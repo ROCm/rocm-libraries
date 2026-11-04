@@ -21,6 +21,7 @@ from kernels.common.attention_unified import (
     _has_score_bias,
     _enable_combo_2d,
     _enable_early_v_schedule,
+    _enable_fast_paged_kv_desc,
     _enable_fp8_mfma_qk,
     _enable_gfx942_3d_wide_kv_load,
     _enable_gfx942_bf16_flash,
@@ -234,15 +235,7 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
         use_transposed_mask_limit=mask_opts,
         use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
         use_early_v_schedule=_enable_early_v_schedule(problem, arch),
-        use_fast_paged_kv_desc=(
-            combo_no_sw
-            and problem.dtype
-            == "bf16"  # fast descriptor is bf16-only (spec validator enforces)
-            and not problem.use_fp8
-            and problem.num_query_heads == 64
-            and problem.num_kv_heads == 8
-            and _select_2d_tile_size(problem, arch) == 64
-        ),
+        use_fast_paged_kv_desc=_enable_fast_paged_kv_desc(problem, arch),
         use_register_pv=_enable_register_pv(problem, arch),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),

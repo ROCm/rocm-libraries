@@ -69,6 +69,7 @@ addressing.
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -1905,7 +1906,10 @@ class DynamicTensorDescriptor(TensorDescriptor):
             raise ValueError("coord_names and strides length mismatch")
         coord_names = tuple(coord_names)
         dynamic = tuple(s if isinstance(s, Value) else None for s in strides)
-        static = tuple(1 if isinstance(s, Value) else int(s) for s in strides)
+        # operator.index rejects a float or string stride instead of truncating it.
+        static = tuple(
+            1 if isinstance(s, Value) else operator.index(s) for s in strides
+        )
         return cls(
             name=name,
             base_names=coord_names,

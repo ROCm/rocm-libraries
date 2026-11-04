@@ -525,12 +525,12 @@ class CkVariantBench:
             use_i64_kv_addr=flags["use_i64_kv_addr"] or _enable_i64_kv_addr(problem),
             use_register_pv=flags["use_register_pv"],
         )
-        # kernel_name() does not encode the KV addressing width, so key on it too.
+        # The name carries i64 addressing; the signature keys the per-shape
+        # launch values the cached spec feeds.
         key = (
             shape.signature,
             variant,
             spec.kernel_name(),
-            spec.use_i64_kv_addr,
             self.compile_backend,
         )
         if key not in self._launchers:

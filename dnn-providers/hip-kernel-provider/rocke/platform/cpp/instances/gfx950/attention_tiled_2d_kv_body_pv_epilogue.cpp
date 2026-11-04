@@ -656,6 +656,13 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
         for(atom = 0; atom < ctx->ACC_M_ATOMS; ++atom)
             yields[yc++] = new_acc[n * ctx->ACC_M_ATOMS + atom];
     yields[yc++] = ctx->GROUPED_KV2 ? in->cur_buf : ctx->nxt_buf_v;
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        for(i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+            yields[yc++] = ctx->page_next[i];
+        for(i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+            yields[yc++] = ctx->page_after_next[i];
+    }
 
     /* Record the rewritten carry for callers that thread phases (the driver's
      * single-phase path reads this back via the loop results). */
@@ -711,6 +718,15 @@ rocke_for_t rocke_gfx950_attn2d_drive_kv_loop(rocke_gfx950_attn2d_build_ctx_t* c
     for(i = 0; i < num_accs; ++i)
         ctx->acc_cur[i] = kvloop.iter_vars[ml + i];
     ctx->cur_buf = kvloop.iter_vars[ml + num_accs];
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        for(i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+        {
+            ctx->page_cur[i] = kvloop.iter_vars[ml + num_accs + 1 + i];
+            ctx->page_next[i] = kvloop.iter_vars[ml + num_accs + 1 + ctx->N_BLOCKS_PER_TILE + i];
+        }
+        ctx->page_cur_tile = kvloop.iv;
+    }
     ctx->skip_mask = false;
 
     rocke_gfx950_attn2d_emit_kv_body(ctx);
@@ -778,8 +794,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             rocke_value_t* op_qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
             rocke_value_t* op_qh_t = rocke_b_add(b, op_qh_mul, op_qh_mod);
             rocke_value_t* op_mask_pos = rocke_b_cmp_lt(b, op_pos_t, ctx->cur_batch_q_len);
-            rocke_value_t* op_mask_qh
-                = rocke_b_cmp_lt(b, op_qh_t, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* op_mask_qh = rocke_b_cmp_lt(b, op_qh_t, ctx->num_qh_p);
             rocke_value_t* op_mask_inner = rocke_b_land(b, op_mask_pos, op_mask_qh);
             rocke_value_t* op_mask_t;
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -875,8 +890,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             }
             {
                 rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos32_base, ctx->cur_batch_q_len);
-                rocke_value_t* mask_qh
-                    = rocke_b_cmp_lt(b, op_qh32_base, rocke_b_const_i32(b, ctx->NUM_QH));
+                rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh32_base, ctx->num_qh_p);
                 rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
                 if(ctx->VALID_ROWS < ctx->BLOCK_M)
                 {
@@ -994,7 +1008,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
         }
         {
             rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos, ctx->cur_batch_q_len);
-            rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh, ctx->num_qh_p);
             rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
             {

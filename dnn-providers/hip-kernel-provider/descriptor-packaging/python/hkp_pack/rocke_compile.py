@@ -323,14 +323,16 @@ def _module_from_source(source):
 
 
 # Builders whose validation predicate is not derivable from the builder name.
-# The tiled ``supports_tiled_2d``/``3d`` are keyword-only, so these builders use the
-# spec-first ``supports_tiled_*_spec`` wrappers in the gfx942/gfx950 modules. The
-# reduce and fastkv-register-P tiled builders and all gfx1250 tiled builders have no
-# spec-first predicate, so ``_check_support_predicate`` refuses to pack them.
+# The tiled ``supports_tiled_2d``/``3d`` and ``supports_fastkv_register_p_2d`` are
+# keyword-only, so these builders use the spec-first ``supports_*_spec`` wrappers in
+# the gfx942/gfx950 modules. The reduce tiled builders and all gfx1250 tiled
+# builders have no spec-first predicate, so ``_check_support_predicate`` refuses to
+# pack them.
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
     "build_gfx942_4warp_gqa": "supports_gfx942_4warp_gqa_spec",
     "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
+    "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d_spec",
 }
 
 
