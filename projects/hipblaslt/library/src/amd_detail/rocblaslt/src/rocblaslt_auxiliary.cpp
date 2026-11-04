@@ -58,10 +58,13 @@
 #include <hip/hip_runtime_api.h>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
@@ -3594,11 +3597,53 @@ struct ArchName
 // exported. Get architecture name
 std::string rocblaslt_internal_get_arch_name()
 {
-    int deviceId;
-    static_cast<void>(hipGetDevice(&deviceId));
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    return ArchName{}(deviceProperties);
+    int        deviceId = -1;
+    hipError_t err      = hipGetDevice(&deviceId);
+    if(err != hipSuccess)
+        throw std::runtime_error(std::string("hipGetDevice failed: ") + hipGetErrorString(err));
+    return rocblaslt_internal_get_arch_name(deviceId);
+}
+
+const std::string& rocblaslt_internal_get_arch_name(int deviceId)
+{
+    struct Device
+    {
+        std::atomic<bool> known{false};
+        std::string       name;
+    };
+
+    // A device's properties do not change while the process runs. Only
+    // successful queries are kept: a failure throws, and the next call
+    // retries (a throwing initializer leaves the static uninitialized).
+    static std::vector<Device> devices = [] {
+        int        count = 0;
+        hipError_t err   = hipGetDeviceCount(&count);
+        if(err != hipSuccess)
+            throw std::runtime_error(std::string("hipGetDeviceCount failed: ")
+                                     + hipGetErrorString(err));
+        return std::vector<Device>(count);
+    }();
+    static std::mutex fill;
+
+    if(deviceId < 0 || deviceId >= static_cast<int>(devices.size()))
+        throw std::runtime_error("Invalid HIP device ID " + std::to_string(deviceId));
+
+    Device& device = devices[deviceId];
+    if(!device.known.load(std::memory_order_acquire))
+    {
+        std::lock_guard<std::mutex> lock(fill);
+        if(!device.known.load(std::memory_order_relaxed))
+        {
+            hipDeviceProp_t deviceProperties;
+            hipError_t      err = hipGetDeviceProperties(&deviceProperties, deviceId);
+            if(err != hipSuccess)
+                throw std::runtime_error(std::string("hipGetDeviceProperties failed: ")
+                                         + hipGetErrorString(err));
+            device.name = ArchName{}(deviceProperties);
+            device.known.store(true, std::memory_order_release);
+        }
+    }
+    return device.name;
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

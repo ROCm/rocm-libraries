@@ -3546,13 +3546,15 @@ namespace
             adapter = a.adapter.load(std::memory_order_relaxed);
             if(!adapter)
             {
-                // Allocate a new adapter using the current HIP device
-                adapter = new TensileLite::hip::SolutionAdapter;
+                // Allocate a new adapter using the current HIP device. It is
+                // owned here until published, so a throwing initialize frees it.
+                auto owned = std::make_unique<TensileLite::hip::SolutionAdapter>();
 
                 // Initialize the adapter and possibly the library
-                host.initialize(*adapter, device);
+                host.initialize(*owned, device);
 
                 // Atomically change the adapter stored for this device ID
+                adapter = owned.release();
                 a.adapter.store(adapter, std::memory_order_release);
             }
         }
