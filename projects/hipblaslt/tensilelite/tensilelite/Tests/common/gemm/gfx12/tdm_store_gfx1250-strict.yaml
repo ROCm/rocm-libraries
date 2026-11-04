@@ -14,7 +14,7 @@ GlobalParameters:
   DataInitTypeC: 3
   DataInitTypeD: 2
   DataInitTypeAlpha: 1
-  DataInitTypeBeta: 1
+  DataInitTypeBeta: 0
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
@@ -31,15 +31,17 @@ BenchmarkProblems:
   # without it every M-edge workgroup does. The other sizes check that the
   # remaining store blocks are unchanged. The last size has a leading
   # dimension larger than M, so BoundsCheck also checks the gap between columns.
+  # DataInitTypeBeta is global, so the beta != 0 epilogue is checked in
+  # tdm_store_beta_gfx1250.yaml.
   ########################################
   -
-    - &problem_type_bf16 # ProblemType TN, beta=0 epilogue only
+    - &problem_type_bf16 # ProblemType TN
       OperationType: GEMM
       DataType: b
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      UseBeta: False
+      UseBeta: True
       Batched: True
       TransposeA: True
       TransposeB: False
@@ -133,32 +135,6 @@ BenchmarkProblems:
           - Exact: [511, 512, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
   ########################################
-  # beta != 0: a TDMStore kernel keeps buffer_store in its beta != 0 epilogue.
-  ########################################
-  -
-    - <<: *problem_type_bf16
-      UseBeta: True
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
-        - WavefrontSize: [32]
-        - DepthU: [64]
-        - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - StoreVectorWidth: [-1]
-        - GlobalSplitU: [1]
-        - AdaptiveGemm: [1]
-        - TDMStore: [1]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [511, 512, 1, 128]
-          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
-  ########################################
   # MacroTile0 512 over 8 waves: staging offsets above the 16-bit DS offset.
   ########################################
   -
@@ -182,3 +158,35 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [1023, 256, 1, 128]
+  ########################################
+  # Non-atomic StreamK=3. Every tile, whole or completed by the fixup, is
+  # stored through the same edge blocks: the problems have NonEdge, odd-M edge,
+  # N-edge and corner tiles in two batches, and a leading dimension larger than
+  # M. On 256 CUs, K=256 gives one whole tile per workgroup; with K=1600 each
+  # workgroup's iterations span two tiles and every tile is completed by the fixup.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - AdaptiveGemm: [1]
+        - TDMStore: [1]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
