@@ -370,10 +370,12 @@ def test_cancelled_trial_ends_a_strategy_that_waits_for_it(tmp_path):
 
 
 def test_requeued_trial_cancelled_when_the_search_stops(tmp_path):
-    ad = FakeAdapter({"P1": ABCD}, script={("P1", "B"): ["unattempted"]})
-    s, _, co = run(tmp_path, ad, {"P1": [["A", "B"]]}, trials_per_problem=2,
-                   new_builds_per_run=2)
-    assert s.stop_reason == "build_cap" and pairs(ad.measured) == [
+    clock = FakeClock()
+    ad = FakeAdapter({"P1": ABCD}, script={("P1", "B"): ["unattempted"]},
+                     clock=clock, advance=10.0)
+    s, _, co = run(tmp_path, ad, {"P1": [["A", "B"]]}, clock=clock,
+                   trials_per_problem=2, deadline_s=10)
+    assert s.stop_reason == "deadline" and pairs(ad.measured) == [
         ("P1", "A"), ("P1", "B")]
     assert s.counts["cancelled"] == 1 and co.ledger.trials["P1"] == 1
     (cancel,) = events(tmp_path / "out", "cancel")
@@ -446,6 +448,47 @@ def test_build_cap_counts_new_builds_not_cached_trials(tmp_path):
     assert ad.builds == [["A", "B", "E", "F"]] and co.ledger.builds == 4
     assert [made[p].asks for p in ("P1", "P2", "P3")] == [[2], [2], [2]]
     assert s.counts["measured"] == 6 and s.status == "complete"
+
+
+@pytest.mark.parametrize("factory", ["scripted", "random"])
+def test_build_cap_admits_work_that_needs_no_build(tmp_path, factory):
+    """Two identical four-kernel domains, trials = batch = cap = 4: P2 re-uses
+    the four kernels P1 builds, in the same round, without another build."""
+    ad = FakeAdapter({"P1": ABCD, "P2": ABCD})
+    s, made, co = run(tmp_path, ad, {"P1": [ABCD], "P2": [ABCD]},
+                      factory=None if factory == "scripted" else AS._default_factory,
+                      new_builds_per_run=4, batch_per_problem=4)
+    assert [sorted(b) for b in ad.builds] == [ABCD] and co.ledger.builds == 4
+    assert sorted(pairs(ad.measured)) == [(p, n) for p in ("P1", "P2") for n in ABCD]
+    assert s.status == "complete" and s.counts["cancelled"] == 0
+
+
+def test_requeued_trial_runs_again_after_the_build_cap(tmp_path):
+    # The cap is spent in round 1, but B is built: re-admitting it needs none.
+    ad = FakeAdapter({"P1": ABCD}, script={("P1", "B"): ["unattempted"]})
+    s, _, co = run(tmp_path, ad, {"P1": [["A", "B"]]}, trials_per_problem=2,
+                   new_builds_per_run=2)
+    assert pairs(ad.measured) == [("P1", "A"), ("P1", "B"), ("P1", "B")]
+    assert s.stop_reason == "searched" and s.counts["cancelled"] == 0
+    assert co.ledger.trials["P1"] == 2 and co.ledger.builds == 2
+
+
+def test_proposal_needing_a_build_past_the_cap_is_cancelled(tmp_path):
+    # Round 1: P1 plans the whole cap (A, B); P2 may still ask for kernels that
+    # need no build: A runs, E would need a third build and is cancelled. Round
+    # 2: the cap is spent, but P2 can still re-use B.
+    ad = FakeAdapter({"P1": ABCD, "P2": list("ABCE")})
+    s, made, co = run(tmp_path, ad, {"P1": [["A", "B"]], "P2": [["A", "E"], ["B"]]},
+                      trials_per_problem=2, new_builds_per_run=2)
+    assert ad.builds == [["A", "B"]] and made["P2"].asks == [2, 1]
+    assert sorted(pairs(ad.measured)) == [("P1", "A"), ("P1", "B"), ("P2", "A"),
+                                          ("P2", "B")]
+    (cancel,) = events(tmp_path / "out", "cancel")
+    assert (cancel["kernel"], cancel["trial_uid"]) == ("E", "P2:2")
+    assert "new_builds_per_run" in cancel["diag"]
+    assert s.counts["cancelled"] == 1 and co.ledger.trials["P2"] == 2
+    assert "P2:2" in made["P2"].pending  # never told, like any cancelled trial
+    assert s.status == "complete"
 
 
 def test_build_cap_rotates_the_first_problem(tmp_path):

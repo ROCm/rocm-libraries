@@ -591,13 +591,16 @@ class SearchCoordinator:
     re-queued trials, then asks its strategy for at most ``batch_per_problem``
     trials in total, capped by its trials left and by the new-build capacity
     left once the distinct new builds this round already needs are subtracted,
-    so a round never plans more builds than the cap allows. Every trial is told
-    before the strategy is asked again; a problem stops at its trial budget, or
-    when its strategy is done or asks nothing while waiting for no result (or
-    only for cancelled trials, which are never told). The
-    run stops when no problem is active, at the deadline (checked before every
-    ask), at the build cap, or after ``max_stall_rounds`` rounds in a row
-    without a new result. Any error ends the search; the finalists measured
+    plus its untried candidates that need no build (built, failed or planned
+    already). A proposal that needs a build once this round's builds spend the
+    cap is cancelled, so a round never plans more builds than the cap allows.
+    Every trial is told before the strategy is asked again; a problem stops at
+    its trial budget, or when its strategy is done or asks nothing while waiting
+    for no result (or only for cancelled trials, which are never told). The run
+    stops when no problem is active, at the deadline (checked before every
+    ask), at the build cap once no active problem has an untried candidate that
+    needs no build, or after ``max_stall_rounds`` rounds in a row without a new
+    result. Any error ends the search; the finalists measured
     so far are still confirmed, unless the adapter broke its contract.
     """
 
@@ -807,6 +810,15 @@ class SearchCoordinator:
         self._calls += 1
         return f"{prefix}{self._calls}"
 
+    def _needs_build(self, c: Candidate, planned) -> bool:
+        """Admitting ``c`` costs a new build: no result yet, none planned."""
+        return c.canonical_key not in planned and self.registry.get(c.canonical_key) is None
+
+    def _build_free(self, p: _Problem, planned=()) -> int:
+        """``p``'s candidates without a result that need no new build."""
+        return sum(1 for k, i in p.members.items()
+                   if k not in p.seen and not self._needs_build(p.cands[i], planned))
+
     def _search(self) -> str:
         stall = 0
         while True:
@@ -817,7 +829,8 @@ class SearchCoordinator:
                 return "stalled"
             if self.ledger.deadline_passed():
                 return "deadline"
-            if self.ledger.builds_left() <= 0:
+            if self.ledger.builds_left() <= 0 and not any(
+                    self._build_free(p) for p in active):
                 return "build_cap"
             self._round += 1
             self.counts["rounds"] += 1
@@ -851,6 +864,12 @@ class SearchCoordinator:
                 self._event("trial", kernel=c.kernel_name, admission="cached", **ev)
             elif (p.key, key) in inflight:
                 p.deferred.append(t)
+            elif self._needs_build(c, planned) and len(planned) >= self.ledger.builds_left():
+                # This round's builds spend the cap, so it could never run: like a
+                # cancelled trial it is not charged and stays pending.
+                self.counts["cancelled"] += 1
+                self._event("cancel", kernel=c.kernel_name,
+                            diag="needs a build past new_builds_per_run", **ev)
             else:
                 self.ledger.admit(p.key)
                 self.counts["admitted"] += 1
@@ -869,8 +888,12 @@ class SearchCoordinator:
             while p.requeue and room > 0 and self.ledger.trials_left(p.key) > 0:
                 place(p, p.requeue.pop(0), "readmitted")
                 room -= 1
-            n = min(room, self.ledger.trials_left(p.key),
-                    self.ledger.builds_left() - len(planned))
+            # A trial is capped by the build capacity left only when it needs a
+            # build: candidates built (or planned) already cost none.
+            n = min(room, self.ledger.trials_left(p.key))
+            capacity = self.ledger.builds_left() - len(planned)
+            if capacity < n:
+                n = min(n, capacity + self._build_free(p, planned))
             if n <= 0:
                 continue
             trials = list(p.strategy.ask(n))

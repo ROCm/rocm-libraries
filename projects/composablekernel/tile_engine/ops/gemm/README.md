@@ -207,7 +207,10 @@ Budget: each round, every active problem in turn proposes up to
 and by the build capacity left once the distinct new kernels the round already
 needs are subtracted. A kernel that is already built, or planned this round,
 costs no further build, so problems that share kernels leave room for others,
-and a round never plans more builds than `new_builds_per_run` allows.
+and such reuse goes on after the cap is spent. A proposal that would need a
+build past the cap is cancelled, so a round never plans more builds than
+`new_builds_per_run` allows; the run stops at the cap once no problem has an
+untried candidate that needs no build.
 
 Option rules:
 
