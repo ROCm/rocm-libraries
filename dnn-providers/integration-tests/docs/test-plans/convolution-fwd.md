@@ -206,8 +206,8 @@ feature small, nightly retests it at medium size, and full adds stress.
 | full | none | S, L, M, R, H, A, X |
 
 FLOP counts 2 × multiply-accumulates; MB is the sum of x, w and y in fp32. When
-an S shape does not fit a level at 3D 16³, the generator tries 16×8×8 and then
-16×8×4; a shape that still does not fit is left out of that level.
+an S shape does not fit a level at 3D 16³, the generator tries 16×8×8, 16×8×4
+and then 8×8×4; a shape that still does not fit is left out of that level.
 
 **Defaults are non-degenerate.** Every S and L shape has K > G unless it is marked
 depthwise. A depthwise shape (S13) has C = G and K = G or 2G; that is a
@@ -215,8 +215,9 @@ multiplier of 1 or 2, not the K = G collapse of a dense conv.
 
 ### 3.1 Small (S)
 
-Defaults: N 1, C 16, K 32, G 1, spatial 16 per dimension, stride 1, dilation 1,
-filter 3, pad 1 unless the row says otherwise.
+Defaults: N 2, C 16, K 32, G 1, spatial 16 per dimension, stride 1, dilation 1,
+filter 3, pad 1 unless the row says otherwise. N is 2 rather than 1 so that no
+default dimension collapses to 1 (RFC 0022 §7); H15 keeps a batch-1 case.
 
 | Id | Features | Parameters | Ranks |
 |---|---|---|---|
@@ -242,9 +243,41 @@ filter 3, pad 1 unless the row says otherwise.
 | S20 | F8 remainder | spatial 17, filter 3, stride 3, pad 0 (14 mod 3 = 2). The earlier draft used stride 2, which divides evenly (17 − 3 = 14). | 1D 2D 3D |
 | S21 | F7 even | filter 2, pad 1 | 1D 2D 3D |
 | S22 | F10 pad ≥ filter | filter 3, pad 4 | 1D 2D 3D |
-| S23 | F1 4D spatial | 6-dim tensors, spatial 6×6×4×4, filter 3, pad 1 | 4D |
+| S23 | F1 4D spatial | 6-dim tensors, N 1, spatial 6×6×4×4, filter 3, pad 1 | 4D |
 
-That is 68 shape × rank combinations. Each is generated per layout and data type
+S24–S46 are the convolution classes that real models use and S1–S23 missed; the
+corpus analysis behind §3.3 found them. Each still changes one thing from the
+defaults, so each class is tested small in PR and at medium size (L24–L46) in
+nightly. In nightly and full they are crossed with layout and data type only,
+not with the fused topologies or the feature probes (T12, §4.3).
+
+| Id | Class | Parameters | Ranks | Source |
+|---|---|---|---|---|
+| S24 | grouped, strided | G 4, stride 2 | 1D 2D 3D | ResNeXt, RegNet |
+| S25 | depthwise, strided | G = C = K, stride 2 | 1D 2D 3D | MobileNetV3, EfficientNet, ir-CSN |
+| S26 | depthwise 5×5, strided | G = C = K, filter 5, stride 2, pad 2 | 2D | MobileNetV3 |
+| S27 | depthwise 7×7 | G = C = K, filter 7, pad 3 | 2D | ConvNeXt |
+| S28 | depthwise multiplier 4 | G = C, K = 4C | 1D 2D 3D | F5 |
+| S29 | patchify 2 | filter 2, stride 2, pad 0 | 1D 2D 3D | ConvNeXt, UNet, nnU-Net |
+| S30 | patchify 4 | filter 4, stride 4, pad 0 | 2D | ConvNeXt stem |
+| S31 | patchify 16 | C 3, filter 16, stride 16, pad 0, spatial 32 | 2D | ViT patch embedding |
+| S32 | temporal 3×1×1 | filter (3, 1, 1), pad (1, 0, 0) | 3D | R(2+1)D, WAN VAE |
+| S33 | spatial 1×3×3, strided | filter (1, 3, 3), stride (1, 2, 2), pad (0, 1, 1) | 3D | R(2+1)D |
+| S34 | pointwise downsample | filter 1, stride 2, pad 0 | 1D 2D 3D | ResNet, ir-CSN |
+| S35 | vocoder dilation | filter 7, dilation 3, pad 9 | 1D | HiFi-GAN |
+| S36 | vocoder dilation | filter 11, dilation 5, pad 25 | 1D | HiFi-GAN |
+| S37 | dilation 4 | dilation 4, pad 4 | 1D 2D 3D | DeepLabV3 |
+| S38 | atrous | dilation 12, pad 12 | 2D | DeepLabV3 ASPP |
+| S39 | strided, no pad | stride 2, pad 0 | 1D 2D 3D | Inception |
+| S40 | 5×5, no pad | filter 5, pad 0 | 2D | Inception |
+| S41 | long strided filter | filter 16, stride 8, pad 4 | 1D | HiFi-GAN |
+| S42 | strided filter 4 | filter 4, stride 2, pad 1 | 1D | HiFi-GAN |
+| S43 | F7 non-square | filter 3×5, pad (1, 2) | 2D | F7 |
+| S44 | F11 pre-only padding | filter 2, stride 2, pre 1, post 0 | 1D 2D 3D | F11 |
+| S45 | F7 filter larger than the input | filter = spatial + 2, pad 1 (output 1) | 1D 2D 3D | F7 |
+| S46 | F8 stride 4 | stride 4 | 1D 2D 3D | F8 |
+
+That is 111 shape × rank combinations. Each is generated per layout and data type
 as the level rules (§4.1) require.
 
 ### 3.2 Medium (L)
@@ -256,13 +289,13 @@ base size:
 |---|---|---|---|
 | 1D | 4 | 128 | 1024 |
 | 2D | 4 | 128 | 56² |
-| 3D | 2 | 32 | 24³ |
+| 3D | 2 | 32 | 32³ |
 
 - **Features that set a value replace the default:**
   - C 3 (L11), C 1 (L17);
-  - C 61, K 67 and spatial 55 / 23³ / 1023 (L14);
+  - C 61, K 67 and spatial 55 / 31³ / 1023 (L14);
   - G = C (L13), G 4 (L8);
-  - spatial 56×28 / 24×24×12 (L6).
+  - spatial 56×28 / 32×32×16 (L6).
 - **Scaling rule:** if a shape exceeds the nightly ceiling, the generator halves N,
   then C and K, until it fits. Examples: L10 2D (filter 5) runs at N 2; L19
   (filter = input) runs at C = K = 64 in 1D and 2D.
@@ -321,8 +354,9 @@ where they matched a signature it was often at a small fraction of real size.
 
 ### 3.4 Hazard (H)
 
-One change from the S defaults (N 1, C 16, K 32, 16 per dimension, filter 3,
-pad 1). Powers of 2 ± 1 and dims that are not multiples of 4 or 8.
+One change from the S defaults (N 2, C 16, K 32, 16 per dimension, filter 3,
+pad 1). Powers of 2 ± 1, dims that are not multiples of 4 or 8, and batch sizes
+that real models use.
 
 | Id | Change |
 |---|---|
@@ -331,6 +365,9 @@ pad 1). Powers of 2 ± 1 and dims that are not multiples of 4 or 8.
 | H9 | N 3 |
 | H10, H11 | G 3 (C 12, K 12); G 5 (C 15, K 20) |
 | H12–H14 | spatial 31, 33, 17 |
+| H15 | N 1 (the batch-1 case the defaults no longer give) |
+| H16, H17 | N 32, N 64 (training batches; 9% of corpus geometries each run at N 64 and 128) |
+| H18 | C 4 (F3, not a multiple of the vector width) |
 
 Non-dense strides are F16. The extreme int32-index case is X3.
 
@@ -375,13 +412,14 @@ that holds its graph; the levels cascade.
 |---|---|---|---|---|
 | Shape size | ≤ 20 MFLOP | ≤ 200 MFLOP (+3 M) | ≤ 8 GFLOP | unbounded |
 | Plain core (18) | S1–S9, layout × dtype pair rotated per rank | every S shape × rank once, pair rotated (≥ 2× core) | every S shape × every pair of its rank | L × every pair |
+| Geometry classes S24–S46 | — | each class × rank once | × every pair of its rank; L24–L46 × 2 pairs | L24–L46 × every pair; no fused or feature crossing (T12) |
 | Rejection probes | `CONVOLUTION`, asymmetric pad (S18), fp8, double, sigmoid fusion | `CONVOLUTION` per rank; 6 extra types; 5 mixed pairs | × core | asymmetric padding, mixed layouts, strides and mixed types × every S shape; `CONVOLUTION`, extra types and override shape stay at nightly's × core (T11) |
 | F13 `conv_mode` | S3 | 1 per rank | × core (rank × layout × dtype) | — (T11) |
 | F15–F16 layout, strides | — | 1 case each | rank × dtype, 2 mixes and 3 stride kinds | paired with every S shape |
 | F19–F20 types | fp8 e4m3, double | each extra type and mixed pair once | × rank × layout | F20 paired with every S shape; F19 — (T11) |
 | F21 values | uniform | + zero, const, large | + tiny, × rank × dtype; A1, A2 (long accumulation) | × core; paired with every S shape; X4 |
 | F35 | — | 1 case | × rank × dtype | — (T11) |
-| H hazards | — | each H once (2D) | each H × every pair (2D); 1D, 3D × 2 pairs | — |
+| H hazards | — | each H once (2D) | each H × every pair (2D); 1D, 3D × 2 pairs (H15–H18: batch 1, 32, 64 and C 4) | — |
 | Model (M) | — | M2, M9, M11 | M1–M12 × every pair of its rank | — |
 | Corpus (R) | — | 30 graphs (one per signature that fits) | 60 graphs (realistic size, every model) | 47 graphs (production size) |
 | Stress | — | — | — | X1–X4 (X3 fp16 and bf16) |
@@ -395,16 +433,16 @@ Cases generated (own level / cumulative):
 | Level | Plain conv | Fused | Own | Cumulative | Claim | Probe |
 |---|---|---|---|---|---|---|
 | quick | 30 | 109 | **139** | 139 | 62 | 77 |
-| PR | 131 | 164 | **295** | 434 | 121 | 174 |
-| nightly | 883 | 820 | **1,703** | 2,137 | 852 | 851 |
-| full | 733 | 769 | **1,502** | 3,639 | 748 | 754 |
+| PR | 178 | 164 | **342** | 481 | 161 | 181 |
+| nightly | 1,226 | 822 | **2,048** | 2,529 | 1,150 | 898 |
+| full | 901 | 776 | **1,677** | 4,206 | 902 | 775 |
 
-By size class: quick S 139. PR S 248, H 14, M 3, R 30. Nightly S 1,174, L 224,
-M 107, H 126, A 12, R 60. Full S 836, L 599, R 47, X 20. 405 distinct conv
-geometries in all. The level rules generate 5,469 synthetic cases; the trims
-T8–T11 (§4.3) remove 1,967 of them and the R set adds 137. Counts are those of
-the generator; `generate_conv_fwd_bundles.py --report` prints them again, with
-the trimmed count per level and trim.
+By size class: quick S 139. PR S 291, H 18, M 3, R 30. Nightly S 1,399, L 309,
+M 106, H 162, A 12, R 60. Full S 843, L 767, R 47, X 20. 509 distinct conv
+geometries in all. The trims T8–T12 (§4.3) remove 4,139 of the generated
+synthetic cases and the R set adds 137. Counts are those of the generator;
+`generate_conv_fwd_bundles.py --report` prints them again, with the trimmed
+count per level and trim.
 
 ### 4.2 Probes and regressions
 
@@ -454,18 +492,20 @@ decision, not an omission: a reviewer can see what was traded and why.
 | T5 | The four non-activation fused topologies × every L shape and every pair | ~1,000 | Scale, residual and chain nodes are element-wise and see only the output tensor. | Each × core (quick, PR); the F27 scale variants (nightly). | An engine fuses these topologies. |
 | T6 | Hazard shapes × every layout and dtype in 1D and 3D | ~500 | Hazards act on C, K, N, G and spatial extent. The layout and dtype multiply compile work, not hazard coverage. | 2D × every pair; 1D and 3D × two pairs (nightly). | A hazard is found that depends on rank. |
 | T7 | Any 3-way product beyond activation × layout × dtype | not counted | Pairwise coverage catches the large majority of interaction faults at a fraction of the cases. | Pairwise (§4 rules). | A 3-way fault is found. Add that triple, not the whole product. |
-| T8 | Activation × every S and L shape on `act` in full, for the activations no engine executes: ReLU lower clip, leaky ReLU, elu, gelu, gelu-tanh, swish, softplus, identity | 1,129 | No engine executed one of these graphs on gfx942 or gfx90a (§4.5), so each case repeats the same decline. | Each activation keeps all 18 core cells on `act` and on `bias_act`, and 70–78 cases over 64–71 distinct tensor shapes in quick, PR and nightly. | An engine executes the activation: add it to `EXECUTED_ACTS` in `conv_fwd_plan.py`, which restores its full product. |
-| T9 | Plain repeats of `scale_bias_act`, `add_relu`, `bias_add_relu` and `act_add` in nightly and full | 301 | No engine executed a graph of these topologies on gfx942 or gfx90a (§4.5) except fp32 `add_relu`, which MIOpen accepts and computes wrongly (ALMIOPEN-3009); the quick and PR cases reach that defect too. | Each topology's 18 core cells in quick and PR (run by every level through the cascade); the F27 scale variants. | An engine executes the topology: remove it from `UNEXECUTED_TOPOLOGIES`. |
-| T10 | fp16 and bf16 `bias_act` in nightly and full | 339 | MIOpen declined every fp16 and bf16 `bias_act` graph on both architectures. | One case per activation × core cell that no other case covers (133 cases in nightly), so every activation keeps 18 of 18 cells; fp32 `bias_act` and the F25 bias variants are untouched. | An engine claims fp16 or bf16 `bias_act`. |
+| T8 | Activation × every S and L shape on `act` in full, for the activations no engine executes: ReLU lower clip, leaky ReLU, elu, gelu, gelu-tanh, swish, softplus, identity | 1,776 | No engine executed one of these graphs on gfx942 or gfx90a (§4.5), so each case repeats the same decline. | Each activation keeps all 18 core cells on `act` and on `bias_act`, and about 70 cases over about 65 distinct tensor shapes in quick, PR and nightly. | An engine executes the activation: add it to `EXECUTED_ACTS` in `conv_fwd_plan.py`, which restores its full product. |
+| T9 | Plain repeats of `scale_bias_act`, `add_relu`, `bias_add_relu` and `act_add` in nightly and full | 476 | No engine executed a graph of these topologies on gfx942 or gfx90a (§4.5) except fp32 `add_relu`, which MIOpen accepts and computes wrongly (ALMIOPEN-3009); the quick and PR cases reach that defect too. | Each topology's 18 core cells in quick and PR (run by every level through the cascade); the F27 scale variants. | An engine executes the topology: remove it from `UNEXECUTED_TOPOLOGIES`. |
+| T10 | fp16 and bf16 `bias_act` in nightly and full | 341 | MIOpen declined every fp16 and bf16 `bias_act` graph on both architectures. | One case per activation × core cell that no other case covers (133 cases in nightly), so every activation keeps 18 of 18 cells; fp32 `bias_act` and the F25 bias variants are untouched. | An engine claims fp16 or bf16 `bias_act`. |
 | T11 | F13 `CONVOLUTION`, F19 extra types and F35 override shape, each paired with every S shape in full | 198 | No engine executes these features, and no reference can judge F13 or F19 (§6); each pairing repeats one decline. | Each feature × core in nightly (F13 18 cases, F19 36, F35 9). | An engine claims the feature; for F13 and F19 the reference fixes of §6 must land too. |
+| T12 | The geometry classes S24–S46 (and L24–L46) crossed with the fused topologies or with the feature probes, in nightly and full | 1,348 | They are geometry classes: they select solver paths of the convolution itself. An epilogue is element-wise (T1) and a layout or type feature is per tensor (T2, T4), so neither depends on which geometry class runs underneath. | Each class in plain conv in every level from PR up, over every layout × dtype pair in nightly and at medium size (L) in nightly and full; the fused topologies and features keep their cover on S1–S23. | A defect is found whose trigger needs one of these classes together with a fusion or a feature, or an engine picks fused kernels by geometry class. |
 
-T8–T11 rest on measured execution, not on the API, so they are applied after the
-fact: the level rules build the complete products, case ids are assigned, and the
-generator then removes the trimmed cases (`conv_fwd_plan.TRIMS`). The cases that
-remain keep their ids, seeds and claims, and undoing a trim brings back exactly
-the cases it removed. No trim removes the last probe of a feature from any level:
-every feature keeps its probes, directly or through the cascade. Strict
-`expected_rejection` bundles are never trimmed.
+T8–T11 rest on measured execution, not on the API; T12 is a design trade-off
+like T1–T7. All five are applied after the fact: the level rules build the
+complete products, case ids are assigned, and the generator then removes the
+trimmed cases (`conv_fwd_plan.TRIMS`). The cases that remain keep their ids,
+seeds and claims, and undoing a trim brings back exactly the cases it removed.
+No trim removes the last probe of a feature from any level: every feature keeps
+its probes, directly or through the cascade. Strict `expected_rejection`
+bundles are never trimmed.
 
 ### 4.4 Cost
 
@@ -499,8 +539,9 @@ later test in the same process fail with error 700, so a single faulting case
 can hide thousands of results.
 
 **Which cases execute.** The trims T8–T11 come from serial runs (one test at a
-time) of all 5,469 synthetic cases with the MIOpen plugin, the only engine that
-runs convolution today:
+time) of the 5,469 cases the level rules generated before the R set, S24–S46,
+H15–H18 and the N 2 default existed, with the MIOpen plugin, the only engine
+that runs convolution today:
 
 | Architecture | OK | Skipped | Failed | Crashed |
 |---|---|---|---|---|
@@ -511,7 +552,8 @@ gfx942 runs with the engine TOML's skips; every gfx90a failure is a probe. On bo
 architectures the `act` topology executed only ReLU, ReLU6, clamp, sigmoid and
 tanh; `bias_act` executed only in fp32; `scale_bias_act`, `bias_add_relu` and
 `act_add` never executed; and F13, F19 and F35 never executed. gfx90a declined
-every fused graph. The R set is not in these runs.
+every fused graph. The R set, S24–S46 and H15–H18 are not in these runs, and the
+S cases ran at N 1; the current set still needs a run on each architecture.
 
 ---
 

@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S2_1d_i16_n1c16k32_f3_fp32_cf_relu_lo",
+      "id": "S2_1d_i16_n2c16k32_f3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -35,7 +35,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               14
             ],
@@ -49,7 +49,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               14
             ],
@@ -77,7 +77,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -101,25 +101,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1711297850,
+        "seed": 1975477463,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1642697878
+            "seed": 1369224024
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1831250662
+            "seed": 1163616318
           }
         }
       }
     },
     {
-      "id": "S3_1d_i16_n1c16k32_f3_fp32_cl_relu6",
+      "id": "S3_1d_i16_n2c16k32_f3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -152,7 +152,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -166,7 +166,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -194,7 +194,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -218,25 +218,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1926352169,
+        "seed": 804735078,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 676250664
+            "seed": 120475238
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1613725657
+            "seed": 1693113806
           }
         }
       }
     },
     {
-      "id": "S4_1d_i16_n1c16k32_f3_fp16_cf_relu_clamp",
+      "id": "S4_1d_i16_n2c16k32_f3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -269,7 +269,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               8
             ],
@@ -283,7 +283,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               8
             ],
@@ -311,7 +311,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -335,25 +335,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 181067589,
+        "seed": 94030085,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 501006596
+            "seed": 890378993
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 320209052
+            "seed": 1328742662
           }
         }
       }
     },
     {
-      "id": "S5_1d_i16_n1c16k32_f3_fp16_cl_relu_leaky",
+      "id": "S5_1d_i16_n2c16k32_f3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -386,7 +386,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -400,7 +400,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -428,7 +428,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -452,25 +452,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1962628135,
+        "seed": 71593525,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1576139405
+            "seed": 2125001994
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1029025784
+            "seed": 1213008755
           }
         }
       }
     },
     {
-      "id": "S7_1d_i16_n1c16k32g2_f3_bf16_cf_relu",
+      "id": "S7_1d_i16_n2c16k32g2_f3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -503,7 +503,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -517,7 +517,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -545,7 +545,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -569,19 +569,19 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 727923144,
+        "seed": 1992115093,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 803542933
+            "seed": 1465332475
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1060992291
+            "seed": 1281792820
           }
         }
       }
@@ -704,7 +704,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu6",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -741,7 +741,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -757,7 +757,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -789,7 +789,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -815,25 +815,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1915386935,
+        "seed": 1336654118,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1847683967
+            "seed": 841585070
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 648513805
+            "seed": 2133926228
           }
         }
       }
     },
     {
-      "id": "S4_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu_clamp",
+      "id": "S4_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -870,7 +870,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               8,
               8
@@ -886,7 +886,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               8,
               8
@@ -918,7 +918,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -944,25 +944,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1365820656,
+        "seed": 1863064507,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 60721867
+            "seed": 637938767
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 37949371
+            "seed": 543506721
           }
         }
       }
     },
     {
-      "id": "S5_2d_i16x16_n1c16k32_f3x3_fp16_cf_relu_leaky",
+      "id": "S5_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -999,7 +999,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1015,7 +1015,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1047,7 +1047,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1073,25 +1073,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 2056213884,
+        "seed": 1465905186,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1169939249
+            "seed": 1387186685
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1333109812
+            "seed": 1987109803
           }
         }
       }
     },
     {
-      "id": "S6_2d_i16x8_n1c16k32_f3x3_fp16_cl_relu",
+      "id": "S6_2d_i16x8_n2c16k32_f3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1128,7 +1128,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               8
@@ -1144,7 +1144,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               8
@@ -1176,7 +1176,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               8
@@ -1202,25 +1202,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 2043514194,
+        "seed": 1663760361,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1995658644
+            "seed": 1084312994
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1080576046
+            "seed": 1413839029
           }
         }
       }
     },
     {
-      "id": "S7_2d_i16x16_n1c16k32g2_f3x3_bf16_cf_relu_lo",
+      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1257,7 +1257,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1273,7 +1273,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1305,7 +1305,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1331,19 +1331,19 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1786151847,
+        "seed": 881378982,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1020060828
+            "seed": 2138253319
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 349705394
+            "seed": 303496180
           }
         }
       }
@@ -1478,7 +1478,7 @@
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu_clamp",
+      "id": "S4_3d_i16x8x8_n2c16k32_f3x3x3_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1519,17 +1519,17 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               8,
-              8,
-              8
+              4,
+              4
             ],
             "strides": [
-              16384,
-              512,
-              64,
-              8,
+              4096,
+              128,
+              16,
+              4,
               1
             ],
             "data_type": "float"
@@ -1537,17 +1537,17 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               8,
-              8,
-              8
+              4,
+              4
             ],
             "strides": [
-              16384,
-              512,
-              64,
-              8,
+              4096,
+              128,
+              16,
+              4,
               1
             ],
             "data_type": "float"
@@ -1573,17 +1573,17 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
-              16,
-              16
+              8,
+              8
             ],
             "strides": [
-              65536,
-              4096,
-              256,
-              16,
+              16384,
+              1024,
+              64,
+              8,
               1
             ],
             "data_type": "float"
@@ -1601,25 +1601,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 608257492,
+        "seed": 2074869290,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2049585033
+            "seed": 827613720
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 654541852
+            "seed": 561885665
           }
         }
       }
     },
     {
-      "id": "S5_3d_i16x8x4_n1c16k32_f3x3x3_fp32_cl_relu_leaky",
+      "id": "S5_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1660,14 +1660,14 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
-              16,
+              8,
               8,
               4
             ],
             "strides": [
-              16384,
+              8192,
               1,
               1024,
               128,
@@ -1678,14 +1678,14 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
-              16,
+              8,
               8,
               4
             ],
             "strides": [
-              16384,
+              8192,
               1,
               1024,
               128,
@@ -1714,14 +1714,14 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
-              16,
+              8,
               8,
               4
             ],
             "strides": [
-              8192,
+              4096,
               1,
               512,
               64,
@@ -1742,25 +1742,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 48281635,
+        "seed": 689806241,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1308224522
+            "seed": 801609552
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 609788143
+            "seed": 683568992
           }
         }
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n1c16k32_f3x3x3_fp16_cf_relu",
+      "id": "S6_3d_i8x4x4_n2c16k32_f3x3x3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1801,16 +1801,16 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
-              16,
               8,
+              4,
               4
             ],
             "strides": [
-              16384,
-              512,
-              32,
+              4096,
+              128,
+              16,
               4,
               1
             ],
@@ -1819,16 +1819,16 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
-              16,
               8,
+              4,
               4
             ],
             "strides": [
-              16384,
-              512,
-              32,
+              4096,
+              128,
+              16,
               4,
               1
             ],
@@ -1855,16 +1855,16 @@
           {
             "uid": 3,
             "dims": [
-              1,
-              16,
+              2,
               16,
               8,
+              4,
               4
             ],
             "strides": [
-              8192,
-              512,
-              32,
+              2048,
+              128,
+              16,
               4,
               1
             ],
@@ -1883,25 +1883,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 2046034865,
+        "seed": 2038643107,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1675317561
+            "seed": 1372002402
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1737825847
+            "seed": 369025460
           }
         }
       }
     },
     {
-      "id": "S7_3d_i16x8x8_n1c16k32g2_f3x3x3_fp16_cl_relu_lo",
+      "id": "S7_3d_i16x8x4_n2c16k32g2_f3x3x3_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1942,17 +1942,17 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               8,
-              8
+              4
             ],
             "strides": [
-              32768,
+              16384,
               1,
-              2048,
-              256,
+              1024,
+              128,
               32
             ],
             "data_type": "float"
@@ -1960,17 +1960,17 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               8,
-              8
+              4
             ],
             "strides": [
-              32768,
+              16384,
               1,
-              2048,
-              256,
+              1024,
+              128,
               32
             ],
             "data_type": "half"
@@ -1996,17 +1996,17 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               8,
-              8
+              4
             ],
             "strides": [
-              16384,
+              8192,
               1,
-              1024,
-              128,
+              512,
+              64,
               16
             ],
             "data_type": "half"
@@ -2024,19 +2024,19 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1662711253,
+        "seed": 1099519293,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1947843836
+            "seed": 1773773761
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 297370912
+            "seed": 30644507
           }
         }
       }
@@ -2324,7 +2324,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_sigmoid",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2361,7 +2361,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -2377,7 +2377,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -2409,7 +2409,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -2435,19 +2435,19 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 241306760,
+        "seed": 1683160985,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1103126990
+            "seed": 1295795164
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1624031858
+            "seed": 314008198
           }
         },
         "notes": "probe: F26 non-ReLU activation"

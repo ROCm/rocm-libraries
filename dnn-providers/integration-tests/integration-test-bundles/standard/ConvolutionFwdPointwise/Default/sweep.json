@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S7_1d_i16_n1c16k32g2_f3_fp32_cf_sigmoid",
+      "id": "S7_1d_i16_n2c16k32g2_f3_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -35,7 +35,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -49,7 +49,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -77,7 +77,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -101,19 +101,19 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1726434069,
+        "seed": 1705656798,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1957811788
+            "seed": 522652713
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 401809748
+            "seed": 2070868543
           }
         },
         "notes": "probe: F26 non-ReLU activation"
@@ -356,7 +356,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n1c16k32_f5_fp16_cl_gelu",
+      "id": "S10_1d_i16_n2c16k32_f5_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -389,7 +389,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -403,7 +403,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -431,7 +431,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -455,26 +455,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 2050909566,
+        "seed": 2127438353,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1714330277
+            "seed": 1426108029
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 175557574
+            "seed": 1136885633
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S11_1d_i16_n1c3k16_f7_bf16_cf_gelu_tanh",
+      "id": "S11_1d_i16_n2c3k16_f7_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -507,7 +507,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               8
             ],
@@ -521,7 +521,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               8
             ],
@@ -549,7 +549,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               3,
               16
             ],
@@ -573,26 +573,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 406722589,
+        "seed": 807132370,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 575329092
+            "seed": 1928070900
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1639703442
+            "seed": 1870898756
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13a_1d_i16_n1c16k16g16_f3_bf16_cl_swish",
+      "id": "S13a_1d_i16_n2c16k16g16_f3_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -625,7 +625,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -639,7 +639,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -667,7 +667,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -691,26 +691,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1982079493,
+        "seed": 300309390,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1606158206
+            "seed": 50382539
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1558109178
+            "seed": 978795267
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S7_2d_i16x16_n1c16k32g2_f3x3_fp32_cf_tanh",
+      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -747,7 +747,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -763,7 +763,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -795,7 +795,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -821,19 +821,19 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1907103045,
+        "seed": 1485740860,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 391593117
+            "seed": 79828199
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2140626609
+            "seed": 56552660
           }
         },
         "notes": "probe: F26 non-ReLU activation"
@@ -1100,7 +1100,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n1c16k32_f5x5_fp16_cl_gelu_tanh",
+      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1137,7 +1137,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1153,7 +1153,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1185,7 +1185,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1211,26 +1211,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1136593672,
+        "seed": 1444710085,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1760702677
+            "seed": 547886456
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 400284161
+            "seed": 685949644
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S11_2d_i16x16_n1c3k16_f7x7_bf16_cf_swish",
+      "id": "S11_2d_i16x16_n2c3k16_f7x7_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1267,7 +1267,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               8,
               8
@@ -1283,7 +1283,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               8,
               8
@@ -1315,7 +1315,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               3,
               16,
               16
@@ -1341,26 +1341,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1175666072,
+        "seed": 557843813,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1264072429
+            "seed": 1875999810
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 189467090
+            "seed": 1123312867
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S12a_2d_i16x16_n1c16k32_f1x3_bf16_cl_softplus",
+      "id": "S12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1397,7 +1397,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1413,7 +1413,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1445,7 +1445,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1471,19 +1471,19 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 420878135,
+        "seed": 2016854050,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 630469633
+            "seed": 2039735159
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 334289619
+            "seed": 331993630
           }
         },
         "notes": "probe: F26 non-ReLU activation"
@@ -1774,7 +1774,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x8x8_n1c16k32_f5x5x5_fp16_cf_gelu_tanh",
+      "id": "S10_3d_i16x8x4_n2c16k32_f5x5x5_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1815,17 +1815,17 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               8,
-              8
+              4
             ],
             "strides": [
-              32768,
-              1024,
-              64,
-              8,
+              16384,
+              512,
+              32,
+              4,
               1
             ],
             "data_type": "float"
@@ -1833,17 +1833,17 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               8,
-              8
+              4
             ],
             "strides": [
-              32768,
-              1024,
-              64,
-              8,
+              16384,
+              512,
+              32,
+              4,
               1
             ],
             "data_type": "half"
@@ -1869,17 +1869,17 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               8,
-              8
+              4
             ],
             "strides": [
-              16384,
-              1024,
-              64,
-              8,
+              8192,
+              512,
+              32,
+              4,
               1
             ],
             "data_type": "half"
@@ -1897,26 +1897,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 29431166,
+        "seed": 945516519,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1559369442
+            "seed": 793113006
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 110708835
+            "seed": 963780870
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n1c3k16_f7x7x7_fp16_cl_swish",
+      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1957,7 +1957,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               8,
               8,
@@ -1975,7 +1975,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               8,
               8,
@@ -2011,7 +2011,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               3,
               16,
               16,
@@ -2039,26 +2039,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1909849,
+        "seed": 1347545597,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1656354542
+            "seed": 1881487662
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1856567886
+            "seed": 1382229274
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n1c16k32_f1x3x3_bf16_cf_softplus",
+      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2099,7 +2099,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -2117,7 +2117,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -2153,7 +2153,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2181,26 +2181,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1890471597,
+        "seed": 1687427011,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 424095628
+            "seed": 491274125
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 510250745
+            "seed": 1097029659
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n1c16k16g16_f3x3x3_bf16_cl_identity",
+      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2241,7 +2241,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2259,7 +2259,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2295,7 +2295,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2323,26 +2323,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1132780545,
+        "seed": 912551534,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2102473894
+            "seed": 1447225549
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1736632576
+            "seed": 1237688329
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S10_1d_i16_n1c16k32_f5_fp32_cf_gelu",
+      "id": "S10_1d_i16_n2c16k32_f5_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2375,7 +2375,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -2389,7 +2389,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -2417,7 +2417,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -2441,26 +2441,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1794604767,
+        "seed": 1325914537,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 138543067
+            "seed": 978422334
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1530599275
+            "seed": 2059677783
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S11_1d_i16_n1c3k16_f7_fp32_cl_gelu_tanh",
+      "id": "S11_1d_i16_n2c3k16_f7_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2493,7 +2493,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               8
             ],
@@ -2507,7 +2507,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               8
             ],
@@ -2535,7 +2535,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               3,
               16
             ],
@@ -2559,26 +2559,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1352490991,
+        "seed": 151551076,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1114153881
+            "seed": 72771723
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2120502282
+            "seed": 1003696962
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13a_1d_i16_n1c16k16g16_f3_fp16_cf_swish",
+      "id": "S13a_1d_i16_n2c16k16g16_f3_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2611,7 +2611,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -2625,7 +2625,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -2653,7 +2653,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -2677,26 +2677,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 236349505,
+        "seed": 1473035470,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 331942743
+            "seed": 64771168
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1261768767
+            "seed": 755591686
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13b_1d_i16_n1c16k32g16_f3_fp16_cl_softplus",
+      "id": "S13b_1d_i16_n2c16k32g16_f3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2729,7 +2729,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -2743,7 +2743,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -2771,7 +2771,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -2795,26 +2795,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1601496895,
+        "seed": 966418644,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 630903250
+            "seed": 680659574
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1581796144
+            "seed": 1933050640
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S14_1d_i15_n1c13k17_f3_bf16_cf_identity",
+      "id": "S14_1d_i15_n2c13k17_f3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2847,7 +2847,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               17,
               15
             ],
@@ -2861,7 +2861,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               17,
               15
             ],
@@ -2889,7 +2889,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               13,
               15
             ],
@@ -2913,26 +2913,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1595493184,
+        "seed": 135272263,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 710374267
+            "seed": 1705868027
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1344269255
+            "seed": 894392062
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S16_1d_i32_n1c16k32_f3_bf16_cl_relu",
+      "id": "S16_1d_i32_n2c16k32_f3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2965,7 +2965,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               11
             ],
@@ -2979,7 +2979,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               11
             ],
@@ -3007,7 +3007,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               32
             ],
@@ -3031,25 +3031,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1389908323,
+        "seed": 1198653381,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 255868339
+            "seed": 879228329
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1897570360
+            "seed": 533785420
           }
         }
       }
     },
     {
-      "id": "S10_2d_i16x16_n1c16k32_f5x5_fp32_cf_gelu_tanh",
+      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3086,7 +3086,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3102,7 +3102,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3134,7 +3134,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3160,26 +3160,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1388997504,
+        "seed": 1039967671,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1683206940
+            "seed": 1633090168
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2048223219
+            "seed": 1398646660
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S11_2d_i16x16_n1c3k16_f7x7_fp32_cl_swish",
+      "id": "S11_2d_i16x16_n2c3k16_f7x7_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3216,7 +3216,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               8,
               8
@@ -3232,7 +3232,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               8,
               8
@@ -3264,7 +3264,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               3,
               16,
               16
@@ -3290,26 +3290,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 574383070,
+        "seed": 490895561,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 966749663
+            "seed": 1274830835
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 790948674
+            "seed": 139269764
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S12a_2d_i16x16_n1c16k32_f1x3_fp16_cf_softplus",
+      "id": "S12a_2d_i16x16_n2c16k32_f1x3_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3346,7 +3346,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3362,7 +3362,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3394,7 +3394,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3420,26 +3420,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1160187244,
+        "seed": 380755219,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 715275838
+            "seed": 930876012
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 956606668
+            "seed": 833424395
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S12b_2d_i16x16_n1c16k32_f3x1_fp16_cl_identity",
+      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3476,7 +3476,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3492,7 +3492,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3524,7 +3524,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3550,26 +3550,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 843727444,
+        "seed": 421540074,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1495382829
+            "seed": 1315574654
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1328116870
+            "seed": 1114126210
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13a_2d_i16x16_n1c16k16g16_f3x3_bf16_cf_relu",
+      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3606,7 +3606,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3622,7 +3622,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3654,7 +3654,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3680,25 +3680,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 2119314273,
+        "seed": 401239183,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 819197475
+            "seed": 390432289
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 173412606
+            "seed": 1308276489
           }
         }
       }
     },
     {
-      "id": "S13b_2d_i16x16_n1c16k32g16_f3x3_bf16_cl_relu_lo",
+      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3735,7 +3735,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3751,7 +3751,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -3783,7 +3783,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -3809,25 +3809,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1007093043,
+        "seed": 210907049,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 634216166
+            "seed": 793138643
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1658448040
+            "seed": 2031530726
           }
         }
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n1c3k16_f7x7x7_fp32_cf_swish",
+      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3868,7 +3868,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               8,
               8,
@@ -3886,7 +3886,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               8,
               8,
@@ -3922,7 +3922,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               3,
               16,
               16,
@@ -3950,26 +3950,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 12343706,
+        "seed": 1656549054,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 702177984
+            "seed": 1500676453
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1153430992
+            "seed": 812636571
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n1c16k32_f1x3x3_fp32_cl_softplus",
+      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4010,7 +4010,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -4028,7 +4028,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -4064,7 +4064,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -4092,26 +4092,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1713954354,
+        "seed": 422794172,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 331029060
+            "seed": 880475518
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1074149382
+            "seed": 536008976
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n1c16k16g16_f3x3x3_fp16_cf_identity",
+      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4152,7 +4152,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -4170,7 +4170,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -4206,7 +4206,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -4234,26 +4234,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1814513700,
+        "seed": 1651283521,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1822603822
+            "seed": 1839430726
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 140335805
+            "seed": 2003765772
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n1c16k32g16_f3x3x3_fp16_cl_relu",
+      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4294,7 +4294,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -4312,7 +4312,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -4348,7 +4348,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -4376,25 +4376,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 707054342,
+        "seed": 1513735294,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1945081626
+            "seed": 816089551
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1973167530
+            "seed": 1467103528
           }
         }
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n1c13k17_f3x3x3_bf16_cf_relu_lo",
+      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4435,7 +4435,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               17,
               15,
               15,
@@ -4453,7 +4453,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               17,
               15,
               15,
@@ -4489,7 +4489,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               13,
               15,
               15,
@@ -4517,25 +4517,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 722846151,
+        "seed": 764420369,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 366576514
+            "seed": 522767704
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 85264379
+            "seed": 870774771
           }
         }
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n1c16k32_f3x3x3_bf16_cl_relu6",
+      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4576,7 +4576,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               14,
               7,
@@ -4594,7 +4594,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               14,
               7,
@@ -4630,7 +4630,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -4658,25 +4658,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1933654496,
+        "seed": 74704246,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1574053769
+            "seed": 131298758
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1492610499
+            "seed": 1692882130
           }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4713,7 +4713,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -4729,7 +4729,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -4761,7 +4761,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -4787,25 +4787,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1322447302,
+        "seed": 728230167,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 403132365
+            "seed": 1837158629
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 833497296
+            "seed": 1935029052
           }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu_lo",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4842,7 +4842,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -4858,7 +4858,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -4890,7 +4890,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -4916,25 +4916,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 615250019,
+        "seed": 69979777,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1241254373
+            "seed": 746246978
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 263341131
+            "seed": 668841719
           }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu_clamp",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4971,7 +4971,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -4987,7 +4987,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5019,7 +5019,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5045,25 +5045,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 2036647356,
+        "seed": 1608818780,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1957549838
+            "seed": 554240773
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1906002017
+            "seed": 1173808920
           }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu_leaky",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5100,7 +5100,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5116,7 +5116,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5148,7 +5148,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5174,25 +5174,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 266121426,
+        "seed": 713574104,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 470726520
+            "seed": 1069302278
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 469132021
+            "seed": 743704145
           }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_tanh",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5229,7 +5229,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5245,7 +5245,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5277,7 +5277,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5303,26 +5303,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 816614260,
+        "seed": 2005262911,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1633966919
+            "seed": 1904470718
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 905038345
+            "seed": 1529231498
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_elu",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5359,7 +5359,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5375,7 +5375,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5407,7 +5407,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5433,26 +5433,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1882704154,
+        "seed": 151827256,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1977681151
+            "seed": 487527678
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2042609579
+            "seed": 416026295
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_gelu",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5489,7 +5489,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5505,7 +5505,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5537,7 +5537,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5563,26 +5563,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 814225930,
+        "seed": 1690669551,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1567309575
+            "seed": 1715327660
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1523952931
+            "seed": 2047651229
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_gelu_tanh",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5619,7 +5619,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5635,7 +5635,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5667,7 +5667,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5693,26 +5693,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 2053376362,
+        "seed": 2113275124,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1584027501
+            "seed": 910452186
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1905225232
+            "seed": 341688870
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_swish",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5749,7 +5749,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5765,7 +5765,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5797,7 +5797,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5823,26 +5823,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1595302397,
+        "seed": 1595505775,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1247897724
+            "seed": 766759489
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1055797455
+            "seed": 437766850
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_softplus",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5879,7 +5879,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5895,7 +5895,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -5927,7 +5927,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -5953,26 +5953,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 615108200,
+        "seed": 670969335,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1093006854
+            "seed": 1823261103
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1351684118
+            "seed": 602342575
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_identity",
+      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -6009,7 +6009,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -6025,7 +6025,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -6057,7 +6057,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -6083,26 +6083,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 195789835,
+        "seed": 662839828,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 714792063
+            "seed": 686248398
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 255701868
+            "seed": 101062880
           }
         },
         "notes": "probe: F26 non-ReLU activation"
       }
     },
     {
-      "id": "S3_F30_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu",
+      "id": "S3_F30_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -6139,7 +6139,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -6155,7 +6155,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -6187,7 +6187,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -6214,26 +6214,26 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 102432909,
+        "seed": 1208525483,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 181476873
+            "seed": 1508773357
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 837164658
+            "seed": 876805983
           }
         },
         "notes": "probe: F30 materialised conv output"
       }
     },
     {
-      "id": "S3_F31_2d_i16x16_n1c16k32_f3x3_fp16_cf_relu",
+      "id": "S3_F31_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -6270,7 +6270,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -6286,7 +6286,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -6318,7 +6318,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -6345,19 +6345,19 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 789389735,
+        "seed": 1100161587,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1151608810
+            "seed": 2080105994
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2120296457
+            "seed": 641902775
           }
         },
         "notes": "probe: F31 intermediate type"

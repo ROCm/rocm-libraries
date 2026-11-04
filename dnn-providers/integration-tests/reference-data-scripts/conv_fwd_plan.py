@@ -403,6 +403,29 @@ S_IDS = (
     "S21",
     "S22",
     "S23",
+    "S24",
+    "S25",
+    "S26",
+    "S27",
+    "S28",
+    "S29",
+    "S30",
+    "S31",
+    "S32",
+    "S33",
+    "S34",
+    "S35",
+    "S36",
+    "S37",
+    "S38",
+    "S39",
+    "S40",
+    "S41",
+    "S42",
+    "S43",
+    "S44",
+    "S45",
+    "S46",
 )
 S_QUICK = ("S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9")
 
@@ -414,10 +437,12 @@ _S_LADDER = {
         dict(ins=(16, 16, 16), rect=(16, 8, 4), odd=(15, 15, 15), big=(32, 32, 32)),
         dict(ins=(16, 8, 8), rect=(16, 8, 4), odd=(15, 15, 15), big=(32, 32, 32)),
         dict(ins=(16, 8, 4), rect=(16, 8, 4), odd=(15, 15, 15), big=(32, 32, 32)),
+        dict(ins=(8, 8, 4), rect=(8, 4, 4), odd=(7, 7, 7), big=(16, 16, 16)),
     ],
     4: [dict(ins=(6, 6, 4, 4), rect=None, odd=None, big=None)],
 }
-_S_BASE = dict(n=1, c=16, k=32, g=1, small=True)
+# N 2 by default: batch 1 is a degenerate default (RFC 0022 section 7); H15 keeps N 1.
+_S_BASE = dict(n=2, c=16, k=32, g=1, small=True)
 _L_BASE = {
     1: dict(
         n=4,
@@ -447,10 +472,10 @@ _L_BASE = {
         k=32,
         g=1,
         small=False,
-        ins=(24, 24, 24),
-        rect=(24, 24, 12),
-        odd=(23, 23, 23),
-        big=(24, 24, 24),
+        ins=(32, 32, 32),
+        rect=(32, 32, 16),
+        odd=(31, 31, 31),
+        big=(32, 32, 32),
     ),
 }
 
@@ -530,6 +555,81 @@ def _feature(sid, r, b):
         kw.update(pre=4, post=4)
     elif sid == "S23":
         return None  # handled by shape_S for rank 4
+    # S24-S46: classes real models use (plan section 3.1, from the corpus of 3.3)
+    elif sid == "S24":  # grouped, strided (ResNeXt, RegNet)
+        kw.update(g=4, s=2)
+    elif sid == "S25":  # depthwise, strided (MobileNet, EfficientNet)
+        kw.update(g=c, k=c, s=2)
+    elif sid == "S26":  # depthwise 5x5, strided
+        if r != 2:
+            return None
+        kw.update(g=c, k=c, f=5, s=2, pre=2, post=2)
+    elif sid == "S27":  # depthwise 7x7 (ConvNeXt)
+        if r != 2:
+            return None
+        kw.update(g=c, k=c, f=7, pre=3, post=3)
+    elif sid == "S28":  # depthwise multiplier 4
+        kw.update(g=c, k=4 * c)
+    elif (
+        sid == "S29"
+    ):  # patchify 2, stride 2, no pad (ConvNeXt downsample, UNet, nnU-Net)
+        kw.update(f=2, s=2, pre=0, post=0)
+    elif sid == "S30":  # patchify 4, stride 4 (ConvNeXt stem)
+        if r != 2:
+            return None
+        kw.update(f=4, s=4, pre=0, post=0)
+    elif sid == "S31":  # patchify 16, stride 16 (ViT patch embedding)
+        if r != 2:
+            return None
+        kw.update(c=3, f=16, s=16, pre=0, post=0, ins=b["big"])
+    elif sid == "S32":  # temporal 3x1x1 ((2+1)D video)
+        if r != 3:
+            return None
+        kw.update(f=(3, 1, 1), pre=(1, 0, 0), post=(1, 0, 0))
+    elif sid == "S33":  # spatial 1x3x3, stride (1, 2, 2)
+        if r != 3:
+            return None
+        kw.update(f=(1, 3, 3), s=(1, 2, 2), pre=(0, 1, 1), post=(0, 1, 1))
+    elif sid == "S34":  # pointwise downsample: 1x1, stride 2
+        kw.update(f=1, s=2, pre=0, post=0)
+    elif sid == "S35":  # vocoder: filter 7, dilation 3 (HiFi-GAN)
+        if r != 1:
+            return None
+        kw.update(f=7, d=3, pre=9, post=9)
+    elif sid == "S36":  # vocoder: filter 11, dilation 5
+        if r != 1:
+            return None
+        kw.update(f=11, d=5, pre=25, post=25)
+    elif sid == "S37":  # dilation 4 (DeepLab)
+        kw.update(d=4, pre=4, post=4)
+    elif sid == "S38":  # atrous dilation 12 (DeepLab ASPP)
+        if r != 2:
+            return None
+        kw.update(d=12, pre=12, post=12)
+    elif sid == "S39":  # 3x3, stride 2, no pad (Inception)
+        kw.update(s=2, pre=0, post=0)
+    elif sid == "S40":  # 5x5, no pad (Inception)
+        if r != 2:
+            return None
+        kw.update(f=5, pre=0, post=0)
+    elif sid == "S41":  # 1D upsampling-style filter 16, stride 8
+        if r != 1:
+            return None
+        kw.update(f=16, s=8, pre=4, post=4)
+    elif sid == "S42":  # 1D filter 4, stride 2
+        if r != 1:
+            return None
+        kw.update(f=4, s=2, pre=1, post=1)
+    elif sid == "S43":  # F7 non-square 3x5
+        if r != 2:
+            return None
+        kw.update(f=(3, 5), pre=(1, 2), post=(1, 2))
+    elif sid == "S44":  # F11 pre-only padding
+        kw.update(f=2, s=2, pre=1, post=0)
+    elif sid == "S45":  # F7 filter larger than the input, padded to fit (output 1)
+        kw.update(f=tuple(i + 2 for i in ins), pre=1, post=1)
+    elif sid == "S46":  # F8 stride 4 with filter 3
+        kw.update(s=4)
     else:
         raise KeyError(sid)
     return kw
@@ -644,8 +744,9 @@ def r_source(rid):
     )
 
 
-# H: hazard breakpoints. One change from the S defaults (N 1, C 16, K 32, 16 per
-# dimension, filter 3, pad 1). Powers of 2 +- 1, dims not divisible by 4 or 8.
+# H: hazard breakpoints. One change from the S defaults (N 2, C 16, K 32, 16 per
+# dimension, filter 3, pad 1). Powers of 2 +- 1, dims not divisible by 4 or 8,
+# and batch sizes that real models use.
 H_SHAPES = {
     "H1": dict(c=15, k=32),
     "H2": dict(c=17, k=33),
@@ -661,6 +762,10 @@ H_SHAPES = {
     "H12": dict(ins=31),
     "H13": dict(ins=33),
     "H14": dict(ins=17),
+    "H15": dict(n=1),
+    "H16": dict(n=32),
+    "H17": dict(n=64),
+    "H18": dict(c=4),
 }
 
 
@@ -670,7 +775,7 @@ def shape_H(hid, r, level):
         base = {**_S_BASE, **ladder}
         kw = dict(
             rank=r,
-            n=h.get("n", 1),
+            n=h.get("n", _S_BASE["n"]),
             c=h.get("c", 16),
             k=h.get("k", 32),
             g=h.get("g", 1),
@@ -713,23 +818,28 @@ ACCUM_SHAPES = {
 
 
 # --------------------------------------------------------------------------
-# Trimmed products (plan section 4.3, trade-off register T8-T11). The level rules
+# Trimmed products (plan section 4.3, trade-off register T8-T12). The level rules
 # generate the complete products; the generator then removes these cases, so the
-# cases that remain keep their ids, seeds and claims. Each trim removes a product
-# that no engine executed on the measured architectures (gfx942 and gfx90a, see
-# plan section 4.5); its trigger brings the product back. Activations that an
-# engine executes are never trimmed.
+# cases that remain keep their ids, seeds and claims. T8-T11 remove products that
+# no engine executed on the measured architectures (gfx942 and gfx90a, see plan
+# section 4.5); activations that an engine executes are never trimmed. T12 keeps
+# the geometry classes S24-S46 to plain convolution in nightly and full: an
+# epilogue or a tensor feature does not depend on the geometry class (T1, T4).
+# Each trim names the trigger that brings its product back.
 # --------------------------------------------------------------------------
 
 # Activations at least one engine executed in the act topology (plan section 4.5).
 EXECUTED_ACTS = ("relu", "relu6", "relu_clamp", "sigmoid", "tanh")
 UNEXECUTED_TOPOLOGIES = ("scale_bias_act", "add_relu", "bias_add_relu", "act_add")
+# Geometry classes added from the corpus analysis (plan section 3.1), and their L forms.
+GEOMETRY_CLASS_SHAPES = tuple(f"{p}{i}" for p in "SL" for i in range(24, 47))
 
 TRIMS = {
     "T8": "full: act x every S and L shape for activations no engine executes",
     "T9": "comprehensive and full: plain repeats of the four fused topologies no engine executes",
     "T10": "comprehensive and full: fp16 and bf16 bias_act, except one case per activation x core cell",
     "T11": "full: F13, F19 and F35 paired with every S shape",
+    "T12": "comprehensive and full: geometry classes S24-S46 crossed with fused topologies or features",
 }
 
 
@@ -743,6 +853,12 @@ def trim(c, level):
     late = level in ("comprehensive", "full")
     if late and topo in UNEXECUTED_TOPOLOGIES and not tagged:
         return "T9"
+    if (
+        late
+        and (topo != "conv" or tagged)
+        and any(i in GEOMETRY_CLASS_SHAPES for i in c["ids"])
+    ):
+        return "T12"
     if late and topo == "bias_act" and c["xt"] in ("half", "bfloat16") and not tagged:
         return "T10"
     if (

@@ -73,12 +73,20 @@ rtol = 1e-5
 #   A 3,200 - 4,608 (L10, A1, A2)      1.9e-4
 #   A >= 65,536 (S19, L19, X4)         8.2e-3
 # Each class takes about 2x its observed maximum. Later entries win.
+# The R shapes and the S24-S46 / L24-L46 shapes are placed in a class by their
+# accumulation length; those placements are not yet calibrated on hardware.
 [[tolerance_overrides]]
 filters = [
     "*_ConvolutionFwd*.L*_fp32_*",
     "*_ConvolutionFwd*.M*_fp32_*",
     "*_ConvolutionFwd*.H*_fp32_*",
     "*_ConvolutionFwd*.X*_fp32_*",
+    "*_ConvolutionFwd*.S31_*_fp32_*",
+    "*_ConvolutionFwd*.R029_*_fp32_*",
+    "*_ConvolutionFwd*.R061_*_fp32_*",
+    "*_ConvolutionFwd*.R065_*_fp32_*",
+    "*_ConvolutionFwd*.R121_*_fp32_*",
+    "*_ConvolutionFwd*.R122_*_fp32_*",
 ]
 atol = 1e-4
 rtol = 1e-4
@@ -87,6 +95,15 @@ rtol = 1e-4
 filters = [
     "*_ConvolutionFwd*.A*_fp32_*",
     "*_ConvolutionFwd*.L10_*_fp32_*",
+    "*_ConvolutionFwd*.L30_*_fp32_*",
+    "*_ConvolutionFwd*.L36_*_fp32_*",
+    "*_ConvolutionFwd*.L40_*_fp32_*",
+    "*_ConvolutionFwd*.L41_*_fp32_*",
+    "*_ConvolutionFwd*.L43_*_fp32_*",
+    "*_ConvolutionFwd*.R028_*_fp32_*",
+    "*_ConvolutionFwd*.R083_*_fp32_*",
+    "*_ConvolutionFwd*.R119_*_fp32_*",
+    "*_ConvolutionFwd*.R131_*_fp32_*",
 ]
 atol = 5e-4
 rtol = 1e-4
@@ -96,6 +113,10 @@ filters = [
     "*_ConvolutionFwd*.S19_*_fp32_*",
     "*_ConvolutionFwd*.L19_*_fp32_*",
     "*_ConvolutionFwd*.X4_*_fp32_*",
+    "*_ConvolutionFwd*.S45_*_fp32_*",
+    "*_ConvolutionFwd*.L45_*_fp32_*",
+    "*_ConvolutionFwd*.R066_*_fp32_*",
+    "*_ConvolutionFwd*.R067_*_fp32_*",
 ]
 atol = 2e-2
 rtol = 1e-4
@@ -146,14 +167,14 @@ reason  = "conv -> bias -> relu with a bias data type different from the io type
 [[test_skips]]
 archs   = ["gfx942"]
 filters = [
-    "*_ConvolutionFwd_Default.S13a_F16chan_2d_i16x16_n1c16k16g16_f3x3_fp32_cf",
-    "*_ConvolutionFwd_Default.S13a_F16fast_3d_i16x16x16_n1c16k16g16_f3x3x3_bf16_cl",
-    "*_ConvolutionFwd_Default.S13b_F16plane_1d_i16_n1c16k32g16_f3_bf16_cf",
-    "*_ConvolutionFwd_Default.S20_F16plane_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl",
-    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n1c16k32_f3x3x3_fp16_cl",
-    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl",
-    "*_ConvolutionFwd_Default.S7_F16fast_2d_i16x16_n1c16k32g2_f3x3_bf16_cl",
-    "*_ConvolutionFwd_Default.S7_F16plane_1d_i16_n1c16k32g2_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.S13a_F16chan_2d_i16x16_n2c16k16g16_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.S13a_F16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.S13b_F16plane_1d_i16_n2c16k32g16_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.S20_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.S7_F16fast_2d_i16x16_n2c16k32g2_f3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.S7_F16plane_1d_i16_n2c16k32g2_f3_bf16_cf",
     "*_ConvolutionFwd_Default.S8_F16chan_2d_i16x16_n2c32k64g4_f3x3_fp32_cf",
     "*_ConvolutionFwd_Default.S8_F16chan_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf",
     "*_ConvolutionFwd_Default.S9_F16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",

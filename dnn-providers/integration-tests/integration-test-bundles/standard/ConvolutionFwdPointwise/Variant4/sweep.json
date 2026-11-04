@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S13b_1d_i16_n1c16k32g16_f3_fp32_cf",
+      "id": "S13b_1d_i16_n2c16k32g16_f3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -28,7 +28,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -42,7 +42,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -56,7 +56,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -70,7 +70,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               16
             ],
@@ -98,7 +98,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -122,32 +122,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1652981884,
+        "seed": 1725677824,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 300516754
+            "seed": 475517746
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1635570775
+            "seed": 449141823
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 968639098
+            "seed": 602449470
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S14_1d_i15_n1c13k17_f3_fp32_cl",
+      "id": "S14_1d_i15_n2c13k17_f3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -173,7 +173,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               17,
               15
             ],
@@ -187,7 +187,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               17,
               15
             ],
@@ -201,7 +201,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               17,
               15
             ],
@@ -215,7 +215,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               17,
               15
             ],
@@ -243,7 +243,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               13,
               15
             ],
@@ -267,32 +267,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 672523091,
+        "seed": 1385981836,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1225995088
+            "seed": 1536838007
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 79033229
+            "seed": 1075270923
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1147415960
+            "seed": 1332727184
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S16_1d_i32_n1c16k32_f3_fp16_cf",
+      "id": "S16_1d_i32_n2c16k32_f3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -318,7 +318,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               11
             ],
@@ -332,7 +332,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               11
             ],
@@ -346,7 +346,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               11
             ],
@@ -360,7 +360,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               11
             ],
@@ -388,7 +388,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               32
             ],
@@ -412,32 +412,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 612936957,
+        "seed": 1463206869,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 265291645
+            "seed": 1673632614
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 970364101
+            "seed": 2070577867
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 396770565
+            "seed": 576658689
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S17_1d_i16_n1c1k16_f3_fp16_cl",
+      "id": "S17_1d_i16_n2c1k16_f3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -463,7 +463,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -477,7 +477,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -491,7 +491,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -505,7 +505,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -533,7 +533,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               1,
               16
             ],
@@ -557,32 +557,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1849414206,
+        "seed": 869625325,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1688705167
+            "seed": 1878473180
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1319753033
+            "seed": 1534048082
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 579469207
+            "seed": 30405561
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S18_1d_i16_n1c16k32_f2_bf16_cf",
+      "id": "S18_1d_i16_n2c16k32_f2_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -608,7 +608,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               8
             ],
@@ -622,7 +622,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               8
             ],
@@ -636,7 +636,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               8
             ],
@@ -650,7 +650,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               8
             ],
@@ -678,7 +678,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -702,32 +702,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 389009696,
+        "seed": 814804043,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 635210028
+            "seed": 1632602761
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 211835420
+            "seed": 345632834
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 799509628
+            "seed": 1334797587
           }
         },
         "notes": "probe: F11 asymmetric padding; F27-F29 topology"
       }
     },
     {
-      "id": "S19_1d_i16_n1c16k32_f16_bf16_cl",
+      "id": "S19_1d_i16_n2c16k32_f16_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -753,7 +753,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               1
             ],
@@ -767,7 +767,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               1
             ],
@@ -781,7 +781,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               1
             ],
@@ -795,7 +795,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               1
             ],
@@ -823,7 +823,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16
             ],
@@ -847,32 +847,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 835632065,
+        "seed": 1424412499,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 882975069
+            "seed": 1755345674
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 176325958
+            "seed": 33031608
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1601575359
+            "seed": 985369017
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S12b_2d_i16x16_n1c16k32_f3x1_fp32_cf",
+      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -902,7 +902,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -918,7 +918,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -934,7 +934,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -950,7 +950,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -982,7 +982,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1008,32 +1008,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 710287546,
+        "seed": 2122625524,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 611081869
+            "seed": 2026545179
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1741874081
+            "seed": 1413644619
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 50679261
+            "seed": 336412550
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S13a_2d_i16x16_n1c16k16g16_f3x3_fp32_cl",
+      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1063,7 +1063,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1079,7 +1079,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1095,7 +1095,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1111,7 +1111,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1143,7 +1143,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1169,32 +1169,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1879217427,
+        "seed": 321849630,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1756117832
+            "seed": 1797001226
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1518824968
+            "seed": 1910862289
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 609615406
+            "seed": 1344968312
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S13b_2d_i16x16_n1c16k32g16_f3x3_fp16_cf",
+      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1224,7 +1224,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1240,7 +1240,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1256,7 +1256,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1272,7 +1272,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               16,
               16
@@ -1304,7 +1304,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1330,32 +1330,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 894331912,
+        "seed": 651194275,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1690007679
+            "seed": 711972264
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 41096739
+            "seed": 486622805
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1450382807
+            "seed": 225467662
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S14_2d_i15x15_n1c13k17_f3x3_fp16_cl",
+      "id": "S14_2d_i15x15_n2c13k17_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1385,7 +1385,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               17,
               15,
               15
@@ -1401,7 +1401,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               17,
               15,
               15
@@ -1417,7 +1417,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               17,
               15,
               15
@@ -1433,7 +1433,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               17,
               15,
               15
@@ -1465,7 +1465,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               13,
               15,
               15
@@ -1491,32 +1491,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1893067173,
+        "seed": 1166342602,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1436526386
+            "seed": 536005107
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 374694864
+            "seed": 1058881478
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1144959492
+            "seed": 538439751
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S15_2d_i16x16_n1c16k32_f3x3_bf16_cf",
+      "id": "S15_2d_i16x16_n2c16k32_f3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1546,7 +1546,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               14,
               7
@@ -1562,7 +1562,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               14,
               7
@@ -1578,7 +1578,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               14,
               7
@@ -1594,7 +1594,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               14,
               7
@@ -1626,7 +1626,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16
@@ -1652,32 +1652,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1392399114,
+        "seed": 1813678254,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1793391881
+            "seed": 933428036
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1438759764
+            "seed": 1060271023
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1459203653
+            "seed": 124598925
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S16_2d_i32x32_n1c16k32_f3x3_bf16_cl",
+      "id": "S16_2d_i32x32_n2c16k32_f3x3_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1707,7 +1707,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               11,
               11
@@ -1723,7 +1723,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               11,
               11
@@ -1739,7 +1739,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               11,
               11
@@ -1755,7 +1755,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               11,
               11
@@ -1787,7 +1787,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               32,
               32
@@ -1813,32 +1813,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 631719544,
+        "seed": 52554404,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1951726624
+            "seed": 267423825
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1490928758
+            "seed": 459461289
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2074147722
+            "seed": 360554330
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n1c16k32g16_f3x3x3_fp32_cf",
+      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1872,7 +1872,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -1890,7 +1890,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -1908,7 +1908,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -1926,7 +1926,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               16,
               16,
@@ -1962,7 +1962,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -1990,32 +1990,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1249478515,
+        "seed": 1274070293,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1024674
+            "seed": 1155588645
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 993125028
+            "seed": 59161772
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 554359503
+            "seed": 363539652
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n1c13k17_f3x3x3_fp32_cl",
+      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2049,7 +2049,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               17,
               15,
               15,
@@ -2067,7 +2067,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               17,
               15,
               15,
@@ -2085,7 +2085,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               17,
               15,
               15,
@@ -2103,7 +2103,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               17,
               15,
               15,
@@ -2139,7 +2139,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               13,
               15,
               15,
@@ -2167,32 +2167,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1152239155,
+        "seed": 2061931009,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 710303148
+            "seed": 1671097687
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2109814962
+            "seed": 585605572
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1204930243
+            "seed": 452184474
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n1c16k32_f3x3x3_fp16_cf",
+      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2226,7 +2226,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               14,
               7,
@@ -2244,7 +2244,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               14,
               7,
@@ -2262,7 +2262,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               14,
               7,
@@ -2280,7 +2280,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               14,
               7,
@@ -2316,7 +2316,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2344,32 +2344,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1433991108,
+        "seed": 1762686225,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 982241711
+            "seed": 1598291680
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1134987544
+            "seed": 1375046392
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1879640475
+            "seed": 95635238
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n1c16k32_f3x3x3_fp16_cl",
+      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2403,7 +2403,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               11,
               11,
@@ -2421,7 +2421,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               11,
               11,
@@ -2439,7 +2439,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               11,
               11,
@@ -2457,7 +2457,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               11,
               11,
@@ -2493,7 +2493,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               32,
               32,
@@ -2521,32 +2521,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 925086880,
+        "seed": 106417532,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 372719637
+            "seed": 1069210984
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1231556797
+            "seed": 579695672
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1775629351
+            "seed": 282427585
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n1c1k16_f3x3x3_bf16_cf",
+      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2580,7 +2580,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2598,7 +2598,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2616,7 +2616,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2634,7 +2634,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2670,7 +2670,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               1,
               16,
               16,
@@ -2698,32 +2698,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 2112234401,
+        "seed": 1503754273,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1597513778
+            "seed": 882870860
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 993338830
+            "seed": 1824878333
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1236854561
+            "seed": 484396718
           }
         },
         "notes": "probe: F27-F29 topology"
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n1c16k32_f2x2x2_bf16_cl",
+      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2757,7 +2757,7 @@
           {
             "uid": 0,
             "dims": [
-              1,
+              2,
               32,
               8,
               8,
@@ -2775,7 +2775,7 @@
           {
             "uid": 1,
             "dims": [
-              1,
+              2,
               32,
               8,
               8,
@@ -2793,7 +2793,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               32,
               8,
               8,
@@ -2811,7 +2811,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              2,
               32,
               8,
               8,
@@ -2847,7 +2847,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               16,
               16,
               16,
@@ -2875,25 +2875,25 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1310588374,
+        "seed": 946908928,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2018201242
+            "seed": 1965095477
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1475245486
+            "seed": 1233342140
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 371037823
+            "seed": 1370202398
           }
         },
         "notes": "probe: F11 asymmetric padding; F27-F29 topology"
