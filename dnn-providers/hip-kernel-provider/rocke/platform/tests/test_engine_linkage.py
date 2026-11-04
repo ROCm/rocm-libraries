@@ -229,9 +229,16 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             for test in tests
             if test["name"] == "rocke_library_attention_cpu_pytest"
         )
-        if "--rocke-require-hkp-pack-headers" in attention_cpu["command"]:
-            install_script = (build / "cmake_install.cmake").read_text()
-            assert "Gfx950AttentionUnified3DGeometry.hpp" in install_script
+        # The flag must track the header install in both directions: dropping
+        # it while the headers ship would turn a missing copy back into a
+        # silent skip, and passing it without them would fail every run.
+        install_script = (build / "cmake_install.cmake").read_text()
+        hkp_headers_installed = "Gfx950AttentionUnified3DGeometry.hpp" in install_script
+        assert (
+            "--rocke-require-hkp-pack-headers" in attention_cpu["command"]
+        ) == hkp_headers_installed
+        if hkp_headers_installed:
+            assert "Gfx950AttentionDenseGeometry.hpp" in install_script
             assert "/tests/library/tests/hkp_packs" in install_script
         command = pair["command"]
         native = command[command.index("--native") + 1]
