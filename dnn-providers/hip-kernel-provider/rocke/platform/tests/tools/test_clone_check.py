@@ -21,6 +21,10 @@ if not TOOL.is_file():
         allow_module_level=True,
     )
 
+POSIX_ONLY = pytest.mark.skipif(
+    os.name != "posix", reason="needs POSIX file names, modes or symlinks"
+)
+
 _GIT_ENV = dict(
     os.environ,
     GIT_AUTHOR_NAME="t",
@@ -74,7 +78,7 @@ class Repo:
     def write(self, rel: str, text: str) -> None:
         target = self.path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
+        target.write_text(text, newline="\n")
 
     def commit(self) -> str:
         self.git("add", "-A")
@@ -1437,6 +1441,8 @@ def test_user_git_settings_do_not_change_the_result(
         monkeypatch.setenv(f"GIT_CONFIG_KEY_{i}", key)
         monkeypatch.setenv(f"GIT_CONFIG_VALUE_{i}", value)
     if setting == "external-diff":
+        if os.name != "posix":
+            pytest.skip("the external diff program is /bin/true")
         monkeypatch.setenv("GIT_EXTERNAL_DIFF", "/bin/true")
     if setting == "diff-opts":
         monkeypatch.setenv("GIT_DIFF_OPTS", "-u5")
@@ -1552,7 +1558,10 @@ def test_reported_spans_follow_the_lines_added_above_them(repo):
     assert spans[0][1] - spans[0][0] == spans[1][1] - spans[1][0]
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads files whatever their mode")
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="needs POSIX file modes and a non-root user (root reads any file)",
+)
 def test_an_unreadable_source_file_is_a_tool_error_not_a_traceback(repo):
     base = repo.commit()
     target = repo.path / "library" / "kernels" / "a.py"
@@ -1565,15 +1574,16 @@ def test_an_unreadable_source_file_is_a_tool_error_not_a_traceback(repo):
 
 
 ODD_NAMES = (
-    "library/k b/a.py",  # a space: the path of a diff header cannot be split on it
-    'library/qu"ote.py',  # names git quotes in its output
-    "library/we\\ird.py",
-    "library/ta\tb.py",
+    # a space: the path of a diff header cannot be split on it
+    pytest.param("library/k b/a.py", id="space"),
+    # names git quotes in its output; not valid file names on Windows
+    pytest.param('library/qu"ote.py', id="quote", marks=POSIX_ONLY),
+    pytest.param("library/we\\ird.py", id="backslash", marks=POSIX_ONLY),
+    pytest.param("library/ta\tb.py", id="tab", marks=POSIX_ONLY),
 )
-ODD_IDS = ("space", "quote", "backslash", "tab")
 
 
-@pytest.mark.parametrize("name", ODD_NAMES, ids=ODD_IDS)
+@pytest.mark.parametrize("name", ODD_NAMES)
 @pytest.mark.parametrize("head_mode", (False, True), ids=("worktree", "commit"))
 def test_an_edited_file_with_an_unusual_name_is_analysed(repo, name, head_mode):
     repo.write(name, func("f1"))
@@ -1584,7 +1594,7 @@ def test_an_edited_file_with_an_unusual_name_is_analysed(repo, name, head_mode):
     assert (rc, kinds(report)) == (0, ["NEW COPY"])
 
 
-@pytest.mark.parametrize("name", ODD_NAMES, ids=ODD_IDS)
+@pytest.mark.parametrize("name", ODD_NAMES)
 def test_a_copy_pasted_into_a_file_with_an_unusual_name_is_found(repo, name):
     repo.write("library/kernels/a.py", func("f1"))
     base = repo.commit()
@@ -1595,6 +1605,7 @@ def test_a_copy_pasted_into_a_file_with_an_unusual_name_is_found(repo, name):
     assert sorted(paths) == sorted([name, "library/kernels/a.py"])
 
 
+@POSIX_ONLY
 def test_a_file_name_that_is_not_utf8_is_ignored_unless_it_is_python(repo):
     kernels = os.fsencode(repo.path / "library" / "kernels")
     with open(kernels + b"/caf\xe9.txt", "wb") as handle:
@@ -1607,6 +1618,7 @@ def test_a_file_name_that_is_not_utf8_is_ignored_unless_it_is_python(repo):
         assert (rc, kinds(report)) == (0, ["NEW COPY"])
 
 
+@POSIX_ONLY
 def test_a_python_file_name_with_a_newline_is_a_tool_error(repo):
     base = repo.commit()
     repo.write("library/kernels/a\nb.py", func("f1"))
@@ -1652,6 +1664,7 @@ def test_a_file_moved_into_scope_from_an_excluded_path_counts_as_added(repo, hea
     assert kinds(report) == ["NEW COPY"]
 
 
+@POSIX_ONLY
 @pytest.mark.parametrize("head_mode", (False, True), ids=("worktree", "commit"))
 def test_a_file_that_becomes_a_symlink_is_not_a_tool_error(repo, head_mode):
     repo.write("library/kernels/a.py", func("f"))
@@ -1687,6 +1700,7 @@ def test_a_head_commit_is_used_for_edited_files_too(repo):
     assert kinds(report) == ["NEW COPY"]
 
 
+@POSIX_ONLY
 def test_a_symlink_is_read_the_same_in_the_working_tree_and_in_a_commit(repo):
     repo.write("library/kernels/a.py", func("f"))
     base = repo.commit()
@@ -1744,6 +1758,7 @@ def test_ignored_files_are_not_scanned_and_untracked_files_are_new(repo):
     }
 
 
+@POSIX_ONLY
 def test_a_python_file_name_that_is_not_utf8_is_a_tool_error(repo):
     base = repo.commit()
     kernels = os.fsencode(repo.path / "library" / "kernels")
