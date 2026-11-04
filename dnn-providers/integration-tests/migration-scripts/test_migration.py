@@ -2597,6 +2597,90 @@ def test_grouped_case_id():
         print("  PASS: grouped_case_id")
 
 
+def _grouped_named_graph():
+    """A ternary graph whose creation-order UIDs differ from sorted-name order."""
+    graph = _ternary_graph({"x": 0, "dy": 1, "scale": 2, "out": 3})
+    for t in graph["tensors"]:
+        t["alignment"] = 16
+        t["is_runtime_pass_by_value"] = False
+    return graph
+
+
+def _import_grouped_capture(tmp, graph, sidecar):
+    """Grouped import of one capture; returns (bundle_dir, metadata, template, case)."""
+    bundle_dir = tmp / "bundles"
+    bundle_dir.mkdir()
+    graph_path = _capture(tmp / "capture", "named_case", graph, sidecar)
+    r = _import_capture(graph_path, bundle_dir, *_GROUPED_FLAGS, "--topology", "Topo")
+    assert r.returncode == 0, r.stderr
+    (rel,) = _sweep_dirs(bundle_dir)
+    (case,) = _load_sweep(bundle_dir, rel)["cases"]
+    with open(bundle_dir / rel / "graph.template.json") as f:
+        template = json.load(f)
+    return bundle_dir, case["metadata"], template, case
+
+
+def test_grouped_import_keeps_values_inputs():
+    """A format_version 2 case with a values input survives grouped import and re-expansion."""
+    from bundle_utils import (
+        canon,
+        canonical_uid_map_by_name,
+        expand,
+        inputs_by_name,
+        remap_graph,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        assert any(old != new for old, new in uid_map.items()), uid_map
+        values = {"kind": "values", "values": [64, 32], "repeat": True, "seed": 11}
+        sidecar = {
+            "format_version": 2,
+            "seed": 7,
+            "inputs": {"0": values, "1": {"seed": 22}, "2": {"seed": 33}},
+        }
+        _, meta, template, case = _import_grouped_capture(tmp, graph, sidecar)
+        assert meta["format_version"] == 2 and meta["seed"] == 7, meta
+        by_name = inputs_by_name(meta, template)
+        assert json.dumps(by_name, sort_keys=True) == json.dumps(
+            inputs_by_name(sidecar, graph), sort_keys=True
+        ), by_name
+        assert uid_map[0] != 0, uid_map
+        assert json.dumps(by_name["x"]) == json.dumps(values), by_name["x"]
+        assert canon(expand(template, case["values"])) == canon(
+            remap_graph(graph, uid_map)
+        ), "the case does not re-expand to the imported graph"
+        print("  PASS: grouped_import_keeps_values_inputs")
+
+
+def test_grouped_import_keeps_per_input_seeds():
+    """A grouped import that renumbers UIDs keeps each tensor's seed and fill spec."""
+    from bundle_utils import canonical_uid_map_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        sidecar = {
+            "format_version": 1,
+            "seed": 1234,
+            "inputs": {
+                "0": {"seed": 101},
+                "1": {"seed": 202},
+                "2": {"kind": "fixed", "seed": 303, "value": 0.125},
+            },
+        }
+        _, meta, template, _ = _import_grouped_capture(tmp, graph, sidecar)
+        assert sorted(meta["inputs"]) == sorted(
+            str(uid_map[int(u)]) for u in sidecar["inputs"]
+        ), meta["inputs"]
+        assert meta["inputs"] != sidecar["inputs"], "the import did not renumber UIDs"
+        assert inputs_by_name(meta, template) == inputs_by_name(sidecar, graph), meta
+        print("  PASS: grouped_import_keeps_per_input_seeds")
+
+
 def test_grouped_topology():
     """--topology names the folder and refuses a mismatch."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -3156,6 +3240,8 @@ def main() -> int:
         test_grouped_require_marked_sweep,
         test_grouped_case_id,
         test_grouped_topology,
+        test_grouped_import_keeps_values_inputs,
+        test_grouped_import_keeps_per_input_seeds,
         test_grouped_runs_are_deterministic,
         test_grouped_attribute_keys_prefixed_per_node,
         test_grouped_engine_api_version_per_case,
