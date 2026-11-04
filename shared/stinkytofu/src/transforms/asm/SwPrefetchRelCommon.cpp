@@ -32,9 +32,9 @@ using namespace stinkytofu;
 /// Grid constants `kSwPrefetchFirstGlobalByte` / `kSwPrefetchSpacingBytes` live in
 /// SwPrefetchRelCommon.hpp (128*255, then every 32*128).
 
-/// BUG #20 (MI400-SPG §4.5.6.1): in xnack-replay mode XCNT must be 0 when an `s_prefetch_*`
-/// issues. A prefetch belongs to the SMEM group, so single-group hardware already drains XCNT when
-/// it follows any other group or a non-memory instruction; only an open SMEM group needs a wait.
+/// XNACK protection: `s_prefetch_*` must issue with XCNT == 0. In the shared
+/// single-VMEM-group model, only an open SMEM group reaching this insertion site
+/// needs an explicit wait.
 /// Gfx1250XnackHazardPass rejects kernels that may enable multi-group replay.
 bool needsSwPrefetchXcntWait(BasicBlock& bb, IRList::iterator insertBefore, bool emitXnackWait) {
     if (!emitXnackWait) return false;

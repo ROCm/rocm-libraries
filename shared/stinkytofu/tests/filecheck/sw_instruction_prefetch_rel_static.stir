@@ -79,7 +79,7 @@ label_vmem_group:
 }
 
 #--- P(2)=40832: a zero-byte label does not end an SMEM group, so the prefetch still needs
-# the explicit wait (BUG #20).
+# the explicit wait.
 # CHECK-LABEL: function "smem_group_across_label_needs_xcnt"
 # CHECK: {{.*}}s_load_b64
 # CHECK: {{.*}}total=40824 bytes{{.*}}s_wait_xcnt{{.*}}(0)

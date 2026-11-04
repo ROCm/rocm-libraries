@@ -108,6 +108,9 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
         if (inst == nullptr || isPseudoInst(inst)) {
             continue;
         }
+        // Prefetch does not consume VGPR-MSB state, so adjacency to it cannot
+        // make s_set_vgpr_msb safe while a replay group is open.
+        if (isScalarPrefetch(*inst)) return false;
         return getReplayGroupKind(*inst, replayMode) != MemoryGroupKind::None;
     }
     return false;

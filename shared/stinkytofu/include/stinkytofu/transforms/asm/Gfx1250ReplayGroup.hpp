@@ -16,7 +16,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 /// gfx1250 XNACK-replay group model shared by Gfx1250XnackHazardPass and the SW instruction prefetch
-/// passes (MI400-SPG §6.9.1, §6.9.4).
+/// passes.
 namespace stinkytofu::gfx1250 {
 
 enum class ReplayGroupKind {
@@ -31,10 +31,15 @@ enum class ReplayMode {
     MultiGroup,
 };
 
-// A scalar prefetch is SMEM-family (opcodes 36-40) but is not classified here: it carries no
-// replay sources and leaves XCNT unchanged, so it neither opens nor extends a tracked group.
+inline bool isScalarPrefetch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_ScalarInstPrefetch);
+}
+
+// A scalar prefetch (`s_prefetch_*`) is SMEM-family. The passes handle its XCNT rule
+// explicitly because it carries no replay sources and should not extend source-clobber tracking.
 inline ReplayGroupKind getReplayGroupKind(const StinkyInstruction& inst, ReplayMode replayMode) {
-    if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic))
+    if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic) ||
+        isScalarPrefetch(inst))
         return ReplayGroupKind::SMEM;
     if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isFLATLoad(inst) ||
         isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
@@ -44,10 +49,6 @@ inline ReplayGroupKind getReplayGroupKind(const StinkyInstruction& inst, ReplayM
         return replayMode == ReplayMode::SingleGroup ? ReplayGroupKind::Other
                                                      : ReplayGroupKind::VMEM;
     return ReplayGroupKind::None;
-}
-
-inline bool isScalarPrefetch(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_ScalarInstPrefetch);
 }
 
 inline bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
