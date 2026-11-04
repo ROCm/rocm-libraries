@@ -98,7 +98,11 @@
     X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
+    X(DisableWaitCntRemoval, bool)                \
+    X(DisableTensorcntInsertion, bool)            \
     X(EnableLoopCarriedTokenDeps, bool)           \
+    X(EnableGirFramePipeline, bool)               \
+    X(EnableGirFrameWaitCntInsertion, bool)       \
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
@@ -130,9 +134,9 @@
     X(DsReadOrder, int)                           \
     X(ArchName, std::string)
 
-// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
-// WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
-// have fixed defaults and
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder,
+// EvenSpreadFillers, WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas,
+// which have fixed defaults and
 // are not resolved by the heuristics. Gfx1250Backend resolves unset
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
 // wins; degenerate main-loop IR falls back to the static default). See
@@ -400,6 +404,20 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
 
+    /**
+     * @brief Is \p node stored as some group's first or last?
+     *
+     * An endpoint must outlive every pass that runs over the range it bounds, so a
+     * region extractor keeps it rather than retargeting onto a neighbor the inner
+     * pipeline is free to erase or reorder.
+     */
+    bool isGroupEndpoint(const IRBase* node) const;
+
+   private:
+    /// (Re)bind the Function erase observer that keeps group endpoints off freed nodes.
+    void installEraseObserver();
+
+   public:
     /**
      * @brief Get the ModuleOptions
      * @return ModuleOptions

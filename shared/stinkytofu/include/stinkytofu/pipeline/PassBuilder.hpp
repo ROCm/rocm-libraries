@@ -48,6 +48,10 @@ enum class PipelineExtensionPoint {
     InnerRegionEnd,
     /// Whole-kernel scope, after the region ScopeAdaptor.
     AfterRegionPasses,
+    /// Whole-kernel scope, at the very end of the pipeline, after every
+    /// backend pass (including TDMLoadWaveSync and SW-prefetch insertion).
+    /// Inserted passes observe the final instruction stream.
+    EndOfPipeline,
 };
 
 /// LLVM-style pass builder that collects plugin-registered callbacks

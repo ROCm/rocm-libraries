@@ -13,6 +13,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/pipeline/PassBuilder.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
 namespace stinkytofu {
@@ -120,4 +121,23 @@ std::unique_ptr<Pass> createDumpMemTokenIRStructurePass(const StinkyAsmModule& m
 std::unique_ptr<Pass> createDumpMemTokenIRStructurePass(DumpMemTokenIRStructurePassConfig config) {
     return std::make_unique<DumpMemTokenIRStructurePass>(std::move(config));
 }
+
+namespace {
+/// Named-factory registration so Python (TensileLite) can inject this dump via
+/// StinkyAsmModule::registerPassAtExtensionPoint("DumpMemTokenIRStructurePass").
+/// The per-kernel output path is read from the module plugin-data string
+/// "DumpMemTokenIRPath"; when unset, nothing is written (empty path). Uses the
+/// module overload so every function is dumped, and so concurrent kernels write
+/// to distinct paths instead of clobbering a shared hard-coded filename.
+struct DumpMemTokenIRStructureRegistrar {
+    DumpMemTokenIRStructureRegistrar() {
+        PassBuilder::registerNamedPassFactory(
+            "DumpMemTokenIRStructurePass", [](StinkyAsmModule& module) -> std::unique_ptr<Pass> {
+                return createDumpMemTokenIRStructurePass(
+                    module, {.path = module.getPluginDataStr("DumpMemTokenIRPath")});
+            });
+    }
+};
+const DumpMemTokenIRStructureRegistrar s_dumpMemTokenIRStructureRegistrar;
+}  // namespace
 }  // namespace stinkytofu

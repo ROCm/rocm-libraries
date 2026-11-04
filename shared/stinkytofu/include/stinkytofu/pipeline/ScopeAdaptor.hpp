@@ -24,6 +24,7 @@
 
 #include <cassert>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -35,6 +36,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
 #include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
@@ -345,18 +347,34 @@ class ScopeAdaptor : public Pass {
    private:
     /// Move IR from [begin, end) into \p bb.
     /// StinkyInstructions and non-TEXTBLOCK AsmDirectives are preserved;
-    /// TEXTBLOCK directives (comments) are erased. A comment that is another
-    /// group's stored endpoint is retargeted onto a neighbor first so a later
-    /// adaptor does not start on a freed node.
+    /// TEXTBLOCK directives (comments) are erased, EXCEPT one that another group
+    /// stores as an endpoint. Retargeting such a comment onto a neighbor is not
+    /// enough: the neighbor travels into this region and the inner pipeline may
+    /// erase or reorder it, leaving that group's first after its last. An empty
+    /// TEXTBLOCK emits no bytes, so keeping it costs nothing and is exactly why
+    /// the frontend placed it there.
     void moveIRToBlock(IntrusiveListIterator<IRBase> begin, IntrusiveListIterator<IRBase> end,
                        BasicBlock* bb) {
         for (auto it = begin; it != end;) {
             IRBase* ir = it.getNodePtr();
+            // A stored range whose end is unreachable from its begin walks off the list. Say so
+            // here: the node is null, so every later symptom is a null dereference somewhere else.
+            if (!ir)
+                STINKY_UNREACHABLE(
+                    (displayName +
+                     ": walked past the end of the list -- the group range is stale (end not "
+                     "reachable from begin)")
+                        .c_str());
             it++;
             if (dyn_cast<StinkyInstruction>(ir)) {
                 bb->appendIR(ir);
             } else if (const auto* directive = dyn_cast<AsmDirective>(ir)) {
                 if (directive->kind == AsmDirectiveKind::TEXTBLOCK) {
+                    // Another group's endpoint: leave it exactly where it is. Erasing it forces a
+                    // retarget onto a neighbor the inner pipeline may erase or reorder, and moving
+                    // it into the region would put a node the scheduler can see inside that
+                    // region. Left in place it stays a live, ordered anchor and emits no bytes.
+                    if (module.isGroupEndpoint(ir)) continue;
                     module.retargetGroupEndpoint(ir, it.getNodePtr(), ir->getPrev());
                     ir->erase();
                 } else {
@@ -406,24 +424,51 @@ class ScopeAdaptor : public Pass {
         IntrusiveListIterator<IRBase> combinedEnd;
         BasicBlock* origBB = nullptr;
 
+        // Endpoints are raw list nodes, so which group comes first is only answerable by
+        // POSITION. Taking the first name's begin and the last name's end assumed `groupNames`
+        // was in program order; when it is not, the walk starts past its own end and runs off
+        // the list. Index the block once and take the true union instead.
         for (const auto& groupName : groupNames) {
             auto groupRange = module.findGroupRange(groupName);
             if (!groupRange) continue;
+            origBB = groupRange.value().first->getParent();
+            if (origBB) break;
+        }
+        if (!origBB) return;
 
+        std::unordered_map<const IRBase*, size_t> position;
+        for (auto it = origBB->begin(); it != origBB->end(); it++)
+            position.emplace(it.getNodePtr(), position.size());
+
+        size_t beginPos = std::numeric_limits<size_t>::max();
+        size_t endPos = 0;
+        for (const auto& groupName : groupNames) {
+            auto groupRange = module.findGroupRange(groupName);
+            if (!groupRange) continue;
             auto [begin, end] = groupRange.value();
-
-            if (!origBB) {
-                origBB = begin->getParent();
+            auto beginAt = position.find(begin.getNodePtr());
+            // An endpoint this block does not contain was erased or moved by an earlier pass.
+            // It bounds nothing here, so it cannot widen the union.
+            if (beginAt == position.end()) continue;
+            // `end` is one PAST the group's last node, so it is null exactly when the group
+            // runs to the end of the block -- that is the widest end there is, not a miss.
+            size_t endIdx = position.size();
+            if (end.getNodePtr() != nullptr) {
+                auto endAt = position.find(end.getNodePtr());
+                if (endAt == position.end()) continue;
+                endIdx = endAt->second;
+            }
+            if (beginAt->second < beginPos) {
+                beginPos = beginAt->second;
                 combinedBegin = begin;
-                combinedEnd = end;
-            } else {
-                // Extend combined range to include this group
-                // We rely on groups being in program order within the same BB
+            }
+            if (endIdx >= endPos) {
+                endPos = endIdx;
                 combinedEnd = end;
             }
         }
 
-        if (!origBB) return;
+        if (beginPos == std::numeric_limits<size_t>::max() || endPos < beginPos) return;
 
         // Create a temporary Function to hold the IR
         Function tempFunc("temp");
