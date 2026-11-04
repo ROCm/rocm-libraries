@@ -167,7 +167,10 @@ template <typename ALayout,
           typename ComputeTypeA                       = CDataType,
           typename ComputeTypeB                       = ComputeTypeA,
           typename LDSTypeA                           = ADataType,
-          typename LDSTypeB                           = BDataType>
+          typename LDSTypeB                           = BDataType,
+          // False leaves out the per-token and per-tensor scaling, so its code takes no
+          // registers; the A and B scale pointers are then never read.
+          bool HasScales = true>
 struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                              ALayout,
                              BLayout,
@@ -1414,7 +1417,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const index_t m1 = get_warp_local_1d_id() / NWave;
         const index_t m3 = threadIdx.x % get_warp_size() / MPerXdl;
 
-        if(p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
+        if(HasScales && p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
         {
             if constexpr(PerTokenQuant)
             {
@@ -1990,7 +1993,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const index_t m1 = get_warp_local_1d_id() / NWave;
         const index_t m3 = threadIdx.x % get_warp_size() / MPerXdl;
 
-        if(p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
+        if(HasScales && p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
         {
             if constexpr(PerTokenQuant)
             {
