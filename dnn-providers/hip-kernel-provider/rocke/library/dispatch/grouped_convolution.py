@@ -1167,10 +1167,19 @@ def _instance_sort_key(identity: KernelIdentity) -> str:
 
 
 def format_instance_list(lst: InstanceList) -> str:
-    """``lst`` as its file's text: canonical records, one per line, sorted by
+    """``lst`` as its file's text: canonical records, one per line.
+
+    For a direction in :data:`_SET_SEMANTICS_DIRECTIONS` (dgrad), sorted by
     :func:`_instance_sort_key` -- a set, not the order ``lst.identities`` happens
-    to hold (insertion/append order is not preserved)."""
-    identities = sorted(lst.identities, key=_instance_sort_key)
+    to hold (insertion/append order is not preserved). Any other direction
+    (fwd) keeps ``lst.identities``'s own order: its hand-tuned on-disk
+    priority (see :func:`_read_instance_list`) is meaning this formatter must
+    not erase."""
+    identities = (
+        sorted(lst.identities, key=_instance_sort_key)
+        if lst.direction in _SET_SEMANTICS_DIRECTIONS
+        else lst.identities
+    )
     lines = ["{"]
     if lst.comment:
         lines.append('  "comment": [')

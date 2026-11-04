@@ -842,17 +842,15 @@ def test_algorithm_pin_keeps_one_family():
 
 @pytest.mark.parametrize(
     "path",
-    sorted(
-        path
-        for (_arch, direction), path in _LISTS.items()
-        if direction in gc._SET_SEMANTICS_DIRECTIONS
-    ),
+    sorted(_LISTS.values()),
     ids=lambda p: p.name,
 )
 def test_instance_list_file_is_canonical(path):
-    """Fix with ``instance_list.py format``. Scoped to set-semantics
-    directions (dgrad): ``format_instance_list`` always re-sorts by label,
-    which would destroy fwd's hand-tuned on-disk priority order."""
+    """Fix with ``instance_list.py format``. Every direction is covered:
+    ``format_instance_list`` sorts by label only for a set-semantics
+    direction (dgrad) and otherwise preserves ``lst.identities``'s on-disk
+    order, so running this (or ``format``) on fwd cannot destroy its
+    hand-tuned priority order."""
     lst = gc.load_instance_list(path)
     assert path.read_text(encoding="utf-8") == gc.format_instance_list(lst)
 
