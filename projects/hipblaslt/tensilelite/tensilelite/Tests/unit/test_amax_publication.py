@@ -158,3 +158,48 @@ def test_amax_publication_uses_target_atomic_fences_and_srd(target):
         assert "global_wb" not in assembly and "global_inv" not in assembly
         assert "Shift num records for gfx125x" not in assembly
     assert not writer.vgprPool.live and not writer.sgprPool.live
+
+
+def _derive_amax_state(num_waves, output_amaxd):
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.Toolchain.Validators import validateToolchain
+
+    isa = IsaVersion(12, 5, 0)
+    isaInfoMap = makeIsaInfoMap([isa], validateToolchain("amdclang++"))
+    state = {
+        "ISA": isa,
+        "ScheduleIterAlg": 1,
+        "WavefrontSize": 32,
+        "ProblemType": {
+            "StridedBatched": True, "Batched": True, "OperationType": "GEMM",
+            "DataType": DataType("s"), "DataTypeA": DataType("s"), "DataTypeB": DataType("s"),
+            "HighPrecisionAccumulate": False, "MXBlockA": 0, "MXBlockB": 0, "Sparse": 0,
+            "TransposeA": False, "TransposeB": False, "SwizzleTensorA": False, "SwizzleTensorB": False,
+            "TLUA": True, "TLUB": True, "OutputAmaxD": output_amaxd,
+        },
+        "EnableMatrixInstruction": True,
+        "MIBlock": [32, 16, 128, 1, 1, 1],
+        "MIWaveGroup": [num_waves, 1],
+        "MIWaveTile": [1, 1],
+        "WorkGroup": [32 * num_waves, 1, 1],
+        "WaveSplitK": False,
+        "MIInputPerThread": 128, "MIInputPerThreadA": 128, "MIInputPerThreadB": 64,
+        "SourceSwap": False, "DirectToLds": 0, "DirectToVgprA": False, "DirectToVgprB": False,
+        "DirectToVgprMXSA": False, "DirectToVgprMXSB": False, "BufferLoad": True,
+        "AssertSummationElementMultiple": 1, "AssertFree0ElementMultiple": 1, "AssertFree1ElementMultiple": 1,
+        "UseF32XEmulation": False, "UseSubtileImpl": False, "ClusterDim": [1, 1], "ClusterBarrier": False,
+        "TDMInst": 0, "DepthU": 128,
+    }
+    Solution.assignProblemIndependentDerivedParameters(state, False, isaInfoMap)
+    return state
+
+
+@pytest.mark.parametrize("num_waves", [1, 2, 3, 4, 6, 8])
+def test_amax_rejects_non_power_of_two_waves(num_waves):
+    state = _derive_amax_state(num_waves, output_amaxd=True)
+    assert state["NumWaves"] == num_waves
+    assert state["Valid"] is (num_waves & (num_waves - 1) == 0)
+
+
+def test_non_power_of_two_waves_ok_without_amax():
+    assert _derive_amax_state(3, output_amaxd=False)["Valid"] is True
