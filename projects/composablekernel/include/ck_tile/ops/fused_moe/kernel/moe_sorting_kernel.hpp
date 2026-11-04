@@ -1824,8 +1824,9 @@ struct MoeSortingMultiPhaseKernel_P0_v2
         {
             p_expert_mesh[i] = 0;
         }
-        // The mesh row lives in global memory (the workspace) and every wavefront of the
-        // block writes it, so the barriers between zeroing, filling and counting must also
+        // The mesh row lives in global memory (the workspace). An entry zeroed by one
+        // wavefront can be filled by another, and an entry filled by one wavefront can be
+        // counted by another, so the barriers between zeroing, filling and counting must also
         // order those global stores across wavefronts. block_sync_load_raw(0) does not:
         // on gfx10/gfx11 it waits for vmcnt, which counts loads but not stores (vscnt), and
         // it does not invalidate the L0 cache. In WGP mode the wavefronts of one block may
