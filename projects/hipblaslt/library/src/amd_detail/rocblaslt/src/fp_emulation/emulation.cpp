@@ -1863,7 +1863,8 @@ namespace FixedPointEmulation
 
             const bool is_first = (chunk_start == 0);
             const bool is_last  = (chunk_start + actual >= effective_s);
-            const bool has_lo   = (effective_s > 7u);
+            /* qpi_lo is non-zero from 6 moduli on (see qpi() in tables.hpp). */
+            const bool has_lo   = (effective_s > 5u);
             _pstart();
             dispatch_by_index<max_num_moduli<T>()>(actual, [&](auto Count) {
                 dispatch_accum_chunk<Count.value>(is_first,
