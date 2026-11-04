@@ -65,10 +65,11 @@ _EXACT_CUSTOM_BIG_PLAIN = ((2560, 16384, 2560),)
 #     cannot express it.
 _EXACT_CUSTOM_WGM_SMALL_MN = 512
 _EXACT_CUSTOM_WGM_SMALL = ((512, 512, 4096),)
-# MI355X is 75a3; 75a2 is the other gfx950 id this library must name. An
+# 75a0 is the gfx950 default chip id: every other gfx950 id (75a2, 75a3, 75a8,
+# 75b*) falls back to it, so a library pinned here loads on all of them. An
 # unsupported list (gfx942 0049/0050) would otherwise be dropped and the
 # master library would load only through the empty-DeviceNames fallback.
-_GFX950_DEVICE_NAMES = ["Device 75a3", "Device 75a2"]
+_GFX950_DEVICE_NAMES = ["Device 75a0"]
 
 
 def _solutionField(solution, key, default=None):
@@ -205,7 +206,7 @@ def preferredExactCustomKernel(m, n, k, solutions):
 
 
 def libraryDeviceNames(architectureName, deviceNames):
-  """Keep a gfx950 library on 75a3 and 75a2 when the config names no such id."""
+  """Keep a gfx950 library on 75a0 when the config names no gfx950 chip id."""
   if architectureName != "gfx950":
     return deviceNames
   from .Common.Architectures import GFX_CHIP_IDS

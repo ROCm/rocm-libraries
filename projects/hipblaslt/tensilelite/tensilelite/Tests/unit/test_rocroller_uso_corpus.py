@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from rocroller_logic_corpus import CORPUS, LOGIC, rocroller_logic_files
 from tensilelite.CustomKernels import _rocRollerStreamKMarks, readCustomKernelConfig
 
 pytestmark = pytest.mark.unit
@@ -33,8 +34,6 @@ RR_KERNEL_PREFIX = "RR_GEMM_"
 _HERE = Path(__file__).resolve().parent
 _VERIFIED = _HERE / "data" / "rocroller_uso_verified.txt"
 _KERNELS = _HERE.parents[1] / "CustomKernels" / "rocroller"
-_LOGIC = _HERE.parents[3] / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full"
-_CORPUS = _LOGIC / "gfx950/gfx950_id75a3/GridBased"
 
 
 def _verified():
@@ -61,13 +60,13 @@ def shipped():
 def logic_blocks():
     """CustomKernel block of every rocRoller solution in the gfx950 logic files."""
     blocks = {}
-    for path in sorted(_CORPUS.glob("*.yaml")):
+    for path in rocroller_logic_files():
         doc = yaml.load(path.read_text(), Loader=yaml.CSafeLoader)
         for solution in doc["Solutions"]:
             name = (solution.get("CustomKernel") or {}).get("name", "")
             if name.startswith(RR_KERNEL_PREFIX):
                 blocks.setdefault(name, []).append((path.name, solution["CustomKernel"]))
-    assert blocks, f"no {RR_KERNEL_PREFIX} solutions under {_CORPUS}"
+    assert blocks, f"no {RR_KERNEL_PREFIX} solutions under {CORPUS}"
     return blocks
 
 
@@ -96,8 +95,8 @@ def test_every_verified_kernel_ships_flagged(shipped):
 
 
 @pytest.mark.skipif(
-    not _LOGIC.is_dir(),
-    reason=f"source-tree check: no hipBLASLt logic tree at {_LOGIC}; the installed "
+    not LOGIC.is_dir(),
+    reason=f"source-tree check: no hipBLASLt logic tree at {LOGIC}; the installed "
     "test payload does not ship it",
 )
 def test_logic_files_agree_with_custom_config(shipped, logic_blocks):

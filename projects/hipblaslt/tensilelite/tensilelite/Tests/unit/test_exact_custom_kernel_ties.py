@@ -147,12 +147,11 @@ def test_tied_custom_kernels_are_kept_and_exact_sizes_remap():
     assert not any(p["tag"] == "SizeLessThan" for p in small + big)
 
 
-def test_gfx950_without_a_supported_id_uses_mi355_ids():
-    assert libraryDeviceNames("gfx950", ["Device 0049", "Device 0050"]) == [
-        "Device 75a3",
-        "Device 75a2",
-    ]
-    assert libraryDeviceNames("gfx950", "fallback") == ["Device 75a3", "Device 75a2"]
+def test_gfx950_without_a_supported_id_uses_the_default_id():
+    # Every gfx950 chip id falls back to 75a0, so this is the one pin that
+    # reaches MI350X (75a0) as well as MI355X (75a3).
+    assert libraryDeviceNames("gfx950", ["Device 0049", "Device 0050"]) == ["Device 75a0"]
+    assert libraryDeviceNames("gfx950", "fallback") == ["Device 75a0"]
     assert libraryDeviceNames("gfx950", ["Device 75a3", "Device 75a2"]) == [
         "Device 75a3",
         "Device 75a2",
