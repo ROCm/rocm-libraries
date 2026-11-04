@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 // gfx950 keeps HostPreSwizzle kernels (name token MXSFHPS) for scale 1001 and
-// drops them for packed scale 3. Both scale modes search the same Tensile
-// problem, which ranks the HostPreSwizzle kernels first, so these tests fail if
-// the layout checks in tensile_host.cpp are removed from the heuristic, the
-// support check, or the launch, in the C API or the hipblaslt_ext::Gemm API.
+// refuses them for packed scales. Both modes search the same Tensile problem,
+// so these tests fail if the layout check is removed from the heuristic, the
+// support check or the launch, in the C API or the hipblaslt_ext Gemm and
+// GroupedGemm APIs.
+//
+// Every gfx950 TensileLite MX kernel is HostPreSwizzle: logic files leave
+// MXScaleFormat at Auto, which gfx950 resolves to HostPreSwizzle. Off the
+// rocRoller path, packed scales therefore have no kernel on gfx950.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -24,8 +28,8 @@ namespace
     constexpr size_t  kWorkspace  = 64ull << 20;
     constexpr size_t  kScaleBytes = 1u << 20;
     constexpr int     kAlgoCount  = 32;
-    const float       kAlpha      = 1.f;
-    const float       kBeta       = 0.f;
+    float             kAlpha      = 1.f;
+    float             kBeta       = 0.f;
 
     bool archIsGfx950()
     {
@@ -40,28 +44,47 @@ namespace
         return kernelName.find("MXSFHPS") != std::string::npos;
     }
 
+    void setEnv(const char* name, const char* value)
+    {
+#if defined(_WIN32)
+        _putenv_s(name, value);
+#else
+        setenv(name, value, 1);
+#endif
+    }
+
+    void unsetEnv(const char* name)
+    {
+#if defined(_WIN32)
+        _putenv_s(name, "");
+#else
+        unsetenv(name);
+#endif
+    }
+
     // The handle reads HIPBLASLT_USE_ROCROLLER in its constructor.
     struct RocRollerEnv
     {
-        bool        had = false;
-        std::string old;
+        static constexpr const char* kName = "HIPBLASLT_USE_ROCROLLER";
+        bool                         had   = false;
+        std::string                  old;
 
         explicit RocRollerEnv(const char* value)
         {
-            if(const char* cur = std::getenv("HIPBLASLT_USE_ROCROLLER"))
+            if(const char* cur = std::getenv(kName))
             {
                 had = true;
                 old = cur;
             }
-            setenv("HIPBLASLT_USE_ROCROLLER", value, 1);
+            setEnv(kName, value);
         }
 
         ~RocRollerEnv()
         {
             if(had)
-                setenv("HIPBLASLT_USE_ROCROLLER", old.c_str(), 1);
+                setEnv(kName, old.c_str());
             else
-                unsetenv("HIPBLASLT_USE_ROCROLLER");
+                unsetEnv(kName);
         }
     };
 
@@ -157,21 +180,21 @@ namespace
         return out;
     }
 
-    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(Problem& q)
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(Problem& q, int count)
     {
-        hipblasLtMatmulHeuristicResult_t raw[kAlgoCount]{};
-        int                              count = 0;
+        std::vector<hipblasLtMatmulHeuristicResult_t> raw(count);
+        int                                           returned = 0;
         EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
-                      q.handle, q.desc, q.a, q.b, q.d, q.d, q.pref, kAlgoCount, raw, &count),
+                      q.handle, q.desc, q.a, q.b, q.d, q.d, q.pref, count, raw.data(), &returned),
                   HIPBLAS_STATUS_SUCCESS);
         std::vector<hipblasLtMatmulHeuristicResult_t> out;
-        for(int i = 0; i < count; ++i)
+        for(int i = 0; i < returned; ++i)
             if(raw[i].state == HIPBLAS_STATUS_SUCCESS)
                 out.push_back(raw[i]);
         return out;
     }
 
-    hipblasStatus_t matmul(Problem& q, const hipblasLtMatmulHeuristicResult_t& result)
+    hipblasStatus_t matmul(Problem& q, const hipblasLtMatmulAlgo_t* algo)
     {
         return hipblasLtMatmul(q.handle,
                                q.desc,
@@ -185,7 +208,7 @@ namespace
                                q.d,
                                q.dD,
                                q.d,
-                               &result.algo,
+                               algo,
                                q.ws,
                                kWorkspace,
                                nullptr);
@@ -206,12 +229,33 @@ namespace
             q.handle, q.desc, &kAlpha, q.dA, q.a, q.dB, q.b, &kBeta, q.dD, q.d, q.dD, q.d);
     }
 
-    std::vector<hipblasLtMatmulHeuristicResult_t> extHeuristic(hipblaslt_ext::Gemm& gemm)
+    // Two groups built from the same problem descriptors.
+    hipblaslt_ext::GroupedGemm extGroupedGemm(Problem& q)
+    {
+        hipblaslt_ext::GroupedGemm           gemm(q.handle,
+                                                  HIPBLAS_OP_T,
+                                                  HIPBLAS_OP_N,
+                                                  HIP_R_8F_E4M3,
+                                                  HIP_R_8F_E4M3,
+                                                  HIP_R_32F,
+                                                  HIP_R_32F,
+                                                  HIPBLAS_COMPUTE_32F);
+        std::vector<hipblasLtMatmulDesc_t>   desc(2, q.desc);
+        std::vector<void*>                   alpha(2, &kAlpha), beta(2, &kBeta);
+        std::vector<void*>                   a(2, q.dA), b(2, q.dB), d(2, q.dD);
+        std::vector<hipblasLtMatrixLayout_t> layA(2, q.a), layB(2, q.b), layD(2, q.d);
+        EXPECT_EQ(gemm.setProblem(desc, alpha, a, layA, b, layB, beta, d, layD, d, layD),
+                  HIPBLAS_STATUS_SUCCESS);
+        return gemm;
+    }
+
+    std::vector<hipblasLtMatmulHeuristicResult_t> extHeuristic(hipblaslt_ext::GemmInstance& gemm,
+                                                               int                          count)
     {
         hipblaslt_ext::GemmPreference pref;
         pref.setMaxWorkspaceBytes(kWorkspace);
         std::vector<hipblasLtMatmulHeuristicResult_t> results;
-        EXPECT_EQ(gemm.algoGetHeuristic(kAlgoCount, pref, results), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.algoGetHeuristic(count, pref, results), HIPBLAS_STATUS_SUCCESS);
         return results;
     }
 
@@ -225,8 +269,8 @@ namespace
         }
     };
 
-    // The setting under which the packed problem used to run a HostPreSwizzle
-    // kernel and fail its numerical check.
+    // The setting under which a packed problem used to run a HostPreSwizzle
+    // kernel and return wrong values.
     TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOff)
     {
         RocRollerEnv      env("0");
@@ -240,15 +284,19 @@ namespace
             if(HasFatalFailure())
                 return;
 
-            auto preResults = heuristic(preswizzled);
-            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
-            for(const auto& name : names(handle, preResults))
-                EXPECT_TRUE(isPreswizzled(name)) << name;
+            // One algo is what hipblasLtMatmul asks for when given none.
+            for(int count : {1, kAlgoCount})
+            {
+                SCOPED_TRACE(count);
+                auto preResults = heuristic(preswizzled, count);
+                ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+                for(const auto& name : names(handle, preResults))
+                    EXPECT_TRUE(isPreswizzled(name)) << name;
+                EXPECT_TRUE(heuristic(packed, count).empty());
+            }
 
-            auto packedResults = heuristic(packed);
-            for(const auto& name : names(handle, packedResults))
-                EXPECT_FALSE(isPreswizzled(name)) << name;
-
+            auto preResults = heuristic(preswizzled, kAlgoCount);
+            ASSERT_FALSE(preResults.empty());
             // isSolutionSupported skips an algo whose first data byte is 0.
             const hipblasLtMatmulHeuristicResult_t* algo = nullptr;
             for(const auto& result : preResults)
@@ -262,16 +310,16 @@ namespace
             EXPECT_EQ(supported(preswizzled, *algo), HIPBLAS_STATUS_SUCCESS);
             EXPECT_NE(supported(packed, *algo), HIPBLAS_STATUS_SUCCESS);
 
-            // runContractionProblem returns not_implemented, which hipblasLtMatmul
-            // reports as an internal error.
-            EXPECT_EQ(matmul(preswizzled, *algo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(matmul(preswizzled, &algo->algo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(matmul(preswizzled, nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-            EXPECT_EQ(matmul(packed, *algo), HIPBLAS_STATUS_INTERNAL_ERROR);
+            EXPECT_EQ(matmul(packed, &algo->algo), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_NE(matmul(packed, nullptr), HIPBLAS_STATUS_SUCCESS);
         }
         hipblasLtDestroy(handle);
     }
 
-    // Packed scale 3 goes to rocRoller. FP8 E4M3 with scale 1001 on both sides
+    // Packed scales go to rocRoller. FP8 E4M3 with scale 1001 on both sides
     // stays on Tensile, and still gets its HostPreSwizzle kernels.
     TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOn)
     {
@@ -286,12 +334,12 @@ namespace
             if(HasFatalFailure())
                 return;
 
-            auto preResults = heuristic(preswizzled);
+            auto preResults = heuristic(preswizzled, kAlgoCount);
             ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
             for(const auto& name : names(handle, preResults))
                 EXPECT_TRUE(isPreswizzled(name)) << name;
 
-            auto packedResults = heuristic(packed);
+            auto packedResults = heuristic(packed, kAlgoCount);
             for(const auto& name : names(handle, packedResults))
                 EXPECT_FALSE(isPreswizzled(name)) << name;
         }
@@ -311,8 +359,7 @@ namespace
             if(HasFatalFailure())
                 return;
 
-            auto preResults = heuristic(q);
-            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+            ASSERT_FALSE(heuristic(q, kAlgoCount).empty()) << "scale 1001 returned no kernel";
 
             const hipblasLtMatmulMatrixScale_t scalar = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
             for(auto attr :
@@ -320,7 +367,7 @@ namespace
                 ASSERT_EQ(hipblasLtMatmulDescSetAttribute(q.desc, attr, &scalar, sizeof(scalar)),
                           HIPBLAS_STATUS_SUCCESS);
 
-            auto scalarResults = heuristic(q);
+            auto scalarResults = heuristic(q, kAlgoCount);
             ASSERT_FALSE(scalarResults.empty()) << "scalar scales returned no kernel";
             for(const auto& name : names(handle, scalarResults))
                 EXPECT_EQ(name.find("MXAE8"), std::string::npos) << name;
@@ -329,7 +376,7 @@ namespace
     }
 
     // hipblaslt_ext::Gemm has no rocRoller dispatch, so it reaches the Tensile
-    // filter whatever HIPBLASLT_USE_ROCROLLER says.
+    // check whatever HIPBLASLT_USE_ROCROLLER says.
     TEST_F(Gfx950MxScaleLayout, smoke_ExtGemmApi)
     {
         hipblasLtHandle_t handle = nullptr;
@@ -345,26 +392,62 @@ namespace
             auto preGemm    = extGemm(preswizzled);
             auto packedGemm = extGemm(packed);
 
-            auto preResults = extHeuristic(preGemm);
-            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
-            for(const auto& name : names(handle, preResults))
-                EXPECT_TRUE(isPreswizzled(name)) << name;
+            for(int count : {1, kAlgoCount})
+            {
+                SCOPED_TRACE(count);
+                auto preResults = extHeuristic(preGemm, count);
+                ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+                for(const auto& name : names(handle, preResults))
+                    EXPECT_TRUE(isPreswizzled(name)) << name;
+                EXPECT_TRUE(extHeuristic(packedGemm, count).empty());
+            }
 
-            auto packedResults = extHeuristic(packedGemm);
-            for(const auto& name : names(handle, packedResults))
-                EXPECT_FALSE(isPreswizzled(name)) << name;
-
-            hipblasLtMatmulAlgo_t algo      = preResults[0].algo;
+            hipblasLtMatmulAlgo_t algo      = extHeuristic(preGemm, 1)[0].algo;
             size_t                workspace = 0;
             EXPECT_EQ(preGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_SUCCESS);
-            EXPECT_NE(packedGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(packedGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
 
             preGemm.setMaxWorkspaceBytes(kWorkspace);
             packedGemm.setMaxWorkspaceBytes(kWorkspace);
             EXPECT_EQ(preGemm.initialize(algo, preswizzled.ws), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(preGemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-            EXPECT_NE(packedGemm.initialize(algo, packed.ws), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(packedGemm.initialize(algo, packed.ws), HIPBLAS_STATUS_INVALID_VALUE);
+        }
+        hipblasLtDestroy(handle);
+    }
+
+    TEST_F(Gfx950MxScaleLayout, smoke_ExtGroupedGemmApi)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        {
+            Problem packed;
+            Problem preswizzled;
+            makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            makeProblem(preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(HasFatalFailure())
+                return;
+
+            auto preGemm    = extGroupedGemm(preswizzled);
+            auto packedGemm = extGroupedGemm(packed);
+
+            auto preResults = extHeuristic(preGemm, kAlgoCount);
+            if(preResults.empty())
+                GTEST_SKIP() << "no grouped MX kernel in the loaded library";
+            for(const auto& name : names(handle, preResults))
+                EXPECT_TRUE(isPreswizzled(name)) << name;
+            EXPECT_TRUE(extHeuristic(packedGemm, kAlgoCount).empty());
+
+            hipblasLtMatmulAlgo_t algo      = preResults[0].algo;
+            size_t                workspace = 0;
+            EXPECT_EQ(preGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(packedGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+
+            preGemm.setMaxWorkspaceBytes(kWorkspace);
+            packedGemm.setMaxWorkspaceBytes(kWorkspace);
+            EXPECT_EQ(preGemm.initialize(algo, preswizzled.ws, false), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(packedGemm.initialize(algo, packed.ws, false), HIPBLAS_STATUS_INVALID_VALUE);
         }
         hipblasLtDestroy(handle);
     }

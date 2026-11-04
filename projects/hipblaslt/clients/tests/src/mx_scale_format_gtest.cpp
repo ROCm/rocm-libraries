@@ -1,59 +1,131 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host test for which TensileLite scale layout gfx950 keeps. The helper
-// compares scale types before it looks at the arch string, and it does not
-// query the device.
+// Host test for the MX scale layout rule every kernel-selection path in
+// tensile_host.cpp and rocblaslt_grouped_matmul.cpp shares, and for the
+// widening search that keeps the rule from shortening a top-N request.
 
 #include <gtest/gtest.h>
 
 #include "../../../library/src/amd_detail/rocblaslt/include/rocblaslt-types.h"
 #include "../../../library/src/amd_detail/rocblaslt/src/include/mx_scale_format.hpp"
 
+#include <vector>
+
 namespace
 {
-    using Scale = RocblasltContractionProblem::ScalingFormat;
+    using Scale  = RocblasltContractionProblem::ScalingFormat;
+    using Need   = rocblaslt_mx_scale_need;
+    using Layout = rocblaslt_mx_scale_layout;
 
-    TEST(MXScaleFormat_smoke, gfx950_keeps_noswizzle_for_packed_and_preswizzle_for_1001)
+    constexpr int kNoSwizzle       = static_cast<int>(Layout::NoSwizzle);
+    constexpr int kHostPreSwizzle  = static_cast<int>(Layout::HostPreSwizzle);
+    constexpr int kInMemorySwizzle = static_cast<int>(Layout::InMemorySwizzle);
+
+    TEST(MXScaleFormat_smoke, packed_scales_never_take_a_preswizzled_kernel)
     {
-        // Packed scale 3 on both sides, or packed plus no scale, keeps NoSwizzle (0).
-        // Packed on one side and pre-swizzled on the other matches no layout.
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx950", Scale::Block_32_UE8M0, Scale::Block_32_UE8M0),
-                  0);
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx950:xnack-", Scale::Block_32_UE8M0, Scale::None),
-                  0);
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx950", Scale::Block_32_UE8M0_32_8_EXT, Scale::Block_32_UE8M0),
-                  -2);
-        EXPECT_TRUE(rocblaslt_kernel_mx_scale_format_ok(0, 0));
-        EXPECT_FALSE(rocblaslt_kernel_mx_scale_format_ok(0, 1));
+        for(auto packed : {Scale::Block_32_UE8M0,
+                           Scale::Block_16_UE8M0,
+                           Scale::Block_32_UE4M3,
+                           Scale::Block_16_UE4M3,
+                           Scale::Block_32_UE5M3,
+                           Scale::Block_16_UE5M3})
+        {
+            SCOPED_TRACE(static_cast<int>(packed));
+            const Need need = rocblaslt_mx_scale_need_for(packed, packed);
+            EXPECT_EQ(need, Need::Natural);
+            EXPECT_TRUE(rocblaslt_mx_scale_layout_ok(need, kNoSwizzle));
+            EXPECT_TRUE(rocblaslt_mx_scale_layout_ok(need, kInMemorySwizzle));
+            EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(need, kHostPreSwizzle));
+        }
+    }
 
-        // Pre-swizzled scale 1001 keeps HostPreSwizzle (1) only.
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx950", Scale::Block_32_UE8M0_32_8_EXT, Scale::Block_32_UE8M0_32_8_EXT),
-                  1);
-        EXPECT_TRUE(rocblaslt_kernel_mx_scale_format_ok(1, 1));
-        EXPECT_FALSE(rocblaslt_kernel_mx_scale_format_ok(1, 0));
+    TEST(MXScaleFormat_smoke, preswizzled_scales_take_only_a_preswizzled_kernel)
+    {
+        const Need need = rocblaslt_mx_scale_need_for(Scale::Block_32_UE8M0_32_8_EXT,
+                                                      Scale::Block_32_UE8M0_32_8_EXT);
+        EXPECT_EQ(need, Need::PreSwizzled);
+        EXPECT_TRUE(rocblaslt_mx_scale_layout_ok(need, kHostPreSwizzle));
+        EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(need, kNoSwizzle));
+        EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(need, kInMemorySwizzle));
+    }
 
-        // Non-MX scales and other archs are not filtered. -1 allows every layout.
+    TEST(MXScaleFormat_smoke, sides_and_groups_combine)
+    {
+        EXPECT_EQ(rocblaslt_mx_scale_need_for(Scale::Block_32_UE8M0, Scale::None), Need::Natural);
+        EXPECT_EQ(rocblaslt_mx_scale_need_for(Scale::Scalar, Scale::Block_32_UE8M0_32_8_EXT),
+                  Need::PreSwizzled);
         EXPECT_EQ(
-            rocblaslt_gfx950_required_mx_scale_format("gfx950", Scale::Vector, Scale::Vector), -1);
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx950", Scale::Block_16_UE8M0, Scale::Block_16_UE8M0),
-                  -1);
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx1250", Scale::Block_32_UE8M0, Scale::Block_32_UE8M0),
-                  -1);
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      "gfx942", Scale::Block_32_UE8M0, Scale::Block_32_UE8M0),
-                  -1);
-        EXPECT_EQ(rocblaslt_gfx950_required_mx_scale_format(
-                      nullptr, Scale::Block_32_UE8M0, Scale::None),
-                  -1);
-        EXPECT_TRUE(rocblaslt_kernel_mx_scale_format_ok(-1, 0));
-        EXPECT_TRUE(rocblaslt_kernel_mx_scale_format_ok(-1, 1));
-        EXPECT_TRUE(rocblaslt_kernel_mx_scale_format_ok(-1, 2));
+            rocblaslt_mx_scale_need_for(Scale::Block_32_UE8M0, Scale::Block_32_UE8M0_32_8_EXT),
+            Need::Conflict);
+        EXPECT_EQ(rocblaslt_mx_scale_need_combine(Need::Natural, Need::PreSwizzled),
+                  Need::Conflict);
+        EXPECT_EQ(rocblaslt_mx_scale_need_combine(Need::Conflict, Need::Any), Need::Conflict);
+        for(int layout : {kNoSwizzle, kHostPreSwizzle, kInMemorySwizzle})
+            EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(Need::Conflict, layout));
+    }
+
+    TEST(MXScaleFormat_smoke, non_mx_scales_take_any_kernel)
+    {
+        for(auto scale : {Scale::None, Scale::Scalar, Scale::Vector, Scale::Block_32_BF16})
+        {
+            SCOPED_TRACE(static_cast<int>(scale));
+            const Need need = rocblaslt_mx_scale_need_for(scale, scale);
+            EXPECT_EQ(need, Need::Any);
+            for(int layout : {kNoSwizzle, kHostPreSwizzle, kInMemorySwizzle})
+                EXPECT_TRUE(rocblaslt_mx_scale_layout_ok(need, layout));
+        }
+    }
+
+    // A ranked library: each entry is a kernel's MX scale layout, best first.
+    struct RankedSearch
+    {
+        std::vector<int> ranked;
+        std::vector<int> requests;
+
+        std::vector<int> operator()(int count)
+        {
+            requests.push_back(count);
+            const size_t n = std::min(ranked.size(), static_cast<size_t>(count));
+            return {ranked.begin(), ranked.begin() + n};
+        }
+    };
+
+    auto dropFor(Need need)
+    {
+        return [need](int layout) { return !rocblaslt_mx_scale_layout_ok(need, layout); };
+    }
+
+    TEST(MXScaleFormat_smoke, top_one_reaches_past_a_dropped_first_rank)
+    {
+        RankedSearch search{{kHostPreSwizzle, kNoSwizzle, kNoSwizzle}};
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Natural));
+        ASSERT_EQ(kept.size(), 1u);
+        EXPECT_EQ(kept[0], kNoSwizzle);
+        EXPECT_EQ(search.requests, (std::vector<int>{1, 2}));
+    }
+
+    TEST(MXScaleFormat_smoke, widening_keeps_rank_order_and_count)
+    {
+        RankedSearch search{
+            {kHostPreSwizzle, kNoSwizzle, kHostPreSwizzle, kInMemorySwizzle, kNoSwizzle}};
+        auto kept = rocblaslt_find_top_kept(search, 3, dropFor(Need::Natural));
+        EXPECT_EQ(kept, (std::vector<int>{kNoSwizzle, kInMemorySwizzle, kNoSwizzle}));
+    }
+
+    TEST(MXScaleFormat_smoke, widening_stops_when_the_library_runs_out)
+    {
+        RankedSearch search{{kHostPreSwizzle, kHostPreSwizzle, kHostPreSwizzle}};
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Natural));
+        EXPECT_TRUE(kept.empty());
+        EXPECT_EQ(search.requests, (std::vector<int>{1, 2, 4}));
+    }
+
+    TEST(MXScaleFormat_smoke, nothing_dropped_searches_once)
+    {
+        RankedSearch search{{kHostPreSwizzle, kNoSwizzle}};
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Any));
+        EXPECT_EQ(kept, (std::vector<int>{kHostPreSwizzle}));
+        EXPECT_EQ(search.requests, (std::vector<int>{1}));
     }
 }

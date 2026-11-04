@@ -632,6 +632,70 @@ namespace
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
 
+    // ----------------------------------------------------------------------------
+    // MX scale layout on the TensileLite path
+    // ----------------------------------------------------------------------------
+
+    // HIPBLASLT_USE_ROCROLLER=0 keeps block-scaled problems on TensileLite, where
+    // packed scales used to run a HostPreSwizzle kernel and fail the norm check.
+    struct tensile_mx_layout_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            static constexpr const char* kName = "HIPBLASLT_USE_ROCROLLER";
+            const char*                  cur   = std::getenv(kName);
+            const std::string            old   = cur ? cur : "";
+            setEnv(kName, "0");
+            testing_matmul(arg);
+            if(cur)
+                setEnv(kName, old.c_str());
+            else
+                setEnv(kName, nullptr);
+        }
+
+        static void setEnv(const char* name, const char* value)
+        {
+#if defined(_WIN32)
+            _putenv_s(name, value ? value : "");
+#else
+            if(value)
+                setenv(name, value, 1);
+            else
+                unsetenv(name);
+#endif
+        }
+    };
+
+    struct tensile_mx_layout_test
+        : RocBlasLt_Test<tensile_mx_layout_test, tensile_mx_layout_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "tensile_mx_layout");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(tensile_mx_layout_test, matmul)
+    {
+        // Every gfx950 TensileLite MX kernel is HostPreSwizzle, so packed scales
+        // find none there, and scale 1001 must still match the reference.
+        if(GetParam().scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+            tensile_mx_layout_testing{}(GetParam());
+        else
+            EXPECT_FATAL_FAILURE(tensile_mx_layout_testing{}(GetParam()), "NO solution found!");
+    }
+    INSTANTIATE_TEST_CATEGORIES(tensile_mx_layout_test);
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     // ----------------------------------------------------------------------------
     // rocRoller
