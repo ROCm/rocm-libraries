@@ -37,55 +37,61 @@ def _legacy_imports(paths):
     return violations
 
 
+# Every module the lower-case migration renamed, as (old, new) paths relative to
+# the ``tensilelite`` package. The ext-op generators were top-level scripts
+# outside the package, so their old path is only the module name.
+_RENAMED_MODULES = (
+    ("Tensile", "tensilelite"),
+    ("TensileBenchmarkCluster", "benchmark_cluster"),
+    ("TensileBenchmarkClusterScripts", "benchmark_cluster_scripts"),
+    ("TensileCreateLibrary", "create_library"),
+    ("TensileCreateLibrary.ParseArguments", "create_library.parse_arguments"),
+    ("TensileCreateLibrary.Run", "create_library.run"),
+    ("TensileLibLogicToYaml", "lib_logic_to_yaml"),
+    ("TensileLogic", "logic"),
+    ("TensileLogic.HandleCustomKernel", "logic.handle_custom_kernel"),
+    ("TensileLogic.KnownBugs", "logic.known_bugs"),
+    ("TensileLogic.ParseArguments", "logic.parse_arguments"),
+    ("TensileLogic.Run", "logic.run"),
+    ("TensileLogic.ValidChipId", "logic.valid_chip_id"),
+    ("TensileLogic.ValidCorpusConsistency", "logic.valid_corpus_consistency"),
+    ("TensileLogic.ValidMatrixInstruction", "logic.valid_matrix_instruction"),
+    ("TensileLogic.ValidWorkGroup", "logic.valid_work_group"),
+    ("TensileLogic.ValidWorkGroupMappingXCC", "logic.valid_work_group_mapping_xcc"),
+    ("TensileMergeLibrary", "merge_library"),
+    ("TensileRetuneLibrary", "retune_library"),
+    ("TensileUpdateLibrary", "update_library"),
+    ("AMaxGenerator", "_extops.amax_generator"),
+    ("ExtOpCreateLibrary", "_extops.extop_create_library"),
+    ("LayerNormGenerator", "_extops.layer_norm_generator"),
+    ("SoftmaxGenerator", "_extops.softmax_generator"),
+)
+
+
+def _legacy_module_names():
+    """Absolute legacy module names: each old path, plus its old leaf under the new parent."""
+    names = set()
+    for old, new in _RENAMED_MODULES:
+        names.add(f"tensilelite.{old}")
+        new_parent = new.rpartition(".")[0]
+        old_leaf = old.rpartition(".")[2]
+        names.add(".".join(filter(None, ("tensilelite", new_parent, old_leaf))))
+    return names
+
+
 def _legacy_internal_imports(paths, root=_PACKAGE_ROOT):
-    legacy_prefixes = (
-        "tensilelite.Tensile",
-        "tensilelite.TensileCreateLibrary",
-        "tensilelite.TensileLogic",
-        "tensilelite._extops.AMaxGenerator",
-        "tensilelite._extops.ExtOpCreateLibrary",
-        "tensilelite._extops.LayerNormGenerator",
-        "tensilelite._extops.SoftmaxGenerator",
-        "tensilelite.logic.ValidCorpusConsistency",
-    )
-    legacy_imported_names = {
-        "tensilelite": {"Tensile", "TensileCreateLibrary", "TensileLogic"},
-        "tensilelite._extops": {
-            "AMaxGenerator",
-            "ExtOpCreateLibrary",
-            "LayerNormGenerator",
-            "SoftmaxGenerator",
-        },
-        "tensilelite.logic": {"ValidCorpusConsistency"},
-    }
+    legacy_modules = _legacy_module_names()
+    legacy_prefixes = tuple(sorted(legacy_modules))
+    legacy_imported_names = {}
+    for module in legacy_modules:
+        parent, _, leaf = module.rpartition(".")
+        legacy_imported_names.setdefault(parent, set()).add(leaf)
     legacy_relative_imported_names = {
-        "_extops": legacy_imported_names["tensilelite._extops"],
-        "logic": legacy_imported_names["tensilelite.logic"],
+        parent.rpartition(".")[2]: names
+        for parent, names in legacy_imported_names.items()
+        if parent != "tensilelite"
     }
-    legacy_relative_modules = {
-        "AMaxGenerator",
-        "ExtOpCreateLibrary",
-        "HandleCustomKernel",
-        "KnownBugs",
-        "LayerNormGenerator",
-        "ParseArguments",
-        "Run",
-        "SoftmaxGenerator",
-        "Tensile",
-        "TensileBenchmarkCluster",
-        "TensileBenchmarkClusterScripts",
-        "TensileCreateLibrary",
-        "TensileLibLogicToYaml",
-        "TensileLogic",
-        "TensileMergeLibrary",
-        "TensileRetuneLibrary",
-        "TensileUpdateLibrary",
-        "ValidChipId",
-        "ValidCorpusConsistency",
-        "ValidMatrixInstruction",
-        "ValidWorkGroup",
-        "ValidWorkGroupMappingXCC",
-    }
+    legacy_relative_modules = {module.rpartition(".")[2] for module in legacy_modules}
 
     def has_legacy_prefix(module):
         return any(
@@ -158,6 +164,14 @@ def test_legacy_internal_import_scanner_covers_import_forms(tmp_path):
                 "from .._extops import SoftmaxGenerator",
                 "from tensilelite.TensileGenerateUID import main",
                 "import tensilelite.TensileGenerateUID",
+                "from tensilelite.TensileMergeLibrary import fixSizeInconsistencies",
+                "from tensilelite import TensileLibLogicToYaml",
+                "import tensilelite.TensileUpdateLibrary",
+                "from tensilelite.logic import ValidChipId",
+                "from tensilelite.create_library import ParseArguments",
+                "from ..logic import KnownBugs",
+                "from tensilelite.create_library import run",
+                "from tensilelite.merge_library import fixSizeInconsistencies",
             )
         ),
         encoding="utf-8",
@@ -171,6 +185,12 @@ def test_legacy_internal_import_scanner_covers_import_forms(tmp_path):
         "stale_imports.py:5: from .ValidCorpusConsistency",
         "stale_imports.py:6: from . import TensileLogic",
         "stale_imports.py:7: from .._extops import SoftmaxGenerator",
+        "stale_imports.py:10: from tensilelite.TensileMergeLibrary",
+        "stale_imports.py:11: from tensilelite import TensileLibLogicToYaml",
+        "stale_imports.py:12: import tensilelite.TensileUpdateLibrary",
+        "stale_imports.py:13: from tensilelite.logic import ValidChipId",
+        "stale_imports.py:14: from tensilelite.create_library import ParseArguments",
+        "stale_imports.py:15: from ..logic import KnownBugs",
     ]
 def test_production_modules_do_not_import_the_legacy_tensile_package():
     """Production modules must not import the removed legacy ``Tensile`` package."""
