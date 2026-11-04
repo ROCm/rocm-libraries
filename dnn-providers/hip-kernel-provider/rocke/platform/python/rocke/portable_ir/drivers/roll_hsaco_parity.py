@@ -208,7 +208,7 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()[:16]
 
 
-def _alpha_norm(text: str) -> str:
+def alpha_norm(text: str) -> str:
     """Rename SSA values in first-appearance order, so two modules that differ
     only in value naming normalize to the same string.
 
@@ -216,7 +216,8 @@ def _alpha_norm(text: str) -> str:
     structural divergence: the rolled path is expected to match verbatim, so when
     a point is not EXACT this says whether only the names moved (ALPHA-EQ, e.g. a
     recipe recorded before the prefix field existed, or a fan the roller could
-    not name positionally) or the emitted code actually changed (DIFFER)."""
+    not name positionally) or the emitted code actually changed (DIFFER). Tests
+    use it the same way, to check a replay whose names differ by design."""
     seen: Dict[str, str] = {}
 
     def rep(m):
@@ -276,7 +277,7 @@ def _check_point(build_at, axis, cbor, v, flavor, want_hsaco) -> Dict[str, Any]:
     row["ll_sha"] = py_sha if py_sha == vm_sha else f"{py_sha}!={vm_sha}"
     if py_ll == vm_ll:
         row["ll"] = "EXACT"
-    elif _alpha_norm(py_ll) == _alpha_norm(vm_ll):
+    elif alpha_norm(py_ll) == alpha_norm(vm_ll):
         row["ll"] = "ALPHA-EQ"
         row["detail"] = "SSA names differ; structure identical"
     else:
