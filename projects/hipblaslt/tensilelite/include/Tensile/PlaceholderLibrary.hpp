@@ -35,6 +35,7 @@
 #include <iterator>
 #include <map>
 #include <mutex>
+#include <set>
 
 #include <tensilelitehost/export.h>
 
@@ -188,77 +189,83 @@ namespace TensileLite
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> loadPlaceholderLibrary() const
         {
             std::call_once(lazyLoadOnce, [this] {
-                if(library)
-                    return;
-
                 std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-                auto loaded = mLibrary->library;
 
                 // Indexed shards publish solutions later; stamp the name on
                 // the cache so it is applied as each one is parsed.
                 if(mLibrary->blobCache)
                     mLibrary->blobCache->setCodeObjectFilename(getCodeObjectFileName());
 
+                // Everything this load registers is built here first and merged
+                // into the master at the end. A throw before the merge leaves the
+                // master unchanged, so the retry that call_once makes registers
+                // the tree it loads and not one left over from this attempt.
+                SolutionMap<MySolution> newSolutions;
+                std::set<std::string>   newFiles;
+                std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>
+                    newSources;
+
                 std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> published;
                 {
                     std::lock_guard<std::mutex> lock(*solutionsGuard);
 
-                    // Publishes this shard's cache so the owning master can resolve
-                    // indices the shard has not parsed yet. Keyed by prefix, so a
-                    // shard the master already published is not registered twice --
-                    // two caches for one shard would retain two copies of its blob
-                    // and hand out two objects for the same solution index.
-                    auto publishShardCache = [&]() {
-                        if(mLibrary->blobCache && solutionSources != nullptr)
-                            solutionSources->emplace(filePrefix, mLibrary->blobCache);
-                    };
+                    const bool fileLoaded = loadedFiles->count(filePrefix) != 0;
+                    auto       adopted    = fileLoaded ? indexLoadedLibraries->find(filePrefix)
+                                                       : indexLoadedLibraries->end();
 
-                    if(loadedFiles->find(filePrefix) != loadedFiles->end())
+                    if(adopted != indexLoadedLibraries->end())
                     {
-                        if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())
-                        {
-                            // Keeping this shard's own tree, so its cache is the one
-                            // the leaves reference.
-                            publishShardCache();
-                            published = loaded;
-                        }
-                        else
-                        {
-                            // Adopting the tree the master loaded means adopting the
-                            // cache the master already published; ours is dropped.
-                            published = (*indexLoadedLibraries)[filePrefix];
-                            indexLoadedLibraries->erase(filePrefix);
+                        // Adopting the tree the master loaded means adopting the
+                        // cache the master already published; ours is dropped.
+                        published = adopted->second;
 
-                            if(Debug::Instance().printCodeObjectInfo())
-                                std::cout << "load placeholder library " << filePrefix
-                                          << " from MasterLibrary cache" << std::endl;
-                        }
+                        if(Debug::Instance().printCodeObjectInfo())
+                            std::cout << "load placeholder library " << filePrefix
+                                      << " from MasterLibrary cache" << std::endl;
                     }
                     else
                     {
-                        publishShardCache();
+                        // Publishes this shard's cache so the owning master can
+                        // resolve indices the shard has not parsed yet. Keyed by
+                        // prefix, so a shard the master already published is not
+                        // registered twice -- two caches for one shard would
+                        // retain two copies of its blob and hand out two objects
+                        // for the same solution index.
+                        if(mLibrary->blobCache && solutionSources != nullptr)
+                            newSources.emplace(filePrefix, mLibrary->blobCache);
 
-                        using std::begin;
-                        using std::end;
+                        // When the file is already recorded, this shard keeps its
+                        // own tree, so its cache is the one the leaves reference.
+                        if(!fileLoaded)
+                        {
+                            for(auto const& entry : mLibrary->solutions)
+                            {
+                                entry.second->codeObjectFilename = getCodeObjectFileName();
+                                newSolutions.insert(entry);
+                            }
+                            newFiles.insert(filePrefix);
 
-                        std::transform(begin(mLibrary->solutions),
-                                       end(mLibrary->solutions),
-                                       std::inserter(*masterSolutions, end(*masterSolutions)),
-                                       [this](auto& i) {
-                                           i.second->codeObjectFilename = getCodeObjectFileName();
-                                           return i;
-                                       });
-                        loadedFiles->insert(filePrefix);
-                        published = loaded;
-
-                        if(Debug::Instance().printCodeObjectInfo())
-                            std::cout << "load placeholder library " << path << std::endl
-                                      << mLibrary->solutions.size() << " solutions loaded"
-                                      << std::endl;
+                            if(Debug::Instance().printCodeObjectInfo())
+                                std::cout << "load placeholder library " << path << std::endl
+                                          << mLibrary->solutions.size()
+                                          << " solutions loaded" << std::endl;
+                        }
+                        published = mLibrary->library;
                     }
+
+                    beforeLibraryRegistered();
+
+                    // Nothing below allocates or throws: merge moves nodes and
+                    // keeps entries the master already has.
+                    if(adopted != indexLoadedLibraries->end())
+                        indexLoadedLibraries->erase(adopted);
+                    if(solutionSources != nullptr)
+                        solutionSources->merge(newSources);
+                    masterSolutions->merge(newSolutions);
+                    loadedFiles->merge(newFiles);
                 }
 
                 // Stored after this load has registered the shard. The hook runs
@@ -400,10 +407,16 @@ namespace TensileLite
         }
 
     protected:
+        // Runs under solutionsGuard once this load has decided what to register
+        // and before the master is changed. If it throws, nothing is registered
+        // and the next lookup loads the shard again.
+        virtual void beforeLibraryRegistered() const {}
+
         // Runs after `library` is stored. This load has already published the
         // shard cache and recorded the file. Indexed solutions stay in that
-        // cache until a lookup parses them.
-        virtual void afterLibraryPublished() const {}
+        // cache until a lookup parses them. It cannot throw: once `library` is
+        // stored, a retry would load the shard a second time.
+        virtual void afterLibraryPublished() const noexcept {}
     };
 
 } // namespace TensileLite

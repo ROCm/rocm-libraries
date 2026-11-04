@@ -53,6 +53,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -767,13 +768,40 @@ namespace
         mutable std::atomic<bool> published{false};
         mutable std::atomic<bool> release{false};
 
-        void afterLibraryPublished() const override
+        void afterLibraryPublished() const noexcept override
         {
             published.store(true, std::memory_order_release);
             while(!release.load(std::memory_order_acquire))
                 std::this_thread::yield();
         }
     };
+
+    // Throws from beforeLibraryRegistered() on the first load only.
+    struct ThrowOncePlaceholder : Holder
+    {
+        mutable std::atomic<int> attempts{0};
+
+        void beforeLibraryRegistered() const override
+        {
+            if(attempts.fetch_add(1) == 0)
+                throw std::runtime_error("injected failure before registration");
+        }
+    };
+
+    // Points a placeholder at a master's registration state.
+    void wirePlaceholder(Holder& holder, Master& master, fs::path const& dir)
+    {
+        holder.filePrefix       = kShardPrefix;
+        holder.libraryDirectory = dir.string();
+        if(holder.libraryDirectory.back() != '/')
+            holder.libraryDirectory.push_back('/');
+        holder.suffix               = ".dat";
+        holder.solutionsGuard       = &master.solutionsGuard;
+        holder.loadedFiles          = &master.loadedFiles;
+        holder.masterSolutions      = &master.solutions;
+        holder.solutionSources      = &master.solutionSources;
+        holder.indexLoadedLibraries = &master.indexLoadedLibraries;
+    }
 
     struct PlaceholderIndexedShardTest : public TempDirTest
     {
@@ -910,23 +938,13 @@ TEST_F(PlaceholderIndexedShardTest, PublishIsVisibleOnlyAfterShardIsRegistered)
 
     Master           fresh;
     GatedPlaceholder cold;
-    cold.filePrefix       = kShardPrefix;
-    cold.libraryDirectory = tmpDir.string();
-    if(cold.libraryDirectory.back() != '/')
-        cold.libraryDirectory.push_back('/');
-    cold.suffix               = ".dat";
-    cold.solutionsGuard       = &fresh.solutionsGuard;
-    cold.loadedFiles          = &fresh.loadedFiles;
-    cold.masterSolutions      = &fresh.solutions;
-    cold.solutionSources      = &fresh.solutionSources;
-    cold.indexLoadedLibraries = &fresh.indexLoadedLibraries;
+    wirePlaceholder(cold, fresh, tmpDir);
 
     struct Sample
     {
-        bool libraryVisible = false;
-        bool fileRecorded   = false;
-        bool cachePublished = false;
-        bool indexInCache   = false;
+        bool fileRecorded    = false;
+        bool cachePublished  = false;
+        bool indexInCache    = false;
         bool codeObjectNamed = false;
     };
 
@@ -979,7 +997,6 @@ TEST_F(PlaceholderIndexedShardTest, PublishIsVisibleOnlyAfterShardIsRegistered)
     {
         readers.emplace_back([&, t] {
             Sample sample;
-            sample.libraryVisible = static_cast<bool>(cold.library);
             sample.fileRecorded   = fresh.loadedFiles.count(kShardPrefix) == 1;
             auto source           = fresh.solutionSources.find(kShardPrefix);
             sample.cachePublished = source != fresh.solutionSources.end() && source->second;
@@ -1001,7 +1018,6 @@ TEST_F(PlaceholderIndexedShardTest, PublishIsVisibleOnlyAfterShardIsRegistered)
 
     for(int t = 0; t < kReaders; ++t)
     {
-        EXPECT_TRUE(seen[t].libraryVisible);
         EXPECT_TRUE(seen[t].fileRecorded) << "library was visible before loadedFiles was updated";
         EXPECT_TRUE(seen[t].cachePublished)
             << "library was visible before the shard cache was published";
@@ -1026,6 +1042,271 @@ TEST_F(PlaceholderIndexedShardTest, PublishIsVisibleOnlyAfterShardIsRegistered)
     auto parsed = source->second->get(index);
     ASSERT_NE(parsed, nullptr);
     EXPECT_EQ(parsed->codeObjectFilename.load(), codeObject);
+}
+
+// The master loaded the shard first, so the placeholder adopts the master's
+// tree and the cache the master already published. While the loader is parked
+// in afterLibraryPublished(), `library` has to be that tree and the hand-off
+// entry in indexLoadedLibraries has to be gone.
+TEST_F(PlaceholderIndexedShardTest, AdoptedTreeIsVisibleOnlyAfterHandOff)
+{
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    const int    index  = shardIndices.front();
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    ASSERT_NE(master->resolveSolutionByIndex(index), nullptr);
+    ASSERT_EQ(master->indexLoadedLibraries.count(kShardPrefix), 1u);
+    ASSERT_EQ(master->solutionSources.size(), 1u);
+    const auto masterTree  = master->indexLoadedLibraries.at(kShardPrefix);
+    const auto masterCache = master->solutionSources.begin()->second;
+
+    GatedPlaceholder cold;
+    wirePlaceholder(cold, *master, tmpDir);
+
+    std::string                          error;
+    std::shared_ptr<ContractionSolution> loaded;
+    std::thread                          loader([&] {
+        try
+        {
+            loaded = cold.getSolutionByIndex(problem, device, index);
+        }
+        catch(std::exception const& ex)
+        {
+            error = ex.what();
+        }
+        catch(...)
+        {
+            error = "unknown exception";
+        }
+    });
+
+    struct Join
+    {
+        GatedPlaceholder* cold;
+        std::thread*      loader;
+        ~Join()
+        {
+            cold->release.store(true, std::memory_order_release);
+            if(loader->joinable())
+                loader->join();
+        }
+    } join{&cold, &loader};
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(!cold.published.load(std::memory_order_acquire)
+          && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    ASSERT_TRUE(cold.published.load(std::memory_order_acquire))
+        << "load did not publish the library; error=" << error;
+
+    EXPECT_EQ(cold.library, masterTree)
+        << "library was visible before the master's tree was adopted";
+    EXPECT_EQ(master->indexLoadedLibraries.count(kShardPrefix), 0u)
+        << "library was visible before the hand-off entry was taken";
+    ASSERT_EQ(master->solutionSources.size(), 1u);
+    EXPECT_EQ(master->solutionSources.begin()->second, masterCache)
+        << "adopting the master's tree must keep the master's cache";
+
+    cold.release.store(true, std::memory_order_release);
+    loader.join();
+
+    ASSERT_TRUE(error.empty()) << error;
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded, master->resolveSolutionByIndex(index))
+        << "the placeholder and the master returned different objects for one index";
+}
+
+// Cold lookups that arrive while another thread is loading the shard must wait
+// for that load to finish. The loader is parked in afterLibraryPublished(), i.e.
+// inside the lazy-load, after `library` is already stored. Readers go through
+// the real public entry point. With std::call_once they block until the loader
+// leaves the hook. If the load is not serialized (for example an unlocked
+// `if(!library)` check, the original race), `library` is already visible and the
+// readers return while the load is still in flight.
+//
+// The "nobody has returned yet" check can only miss a bug, never flag correct
+// code: a reader that has not been scheduled has not returned either, and a
+// correct implementation never lets a reader return while the loader is parked.
+TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsBlockUntilLoadCompletes)
+{
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const int    index  = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto        problem    = TensileLite::testing::dummyProblem();
+    const std::string codeObject = std::string(kShardPrefix) + ".co";
+
+    struct CountingGate : GatedPlaceholder
+    {
+        mutable std::atomic<int> hookRuns{0};
+
+        void afterLibraryPublished() const noexcept override
+        {
+            hookRuns.fetch_add(1, std::memory_order_relaxed);
+            GatedPlaceholder::afterLibraryPublished();
+        }
+    };
+
+    Master       fresh;
+    CountingGate cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    constexpr int kReaders = 8;
+
+    std::vector<std::shared_ptr<ContractionSolution>> results(kReaders);
+    std::vector<std::string>                          errors(kReaders);
+    std::vector<std::thread>                          readers;
+    std::atomic<int>                                  entered{0};
+    std::atomic<int>                                  returned{0};
+    std::string                                       loaderError;
+    std::shared_ptr<ContractionSolution>              loaded;
+
+    std::thread loader([&] {
+        try
+        {
+            loaded = cold.getSolutionByIndex(problem, device, index);
+        }
+        catch(std::exception const& ex)
+        {
+            loaderError = ex.what();
+        }
+        catch(...)
+        {
+            loaderError = "unknown exception";
+        }
+    });
+
+    // Releases the loader on every exit path, then joins everything, so a
+    // failed assertion never leaves a thread parked or an unjoined std::thread.
+    struct Join
+    {
+        CountingGate*             cold;
+        std::thread*              loader;
+        std::vector<std::thread>* readers;
+        ~Join()
+        {
+            cold->release.store(true, std::memory_order_release);
+            if(loader->joinable())
+                loader->join();
+            for(auto& th : *readers)
+                if(th.joinable())
+                    th.join();
+        }
+    } join{&cold, &loader, &readers};
+
+    using Clock = std::chrono::steady_clock;
+
+    const auto parkDeadline = Clock::now() + std::chrono::seconds(10);
+    while(!cold.published.load(std::memory_order_acquire) && Clock::now() < parkDeadline)
+        std::this_thread::yield();
+    ASSERT_TRUE(cold.published.load(std::memory_order_acquire))
+        << "loader never reached afterLibraryPublished(); error=" << loaderError;
+
+    for(int t = 0; t < kReaders; ++t)
+    {
+        readers.emplace_back([&, t] {
+            entered.fetch_add(1, std::memory_order_acq_rel);
+            try
+            {
+                results[t] = cold.getSolutionByIndex(problem, device, index);
+            }
+            catch(std::exception const& ex)
+            {
+                errors[t] = ex.what();
+            }
+            catch(...)
+            {
+                errors[t] = "unknown exception";
+            }
+            returned.fetch_add(1, std::memory_order_acq_rel);
+        });
+    }
+
+    // Give every reader a chance to be inside the call, then hold the loader
+    // for a further interval. A reader that returns in this window got past an
+    // in-flight load. Neither wait fails the test by itself.
+    const auto enterDeadline = Clock::now() + std::chrono::seconds(10);
+    while(entered.load(std::memory_order_acquire) < kReaders && Clock::now() < enterDeadline)
+        std::this_thread::yield();
+
+    const auto holdEnd = Clock::now() + std::chrono::milliseconds(100);
+    while(Clock::now() < holdEnd && returned.load(std::memory_order_acquire) < kReaders)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    const int returnedWhileLoading = returned.load(std::memory_order_acquire);
+    EXPECT_EQ(returnedWhileLoading, 0)
+        << returnedWhileLoading << " of " << kReaders
+        << " cold lookups returned while the shard load was still in progress (loader parked in "
+           "afterLibraryPublished()). Lookups that arrive during a lazy load must wait for it, "
+           "which PlaceholderLibrary::loadPlaceholderLibrary() gets from std::call_once; an "
+           "unserialized check of `library` lets them run against a half-registered shard.";
+
+    // Let the load finish; every reader must now complete with the same solution.
+    cold.release.store(true, std::memory_order_release);
+    loader.join();
+    for(auto& th : readers)
+        th.join();
+
+    ASSERT_TRUE(loaderError.empty()) << loaderError;
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->index, index);
+    EXPECT_EQ(loaded->codeObjectFilename.load(), codeObject);
+    for(int t = 0; t < kReaders; ++t)
+    {
+        EXPECT_TRUE(errors[t].empty()) << "reader " << t << ": " << errors[t];
+        EXPECT_EQ(results[t], loaded) << "reader " << t << " got a different solution object";
+    }
+
+    EXPECT_EQ(cold.hookRuns.load(), 1) << "the shard must be loaded exactly once";
+    EXPECT_EQ(fresh.loadedFiles.count(kShardPrefix), 1u);
+    EXPECT_EQ(fresh.solutionSources.size(), 1u) << "one cache registered per shard";
+}
+
+// A load that throws before it registers anything leaves the master unchanged.
+// call_once then runs the load again on the next lookup, and the cache that
+// load registers is the one its tree resolves through.
+TEST_F(PlaceholderIndexedShardTest, FailedLoadRegistersNothingAndRetryIsConsistent)
+{
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const int    index  = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    Master               fresh;
+    ThrowOncePlaceholder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    EXPECT_THROW(cold.getSolutionByIndex(problem, device, index), std::runtime_error);
+    EXPECT_EQ(cold.library, nullptr);
+    EXPECT_TRUE(fresh.loadedFiles.empty()) << "the failed load recorded its file";
+    EXPECT_TRUE(fresh.solutionSources.empty()) << "the failed load registered its cache";
+    EXPECT_TRUE(fresh.solutions.empty()) << "the failed load registered solutions";
+
+    auto solution = cold.getSolutionByIndex(problem, device, index);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(cold.attempts.load(), 2);
+    EXPECT_EQ(fresh.loadedFiles.count(kShardPrefix), 1u);
+    ASSERT_EQ(fresh.solutionSources.size(), 1u);
+    EXPECT_EQ(fresh.solutionSources.at(kShardPrefix)->get(index), solution)
+        << "the registered cache is not the one the loaded tree resolves through";
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)

@@ -179,7 +179,9 @@ namespace TensileLite
  * of solutions, i.e. `solutions` already holds everything the library can
  * return for this problem. It describes this call only and travels with the
  * result, so concurrent searches on the same library object cannot observe
- * each other's value.
+ * each other's value. CachingLibrary reads it to tell whether a cached list is
+ * complete; other libraries pass it through and callers outside the library
+ * tree read only `solutions`.
  */
     template <typename MySolution>
     struct TopSolutionsResult

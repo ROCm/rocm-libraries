@@ -16,8 +16,7 @@
 #include <tuple>
 #include <vector>
 
-extern "C" void rocblaslt_testing_reset_last_get_all_search_type_for_test();
-extern "C" int  rocblaslt_testing_last_get_all_search_type_for_test();
+#include "../../../library/src/amd_detail/rocblaslt/src/include/get_all_search_type_for_test.hpp"
 
 namespace
 {
