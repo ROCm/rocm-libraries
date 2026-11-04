@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
@@ -17,6 +18,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
 
@@ -132,56 +134,30 @@ inline std::vector<Role>
             {attrs.dv_tensor_uid, false, true, false}};
 }
 
-// Every tensor uid the node's attributes name.
-template <typename AttrsT>
-std::vector<int64_t> referencedUids(const AttrsT& attrs)
+// Collects every tensor uid a node's attributes name (node_operands::visit reads them from the
+// serialized node, so a uid field added to the schema is covered).
+struct UidCollector
 {
     std::vector<int64_t> uids;
-    for(const auto& role : sdpaRoles(attrs))
+
+    void tensor(std::string_view /*role*/, int64_t uid, bool /*workDataDependent*/)
     {
-        uids.push_back(role.uid);
+        uids.push_back(uid);
     }
-    const auto addOptional = [&](const auto& uid) {
-        if(uid.has_value())
-        {
-            uids.push_back(uid.value());
-        }
-    };
-    addOptional(attrs.scale_tensor_uid);
-    addOptional(attrs.attn_mask_tensor_uid);
-    addOptional(attrs.seq_len_q_tensor_uid);
-    addOptional(attrs.seq_len_kv_tensor_uid);
-    addOptional(attrs.seed_tensor_uid);
-    addOptional(attrs.offset_tensor_uid);
-    addOptional(attrs.dropout_mask_tensor_uid);
-    addOptional(attrs.dropout_scale_tensor_uid);
-    if constexpr(std::is_same_v<AttrsT, hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT>)
+    template <typename T>
+    void scalar(std::string_view /*name*/, T /*value*/)
     {
-        addOptional(attrs.page_table_k_tensor_uid);
-        addOptional(attrs.page_table_v_tensor_uid);
-        addOptional(attrs.block_mask_tensor_uid);
-        addOptional(attrs.sink_token_tensor_uid);
-        addOptional(attrs.descale_q_tensor_uid);
-        addOptional(attrs.descale_k_tensor_uid);
-        addOptional(attrs.descale_v_tensor_uid);
-        addOptional(attrs.descale_s_tensor_uid);
-        addOptional(attrs.scale_s_tensor_uid);
-        addOptional(attrs.scale_o_tensor_uid);
-        addOptional(attrs.rng_dump_tensor_uid);
-        addOptional(attrs.amax_s_tensor_uid);
-        addOptional(attrs.amax_o_tensor_uid);
     }
-    else
+    template <typename T>
+    void element(std::string_view /*name*/, size_t /*index*/, T /*value*/)
     {
-        addOptional(attrs.dropout_scale_inv_tensor_uid);
-        addOptional(attrs.dbias_tensor_uid);
     }
-    return uids;
-}
+};
 
 template <typename AttrsT>
 std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects::GraphT& graph,
-                                           AttrsT& attrs)
+                                           AttrsT& attrs,
+                                           const std::vector<int64_t>& referenced)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
@@ -253,7 +229,7 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         }
         const auto it = tensors.find(seqLenUid.value());
         if(qDims.empty() || it == tensors.end() || it->second->data_type != DataType::INT32
-           || it->second->dims != std::vector<int64_t>{qDims[0], 1, 1, 1})
+           || !hipdnn_data_sdk::utilities::detail::isBatchAxisVector(it->second->dims, qDims[0]))
         {
             return std::nullopt;
         }
@@ -282,7 +258,8 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
                && offsetIt->second->data_type != DataType::INT64)
            || tensor->ragged_offset_multiplier < 1
            || !hasValidRaggedStrides(tensor->dims, tensor->strides)
-           || offsetIt->second->dims != std::vector<int64_t>{tensor->dims[0] + 1, 1, 1, 1})
+           || !hipdnn_data_sdk::utilities::detail::isBatchAxisVector(offsetIt->second->dims,
+                                                                     tensor->dims[0] + 1))
         {
             return std::nullopt;
         }
@@ -311,7 +288,6 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
 
     // The offset tables are inputs of the ragged graph only; drop them unless one of the node's
     // attributes still names the tensor.
-    const auto referenced = referencedUids(attrs);
     graph.tensors.erase(
         std::remove_if(graph.tensors.begin(),
                        graph.tensors.end(),
@@ -400,14 +376,17 @@ inline std::optional<DenseSdpaFromRagged> densifyRaggedSdpaGraph(const void* buf
     {
         return std::nullopt;
     }
+    ragged_densify_detail::UidCollector referenced;
+    hipdnn_flatbuffers_sdk::data_objects::node_operands::visit(
+        *hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer)->nodes()->Get(0), referenced);
     auto& node = *graph->nodes.front();
     if(auto* fwd = node.attributes.AsSdpaAttributes(); fwd != nullptr)
     {
-        return ragged_densify_detail::densify(*graph, *fwd);
+        return ragged_densify_detail::densify(*graph, *fwd, referenced.uids);
     }
     if(auto* bwd = node.attributes.AsSdpaBackwardAttributes(); bwd != nullptr)
     {
-        return ragged_densify_detail::densify(*graph, *bwd);
+        return ragged_densify_detail::densify(*graph, *bwd, referenced.uids);
     }
     return std::nullopt;
 }

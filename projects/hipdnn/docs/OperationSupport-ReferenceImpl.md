@@ -172,7 +172,7 @@ per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_
 runs, and the outputs are packed back. They therefore support everything the dense forward and
 backward columns list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64`
 offsets and ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V
-container. Divergences from cuDNN: [KNOWN_DIVERGENCES.md](KNOWN_DIVERGENCES.md).
+container.
 
 The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
 FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).

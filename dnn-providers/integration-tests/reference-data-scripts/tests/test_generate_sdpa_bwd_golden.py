@@ -241,6 +241,20 @@ class TestGenerateSdpaBwdGoldenRejectedConfigurations(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be a multiple of H_kv", result.stdout + result.stderr)
 
+    def test_ragged_only_options_without_ragged_sides_are_rejected(self):
+        for flag, value in (
+            ("--ragged-blocks", "q=2,2"),
+            ("--ragged-origins", "q=0,2"),
+            ("--ragged-head-major", "q"),
+            ("--ragged-head-pitch", "q=8"),
+            ("--ragged-token-stride", "q=16"),
+            ("--ragged-units", "tokens"),
+        ):
+            with self.subTest(flag=flag):
+                result = self.generate(flag, value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{flag} requires --ragged-sides", result.stderr)
+
     def test_fully_masked_query_row_is_rejected(self):
         # A fully masked row makes LSE -inf, so the softmax and every gradient
         # that depends on it would be NaN.

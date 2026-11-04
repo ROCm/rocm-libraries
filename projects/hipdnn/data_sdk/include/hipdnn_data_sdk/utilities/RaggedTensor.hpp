@@ -270,6 +270,13 @@ inline RaggedFootprint raggedFootprint(const std::vector<int64_t>& dims,
     return {static_cast<size_t>(elementCount), static_cast<size_t>(space)};
 }
 
+/// Whether @p dims is `[count, 1, 1, 1]`, the shape of a ragged offset table (count = B + 1) and
+/// of a seq_len tensor (count = B).
+inline bool isBatchAxisVector(const std::vector<int64_t>& dims, int64_t count)
+{
+    return dims == std::vector<int64_t>{count, 1, 1, 1};
+}
+
 } // namespace detail
 
 /**
@@ -472,8 +479,7 @@ protected:
                 + ") must equal paddedDims[0] + 1 (" + std::to_string(expectedCount) + ")");
         }
         // Values are read along axis 0, so they must all lie on it.
-        if(_raggedOffset->dims().size() != 4
-           || static_cast<size_t>(_raggedOffset->dims()[0]) != expectedCount)
+        if(!detail::isBatchAxisVector(_raggedOffset->dims(), static_cast<int64_t>(expectedCount)))
         {
             throw std::invalid_argument("ragged_offset must have shape [B + 1, 1, 1, 1]");
         }
@@ -495,8 +501,7 @@ protected:
                 "seq_len elementCount (" + std::to_string(raggedLength->elementCount())
                 + ") must equal paddedDims[0] (" + std::to_string(batchCount) + ")");
         }
-        if(raggedLength->dims().size() != 4
-           || static_cast<size_t>(raggedLength->dims()[0]) != batchCount)
+        if(!detail::isBatchAxisVector(raggedLength->dims(), static_cast<int64_t>(batchCount)))
         {
             throw std::invalid_argument("seq_len must have shape [B, 1, 1, 1]");
         }

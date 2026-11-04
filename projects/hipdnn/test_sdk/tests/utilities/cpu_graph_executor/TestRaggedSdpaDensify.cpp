@@ -381,28 +381,6 @@ constexpr int64_t SUM_EXP_UID = 102;
 constexpr int64_t DQ_OFFSETS = 103;
 constexpr int64_t DKV_OFFSETS = 104;
 
-std::vector<uint8_t> editGraph(const std::vector<uint8_t>& buffer,
-                               const std::function<void(GraphT&)>& edit)
-{
-    auto graph = UnPackGraph(buffer.data());
-    edit(*graph);
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(Graph::Pack(builder, graph.get()));
-    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
-}
-
-TensorAttributesT& tensorOf(GraphT& graph, int64_t uid)
-{
-    for(auto& t : graph.tensors)
-    {
-        if(t->uid == uid)
-        {
-            return *t;
-        }
-    }
-    throw std::runtime_error("no tensor " + std::to_string(uid));
-}
-
 void addInt32(GraphT& graph, int64_t uid, int64_t count)
 {
     graph.tensors.push_back(tensor(uid, DataType::INT32, {count, 1, 1, 1}, {1, 1, 1, 1}));
@@ -856,18 +834,23 @@ TEST(TestRaggedSdpaDensify, RaggedRoleWithAnotherBatchIsDeclined)
 
 TEST(TestRaggedSdpaDensify, SeqLenOffTheBatchAxisIsDeclined)
 {
-    const auto make = [](std::vector<int64_t> dims, std::vector<int64_t> strides) {
-        return editGraph(raggedGraph(false, true), [&](GraphT& g) {
-            addSeqLens(g);
-            tensorOf(g, SEQ_Q).dims = dims;
-            tensorOf(g, SEQ_Q).strides = strides;
-            auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
-            attrs->seq_len_q_tensor_uid = SEQ_Q;
-            attrs->seq_len_kv_tensor_uid = SEQ_KV;
-        });
-    };
-    EXPECT_FALSE(densifies(make({1, B, 1, 1}, {B, 1, 1, 1})));
-    EXPECT_TRUE(densifies(make({B, 1, 1, 1}, {1, 1, 1, 1})));
+    // Reshapes one seq_len tensor (SEQ_Q or SEQ_KV) onto `dims`; the other stays [B, 1, 1, 1].
+    const auto make
+        = [](int64_t reshaped, std::vector<int64_t> dims, std::vector<int64_t> strides) {
+              return editGraph(raggedGraph(false, true), [&](GraphT& g) {
+                  addSeqLens(g);
+                  tensorOf(g, reshaped).dims = dims;
+                  tensorOf(g, reshaped).strides = strides;
+                  auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+                  attrs->seq_len_q_tensor_uid = SEQ_Q;
+                  attrs->seq_len_kv_tensor_uid = SEQ_KV;
+              });
+          };
+    for(const int64_t uid : {static_cast<int64_t>(SEQ_Q), static_cast<int64_t>(SEQ_KV)})
+    {
+        EXPECT_FALSE(densifies(make(uid, {1, B, 1, 1}, {B, 1, 1, 1}))) << "uid " << uid;
+        EXPECT_TRUE(densifies(make(uid, {B, 1, 1, 1}, {1, 1, 1, 1}))) << "uid " << uid;
+    }
 }
 
 // The rewrite reads seq_len values as INT32, so any other element type is declined.
@@ -891,6 +874,24 @@ TEST(TestRaggedSdpaDensify, OffsetTableNamedByAnotherAttributeIsKept)
 {
     const auto graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
         g.nodes.front()->attributes.AsSdpaAttributes()->scale_tensor_uid = Q_OFFSETS;
+    });
+    const auto dense = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graph.data(), graph.size());
+    ASSERT_TRUE(dense.has_value());
+    const auto rewritten = UnPackGraph(dense->graph.data());
+    const auto has = [&](int64_t uid) {
+        return std::any_of(rewritten->tensors.begin(),
+                           rewritten->tensors.end(),
+                           [&](const auto& t) { return t->uid == uid; });
+    };
+    EXPECT_TRUE(has(Q_OFFSETS));
+    EXPECT_FALSE(has(KV_OFFSETS));
+}
+
+// The same for a table named only by an attribute of the backward node.
+TEST(TestRaggedSdpaDensify, OffsetTableNamedByBackwardAttributeIsKept)
+{
+    const auto graph = editGraph(raggedGraph(true, false), [](GraphT& g) {
+        g.nodes.front()->attributes.AsSdpaBackwardAttributes()->dbias_tensor_uid = Q_OFFSETS;
     });
     const auto dense = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graph.data(), graph.size());
     ASSERT_TRUE(dense.has_value());

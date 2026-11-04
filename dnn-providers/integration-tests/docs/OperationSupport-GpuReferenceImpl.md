@@ -183,8 +183,7 @@ through the host): the packed tensors are unpacked into dense padded ones with t
 per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_q/kv`, the dense plan runs,
 and the outputs are packed back. They therefore support everything the dense forward column and the SDPA
 Backward row list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64` offsets and
-ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V container. Divergences
-from cuDNN: [KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md).
+ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V container.
 
 ## Validators
 

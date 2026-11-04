@@ -845,6 +845,8 @@ def ragged_element_space(
                 f"ragged sequences overlap: rows from {next_start} start inside rows "
                 f"{start}..{start + length - 1} (overlap rule)"
             )
+    if 0 in (dims[1], dims[3]):
+        return 0
     max_row = max(start + length - 1 for start, length in live)
     span = 1
     for stride, extent in sorted(
@@ -858,8 +860,6 @@ def ragged_element_space(
                 f"{span} of the axes under it (sorted-stride rule)"
             )
         span += (extent - 1) * stride
-    if 0 in (dims[1], dims[3]):
-        return 0
     return (
         1
         + max_row * seq_stride
@@ -960,6 +960,14 @@ def ragged_tensor_element_space(
     """The RFC 0014 §4.5 elementSpace of a ragged tensor from its offset tensor and,
     when its SDPA node names the role's seq_len, that tensor's lengths; None if it
     cannot be determined."""
+    if len(tensor_spec["dims"]) != 4 or len(tensor_spec["strides"]) != 4:
+        result.error(
+            tensor_path_for(uid),
+            "invalid ragged layout: ragged tensors must have rank 4 "
+            f"(got dims {tensor_spec['dims']}, strides {tensor_spec['strides']})",
+            uid,
+        )
+        return None
     offset_uid = tensor_spec["ragged_offset_tensor_uid"]
     offsets = read_ragged_tensor_values(
         offset_uid,

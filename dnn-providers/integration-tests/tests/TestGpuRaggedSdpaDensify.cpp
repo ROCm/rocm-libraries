@@ -118,40 +118,31 @@ void expectGpuMatchesCpu(std::vector<uint8_t> graph,
 // The forward graph with seq_len_q/kv bound to the node (INT32 [B, 1, 1, 1], uids SEQ_Q/SEQ_KV).
 std::vector<uint8_t> withSeqLens(const std::vector<uint8_t>& graph)
 {
-    auto graphT = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>(
-        hipdnn_flatbuffers_sdk::data_objects::GetGraph(graph.data())->UnPack());
-    for(const int64_t uid : {SEQ_Q, SEQ_KV})
-    {
-        graphT->tensors.push_back(tensor(uid,
-                                         hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-                                         {B, 1, 1, 1},
-                                         {1, 1, 1, 1}));
-    }
-    auto* attrs = graphT->nodes.at(0)->attributes.AsSdpaAttributes();
-    attrs->seq_len_q_tensor_uid = SEQ_Q;
-    attrs->seq_len_kv_tensor_uid = SEQ_KV;
-    attrs->padding_mask = true;
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graphT.get()));
-    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
+    return editGraph(graph, [](GraphT& g) {
+        for(const int64_t uid : {SEQ_Q, SEQ_KV})
+        {
+            g.tensors.push_back(tensor(uid, DataType::INT32, {B, 1, 1, 1}, {1, 1, 1, 1}));
+        }
+        auto* attrs = g.nodes.at(0)->attributes.AsSdpaAttributes();
+        attrs->seq_len_q_tensor_uid = SEQ_Q;
+        attrs->seq_len_kv_tensor_uid = SEQ_KV;
+        attrs->padding_mask = true;
+    });
 }
 
 // The graph with the token offsets and seq_len tensors (those it has) at batch stride `stride`.
 std::vector<uint8_t> withAuxStrides(const std::vector<uint8_t>& graph, int64_t stride)
 {
-    auto graphT = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>(
-        hipdnn_flatbuffers_sdk::data_objects::GetGraph(graph.data())->UnPack());
-    for(auto& attrs : graphT->tensors)
-    {
-        if(attrs->uid == Q_OFFSETS || attrs->uid == KV_OFFSETS || attrs->uid == SEQ_Q
-           || attrs->uid == SEQ_KV)
+    return editGraph(graph, [&](GraphT& g) {
+        for(auto& attrs : g.tensors)
         {
-            attrs->strides = {stride, 1, 1, 1};
+            if(attrs->uid == Q_OFFSETS || attrs->uid == KV_OFFSETS || attrs->uid == SEQ_Q
+               || attrs->uid == SEQ_KV)
+            {
+                attrs->strides = {stride, 1, 1, 1};
+            }
         }
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graphT.get()));
-    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
+    });
 }
 
 } // namespace
@@ -290,21 +281,11 @@ TEST(TestGpuRaggedSdpaDensify, RaggedQOverPagedKvMatchesCpu)
 TEST(TestGpuRaggedSdpaDensify, AuxOffTheBatchAxisIsNotApplicable)
 {
     SKIP_IF_NO_DEVICES();
-    const auto reshape = [](std::vector<uint8_t> graph, int64_t uid, int64_t count) {
-        auto graphT = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>(
-            hipdnn_flatbuffers_sdk::data_objects::GetGraph(graph.data())->UnPack());
-        for(auto& attrs : graphT->tensors)
-        {
-            if(attrs->uid == uid)
-            {
-                attrs->dims = {1, count, 1, 1};
-                attrs->strides = {count, 1, 1, 1};
-            }
-        }
-        flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graphT.get()));
-        return std::vector<uint8_t>(builder.GetBufferPointer(),
-                                    builder.GetBufferPointer() + builder.GetSize());
+    const auto reshape = [](const std::vector<uint8_t>& graph, int64_t uid, int64_t count) {
+        return editGraph(graph, [&](GraphT& g) {
+            tensorOf(g, uid).dims = {1, count, 1, 1};
+            tensorOf(g, uid).strides = {count, 1, 1, 1};
+        });
     };
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpu;
     auto applicable

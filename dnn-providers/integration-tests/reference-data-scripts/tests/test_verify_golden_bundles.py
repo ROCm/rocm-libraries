@@ -2092,6 +2092,19 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         self.assertIn("file has 48 bytes but graph expects 40 bytes", failed.stderr)
         self.assertIn("ragged elementSpace=10", failed.stderr)
 
+    def test_ragged_tensor_must_have_rank_4(self) -> None:
+        failed = self.verify_sdpa_ragged(
+            elements=16,
+            offsets=(0, 4, 12),
+            lengths=(2, 3),
+            dims=(2, 4, 8),
+            strides=(32, 8, 1),
+        )
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("ragged tensors must have rank 4", failed.stderr)
+        self.assertNotIn("Traceback", failed.stderr)
+
     def test_ragged_offset_tensor_must_hold_exactly_b_plus_one_values(self) -> None:
         failed = self.verify_sdpa_ragged(
             elements=10, offsets=(0, 4, 12, 12), lengths=(2, 3)
@@ -2299,6 +2312,13 @@ class TestRaggedElementSpace(unittest.TestCase):
         self.assertEqual(
             self.space([0, 4, 10], [2, 3], dims=[2, 1, 4, 0]),
             0,
+        )
+
+    def test_zero_extent_axis_is_empty_whatever_the_other_strides(self) -> None:
+        # Head and sequence strides that would alias are never checked on an empty
+        # tensor.
+        self.assertEqual(
+            self.space([0, 4, 10], [3, 3], dims=[2, 0, 4, 2], strides=[8, 2, 1, 1]), 0
         )
 
     def test_batch_axis_stride_is_unused_so_negative_is_accepted(self) -> None:

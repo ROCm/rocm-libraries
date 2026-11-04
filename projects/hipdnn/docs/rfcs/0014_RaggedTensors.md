@@ -441,7 +441,7 @@ These apply to both `RaggedTensor<T>` and
 
    The widen-to-`int64_t` cost is negligible relative to the per-
    element work the CPU reference does, and the structural
-   invariants in item 5 (rank 4, length `B + 1`, and the
+   invariants in item 5 (shape `[B + 1, 1, 1, 1]`, and the
    element-size check) bound the surface where type-erasure could
    go wrong to this one helper. See
    [§6.3](#63-templating-the-ragged-tensor-types-on-indext) for
@@ -513,8 +513,8 @@ These apply to both `RaggedTensor<T>` and
      `origin_b = ragged_offset[b] * multiplier` and
      `len_b = seq_len[b]`. Origins may be in any order.
      `ragged_offset` still holds `B + 1` values and `ragged_offset[B]`
-     is read and validated with the table, but it does not determine
-     any batch's length.
+     is read with the table, but it is neither used nor validated:
+     origins come from entries `0..B-1` and lengths from `seq_len`.
    - **Without one:** offsets are monotonic,
      `origin_b = ragged_offset[b] * multiplier` and
      `len_b = min((ragged_offset[b+1] - ragged_offset[b]) / seqStride, S_max)`.
@@ -595,11 +595,11 @@ These apply to both `RaggedTensor<T>` and
    - `seqAxis ∈ [1, rank(paddedDims))`.
    - `raggedOffset->elementCount() == paddedDims[0] + 1`
      (i.e. `B + 1`).
-   - `raggedOffset` has rank 4.
+   - `raggedOffset` has shape `[B + 1, 1, 1, 1]`.
    - `raggedOffset->elementSize() == 4 || raggedOffset->elementSize() == 8`
      (int32 or int64 element type).
-   - a length tensor, when given, has rank 4, `elementCount() == B`
-     and element size 4 or 8.
+   - a length tensor, when given, has shape `[B, 1, 1, 1]` and element
+     size 4 or 8.
    - the sequence-axis stride is positive (`strides()[seqAxis] > 0`).
    - every other non-batch stride is non-negative (a zero stride
      broadcasts).
@@ -1490,20 +1490,16 @@ validator would only skip over this one value.
    overlapping token rows and sorted-stride violations (§4.5.1, L10 and
    L11); zero-stride axes are broadcasts and are accepted. It also
    requires whole-token origins, `0 <= len_b <= S_max` and strides
-   `>= 0`. The cuDNN frontend validates ragged graphs by attribute only
-   and does not see offset values (`sdpa_support_surface.h:90-92`); see
-   [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md). Applicability sees
-   only graph attributes, not offset values; layouts that depend on the
-   values are rejected when the tensor is built (bundle load), or with
-   `std::invalid_argument` at execute for callers passing raw pointers.
+   `>= 0`. Applicability sees only graph attributes, not offset
+   values; layouts that depend on the values are rejected when the
+   tensor is built (bundle load), or with `std::invalid_argument` at
+   execute for callers passing raw pointers.
 9. **Paged K/V and ragged Max/Sum_exp.** The native ragged forward
    gate declines ragged Q over paged K/V and declines `Max` and
    `Sum_exp`. The dense rewrite (`RaggedSdpaDensify.hpp`) serves
    ragged Q over non-ragged paged K/V and serves ragged `Max` and
    `Sum_exp` (bound by `seq_len_q`, like Stats). It declines a
-   `ragged_offset` on a paged K/V container; the cuDNN frontend
-   accepts ragged offsets with paged attention from cuDNN 9.7
-   (`sdpa_support_surface.h:281-283`).
+   `ragged_offset` on a paged K/V container.
 10. **INT64 offsets.** The SDPA gate declines INT64 `ragged_offset`
     (the dense rewrite accepts it).
 11. **The forward golden generator authors only bshd ragged
@@ -1620,7 +1616,7 @@ runtime branch per offset read. The branch widens an `int32_t`
 or `int64_t` aux element up to `int64_t`; on any modern CPU this
 is essentially free relative to the per-element work the CPU
 reference performs, and the structural invariants on the aux
-(rank 4, B+1 long, int32 or int64) bound the surface
+(shape `[B + 1, 1, 1, 1]`, int32 or int64) bound the surface
 where type-erasure could go wrong to one small helper. In
 return:
 
