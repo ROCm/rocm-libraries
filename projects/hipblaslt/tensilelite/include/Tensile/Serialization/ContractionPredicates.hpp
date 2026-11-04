@@ -132,9 +132,11 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::SwizzleTensorA>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
                      Base::template Pair<Predicates::Contraction::FusedGemmA2A>(),
-                     Base::template Pair<Predicates::Contraction::FusedA2ATileDivisible>(),
+                     Base::template Pair<Predicates::Contraction::GemmA2AShape>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
+                     Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
+                     Base::template Pair<Predicates::Contraction::MXBlockFreeB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
@@ -591,8 +593,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::FusedA2ATileDivisible, IO>
-            : public AutoMappingTraits<Predicates::Contraction::FusedA2ATileDivisible, IO>
+        struct MappingTraits<Predicates::Contraction::GemmA2AShape, IO>
+            : public AutoMappingTraits<Predicates::Contraction::GemmA2AShape, IO>
         {
         };
 
@@ -628,6 +630,16 @@ namespace TensileLite
         {
         };
                 template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockFreeA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockFreeA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockFreeB, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockFreeB, IO>
+        {
+        };
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
         {

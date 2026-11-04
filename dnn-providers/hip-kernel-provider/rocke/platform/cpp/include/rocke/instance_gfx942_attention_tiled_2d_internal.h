@@ -91,8 +91,9 @@ extern "C" {
 #define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS 96
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE 16
-/* QK / PV K-iters (HD/16 or T/16); HD<=256, T<=128 -> <=16. */
-#define ROCKE_GFX942_ATTN2D_MAX_K_ITERS 16
+/* QK / PV K-iters: HD/16 or T/16 on the narrow atom, HD/8 on the 32x32x8 wide
+ * atom; HD<=256, T<=128 -> <=32. */
+#define ROCKE_GFX942_ATTN2D_MAX_K_ITERS 32
 /* QK / PV N-tiles (T/16 or HD/16); <=16. */
 #define ROCKE_GFX942_ATTN2D_MAX_N_TILES 16
 
@@ -177,6 +178,8 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    /* Trailing lse_ptr (F32*), declared only when spec->emit_lse; else NULL. */
+    rocke_value_t* lse;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
@@ -358,7 +361,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* l_final[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* acc_final[ROCKE_GFX942_ATTN2D_MAX_ACCS];
     rocke_value_t* rcp_l[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
-    rocke_value_t* l_nonzero[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* l_zero[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
 } rocke_gfx942_attn2d_build_ctx_t;
 
 /* ===================================================================== *
@@ -576,7 +579,7 @@ typedef struct rocke_gfx942_attn2d_pv_inputs
     rocke_value_t* const* alpha_regs; /* SOFTMAX_STATE_SLOTS                       */
     int alpha_count;
     rocke_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
-    rocke_value_t* const* m_new; /* SOFTMAX_STATE_SLOTS                       */
+    rocke_value_t* const* m_carry; /* SOFTMAX_STATE_SLOTS: unclamped running max */
     /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
      * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
     rocke_value_t* const* pt32_g0;
@@ -614,7 +617,7 @@ rocke_value_t* rocke_gfx942_attn2d_strided_v_b_operand(rocke_gfx942_attn2d_build
 
 /* ----- epilogue (lines 5054-5287) ----- *
  * Drains outstanding async copies, reads the loop results into ctx->l_final /
- * acc_final / rcp_l / l_nonzero, then emits the normalize + store (the
+ * acc_final / rcp_l / l_zero, then emits the normalize + store (the
  * transposed-x8 direct scalar store, the 32x32 Acc_lds stripe store, or the
  * narrow striped vec8 cooperative store). Returns b->kernel on success or NULL
  * with the builder error set. */
