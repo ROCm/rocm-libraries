@@ -528,9 +528,9 @@ SKINNY = {"M": 256, "N": 768, "K": 874159}
 ])
 def test_host_allowance_is_per_input_dtype(tmp_path, monkeypatch, dtype, want):
     # A skinny large-K shape is mostly inputs: 75 s, of which 7 s reference.
-    # fp8 and bf8 inputs cost about 5x a 16-bit one on the host (their
-    # encoding): 400 ns per element against 75 ns, so the same fp8 shape gets
-    # 365 s. A dtype without a rate of its own gets the slowest.
+    # fp8 and bf8 inputs cost about 4x a 16-bit one on the host (their
+    # encoding): GEMM's rates are 400 ns per element against 75 ns, so the same
+    # fp8 shape gets 365 s. A dtype without a rate of its own gets the slowest.
     big = {"M": 8192, "N": 8192, "K": 8192}
     assert [GS.verify_allowance_s(p, dtype) for p in (P1, big, SKINNY)] == want
     seen = []

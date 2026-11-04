@@ -1697,6 +1697,13 @@ def test_fs_type_reads_the_mount_table(tmp_path):
     assert HC.fs_type(root, str(tmp_path / "none")) == ""
 
 
+def test_host_allowance_takes_the_ops_counts_and_rate():
+    # The shared formula has no rates of its own: the op passes its reference
+    # flops, its input element count and its seconds per element.
+    cases = ((0, 0, 0), (1, 1, 1e-9), (1e11, 0, 1), (5e10, 10**6, 1.5e-6))
+    assert [AS.host_allowance_s(*c) for c in cases] == [0, 1, 2, 3]
+
+
 def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path, monkeypatch):
     monkeypatch.setattr(HC, "fs_type", lambda p: "")  # no NFS note, wherever tmp is
     lines = []

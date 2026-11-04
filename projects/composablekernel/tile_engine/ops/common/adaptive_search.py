@@ -22,7 +22,7 @@ them) lives behind ``OperationAdapter``; the GEMM one is
 ``tile_engine/ops/gemm/gemm_search.py``. The plumbing every op binding shares
 is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
 ``CallFiles`` (per-call files under rounds/), ``measure_built``,
-``host_allowance_s`` (a verified call's host time, by input dtype),
+``host_allowance_s`` (a verified call's host time, at the op's rates),
 ``source_info``, ``check_search_options`` and ``run_search`` (the driver's
 search mode, with its exit code). Importing this module imports neither
 ``ck_search`` nor numpy: the search core is loaded when a search runs.
@@ -1466,26 +1466,18 @@ def measure_built(store: ArtifactStore, requests: Sequence[PairRequest],
 # generates random inputs, encodes them for the kernel and computes an fp32
 # numpy reference (a miss of the run's host cache pays all of it): the
 # reference at HOST_REFERENCE_FLOPS, a rate the host keeps with several device
-# workers sharing its cores, and each input element at its dtype's rate, which
-# covers generating, encoding and decoding it. Measured single-threaded with
-# the gemm_utils codecs: 33-60 ns per element for fp16, bf16 and fp32, 177-213
-# ns for fp8 and bf8 (their encoding dominates). A dtype not listed gets the
-# slowest listed rate.
+# workers sharing its cores (when they get the node's CPUs), and each input
+# element at the op's own rate, which covers generating, encoding and decoding
+# it (GEMM's, by dtype: ``gemm_search.HOST_S_PER_INPUT``).
 HOST_REFERENCE_FLOPS = 5e10
-HOST_S_PER_INPUT = {"fp16": 75e-9, "bf16": 75e-9, "fp32": 75e-9,
-                    "fp8": 400e-9, "bf8": 400e-9}
 
 
-def host_input_rate(dtype) -> float:
-    """Host seconds per input element of ``dtype`` (``HOST_S_PER_INPUT``)."""
-    return HOST_S_PER_INPUT.get(dtype, max(HOST_S_PER_INPUT.values()))
-
-
-def host_allowance_s(flops, inputs, dtype) -> int:
+def host_allowance_s(flops, inputs, s_per_input) -> int:
     """Seconds of host work of a verified call whose reference takes ``flops``
-    and whose inputs are ``inputs`` elements of ``dtype``. An op binds it with
-    its own counts (the GEMM one: ``gemm_search.verify_allowance_s``)."""
-    return math.ceil(flops / HOST_REFERENCE_FLOPS + inputs * host_input_rate(dtype))
+    and whose ``inputs`` elements take ``s_per_input`` seconds each. An op
+    binds it with its own counts and rates (the GEMM one:
+    ``gemm_search.verify_allowance_s``)."""
+    return math.ceil(flops / HOST_REFERENCE_FLOPS + inputs * s_per_input)
 
 
 class CallFiles:

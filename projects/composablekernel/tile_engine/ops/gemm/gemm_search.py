@@ -100,8 +100,8 @@ RUN_STATUS = {
 # comparison is left once the problem has an entry, but a problem's first
 # calls, or one over the cache's caps, pay it all. Each call's timeout is
 # --kernel-timeout plus that time (verify_allowance_s, at the per-dtype rates
-# of adaptive_search.host_allowance_s). The inputs dominate skinny large-K
-# shapes: 34 s of bf16 inputs at 256x768x874159, and about 5x that in fp8.
+# of HOST_S_PER_INPUT). The inputs dominate skinny large-K shapes: 34 s of
+# bf16 inputs at 256x768x874159, and about 4x that in fp8.
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # A search round measures once all its builds end, so a kernel that never
 # builds holds the round for its whole limit (a full run keeps the build
@@ -117,11 +117,25 @@ BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 SEARCH_BUILD_TIMEOUT_S = 180
 
 
+# Host seconds per A or B element of a verified call (generating, encoding and
+# decoding it), by dtype. Measured single-threaded with the gemm_utils codecs:
+# 33-60 ns per element for fp16, bf16 and fp32, 177-213 ns for fp8 and bf8
+# (their encoding dominates). A dtype not listed gets the slowest listed rate.
+HOST_S_PER_INPUT = {"fp16": 75e-9, "bf16": 75e-9, "fp32": 75e-9,
+                    "fp8": 400e-9, "bf8": 400e-9}
+
+
+def host_input_rate(dtype) -> float:
+    """Host seconds per input element of ``dtype`` (``HOST_S_PER_INPUT``)."""
+    return HOST_S_PER_INPUT.get(dtype, max(HOST_S_PER_INPUT.values()))
+
+
 def verify_allowance_s(problem, dtype) -> int:
     """Seconds added to ``--kernel-timeout`` for a verified call on ``problem``
     with ``dtype`` inputs: its fp32 reference and its A and B."""
     m, n, k = problem["M"], problem["N"], problem["K"]
-    return adaptive_search.host_allowance_s(2 * m * n * k, (m + n) * k, dtype)
+    return adaptive_search.host_allowance_s(2 * m * n * k, (m + n) * k,
+                                            host_input_rate(dtype))
 
 
 @dataclass(frozen=True)
@@ -287,7 +301,7 @@ class GemmSearchAdapter:
         if self.repeated:
             notes.append(f"repeated problems searched once: {sorted(set(self.repeated))}")
         flops = adaptive_search.HOST_REFERENCE_FLOPS
-        rate = adaptive_search.host_input_rate(a.dtype)
+        rate = host_input_rate(a.dtype)
         return {
             **self._context,
             "dtype": a.dtype,

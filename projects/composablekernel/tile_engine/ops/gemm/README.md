@@ -299,7 +299,7 @@ Option rules:
   `ceil(2*M*N*K / 5e10 + (M+N)*K * r)` s: the reference at 50 GFLOP/s, and
   the inputs at a rate `r` per element that depends on the dtype, 75 ns for
   fp16, bf16 and fp32 and 400 ns for fp8 and bf8, whose encoding costs about
-  5x more on the host (`HOST_S_PER_INPUT` in `adaptive_search.py`; a dtype
+  4x more on the host (`HOST_S_PER_INPUT` in `gemm_search.py`; a dtype
   without a rate gets the slowest). `run.json` records the run's formula.
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
