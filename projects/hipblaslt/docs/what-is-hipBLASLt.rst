@@ -114,9 +114,9 @@ keeps that idea and adds three more:
 
 * A **memory order**. ``HIPBLASLT_ORDER_COL`` (column-major) is the default.
   ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted by ``hipblasLtMatrixTransform``, and by
-  ``hipblasLtMatmul`` for A and B, which it computes as their column-major transposes. C and D must
-  be column-major; ``hipblasLtOrder_t`` in the datatypes reference lists every limit. The C++
-  extension API does not accept row-major layouts. Some architectures additionally accept **swizzled**
+  ``hipblasLtMatmul`` for A and B. C and D must be column-major; ``hipblasLtOrder_t`` in the
+  datatypes reference lists every limit. The C++ extension API does not accept row-major layouts.
+  Some architectures additionally accept **swizzled**
   orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
   data is pre-arranged into the exact pattern the kernel reads. That saves the kernel from
   rearranging values itself. However, a swizzled order is valid only for particular type, transpose,
@@ -127,6 +127,18 @@ keeps that idea and adds three more:
   a sub-matrix inside a larger allocation. :doc:`Use general batched GEMM
   <./how-to/how-to-general-batched-gemm>` describes when offsets apply.
 * **Batch** information, which `Running many GEMMs at once`_ covers.
+
+For supported row-major A and B, matmul and the heuristic rewrite internal copies of the layouts:
+they swap the stored row and column counts and flip the transpose operations between N and T.
+This rewrite does not copy or reorder matrix data, launch a separate transpose kernel, or require
+workspace for layout conversion. The selected GEMM algorithm can still require its own workspace.
+Logs and generated benchmark commands describe the resulting column-major problem.
+
+An equivalent column-major description supplied by the caller reaches the same backend problem
+for selection and execution. The row-major rewrite adds host-side descriptor handling, but no GPU
+layout conversion. Performance can differ between physically different arrangements of the data,
+depending on the GPU, data type, transpose choices, dimensions, and available kernels. The default
+``HIPBLASLT_ORDER_COL`` does not identify the fastest arrangement for every problem.
 
 Precision: types, compute modes, and scaling
 ============================================

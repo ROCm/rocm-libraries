@@ -491,9 +491,13 @@ typedef enum {
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
    * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
-   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. Matmul computes a row-major A or B as its
-   * column-major transpose. Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major C or
-   * D, and for a row-major A or B combined with an operation other than ``HIPBLAS_OP_N`` or
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. For the supported combinations, the library
+   * rewrites internal copies of the layouts and transpose operations into an equivalent
+   * column-major problem. This rewrite does not copy or reorder matrix data and does not launch
+   * a separate transpose kernel. The heuristic and matmul use the same rewritten problem.
+   *
+   * Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major C or D, and for a row-major
+   * A or B combined with an operation other than ``HIPBLAS_OP_N`` or
    * ``HIPBLAS_OP_T``, a block or vector scale mode, or an ``HIP_R_4I`` matrix. With a fused
    * all-to-all epilogue, a row-major D returns ``HIPBLAS_STATUS_INVALID_VALUE`` instead, because
    * the epilogue's own check runs first.
