@@ -71,7 +71,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import (
     BF16,
@@ -373,10 +373,9 @@ def winograd_gemm_reason(
         return f"LDS {spec.lds_bytes()} B > {target.lds_capacity_bytes}"
     if spec.vgpr_estimate() > VGPR_BUDGET * (2 if spec.waves <= 4 else 1):
         return f"~{spec.vgpr_estimate()} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
+    why = scheduler_strategy_reason(spec.sched)
+    if why is not None:
+        return why
     return None
 
 

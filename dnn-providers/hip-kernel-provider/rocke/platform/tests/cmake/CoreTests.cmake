@@ -50,6 +50,44 @@ if(BUILD_TESTING)
             "CTest is not registered")
   endif()
 
+  # The binding consumes Python-built IR; this binary exercises the independent
+  # C builder as well, including compiler-dependent argument evaluation order.
+  set_source_files_properties(instances/parity/optimization_barrier_emit.c
+                              PROPERTIES LANGUAGE CXX)
+  add_executable(rocke_optimization_barrier_emit
+                 instances/parity/optimization_barrier_emit.c)
+  target_link_libraries(rocke_optimization_barrier_emit PRIVATE rocke_core)
+  # The supported CMake minimum predates language flags for a .c file.
+  if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE /TP)
+  else()
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE -x c++)
+  endif()
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                              rocke_optimization_barrier_emit)
+  set_target_properties(rocke_optimization_barrier_emit
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_optimization_barrier_emit
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  if(Python3_Interpreter_FOUND)
+    set(_rocke_core_tests "${CMAKE_CURRENT_SOURCE_DIR}/core")
+    set(_rocke_python_root "${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    set(_rocke_parity_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/instances/parity")
+    add_test(
+      NAME rocke_optimization_barrier_hip_pair
+      COMMAND "${Python3_EXECUTABLE}"
+              "${_rocke_core_tests}/test_optimization_barrier_cli.py"
+              --native "$<TARGET_FILE:rocke_optimization_barrier_emit>"
+              --launcher
+              "${_rocke_python_root}/rocke/tests/subprocess_launcher.py"
+              --emitter
+              "${_rocke_parity_dir}/optimization_barrier_emit.py"
+              --count 17)
+    set_tests_properties(rocke_optimization_barrier_hip_pair
+                         PROPERTIES LABELS "ckc;python;host;quick" TIMEOUT 120)
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
