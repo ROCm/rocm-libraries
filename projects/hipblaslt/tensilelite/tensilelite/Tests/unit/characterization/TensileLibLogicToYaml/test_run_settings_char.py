@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for how Tensile.TensileLibLogicToYaml recovers the
+# Characterization tests for how tensilelite.TensileLibLogicToYaml recovers the
 # settings of the run that produced its input: ClientParameters.ini from the
 # benchmark build tree, then the tuning config beside the build directory.
 ################################################################################

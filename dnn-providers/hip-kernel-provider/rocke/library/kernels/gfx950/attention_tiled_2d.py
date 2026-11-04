@@ -47,6 +47,7 @@ from kernels.common._attention_additive_bias import (
     declare_additive_bias_params,
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_mask_type import band_mask_type
 
 from rocke.core.ir import (
     BF16,
@@ -916,6 +917,22 @@ class UnifiedAttention2DTiledSpec:
     @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
+
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value
+        (``kernels.common.attention_mask_type.band_mask_type``): 0 no mask, 1 top-left
+        causal, 2 bottom-right causal, 3 any other band (a sliding window or a right bound
+        above zero).
+
+        A bound method rather than a property so ``hkp_pack`` can observe it as an
+        effective accessor: a descriptor's metadata cannot carry ``right_bound``'s -1
+        (the generator's unset sentinel), and this is what it carries instead.
+        """
+        return band_mask_type(
+            sliding_window=self.sliding_window,
+            right_bound=self.right_bound,
+            causal_top_left=self.causal_top_left,
+        )
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join

@@ -54,6 +54,9 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+# Re-exported, never redeclared: the tiled kernel specs name their band by these
+# ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
+from kernels.common.attention_mask_type import AttentionMaskType
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     gfx942_3d_kv_needs_i64_addr,
@@ -75,18 +78,6 @@ FAMILY = "attention_unified"
 # v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
 # window as kernargs.
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
-
-
-class AttentionMaskType(IntEnum):
-    """Attention-mask ordinals matching ``plan_utils::MaskType``.
-
-    These are mask kinds, not hipDNN ``DiagonalAlignment`` ordinals.
-    """
-
-    NO_MASK = 0
-    TOP_LEFT_CAUSAL = 1
-    BOTTOM_RIGHT_CAUSAL = 2
-    SLIDING_WINDOW = 3
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
