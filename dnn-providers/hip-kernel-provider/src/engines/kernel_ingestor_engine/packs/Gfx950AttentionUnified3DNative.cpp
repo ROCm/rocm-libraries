@@ -417,8 +417,9 @@ bool kernelMatches(const MatchContext& context,
 }
 
 /// Scores for the cold ranking. Every legal candidate scores in (0, 1]; a record
-/// kernelMatches already declined gets UNSUPPORTED_SCORE.
-constexpr double SEGMENT_SPAN = 8192.0; // 2^13, above every legal num_segments
+/// kernelMatches already declined gets UNSUPPORTED_SCORE. The span is one past the
+/// segment cap, so even the widest legal candidate scores above UNSUPPORTED_SCORE.
+constexpr double SEGMENT_SPAN = static_cast<double>(GFX950_UNIFIED_3D_MAX_SEGMENTS) + 1.0;
 constexpr double UNSUPPORTED_SCORE = 0.0;
 
 /**
