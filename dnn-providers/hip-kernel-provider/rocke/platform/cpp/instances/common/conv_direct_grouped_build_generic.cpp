@@ -598,7 +598,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_k(&p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_k(&p);
         lengths[1] = KH;
         lengths[2] = KW;
         lengths[3] = p.cpg;

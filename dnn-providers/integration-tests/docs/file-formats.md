@@ -210,8 +210,7 @@ suffix only when the readable part is not already unique.
 **Do not write cases by hand.** Generate them with `import_graph.py` (see
 [Adding Tests](adding-tests.md#add-a-bundle)). You can edit a field of an existing
 case, for example to add its `golden` pointer. Do not rename ids without a
-reason, because support-claim sidecars and the `ffm-quick` tier of
-miopen-provider name cases by id.
+reason, because support-claim sidecars name cases by id.
 
 #### `tensor_patches`
 
@@ -597,7 +596,7 @@ Do not confuse them:
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
 | `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950AttentionDense_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.
@@ -640,8 +639,6 @@ execution_settings:
   `DISABLED` and is never launched. Variants are generated for each `ex_gpu_*`
   label declared in the file, not for the arch that you build. To select one, use
   `ctest -L ex_gpu_<arch>`.
-- miopen-provider's `ffm-quick` lists exact test names (sweep case ids).
-  Regenerating a sweep can rename those ids and silently shrink that tier.
 
 ## Where each format is enforced
 

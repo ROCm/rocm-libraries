@@ -746,5 +746,4 @@ are in [GPU reference test coverage rules](gpu-ref-test-coverage.md).
 - [ ] `python dnn-providers/integration-tests/scripts/verify_support_claims.py`
       passes when you run it by hand.
 - [ ] If you regenerated or renamed sweep cases, no sidecar names a case that no
-      longer exists. The `ffm-quick` ids of miopen-provider still exist
-      (`ctest --test-dir build/dnn-providers/miopen-provider -L ffm-quick -N`).
+      longer exists.
