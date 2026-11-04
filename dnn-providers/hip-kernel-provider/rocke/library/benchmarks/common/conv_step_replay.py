@@ -31,6 +31,13 @@ Modes (``--mode``, repeatable; default ``staged step``):
               (``--per-call``). GFX clock / socket power are sampled with
               ``amd-smi`` meanwhile (``--no-clock`` turns that off).
 
+Variants (``ab`` and ``step`` time them interleaved, in one session): ``--variant``
+(env), ``--pins-variant`` / ``--routes-variant`` (other kernels or routes for the
+same problems, on the base's buffers) and ``--form-variant`` (the same step in
+another problem form, e.g. the halo form beside a padded base, on its own
+buffers). ``ab`` also prints each variant's calls-weighted staged sum per
+direction.
+
 Every (case, direction) gets its own operand buffers (``--share`` reuses one
 set per case and direction across its calls, which is the default: the calls of
 one case in a step differ only in their data, and a fresh buffer per call costs
@@ -203,6 +210,8 @@ class Case:
             sizes.append(n * elem)
         self.sizes = tuple(sizes)
         self.bufs = []
+        if share_from is not None and any(a > b for a, b in zip(sizes, getattr(share_from, "sizes", sizes))):
+            raise SystemExit(f"{key}: operands larger than the shared buffers (another problem form: --form-variant)")
         n_sets = self.calls if not args.share else 1
         self.ptr_sets = list(share_from.ptr_sets) if share_from is not None else []
         for _ in range(0 if share_from is not None else n_sets):
@@ -366,6 +375,9 @@ def main(argv=None) -> int:
                          "--pins; with --pins too, rows without a kernel take the pin table's")
     ap.add_argument("--routes-variant", action="append", default=[], metavar="NAME:ROUTE_TABLE#MODE[@FORM]",
                     help="a variant that runs a route table's routes (buffers shared with the base)")
+    ap.add_argument("--form-variant", action="append", default=[], metavar="NAME:PINS",
+                    help="a variant that replays the same step in another problem form (e.g. the halo form "
+                         "PIN_TABLE#MODE beside a padded base): its own commands and its own buffers")
     ap.add_argument("--cache", required=True)
     ap.add_argument("--arch", default="gfx942")
     ap.add_argument("--mode", action="append", choices=["staged", "parts", "b2b", "step", "ab", "stepsel", "energy"])
@@ -444,6 +456,10 @@ def main(argv=None) -> int:
         pins = load_route_cases(args.routes, args.arch, args.pins)
     else:
         pins = load_pins_cases(args.pins, args.arch)
+    form_pins = {}
+    for spec in args.form_variant:
+        name, _, path = spec.partition(":")
+        form_pins[name] = load_pins_cases(path, args.arch)
     keys = args.cases.split(",") if args.cases else list(pins)
     need = set(keys)
     if "step" in modes:
@@ -454,8 +470,8 @@ def main(argv=None) -> int:
     rt = Runtime()
     cache = KernelCache(Path(args.cache), args.arch)
     max_bytes = 0
-    for k in need:
-        problem, _, _ = B.parse_miopen_cmd(pins[k]["cmd"])
+    for k, row in [(k, pins[k]) for k in need] + [(k, fp[k]) for fp in form_pins.values() for k in need if k in fp]:
+        problem, _, _ = B.parse_miopen_cmd(row["cmd"])
         p = problem
         # every operand the host data is copied into: activations and the filter
         # (the filter dominates the deep layers, e.g. s10: 57 MB vs 3.7 MB of dX)
@@ -495,6 +511,11 @@ def main(argv=None) -> int:
                     host_bits, stage2, args, share_from=cases[k])
             for k in sorted(need)
         }
+    for name, vp in form_pins.items():
+        missing = sorted(k for k in need if k not in vp)
+        if missing:
+            raise SystemExit(f"form variant {name}: no pins for {missing}")
+        variants[name] = {k: Case(k, vp[k], cache, args.arch, B, rt, host_bits, stage2, args) for k in sorted(need)}
     for spec in args.routes_variant:
         name, _, path = spec.partition(":")
         vp = load_route_cases(path, args.arch)
@@ -599,6 +620,7 @@ def main(argv=None) -> int:
         print("  " + " " * 11 + "".join(f"{n:>12s}" for n in names))
         out["ab"] = {}
         tot = {n: 0.0 for n in names}
+        tot_dir = {n: {} for n in names}
         for k in keys:
             labels = [variants[n][k].label for n in names]
             # one timing per distinct (label, env) callable; identical pins of a
@@ -610,6 +632,8 @@ def main(argv=None) -> int:
             out["ab"][k]["labels"] = labels
             for n, x in zip(names, t):
                 tot[n] += (x or 0.0) * cases[k].calls
+                d_ = k.split("_")[0]
+                tot_dir[n][d_] = tot_dir[n].get(d_, 0.0) + (x or 0.0) * cases[k].calls
             line = f"  {k:10s}" + "".join(f"{x:12.4f}" for x in t)
             line += "  " + " ".join(f"{(x / t[0] - 1) * 100:+.1f}%" for x in t[1:])
             if len(set(labels)) > 1:
@@ -617,6 +641,9 @@ def main(argv=None) -> int:
             print(line, flush=True)
         print("  calls-weighted sum: " + "  ".join(f"{n} {v:.3f}" for n, v in tot.items()))
         out["ab_sum"] = {n: round(v, 4) for n, v in tot.items()}
+        out["ab_dir"] = {n: {d_: round(v, 4) for d_, v in dd.items()} for n, dd in tot_dir.items()}
+        for n, dd in tot_dir.items():
+            print(f"  {n:12s} per direction: " + "  ".join(f"{d_} {v:.3f}" for d_, v in sorted(dd.items())))
 
     if "energy" in modes:
         # Energy per call of each case's candidates (pins[k]["alts"], pin first):
