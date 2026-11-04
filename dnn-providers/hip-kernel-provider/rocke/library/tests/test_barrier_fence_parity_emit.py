@@ -21,9 +21,11 @@ flavor:
 * with ``rocke_engine`` built, the C++ engine lowers the ``ir`` output to the
   same bytes as ``ll`` (the cross-engine check; skipped without the engine).
 
-There is no ``barrier_fence_emit.c``: the backward family is Python-only (the
-C++-engine waiver in ``dsl_docs/instances/attention_bwd.md``). The C++
-engine's fence emission is unit-tested by
+There is no ``barrier_fence_emit.c``. The C++ twins of the backward builders
+have their own parity pairs (``attention_bwd_*_emit.c``,
+``attention_dense_bwd_*_emit.c``; ``dsl_docs/instances/attention_bwd.md``
+0.3), whose ``.ll``, every fenced barrier included, must match Python byte
+for byte. The C++ engine's fence emission is unit-tested by
 ``platform/tests/core/test_barrier_fence.cpp``.
 """
 
