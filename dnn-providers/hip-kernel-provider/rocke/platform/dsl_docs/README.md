@@ -15,7 +15,8 @@ changes.
 > `ROCKE_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
 > Then follow [`development/onboarding.md`](./development/onboarding.md) to learn
 > to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
-> stack (older ROCm needs `ROCKE_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
+> stack. AUTO queries the loaded COMGR compiler’s LLVM version; select an
+> explicit flavor for offline emission, not from the ROCm release label.
 
 ## Two engines at a glance
 
@@ -80,25 +81,28 @@ New to the DSL? Read in this order:
 17. [`runtime/comgr_and_hipmodule.md`](./runtime/comgr_and_hipmodule.md)
 18. [`runtime/limitations.md`](./runtime/limitations.md)
 19. [`optimization/optimization_runbook.md`](./optimization/optimization_runbook.md) — current evidence-first optimization workflow
-20. [`optimization/runbook_compliance.md`](./optimization/runbook_compliance.md) — code and test anchors for each workflow stage
-21. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
-22. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
-23. [`fusion/overview.md`](./fusion/overview.md)
-24. [`autotune/overview.md`](./autotune/overview.md)
-25. [`development/testing.md`](./development/testing.md)
-26. [`development/extending.md`](./development/extending.md)
-27. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
-28. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
-29. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
-30. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
-31. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
-32. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
-33. [`reference/file_index.md`](./reference/file_index.md)
-34. [`reference/api_index.md`](./reference/api_index.md)
-35. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
-36. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
-37. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
-38. [`reference/glossary.md`](./reference/glossary.md)
+20. [`optimization/scheduler-policy.md`](./optimization/scheduler-policy.md) — typed AMDGPU machine-scheduler tuning
+21. [`optimization/runbook_compliance.md`](./optimization/runbook_compliance.md) — code and test anchors for each workflow stage
+22. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
+23. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
+24. [`fusion/overview.md`](./fusion/overview.md)
+25. [`fusion/adding_fused_kernels.md`](./fusion/adding_fused_kernels.md) — decision guide: when a fusion pays, when it doesn't, how to land one
+26. [`autotune/overview.md`](./autotune/overview.md)
+27. [`development/testing.md`](./development/testing.md)
+28. [`development/extending.md`](./development/extending.md)
+29. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+30. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
+31. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
+32. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
+33. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
+34. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
+35. [`development/debugging_rocgdb.md`](./development/debugging_rocgdb.md) — driving rocgdb: fault → authoring line, workgroup/lane, precise-memory
+36. [`reference/file_index.md`](./reference/file_index.md)
+37. [`reference/api_index.md`](./reference/api_index.md)
+38. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
+39. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
+40. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
+41. [`reference/glossary.md`](./reference/glossary.md)
 
 ## One-Screen Summary
 
@@ -131,7 +135,7 @@ Hard facts:
   `_DATALAYOUT_LLVM22`) rather than by architecture.
 - Wavefront mode is a compile-time capability of the exact gfx target, not a runtime switch.
   gfx942/gfx950 admit wave64 only; gfx1250 admits wave32 only. gfx1151,
-  gfx11-generic, and gfx1201 default to wave32 and can select wave64, but rocKE
+  gfx11-generic, gfx1201, and gfx12-generic default to wave32 and can select wave64, but rocKE
   records one validated mode per target in `ArchTarget`. Matrix-atom availability
   is a separate `MmaCatalog` fact; do not infer legal atoms from wave width alone.
 - Kernel authors usually compose helpers (`TensorDescriptor`, `TensorView`, `TileWindow`, `MfmaAtom`, `WarpGrid`, `CoalescedTileLoader`, `AsyncTileLoader`, `SchedulePolicy`, `SoftwarePipeline`, `DirectEpilogue`, `CShuffleEpilogue`, `block_lds_reduce`, `sweep_row_chunks`).
@@ -139,7 +143,7 @@ Hard facts:
 - Runtime is persistent: `KernelLauncher` loads HSACO once and is called repeatedly. `PipelineLauncher` chains stages on one stream. `WorkspacePool` keeps long-lived torch workspaces alive across launches. `time_launches` is the canonical HIP-event timer.
 - Buffer-resource descriptor DW3 is selected by the exact gfx ISA backend, not
   by a broad accelerator-family label. gfx90a/gfx942/gfx950 use `0x00027000`,
-  while gfx11-generic/gfx1151/gfx1201 use `0x31014000`. The gfx1250 backend
+  while gfx11-generic/gfx1151/gfx12-generic/gfx1201 use `0x31014000`. The gfx1250 backend
   currently inherits `0x31014000` as a bring-up placeholder; its 57-bit
   SRD model still requires target validation. On the established gfx9 and RDNA
   mappings, bounds-checked descriptors make OOB lanes return zero on load and
@@ -154,12 +158,12 @@ The docs in this folder are written against the current code. Run commands
 from the `rocke/platform/` root with the Python interpreter for your ROCm environment:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 

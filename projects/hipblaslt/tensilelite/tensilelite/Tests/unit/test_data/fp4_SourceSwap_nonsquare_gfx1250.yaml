@@ -1,0 +1,93 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# GPU-less (--cpu-only) guard for SourceSwap on a non-square F4 MatrixInstruction.
+# Modeled on test_data/cpu_only.yaml: no ISA/Architecture pinned here (the target
+# arch is supplied at the command line via --gpu-targets gfx1250, which is the
+# only revision that has the fp4 32x16 WMMA opcode -- gfx1250v0 lacks it).
+# Deliberately NO LibraryLogic section: the contract under test is solution
+# generation + MI validation, which fails (or not) inside BenchmarkProblems long
+# before any logic yaml would be analyzed, so running LibraryLogic would only add
+# time and a getCUCount() device probe.
+#
+# HARD-FAIL DESIGN: MatrixInstruction lists ONLY the non-square 32x16 WMMA and
+# SourceSwap ONLY [true]. There is deliberately no 16x16 square and no
+# SourceSwap:[false] fallback. If the SourceSwap M/N validation regresses (the
+# effective-vs-physical MatrixInstM/N contract in validateMIParameters /
+# matrixInstructionToMIParameters), EVERY candidate here is rejected, the group
+# yields 0 valid solutions, and BenchmarkProblems calls printExit -> the run
+# fails loudly. With a square or SS:false candidate present the regression would
+# be silently dropped (the group still produces a winner), so those are omitted
+# on purpose.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  #######################################
+  # TN - MXF4SS Block32, E4M3, 32x16 non-square + SourceSwap only
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: f8
+      DataTypeMXSB: f8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        # Non-square only: 32x16 WMMA. No 16x16 square fallback -> a SourceSwap
+        # M/N validation regression drops every candidate -> 0 valid solutions.
+        - MatrixInstruction:
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  2, 1,  2, 1]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - LocalReadVectorWidth: [32]
+        - ScheduleIterAlg: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
+        - InnerUnroll: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalReadPerMfma: [1.0]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        # SourceSwap only [true]: exercises the transposed non-square path exclusively.
+        - SourceSwap: [true]
+        - WavefrontSize: [32]
+        - AssertSummationElementMultiple: [ 32 ]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]

@@ -3,7 +3,7 @@
 
 #include "hipdnn_backend.h"
 
-#include <iomanip>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -75,8 +75,8 @@ bool printEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
         return false;
     }
 
-    std::cout << "  " << engineName.data() << " (0x" << std::hex << std::uppercase << std::setw(16)
-              << std::setfill('0') << engineId << std::dec << ")\n"
+    std::cout << "  " << engineName.data() << " ("
+              << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId) << ")\n"
               << "    Plugin:  " << pluginName.data() << "\n"
               << "    Version: " << version.data() << "\n"
               << "    Type:    " << type.data() << "\n";

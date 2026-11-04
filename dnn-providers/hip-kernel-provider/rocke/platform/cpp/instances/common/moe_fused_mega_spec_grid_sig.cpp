@@ -19,6 +19,7 @@
  *   spec.kernel_name()                      rocke_moe_fused_mega_kernel_name()
  *   moe_fused_mega_grid(...)                rocke_moe_fused_mega_grid()
  *   moe_fused_mega_signature(spec)          rocke_moe_fused_mega_signature()
+ *   _lds_allocs(spec)                       rocke_moe_fused_mega_lds_allocs()
  *
  * NONE of these touch the IR builder; they are bit-for-bit value producers whose
  * results are later baked into the IR by the build chunk. A byte-identical
@@ -255,6 +256,56 @@ void rocke_moe_fused_mega_down_universal_spec(const rocke_moe_fused_mega_kernel_
     out->tile.warp_tile_m = spec->warp_tile_m;
     out->tile.warp_tile_n = spec->warp_tile_n;
     out->tile.warp_tile_k = spec->warp_tile_k;
+}
+
+/* ===================================================================== *
+ *  _lds_allocs()
+ *
+ *  Python:
+ *      def _lds_allocs(spec) -> Tuple[LdsAlloc, ...]:
+ *          t = spec.gate_up_tile(); td = spec.down_tile()
+ *          eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+ *          return (LdsAlloc("A_smem",      eb, t.tile_m * t.tile_k),
+ *                  LdsAlloc("Bg_smem",     eb, t.tile_n * t.tile_k),
+ *                  LdsAlloc("Bu_smem",     eb, t.tile_n * t.tile_k),
+ *                  LdsAlloc("Hidden_smem", eb, t.tile_m * t.tile_n),
+ *                  LdsAlloc("Bd_smem",     eb, td.tile_n * td.tile_k))
+ *
+ *  t / td / the storage dtype arrive as the caller's already-derived u_gu and
+ *  u_down (u_gu->tile IS gate_up_tile(), u_down->tile IS down_tile()).
+ * ===================================================================== */
+
+void rocke_moe_fused_mega_lds_allocs(const rocke_gemm_universal_spec_t* u_gu,
+                                     const rocke_gemm_universal_spec_t* u_down,
+                                     rocke_mega_lds_alloc_t out[ROCKE_MOE_MEGA_LDS_ALLOCS])
+{
+    const rocke_gemm_tile_spec_t* t;
+    const rocke_gemm_tile_spec_t* td;
+    int eb;
+
+    if(u_gu == NULL || u_down == NULL || out == NULL)
+    {
+        return;
+    }
+    t = &u_gu->tile;
+    td = &u_down->tile;
+    eb = rocke_mega_lds_elem_bytes(rocke_moe_storage_dtype(u_gu));
+
+    out[0].name = "A_smem";
+    out[0].elem_bytes = eb;
+    out[0].elem_count = t->tile_m * t->tile_k;
+    out[1].name = "Bg_smem";
+    out[1].elem_bytes = eb;
+    out[1].elem_count = t->tile_n * t->tile_k;
+    out[2].name = "Bu_smem";
+    out[2].elem_bytes = eb;
+    out[2].elem_count = t->tile_n * t->tile_k;
+    out[3].name = "Hidden_smem";
+    out[3].elem_bytes = eb;
+    out[3].elem_count = t->tile_m * t->tile_n;
+    out[4].name = "Bd_smem";
+    out[4].elem_bytes = eb;
+    out[4].elem_count = td->tile_n * td->tile_k;
 }
 
 /* ===================================================================== *

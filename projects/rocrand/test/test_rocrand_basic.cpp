@@ -87,18 +87,8 @@ TEST_P(rocrand_basic_tests, rocrand_initialize_generator_test)
     ROCRAND_CHECK(rocrand_destroy_generator(g));
 }
 
-// The default INSTANTIATE_TEST_SUITE_P naming uses the parameter's plain index
-// in rng_types, which shifts whenever a generator is added to or removed from
-// the array. Give the case targeted by test filters (e.g. test_categories.yaml)
-// a fixed, type-derived name so those filters stay valid across reordering.
+// Name cases by RNG type (not array index) so filters survive reordering.
 INSTANTIATE_TEST_SUITE_P(rocrand_basic_tests,
                          rocrand_basic_tests,
                          ::testing::ValuesIn(rng_types),
-                         [](const ::testing::TestParamInfo<rocrand_rng_type>& info)
-                         {
-                             if(info.param == ROCRAND_RNG_QUASI_SOBOL32)
-                             {
-                                 return std::string("Sobol32");
-                             }
-                             return std::to_string(info.index);
-                         });
+                         rocrand_rng_type_test_name);

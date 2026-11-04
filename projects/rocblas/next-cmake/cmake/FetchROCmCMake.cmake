@@ -12,8 +12,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG develop
-    GIT_SHALLOW TRUE)
+    GIT_TAG 55b13e6fdf0a6eafc48c073633e7ea50b19028e1)
 
   FetchContent_GetProperties(rocm-cmake)
   if(NOT rocm-cmake_POPULATED)

@@ -295,7 +295,7 @@ endfunction()
 #       into whichever suites actually get registered later.
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS;ENVIRONMENT" ${ARGN})
+    cmake_parse_arguments(ARG "SKIP_NAME_VALIDATION;EXPLICIT_REGISTRATION" "" "LABELS;ENVIRONMENT" ${ARGN})
     set(EXTRA_LABELS ${ARG_LABELS})
     set(TARGET_EXE ${TARGET})
 
@@ -305,18 +305,33 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     message(STATUS "Registering ${APPEND_FUNCTION_SUFFIX} test target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
 
-    set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
-        CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
-    )
-    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
-        CACHE INTERNAL "Accumulated global check executable paths" FORCE
-    )
+    # SKIP_NAME_VALIDATION keeps a target out of <prefix>_test_executables.txt, so
+    # the test-name validator never enumerates it. Reserved for binaries whose
+    # GTest names are derived from data rather than written by hand -- the naming
+    # convention exists to keep hand-written C++ test names consistent, and a name
+    # generated from a bundle's directory path cannot satisfy it without renaming
+    # the data.
+    if(NOT ARG_SKIP_NAME_VALIDATION)
+        set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
+            CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
+        )
+        set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
+            CACHE INTERNAL "Accumulated global check executable paths" FORCE
+        )
+    endif()
 
     set_target_properties(
         ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
 
-    set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_TEST_TARGETS ${TARGET})
+    # The installed-target list, which install_provider_ctest_files() turns into one bare
+    # add_test(<target> "../<target>") apiece. That is the same unfiltered invocation the
+    # raw add_test() below would be, just in the installed tree, so EXPLICIT_REGISTRATION
+    # has to withhold both or the entry it suppresses in the build tree reappears in the
+    # artifact.
+    if(NOT ARG_EXPLICIT_REGISTRATION)
+        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_TEST_TARGETS ${TARGET})
+    endif()
 
     set_target_properties(
         ${TARGET}
@@ -356,7 +371,10 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # environment instead so the caller can forward it explicitly to
     # whichever suites apply_test_category_labels()/apply_ctest_category_labels()
     # actually creates.
-    if(DNN_PROVIDER_TEST_CATEGORY_YAMLS)
+    #
+    # EXPLICIT_REGISTRATION returns here for the same reason: its binary has no correct
+    # bare invocation, so an unfiltered run proves nothing and fails or skips wholesale.
+    if(DNN_PROVIDER_TEST_CATEGORY_YAMLS OR ARG_EXPLICIT_REGISTRATION)
         set(${TARGET}_TEST_ENVIRONMENT "${_MERGED_TEST_ENVIRONMENT}" PARENT_SCOPE)
         return()
     endif()
@@ -389,15 +407,30 @@ endfunction()
 #
 # Usage:
 #   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...]
-#                         [ENVIRONMENT KEY=VALUE ...])
+#                         [ENVIRONMENT KEY=VALUE ...] [SKIP_NAME_VALIDATION]
+#                         [EXPLICIT_REGISTRATION])
 #
 # ENVIRONMENT is forwarded to _add_test_target_internal(); see its
 # ENVIRONMENT parameter doc for how it is applied and, in YAML-categorized
-# builds, published back as <TARGET>_TEST_ENVIRONMENT.
+# builds, published back as <TARGET>_TEST_ENVIRONMENT. SKIP_NAME_VALIDATION is
+# forwarded likewise; see its comment there for when it is appropriate.
+#
+# EXPLICIT_REGISTRATION withholds the unfiltered add_test() for a binary that has no
+# correct bare invocation, leaving its entries to whichever caller supplies the state
+# they need. The target still installs, keeps its RPATH and Windows DLL staging, and
+# joins the check-target lifecycle. <TARGET>_TEST_ENVIRONMENT is published in this mode
+# too, so the caller can forward the ambient environment onto the entries it registers.
 # ~~~
 function(add_unit_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS;ENVIRONMENT" ${ARGN})
-    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} LABELS ${ARG_LABELS} ENVIRONMENT ${ARG_ENVIRONMENT})
+    cmake_parse_arguments(ARG "SKIP_NAME_VALIDATION;EXPLICIT_REGISTRATION" "" "LABELS;ENVIRONMENT" ${ARGN})
+    if(ARG_SKIP_NAME_VALIDATION)
+        set(SKIP_NAME_VALIDATION_ARG SKIP_NAME_VALIDATION)
+    endif()
+    if(ARG_EXPLICIT_REGISTRATION)
+        set(_explicit EXPLICIT_REGISTRATION)
+    endif()
+    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} ${_explicit} LABELS ${ARG_LABELS}
+        ENVIRONMENT ${ARG_ENVIRONMENT} ${SKIP_NAME_VALIDATION_ARG})
     if(DEFINED ${TARGET}_TEST_ENVIRONMENT)
         set(${TARGET}_TEST_ENVIRONMENT "${${TARGET}_TEST_ENVIRONMENT}" PARENT_SCOPE)
     endif()
@@ -408,15 +441,20 @@ endfunction()
 #
 # Usage:
 #   add_integration_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...]
-#                                [ENVIRONMENT KEY=VALUE ...])
+#                                [ENVIRONMENT KEY=VALUE ...] [SKIP_NAME_VALIDATION])
 #
 # ENVIRONMENT is forwarded to _add_test_target_internal(); see its
 # ENVIRONMENT parameter doc for how it is applied and, in YAML-categorized
-# builds, published back as <TARGET>_TEST_ENVIRONMENT.
+# builds, published back as <TARGET>_TEST_ENVIRONMENT. SKIP_NAME_VALIDATION is
+# forwarded likewise; see its comment there for when it is appropriate.
 # ~~~
 function(add_integration_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS;ENVIRONMENT" ${ARGN})
-    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} LABELS ${ARG_LABELS} ENVIRONMENT ${ARG_ENVIRONMENT})
+    cmake_parse_arguments(ARG "SKIP_NAME_VALIDATION" "" "LABELS;ENVIRONMENT" ${ARGN})
+    if(ARG_SKIP_NAME_VALIDATION)
+        set(SKIP_NAME_VALIDATION_ARG SKIP_NAME_VALIDATION)
+    endif()
+    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} LABELS ${ARG_LABELS}
+        ENVIRONMENT ${ARG_ENVIRONMENT} ${SKIP_NAME_VALIDATION_ARG})
     if(DEFINED ${TARGET}_TEST_ENVIRONMENT)
         set(${TARGET}_TEST_ENVIRONMENT "${${TARGET}_TEST_ENVIRONMENT}" PARENT_SCOPE)
     endif()

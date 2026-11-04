@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <sstream>
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -267,6 +268,71 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     } while(0)
 #endif
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
+
+// Record a failure without throwing, so these are safe in a destructor.
+// Inline so GOOGLE_TEST is taken from the including translation unit.
+inline void log_hip_error(const char* call, hipError_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
+#else
+    fprintf(
+        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
+#endif
+}
+
+inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
+        << call << " failed: " << hipsparseStatusToString(status);
+#else
+    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
+#endif
+}
+
+[[noreturn]] inline void throw_hip_error(const char* call, hipError_t status)
+{
+    std::ostringstream message;
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
+
+[[noreturn]] inline void throw_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    std::ostringstream message;
+    message << call << " failed: " << hipsparseStatusToString(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
+
+// Constructors throw so a failed create cannot be used by the rest of the test.
+// Destructors record a failed destroy without throwing, so teardown stays safe
+// while another exception is unwinding.
+inline void throw_if_hip_error(const char* call, hipError_t status)
+{
+    if(status != hipSuccess)
+    {
+        throw_hip_error(call, status);
+    }
+}
+
+inline void throw_if_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        throw_hipsparse_error(call, status);
+    }
+}
+
+inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        log_hipsparse_error(call, status);
+    }
+}
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
@@ -7614,11 +7680,13 @@ extern "C" {
 void query_version(char* version);
 
 /* ============================================================================================ */
-/*  device query and print out their ID and name */
-int query_device_property();
+/*  device query and print out their ID and name.
+    Writes the device count and returns the HIP status.
+    A property-query failure is fatal only for device_id. */
+hipError_t query_device_property(int* device_count, int device_id);
 
-/*  set current device to device_id */
-void set_device(int device_id);
+/*  set current device to device_id; returns the HIP status */
+hipError_t set_device(int device_id);
 
 /* ============================================================================================ */
 /*  timing: HIP only provides very limited timers function clock() and not general;
@@ -7918,6 +7986,71 @@ void host_sddmm_csr(J                    C_m,
             }
             csr_val[j] = testing_mult(csr_val[j], beta) + testing_mult(alpha, sum);
         }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host batched sddmm_csr (sampled dense-dense matrix multiplication - CSR format).*/
+template <typename I, typename J, typename T>
+void host_sddmm_csr_batched(J                    C_m,
+                            J                    C_n,
+                            J                    k,
+                            I                    nnz,
+                            T                    alpha,
+                            const T*             A,
+                            int64_t              lda,
+                            hipsparseOrder_t     orderA,
+                            hipsparseOperation_t transA,
+                            J                    batch_count_A,
+                            int64_t              batch_stride_A,
+                            const T*             B,
+                            int64_t              ldb,
+                            hipsparseOrder_t     orderB,
+                            hipsparseOperation_t transB,
+                            J                    batch_count_B,
+                            int64_t              batch_stride_B,
+                            T                    beta,
+                            T*                   csr_val,
+                            const I*             csr_row_ptr,
+                            const J*             csr_col_ind,
+                            J                    batch_count_C,
+                            int64_t              offsets_batch_stride_C,
+                            int64_t              columns_values_batch_stride_C,
+                            hipsparseIndexBase_t idx_base)
+{
+    const bool Ci_A_B_Ci   = (batch_count_A == 1 && batch_count_B == 1);
+    const bool Ci_A_Bi_Ci  = (batch_count_A == 1 && batch_count_B == batch_count_C);
+    const bool Ci_Ai_B_Ci  = (batch_count_B == 1 && batch_count_A == batch_count_C);
+    const bool Ci_Ai_Bi_Ci = (batch_count_A == batch_count_C && batch_count_A == batch_count_B);
+
+    if(!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci)
+    {
+        return;
+    }
+
+    for(J i = 0; i < batch_count_C; i++)
+    {
+        const int64_t offset_A = (batch_count_A == 1) ? 0 : (batch_stride_A * i);
+        const int64_t offset_B = (batch_count_B == 1) ? 0 : (batch_stride_B * i);
+
+        host_sddmm_csr(C_m,
+                       C_n,
+                       k,
+                       nnz,
+                       alpha,
+                       A + offset_A,
+                       lda,
+                       orderA,
+                       transA,
+                       B + offset_B,
+                       ldb,
+                       orderB,
+                       transB,
+                       beta,
+                       csr_val + columns_values_batch_stride_C * i,
+                       csr_row_ptr + offsets_batch_stride_C * i,
+                       csr_col_ind + columns_values_batch_stride_C * i,
+                       idx_base);
     }
 }
 

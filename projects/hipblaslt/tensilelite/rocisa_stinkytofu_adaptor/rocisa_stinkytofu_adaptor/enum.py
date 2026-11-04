@@ -22,7 +22,7 @@ _DataTypeEnum_values = [
     "Int8x4", "Int32", "BFloat16", "Int8", "Int64", "XFloat32",
     "Float8_fnuz", "BFloat8_fnuz", "Float8BFloat8_fnuz", "BFloat8Float8_fnuz",
     "Float8", "BFloat8", "Float8BFloat8", "BFloat8Float8",
-    "Float6", "BFloat6", "Float4", "E8", "E5M3",
+    "Float6", "BFloat6", "Float4", "E8", "E5M3", "Int4",
 ]
 DataTypeEnum = make_dummy_enum(f"{_P}.DataTypeEnum", _DataTypeEnum_values)
 export_enum_values(globals(), DataTypeEnum, _DataTypeEnum_values)
@@ -123,8 +123,9 @@ ArgType = make_dummy_enum(f"{_P}.ArgType", _ArgType_values)
 export_enum_values(globals(), ArgType, _ArgType_values)
 
 
-_HighBitSel_values = ["NONE", "LOW", "HIGH"]
-HighBitSel = make_dummy_enum(f"{_P}.HighBitSel", _HighBitSel_values)
+_HighBitSel_members = [("NONE", -1), ("LOW", 0), ("HIGH", 1)]
+_HighBitSel_values = [name for name, _ in _HighBitSel_members]
+HighBitSel = make_bound_enum(f"{_P}.HighBitSel", _HighBitSel_members)
 export_enum_values(globals(), HighBitSel, _HighBitSel_values)
 
 
@@ -136,3 +137,13 @@ export_enum_values(globals(), RoundType, _RoundType_values)
 _SaturateCastType_values = ["NORMAL", "DO_NOTHING", "UPPER", "LOWER"]
 SaturateCastType = make_dummy_enum(f"{_P}.SaturateCastType", _SaturateCastType_values)
 export_enum_values(globals(), SaturateCastType, _SaturateCastType_values)
+
+
+# Not bound in rocisa/src/enum.cpp, but SDelayAlu's nanobind ctor takes these
+# C++ enums (enum.hpp). Exposed here so the adaptor SDelayAlu shim can use
+# the same names / integer values as rocisa::DelayALUType / DelayALUSkip.
+DelayALUType = make_dummy_enum(f"{_P}.DelayALUType", ["VALU", "TRANS", "SALU", "OTHER"])
+DelayALUSkip = make_dummy_enum(
+    f"{_P}.DelayALUSkip",
+    ["SAME", "NEXT", "SKIP_1", "SKIP_2", "SKIP_3", "SKIP_4"],
+)

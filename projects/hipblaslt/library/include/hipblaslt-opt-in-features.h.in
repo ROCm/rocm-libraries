@@ -1,0 +1,10 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+#ifndef _HIPBLASLT_OPT_IN_FEATURES_H_
+#define _HIPBLASLT_OPT_IN_FEATURES_H_
+
+#cmakedefine01 HIPBLASLT_HAS_GEMM_A2A_FUSION
+
+#endif /* _HIPBLASLT_OPT_IN_FEATURES_H_ */

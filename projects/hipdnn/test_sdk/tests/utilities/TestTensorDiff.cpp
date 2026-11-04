@@ -1,15 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "Helpers.hpp"
+
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
+#include <limits>
 #include <sstream>
+#include <string>
+#include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
+using hipdnn_data_sdk::helpers::createRaggedSdpaTensor;
+using hipdnn_data_sdk::helpers::RAGGED_SDPA_DIMS;
 
 // =================================================================================================
 // computeTensorDiff
@@ -243,4 +251,95 @@ TEST(TestValidateAndReport, ShapeMismatchPrintsShapeError)
 
     EXPECT_FALSE(result);
     EXPECT_NE(oss.str().find("shape mismatch"), std::string::npos);
+}
+
+// =================================================================================================
+// Ragged tensors
+// =================================================================================================
+
+template <typename T>
+class RaggedTensorDiff : public ::testing::Test
+{
+};
+
+using RaggedTensorDiffTypes
+    = ::testing::Types<float, hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::bfloat16>;
+TYPED_TEST_SUITE(RaggedTensorDiff, RaggedTensorDiffTypes, );
+
+TYPED_TEST(RaggedTensorDiff, IdenticalTensorsCountInBlockElements)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+
+    EXPECT_EQ(summary.totalElements, 20u);
+    EXPECT_EQ(summary.mismatchCount, 0u);
+}
+
+TYPED_TEST(RaggedTensorDiff, InBlockNaNReferenceIsExcluded)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f);
+    ref.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 1, 1, 2, 1);
+    impl.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+
+    EXPECT_EQ(summary.totalElements, 19u);
+    EXPECT_EQ(summary.mismatchCount, 0u);
+}
+
+TYPED_TEST(RaggedTensorDiff, ReportsInBlockDifference)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f);
+    impl.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+
+    EXPECT_EQ(summary.totalElements, 20u);
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 1.5f);
+    EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1, 1, 2, 1}));
+}
+
+TYPED_TEST(RaggedTensorDiff, MismatchedLayoutsReturnEmptySummary)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f, {0, 3, 5});
+
+    auto summary = computeTensorDiff<TypeParam>(ref, impl, 0.0f, 0.0f);
+
+    EXPECT_EQ(summary.totalElements, 0u);
+    EXPECT_EQ(summary.mismatchCount, 0u);
+}
+
+TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatch)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f, {0, 3, 5});
+    const CpuFpReferenceValidation<TypeParam> validator;
+
+    std::ostringstream oss;
+    const bool result = validateAndReport<TypeParam>(oss, "o", validator, ref, impl, 0.0f, 0.0f);
+
+    EXPECT_FALSE(result);
+    EXPECT_NE(oss.str().find("ragged layout mismatch"), std::string::npos) << oss.str();
+}
+
+TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatchAgainstDense)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    Tensor<TypeParam> impl(RAGGED_SDPA_DIMS);
+    impl.fillTensorWithValue(0.5f);
+    const CpuFpReferenceValidation<TypeParam> validator;
+
+    std::ostringstream oss;
+    const bool result = validateAndReport<TypeParam>(oss, "o", validator, ref, impl, 0.0f, 0.0f);
+
+    EXPECT_FALSE(result);
+    const std::string output = oss.str();
+    EXPECT_NE(output.find("ragged layout mismatch"), std::string::npos) << output;
+    EXPECT_NE(output.find("implementation dense"), std::string::npos) << output;
 }

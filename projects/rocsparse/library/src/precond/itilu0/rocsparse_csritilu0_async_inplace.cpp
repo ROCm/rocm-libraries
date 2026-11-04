@@ -34,6 +34,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0_driver.hpp"
 #include "rocsparse_csritilu0x_driver.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 
 namespace rocsparse
@@ -72,22 +73,26 @@ namespace rocsparse
     }
 
     template <bool RESIDUAL, typename T, typename I, typename J>
-    ROCSPARSE_DEVICE_ILF void device_calculate(const J i,
-                                               const J j,
-                                               const T* __restrict__ x_,
-                                               T* __restrict__ y_,
+    ROCSPARSE_DEVICE_ILF void
+        device_calculate(const J i,
+                         const J j,
+                         const T* __restrict__ x_,
+                         // NOTE: y_ and ilu0_ intentionally alias (y_ == ilu0_ + k)
+                         // for the in-place iteration, so neither may be marked
+                         // __restrict__.
+                         T* y_,
 
-                                               const I* __restrict__ lptr_begin_,
-                                               const I* __restrict__ lptr_end_,
-                                               const J* __restrict__ lind_,
+                         const I* __restrict__ lptr_begin_,
+                         const I* __restrict__ lptr_end_,
+                         const J* __restrict__ lind_,
 
-                                               const I* __restrict__ uptr_begin_,
-                                               const I* __restrict__ uptr_end_,
-                                               const J* __restrict__ uind_,
-                                               const I* __restrict__ uperm_,
-                                               const rocsparse_index_base base_,
-                                               const T* __restrict__ ilu0_,
-                                               floating_data_t<T>* __restrict__ nrm_)
+                         const I* __restrict__ uptr_begin_,
+                         const I* __restrict__ uptr_end_,
+                         const J* __restrict__ uind_,
+                         const I* __restrict__ uperm_,
+                         const rocsparse_index_base base_,
+                         const T*                   ilu0_,
+                         floating_data_t<T>* __restrict__ nrm_)
     {
         T val = *x_;
 
@@ -183,7 +188,7 @@ namespace rocsparse
                           const I* __restrict__ uptr_end_,
                           const J* __restrict__ uind_,
                           const I* __restrict__ uperm_,
-                          T* __restrict__ ilu0_,
+                          T*                        ilu0_,
                           floating_data_t<T>*       nrm_,
                           const floating_data_t<T>* nrm0_)
     {
@@ -346,7 +351,7 @@ namespace rocsparse
                               const I* __restrict__ uptr_end_,
                               const J* __restrict__ uind_,
                               const I* __restrict__ uperm_,
-                              T* __restrict__ ilu0_,
+                              T*                        ilu0_,
                               floating_data_t<T>*       nrm_,
                               const floating_data_t<T>* nrm0_)
     {
@@ -459,7 +464,7 @@ namespace rocsparse
                                           const I* __restrict__ uptr_end_,
                                           const J* __restrict__ uind_,
                                           const I* __restrict__ uperm_,
-                                          T* __restrict__ ilu0_)
+                                          T* ilu0_)
         {
             hipStream_t stream         = handle_->stream;
             const bool  use_coo_format = (options_ & rocsparse_itilu0_option_coo_format) > 0;
@@ -552,7 +557,7 @@ namespace rocsparse
                                     const J* __restrict__ uind_,
                                     const I* __restrict__ uperm_,
 
-                                    T* __restrict__ ilu0_,
+                                    T*     ilu0_,
                                     size_t buffer_size_,
                                     void* __restrict__ buffer_)
         {
@@ -768,9 +773,9 @@ namespace rocsparse
     struct buffer_layout_inplace_t
     {
     public:
-        static size_t get_sizeof_double()
+        static size_t get_header_size()
         {
-            return ((sizeof(buffer_layout_inplace_t) - 1) / sizeof(double) + 1);
+            return align_size<buffer_layout_inplace_t>(1);
         }
 
         typedef enum enum_ivalue_type
@@ -851,11 +856,6 @@ namespace rocsparse
                 = (I*)rocsparse::assign_b<char>(buffer_size_, buffer_, align_size<I>(nitems_));
             m_isizes[v] = sizeof(I) * nitems_;
         }
-        template <typename T>
-        static size_t align_size(size_t nelms_)
-        {
-            return ((sizeof(T) * nelms_ + sizeof(double) - 1) / sizeof(double)) * sizeof(double);
-        }
 
     public:
         template <typename I, typename J>
@@ -870,8 +870,7 @@ namespace rocsparse
                 buffer_size_ += align_size<J>(nnz_);
             }
 
-            const size_t sizeof_double = get_sizeof_double();
-            buffer_size_ += sizeof_double * sizeof(double);
+            buffer_size_ += get_header_size();
         }
 
         template <typename I, typename J>
@@ -883,11 +882,11 @@ namespace rocsparse
                   void* __restrict__& buffer_,
                   bool                csrcoo_)
         {
-            const size_t parent_sizeof_double = get_sizeof_double();
-            m_buffer_size = buffer_size_ - parent_sizeof_double * sizeof(double);
-            m_buffer      = (void*)(((double*)buffer_) + parent_sizeof_double);
-            buffer_size_  = m_buffer_size;
-            buffer_       = m_buffer;
+            const size_t header_size = get_header_size();
+            m_buffer_size            = buffer_size_ - header_size;
+            m_buffer                 = (void*)(((char*)buffer_) + header_size);
+            buffer_size_             = m_buffer_size;
+            buffer_                  = m_buffer;
             if(csrcoo_)
             {
                 this->set<J>(coo_row_ind, buffer_size_, buffer_, nnz_);
@@ -912,6 +911,21 @@ namespace rocsparse
         void*  m_jpointers[1]{};
         void*  m_tpointers[2]{};
     };
+
+    //
+    // Number of BLOCKSIZE-thread blocks covering target_size. The kernels below
+    // do not grid-stride, so a count the grid.x dispatch cannot run is an error
+    // rather than a silently narrowed launch.
+    //
+    template <uint32_t BLOCKSIZE, typename J>
+    static uint32_t grid_blocks_x(J target_size_)
+    {
+        const int64_t nblocks = rocsparse::ceil_div(target_size_, BLOCKSIZE);
+        THROW_IF_ROCSPARSE_ERROR((nblocks > rocsparse::dispatch_limit_x(BLOCKSIZE))
+                                     ? rocsparse_status_invalid_size
+                                     : rocsparse_status_success);
+        return static_cast<uint32_t>(nblocks);
+    }
 
     //
     // Calculate the array lptr_end.
@@ -961,7 +975,7 @@ namespace rocsparse
                                                  hipStream_t stream_,
                                                  P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1019,7 +1033,7 @@ namespace rocsparse
     static void
         kernel_compute_coo_dispatch(J target_size_, int wavefront_size, hipStream_t stream_, P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1079,7 +1093,7 @@ namespace rocsparse
                                                     hipStream_t stream_,
                                                     P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1164,7 +1178,7 @@ namespace rocsparse
                                              hipStream_t stream_,
                                              P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1571,7 +1585,7 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
             layout_t layout;
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 &layout, buffer_, sizeof(layout), hipMemcpyDeviceToHost, handle_->stream));
-            buffer_ = (void*)(((double*)buffer_) + layout_t::get_sizeof_double());
+            buffer_ = (void*)(((char*)buffer_) + layout_t::get_header_size());
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             //

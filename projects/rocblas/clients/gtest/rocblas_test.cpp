@@ -96,7 +96,8 @@ void stream_pool::reset(size_t numDevices, size_t numStreams)
 
     m_streams.clear();
 
-    for(size_t i = 0; i < (numDevices > 1 ? numDevices : 1); ++i)
+    size_t devices = numDevices > 1 ? numDevices : 1;
+    for(size_t i = 0; i < devices; ++i)
     {
         if(numDevices)
             CHECK_HIP_ERROR(hipSetDevice(i));
@@ -121,6 +122,7 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
 {
     size_t devices = numDevices > 1 ? numDevices : 1;
     size_t streams = numStreams > 1 ? numStreams : 1;
+
     for(size_t i = 0; i < devices; ++i)
     {
         CHECK_HIP_ERROR(hipSetDevice(i));
@@ -141,17 +143,19 @@ void launch_test_on_threads(std::function<void()> test,
                             size_t                numStreams,
                             size_t                numDevices)
 {
-    auto promise = std::make_unique<std::promise<void>[]>(numThreads);
-    auto future  = std::make_unique<std::future<void>[]>(numThreads);
+    size_t threads = numThreads > 1 ? numThreads : 1;
 
-    for(size_t i = 0; i < numThreads; ++i)
+    auto promise = std::make_unique<std::promise<void>[]>(threads);
+    auto future  = std::make_unique<std::future<void>[]>(threads);
+
+    for(size_t i = 0; i < threads; ++i)
         future[i] = promise[i].get_future();
 
-    for(size_t i = 0; i < numThreads; ++i)
+    for(size_t i = 0; i < threads; ++i)
         g_thread_pool.submit([=] { launch_test_on_streams(test, numStreams, numDevices); },
                              std::move(promise[i]));
 
-    for(size_t i = 0; i < numThreads; ++i)
+    for(size_t i = 0; i < threads; ++i)
         future[i].get(); //Wait for tasks to complete
 }
 

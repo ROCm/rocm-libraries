@@ -1,7 +1,9 @@
 # RFC: cuDNN shim for hipDNN
 
-- **Status**: Accepted
 - **Authors**: Mitch Ousdahl
+- **Status**: In progress
+- **Status notes**: The shim headers live in `frontend/include/hipdnn_compatibility/cudnn/` behind `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`), with graph nodes, SDPA, heuristics, knobs, notes, and logging (#8238, #9361, #9738, #10226, #11388). The upstream sample corpus builds in CI (#12124). PyTorch validation, the overhead gate, and the `docs/cudnn-shim.md` user guide are not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -133,9 +135,12 @@ The pinned upstream reference is cuDNN FE **v1.24.0**, verified in
 
 ### 4.1 Layout and packaging
 
-The shim will primarily reside under
-`projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/` and be exposed as an
-exported header-only CMake target. The objects will be namespaced
+The shim resides under
+`projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/`. The headers
+are part of the `hipdnn_frontend` include tree. They install only when
+`HIPDNN_ENABLE_CUDNN_COMPATIBILITY` is on, and the package exports them as
+the optional `cudnn_compatibility` component of `hipdnn_frontend`. There is
+no separate shim CMake target. The objects will be namespaced
 `hipdnn_frontend::compatibility::cudnn_frontend` (referred to below as
 `<shim_ns>`), mirroring upstream's `cudnn_frontend` namespace as closely as
 possible so a consumer can write `namespace cudnn_frontend =
@@ -144,42 +149,45 @@ hipdnn_frontend::compatibility::cudnn_frontend;` and have nested namespaces
 internal details will be placed in a `detail/` subdirectory and additionally
 namespaced as `<shim_ns>::detail`.
 
-Proposed source layout (filenames mirror upstream cuDNN FE exactly, all
-`.h` per §5.1):
+Source layout (filenames mirror upstream cuDNN FE, all `.h` per §5.1):
 
 ```
 projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/
-    cudnn.h                         # Stub: v9-required C-API types only (see §4.7)
+    cudnn.h                         # Stub: v9-required C-API types and entry points (see §4.7)
+    cudnn_status.h                  # cudnnStatus_t
+    cudnn_runtime_version.h
     cudnn_frontend.h                # Umbrella; matches upstream filename
+    cudnn_frontend_utils.h
     cudnn_frontend_version.h
-    cuda_runtime_compat.h           # OPT-IN; not auto-included
     cudnn_frontend/                 # Mirrors upstream include/cudnn_frontend/
         graph_helpers.h
         graph_interface.h
         graph_properties.h
-        node_interface.h
-        plans.h
-        ...
+        sdpa_attributes.h
     detail/                         # Shim-internal; namespaced <shim_ns>::detail
-        type_mapping.h              # cuDNN enum/struct ↔ hipDNN mapping
-        status_translation.h        # cudnnStatus_t ↔ hipdnnStatus_t
+        status_translation.h        # toCudnnStatus / toHipdnnStatus
         graph_wrapper.h             # Wraps hipdnn_frontend::graph::Graph
-        tensor_wrapper.h
-        node_wrappers/...
-        handle_wrapper.h
+        knob_wrapper.h
+        engine_filters.h
+        note_triage.h
+        error_recorder.h
         logging_bridge.h
+        node_wrappers/
+            unsupported_nodes.h
 ```
+
+`cudnnHandle_t` in `cudnn.h` is an alias of `hipdnnHandle_t`.
 
 Per the aliasing-first strategy (§4.3.1), much of the `detail/` wrapper set
 above is expected to be **small**: most public headers
 (`cudnn_frontend/*.h`) reduce to thin umbrellas of `using` declarations
 that re-export 1:1 hipDNN types, and `detail/` carries real code only for
-the composition wrapper (`graph_wrapper.h`), the residual non-aliasable
-enum mappings (`type_mapping.h`), and the error/logging bridges. The
+the composition wrapper (`graph_wrapper.h`), status translation, and the
+error/logging bridges. The
 `node_wrappers/` directory holds Tier-2 error-stubs and Tier-3 composition
 wrappers only — not one file per node.
 
-A separate, **opt-in** header,
+Not yet built. A separate, **opt-in** header,
 `<hipdnn_compatibility/cudnn/cuda_runtime_compat.h>`, will provide `#define`
 overrides for the small fixed set of CUDA runtime symbols that frequently
 appear in cuDNN-consuming code and have direct HIP equivalents:
@@ -304,11 +312,11 @@ and translate. A value that hipDNN's enum carries but no engine yet supports
 is a *runtime* `GRAPH_NOT_SUPPORTED` at build time (§4.4.2), not an
 enum-mapping concern.
 
-Bidirectional `static constexpr` mapping (`to_hipdnn()` / `from_hipdnn()` in
-`detail/type_mapping.h`) is therefore needed only for the **C-API enum
-family** — the `<cudnn.h>` stub types (`cudnnDataType_t`, etc., §4.7) that
-map to their hipDNN C equivalents — not for the FE-namespace enums, which are
-aliases.
+A named mapping function is therefore needed only for the **C-API enum
+family** — the `<cudnn.h>` stub types (§4.7) that map to their hipDNN C
+equivalents — not for the FE-namespace enums, which are aliases. Status
+codes use `toCudnnStatus()` / `toHipdnnStatus()` in
+`detail/status_translation.h`.
 
 The shim **never** `static_cast`s between the cuDNN and hipDNN enum families.
 Even where the integer values happen to coincide, the equivalence is only
@@ -531,22 +539,24 @@ separately.
 **Notes — per-note triage, not blanket no-op.** A blanket "accept and
 ignore" is unsafe: silently running without a requested filter can be
 *wrong*, not merely slower. Each `NumericalNote_t` / `BehaviorNote_t` is
-triaged into one of three handlings:
+triaged into one of four handlings:
 
 - **Map to engine capability** — when hipDNN can honor the constraint
-  through its engine/knob system. The deterministic ("non-deterministic"
-  filter) case is the worked example: now that the note system exists,
-  hipDNN can likely express it, and the shim should wire it through.
+  through its engine/knob system. Deterministic
+  (`deselect_numeric_notes({NONDETERMINISTIC})`) maps to engines that
+  positively claim determinism; error if no engine survives.
 - **Warn and ignore** — for notes that are advisory and safe to drop
-  (logged at WARN on first use).
-- **Error** — for correctness-critical notes hipDNN cannot honor. If a user
-  requests deterministic behavior and the shim cannot guarantee it, it is
-  **wrong** to run anyway; the shim must error rather than silently produce
-  non-deterministic results. (Recorded-error mechanism, §4.4.2.)
+  (logged at WARN).
+- **Error** — for correctness-critical notes hipDNN cannot honor, e.g.
+  deselecting `REDUCED_PRECISION_REDUCTION` or selecting `STRICT_NAN_PROP`.
+  Running anyway could silently violate the caller's constraint, so the
+  shim errors instead. (Recorded-error mechanism, §4.4.2.)
+- **No-op** — `NOT_SET`, which requests nothing.
 
-The per-note classification table lives in
+The per-note classification table is maintained in
+[KNOWN_DIVERGENCES.md — Note filters](../KNOWN_DIVERGENCES.md#note-filters);
 [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)
-and must be reviewed note-by-note before Phase 4 lands.
+records the classification principle.
 
 **Resource caps.** The workspace-size cap is enforced post-hoc against
 hipDNN's existing `get_workspace_size()` (and the workspace *knobs* need a
@@ -556,8 +566,7 @@ the shim **rejects a non-zero `deselect_shared_mem_greater_than`** rather
 than silently ignoring it (Reference §4).
 
 For the full upstream method enumeration (with `graph_interface.h` line
-numbers), behaviour table, and the open question about hipDNN-side
-metadata extensions, see
+numbers) and the open question about hipDNN-side metadata extensions, see
 [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api).
 
 ### 4.6 Error handling and logging
@@ -635,11 +644,9 @@ version checks — and are needed to build and run the cuDNN-mirrored samples
   with (§4.8).
 
 cuDNN FE also provides a `create_cudnn_handle()` helper that calls directly
-into the handle API; the shim re-exports an equivalent so sample code that
-uses it works unchanged. (Implementation note / open item: confirm which of
-these hipDNN C-API entry points already exist to forward to, and add any
-that are missing. The full cuDNN C library beyond this set — convolution
-descriptor APIs, etc. — remains out of scope.)
+into the handle API; the shim provides an equivalent in `cudnn.h` so sample
+code that uses it works unchanged. The full cuDNN C library beyond this set
+— convolution descriptor APIs, etc. — is out of scope.
 
 If, during implementation, the v9 graph API surface is found to refer to
 a v0.x C++ type by name (e.g., `cudnn_frontend::Tensor` as used by some
@@ -830,6 +837,14 @@ MIT-licensed source. Without correct attribution this is a license violation.
   derived from NVIDIA cuDNN frontend, used under the MIT license", with the
   upstream copyright notice preserved.
 - Legal review before initial merge.
+- **Resolution**: every file derived from cuDNN frontend carries a
+  "Portions derived from NVIDIA cuDNN frontend" header after the AMD
+  copyright and SPDX lines, naming the upstream files and preserving their
+  NVIDIA copyright notice. `frontend/THIRD_PARTY_LICENSES.md` records the
+  pinned upstream version and the full MIT license text, and installs to
+  `share/doc/hipdnn_frontend`. The cuDNN backend C-API identifiers in
+  `cudnn.h`, `cudnn_status.h`, and `cudnn_runtime_version.h` are declared
+  for source compatibility and make no MIT claim.
 
 ### 6.5 Maintenance burden
 
@@ -865,14 +880,11 @@ hipDNN-native PyTorch that ships in 2027.
 ### 7.1 Phase 1 — Foundations (compiles, builds, has CI)
 
 - Add `projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/` to the
-  source tree.
-- Stand up `cudnn_frontend.h` umbrella header (empty but installable).
-- Add CMake target `hipdnn_cudnn_shim` (or integrate into `hipdnn_frontend`
-  as an additional include directory).
-- Implement `detail/type_mapping.h` for the core enums
-  (`cudnnStatus_t`, `cudnnDataType_t`, `cudnnTensorFormat_t`,
-  `cudnnPointwiseMode_t`, `cudnnReduceTensorOp_t`).
-- Implement `detail/status_translation.h` and `error_object`.
+  `hipdnn_frontend` include tree, installed as the optional
+  `cudnn_compatibility` package component.
+- Stand up `cudnn_frontend.h` umbrella header.
+- Implement `cudnnStatus_t` (`cudnn_status.h`) and
+  `detail/status_translation.h` (`toCudnnStatus`, `toHipdnnStatus`).
 - Ship the stub `cudnn.h` (per §4.7) covering the C-API types referenced by
   the v9 graph API (`cudnnHandle_t`, `cudnnStatus_t`, `cudnnDataType_t`,
   `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`,
@@ -885,8 +897,10 @@ hipDNN-native PyTorch that ships in 2027.
   `create_cudnn_handle()` helper (each forwarding to the hipDNN equivalent —
   see §4.7). The remainder of the cuDNN C library (convolution descriptor
   APIs, etc.) stays out of scope.
-- Unit tests for the type mapping and status translation (round-trip every
-  enum value).
+- Unit tests for status translation (round-trip every status value).
+
+Not yet built: the C-API enum types in the stub `cudnn.h` other than
+`cudnnHandle_t` and `cudnnStatus_t`.
 
 **Exit criterion**: a v9-only translation unit — a hand-written test file
 that uses only `cudnn_frontend::graph::*` and the C-API types listed
@@ -976,10 +990,12 @@ the corresponding cuDNN FE sample.
 - Implement `HeurMode_t`, `NumericalNote_t`, `BehaviorNote_t` enum mapping.
 - Wire the plan-filter methods on the shim's `Graph`, applying the
   per-note triage (§4.5; classification table in
-  [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)):
+  [KNOWN_DIVERGENCES.md — Note filters](../KNOWN_DIVERGENCES.md#note-filters)):
   - `select_*` / `deselect_*` notes — map to engine capability where
-    hipDNN can honor it, warn-and-ignore where advisory, **error** where
-    correctness-critical and unsupported (e.g. deterministic). No blanket
+    hipDNN can honor it (e.g. deselect `NONDETERMINISTIC`; error if no
+    engine survives), warn-and-ignore where advisory, **error** where
+    correctness-critical and unsupported (e.g. deselect
+    `REDUCED_PRECISION_REDUCTION`, select `STRICT_NAN_PROP`). No blanket
     no-op.
   - `deselect_workspace_greater_than` — filter hipDNN plans by
     workspace size before `build_plans()` (hipDNN's
@@ -1044,14 +1060,13 @@ PyTorch build (or rewritten to v9 first).
 
 ### 8.1 Unit tests
 
-Location: `projects/hipdnn/frontend/tests/hipdnn_compatibility/cudnn/`. Same
-gtest framework as the rest of the frontend tests; same naming convention
-(`TestCudnnShim*.cpp`, suites prefixed `TestCudnnShim*`).
+Location: flat files in `projects/hipdnn/frontend/tests/`
+(`TestCudnnShim*.cpp`), listed in `frontend/tests/CMakeLists.txt` and built
+only when `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` is on. Same gtest framework as
+the rest of the frontend tests; suites prefixed `TestCudnnShim*`.
 
-- `TestCudnnShimTypeMapping` — round-trip every mappable enum value in both
-  directions; assert unmappable values produce the documented error.
-- `TestCudnnShimStatusTranslation` — every cuDNN status code maps to a
-  hipDNN one and back.
+- `TestCudnnShimStatusTranslationStandalone` — every cuDNN status code maps
+  to a hipDNN one and back.
 - `TestCudnnShimHandle` — handle lifecycle, stream binding.
 - `TestCudnnShimTensor` — `Tensor_attributes` construction, all setters, UID
   assignment, identity preservation across copies.
@@ -1064,9 +1079,10 @@ gtest framework as the rest of the frontend tests; same naming convention
 
 ### 8.2 Integration tests (AMD-authored)
 
-Location: `projects/hipdnn/samples/cudnn_shim/` (or under
-`projects/hipdnn/samples/` next to the existing `convolution`, `sdpa`, etc.
-samples).
+Location: samples in `projects/hipdnn/samples/cudnn_shim/` (`ConvFprop`,
+`Layernorm`, `Matmul`, `Pointwise`, `SdpaRoundTrip`) and integration tests
+in `projects/hipdnn/tests/frontend/` (`IntegrationCudnnShimHandle.cpp`,
+`IntegrationCudnnShimUmbrella.cpp`).
 
 These are **AMD-authored** integration tests, distinct from the
 upstream-sample compatibility check in §8.3 (which compiles NVIDIA's own
@@ -1092,13 +1108,17 @@ compatibility is that NVIDIA's own `samples/cpp/` programs from the pinned
 cuDNN FE version build and pass when their includes are repointed at the
 shim.
 
-- Vendor (as a git submodule or fetched at configure time) a pinned cuDNN
-  FE tag.
-- CI job that builds those samples against the shim.
-- For samples whose dependencies cannot be satisfied (e.g., samples that
-  rely on cuBLAS), document the skip and the reason.
+`projects/hipdnn/tests/cudnn_samples/` (#12124) implements this check:
+
+- At configure time it clones the cuDNN FE corpus pinned in `manifest.json`
+  (`v1.24.0`), or uses `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR`.
+- It builds those samples against the installed shim.
+- When hipDNN is built without `HIPDNN_ENABLE_CUDNN_COMPATIBILITY`, it
+  registers one skipped test and builds no samples.
 
 ### 8.4 Performance / overhead testing
+
+Not yet built.
 
 - Microbenchmarks comparing native `hipdnn_frontend` Graph construction +
   execute vs. the shim equivalent for a handful of representative graphs.
@@ -1109,18 +1129,20 @@ shim.
 
 ### 8.5 Install / package testing
 
-- The shim headers must be installed by the `Development` CMake component
-  alongside `hipdnn_frontend` headers.
-- Add a `find_package(hipdnn_frontend)`-using downstream CMake project under
-  `projects/hipdnn/tests/install/` (or wherever the existing install tests
-  live) that `#include`s the shim umbrella header and compiles a trivial
-  Graph.
+- The shim headers install in the `Development` CMake component alongside
+  the `hipdnn_frontend` headers, only when
+  `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` is on (`frontend/CMakeLists.txt`).
+- The package exports them as the optional `cudnn_compatibility` component
+  of `hipdnn_frontend` (#10968).
+- The `tests/cudnn_samples` harness consumes the installed package.
 
 Python bindings are out of scope (§1, §9); a hipDNN benchmarking/bindings
 project would be the natural host for shim-level perf or Python-side testing
 *if* such bindings are ever built.
 
 ### 8.6 PyTorch end-to-end smoke test
+
+Not yet built.
 
 A small set of PyTorch tests run on a nightly schedule against a PyTorch
 build whose `aten/src/ATen/native/cudnn/MHA.cpp` has been hipified to use

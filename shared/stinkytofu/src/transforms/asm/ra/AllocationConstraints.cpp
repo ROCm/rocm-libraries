@@ -1,0 +1,565 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
+
+#include <algorithm>
+#include <array>
+#include <limits>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+#include "stinkytofu/core/BasicBlock.hpp"
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/AsmTargetRegisters.hpp"
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
+
+namespace stinkytofu {
+namespace {
+
+void ensureIndex(std::vector<RegType>& classes, std::vector<std::optional<RegKey>>& hints,
+                 SSAValueID id) {
+    if (id >= classes.size()) {
+        classes.resize(id + 1, RegType::UNKNOWN);
+        hints.resize(id + 1);
+    }
+}
+
+void recordValue(const StinkySSAValue* value, std::vector<RegType>& classes,
+                 std::vector<std::optional<RegKey>>& hints) {
+    if (value == nullptr) return;
+    const SSAValueID id = value->valueId();
+    if (id == kInvalidSSAValueID) return;
+    ensureIndex(classes, hints, id);
+    classes[id] = value->type().regType;
+    if (!value->hasPhysicalBinding()) return;
+    const StinkySSAValue::PhysicalBinding& binding = value->physical();
+    hints[id] = RegKey{binding.type, binding.idx, RegHalf::NONE};
+}
+
+void collectUnits(const std::vector<StinkySSAValue*>& values, std::vector<TupleRun>& runs) {
+    if (values.size() < 2) return;
+    TupleRun run;
+    run.units.reserve(values.size());
+    for (StinkySSAValue* value : values) {
+        if (value == nullptr) return;
+        run.units.push_back(value->valueId());
+    }
+    runs.push_back(std::move(run));
+}
+
+void collectLiftedDestinations(const StinkyInstruction& instruction, const RegClassSet& classes,
+                               std::vector<TupleRun>& runs) {
+    size_t cursor = 0;
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    for (size_t operand = 0; operand < destRegs.size(); ++operand) {
+        const size_t units = liftedSSAUnits(destRegs[operand], classes);
+        if (units == 0) continue;
+        if (cursor + units > instruction.getNumSSAResults()) return;
+        std::vector<StinkySSAValue*> values;
+        values.reserve(units);
+        for (size_t unit = 0; unit < units; ++unit)
+            values.push_back(instruction.getSSAResult(cursor++));
+        collectUnits(values, runs);
+    }
+}
+
+void collectLiftedSources(const StinkyInstruction& instruction, const RegClassSet& classes,
+                          std::vector<TupleRun>& runs) {
+    size_t cursor = 0;
+    const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
+    for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
+        const size_t units = liftedSSAUnits(srcRegs[operand], classes);
+        if (units == 0) {
+            if (cursor < instruction.getNumSSAOperands()) ++cursor;
+            continue;
+        }
+        if (cursor + units > instruction.getNumSSAOperands()) return;
+        std::vector<StinkySSAValue*> values;
+        values.reserve(units);
+        for (size_t unit = 0; unit < units; ++unit)
+            values.push_back(instruction.getSSAOperandValue(cursor++));
+        collectUnits(values, runs);
+    }
+}
+
+/// SSA values behind each register operand, by operand position. A register
+/// operand covers as many values as it has lifted DWORDs, so this is positional
+/// rather than one value per operand.
+std::vector<std::vector<SSAValueID>> valueGroups(const StinkyInstruction& instruction,
+                                                 const RegClassSet& classes, bool destinations) {
+    std::vector<std::vector<SSAValueID>> groups;
+    const std::vector<StinkyRegister>& regs =
+        destinations ? instruction.getDestRegs() : instruction.getSrcRegs();
+    const size_t available =
+        destinations ? instruction.getNumSSAResults() : instruction.getNumSSAOperands();
+    size_t cursor = 0;
+    for (const StinkyRegister& reg : regs) {
+        const size_t units = liftedSSAUnits(reg, classes);
+        std::vector<SSAValueID> ids;
+        if (units == 0) {
+            // A source the lift did not cover still consumes an operand slot.
+            if (!destinations && cursor < available) ++cursor;
+            groups.push_back(std::move(ids));
+            continue;
+        }
+        for (size_t unit = 0; unit < units && cursor < available; ++unit) {
+            const StinkySSAValue* value = destinations ? instruction.getSSAResult(cursor)
+                                                       : instruction.getSSAOperandValue(cursor);
+            ++cursor;
+            ids.push_back(value == nullptr ? kInvalidSSAValueID : value->valueId());
+        }
+        groups.push_back(std::move(ids));
+    }
+    return groups;
+}
+
+}  // namespace
+
+OperandGroups operandGroupsOf(const StinkyInstruction& instruction, const RegClassSet& classes) {
+    return {valueGroups(instruction, classes, /*destinations=*/true),
+            valueGroups(instruction, classes, /*destinations=*/false)};
+}
+
+namespace {
+
+/// Tie a read-write destination to the source naming the same register.
+///
+/// The hardware reads such a destination on the path where it does not write
+/// it: `s_cmov_b32 d, s` is `if (SCC) d = s`, so on the untaken path d keeps
+/// what it already held. Give d and that source different registers and the
+/// untaken path yields whatever happened to be in d, not the value the IR says
+/// it should. `readsDestination` names those destinations, and AsmVerifierPass
+/// already requires the register to appear on both sides; this is what makes the
+/// allocator keep it that way.
+///
+/// \p execMasked says the same thing about a different destination. Under a
+/// narrow exec mask a vector write covers only the active lanes and the rest of
+/// the destination keeps what it held, so the lanes it does not write are a read
+/// of it -- read-write by position in the stream rather than by opcode.
+/// TieExecMaskedWritesPass is what puts the matching source there, so the lookup
+/// below finds it the same way.
+void collectReadWriteTies(const StinkyInstruction& instruction, const OperandGroups& groups,
+                          bool execMasked, std::vector<AffinitySet>& sets) {
+    const HwInstDesc* desc = instruction.getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
+    const std::vector<std::vector<SSAValueID>>& destGroups = groups.dest;
+    const std::vector<std::vector<SSAValueID>>& srcGroups = groups.src;
+
+    // Only the destination side needs walking: the source that pairs with a
+    // read-write destination is the one naming the same register, which is what
+    // AsmVerifierPass requires to be there, so it is found by lookup rather
+    // than by tracking a second cursor.
+    size_t destIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (destSlot >= destRegs.size() || destSlot >= destGroups.size()) continue;
+
+        const StinkyRegister& reg = destRegs[destSlot];
+        // A scalar register holds one value per wave, so the mask does not gate
+        // it and a masked scalar write really is a total definition. Tying one
+        // would only cost a register.
+        const bool maskedVectorWrite = execMasked && reg.isRegister() && reg.reg.type == RegType::V;
+        if (!readsDestination(instruction, destSlot) && !maskedVectorWrite) continue;
+
+        for (size_t source = 0; source < srcRegs.size() && source < srcGroups.size(); ++source) {
+            if (!(srcRegs[source] == reg)) continue;
+            const std::vector<SSAValueID>& written = destGroups[destSlot];
+            const std::vector<SSAValueID>& read = srcGroups[source];
+            for (size_t unit = 0; unit < written.size() && unit < read.size(); ++unit) {
+                if (written[unit] == kInvalidSSAValueID || read[unit] == kInvalidSSAValueID)
+                    continue;
+                if (written[unit] == read[unit]) continue;
+                AffinitySet set;
+                set.members = {written[unit], read[unit]};
+                std::sort(set.members.begin(), set.members.end());
+                sets.push_back(std::move(set));
+            }
+            break;
+        }
+    }
+}
+
+/// One lifted DWORD, which is what "the whole register" means to the allocator:
+/// a field declaring fewer bits than this writes part of one and leaves the rest.
+constexpr uint16_t kLiftedUnitBits = 32;
+
+/// Record each value written through a narrow (sub-32-bit) destination that
+/// nothing reads.
+///
+/// A narrow write changes part of a register and keeps the rest, so the value
+/// already in the register is one of its inputs. `readsDestination` is what says
+/// so, and collectReadWriteTies then holds the old and new values in one
+/// register. Should that answer ever be wrong, the input is invisible: the
+/// earlier value has no reader, looks dead the moment it is written, and the
+/// allocator gives its register away, losing the part the next write meant to
+/// keep.
+///
+/// Every narrow write is checked, read-write or not, because a result with no
+/// reader is the trace that mistake leaves. A pack whose first write names no
+/// half reads as a whole-register write, so the second write inherits a register
+/// nothing established -- and the first result is then the one nobody reads.
+///
+/// This is a warning, not an error: a narrow write that really is dead is legal.
+/// A wrong answer, though, is silent wrong code no later pass can catch, because
+/// op_sel is not a register, so it is worth reporting.
+void collectUnreadPartialWrites(const StinkyInstruction& instruction, const RegClassSet& classes,
+                                std::vector<SSAValueID>& unread) {
+    const HwInstDesc* desc = instruction.getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    size_t destIdx = 0;
+    size_t cursor = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (destSlot >= destRegs.size()) break;
+
+        const size_t units = liftedSSAUnits(destRegs[destSlot], classes);
+        const size_t first = cursor;
+        cursor += units;
+        if (units == 0) continue;
+        if (field.fieldSizeBits == 0 || field.fieldSizeBits >= kLiftedUnitBits) continue;
+
+        for (size_t unit = 0; unit < units && first + unit < instruction.getNumSSAResults();
+             ++unit) {
+            const StinkySSAValue* value = instruction.getSSAResult(first + unit);
+            if (value != nullptr && value->useEmpty()) unread.push_back(value->valueId());
+        }
+    }
+}
+
+/// Cap the values used where the instruction cannot select a VGPR bank.
+///
+/// `s_set_vgpr_msb` carries four 2-bit slots, so a format with more register
+/// operands than that leaves the surplus fields reaching one bank only.
+/// `encodeFieldToVgprOffSlot` reports them as slot -1, and a value read or
+/// written through such a field has to live in the bank it can reach.
+///
+/// Combined by minimum, because a value has one ceiling per use and must
+/// satisfy all of them. Overwriting instead would let an unconstrained use
+/// erase a constrained one, with the outcome depending on visit order.
+void collectBankReachableCeilings(const StinkyInstruction& instruction, const OperandGroups& groups,
+                                  std::vector<uint32_t>& maxIndexByValue) {
+    const std::vector<std::vector<SSAValueID>>& destGroups = groups.dest;
+    const std::vector<std::vector<SSAValueID>>& srcGroups = groups.src;
+
+    forEachVgprOperandField(
+        instruction, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+            if (slot >= 0) return;
+            if (!reg.isRegister() || reg.reg.type != RegType::V) return;
+
+            const std::vector<std::vector<SSAValueID>>& groups = isDest ? destGroups : srcGroups;
+            if (operand >= groups.size()) return;
+            for (const SSAValueID id : groups[operand]) {
+                if (id == kInvalidSSAValueID || id >= maxIndexByValue.size()) continue;
+                maxIndexByValue[id] = std::min(maxIndexByValue[id], kVgprBankSize - 1);
+            }
+        });
+}
+
+/// Wavefront size of \p function, which is what selects the EXEC register the
+/// exec-span walk looks for.
+///
+/// Falls back to 64 on a function carrying no architecture, as the unit tests
+/// build, rather than asserting. That is the conservative direction: EXEC
+/// overlaps EXEC_LO and EXEC_HI, so a wave64 probe finds every exec write a
+/// wave32 probe would and then some.
+uint32_t wavefrontSizeOf(const Function& function) {
+    const std::array<int, 3> arch = function.getGemmTileConfig().arch;
+    if (arch[0] == 0 && arch[1] == 0 && arch[2] == 0) return 64;
+    return getWaveFrontSize(static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
+                            static_cast<uint32_t>(arch[2]));
+}
+
+/// Where the dispatch stops writing scalars, or "everywhere" when the function
+/// does not say.
+///
+/// Unknown has to mean the whole file. The metadata is absent for anything that
+/// skipped the rocisa conversion -- a .stir file, a test -- and a stored zero is
+/// a default nobody set, every dispatch filling something. Believing either
+/// would unpin live-ins on no more than the absence of evidence.
+uint32_t dispatchFilledSgprsOf(const Function& function) {
+    constexpr uint32_t kEverything = std::numeric_limits<uint32_t>::max();
+    const uint64_t filled = function.getMetaData(kSigDispatchFilledSgprsMetaKey).value_or(0);
+    if (filled == 0 || filled > kEverything) return kEverything;
+    return static_cast<uint32_t>(filled);
+}
+
+/// Where the dispatch stops writing vectors, or "everywhere" when \p arch does
+/// not settle it.
+///
+/// No metadata to read: the only VGPRs the dispatch fills hold the workitem id,
+/// and on a target that packs the dimensions into v0 that is one register
+/// whatever the descriptor enabled. An unpacked target needs a field the
+/// allocator cannot reach, so it lands on "everywhere" and keeps every vector
+/// live-in pinned -- the same direction of caution as a missing
+/// kSigDispatchFilledSgprsMetaKey.
+uint32_t dispatchFilledVgprsOf(GfxArchID arch) {
+    constexpr uint32_t kEverything = std::numeric_limits<uint32_t>::max();
+    return settledDispatchFilledVgprCount(arch).value_or(kEverything);
+}
+
+/// Whether a live-in bound to \p hint arrived holding something.
+///
+/// One line per class, because the dispatch fills the two for unrelated
+/// reasons: scalars from preloaded kernargs and workgroup ids, vectors from the
+/// workitem id alone. Either line is absent when this build cannot say where it
+/// falls, and an absent line pins the whole class -- understating a line unpins
+/// a register the dispatch wrote, which is wrong code rather than a missed
+/// optimisation.
+///
+/// Per DWORD, each unit of a tuple carrying its own hint, so a tuple straddling
+/// a line keeps the pin on its lower units and tupleRuns() holds the rest in
+/// place behind them.
+///
+/// A missing hint counts as filled, there being no index to compare and no
+/// reading of "no register recorded" that means "any will do". So does a class
+/// with neither line, which is every class beyond S and V.
+bool dispatchFillsLiveIn(const std::optional<RegKey>& hint, uint32_t dispatchFilledSgprs,
+                         uint32_t dispatchFilledVgprs) {
+    if (!hint.has_value()) return true;
+    switch (hint->type) {
+        case RegType::S:
+            return hint->idx < dispatchFilledSgprs;
+        case RegType::V:
+            return hint->idx < dispatchFilledVgprs;
+        default:
+            return true;
+    }
+}
+
+/// The register a value was lifted from, as recordValue() derives it, so the
+/// stamp and the hint a policy reads cannot disagree about which register.
+std::optional<RegKey> hintOf(const StinkySSAValue& value) {
+    if (!value.hasPhysicalBinding()) return std::nullopt;
+    const StinkySSAValue::PhysicalBinding& binding = value.physical();
+    return RegKey{binding.type, binding.idx, RegHalf::NONE};
+}
+
+std::string joinIds(const std::vector<SSAValueID>& ids) {
+    std::ostringstream out;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (i > 0) out << ", ";
+        out << '%' << ids[i];
+    }
+    return out.str();
+}
+
+}  // namespace
+
+void markUndefinedLiveIns(Function& function, const AsmTargetRegisters& target) {
+    if (!function.hasAttachedSSA()) return;
+
+    const uint32_t dispatchFilledSgprs = dispatchFilledSgprsOf(function);
+    const uint32_t dispatchFilledVgprs = dispatchFilledVgprsOf(target.arch());
+
+    for (BasicBlock& block : function) {
+        for (const SSABlockArgument& arg : block.ssaArguments()) {
+            // Incoming edges mean the program defines it. Without them only the
+            // dispatch could have: below its class's line it holds something
+            // real, so build() pins it. Above the line it holds nothing, so
+            // pinning buys nothing -- and for s[100:107] on a 106-register file
+            // it is impossible.
+            if (arg.value == nullptr || !arg.incoming.empty()) continue;
+            arg.value->setUndefined(
+                !dispatchFillsLiveIn(hintOf(*arg.value), dispatchFilledSgprs, dispatchFilledVgprs));
+        }
+    }
+}
+
+AllocationConstraints AllocationConstraints::build(const Function& function,
+                                                   const AsmTargetRegisters& target,
+                                                   const AllocationRules& rules) {
+    AllocationConstraints constraints;
+    constraints.target_ = &target;
+
+    const size_t valueCount = function.ssaArena().valueCount();
+    constraints.classByValue_.assign(valueCount + 1, RegType::UNKNOWN);
+    constraints.hintByValue_.assign(valueCount + 1, std::nullopt);
+    constraints.pinnedByValue_.assign(valueCount + 1, false);
+    constraints.pinReasonByValue_.assign(valueCount + 1, nullptr);
+    constraints.maxIndexByValue_.assign(valueCount + 1, std::numeric_limits<uint32_t>::max());
+
+    for (StinkySSAValue* value : function.ssaArena().values()) {
+        recordValue(value, constraints.classByValue_, constraints.hintByValue_);
+    }
+
+    const RegClassSet& liftedClasses = function.ssaArena().liftedClasses();
+    const uint32_t wavefrontSize = wavefrontSizeOf(function);
+
+    for (const BasicBlock& block : function) {
+        // Same spans TieExecMaskedWritesPass normalized against, read from the
+        // same predicates, so the operand it added and the tie collected here
+        // cannot disagree about which writes the mask covers.
+        const std::unordered_set<const StinkyInstruction*> execMasked =
+            execMaskedInstructions(block, wavefrontSize);
+
+        for (const IRBase& ir : block) {
+            const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
+            if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
+            collectLiftedDestinations(*instruction, liftedClasses, constraints.tupleRuns_);
+            collectLiftedSources(*instruction, liftedClasses, constraints.tupleRuns_);
+
+            const OperandGroups groups = operandGroupsOf(*instruction, liftedClasses);
+            collectReadWriteTies(*instruction, groups, execMasked.count(instruction) != 0,
+                                 constraints.affinitySets_);
+            collectUnreadPartialWrites(*instruction, liftedClasses,
+                                       constraints.unreadPartialWrites_);
+            collectBankReachableCeilings(*instruction, groups, constraints.maxIndexByValue_);
+
+            // Soft pairings and producer pins, per instruction because that is
+            // where an operand means anything. Skipped entirely on a chip with
+            // neither, so nothing here costs a std::function on the common path.
+            if (rules.pairs() || rules.pins()) {
+                const OperandValues values = [&groups](size_t operand, bool isDest) {
+                    return groups.at(operand, isDest);
+                };
+                if (rules.pairs())
+                    rules.addPreferences(*instruction, values, constraints.preferences_);
+                if (rules.pins()) {
+                    // Tagged here rather than by the rule, so a rule cannot name
+                    // the wrong row and have its pins reported as somebody else's.
+                    for (const AllocationRule& rule : rules.all()) {
+                        if (rule.status != RuleStatus::Active || !rule.pinToProducer) continue;
+                        std::vector<SSAValueID> pinned;
+                        rule.pinToProducer(*instruction, values, pinned);
+                        for (const SSAValueID id : pinned) {
+                            if (id == kInvalidSSAValueID || id >= constraints.pinnedByValue_.size())
+                                continue;
+                            // First pin wins. A live-in collected below overwrites
+                            // the reason, which is the more specific one.
+                            if (constraints.pinnedByValue_[id]) continue;
+                            if (!constraints.hintByValue_[id].has_value()) continue;
+                            constraints.pinnedByValue_[id] = true;
+                            constraints.pinReasonByValue_[id] = rule.name.data();
+                        }
+                    }
+                }
+            }
+        }
+
+        for (const SSABlockArgument& arg : block.ssaArguments()) {
+            if (arg.value == nullptr) continue;
+            // Nothing defines a value with no incoming edge, so it is pinned
+            // unless markUndefinedLiveIns() found it holds nothing. Read rather
+            // than re-derived: destruction reaches the same answer from less.
+            if (arg.incoming.empty()) {
+                const SSAValueID id = arg.value->valueId();
+                if (id == kInvalidSSAValueID || id >= constraints.pinnedByValue_.size()) continue;
+                if (arg.value->isUndefined()) {
+                    constraints.undefinedLiveIns_.push_back(id);
+                } else {
+                    constraints.pinnedByValue_[id] = true;
+                    constraints.pinReasonByValue_[id] = "a function live-in";
+                }
+                continue;
+            }
+            AffinitySet set;
+            set.members.push_back(arg.value->valueId());
+            for (const SSABlockIncoming& incoming : arg.incoming) {
+                const StinkyOpOperand* use = incoming.use.get();
+                const StinkySSAValue* value = use == nullptr ? nullptr : use->value();
+                if (value == nullptr) continue;
+                // An undefined edge asks for nothing: the merge reads garbage
+                // along it whichever register it takes. Dropping the member
+                // leaves the result welded to the edges that do define it.
+                if (value->isUndefined()) continue;
+                set.members.push_back(value->valueId());
+            }
+            std::sort(set.members.begin(), set.members.end());
+            set.members.erase(std::unique(set.members.begin(), set.members.end()),
+                              set.members.end());
+            if (set.members.size() < 2) continue;
+            constraints.affinitySets_.push_back(std::move(set));
+        }
+    }
+
+    // Last, so a rule-imposed relation is appended to the IR-derived ones and
+    // both reach OffsetUnion and the verifier identically. Only Active rules
+    // contribute; the table decides that, not the rule.
+    rules.addRelations(function, constraints.tupleRuns_, constraints.affinitySets_);
+
+    return constraints;
+}
+
+RegType AllocationConstraints::classOf(SSAValueID id) const {
+    if (id == kInvalidSSAValueID || id >= classByValue_.size()) return RegType::UNKNOWN;
+    return classByValue_[id];
+}
+
+bool AllocationConstraints::isAllocatable(SSAValueID id) const {
+    if (target_ == nullptr) return false;
+    return target_->isAllocatableClass(classOf(id));
+}
+
+std::optional<RegKey> AllocationConstraints::hintFor(SSAValueID id) const {
+    if (id == kInvalidSSAValueID || id >= hintByValue_.size()) return std::nullopt;
+    return hintByValue_[id];
+}
+
+bool AllocationConstraints::isPinned(SSAValueID id) const {
+    if (id == kInvalidSSAValueID || id >= pinnedByValue_.size()) return false;
+    return pinnedByValue_[id];
+}
+
+const char* AllocationConstraints::pinReason(SSAValueID id) const {
+    if (id == kInvalidSSAValueID || id >= pinReasonByValue_.size()) return nullptr;
+    return pinReasonByValue_[id];
+}
+
+uint32_t AllocationConstraints::maxIndexFor(SSAValueID id) const {
+    constexpr uint32_t kNoLimit = std::numeric_limits<uint32_t>::max();
+    if (id == kInvalidSSAValueID || id >= maxIndexByValue_.size()) return kNoLimit;
+    return maxIndexByValue_[id];
+}
+
+std::string AllocationConstraints::toString() const {
+    std::ostringstream out;
+    out << "values=" << (classByValue_.empty() ? 0 : classByValue_.size() - 1);
+    out << " tuples=" << tupleRuns_.size();
+    out << " affinity=" << affinitySets_.size() << '\n';
+    for (size_t id = 1; id < hintByValue_.size(); ++id) {
+        out << '%' << id << ':' << regTypeToString(classOf(static_cast<SSAValueID>(id)));
+        if (hintByValue_[id].has_value()) out << " hint " << regKeyToString(*hintByValue_[id]);
+        if (isPinned(static_cast<SSAValueID>(id))) {
+            out << " pinned";
+            if (const char* reason = pinReason(static_cast<SSAValueID>(id)))
+                out << " (" << reason << ")";
+        }
+        const uint32_t ceiling = maxIndexFor(static_cast<SSAValueID>(id));
+        if (ceiling != std::numeric_limits<uint32_t>::max()) out << " max " << ceiling;
+        out << '\n';
+    }
+    for (const TupleRun& run : tupleRuns_) {
+        out << "tuple [" << joinIds(run.units) << "]\n";
+    }
+    for (const AffinitySet& set : affinitySets_) {
+        out << "affinity {" << joinIds(set.members) << "}\n";
+    }
+    if (!undefinedLiveIns_.empty()) {
+        out << "undefined live-in {" << joinIds(undefinedLiveIns_) << "}\n";
+    }
+    return out.str();
+}
+
+}  // namespace stinkytofu

@@ -194,7 +194,7 @@ The test file name should mirror the primary test suite it contains.  For exampl
 
 ### 11.3 Integration Tests
 
-See [TestingStrategy.md](testing/TestingStrategy.md) for more information on integration tests. Integration tests should be named to reflect the feature or component under test.
+See [TESTING_STRATEGY.md](testing/TESTING_STRATEGY.md) for more information on integration tests. Integration tests should be named to reflect the feature or component under test.
 
 #### Naming Examples
 
@@ -295,7 +295,7 @@ The repository includes automated tooling to enforce coding standards and mainta
 
 ### 15.1 Clang-Tidy Rules
 
-The project uses clang-tidy to automatically enforce many of the coding style guidelines defined in this document. The configuration can be found in `.clang-tidy` at the repository root.
+The project uses clang-tidy to automatically enforce many of the coding style guidelines defined in this document. The configuration can be found in `.clang-tidy` at the hipDNN project root (`projects/hipdnn/.clang-tidy`).
 
 The CI pipeline automatically runs clang-tidy on all pull requests to ensure compliance before merging.
 
@@ -327,11 +327,11 @@ The tool is located at `cmake/scripts/test_name_validator.py` and is integrated 
 
 To run the validation manually:
 ```bash
-ninja validate_test_names
+ninja hipdnn-validate_test_names
 ```
 
 > [!NOTE]
-> This validation also runs automatically as part of the `ninja check` target.
+> This validation also runs automatically as part of the `ninja check` target. It is also registered as the CTest test `hipdnn_test_name_validation`.
 
 This tool:
 - Parses all test executables to extract test names

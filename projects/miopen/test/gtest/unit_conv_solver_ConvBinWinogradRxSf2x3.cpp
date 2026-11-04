@@ -72,7 +72,7 @@ template <miopenDataType_t datatype>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
     Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 |
-                         Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
+                         Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X | Gpu::gfx117X;
     if constexpr(datatype == miopenFloat)
     {
         supported_gpus = supported_gpus | Gpu::gfx900;

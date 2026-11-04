@@ -1,21 +1,34 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""ROCKE architecture metadata package (polymorphic-core SSOT).
+"""Architecture metadata and target-name helpers.
 
-Exposes :class:`ArchTarget` and the MMA catalog. Hardware facts only — no
-pipeline/scheduler vocabulary, no LLVM intrinsic text, no ``dispatcher/`` imports.
+Exposes :class:`ArchTarget`, the MMA catalog, and helpers for converting HIP
+and COMGR target names. These helpers read the architecture catalog without
+querying a GPU or compiler.
 """
 
+from ..dtypes import normalize_dtype
 from .target import (  # noqa: F401
     ArchTarget,
     LayoutMap,
     MemoryCapabilities,
     MmaCatalog,
+    MmaEmulation,
+    MmaEmulationRecipe,
     MmaOp,
+    MmaScaleBlockK,
+    MmaScaleDType,
     ResourceLimits,
     arch_from_isa,
+    arches_with_own_facts,
+    base_arch_from_target_id,
+    compiler_target_for_flavor,
+    compiler_target_for_llvm_major,
+    compiler_target_from_target_id,
+    generic_arch_from_target_id,
     known_arches,
-    normalize_dtype,
+    listed_arch_for,
+    target_id_from_isa,
     validate_arch,
 )
 
@@ -24,10 +37,22 @@ __all__ = [
     "LayoutMap",
     "MemoryCapabilities",
     "MmaCatalog",
+    "MmaEmulation",
+    "MmaEmulationRecipe",
     "MmaOp",
+    "MmaScaleBlockK",
+    "MmaScaleDType",
     "ResourceLimits",
     "arch_from_isa",
+    "arches_with_own_facts",
+    "base_arch_from_target_id",
+    "compiler_target_for_flavor",
+    "compiler_target_for_llvm_major",
+    "compiler_target_from_target_id",
+    "generic_arch_from_target_id",
     "known_arches",
+    "listed_arch_for",
     "normalize_dtype",
+    "target_id_from_isa",
     "validate_arch",
 ]

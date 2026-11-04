@@ -28,7 +28,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
 namespace stinkytofu {
@@ -46,15 +46,16 @@ class StinkyAsmModule;
 /// @endcode
 class STINKYTOFU_EXPORT BackendRegistry {
    public:
-    /// Function type: builds the pipeline for a module into a PassManager.
+    /// Function type: builds the pipeline for a module into a ModulePassManager.
     /// The PassBuilder provides extension points where plugin passes
     /// can be injected.
     /// Returns true if passes were added, false if nothing to do.
-    using PipelineBuilder = std::function<bool(PassManager&, StinkyAsmModule&, const PassBuilder&)>;
+    using PipelineBuilder =
+        std::function<bool(ModulePassManager&, StinkyAsmModule&, const PassBuilder&)>;
 
     /// Per-architecture pipeline configuration.
     struct ArchPipeline {
-        PipelineBuilder builder;              ///< Populates a PM with ScopeAdaptor passes.
+        PipelineBuilder builder;              ///< Populates the module pass manager.
         std::vector<std::string> groupNames;  ///< Instruction groups the builder operates on.
     };
 

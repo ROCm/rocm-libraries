@@ -88,7 +88,6 @@ namespace rocsparse
             9, info, ((mb > 0) && (trm_info == nullptr)), rocsparse_status_invalid_pointer);
 
         _rocsparse_spmat_descr bsr(rocsparse_format_bsr,
-                                   true,
                                    static_cast<int64_t>(1),
                                    mb,
                                    mb,

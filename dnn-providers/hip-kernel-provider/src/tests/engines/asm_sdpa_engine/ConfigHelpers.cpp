@@ -32,13 +32,18 @@ static DataType toDataType(const std::string& configDataType)
     return it->second;
 }
 
-flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config)
+flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
+                                                       bool withStats)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    // Map dtype string to DataType enum
-    const DataType dataType = toDataType(config.dtype);
+    // Map dtype string to DataType enums. FP8 configs use FP8_E4M3 inputs with a
+    // BFLOAT16 output and require q/k/v descale tensors (mirrors the engine's fp8
+    // applicability contract); every other config is single-dtype in and out.
+    const bool isFp8 = (config.dtype == config::FP8BF16);
+    const DataType inDataType = isFp8 ? DataType::FP8_E4M3_FNUZ : toDataType(config.dtype);
+    const DataType outDataType = isFp8 ? DataType::BFLOAT16 : inDataType;
 
     // Use arbitrary values for batch, num_heads, and sequence lengths
     const int64_t batch = 2;
@@ -47,39 +52,108 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     const int64_t seqKv = 256;
 
     // Define tensor dimensions
+    // Use physical memory layout: B, Seq, H, D for compatibility with group mode
+    const std::vector<int64_t> layout = {3, 1, 2, 0};
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
-    const std::vector<int64_t> qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);
+    const std::vector<int64_t> qStrides
+        = hipdnn_data_sdk::utilities::generateStrides(qDims, layout);
 
     const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
-    const std::vector<int64_t> kStrides = hipdnn_data_sdk::utilities::generateStrides(kDims);
+    const std::vector<int64_t> kStrides
+        = hipdnn_data_sdk::utilities::generateStrides(kDims, layout);
 
     const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
-    const std::vector<int64_t> vStrides = hipdnn_data_sdk::utilities::generateStrides(vDims);
+    const std::vector<int64_t> vStrides
+        = hipdnn_data_sdk::utilities::generateStrides(vDims, layout);
 
     const std::vector<int64_t> oDims = {batch, numHeads, seqQ, config.hdim_v};
-    const std::vector<int64_t> oStrides = hipdnn_data_sdk::utilities::generateStrides(oDims);
+    const std::vector<int64_t> oStrides
+        = hipdnn_data_sdk::utilities::generateStrides(oDims, layout);
 
     int64_t uid = 1;
 
+    const bool isGroup = config.mode == BatchMode::GROUP;
+    const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
+    const std::vector<int64_t> offsetStrides
+        = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
+    auto appendRaggedOffset = [&](const char* name) -> flatbuffers::Optional<int64_t> {
+        if(!isGroup)
+        {
+            return flatbuffers::nullopt;
+        }
+        const auto offsetUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, offsetUid, name, DataType::INT32, &offsetStrides, &offsetDims));
+        return offsetUid;
+    };
+    const auto qoRaggedUid = appendRaggedOffset("qo_ragged_offset");
+    const auto kvRaggedUid = appendRaggedOffset("kv_ragged_offset");
+    const auto raggedMultiplier
+        = [&](const std::vector<int64_t>& strides) { return isGroup ? strides[2] : 1; };
+
     // Q tensor
     const auto qUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", dataType, &qStrides, &qDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            qUid,
+                                                            "q",
+                                                            inDataType,
+                                                            &qStrides,
+                                                            &qDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            qoRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(qStrides)));
 
     // K tensor
     const auto kUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "k", dataType, &kStrides, &kDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            kUid,
+                                                            "k",
+                                                            inDataType,
+                                                            &kStrides,
+                                                            &kDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            kvRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(kStrides)));
 
     // V tensor
     const auto vUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", dataType, &vStrides, &vDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            vUid,
+                                                            "v",
+                                                            inDataType,
+                                                            &vStrides,
+                                                            &vDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            kvRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(vStrides)));
 
     // O tensor
     const auto oUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "o", dataType, &oStrides, &oDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            oUid,
+                                                            "o",
+                                                            outDataType,
+                                                            &oStrides,
+                                                            &oDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            qoRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(oStrides)));
 
     // Scale tensor (always include for SDPA)
     const std::vector<int64_t> scaleDims = {1};
@@ -96,29 +170,58 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                      TensorValue::Float32Value,
                                      builder.CreateStruct(scaleVal).Union()));
 
-    // Handle GROUP mode - add sequence length tensors
-    flatbuffers::Optional<int64_t> seqLenQUid = flatbuffers::nullopt;
-    flatbuffers::Optional<int64_t> seqLenKvUid = flatbuffers::nullopt;
-
-    if(config.mode == BatchMode::GROUP)
+    // Optional stats (LSE) output tensor: [B, H, Sq, 1], FP32
+    flatbuffers::Optional<int64_t> statsUid = flatbuffers::nullopt;
+    flatbuffers::Optional<bool> generateStats = flatbuffers::nullopt;
+    if(withStats)
     {
-        // Sequence length tensors: shape [batch]
-        const std::vector<int64_t> seqLenDims = {batch};
-        const std::vector<int64_t> seqLenStrides = {1};
-
-        const auto seqLenQTensorUid = uid++;
+        const std::vector<int64_t> statsDims = {batch, numHeads, seqQ, 1};
+        const std::vector<int64_t> statsStrides
+            = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+        const auto statsUidVal = uid++;
         tensorAttributes.push_back(CreateTensorAttributesDirect(
-            builder, seqLenQTensorUid, "seq_len_q", DataType::INT32, &seqLenStrides, &seqLenDims));
-        seqLenQUid = flatbuffers::Optional<int64_t>(seqLenQTensorUid);
+            builder, statsUidVal, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+        statsUid = flatbuffers::Optional<int64_t>(statsUidVal);
+        generateStats = flatbuffers::Optional<bool>(true);
+    }
 
-        const auto seqLenKvTensorUid = uid++;
+    // FP8 inputs require per-tensor (scalar) q/k/v descale tensors, else the engine
+    // declines the graph (mirrors AITER's TORCH_CHECK).
+    flatbuffers::Optional<int64_t> descaleQUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> descaleKUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> descaleVUid = flatbuffers::nullopt;
+    if(isFp8)
+    {
+        const std::vector<int64_t> descaleDims = {1, 1, 1, 1};
+        const std::vector<int64_t> descaleStrides
+            = hipdnn_data_sdk::utilities::generateStrides(descaleDims);
+
+        const auto descaleQTensorUid = uid++;
         tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
-                                                                seqLenKvTensorUid,
-                                                                "seq_len_kv",
-                                                                DataType::INT32,
-                                                                &seqLenStrides,
-                                                                &seqLenDims));
-        seqLenKvUid = flatbuffers::Optional<int64_t>(seqLenKvTensorUid);
+                                                                descaleQTensorUid,
+                                                                "descale_q",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleQUid = flatbuffers::Optional<int64_t>(descaleQTensorUid);
+
+        const auto descaleKTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleKTensorUid,
+                                                                "descale_k",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleKUid = flatbuffers::Optional<int64_t>(descaleKTensorUid);
+
+        const auto descaleVTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleVTensorUid,
+                                                                "descale_v",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleVUid = flatbuffers::Optional<int64_t>(descaleVTensorUid);
     }
 
     // Determine mask-related attributes based on MaskType
@@ -170,8 +273,8 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                oUid,
                                flatbuffers::nullopt, // attn_mask_tensor_uid
                                scaleUid,
-                               seqLenQUid,
-                               seqLenKvUid,
+                               flatbuffers::nullopt,
+                               flatbuffers::nullopt,
                                flatbuffers::nullopt, // seed_tensor_uid
                                flatbuffers::nullopt, // offset_tensor_uid
                                flatbuffers::nullopt, // dropout_mask_tensor_uid
@@ -180,19 +283,19 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                flatbuffers::nullopt, // page_table_v_tensor_uid
                                flatbuffers::nullopt, // block_mask_tensor_uid
                                flatbuffers::nullopt, // sink_token_tensor_uid
-                               flatbuffers::nullopt, // descale_q_tensor_uid
-                               flatbuffers::nullopt, // descale_k_tensor_uid
-                               flatbuffers::nullopt, // descale_v_tensor_uid
+                               descaleQUid, // descale_q_tensor_uid
+                               descaleKUid, // descale_k_tensor_uid
+                               descaleVUid, // descale_v_tensor_uid
                                flatbuffers::nullopt, // descale_s_tensor_uid
                                flatbuffers::nullopt, // scale_s_tensor_uid
                                flatbuffers::nullopt, // scale_o_tensor_uid
-                               flatbuffers::nullopt, // stats_tensor_uid
+                               statsUid, // stats_tensor_uid
                                flatbuffers::nullopt, // max_tensor_uid
                                flatbuffers::nullopt, // sum_exp_tensor_uid
                                flatbuffers::nullopt, // rng_dump_tensor_uid
                                flatbuffers::nullopt, // amax_s_tensor_uid
                                flatbuffers::nullopt, // amax_o_tensor_uid
-                               flatbuffers::nullopt, // generate_stats
+                               generateStats, // generate_stats
                                false, // alibi_mask
                                false, // padding_mask
                                causalMask,

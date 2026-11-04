@@ -740,8 +740,8 @@ hipsparseStatus_t
                                      size_t                                 dataSize)
 {
     auto status = hipCUSPARSEStatusToHIPStatus(
-        cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
-                                        (cusparseLtMatmulAlgSelection_t*)algSelection,
+        cusparseLtMatmulAlgGetAttribute((const cusparseLtHandle_t*)handle,
+                                        (const cusparseLtMatmulAlgSelection_t*)algSelection,
                                         HIPMatmulAlgAttributeToCuSparseLtAlgAttribute(attribute),
                                         data,
                                         dataSize));
@@ -751,6 +751,7 @@ hipsparseStatus_t
         auto mode = CuSparseLtSplitKModeToHIPSplitKMode(cmode);
         *(reinterpret_cast<hipsparseLtSplitKMode_t*>(data)) = mode;
     }
+    return status;
 }
 
 /* matmul plan */

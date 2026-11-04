@@ -325,13 +325,22 @@ def generate_recommendations(
     elif has_padding:
         recs.append("✅ Padding detected - helps avoid power-of-2 conflicts")
 
-    # Instruction-specific guidance based on LDS_a.md conflict period rules
-    if isa_stats.ds_read_b128 > 50 or isa_stats.ds_write_b128 > 50:
-        conflict_period = 64 if "gfx950" in arch.lower() else 32
+    # Historical wave64 periods differ by direction on gfx950.
+    for opcode, count, conflict_period in (
+        (
+            "ds_read_b128",
+            isa_stats.ds_read_b128,
+            64 if "gfx950" in arch.lower() else 32,
+        ),
+        ("ds_write_b128", isa_stats.ds_write_b128, 32),
+    ):
+        if count <= 50:
+            continue
         recs.append(
-            f"ℹ️ Many ds_read/write_b128 instructions (128-bit LDS ops) - "
-            f"Conflict period: {conflict_period} dwords. "
-            f"Ensure stride > {conflict_period} dwords or apply swizzle"
+            f"ℹ️ {opcode}: observed wave64 address-class period is "
+            f"{conflict_period} dwords ({conflict_period * 4} bytes). "
+            "Conflicts also depend on active lanes and opcode-specific phases; "
+            "a stride larger than the period can still conflict."
         )
 
     # Coalescing recommendation

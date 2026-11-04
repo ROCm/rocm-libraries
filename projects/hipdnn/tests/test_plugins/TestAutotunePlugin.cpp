@@ -4,6 +4,7 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
@@ -20,10 +21,10 @@ thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
-// Workspace sizes for AutotunePluginEngineWorkspaceGrows: the pre-compile
-// estimate fits a modest budget, but the compiled (execution-plan) workspace is
-// larger. A test sets a budget between the two so EXHAUSTIVE priming is skipped
-// for this engine while the normal benchmark still runs.
+// Workspace sizes for AutotunePluginEngineWorkspaceGrows: with the benchmarking knob on, both
+// the pre-compile estimate and the compiled (execution-plan) workspace are larger than without
+// it. A test sets a budget between the two so EXHAUSTIVE priming is skipped for this engine
+// while the normal benchmark still runs.
 namespace
 {
 constexpr size_t WORKSPACE_DEFAULT_SIZE = 1024;
@@ -36,70 +37,64 @@ constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
 // device work on the profiling stream guarantees a positive, above-resolution
 // measured time. 4 MiB clears the timer resolution on all supported GPUs with
 // margin.
-constexpr size_t TIMING_SCRATCH_SIZE = 4UL * 1024 * 1024;
+constexpr size_t TIMING_SCRATCH_SIZE = size_t{4} * 1024 * 1024;
 
-// Stream captured from hipdnnEnginePluginSetStream, which is the same stream the
-// autotune profiling events record on.
-// NOLINTNEXTLINE
-hipStream_t g_timingStream = nullptr;
-
-// RAII owner for a stream-ordered scratch allocation. The destructor enqueues a
-// stream-ordered free, so the buffer is released on every path, including when
-// a later HIP call throws during exception unwinding.
-class StreamScratch
+// The host-sync engine deliberately trips the stall watchdog. Only recovery tests
+// enable it, before handle creation discovers and caches the engine list.
+bool hostSyncEngineEnabled()
 {
-public:
-    StreamScratch(size_t bytes, hipStream_t stream)
-        : _stream(stream)
+    return !hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE").empty();
+}
+
+/// 7 with the host-syncing engine enabled, 6 without. Every engine-list entry point must
+/// agree with this, or a caller indexes an engine the count did not advertise.
+uint32_t totalEngines()
+{
+    return hostSyncEngineEnabled() ? 7U : 6U;
+}
+
+struct AutotunePluginHandle final : HipdnnEnginePluginHandle
+{
+    ~AutotunePluginHandle() override
     {
-        const hipError_t err = hipMallocAsync(&_ptr, bytes, _stream);
-        if(err != hipSuccess || _ptr == nullptr)
+        if(timingScratch != nullptr)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("AutotunePlugin: hipMallocAsync for timing scratch failed: ")
-                    + hipGetErrorString(err));
+            static_cast<void>(hipFree(timingScratch));
         }
     }
 
-    ~StreamScratch()
-    {
-        // Best-effort stream-ordered free; a failure here cannot be surfaced
-        // from a destructor and would only occur on an already-broken stream.
-        static_cast<void>(hipFreeAsync(_ptr, _stream));
-    }
-
-    StreamScratch(const StreamScratch&) = delete;
-    StreamScratch& operator=(const StreamScratch&) = delete;
-    StreamScratch(StreamScratch&&) = delete;
-    StreamScratch& operator=(StreamScratch&&) = delete;
-
-    void* get() const
-    {
-        return _ptr;
-    }
-
-private:
-    void* _ptr = nullptr;
-    hipStream_t _stream = nullptr;
+    void* timingScratch = nullptr;
+    hipStream_t stream = nullptr;
 };
 
-// Enqueue trivial-but-real device work on the profiling stream so the
-// benchmarked interval is non-empty. Allocation, memset, and free are all
-// stream-ordered, so the work is captured by the timing events and nothing
-// outlives the run. Throws HipdnnPluginException on HIP error; callers run it
-// inside hipdnn_plugin_sdk::tryCatch.
-void enqueueTimingWork()
+// Keep one scratch allocation per plugin handle. The first execution allocates
+// it outside any timed device work; later warmup and timed executions only
+// enqueue the memset bracketed by profiling events.
+void enqueueTimingWork(hipdnnEnginePluginHandle_t handle)
 {
-    const StreamScratch scratch(TIMING_SCRATCH_SIZE, g_timingStream);
-    const hipError_t memsetErr
-        = hipMemsetAsync(scratch.get(), 0, TIMING_SCRATCH_SIZE, g_timingStream);
-    if(memsetErr != hipSuccess)
+    hipdnn_plugin_sdk::throwIfNull(handle);
+    auto* pluginHandle = static_cast<AutotunePluginHandle*>(handle);
+
+    if(pluginHandle->timingScratch == nullptr)
     {
-        // scratch's destructor still enqueues the stream-ordered free.
+        const auto mallocStatus = hipMalloc(&pluginHandle->timingScratch, TIMING_SCRATCH_SIZE);
+        if(mallocStatus != hipSuccess || pluginHandle->timingScratch == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("AutotunePlugin: timing scratch allocation failed: ")
+                    + hipGetErrorString(mallocStatus));
+        }
+    }
+
+    const auto memsetStatus
+        = hipMemsetAsync(pluginHandle->timingScratch, 0, TIMING_SCRATCH_SIZE, pluginHandle->stream);
+    if(memsetStatus != hipSuccess)
+    {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            std::string("AutotunePlugin: hipMemsetAsync failed: ") + hipGetErrorString(memsetErr));
+            std::string("AutotunePlugin: hipMemsetAsync failed: ")
+                + hipGetErrorString(memsetStatus));
     }
 }
 } // namespace
@@ -129,12 +124,12 @@ public:
 
     uint32_t getNumEngines() const override
     {
-        return 6;
+        return totalEngines();
     }
 
     uint32_t getNumApplicableEngines() const override
     {
-        return 6;
+        return totalEngines();
     }
 
     static hipdnnPluginStatus_t
@@ -150,9 +145,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            constexpr uint32_t TOTAL_ENGINES = 6;
+            const uint32_t engineCount = totalEngines();
             // When maxEngines=0, return total count for discovery; otherwise return actual count
-            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
+            *numEngines = (maxEngines == 0) ? engineCount : std::min(maxEngines, engineCount);
 
             if(maxEngines >= 1)
             {
@@ -180,6 +175,11 @@ public:
             {
                 engineIds[5] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEngineWorkspaceGrows>();
+            }
+            if(maxEngines >= 7 && engineCount >= 7)
+            {
+                engineIds[6]
+                    = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -207,9 +207,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            constexpr uint32_t TOTAL_ENGINES = 6;
+            const uint32_t engineCount = totalEngines();
             // When maxEngines=0, return total count for discovery; otherwise return actual count
-            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
+            *numEngines = (maxEngines == 0) ? engineCount : std::min(maxEngines, engineCount);
 
             if(maxEngines >= 1)
             {
@@ -237,6 +237,11 @@ public:
             {
                 engineIds[5] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEngineWorkspaceGrows>();
+            }
+            if(maxEngines >= 7 && engineCount >= 7)
+            {
+                engineIds[6]
+                    = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>();
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
@@ -277,22 +282,8 @@ public:
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
             context->engineId = engineConfigWrapper.engineId();
 
-            // Parse knob settings to detect benchmarking mode (global.benchmarking = 1)
-            if(engineConfigWrapper.hasKnobSetting("global.benchmarking"))
-            {
-                const auto& knobSetting
-                    = engineConfigWrapper.getKnobSettingByName("global.benchmarking");
-                if(knobSetting.valueType()
-                   == hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue)
-                {
-                    const auto& intValue
-                        = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
-                    if(intValue.value() == 1)
-                    {
-                        context->hasBenchmarkingKnobEnabled = true;
-                    }
-                }
-            }
+            // Detect benchmarking mode (global.benchmarking = 1)
+            context->hasBenchmarkingKnobEnabled = benchmarkingKnobEnabled(engineConfigWrapper);
 
             *executionContext = context.release();
 
@@ -346,14 +337,53 @@ public:
         // Successful engines: enqueue real device work on the profiling stream so
         // the autotune timed interval measures a positive, above-resolution time
         // instead of an empty (possibly negative) hipEventElapsedTime window.
-        const auto timingStatus = hipdnn_plugin_sdk::tryCatch([]() { enqueueTimingWork(); });
+        const auto timingStatus = hipdnn_plugin_sdk::tryCatch([&]() { enqueueTimingWork(handle); });
         if(timingStatus != HIPDNN_PLUGIN_STATUS_SUCCESS)
         {
             return timingStatus;
         }
 
+        // AutotunePluginEngineHostSyncs: blocks the host on the plugin's own stream
+        // from inside the timed region, exactly like a plugin whose execute() calls
+        // hipStreamSynchronize. When the autotune stall gate has armed that stream,
+        // this synchronize cannot return until release() or the watchdog writes the
+        // signal, reproducing the self-inflicted deadlock the watchdog exists to break.
+        if(executionContext != nullptr)
+        {
+            const auto* ctx = static_cast<HipdnnEnginePluginExecutionContext*>(executionContext);
+            if(ctx->engineId
+               == hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>())
+            {
+                auto* pluginHandle = static_cast<AutotunePluginHandle*>(handle);
+                const auto syncStatus = hipStreamSynchronize(pluginHandle->stream);
+                if(syncStatus != hipSuccess)
+                {
+                    return hipdnn_plugin_sdk::tryCatch([&]() {
+                        throw hipdnn_plugin_sdk::HipdnnPluginException(
+                            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                            std::string(
+                                "AutotunePluginEngineHostSyncs: hipStreamSynchronize failed: ")
+                                + hipGetErrorString(syncStatus));
+                    });
+                }
+            }
+        }
+
         return TestPluginBase::enginePluginExecuteOpGraph(
             handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
+    }
+
+    static bool benchmarkingKnobEnabled(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper& engineConfig)
+    {
+        if(!engineConfig.hasKnobSetting("global.benchmarking"))
+        {
+            return false;
+        }
+        const auto& knobSetting = engineConfig.getKnobSettingByName("global.benchmarking");
+        return knobSetting.valueType() == hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue
+               && knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value()
+                      == 1;
     }
 
     static hipdnnPluginStatus_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
@@ -372,7 +402,15 @@ public:
             hipdnn_plugin_sdk::throwIfNull(opGraph);
             hipdnn_plugin_sdk::throwIfNull(workspaceSize);
 
-            *workspaceSize = WORKSPACE_DEFAULT_SIZE;
+            // Like a provider whose estimate covers the benchmarking configuration, the
+            // WorkspaceGrows engine reports its larger workspace when asked with the knob on.
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+                engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+            const bool grows = engineConfigWrapper.engineId()
+                                   == hipdnn_tests::plugin_constants::engineId<
+                                       AutotunePluginEngineWorkspaceGrows>()
+                               && benchmarkingKnobEnabled(engineConfigWrapper);
+            *workspaceSize = grows ? WORKSPACE_LARGE_COMPILED_SIZE : WORKSPACE_DEFAULT_SIZE;
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });
@@ -574,7 +612,16 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
 {
-    return TestPluginBase::enginePluginCreate(handle);
+    LOG_API_ENTRY("handlePtr=" << static_cast<void*>(handle));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+
+        auto pluginHandle = std::make_unique<AutotunePluginHandle>();
+        *handle = pluginHandle.release();
+
+        LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
+    });
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
@@ -586,10 +633,12 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream)
 {
-    // Capture the stream so executeOpGraph enqueues its timing work on the same
-    // stream the autotune profiling events record on.
-    g_timingStream = stream;
-    return TestPluginBase::enginePluginSetStream(handle, stream);
+    const auto status = TestPluginBase::enginePluginSetStream(handle, stream);
+    if(status == HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        static_cast<AutotunePluginHandle*>(handle)->stream = stream;
+    }
+    return status;
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t

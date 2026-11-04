@@ -19,11 +19,15 @@
 #         PLUGIN_TARGET <target>
 #         ENGINE_NAME   <engine>
 #         [INSTALL_SUBDIR <subdir>]
+#         [INSTALL_DESTINATION <prefix-relative dir>]
+#         [INSTALL_STAGING_KEY <key>]
 #         [TEST_CATEGORIES_YAML <path>]
 #         [INSTALL_TEST_FILE <path>]
 #         [TEST_NAME_PREFIX <prefix>]
-#
 #         [TEST_CONFIG <path>]
+#         [REFERENCE_EXECUTOR <cpu|gpu>]
+#         [ENVIRONMENT <VAR=value>...]
+#         [INSTALL_ENVIRONMENT <VAR=value>...]
 #         [GTEST_FILTER <filter>...]
 #     )
 #
@@ -50,6 +54,17 @@
 #     Optional path to a TOML configuration file for per-test tolerance
 #     overrides. Passed via ``--test-config`` to the test binary.
 #
+#   ``REFERENCE_EXECUTOR``
+#     Optional reference executor passed via ``--reference-executor``.
+#
+#   ``ENVIRONMENT``
+#     Optional list of ``VAR=value`` entries applied to the build-tree custom
+#     target and CTest test.
+#
+#   ``INSTALL_ENVIRONMENT``
+#     Optional list of ``VAR=value`` entries for the staged install-tree CTest
+#     test. Defaults to ``ENVIRONMENT`` when omitted.
+#
 #   ``GTEST_FILTER``
 #     Optional list of Google Test filter expressions. Each entry is joined
 #     with ``:`` to form the final filter string passed via ``--gtest_filter``.
@@ -70,6 +85,19 @@
 #   ``TEST_NAME_PREFIX``
 #     Optional prefix for generated category suite CTest names. Defaults to
 #     ``TARGET_NAME``.
+#
+#   Support-claim mode is not a per-target keyword. Every lane names
+#   ``--test-engine``, and the binary enforces support claims by default when an
+#   engine is named: the sidecar is queried against the engine under test, every
+#   verdict is printed in the summary, and a broken claim fails that bundle's test.
+#
+#   A claim only applies to the arch and platform the run is on, and a runner with
+#   no device reports no arch, so no claim applies and nothing is enforced. A GPU
+#   lane enforces the claims for its own arch; a CPU-only lane sees no change.
+#
+#   Sidecars are git-tracked, so enforcement does not wait on ``dvc pull``; DVC
+#   carries the tensor payloads, which claim checking never reads.
+
 # Builds the build-tree command for an external integration test.
 #
 # Arguments:
@@ -83,6 +111,9 @@ macro(_build_external_integration_command out_var)
     )
     if(ARG_TEST_CONFIG)
         list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
+    endif()
+    if(ARG_REFERENCE_EXECUTOR)
+        list(APPEND ${out_var} "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
     endif()
     if(ARG_GTEST_FILTER)
         list(JOIN ARG_GTEST_FILTER ":" _GTEST_FILTER_STR)
@@ -99,16 +130,23 @@ macro(_stage_external_integration_install_test)
     set(_install_plugin "")
     set(_install_config "")
     if(ARG_INSTALL_SUBDIR)
+        # Where the entry, its config and its CTest file land; every offset below derives
+        # from it. The header says why an engine-pinned test must not take the default.
+        set(_install_dest "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}")
+        if(ARG_INSTALL_DESTINATION)
+            set(_install_dest "${ARG_INSTALL_DESTINATION}")
+        endif()
+
         if(ARG_TEST_CONFIG)
             get_filename_component(_install_config "${ARG_TEST_CONFIG}" NAME)
             install(FILES "${ARG_TEST_CONFIG}"
-                DESTINATION "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
+                DESTINATION "${_install_dest}"
             )
         endif()
 
         set(_synthetic_root "/__hipdnn_install_root__")
         set(_install_cwd_abs
-            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
+            "${_synthetic_root}/${_install_dest}"
         )
         set(_bin_abs
             "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
@@ -124,16 +162,37 @@ macro(_stage_external_integration_install_test)
             if(ARG_TEST_CONFIG)
                 string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
             endif()
+            if(ARG_REFERENCE_EXECUTOR)
+                string(APPEND _install_cmd " \"--reference-executor\" \"${ARG_REFERENCE_EXECUTOR}\"")
+            endif()
             if(ARG_GTEST_FILTER)
                 string(APPEND _install_cmd " \"--gtest_filter=${_GTEST_FILTER_STR}\"")
             endif()
             string(APPEND _install_cmd ")\n")
+
+            set(_install_properties "LABELS \"${_LABELS}\"")
+            if(ARG_INSTALL_ENVIRONMENT)
+                set(_install_environment "${ARG_INSTALL_ENVIRONMENT}")
+            else()
+                set(_install_environment "${ARG_ENVIRONMENT}")
+            endif()
+            if(_install_environment)
+                string(REPLACE ";" "\\;" _install_environment_escaped "${_install_environment}")
+                string(APPEND _install_properties " ENVIRONMENT \"${_install_environment_escaped}\"")
+            endif()
+
             string(APPEND _install_cmd
-                "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES LABELS \"${_LABELS}\")\n"
+                "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES ${_install_properties})\n"
             )
 
+            # An entry with its own destination needs its own accumulator, or it drains
+            # into the common file and undoes that destination.
+            set(_staging_key "${ARG_INSTALL_SUBDIR}")
+            if(ARG_INSTALL_STAGING_KEY)
+                set(_staging_key "${ARG_INSTALL_STAGING_KEY}")
+            endif()
             set_property(GLOBAL APPEND_STRING
-                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
+                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${_staging_key}"
                 "${_install_cmd}"
             )
         endif()
@@ -158,11 +217,14 @@ macro(_add_external_integration_category_suites)
         if(ARG_TEST_CONFIG)
             list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
         endif()
+        if(ARG_REFERENCE_EXECUTOR)
+            list(APPEND _category_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+        endif()
 
         set(_apply_category_args
             TEST_NAME_PREFIX "${_category_prefix}"
             COMMAND_ARGS ${_category_command_args}
-            ADDITIONAL_LABELS "integration_test" "slow" "external_integration_test" "${ARG_ENGINE_NAME}"
+            ADDITIONAL_LABELS "integration_test" "slow" "external_integration_test" "${_engine_label}"
         )
         if(ARG_ENVIRONMENT)
             list(APPEND _apply_category_args ENVIRONMENT ${ARG_ENVIRONMENT})
@@ -183,6 +245,9 @@ macro(_add_external_integration_category_suites)
             if(ARG_TEST_CONFIG)
                 list(APPEND _category_install_command_args "--test-config" "${_install_config}")
             endif()
+            if(ARG_REFERENCE_EXECUTOR)
+                list(APPEND _category_install_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+            endif()
 
             list(APPEND _apply_category_args
                 INSTALL_TEST_FILE "${ARG_INSTALL_TEST_FILE}"
@@ -202,6 +267,20 @@ endmacro()
 
 # Adds a custom target and optional CTest entries for an external integration test.
 #
+# INSTALL_DESTINATION (optional, default <bindir>/<INSTALL_SUBDIR>) places the installed
+# entry, its TEST_CONFIG and its CTest file, relative to the install prefix. Every offset
+# the entry carries is computed from it.
+#
+# Pass a destination inside an architecture's own content directory whenever the test is
+# pinned to an engine only that architecture ships. The default is arch-neutral, so
+# pruning an artifact to another architecture leaves the entry behind to run against an
+# engine the package no longer carries.
+#
+# INSTALL_STAGING_KEY (optional, default INSTALL_SUBDIR) selects the
+# EXTERNAL_TEST_INSTALL_STAGING_<key> accumulator. Pass one alongside INSTALL_DESTINATION
+# for an uncategorized entry, or it drains into the common file and undoes the
+# destination. Categorized suites route through INSTALL_TEST_FILE instead.
+#
 # When TEST_CATEGORIES_YAML is provided, the base target stays CMake-only and
 # category-specific GTest-filtered suites cover the CTest surface.
 # ~~~
@@ -209,8 +288,8 @@ function(add_external_integration_test_target)
     cmake_parse_arguments(
         ARG
         ""
-        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
-        "GTEST_FILTER;ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
+        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX;INSTALL_DESTINATION;INSTALL_STAGING_KEY"
+        "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
@@ -224,10 +303,22 @@ function(add_external_integration_test_target)
         message(FATAL_ERROR "add_external_integration_test_target: ENGINE_NAME is required")
     endif()
 
+    # CTest labels carry the engine name so suites can be filtered by engine, but
+    # an engine name is free-form and may hold characters a label may not.
+    # parse_test_categories.py accepts only [A-Za-z0-9_.-], and rejecting a label
+    # makes apply_test_category_labels warn and register nothing, so map the
+    # remaining characters to underscores.
+    string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _engine_label "${ARG_ENGINE_NAME}")
+
     _build_external_integration_command(_CMD)
 
+    set(_TARGET_CMD ${_CMD})
+    if(ARG_ENVIRONMENT)
+        set(_TARGET_CMD ${CMAKE_COMMAND} -E env ${ARG_ENVIRONMENT} ${_CMD})
+    endif()
+
     add_custom_target(${ARG_TARGET_NAME}
-        COMMAND ${_CMD}
+        COMMAND ${_TARGET_CMD}
         DEPENDS ${ARG_PLUGIN_TARGET} hipdnn_integration_tests
         COMMENT "Running integration tests for ${ARG_ENGINE_NAME}"
         USES_TERMINAL
@@ -239,7 +330,13 @@ function(add_external_integration_test_target)
         set(_GENERATE_EXTERNAL_CATEGORY_SUITES TRUE)
     endif()
 
-    set(_LABELS "integration_test;slow;external_integration_test;${ARG_ENGINE_NAME}")
+    # Register with ctest so the cross-provider integration suite is picked up
+    # by the calling project's `<project>-integration-check` target (which runs
+    # `ctest -L integration_test`) and by direct `ctest` invocations from the
+    # project's build subdir. Labels mirror add_integration_test_target so the
+    # test is selected the same way as the provider's own integration tests,
+    # plus an `external_integration_test` label and the engine name for filtering.
+    set(_LABELS "integration_test;slow;external_integration_test;${_engine_label}")
     if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
         add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
         set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
@@ -256,6 +353,9 @@ function(add_external_integration_test_target)
         endif()
     endif()
 
+    # Stage an install-tree add_test() snippet so install_provider_ctest_files
+    # can include this test in the installed CTestTestfile.cmake. Required for
+    # CI flows that invoke ctest from the install tree (e.g. TheRock).
     _stage_external_integration_install_test()
     _add_external_integration_category_suites()
 endfunction()

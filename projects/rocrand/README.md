@@ -199,6 +199,10 @@ cd rocm-libraries/projects/rocrand; cd build
 ./benchmark/benchmark_curand_device_api [primbench options]
 ```
 
+### Comparison
+
+When possible, we advise using the host API over the device API, as its kernel can be optimized much more effectively. This also makes the host API a better basis for comparing cuRAND to rocRAND: the device API benchmark relies on a generic kernel that may look completely different from how you would use it in practice, whereas the host API's kernel benefits from far more optimization.
+
 ## Wrappers
 
 * C++ wrappers for the rocRAND host API are in [`rocrand.hpp`](./library/include/rocrand/rocrand.hpp).

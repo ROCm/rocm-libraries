@@ -71,46 +71,34 @@ namespace rocsparse
     template <typename T, typename J>
     struct itilu0x_info_t
     {
-        T*    nrm_matrix{};
-        T*    nrm_corr{};
-        T*    nrm_residual{};
-        J*    options;
-        J*    nmaxiter;
-        J*    local_iter{};
-        J*    iter{};
+        T* nrm_matrix{};
+        T* nrm_corr{};
+        T* nrm_residual{};
+        J* options;
+        J* nmaxiter;
+        J* local_iter{};
+        J* iter{};
+
         void* init(void* buffer_)
         {
-            void* buffer = buffer_;
-            //
-            // T first for aligments.
-            //
-            nrm_matrix = ((T*)buffer);
-            buffer     = (void*)&nrm_matrix[1];
+            char* base = static_cast<char*>(buffer_);
 
-            nrm_corr = ((T*)buffer);
-            buffer   = (void*)&nrm_corr[1];
+            nrm_matrix   = reinterpret_cast<T*>(base);
+            nrm_corr     = nrm_matrix + 1;
+            nrm_residual = nrm_matrix + 2;
 
-            nrm_residual = ((T*)buffer);
-            buffer       = (void*)&nrm_residual[1];
+            J* jbase   = reinterpret_cast<J*>(base + align_size<T>(3));
+            options    = jbase;
+            nmaxiter   = jbase + 1;
+            local_iter = jbase + 2;
+            iter       = jbase + 3;
 
-            options = ((J*)buffer);
-            buffer  = (void*)&options[1];
-
-            nmaxiter = ((J*)buffer);
-            buffer   = (void*)&nmaxiter[1];
-
-            local_iter = ((J*)buffer);
-            buffer     = (void*)&local_iter[1];
-
-            iter   = ((J*)buffer);
-            buffer = (void*)&iter[1];
-
-            return (void*)(((char*)buffer_) + size());
+            return static_cast<void*>(base + size());
         };
 
         static size_t size()
         {
-            return (((sizeof(T) * 3 + sizeof(J) * 4) - 1) / sizeof(T) + 1) * sizeof(T);
+            return align_size<T>(3) + align_size<J>(4);
         };
     };
 
@@ -309,7 +297,7 @@ namespace rocsparse
                                         const I* __restrict__ lptr_begin_,
                                         const I* __restrict__ lptr_end_,
                                         const J* __restrict__ lind_,
-                                        T* __restrict__ lval_,
+                                        T*                   lval_,
                                         rocsparse_index_base lbase_,
                                         rocsparse_diag_type  udiag_type_,
                                         rocsparse_direction  udir_,
@@ -318,10 +306,10 @@ namespace rocsparse
                                         const I* __restrict__ uptr_end_,
                                         const J* __restrict__ uind_,
 
-                                        T* __restrict__ uval_,
+                                        T*                   uval_,
                                         rocsparse_index_base ubase_,
-                                        T* __restrict__ dval_,
-                                        size_t buffer_size_,
+                                        T*                   dval_,
+                                        size_t               buffer_size_,
                                         void* __restrict__ buffer_);
         };
     };

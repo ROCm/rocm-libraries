@@ -3,8 +3,11 @@
 
 #include "bindings.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
+#include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <stdexcept>
@@ -107,6 +110,14 @@ public:
         float milliseconds = 0.0F;
         throwOnHipError(hipEventElapsedTime(&milliseconds, getChecked(), stop.getChecked()),
                         "hipEventElapsedTime");
+        // HIP can report success with a garbage duration (e.g. an event never
+        // recorded on a stream that never ran). Zero is a legitimate back-to-back
+        // measurement, so only non-finite or negative values are rejected.
+        if(!std::isfinite(milliseconds) || milliseconds < 0.0F)
+        {
+            throw std::runtime_error("hipEventElapsedTime returned a non-finite or negative "
+                                     "elapsed time");
+        }
         return milliseconds;
     }
 
@@ -148,127 +159,126 @@ void deviceSynchronize()
     throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize");
 }
 
-// Host-released device-side stall: the work stream waits on a host-writable
-// signal value; the host releases by writing the value from a private control
-// stream. Uses hipStreamWaitValue32/hipStreamWriteValue32 on hipMallocSignalMemory
-// so the bindings stay CXX-only (no device-code compilation).
-class HipStallGate
-{
-private:
-    uint32_t* _signal = nullptr;
-    hipStream_t _control = nullptr;
+using StallGate = hipdnn_data_sdk::utilities::StallGate;
 
-    // A destroyed gate has null signal/control; arm/release would otherwise
-    // issue stream-wait/write ops on a null signal pointer (UB-adjacent).
-    void throwIfDestroyed() const
+void armStallGate(StallGate& gate, uintptr_t stream)
+{
+    if(gate.arm(toHipStream(stream)))
     {
-        if(_signal == nullptr || _control == nullptr)
-        {
-            throw std::runtime_error("HIP stall gate has been destroyed");
-        }
+        return;
     }
 
+    throwOnHipError(gate.lastError(), gate.lastOperation());
+    throw std::runtime_error(
+        std::string("HIP stall gate declined arm: ")
+        + (gate.lastOperation() != nullptr ? gate.lastOperation() : "unknown operation"));
+}
+
+// Binding-local owner for a StallGate. StallGate is non-movable, so the wrapper
+// owns it indirectly and can detach that ownership before releasing the GIL.
+//
+// close()/__exit__ are the deterministic teardown path. The plain destructor is
+// the GC fallback. StallGate destruction joins its watchdog thread and frees
+// signal memory with hipFree, which can synchronize the device. Teardown
+// therefore releases the GIL.
+class PyStallGate
+{
 public:
-    HipStallGate()
+    PyStallGate()
+        : _gate(std::make_unique<StallGate>())
     {
-        if(!canUseStreamWaitValue())
+        if(_gate->isUsable())
+        {
+            return;
+        }
+
+        // hipSuccess means no HIP call failed, so the device simply lacks support.
+        const auto lastError = _gate->lastError();
+        const auto* lastOperation = _gate->lastOperation();
+        _gate.reset();
+        if(lastError == hipSuccess)
         {
             throw std::runtime_error("hipStreamWaitValue32 unsupported on this device");
         }
-        // Signal memory is an 8-byte HSA signal; a smaller size is rejected with
-        // hipErrorInvalidValue. The 32-bit wait/write ops act on its low word.
-        throwOnHipError(hipExtMallocWithFlags(reinterpret_cast<void**>(&_signal),
-                                              sizeof(uint64_t),
-                                              hipMallocSignalMemory),
-                        "hipExtMallocWithFlags");
-        // Any failure after the allocation above must free what was already
-        // acquired: a throwing constructor does not run the destructor, so
-        // _signal (and _control, once created) would otherwise leak.
-        try
-        {
-            // Non-blocking so the release write runs concurrently with a stalled
-            // work stream; a blocking control stream would implicitly serialize
-            // with the legacy default stream and deadlock when the gate stalls it.
-            throwOnHipError(hipStreamCreateWithFlags(&_control, hipStreamNonBlocking),
-                            "hipStreamCreateWithFlags");
-            throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0),
-                            "hipStreamWriteValue32");
-            throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
-        }
-        catch(...)
-        {
-            destroy();
-            throw;
-        }
+        throwOnHipError(lastError, lastOperation);
     }
 
-    ~HipStallGate()
+    ~PyStallGate()
     {
-        destroy();
+        closeGate();
     }
 
-    HipStallGate(const HipStallGate&) = delete;
-    HipStallGate& operator=(const HipStallGate&) = delete;
+    PyStallGate(const PyStallGate&) = delete;
+    PyStallGate& operator=(const PyStallGate&) = delete;
+    PyStallGate(PyStallGate&&) = delete;
+    PyStallGate& operator=(PyStallGate&&) = delete;
 
-    HipStallGate(HipStallGate&& other) noexcept
-        : _signal(other._signal)
-        , _control(other._control)
+    void arm(uintptr_t stream)
     {
-        other._signal = nullptr;
-        other._control = nullptr;
+        armStallGate(checkOpen(), stream);
     }
 
-    HipStallGate& operator=(HipStallGate&& other) noexcept
+    void release()
     {
-        if(this != &other)
-        {
-            destroy();
-            _signal = other._signal;
-            _control = other._control;
-            other._signal = nullptr;
-            other._control = nullptr;
-        }
+        checkOpen().release();
+    }
+
+    bool timedOut()
+    {
+        return checkOpen().timedOut();
+    }
+
+    // Idempotent: a second close() is a no-op, matching StallGate::release()'s own
+    // idempotence and file.close()'s in the standard library.
+    void close()
+    {
+        closeGate();
+    }
+
+    PyStallGate& enter()
+    {
+        checkOpen();
         return *this;
     }
 
-    // Reset the signal, then enqueue a wait packet on the work stream that blocks
-    // all later work on that stream until the host releases the gate.
-    void arm(uintptr_t stream)
+    void exit(const nb::object& /*excType*/,
+              const nb::object& /*excValue*/,
+              const nb::object& /*traceback*/)
     {
-        throwIfDestroyed();
-        throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
-        throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
-        throwOnHipError(hipStreamWaitValue32(
-                            toHipStream(stream), _signal, 1U, hipStreamWaitValueGte, 0xFFFFFFFFU),
-                        "hipStreamWaitValue32");
+        closeGate();
     }
 
-    // Release the gate from the (otherwise idle) control stream; the work stream
-    // proceeds device-side, no host sync needed.
-    void release()
+private:
+    StallGate& checkOpen()
     {
-        throwIfDestroyed();
-        throwOnHipError(hipStreamWriteValue32(_control, _signal, 1U, 0), "hipStreamWriteValue32");
+        if(_gate == nullptr)
+        {
+            throw std::runtime_error("HipStallGate is closed");
+        }
+        return *_gate;
     }
 
-    void destroy() noexcept
+    void closeGate() noexcept
     {
-        if(_control != nullptr)
+        if(_gate == nullptr)
         {
-            (void)hipStreamDestroy(_control);
-            _control = nullptr;
+            return;
         }
-        if(_signal != nullptr)
-        {
-            (void)hipFree(_signal);
-            _signal = nullptr;
-        }
+
+        // Detach while Python still serializes access to this wrapper, then destroy
+        // the gate without the GIL. Both explicit close() and nanobind deallocation
+        // enter here with the GIL held.
+        auto gate = std::move(_gate);
+        const nb::gil_scoped_release release;
+        gate.reset();
     }
+
+    std::unique_ptr<StallGate> _gate;
 };
 
 } // namespace
 
-// NOTE: HipEvent, HipStallGate, and the hip_* stream/device helpers are HIP
+// NOTE: HipEvent, StallGate, and the hip_* stream/device helpers are HIP
 // primitives, not hipDNN concepts. They are exposed through the hipDNN frontend
 // bindings only provisionally; treat them as an internal, unstable surface and
 // avoid depending on them.
@@ -303,17 +313,30 @@ void hipBindings(nb::module_& m)
           "Block until a HIP stream pointer encoded as an integer is idle");
     m.def("hip_get_device_count", &getDeviceCount, "Return the number of visible HIP devices");
 
-    nb::class_<HipStallGate>(m, "HipStallGate")
+    nb::class_<PyStallGate>(m, "HipStallGate")
         .def(nb::init<>(), "Create a host-released device-side stall gate")
         .def("arm",
-             &HipStallGate::arm,
+             &PyStallGate::arm,
              nb::arg("stream") = 0,
-             nb::call_guard<nb::gil_scoped_release>(),
-             "Stall a HIP stream pointer encoded as an integer until release() is called")
-        .def("release",
-             &HipStallGate::release,
-             "Release the gate so stalled work on the stream proceeds")
-        .def("destroy", &HipStallGate::destroy, "Destroy the stall gate");
+             "Stall a HIP stream pointer encoded as an integer until release() is called.\n"
+             "Before re-arming, synchronize the previously armed stream so its wait "
+             "packet has retired; release() alone does not guarantee retirement. "
+             "The stream must remain valid until the measurement has finished.")
+        .def("release", &PyStallGate::release, "Release the gate so stalled work proceeds")
+        .def("timed_out",
+             &PyStallGate::timedOut,
+             "Return whether the stall watchdog, not release(), ended the last arm()")
+        .def("close",
+             &PyStallGate::close,
+             "Idempotently release pending waits, join the watchdog, and free its signal. "
+             "Freeing the signal can synchronize the device. "
+             "Every other method raises RuntimeError once closed.")
+        .def("__enter__", &PyStallGate::enter, nb::rv_policy::reference_internal)
+        .def("__exit__",
+             &PyStallGate::exit,
+             nb::arg("exc_type").none(),
+             nb::arg("exc_value").none(),
+             nb::arg("traceback").none());
 
     m.def("hip_device_synchronize",
           &deviceSynchronize,

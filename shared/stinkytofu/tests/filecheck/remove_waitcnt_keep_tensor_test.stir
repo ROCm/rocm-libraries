@@ -1,0 +1,20 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass=keepTensor --print-output
+#
+# keepTensor leaves s_wait_tensorcnt for a later insertion pass to reuse. The
+# dscnt drains stripped alongside it show that only the tensor branch of the
+# pass was disabled.
+#
+# Default policy: remove_waitcnt_test.stir.
+
+# CHECK-LABEL: @keeps_tensorcnt_still_strips_dscnt
+# CHECK: s_wait_tensorcnt
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_dscnt
+
+st.func @keeps_tensorcnt_still_strips_dscnt() {
+^entry:
+  "st.s_wait_dscnt"(0)
+  "st.s_wait_tensorcnt"(0)
+  "st.s_wait_dscnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}

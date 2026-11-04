@@ -214,17 +214,17 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
     void* p_sorted_col_ind[1]{};
     void* p_sorted_perm[1]{};
     void* rocprim_buffer = ptr;
-    apply_sort(handle,
-               m,
-               nnz,
-               csrt_col_ind,
-               tmp_work1,
-               csrt_perm,
-               tmp_work2,
-               descr->base,
-               rocprim_buffer,
-               p_sorted_perm,
-               p_sorted_col_ind);
+    RETURN_IF_ROCSPARSE_ERROR(apply_sort(handle,
+                                         m,
+                                         nnz,
+                                         csrt_col_ind,
+                                         tmp_work1,
+                                         csrt_perm,
+                                         tmp_work2,
+                                         descr->base,
+                                         rocprim_buffer,
+                                         p_sorted_perm,
+                                         p_sorted_col_ind));
 
     //
     // Copy permutation vector, if not already available
@@ -299,7 +299,11 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     // Stream
     hipStream_t stream = handle->stream;
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    if(trans != rocsparse_operation_none)
+#else
     if(trans == rocsparse_operation_transpose || trans == rocsparse_operation_conjugate_transpose)
+#endif
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_trm_transpose(handle,
                                                           m,
@@ -357,7 +361,7 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(info->get_ref_diag_ind(), sizeof_I * m, stream));
 
     // Allocate buffer to hold zero pivot
-    pivot_info->create_zero_pivot_async(csr_col_ind_indextype, stream);
+    RETURN_IF_ROCSPARSE_ERROR(pivot_info->create_zero_pivot_async(csr_col_ind_indextype, stream));
 
     // Allocate buffer to hold row map
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(info->get_ref_row_map(), sizeof_J * m, stream));
@@ -437,7 +441,9 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     }
 
-    apply_sort2(handle, m, done_array, workspace2, workspace, row_map, rocprim_buffer);
+    RETURN_IF_ROCSPARSE_ERROR(
+        apply_sort2(handle, m, done_array, workspace2, workspace, row_map, rocprim_buffer));
+
     return rocsparse_status_success;
 }
 

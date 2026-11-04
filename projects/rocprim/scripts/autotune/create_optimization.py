@@ -61,6 +61,8 @@ TARGET_ARCHITECTURES = [
     "gfx1151",
     "gfx1152",
     "gfx1153",
+    "gfx1170",
+    "gfx1171",
     "gfx1200",
     "gfx1201",
 ]
@@ -959,6 +961,8 @@ class BenchmarkDataManager:
                 | "target_arch::gfx1151"
                 | "target_arch::gfx1152"
                 | "target_arch::gfx1153"
+                | "target_arch::gfx1170"
+                | "target_arch::gfx1171"
             ):
                 return "gen::rdna3"
             case "target_arch::gfx1200" | "target_arch::gfx1201":

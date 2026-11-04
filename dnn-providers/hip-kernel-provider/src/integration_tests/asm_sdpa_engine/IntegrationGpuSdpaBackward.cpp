@@ -133,12 +133,10 @@ protected:
             shallowK,
             shallowV,
             shallowO,
-            _attnScaleValue,
-            /*attnMask=*/nullptr,
-            _leftBound,
-            _rightBound,
-            _topLeftAlignment,
-            &shallowStats);
+            SdpaFwdOptions<float>{}
+                .setScale(_attnScaleValue)
+                .setBand(_leftBound, _rightBound, _topLeftAlignment)
+                .setLse(&shallowStats));
 
         // Mark O and stats as host-modified so the GPU bundle syncs to device
         oTensor.markHostModified();
@@ -244,10 +242,11 @@ protected:
         _rightBound = testCase.rightBound;
         _topLeftAlignment = testCase.topLeftAlignment;
 
-        this->registerValidator(dq, tolerance);
-        this->registerValidator(dk, tolerance);
-        this->registerValidator(dv, tolerance);
-        this->verifyGraph(graph, 0);
+        GraphVerificationContext context(graph);
+        this->registerValidator(context, dq, tolerance);
+        this->registerValidator(context, dk, tolerance);
+        this->registerValidator(context, dv, tolerance);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;

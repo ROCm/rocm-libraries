@@ -21,9 +21,10 @@ with three knobs:
 This module exposes the small set of helpers every quantised op needs:
 
 * :class:`QDType` — the output dtype literal alias used in spec dataclasses.
+* :class:`LogicalQDType` — recognized types, including FP4/FP6 without scalar conversion.
 * :data:`QUANT_MAX_ABS` — clamp bound per output type (matches CK Tile's
   ``ComputeDataType{127.0f}`` / ``448.0f`` / ``57344.0f`` literals).
-* :func:`quant_ir_type` — map a ``QDType`` to the IR :class:`Type`.
+* :func:`quant_ir_type` — map a recognized dtype string to the IR :class:`Type`.
 * :func:`quantize_scalar_f32` — the one-element quant fast path
   (``cvt_f32_to_<qd>(clamp(x * inv_scale, -max, max))``).
 * :func:`dequantize_scalar_to_f32` — the dual; auto-dispatches on the
@@ -37,12 +38,24 @@ the dtype as a *string* alias so call sites read naturally
 
 from __future__ import annotations
 
-from typing import List, Literal
+from typing import List, Literal, TypeAlias
 
-from ..core.ir import BF8E5M2, F32, FP8E4M3, I8, I32, I64, IRBuilder, Type, Value
+from ..core.ir import (
+    BF8E5M2,
+    F32,
+    FP8E4M3,
+    I8,
+    I32,
+    I64,
+    IRBuilder,
+    Type,
+    Value,
+    dtype_to_ir_type,
+)
 
 
 __all__ = [
+    "LogicalQDType",
     "QDType",
     "QUANT_MAX_ABS",
     "dequantize_scalar_to_f32",
@@ -55,7 +68,8 @@ __all__ = [
 ]
 
 
-QDType = Literal["i8", "fp8e4m3", "bf8e5m2"]
+QDType: TypeAlias = Literal["i8", "fp8e4m3", "bf8e5m2"]
+LogicalQDType: TypeAlias = Literal[QDType, "fp4e2m1", "fp6e2m3", "fp6e3m2"]
 
 
 # Per-dtype clamp magnitude (the largest representable absolute value).
@@ -79,9 +93,21 @@ _QDTYPE_ALIAS = {
     "fp8e4m3": "fp8e4m3",
     "fp8": "fp8e4m3",
     "fp8_e4m3": "fp8e4m3",
+    "e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
     "bf8": "bf8e5m2",
     "fp8_e5m2": "bf8e5m2",
+}
+
+
+# Type recognition includes formats without scalar quantization support.
+_QUANT_TYPE_ALIAS = _QDTYPE_ALIAS | {
+    "fp4": "fp4e2m1",
+    "fp4e2m1": "fp4e2m1",
+    "fp6": "fp6e2m3",
+    "fp6e2m3": "fp6e2m3",
+    "bf6": "fp6e3m2",
+    "fp6e3m2": "fp6e3m2",
 }
 
 
@@ -89,6 +115,9 @@ _IR_TO_QDTYPE = {
     "i8": "i8",
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
+    "fp4e2m1": "fp4e2m1",
+    "fp6e2m3": "fp6e2m3",
+    "fp6e3m2": "fp6e3m2",
 }
 
 
@@ -104,19 +133,16 @@ def _canon(qdtype: str) -> QDType:
 def quant_ir_type(qdtype: str) -> Type:
     """Map a quant-dtype alias string to the canonical IR :class:`Type`.
 
-    Accepts ``"i8"`` / ``"int8"`` / ``"fp8e4m3"`` / ``"fp8"`` /
-    ``"bf8e5m2"`` / ``"bf8"``. Raises :class:`ValueError` for anything
-    else; this is the single point of truth for the alias map so
-    everywhere in the codebase agrees on the canonical names.
+    Accepts the existing i8/FP8/BF8 aliases and the FP4/FP6 aliases from
+    the common dtype resolver. Type recognition does not enable scalar
+    quantization or dequantization for the low-bit formats.
     """
-    canon = _canon(qdtype)
-    if canon == "i8":
-        return I8
-    if canon == "fp8e4m3":
-        return FP8E4M3
-    if canon == "bf8e5m2":
-        return BF8E5M2
-    raise ValueError(f"unreachable: canon={canon!r}")
+    if qdtype not in _QUANT_TYPE_ALIAS:
+        raise ValueError(
+            f"unsupported quant dtype {qdtype!r}; expected one of "
+            f"{sorted(_QUANT_TYPE_ALIAS)}"
+        )
+    return dtype_to_ir_type(_QUANT_TYPE_ALIAS[qdtype])
 
 
 def quant_max_abs(qdtype: str) -> float:
@@ -131,7 +157,7 @@ def quant_max_abs(qdtype: str) -> float:
     return QUANT_MAX_ABS[canon]
 
 
-def ir_to_qdtype(t: Type) -> QDType:
+def ir_to_qdtype(t: Type) -> LogicalQDType:
     """Inverse of :func:`quant_ir_type`. Rejects non-quant types."""
     if t.name in _IR_TO_QDTYPE:
         return _IR_TO_QDTYPE[t.name]  # type: ignore[return-value]
@@ -158,10 +184,12 @@ def quantize_scalar_f32(
 
     The clamp is redundant for fp8/bf8 (the AMDGPU hardware already
     saturates on conversion), but it's a cheap two-op ``v_med3_f32``
-    that keeps the f32 path interpretable in IR dumps and matches the
-    CK Tile reference's saturation semantics exactly for the i8 path
-    (where ``v_cvt_pk_i16_i32`` does *not* saturate without the
-    explicit clamp).
+    that keeps the f32 path interpretable in IR dumps. For i8 it sets
+    the output range: ``cvt_f32_to_i8_sat`` alone saturates to
+    ``[-128, 127]``, and the clamp narrows that to the symmetric
+    ``[-127, 127]`` of the CK Tile reference. (The i8 path does not use
+    ``v_cvt_pk_i16_i32``; that instruction does saturate, but to the
+    i16 range, so it would not bound an i8 result either.)
 
     ``inv_scale`` is in the *natural* direction (``inv_scale = 1 / scale``
     where ``scale = amax / quant_max``). Pre-computing the reciprocal
@@ -188,8 +216,8 @@ def quantize_scalar_f32(
     # bf8, drop the explicit ``v_med3_f32`` clamp because the AMDGPU
     # ``cvt.pk.fp8.f32`` / ``cvt.pk.bf8.f32`` instructions already
     # saturate the input on conversion. For ``i8`` we keep the clamp:
-    # ``v_cvt_pk_i16_i32`` does not saturate so the explicit
-    # ``smax`` / ``smin`` chain is required for correctness.
+    # it gives the symmetric ``[-127, 127]`` range of the CK Tile
+    # reference, where ``cvt_f32_to_i8_sat`` alone would produce -128.
     if skip_clamp_on_pack and canon in ("fp8e4m3", "bf8e5m2"):
         if canon == "fp8e4m3":
             return b.cvt_f32_to_fp8(scaled)

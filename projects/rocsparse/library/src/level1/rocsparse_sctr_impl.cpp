@@ -26,6 +26,7 @@
 #include "rocsparse_sctr.hpp"
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "sctr_device.h"
@@ -68,7 +69,11 @@ rocsparse_status rocsparse::sctr_template(rocsparse_handle     handle,
     hipStream_t stream = handle->stream;
 
 #define SCTR_DIM 512
-    dim3 sctr_blocks((nnz - 1) / SCTR_DIM + 1);
+    // Clamp to both the device limit and the dispatch packet's work-item limit.
+    // The grid-stride kernel processes elements beyond the clamped grid.
+    const uint32_t num_blocks = rocsparse::get_grid_size_x(
+        handle, (static_cast<int64_t>(nnz) - 1) / SCTR_DIM + 1, SCTR_DIM);
+    dim3 sctr_blocks(num_blocks);
     dim3 sctr_threads(SCTR_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sctr_kernel<SCTR_DIM, I, T>),

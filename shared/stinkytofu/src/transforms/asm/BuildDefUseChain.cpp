@@ -32,6 +32,7 @@
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/PhiPlacement.hpp"
 
 namespace stinkytofu {
@@ -49,11 +50,6 @@ class DefUseChainBuilder {
         phi->sources.push_back(def);
         if (def) def->users.push_back(phi);
     }
-
-    static void clearChains(StinkyInstruction* inst) {
-        inst->sources.clear();
-        inst->users.clear();
-    }
 };
 
 }  // namespace stinkytofu
@@ -66,12 +62,7 @@ using namespace stinkytofu;
 //----------------------------------------------------------------------
 
 void clearAllChains(Function& func) {
-    for (BasicBlock& bb : func) {
-        for (IRBase& ir : bb) {
-            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-            DefUseChainBuilder::clearChains(cast<StinkyInstruction>(&ir));
-        }
-    }
+    clearDefUseChains(func);
 }
 
 void removeUnusedPhis(BasicBlock& bb) {

@@ -26,6 +26,7 @@
 #define TESTING_SPGEMM_CSR_HPP
 
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -58,8 +59,7 @@ void testing_spgemm_csr_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpGEMMAlg_t alg       = HIPSPARSE_SPGEMM_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<spgemm_struct> unique_ptr_descr(new spgemm_struct);
     hipsparseSpGEMMDescr_t         descr = unique_ptr_descr->descr;
@@ -354,8 +354,7 @@ void testing_spgemm_csr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handles
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<spgemm_struct> unique_ptr_descr(new spgemm_struct);
     hipsparseSpGEMMDescr_t         descr = unique_ptr_descr->descr;
@@ -500,8 +499,8 @@ void testing_spgemm_csr(Arguments argus)
                                                          &bufferSize1,
                                                          nullptr));
 
-    void* externalBuffer1;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer1, bufferSize1));
+    auto  externalBuffer1_managed = hipsparse_unique_ptr{device_malloc(bufferSize1), device_free};
+    void* externalBuffer1         = externalBuffer1_managed.get();
 
     // SpGEMM work estimation
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -564,8 +563,8 @@ void testing_spgemm_csr(Arguments argus)
                                                   &bufferSize2,
                                                   nullptr));
 
-    void* externalBuffer2;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer2, bufferSize2));
+    auto  externalBuffer2_managed = hipsparse_unique_ptr{device_malloc(bufferSize2), device_free};
+    void* externalBuffer2         = externalBuffer2_managed.get();
 
     // SpGEMM compute
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -792,10 +791,6 @@ void testing_spgemm_csr(Arguments argus)
         unit_check_general(
             1, nnz_C_gold, 1, hcsr_val_C_reuse_gold.data(), hcsr_val_C_1_reuse.data());
     }
-
-    // Free buffers
-    CHECK_HIP_ERROR(hipFree(externalBuffer1));
-    CHECK_HIP_ERROR(hipFree(externalBuffer2));
 
     // Clean up
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));

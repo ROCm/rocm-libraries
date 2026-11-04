@@ -39,7 +39,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     // Input dimensions
-    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
@@ -208,7 +208,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // Runs CPU reference validation against the current GPU output buffers. Called once after
     // the initial execute() and again after the runtime pass-by-value re-execution demo below,
     // so both scalar values get verified against the CPU reference.
-    auto runCpuValidation = [&]() -> bool {
+    auto runCpuValidation = [&,
+                             y = y,
+                             savedMean = savedMean,
+                             savedInvVariance = savedInvVariance,
+                             nextRunningMean = nextRunningMean,
+                             nextRunningVariance = nextRunningVariance]() -> bool {
         std::cout << "Running CPU reference validation...\n";
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);

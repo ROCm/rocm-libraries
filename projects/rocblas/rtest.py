@@ -40,6 +40,8 @@ OS_info = {}
 timeout = False
 test_proc = None
 stop = 0
+# Compiled ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN, or None when unset (no output scan).
+output_fail_re = None
 
 test_script = [ '%XML%' ] # [ 'cd %IDIR%', '%XML%' ]
 
@@ -69,40 +71,68 @@ def parse_args():
     #                     help='Verbose install (optional, default: False)')
     return parser.parse_args()
 
+def load_output_fail_pattern():
+    """Compile the output-failure regex from the environment.
+
+    ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN is a case-insensitive regular expression
+    matched against each test output line. Unset or empty (the default)
+    disables that scan; a test then fails only on its exit status or timeout.
+    """
+    global output_fail_re
+    raw = os.environ.get("ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN", "")
+    if not raw:
+        output_fail_re = None
+        return
+    try:
+        output_fail_re = re.compile(raw, re.IGNORECASE)
+    except re.error as exc:
+        raise SystemExit(
+            f"ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN {raw!r} is not a valid regular expression: {exc}"
+        )
+    print(f"ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN: {raw}")
+
 def arg_into_list(arg) -> list:
     arg = re.sub(r"['\"]|['\']",'', arg)
     return arg.split(';')
 
-def rocm_executable(exe_name: str) -> str:
-  if shutil.which(exe_name):
-    return exe_name
-  bin_dir = os.environ.get("ROCM_PATH") or os.environ.get("HIP_PATH")
-  if bin_dir:
-    candidate = pathlib.Path(bin_dir) / "bin" / exe_name
-    if candidate.exists():
-        return str(candidate)
-  return None
+def rocm_executables(exe_name: str) -> list:
+  candidates = []
+  found = shutil.which(exe_name)
+  if found:
+    candidates.append(found)
+  for env_var in ("ROCM_PATH", "HIP_PATH"):
+    bin_dir = os.environ.get(env_var)
+    if bin_dir:
+      candidate = pathlib.Path(bin_dir) / "bin" / exe_name
+      if candidate.exists() and str(candidate) not in candidates:
+        candidates.append(str(candidate))
+  return candidates
+
+def run_info_tool(exe_name: str) -> str:
+  for cmd in rocm_executables(exe_name):
+    try:
+      process = subprocess.run([cmd], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+      print(f'Warning: unable to run {cmd}: {e}')
+      continue
+    return process.stdout.decode(errors="replace")
+  print(f'Warning: {exe_name} not available, VRAM detection skipped')
+  return ""
 
 def vram_detect():
     global OS_info
     OS_info["VRAM"] = 0
     if os.name == "nt":
-        cmd = rocm_executable("hipinfo.exe")
-        if cmd is not None: 
-            process = subprocess.run([cmd], stdout=subprocess.PIPE)
-            for line_in in process.stdout.decode().splitlines():
-                if 'totalGlobalMem' in line_in:
-                    OS_info["VRAM"] = float(line_in.split()[1])
-                    break
+        for line_in in run_info_tool("hipinfo.exe").splitlines():
+            if 'totalGlobalMem' in line_in:
+                OS_info["VRAM"] = float(line_in.split()[1])
+                break
     else:
-        cmd = rocm_executable("rocminfo")
-        if cmd is not None: 
-            process = subprocess.run([cmd], stdout=subprocess.PIPE)
-            for line_in in process.stdout.decode().splitlines():
-                match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
-                if match:
-                    OS_info["VRAM"] = float(match.group(1))/(1024*1024)
-                    break
+        for line_in in run_info_tool("rocminfo").splitlines():
+            match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
+            if match:
+                OS_info["VRAM"] = float(match.group(1))/(1024*1024)
+                break
 
 def os_detect():
     global OS_info
@@ -251,9 +281,11 @@ def run_cmd(cmd, test = False, time_limit = 0, path = "" ):
                 elif output:
                     outstring = output.strip()
                     print (outstring)
-                    # skip output that is optional GTest summary
-                    if not re.search(r'\[ FAILED.*\]', outstring):
-                        error = error or re.search(r'error|fail', outstring, re.IGNORECASE)
+                    # Optional text scan. Skip the GTest summary line, which
+                    # contains "FAILED" while the process exit status already
+                    # records that result.
+                    if output_fail_re is not None and not re.search(r'\[\s+FAILED.*\]', outstring):
+                        error = error or bool(output_fail_re.search(outstring))
             status = test_proc.poll()
             if time_limit > 0:
                 p.stop()
@@ -345,9 +377,11 @@ def batch(script, xml):
                         error = run_cmd(var_cmd, True, timeout, test_dir)
                         if (error == 2):
                             print( f'***\n*** Timed out when running: {name}\n***')
+                        # Fold this run in before the next <run> overwrites error.
+                        fail = fail or error
         else:
             error = run_cmd(cmd)
-        fail = fail or error
+            fail = fail or error
 
     if (fail):
         if (cmd == "%XML%"):
@@ -420,6 +454,8 @@ def main():
 
     os_detect()
     args = parse_args()
+
+    load_output_fail_pattern()
 
     # PR / CI labels (e.g. GitHub Actions): semicolon-separated, same format as --ci_labels.
     # When --ci_labels is omitted, use GITHUB_PR_LABELS from the environment (e.g. set by CI before ctest).

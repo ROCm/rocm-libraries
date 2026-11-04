@@ -1,0 +1,134 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Reports how far behind `develop` each open PR's base is, as a commit status
+# named by STATUS_CONTEXT below.
+#
+# Why a commit status and not a check run: staleness is a function of
+# wall-clock time, so a PR that is fine today has to be able to turn red three
+# days from now with no push in between. Only a scheduled job can do that, and
+# a scheduled job has no PR event to hang a check run on. Commit statuses can
+# be (re)posted for an arbitrary SHA at any time, and a ruleset can require
+# them by context name exactly like a check.
+#
+# This runs in REPORT-ONLY mode: every status is posted as success, with the
+# verdict in the description ("WOULD FAIL: ..." when a PR is over the limit).
+# Nothing is gated until both of these happen:
+#   1. MODE below is changed to `enforce`, and
+#   2. the STATUS_CONTEXT below is added to the required status checks of the
+#      `develop` ruleset.
+# Do (1) first and let it soak; an enforcing status that is never posted would
+# block its PR permanently.
+
+name: PR Base Freshness
+
+on:
+  # SECURITY: pull_request_target runs in the BASE-repo context, so the token
+  # can post a status even for PRs opened from FORKS.
+  #
+  # This is SAFE here ONLY because this workflow:
+  #   • NEVER checks out or executes PR head code (see checkout step below),
+  #   • runs the TRUSTED pr_base_freshness.py from the base branch, and
+  #   • reads all PR data via the GitHub API.
+  # Do NOT add build/test/install steps that run PR-provided code, and do NOT
+  # change the checkout to the PR head — that would create a "pwn request".
+  # Refs:
+  #   https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
+  #   https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+  pull_request_target:
+    branches: [develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+  # Four times a day. The threshold is measured in days, so this only needs to
+  # be fine-grained enough that a PR cannot sit stale-green for long; anything
+  # more frequent just spends rate limit. Scheduled runs are often delayed
+  # under load, which is immaterial at this granularity.
+  schedule:
+    - cron: '0 1,7,13,19 * * *'
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report (post success always) or enforce (fail stale PRs)'
+        type: choice
+        options: [report, enforce]
+        default: report
+      # A list rather than free text. This value sets the cutoff date, so a
+      # zero, a negative or a typo would put the cutoff at or after now, make
+      # `develop`'s own tip the cutoff, and mark the entire queue stale. The
+      # script rejects those too, but there is no reason to be able to type
+      # them in the first place.
+      max_age_days:
+        description: 'Maximum days the base may lag develop'
+        type: choice
+        options: ['1', '2', '3', '5', '7', '14']
+        default: '3'
+      dry_run:
+        description: 'Evaluate and log, but post no statuses'
+        type: boolean
+        default: false
+
+# Least privilege: the only write is the commit status itself.
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+
+# Per-PR runs supersede each other; scheduled runs never cancel one another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # Change to 'enforce' only after this has soaked in report mode.
+  MODE: ${{ inputs.mode || 'report' }}
+  MAX_AGE_DAYS: ${{ inputs.max_age_days || '3' }}
+  # Also the context name to add to the develop ruleset when enforcing.
+  STATUS_CONTEXT: base-freshness
+
+jobs:
+  freshness:
+    name: Base freshness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # SECURITY: check out the TRUSTED default branch, NEVER the PR head. This
+      # guarantees we run OUR pr_base_freshness.py, not the fork's.
+      #
+      # Every event is pinned to the default branch tip. For PR and scheduled
+      # runs that is also where this workflow file is loaded from, so the two
+      # always match. Do not use the PR's base SHA: a PR based on a commit
+      # older than the script has no script to run. Do not leave `ref` empty
+      # either: a workflow_dispatch run falls through to whatever branch the
+      # caller picked and would run that branch's copy of the script. (A
+      # dispatch also loads this YAML from that branch; that needs write
+      # access, which can already add a workflow with `statuses: write`.)
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      # SECURITY: no dependency install step, deliberately. This job holds
+      # `statuses: write`, so any package it pulls is code running at that
+      # privilege, and an unpinned `pip install` would make that a moving
+      # target on every run. The script uses only the standard library.
+
+      - name: Evaluate base freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A PR event scopes the run to that one PR; schedule and manual runs
+          # sweep every open PR so a long-idle one cannot stay stale-green.
+          PR_SCOPE: ${{ github.event.pull_request.number && format('--pr {0}', github.event.pull_request.number) || '--all-open' }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          python .github/scripts/pr_base_freshness.py \
+            --base-branch develop \
+            --max-age-days "$MAX_AGE_DAYS" \
+            --context "$STATUS_CONTEXT" \
+            --mode "$MODE" \
+            $PR_SCOPE $DRY_RUN

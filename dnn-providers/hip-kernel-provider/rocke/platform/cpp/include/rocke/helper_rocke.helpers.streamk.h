@@ -141,6 +141,104 @@ rocke_streamk_decoded_tile_t rocke_emit_streamk_decode(rocke_ir_builder_t* b,
                                                        rocke_value_t* linear_id,
                                                        const rocke_streamk_partition_t* spec);
 
+/* ------------------------------------------------------------------ *
+ * Iteration-balanced stream-K (CK Tile StreamKTilePartitioner)
+ * ------------------------------------------------------------------ *
+ *   Python                                C99 (this header)
+ *   -----------------------------------   -----------------------------------
+ *   class StreamKIterPartition            rocke_streamk_iter_partition_t
+ *     (its @property values)                + rocke_streamk_iter_plan_t, resolved
+ *                                             once by rocke_streamk_iter_plan()
+ *   streamk_iter_partition(...)           rocke_streamk_iter_partition_make(...)
+ *   StreamKIterPartition.flags_bytes()    rocke_streamk_flags_bytes(...)
+ *   streamk_start_iter / streamk_end_iter rocke_streamk_start_iter / _end_iter
+ *   StreamKIterArgs                       rocke_streamk_iter_args_t
+ *   emit_streamk_sk_start_iter(...)       rocke_emit_streamk_sk_start_iter(...)
+ *   emit_streamk_iter_range(...)          rocke_emit_streamk_iter_range(...)
+ *
+ * The derived quantities are returned as one resolved plan by value rather
+ * than as per-property accessors, so the C side cannot recompute any of them
+ * with different rounding than the Python @property it mirrors.
+ */
+typedef struct rocke_streamk_iter_partition
+{
+    int m_tiles;
+    int n_tiles;
+    int iters_per_tile;
+    int max_active_wgs;
+    bool persistent;
+} rocke_streamk_iter_partition_t;
+
+typedef struct rocke_streamk_iter_plan
+{
+    int num_tiles;
+    int sk_tiles;
+    int sk_ctas;
+    int total_sk_iters;
+    int iters_per_sk_cta; /* >= 1; clamped to 1 for an all-DP plan (a divisor) */
+    int extra_iters;
+    int dp_tiles;
+    int total_dp_iters;
+    int grid_size;
+    int max_linear_partners;
+    int tree_rounds;
+} rocke_streamk_iter_plan_t;
+
+/* streamk_iter_partition: every count must be > 0. On violation *out_status
+ * (if non-NULL) is ROCKE_ERR_VALUE and the returned partition is zeroed. */
+rocke_streamk_iter_partition_t rocke_streamk_iter_partition_make(int m_tiles,
+                                                                 int n_tiles,
+                                                                 int iters_per_tile,
+                                                                 int max_active_wgs,
+                                                                 bool persistent,
+                                                                 rocke_status_t* out_status);
+
+/* Every StreamKIterPartition @property, resolved once. */
+rocke_streamk_iter_plan_t rocke_streamk_iter_plan(const rocke_streamk_iter_partition_t* p);
+
+/* StreamKIterPartition.flags_bytes(n_waves): bytes of the stream-K fixup flag
+ * table, one i32 flag per (stream-K CTA, wave) padded to 256 bytes; 0 for an
+ * all-DP plan. n_waves is the waves per CTA that signal independently
+ * (warp_m * warp_n for wgrad). n_waves <= 0 (Python ValueError) sets
+ * *out_status (if non-NULL) to ROCKE_ERR_VALUE and returns 0. */
+size_t rocke_streamk_flags_bytes(const rocke_streamk_iter_plan_t* r,
+                                 int n_waves,
+                                 rocke_status_t* out_status);
+
+int rocke_streamk_start_iter(const rocke_streamk_iter_partition_t* p, int sk_cta);
+int rocke_streamk_end_iter(const rocke_streamk_iter_partition_t* p, int sk_cta);
+
+/* The runtime stream-K partition a shape-agnostic kernel reads (Python
+ * StreamKIterArgs). The host computes a partition per launch and passes these
+ * as kernel arguments; the emitters below only see them as SSA values. */
+typedef struct rocke_streamk_iter_args
+{
+    rocke_value_t* iters_per_tile; /* i32 MAC iterations per output tile */
+    rocke_value_t* dp_tiles; /* i32 tiles owned whole by data-parallel CTAs */
+    rocke_value_t* total_dp_iters; /* i32 dp_tiles * iters_per_tile */
+    rocke_value_t* iters_per_sk_cta; /* i32 base iterations per stream-K CTA (>= 1) */
+    rocke_value_t* extra_iters; /* i32 stream-K CTAs that own one more */
+} rocke_streamk_iter_args_t;
+
+/* emit_streamk_sk_start_iter: SSA start iteration of a runtime SK CTA index. */
+rocke_value_t* rocke_emit_streamk_sk_start_iter(rocke_ir_builder_t* b,
+                                                rocke_value_t* sk_cta,
+                                                const rocke_streamk_iter_args_t* a);
+
+/* emit_streamk_iter_range result (Python _IterRange). */
+typedef struct rocke_streamk_iter_range
+{
+    rocke_value_t* start; /* i32 global first iteration (SGPR) */
+    rocke_value_t* end; /* i32 one past the last iteration (SGPR) */
+    rocke_value_t* sk_cta; /* i32 stream-K CTA index; meaningless for a DP CTA */
+} rocke_streamk_iter_range_t;
+
+/* emit_streamk_iter_range(b, cta, args, *, dp). */
+rocke_streamk_iter_range_t rocke_emit_streamk_iter_range(rocke_ir_builder_t* b,
+                                                         rocke_value_t* cta,
+                                                         const rocke_streamk_iter_args_t* a,
+                                                         bool dp);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

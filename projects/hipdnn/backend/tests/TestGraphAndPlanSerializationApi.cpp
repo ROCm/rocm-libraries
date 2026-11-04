@@ -20,6 +20,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
 #include <array>
 #include <cstdint>
@@ -132,6 +133,32 @@ public:
     static flatbuffers::DetachedBuffer makeBareGraphBlob()
     {
         return createValidGraph().Release();
+    }
+
+    // Same shape as makeBareGraphBlob(), but with an explicit graph id - the
+    // container format (HDGP) is a distinct wire format from the bare graph
+    // blob, so id survival has to be proven through it separately.
+    static flatbuffers::DetachedBuffer
+        makeBareGraphBlobWithId(const hipdnn_flatbuffers_sdk::utilities::UuidBytes& idBytes)
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        flatbuffers::FlatBufferBuilder builder;
+        const std::vector<::flatbuffers::Offset<TensorAttributes>> tensors;
+        const std::vector<::flatbuffers::Offset<Node>> nodes;
+        const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(idBytes);
+        auto graphOffset = CreateGraphDirect(builder,
+                                             "test",
+                                             DataType::FLOAT,
+                                             DataType::HALF,
+                                             DataType::BFLOAT16,
+                                             &tensors,
+                                             &nodes,
+                                             flatbuffers::nullopt,
+                                             false,
+                                             nullptr,
+                                             &uuid);
+        builder.Finish(graphOffset);
+        return builder.Release();
     }
 
     // A bare SerializedExecutionPlan FlatBuffer, i.e. NOT wrapped in an HDGP
@@ -329,6 +356,36 @@ TEST_F(TestGraphAndPlanSerializationApi, ComboSerializeProducesContainerWithGrap
         EXPECT_EQ(reinterpret_cast<uintptr_t>(graphView.data) % 8, 0u);
         EXPECT_EQ(reinterpret_cast<uintptr_t>(planView.data) % 8, 0u);
     }
+}
+
+TEST_F(TestGraphAndPlanSerializationApi, ComboSerializePreservesGraphId)
+{
+    const auto id
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89ab-4def-8123-456789abcdef");
+    auto graphBlob = makeBareGraphBlobWithId(id);
+    hipdnnBackendDescriptor_t rawGraph = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateAndDeserializeGraph_ext(&rawGraph, graphBlob.data(), graphBlob.size()),
+        HIPDNN_STATUS_SUCCESS);
+    const ScopedBackendDescriptor graphDesc(rawGraph);
+
+    makeExecutionPlanFinalized();
+    expectPlanSerialization();
+
+    size_t size = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+                  graphDesc.get(), _planWrapper.get(), 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> blob(size);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+                  graphDesc.get(), _planWrapper.get(), size, &size, blob.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    const auto graphView
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::extractGraphBlob(blob.data(), blob.size());
+    const auto* embeddedGraph = fbs::GetGraph(static_cast<const uint8_t*>(graphView.data));
+    ASSERT_NE(embeddedGraph->id(), nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*embeddedGraph->id()), id);
 }
 
 TEST_F(TestGraphAndPlanSerializationApi, ComboSerializeGraphOnlyWhenPlanDescIsNull)
@@ -567,6 +624,29 @@ TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphFromContainerExtractsGr
     verifyDeserializedGraphMatchesSource(desc.get());
 }
 
+TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphFromContainerPreservesId)
+{
+    const auto id
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89ab-4def-8123-456789abcdef");
+    auto graphBlob = makeBareGraphBlobWithId(id);
+    auto planBlob = makeBarePlanBlob();
+    auto container = makeContainer({graphBlob.data(), graphBlob.data() + graphBlob.size()},
+                                   {planBlob.data(), planBlob.data() + planBlob.size()});
+
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc, container.data(), container.size()),
+        HIPDNN_STATUS_SUCCESS);
+    const ScopedBackendDescriptor desc(rawDesc);
+
+    auto graphDesc = desc->asDescriptor<GraphDescriptor>();
+    graphDesc->buildSerializedGraph();
+    auto roundTripped = graphDesc->getSerializedGraph();
+    const auto* reconstructed = fbs::GetGraph(static_cast<const uint8_t*>(roundTripped.ptr));
+    ASSERT_NE(reconstructed->id(), nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*reconstructed->id()), id);
+}
+
 TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphFromLegacyBareBlobUnchanged)
 {
     auto graphBlob = makeBareGraphBlob();
@@ -599,6 +679,37 @@ TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphIdentifiedButCorruptCon
     hipdnnBackendDescriptor_t rawDesc = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc, corrupt.data(), corrupt.size()),
               HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(rawDesc, nullptr);
+}
+
+// Neither a bare plan nor a bare graph carries a file identifier, so the graph loader
+// cannot tell them apart and parses a bare plan as a graph. No check looks for a plan;
+// the Graph verifier rejects it as a side effect. At version 2 the first check to fail is
+// the Graph name: the verifier reads the plan's version field as the offset of the name
+// string, and an offset of 2 is not 4-byte aligned. With this fixture's plugin payload,
+// the graph loader also rejects the plan when PLAN_SERIALIZATION_VERSION is 0 or 4, so a
+// version change alone does not fail this test. The plan comes from the production
+// writer, so a change to the plan envelope or the graph loader that lets a plan through
+// fails this test.
+TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphRejectsBarePlanBlob)
+{
+    makeExecutionPlanFinalized();
+    expectPlanSerialization();
+
+    size_t size = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedExecutionPlan_ext(_planWrapper.get(), 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> planBlob(size);
+    ASSERT_EQ(hipdnnBackendGetSerializedExecutionPlan_ext(
+                  _planWrapper.get(), size, &size, planBlob.data()),
+              HIPDNN_STATUS_SUCCESS);
+    flatbuffers::Verifier verifier(planBlob.data(), planBlob.size());
+    ASSERT_TRUE(fbs::VerifySerializedExecutionPlanBuffer(verifier));
+
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    EXPECT_EQ(
+        hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc, planBlob.data(), planBlob.size()),
+        HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(rawDesc, nullptr);
 }
 

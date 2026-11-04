@@ -17,9 +17,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#define NOMINMAX
+
 #include "hip/thread"
 
 #include "hip/__support/misuse.h"
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
@@ -44,6 +48,9 @@ namespace cuda {
 enum {
     CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
     MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
+    // Hard upper bound on the number of scheduler vcores. currentWorkNode is indexed by
+    // blockIdx.x, so the scheduler grid must never exceed this or we write out of bounds.
+    MAX_VCORES = 8192U,
 };
 
 namespace internal {
@@ -93,8 +100,10 @@ __device__ WorkQueue<MAIN_WORK_QUEUE_SIZE> mainWorkQueue;
 
 __device__ uint32_t numVcores = 0;
 __device__ uint32_t activeVcoreCount = 0;
-// Server GPUs can have CU/WGP counts in the hundreds, and we spawn multiple vcores per WGP.
-__device__ WorkNode_Header *currentWorkNode[8192] = {};
+// One slot per vcore, indexed by blockIdx.x. Server GPUs can have CU counts in the hundreds and we
+// spawn multiple vcores per CU, so this is sized for the worst case wthread::hardware_concurrency()
+// is allowed to return.
+__device__ WorkNode_Header *currentWorkNode[MAX_VCORES] = {};
 
 hipStream_t mainStream;
 ::std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
@@ -345,6 +354,21 @@ static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
     return cpuWorkQueueAddr;
 }
 
+  // pushCount is written by the host while threading_main is already running. Use hipStreamWriteValue32 rather than
+  // hipMemcpyToSymbolAsync: on Navi4 (gfx12) under Windows, the running kernel was observed never to see a value
+  // written by hipMemcpyToSymbolAsync, so it never exited and anything synchronizing with mainStream (e.g. a null-stream
+  // copy) hung. This is related to, but distinct from, the issue behind sendToGPU's use of hipStreamWriteValue64
+  // (the kernel seeing partially written values): both concern how a host-initiated write becomes visible to the
+  // persistent kernel.
+static __host__ uint32_t *getCPUWorkQueuePushCountAddr() {
+    static uint32_t * const pushCountAddr = [](){
+        void *temp;
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
+        return &static_cast<decltype(cpuWorkQueue) *>(temp)->pushCount;
+    }();
+    return pushCountAddr;
+}
+
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
@@ -366,25 +390,23 @@ static __host__ void prepDeviceForWork() {
     };
 
     bool isFirstTime = false;
-    // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
-    // variable for the trick anyways, and we also need some persistent memory to copy from when setting
-    // cpuWorkQueue.pushCount = -1U, we'll use temp for that purpose too.
-    static uint32_t temp = ([&isFirstTime]() {
-        // TODO: investigate using hipExtStreamCreateWithCUMask for this
-        __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
-        isFirstTime = true;
-    }(), -1U);
+    [[maybe_unused]] static const bool initialized = [&isFirstTime]() {
+          __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
 
-    if (isFirstTime) {
-        // Initalize numVcores, so device code can call hip::wthread::hardware_concurrency
-        static uint32_t temp2 = hip::wthread::hardware_concurrency();
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
-    } else {
+          void *numVcoresAddr;
+          __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&numVcoresAddr, HIP_SYMBOL(numVcores)));
+          __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), static_cast<uint32_t *>(numVcoresAddr), hip::wthread::hardware_concurrency(), 0));
+
+          isFirstTime = true;
+          return true;
+    }();
+
+    if (!isFirstTime){
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
-        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
+        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its write in that stream, and we need to make
         // sure the change made by the last wthread's destructor doesn't get over-written.
         // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), -1U, 0));
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
@@ -412,13 +434,11 @@ static __host__ void prepDeviceForWork() {
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
-    // Needs to be static because the copy might not be done before we return
-    static uint32_t temp;
-    temp = cpuWorkQueuePushCount;
-    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), cpuWorkQueuePushCount, 0));
+    // Make sure the write is actually submitted: on Windows, queued work may not reach the GPU until the stream is
+    // synchronized (see the kicker thread in prepDeviceForWork), and threading_main can't exit until it sees it.
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     if (blocking) {
-        // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
-        // synchronizing on mainStream, but there's no need.
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(mainStream));
     }
 }
@@ -529,7 +549,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
 
 namespace this_thread {
 _LIBHIPTHREADS_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns) {
-#if CCCL_VERSION >= 3000000
+#if CCCL_VERSION >= 3000000 || HIPCCL_VERSION >= 3000000
     cuda::std::__cccl_thread_sleep_for(__ns);
 #else
     cuda::std::__libcpp_thread_sleep_for(__ns);
@@ -599,6 +619,24 @@ __device__ unsigned int get_fiber_id() noexcept {
 __host__ wthread::wthread() noexcept {
     prepDeviceForWork();
 }
+
+__host__ __device__ wthread::wthread(wthread &&other) noexcept
+#ifdef __HIP_DEVICE_COMPILE__
+    : worknode_d(other.worknode_d), cached_tdata(::std::move(other.cached_tdata)) {
+    other.worknode_d = nullptr;
+}
+#else // __HIP_DEVICE_COMPILE__
+    : worknode_d(::std::move(other.worknode_d)), cached_tdata(::std::move(other.cached_tdata)) {
+    // Unlike a typical move constructor, this one has to do more than transfer ownership. gpuThreadFromHost_counter
+    // counts live host hip::wthread objects, not owned work nodes: every host constructor increments it and every
+    // destructor decrements it, including the destructor of a moved-from object. If we didn't count the new object
+    // here, each move would leave the counter one too low; once it wraps below zero, prepDeviceForWork() never sees 0
+    // again, the persistent kernel is never launched, and join() hangs (e.g. when a std::vector<hip::wthread> grows).
+    // other is still alive and was already counted, so the counter is non-zero here and this call only increments it;
+    // it never launches the persistent kernel.
+    prepDeviceForWork();
+}
+#endif // !__HIP_DEVICE_COMPILE__
 
 __host__ __device__ wthread &wthread::operator=(wthread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__
@@ -725,32 +763,145 @@ __host__ __device__ void wthread::detach() {
 #endif // !__HIP_DEVICE_COMPILE__
 }
 
+// Scheduler vcores requested per WGP (or WGP-equivalent on CDNA - see getCusPerMultiprocessor).
+// Overridable at runtime via the HIPTHREADS_VCORES_PER_WGP environment variable; defaults to
+// HIPTHREADS_DEFAULT_VCORES_PER_WGP if unset or unparseable. Process-wide, not per-device, so the
+// parse happens once ever rather than once per device.
 [[gnu::const]]
+static __host__ uint32_t getRequestedVcoresPerWgp() {
+    static const uint32_t value = [](){
+        const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
+        if (env != nullptr) {
+            char *end;
+            unsigned long val = ::std::strtoul(env, &end, 10);
+            if (end != env && *end == '\0' && val > 0) {
+                return static_cast<uint32_t>(val);
+            }
+        }
+        return static_cast<uint32_t>(HIPTHREADS_DEFAULT_VCORES_PER_WGP);
+    }();
+    return value;
+}
+
+// Returns how many CUs make up one HIP "multiprocessor" on device: 2 on RDNA, where
+// hipDeviceAttributeMultiprocessorCount reports WGPs, or 1 on CDNA/GCN, where it already reports
+// CUs. warpSize is the discriminator: wave32 is RDNA, wave64 is CDNA/GCN.
+[[gnu::const]]
+static __host__ uint32_t getCusPerMultiprocessor(int device) {
+    int warpSize = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device));
+    return (warpSize == 32) ? 2U : 1U;
+}
+
+// Total scheduler vcores requested across the whole device, before any occupancy-based clamp.
+// "Vcores per WGP" always means "per 2 CUs" by definition, so the per-CU rate is
+// requestedVcoresPerWgp / 2 on every architecture; only converting multiprocessorCount into a
+// real CU count is architecture dependent (see getCusPerMultiprocessor). CU counts are even on
+// every architecture we've measured, so that division is exact - it doesn't special-case small
+// requests the way halving requestedVcoresPerWgp itself would need to.
+[[gnu::const]]
+static __host__ uint64_t getTotalRequestedVcores(int device) {
+    int multiprocessorCount = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(
+        hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
+    const uint64_t cuCount =
+        static_cast<uint64_t>(multiprocessorCount) * getCusPerMultiprocessor(device);
+    return (cuCount / 2) * getRequestedVcoresPerWgp();
+}
+
+// Ceiling on total scheduler vcores based on measured occupancy of threading_main, or
+// UINT64_MAX if occupancy could not be measured or safety-divided down to something usable
+// (in which case the caller should treat the device as unconstrained by this check).
+//
+// threading_main is persistent: a vcore that cannot be made resident never runs, and the
+// resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
+[[gnu::const]]
+static __host__ uint64_t getOccupancyBasedMaxVcores(int device) {
+    // hipOccupancyMaxActiveBlocksPerMultiprocessor is theoretical and over-predicts what a
+    // persistent kernel sustains, by an amount that varies by architecture, so the margin is
+    // scaled: RDNA sustains ~3/4 of it (gfx1100 reports 44 blocks/WGP, wedges at 36); CDNA far
+    // less - gfx942 reports 16 but wedges intermittently at 8, likely because multi-XCD parts
+    // cannot pack the grid evenly and one oversubscribed XCD is enough. Hence the wider margin
+    // there.
+    const int occupancySafetyDivisor = (getCusPerMultiprocessor(device) == 2U) ? 2 : 4;
+
+    int theoreticalBlocksPerMp = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &theoreticalBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
+    if (theoreticalBlocksPerMp <= 0) {
+        return UINT64_MAX;
+    }
+
+    const uint64_t safeBlocksPerMp = static_cast<uint64_t>(theoreticalBlocksPerMp) / occupancySafetyDivisor;
+    if (safeBlocksPerMp == 0) {
+        return UINT64_MAX;
+    }
+
+    int multiprocessorCount = 0;
+    __LIBHIPTHREADS_HIP_CHECK__(
+        hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
+    return safeBlocksPerMp * static_cast<uint64_t>(multiprocessorCount);
+}
+
+// Derives hardware_concurrency() for a specific device - see the individual helpers above for how
+// the total is bounded. Unlike the public API, this can be [[gnu::const]]: for a fixed device the
+// result doesn't depend on anything else. wthread::hardware_concurrency() is what has to worry
+// about which device is current and about caching per device.
+[[gnu::const]]
+static __host__ uint32_t getDeviceSpecificHardwareConcurrency(int device) {
+    // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
+    // means two densities - which is why the default hung on Instinct but not Navi.
+    // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
+    // on both. Even at the right density the device may not hold that many blocks, so
+    // getOccupancyBasedMaxVcores caps against measured occupancy. MAX_VCORES is the hard
+    // bound imposed by currentWorkNode's fixed size, independent of either.
+    const uint64_t requestedTotal = getTotalRequestedVcores(device);
+    const uint64_t occupancyBasedMaxVcores = getOccupancyBasedMaxVcores(device);
+    const uint64_t maxVcores = static_cast<uint64_t>(MAX_VCORES);
+    uint64_t total = ::std::min({requestedTotal, occupancyBasedMaxVcores, maxVcores});
+
+    if (total < requestedTotal) {
+        // Called at most once per device: wthread::hardware_concurrency() only reaches here on a
+        // cache miss.
+        ::std::cerr << "[hipthreads] device " << device << ": requested " << requestedTotal
+                    << " vcores, but the occupancy-based maximum is " << occupancyBasedMaxVcores
+                    << " and MAX_VCORES is " << maxVcores << "; using " << total << ".\n";
+    }
+    if (total == 0) {
+        // Never report zero: callers size loops off this, and the scheduler needs a grid.
+        total = 1;
+    }
+    return static_cast<uint32_t>(total);
+}
+
+// Deliberately not [[gnu::const]]: the result depends on which device is current when the call is
+// made, so the compiler must not treat calls either side of a hipSetDevice as interchangeable.
 __host__ unsigned int wthread::hardware_concurrency() noexcept {
     try {
-        static uint32_t multiprocessorCount = [](){
-            int temp;
-            __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&temp, hipDeviceAttributeMultiprocessorCount, 0));
-            // __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
-            return temp;
-        }();
-        // Number of scheduler vcores launched per WGP/multiprocessor. Overridable at runtime via the
-        // HIPTHREADS_VCORES_PER_WGP environment variable; defaults to 16 if unset or unparseable.
-        static uint32_t vcoresPerWgp = [](){
-            const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
-            if (env != nullptr) {
-                char *end;
-                unsigned long val = ::std::strtoul(env, &end, 10);
-                if (end != env && *end == '\0' && val > 0) {
-                    return static_cast<uint32_t>(val);
-                }
+        int device = 0;
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetDevice(&device));
+
+        // Per-device cache; 0 means "not computed yet". Two threads racing here compute the same
+        // value, so the duplicated work is benign and needs no lock.
+        constexpr int MAX_CACHED_DEVICES = 64;
+        static ::std::atomic<uint32_t> cache[MAX_CACHED_DEVICES];
+        const bool cacheable = device >= 0 && device < MAX_CACHED_DEVICES;
+        if (cacheable) {
+            const uint32_t cached = cache[device].load(::std::memory_order_relaxed);
+            if (cached != 0) {
+                return cached;
             }
-            return static_cast<uint32_t>(HIPTHREADS_DEFAULT_VCORES_PER_WGP);
-        }();
-        return multiprocessorCount * vcoresPerWgp;
+        }
+
+        const uint32_t result = getDeviceSpecificHardwareConcurrency(device);
+
+        if (cacheable) {
+            cache[device].store(result, ::std::memory_order_relaxed);
+        }
+        return result;
     }
     catch (...) {
-        ::std::cerr << "Exception while fetching multiprocessorCount\n";
+        ::std::cerr << "Exception while computing hardware_concurrency\n";
         return 1;
     }
 }

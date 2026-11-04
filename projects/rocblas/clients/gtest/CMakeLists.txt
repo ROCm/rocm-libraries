@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@ set(rocblas_no_tensile_test_source
     rocblas_test.cpp
     asan_helpers_gtest.cpp
     general_gtest.cpp
+    host_alloc_gtest.cpp
     set_get_pointer_mode_gtest.cpp
     set_get_atomics_mode_gtest.cpp
     set_get_alpha_beta_stride_gtest.cpp
@@ -102,6 +103,7 @@ set(rocblas_no_tensile_test_source
     blas3/trtri_gtest.cpp
     blas3/trmm_gtest.cpp
     blas3/syrk_gtest.cpp
+    blas3/syrk_herk_workspace_gtest.cpp
     blas3/syrkx_gtest.cpp
     blas3/syr2k_gtest.cpp
     blas3/herk_gtest.cpp
@@ -145,6 +147,7 @@ target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERN
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   # HIP and tooling (OpenBLAS DLLs come from the same install CMake linked when using ILP64).
+  # hipblaslt still requires PATH to be set
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF
     CONFIGURE_DEPENDS

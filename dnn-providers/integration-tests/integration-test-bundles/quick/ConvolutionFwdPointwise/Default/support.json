@@ -1,0 +1,123 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_6ec8ae",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_013158",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_7cbb62",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_ddd28d",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_947b9f",
+          "2_4_7_7_fp16_nchw_dil2x2_postpad1x1_prepad1x1_e634d6",
+          "2_8_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_b24b66",
+          "8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_4e5feb"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_81e6bb",
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_93e7db",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_379605",
+          "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_a008a7",
+          "1_16_3_3_fp32_nhwc_dil2x2_postpad2x2_prepad2x2_96aa21"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_f61755"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE_DETERMINISTIC": [
+      {
+        "cases": [
+          "1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_6ec8ae",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_013158",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_7cbb62",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_ddd28d",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_947b9f",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_f61755",
+          "2_4_7_7_fp16_nchw_dil2x2_postpad1x1_prepad1x1_e634d6",
+          "2_8_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_b24b66",
+          "8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_4e5feb"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_81e6bb",
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_93e7db",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_379605",
+          "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_a008a7",
+          "1_16_3_3_fp32_nhwc_dil2x2_postpad2x2_prepad2x2_96aa21"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

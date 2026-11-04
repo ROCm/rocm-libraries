@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "bsrmm_device_large_ext.h"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -30,6 +31,7 @@ namespace rocsparse
     template <uint32_t BSR_BLOCK_DIM,
               uint32_t BLK_SIZE_Y,
               uint32_t UNROLL_SIZE_Y,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename A,
@@ -67,27 +69,28 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::bsrmm_large_blockdim_device_ext<BSR_BLOCK_DIM, BLK_SIZE_Y, UNROLL_SIZE_Y>(
-            nn,
-            direction,
-            mb,
-            n,
-            offsets_batch_stride_A,
-            columns_values_batch_stride_A,
-            alpha,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val,
-            block_dim,
-            dense_B,
-            ldb,
-            batch_stride_B,
-            beta,
-            dense_C,
-            ldc,
-            batch_stride_C,
-            order_C,
-            idx_base);
+        rocsparse::
+            bsrmm_large_blockdim_device_ext<BSR_BLOCK_DIM, BLK_SIZE_Y, UNROLL_SIZE_Y, GRID_STRIDE>(
+                nn,
+                direction,
+                mb,
+                n,
+                offsets_batch_stride_A,
+                columns_values_batch_stride_A,
+                alpha,
+                bsr_row_ptr,
+                bsr_col_ind,
+                bsr_val,
+                block_dim,
+                dense_B,
+                ldb,
+                batch_stride_B,
+                beta,
+                dense_C,
+                ldc,
+                batch_stride_C,
+                order_C,
+                idx_base);
     }
 
     typedef enum
@@ -159,35 +162,54 @@ namespace rocsparse
         hipStream_t stream = handle->stream;
         rocsparse_host_assert(block_dim <= 32, "This function is designed for block_dim <= 32.");
 
+        // grid.x and grid.y are clamped to the device limits. Only a launch the
+        // clamp actually shrinks runs the grid-stride kernel, which loops over
+        // block rows and column panels beyond the grid (see
+        // bsrmm_large_blockdim_device_ext).
 #define LAUNCH_LARGE_KERNEL(M_, N_, K_)                                                          \
-    const dim3 bsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / (N_ * K_) + 1);                          \
-    const dim3 bsrmm_threads(M_, N_);                                                            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrmm_large_blockdim_kernel_ext<M_, N_, K_>), \
-                                       bsrmm_blocks,                                             \
-                                       bsrmm_threads,                                            \
-                                       0,                                                        \
-                                       stream,                                                   \
-                                       nn,                                                       \
-                                       dir,                                                      \
-                                       mb,                                                       \
-                                       n,                                                        \
-                                       offsets_batch_stride_A,                                   \
-                                       columns_values_batch_stride_A,                            \
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),         \
-                                       bsr_row_ptr,                                              \
-                                       bsr_col_ind,                                              \
-                                       bsr_val,                                                  \
-                                       block_dim,                                                \
-                                       dense_B,                                                  \
-                                       ldb,                                                      \
-                                       batch_stride_B,                                           \
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),          \
-                                       dense_C,                                                  \
-                                       ldc,                                                      \
-                                       batch_stride_C,                                           \
-                                       order_C,                                                  \
-                                       descr->base,                                              \
-                                       handle->pointer_mode == rocsparse_pointer_mode_host)
+    const J        bsrmm_panels = (n - 1) / (N_ * K_) + 1;                                       \
+    const uint32_t bsrmm_grid_x = rocsparse::get_grid_size_x(handle, mb, M_);                    \
+    const uint32_t bsrmm_grid_y = rocsparse::get_grid_size_y(handle, bsrmm_panels);              \
+    const auto     launch_large = [&](auto grid_stride) -> rocsparse_status {                    \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
+            (rocsparse::                                                                     \
+                 bsrmm_large_blockdim_kernel_ext<M_, N_, K_, decltype(grid_stride)::value>), \
+            dim3(bsrmm_grid_x, bsrmm_grid_y),                                                \
+            dim3(M_, N_),                                                                    \
+            0,                                                                               \
+            stream,                                                                          \
+            nn,                                                                              \
+            dir,                                                                             \
+            mb,                                                                              \
+            n,                                                                               \
+            offsets_batch_stride_A,                                                          \
+            columns_values_batch_stride_A,                                                   \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                                \
+            bsr_row_ptr,                                                                     \
+            bsr_col_ind,                                                                     \
+            bsr_val,                                                                         \
+            block_dim,                                                                       \
+            dense_B,                                                                         \
+            ldb,                                                                             \
+            batch_stride_B,                                                                  \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                                 \
+            dense_C,                                                                         \
+            ldc,                                                                             \
+            batch_stride_C,                                                                  \
+            order_C,                                                                         \
+            descr->base,                                                                     \
+            handle->pointer_mode == rocsparse_pointer_mode_host);                            \
+        return rocsparse_status_success;                                                     \
+    };                                                                                           \
+    if(bsrmm_grid_x < static_cast<int64_t>(mb)                                                   \
+       || bsrmm_grid_y < static_cast<int64_t>(bsrmm_panels))                                     \
+    {                                                                                            \
+        RETURN_IF_ROCSPARSE_ERROR(launch_large(std::true_type{}));                               \
+    }                                                                                            \
+    else                                                                                         \
+    {                                                                                            \
+        RETURN_IF_ROCSPARSE_ERROR(launch_large(std::false_type{}));                              \
+    }
 
         //
         // Select which tuned kernel to apply.

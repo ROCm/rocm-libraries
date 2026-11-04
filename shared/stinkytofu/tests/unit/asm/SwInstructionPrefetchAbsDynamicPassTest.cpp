@@ -29,7 +29,9 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
@@ -159,10 +161,33 @@ int countSPrefetchInst(const Function& func) {
     return c;
 }
 
+int countSWaitXcnt(const Function& func) {
+    int c = 0;
+    for (const BasicBlock& bb : func) c += countInstructions(bb, "s_wait_xcnt");
+    return c;
+}
+
 int countSGetpc(const Function& func) {
     int c = 0;
     for (const BasicBlock& bb : func) c += countInstructions(bb, "s_getpc_b64");
     return c;
+}
+
+/// Destination index of every `s_getpc_b64` in program order: the entry cover's
+/// first, then one per ladder arm.
+std::vector<uint32_t> getpcDestIndexes(const Function& func) {
+    std::vector<uint32_t> dests;
+    for (const BasicBlock& bb : func) {
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            const IRBase* n = it.getNodePtr();
+            if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+            const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+            const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+            if (m && std::strcmp(m, "s_getpc_b64") == 0 && !inst.getDestRegs().empty())
+                dests.push_back(inst.getDestRegs().front().reg.idx);
+        }
+    }
+    return dests;
 }
 
 /// Collect, in program order, the mnemonics of the burst-relevant instructions (getpc /
@@ -227,12 +252,29 @@ class SwInstructionPrefetchAbsDynamicPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    PassManager makePm(int baseSgpr = 64, bool cpCover = false) {
+    // xnackReplay defaults to the shipping mode; see the note in
+    // SwInstructionPrefetchAbsStaticPassTest.cpp.
+    PassManager makePm(int baseSgpr = 64, bool cpCover = false, bool afterSgprCompact = false,
+                       bool xnackReplay = true) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
-        pm.addPass(createSwInstructionPrefetchAbsDynamicPass(baseSgpr, {}, cpCover));
+        AsmCapsConfig caps;
+        caps.enableXnackReplay = xnackReplay;
+        pm.setAsmCapsConfig(caps);
+        pm.addPass(
+            createSwInstructionPrefetchAbsDynamicPass(baseSgpr, {}, cpCover, afterSgprCompact));
         return pm;
+    }
+
+    /// Name s57 as the kernel's highest SGPR, as if compact had renumbered it,
+    /// and publish where the dispatch stopped filling scalars.
+    void compactedTo57() {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        mov->addDestReg(StinkyRegister("s", 57, 1));
+        mov->addSrcReg(StinkyRegister(0));
+        func->setMetaData(kSigDispatchFilledSgprsMetaKey, 8);
     }
 
     std::string runWithDebug(int baseSgpr = 64) {
@@ -464,6 +506,77 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CpCover_EmittedAtE
     EXPECT_EQ(countSGetpc(*func), 4);  // 1 cover (entry) + 3 arms (MGE)
     EXPECT_TRUE(firstGetpcBeforeLabel(*func, "label_MultiGemmEnd"));  // cover is at entry
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
+}
+
+// Without compact both sites write the triple Tensile reserved, which it keeps
+// live across the prolog and the label_MultiGemmEnd window alike.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, WithoutCompactBothSitesUseTheReservedTriple) {
+    buildThreeArmEmittableKernel(bb, arch);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true);
+    pm.run(*func);
+
+    EXPECT_EQ(getpcDestIndexes(*func), std::vector<uint32_t>({64u, 64u, 64u, 64u}));
+}
+
+// After compact that reservation names nothing, and the two sites no longer have
+// the same freedom. The cover is at kernel entry, where no instruction has run,
+// so it reuses a block inside the kernel's range (s[52:54], below the pair the
+// prologue takes). The ladder sits after label_MultiGemmEnd, where any allocated
+// register may still be holding a value, so it has to stay above everything the
+// kernel names (s57 → s[58:60]).
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, AfterCompactLadderStaysAboveTheAllocatedRange) {
+    buildThreeArmEmittableKernel(bb, arch);
+    compactedTo57();
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/true);
+    pm.run(*func);
+
+    EXPECT_TRUE(firstGetpcBeforeLabel(*func, "label_MultiGemmEnd"));  // dests[0] is the cover
+    EXPECT_EQ(getpcDestIndexes(*func), std::vector<uint32_t>({52u, 58u, 58u, 58u}));
+}
+
+// With the gfx1250 hardware-entrypoint prologue present (s_mov_b64 s[64:65], 0 / v_nop /
+// global_prefetch_b8, inserted by InsertInitialUnclausedVmemPass), the entry CP cover must be
+// placed AFTER it so the prologue stays the kernel's first executed code.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CpCover_FollowsEntryPrologue) {
+    buildThreeArmEmittableKernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createInsertInitialUnclausedVmemPass());
+    pm.addPass(createSwInstructionPrefetchAbsDynamicPass(/*baseSgpr=*/64, {}, /*cpCover=*/true));
+    pm.run(*func);
+
+    ASSERT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);  // cover emitted
+    EXPECT_EQ(countSGetpc(*func), 4);                                    // 1 cover + 3 arms
+
+    // The cover burst must sit immediately AFTER the 3-instruction prologue: collect the
+    // non-pseudo instruction stream and check the window around global_prefetch_b8.
+    // (The predicated ladder anchors at label_MultiGemmEnd, which this synthetic kernel puts
+    // at the very entry; in real kernels MGE is deep in the prolog.)
+    std::vector<uint16_t> ops;
+    for (auto it = bb->begin(); it != bb->end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction* inst = cast<StinkyInstruction>(n);
+        if (isPseudoInst(inst)) continue;
+        ops.push_back(inst->getUnifiedOpcode());
+    }
+    size_t pf = ops.size();
+    for (size_t i = 0; i < ops.size(); ++i) {
+        if (ops[i] == GFX::global_prefetch_b8) {
+            pf = i;
+            break;
+        }
+    }
+    ASSERT_LT(pf, ops.size()) << "prologue global_prefetch_b8 not found";
+    ASSERT_GE(pf, 2u);
+    EXPECT_EQ(ops[pf - 2], GFX::s_mov_b64);
+    EXPECT_EQ(ops[pf - 1], GFX::v_nop);
+    ASSERT_LT(pf + 1, ops.size());
+    EXPECT_EQ(ops[pf + 1], GFX::s_getpc_b64) << "CP cover must start right after the prologue";
 }
 
 // EMPTY entry-stub BB: real Tensile kernels have an empty CFG-stub as func.getEntryBlock()
@@ -818,4 +931,30 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CoverBoundary_OptN
     EXPECT_EQ(countSGetpc(*func), 4);
     EXPECT_EQ(countSPrefetchInst(*func), 3 + 15);  // OptNLL_End boundary -> coverN=3, armN=5
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
+}
+
+// The CP-cover insert upper bound carries the pre-boundary drains' bytes, so
+// dropping them can move coverN across a 4 KiB boundary. At tail 36404 the two
+// modes land either side of it, which pins the bound from the outside --
+// hard-coding it to either 320 or 336 fails one of these two.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, XnackDrain_Tail36404_ModesDiffer) {
+    buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/36404);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/false,
+                     /*xnackReplay=*/true);
+    pm.run(*func);
+
+    EXPECT_EQ(countSPrefetchInst(*func), 2 + 18);  // coverN=2, armN=6
+    EXPECT_EQ(countSWaitXcnt(*func), 4);           // 1 cover burst + 3 ladder arms
+}
+
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, NoXnackDrain_Tail36404_ModesDiffer) {
+    buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/36404);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/false,
+                     /*xnackReplay=*/false);
+    pm.run(*func);
+
+    EXPECT_EQ(countSPrefetchInst(*func), 1 + 18);  // coverN=1, armN=6
+    EXPECT_EQ(countSWaitXcnt(*func), 0);
 }

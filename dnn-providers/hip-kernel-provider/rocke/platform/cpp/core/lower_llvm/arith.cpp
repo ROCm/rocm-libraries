@@ -9,7 +9,7 @@
  *   arith.add/sub/mul/div/mod (integer),
  *   arith.fadd/fsub/fmul/fdiv/fneg/fabs/fma/fmax3/fmin3 (float),
  *   arith.cmp/fcmp, arith.fmax/fmin,
- *   arith.select/and/or/not/smax/smin/xor/shl/lshr/umul_hi_i32,
+ *   arith.select/and/or/not/smax/smin/umax/umin/xor/shl/lshr/umul_hi_i32,
  *   math.exp2/log2/rcp/rcp_fast/sqrt/rsqrt/tanh,
  *   gpu.thread_id / gpu.block_id.
  *
@@ -17,6 +17,7 @@
  * rocke_ll_need, rocke_ll_fresh, rocke_ll_fp32_hex, rocke_ll_binop, rocke_ll_fail, ...)
  * lives in BUCKET 0; this file only calls them through the internal header.
  */
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <stdio.h>
@@ -56,6 +57,75 @@ static const char* ll_fp_llvm_ty(const char* ty_name)
         return "bfloat";
     }
     return NULL;
+}
+
+/* Lower a synthetic primitive while expanding a higher-level operation. The
+ * temporary op is never inserted into the public rocKE IR; dispatching it
+ * through the normal handler keeps composite lowerings out of the business of
+ * spelling LLVM instructions, tracking intrinsic declarations, or duplicating
+ * primitive type handling. */
+static void ll_lower_composed_op(rocke_lower_t* L,
+                                 rocke_opcode_t opcode,
+                                 rocke_value_t** operands,
+                                 int num_operands,
+                                 rocke_value_t* result,
+                                 const rocke_attr_map_t* attrs)
+{
+    rocke_value_t* results[] = {result};
+    rocke_op_t expanded = {};
+    expanded.opcode = opcode;
+    expanded.name = rocke_opcode_name(opcode);
+    expanded.operands = operands;
+    expanded.num_operands = num_operands;
+    expanded.results = results;
+    expanded.num_results = 1;
+    if(attrs)
+    {
+        expanded.attrs = *attrs;
+    }
+    else
+    {
+        rocke_attr_map_init(&expanded.attrs);
+    }
+    rocke_ll_lower_op(L, &expanded);
+}
+
+static void ll_lower_composed_unary(rocke_lower_t* L,
+                                    rocke_opcode_t opcode,
+                                    rocke_value_t* operand,
+                                    rocke_value_t* result)
+{
+    rocke_value_t* operands[] = {operand};
+    ll_lower_composed_op(L, opcode, operands, 1, result, NULL);
+}
+
+static void ll_lower_composed_binary(rocke_lower_t* L,
+                                     rocke_opcode_t opcode,
+                                     rocke_value_t* lhs,
+                                     rocke_value_t* rhs,
+                                     rocke_value_t* result)
+{
+    rocke_value_t* operands[] = {lhs, rhs};
+    ll_lower_composed_op(L, opcode, operands, 2, result, NULL);
+}
+
+static void ll_lower_composed_ternary(rocke_lower_t* L,
+                                      rocke_opcode_t opcode,
+                                      rocke_value_t* a,
+                                      rocke_value_t* b,
+                                      rocke_value_t* c,
+                                      rocke_value_t* result)
+{
+    rocke_value_t* operands[] = {a, b, c};
+    ll_lower_composed_op(L, opcode, operands, 3, result, NULL);
+}
+
+static rocke_value_t ll_composed_value(const char* name, const rocke_type_t* type)
+{
+    rocke_value_t value = {};
+    value.name = name;
+    value.type = type;
+    return value;
 }
 
 /* ------------------------------------------------------------------ arith */
@@ -98,25 +168,61 @@ static void _op_arith_constant_vec(rocke_lower_t* L, const rocke_op_t* op)
 
 /* The same-type binary handlers all defer to the shared rocke_ll_binop helper
  * (Python self._binop(op, llvm_op)). */
+
+/* Python _wrapping_binop: `nsw` makes a signed overflow poison, as C does for
+ * signed types; unsigned values wrap modulo 2**N, so they get no flag. */
+static void ll_wrapping_binop(rocke_lower_t* L,
+                              const rocke_op_t* op,
+                              const char* signed_op,
+                              const char* unsigned_op)
+{
+    const rocke_value_t* res = ll_result(op);
+    rocke_ll_binop(L, op, (res && rocke_type_is_unsigned(res->type)) ? unsigned_op : signed_op);
+}
 static void _op_arith_add(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_binop(L, op, "add nsw");
+    /* Python: an explicit no-unsigned-wrap add is "add nuw"; otherwise the
+     * type's default (nsw for signed values, no flag for unsigned ones). */
+    char wrap_buf[128];
+    const char* wrap_error
+        = rocke_i_add_wrap_error(&op->attrs, op->operands[0]->type, wrap_buf, sizeof wrap_buf);
+    if(wrap_error)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", wrap_error);
+        return;
+    }
+    const char* wrap = rocke_attr_get_str(&op->attrs, "wrap");
+    if(wrap && strcmp(wrap, "nuw") == 0)
+    {
+        rocke_ll_binop(L, op, "add nuw");
+        return;
+    }
+    ll_wrapping_binop(L, op, "add nsw", "add");
+}
+/* Python _op_arith_assume_range: emits nothing; rocke_ll_operand prints the
+ * marked value (operand 0) at every use of the marker's result. */
+static void _op_arith_assume_range(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)L;
+    (void)op;
 }
 static void _op_arith_sub(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_binop(L, op, "sub nsw");
+    ll_wrapping_binop(L, op, "sub nsw", "sub");
 }
 static void _op_arith_mul(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_binop(L, op, "mul nsw");
+    ll_wrapping_binop(L, op, "mul nsw", "mul");
 }
 static void _op_arith_div(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_binop(L, op, "sdiv");
+    const rocke_value_t* res = ll_result(op);
+    rocke_ll_binop(L, op, (res && rocke_type_is_unsigned(res->type)) ? "udiv" : "sdiv");
 }
 static void _op_arith_mod(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_binop(L, op, "srem");
+    const rocke_value_t* res = ll_result(op);
+    rocke_ll_binop(L, op, (res && rocke_type_is_unsigned(res->type)) ? "urem" : "srem");
 }
 static void _op_arith_fadd(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -148,7 +254,9 @@ static void _op_arith_fneg(rocke_lower_t* L, const rocke_op_t* op)
         L, "  %s = fneg %s %s", res->name, rocke_ll_llvm_type(L, v->type), rocke_ll_operand(L, v));
 }
 
-/* Python _op_arith_fabs -> llvm.fabs.<ty>. */
+/* Python _op_arith_fabs -> llvm.fabs.<ty>. Unlike fma / fmax3, fabs also
+ * accepts f64 (a sign-bit clear), so f64 is admitted here rather than in
+ * the shared ll_fp_llvm_ty table. */
 static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -158,7 +266,8 @@ static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
     }
     const rocke_value_t* v = op->operands[0];
     const char* ty_name = v->type ? v->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(
@@ -261,6 +370,53 @@ static void ll_fminmax3(rocke_lower_t* L,
                    inner);
 }
 
+/* Python _op_arith_fdot2 -> llvm.amdgcn.fdot2[.f32.bf16](a, b, c, i1 false). */
+static void _op_arith_fdot2(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* c = op->operands[2];
+    const rocke_type_t* elem = (a->type && a->type->elem) ? a->type->elem : NULL;
+    const char* elem_name = elem ? elem->name : NULL;
+    const char* vty = NULL;
+    const char* fn = NULL;
+    if(elem_name && strcmp(elem_name, "bf16") == 0)
+    {
+        vty = "<2 x bfloat>";
+        fn = "llvm.amdgcn.fdot2.f32.bf16";
+    }
+    else if(elem_name && strcmp(elem_name, "f16") == 0)
+    {
+        vty = "<2 x half>";
+        fn = "llvm.amdgcn.fdot2";
+    }
+    else
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "fdot2: unsupported element type %s",
+                      elem_name ? elem_name : "(null)");
+        return;
+    }
+    char key[32];
+    snprintf(key, sizeof key, "amdgcn.fdot2.%s", elem_name);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call float @%s(%s %s, %s %s, float %s, i1 false)",
+                   res->name,
+                   fn,
+                   vty,
+                   rocke_ll_operand(L, a),
+                   vty,
+                   rocke_ll_operand(L, b),
+                   rocke_ll_operand(L, c));
+}
+
 /* Python _op_arith_fmax3 -> maxnum(a, maxnum(b, c)). */
 static void _op_arith_fmax3(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -285,37 +441,9 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         pred = "lt";
     }
-    const char* llvm_pred;
-    if(strcmp(pred, "lt") == 0)
-    {
-        llvm_pred = "slt";
-    }
-    else if(strcmp(pred, "le") == 0)
-    {
-        llvm_pred = "sle";
-    }
-    else if(strcmp(pred, "gt") == 0)
-    {
-        llvm_pred = "sgt";
-    }
-    else if(strcmp(pred, "ge") == 0)
-    {
-        llvm_pred = "sge";
-    }
-    else if(strcmp(pred, "eq") == 0)
-    {
-        llvm_pred = "eq";
-    }
-    else if(strcmp(pred, "ne") == 0)
-    {
-        llvm_pred = "ne";
-    }
-    else
-    {
-        rocke_ll_fail(L, ROCKE_ERR_KEY, "arith.cmp: unknown pred %s", pred);
-    }
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
+    const char* llvm_pred = rocke_ll_icmp_predicate(L, "arith.cmp", pred, a->type);
     rocke_ll_emitf(L,
                    "  %s = icmp %s %s %s, %s",
                    res->name,
@@ -360,7 +488,9 @@ static void ll_fminmax(rocke_lower_t* L, const rocke_op_t* op, const char* intri
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const char* ty_name = a->type ? a->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    /* Python's fmax / fmin dicts (unlike the shared FP map) also accept f64. */
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(L,
@@ -475,6 +605,7 @@ static void _op_arith_smax(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, "arith.umax");
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     rocke_ll_need(L, "smax.i32");
@@ -493,6 +624,7 @@ static void _op_arith_smin(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, "arith.umin");
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     rocke_ll_need(L, "smin.i32");
@@ -501,6 +633,40 @@ static void _op_arith_smin(rocke_lower_t* L, const rocke_op_t* op)
                    res->name,
                    rocke_ll_operand(L, a),
                    rocke_ll_operand(L, b));
+}
+
+/* Python _unsigned_min_max -> llvm.umax.<ty> / llvm.umin.<ty>. */
+static void ll_unsigned_min_max(rocke_lower_t* L, const rocke_op_t* op, const char* which)
+{
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const char* ty = rocke_ll_llvm_type(L, a->type);
+    char key[32];
+    snprintf(key, sizeof(key), "%s.%s", which, ty);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.%s.%s(%s %s, %s %s)",
+                   res->name,
+                   ty,
+                   which,
+                   ty,
+                   ty,
+                   rocke_ll_operand(L, a),
+                   ty,
+                   rocke_ll_operand(L, b));
+}
+static void _op_arith_umax(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_unsigned_min_max(L, op, "umax");
+}
+static void _op_arith_umin(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_unsigned_min_max(L, op, "umin");
 }
 
 /* Python _op_arith_xor (result-typed). */
@@ -661,10 +827,93 @@ static void _op_math_rsqrt(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "rsqrt", "rsqrt.f32", "amdgcn.rsq.f32");
 }
-/* Python _op_math_tanh -> llvm.tanh.f32. */
+/* Python _op_math_tanh -> composition of lowerable scalar primitives. */
 static void _op_math_tanh(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "tanh", "tanh.f32", "tanh.f32");
+    rocke_value_t* res = (op && op->num_results > 0) ? op->results[0] : NULL;
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    rocke_value_t* v = op->operands[0];
+    if(!v->type || !v->type->name || strcmp(v->type->name, "f32") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "math.tanh requires f32 operand, got %s",
+                      (v->type && v->type->name) ? v->type->name : "(null)");
+        return;
+    }
+
+    /* OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
+     * Coefficients are in Horner power-basis order, not Taylor coefficients.
+     * Source: amd/device-libs/ocml/src/tanhF.cl. */
+    rocke_value_t one = ll_composed_value(rocke_ll_fp32_hex(L, 1.0), rocke_f32());
+    rocke_value_t neg_two = ll_composed_value(rocke_ll_fp32_hex(L, -2.0), rocke_f32());
+    rocke_value_t two_log2e
+        = ll_composed_value(rocke_ll_fp32_hex(L, 2.0 * 1.4426950408889634), rocke_f32());
+    rocke_value_t cutoff = ll_composed_value(rocke_ll_fp32_hex(L, 0.625), rocke_f32());
+    rocke_value_t c0 = ll_composed_value(rocke_ll_fp32_hex(L, -0x1.758e7ap-8), rocke_f32());
+    rocke_value_t c1 = ll_composed_value(rocke_ll_fp32_hex(L, 0x1.521192p-6), rocke_f32());
+    rocke_value_t c2 = ll_composed_value(rocke_ll_fp32_hex(L, -0x1.b8389cp-5), rocke_f32());
+    rocke_value_t c3 = ll_composed_value(rocke_ll_fp32_hex(L, 0x1.110704p-3), rocke_f32());
+    rocke_value_t c4 = ll_composed_value(rocke_ll_fp32_hex(L, -0x1.555532p-2), rocke_f32());
+    rocke_value_t sign_mask = ll_composed_value("-2147483648", rocke_i32());
+    rocke_value_t abs_mask = ll_composed_value("2147483647", rocke_i32());
+
+    rocke_value_t x_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.xbits"), rocke_i32());
+    rocke_value_t sign = ll_composed_value(rocke_ll_fresh(L, "tanh.sign"), rocke_i32());
+    rocke_value_t abs_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.abits"), rocke_i32());
+    rocke_value_t abs_x = ll_composed_value(rocke_ll_fresh(L, "tanh.abs"), rocke_f32());
+    rocke_value_t y2 = ll_composed_value(rocke_ll_fresh(L, "tanh.y2"), rocke_f32());
+    rocke_value_t p0 = ll_composed_value(rocke_ll_fresh(L, "tanh.p0"), rocke_f32());
+    rocke_value_t p1 = ll_composed_value(rocke_ll_fresh(L, "tanh.p1"), rocke_f32());
+    rocke_value_t p2 = ll_composed_value(rocke_ll_fresh(L, "tanh.p2"), rocke_f32());
+    rocke_value_t p3 = ll_composed_value(rocke_ll_fresh(L, "tanh.p3"), rocke_f32());
+    rocke_value_t yp = ll_composed_value(rocke_ll_fresh(L, "tanh.yp"), rocke_f32());
+    rocke_value_t poly = ll_composed_value(rocke_ll_fresh(L, "tanh.poly"), rocke_f32());
+    rocke_value_t exp_scaled = ll_composed_value(rocke_ll_fresh(L, "tanh.escaled"), rocke_f32());
+    rocke_value_t exp = ll_composed_value(rocke_ll_fresh(L, "tanh.exp"), rocke_f32());
+    rocke_value_t exp_den = ll_composed_value(rocke_ll_fresh(L, "tanh.eden"), rocke_f32());
+    rocke_value_t exp_inv = ll_composed_value(rocke_ll_fresh(L, "tanh.einv"), rocke_f32());
+    rocke_value_t exp_mag = ll_composed_value(rocke_ll_fresh(L, "tanh.emag"), rocke_f32());
+    rocke_value_t use_poly = ll_composed_value(rocke_ll_fresh(L, "tanh.small"), rocke_i1());
+    rocke_value_t mag = ll_composed_value(rocke_ll_fresh(L, "tanh.mag"), rocke_f32());
+    rocke_value_t mag_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.mbits"), rocke_i32());
+    rocke_value_t signed_bits = ll_composed_value(rocke_ll_fresh(L, "tanh.sbits"), rocke_i32());
+
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, v, &x_bits);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_AND, &x_bits, &sign_mask, &sign);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_AND, &x_bits, &abs_mask, &abs_bits);
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, &abs_bits, &abs_x);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FMUL, &abs_x, &abs_x, &y2);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &c0, &c1, &p0);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &p0, &c2, &p1);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &p1, &c3, &p2);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &p2, &c4, &p3);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FMUL, &abs_x, &p3, &yp);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &y2, &yp, &abs_x, &poly);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FMUL, &two_log2e, &abs_x, &exp_scaled);
+    ll_lower_composed_unary(L, ROCKE_OP_MATH_EXP2, &exp_scaled, &exp);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_FADD, &exp, &one, &exp_den);
+    ll_lower_composed_unary(L, ROCKE_OP_MATH_RCP_FAST, &exp_den, &exp_inv);
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_FMA, &neg_two, &exp_inv, &one, &exp_mag);
+
+    rocke_attr_entry_t pred_entry = {};
+    pred_entry.key = "pred";
+    pred_entry.value.kind = ROCKE_ATTR_STR;
+    pred_entry.value.u.s = "olt";
+    rocke_attr_map_t pred_attrs = {};
+    pred_attrs.entries = &pred_entry;
+    pred_attrs.count = 1;
+    pred_attrs.cap = 1;
+    rocke_value_t* fcmp_operands[] = {&abs_x, &cutoff};
+    ll_lower_composed_op(L, ROCKE_OP_ARITH_FCMP, fcmp_operands, 2, &use_poly, &pred_attrs);
+
+    ll_lower_composed_ternary(L, ROCKE_OP_ARITH_SELECT, &use_poly, &poly, &exp_mag, &mag);
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, &mag, &mag_bits);
+    ll_lower_composed_binary(L, ROCKE_OP_ARITH_OR, &mag_bits, &sign, &signed_bits);
+    ll_lower_composed_unary(L, ROCKE_OP_ARITH_BITCAST, &signed_bits, res);
 }
 
 /* ------------------------------------------------------------------ gpu.* */
@@ -714,6 +963,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT, _op_arith_constant);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT_VEC, _op_arith_constant_vec);
     rocke_ll_set_handler(ROCKE_OP_ARITH_ADD, _op_arith_add);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_ASSUME_RANGE, _op_arith_assume_range);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SUB, _op_arith_sub);
     rocke_ll_set_handler(ROCKE_OP_ARITH_MUL, _op_arith_mul);
     rocke_ll_set_handler(ROCKE_OP_ARITH_DIV, _op_arith_div);
@@ -725,6 +975,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_FNEG, _op_arith_fneg);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FABS, _op_arith_fabs);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FMA, _op_arith_fma);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_FDOT2, _op_arith_fdot2);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FMAX3, _op_arith_fmax3);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FMIN3, _op_arith_fmin3);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CMP, _op_arith_cmp);
@@ -737,6 +988,8 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_NOT, _op_arith_not);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SMAX, _op_arith_smax);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SMIN, _op_arith_smin);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_UMAX, _op_arith_umax);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_UMIN, _op_arith_umin);
     rocke_ll_set_handler(ROCKE_OP_ARITH_XOR, _op_arith_xor);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SHL, _op_arith_shl);
     rocke_ll_set_handler(ROCKE_OP_ARITH_LSHR, _op_arith_lshr);

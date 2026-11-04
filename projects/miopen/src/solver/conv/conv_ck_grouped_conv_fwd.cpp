@@ -102,10 +102,6 @@ bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.use_hip_kernels)
         return false;
 
-    // Kernel requires a wavefront size of 64
-    if(64 != ctx.GetStream().GetWavefrontWidth())
-        return false;
-
     if(!problem.IsLayoutDefault())
         return false;
 
@@ -273,8 +269,6 @@ bool ConvDepthwiseBwdData2D::IsApplicable(const ExecutionContext& ctx,
     if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_BWD_DATA_2D))
         return false;
     if(!ctx.use_hip_kernels)
-        return false;
-    if(64 != ctx.GetStream().GetWavefrontWidth())
         return false;
     if(!problem.IsLayoutDefault())
         return false;

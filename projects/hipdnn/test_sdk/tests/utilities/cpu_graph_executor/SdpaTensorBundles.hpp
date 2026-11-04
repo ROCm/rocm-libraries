@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -13,7 +15,9 @@ namespace hipdnn_sdk_test_utils
 
 /// Tensor bundle for a forward SDPA operation.
 /// Dims: Q [B, H, Sq, D], K [B, Hkv, Skv, D], V [B, Hkv, Skv, Dv], O [B, H, Sq, Dv]
-template <typename InputType>
+/// maskTensor is the optional additive attention mask, element type MaskT; callers emplace and
+/// fill it, and the graph builders derive the mask's graph dtype from MaskT.
+template <typename InputType, class MaskT = float>
 struct SdpaFwdTensorBundle
 {
     SdpaFwdTensorBundle(const std::vector<int64_t>& qDims,
@@ -37,13 +41,18 @@ struct SdpaFwdTensorBundle
         createVariantPack(const hipdnn_frontend::graph::TensorAttributes& qTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& kTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& vTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& oTensorAttr)
+                          const hipdnn_frontend::graph::TensorAttributes& oTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes* maskTensorAttr = nullptr)
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[qTensorAttr.get_uid()] = qTensor.memory().hostData();
         variantPack[kTensorAttr.get_uid()] = kTensor.memory().hostData();
         variantPack[vTensorAttr.get_uid()] = vTensor.memory().hostData();
         variantPack[oTensorAttr.get_uid()] = oTensor.memory().hostData();
+        if(maskTensorAttr != nullptr)
+        {
+            variantPack[maskTensorAttr->get_uid()] = maskTensor.value().memory().hostData();
+        }
         return variantPack;
     }
 
@@ -51,13 +60,15 @@ struct SdpaFwdTensorBundle
     hipdnn_data_sdk::utilities::Tensor<InputType> kTensor;
     hipdnn_data_sdk::utilities::Tensor<InputType> vTensor;
     hipdnn_data_sdk::utilities::Tensor<InputType> oTensor;
+    std::optional<hipdnn_data_sdk::utilities::Tensor<MaskT>> maskTensor;
 };
 
 /// Tensor bundle for a backward SDPA operation.
 /// Dims: Q [B, H, Sq, D], K [B, Hkv, Skv, D], V [B, Hkv, Skv, Dv],
 ///       O/dO [B, H, Sq, Dv], stats [B, H, Sq, 1],
 ///       dQ [B, H, Sq, D], dK [B, Hkv, Skv, D], dV [B, Hkv, Skv, Dv]
-template <typename InputType>
+/// maskTensor is the optional additive attention mask, element type MaskT (see the forward bundle).
+template <typename InputType, class MaskT = float>
 struct SdpaBwdTensorBundle
 {
     SdpaBwdTensorBundle(const std::vector<int64_t>& qDims,
@@ -96,7 +107,8 @@ struct SdpaBwdTensorBundle
                           const hipdnn_frontend::graph::TensorAttributes& statsTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& dqTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& dkTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& dvTensorAttr)
+                          const hipdnn_frontend::graph::TensorAttributes& dvTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes* maskTensorAttr = nullptr)
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[qTensorAttr.get_uid()] = qTensor.memory().hostData();
@@ -108,6 +120,10 @@ struct SdpaBwdTensorBundle
         variantPack[dqTensorAttr.get_uid()] = dqTensor.memory().hostData();
         variantPack[dkTensorAttr.get_uid()] = dkTensor.memory().hostData();
         variantPack[dvTensorAttr.get_uid()] = dvTensor.memory().hostData();
+        if(maskTensorAttr != nullptr)
+        {
+            variantPack[maskTensorAttr->get_uid()] = maskTensor.value().memory().hostData();
+        }
         return variantPack;
     }
 
@@ -120,6 +136,7 @@ struct SdpaBwdTensorBundle
     hipdnn_data_sdk::utilities::Tensor<InputType> dqTensor;
     hipdnn_data_sdk::utilities::Tensor<InputType> dkTensor;
     hipdnn_data_sdk::utilities::Tensor<InputType> dvTensor;
+    std::optional<hipdnn_data_sdk::utilities::Tensor<MaskT>> maskTensor;
 };
 
 } // namespace hipdnn_sdk_test_utils

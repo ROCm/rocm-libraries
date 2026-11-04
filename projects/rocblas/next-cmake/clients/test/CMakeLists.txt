@@ -58,6 +58,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/her_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/herk_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/herkx_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/host_alloc_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hpmv_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hpr2_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hpr_gtest.yaml"

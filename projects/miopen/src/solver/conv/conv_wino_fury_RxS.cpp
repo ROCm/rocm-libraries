@@ -38,9 +38,6 @@
 
 #define WORKAROUND_SWDEV_453577 1
 
-// Workaround for an HSA_STATUS_ERROR_INVALID_ISA error encountered on gfx1103
-#define WORKAROUND_ISSUE_3044 1
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2)
 
@@ -99,6 +96,12 @@ struct PerfModelCost
     uint64_t filter_cost;
 };
 
+struct PerfModelParams
+{
+    uint64_t mac_rate;  // MAC operations per CU per clock
+    PerfModelCost cost; // Cost of internal shader operations
+};
+
 // Base class for shader performance models
 class ShaderModel
 {
@@ -108,7 +111,7 @@ protected:
     const uint64_t n_groups;
     const uint32_t cu_count;
     const bool reduced_vgpr;
-    std::array<PerfModelCost, 2> model_params;
+    std::array<PerfModelParams, 2> model_params;
 
 public:
     static constexpr float default_wti = -2.0f;
@@ -142,7 +145,8 @@ public:
         PerfModelInfo perf_model_c16, perf_model_c32;
         perf_model_c16 = PerfPrediction(false);
         perf_model_c32 = PerfPrediction(true);
-        if(perf_model_c32.predicted_clk <= perf_model_c16.predicted_clk)
+        if(perf_model_c32.predicted_clk != 0 &&
+           perf_model_c32.predicted_clk <= perf_model_c16.predicted_clk)
         {
             result            = true;
             out_predicted_clk = perf_model_c32.predicted_clk;
@@ -205,10 +209,11 @@ protected:
         const uint64_t ph_activ  = n_works_per_cu;
         const uint64_t ph_filter = f_relaods * c_loops;
 
-        const uint64_t start_cost  = model_params[c32_mode ? 1 : 0].start_cost;
-        const uint64_t accum_cost  = model_params[c32_mode ? 1 : 0].accum_cost;
-        const uint64_t activ_cost  = model_params[c32_mode ? 1 : 0].activ_cost;
-        const uint64_t filter_cost = model_params[c32_mode ? 1 : 0].filter_cost;
+        const auto& cost           = model_params[c32_mode ? 1 : 0].cost;
+        const uint64_t start_cost  = cost.start_cost;
+        const uint64_t accum_cost  = cost.accum_cost;
+        const uint64_t activ_cost  = cost.activ_cost;
+        const uint64_t filter_cost = cost.filter_cost;
 
         out.predicted_clk = ph_start * start_cost + ph_accum * accum_cost + ph_activ * activ_cost +
                             ph_filter * filter_cost;
@@ -219,9 +224,9 @@ protected:
 class ShaderModelV2 : public ShaderModel
 {
 public:
-    static constexpr std::array<PerfModelCost, 2> GFX11_ModelParams{{
-        {1450, 1645, 1696, 1450}, // C16 mode
-        {2600, 2938, 2989, 2600}  // C32 mode
+    static constexpr std::array<PerfModelParams, 2> GFX11_ModelParams{{
+        {0, {1450, 1645, 1696, 1450}}, // C16 mode
+        {0, {2600, 2938, 2989, 2600}}  // C32 mode
     }};
 
     ShaderModelV2(const WinoShaderArgsV2& args,
@@ -260,19 +265,24 @@ public:
 class ShaderModelV4 : public ShaderModel
 {
 public:
-    static constexpr uint64_t GFX12_MACRate = 512; // Float16 MAC operations per CU per clock
-    static constexpr std::array<PerfModelCost, 2> GFX12_ModelParams{{
-        {1010, 1343, 1495, 1010}, // C16 mode
-        {1746, 2287, 2443, 1746}  // C32 mode
+    static constexpr std::array<PerfModelParams, 2> GFX12_ModelParams{{
+        {512, {1010, 1343, 1495, 1010}}, // C16 mode
+        {512, {1746, 2287, 2443, 1746}}  // C32 mode
     }};
 
-    ShaderModelV4(const WinoShaderArgsV2& args,
+    static constexpr std::array<PerfModelParams, 2> GFX117_ModelParams{{
+        {512, {1010, 1421, 1521, 1132}}, // C16 mode
+        {512, {0, 0, 0, 0}}              // C32 mode (not supported)
+    }};
+
+    ShaderModelV4(const std::string& dev_name,
+                  const WinoShaderArgsV2& args,
                   uint32_t cu_cnt,
                   uint32_t n_grp,
                   bool reduced_vgpr_mem)
         : ShaderModel(args, cu_cnt, n_grp, reduced_vgpr_mem)
     {
-        model_params = GFX12_ModelParams;
+        model_params = StartsWith(dev_name, "gfx117") ? GFX117_ModelParams : GFX12_ModelParams;
     }
 
     bool IsShaderConstraintsMet() const override
@@ -304,10 +314,10 @@ public:
     float ComputeWti() const override
     {
         const uint64_t macs          = N * G * K * C * oH * R * oW * S;
-        const float ideal_direct_clk = static_cast<float>(macs) / GFX12_MACRate / cu_count;
         uint64_t predicted_clk       = 0;
-        bool is_c32_mode             = IsC32ModePreferable(predicted_clk);
-        std::ignore                  = is_c32_mode;
+        const bool is_c32_mode       = IsC32ModePreferable(predicted_clk);
+        const uint64_t mac_rate      = model_params[is_c32_mode ? 1 : 0].mac_rate;
+        const float ideal_direct_clk = static_cast<float>(macs) / mac_rate / cu_count;
         return predicted_clk != 0 ? ideal_direct_clk / predicted_clk : default_wti;
     }
 };
@@ -324,11 +334,20 @@ public:
     {
         if(StartsWith(dev_name, "gfx11"))
         {
-            return std::make_unique<ShaderModelV2>(args, cu_count, n_groups, reduced_vgpr_mem);
+            if(StartsWith(dev_name, "gfx117"))
+            {
+                return std::make_unique<ShaderModelV4>(
+                    dev_name, args, cu_count, n_groups, reduced_vgpr_mem);
+            }
+            else
+            {
+                return std::make_unique<ShaderModelV2>(args, cu_count, n_groups, reduced_vgpr_mem);
+            }
         }
         else if(StartsWith(dev_name, "gfx120"))
         {
-            return std::make_unique<ShaderModelV4>(args, cu_count, n_groups, reduced_vgpr_mem);
+            return std::make_unique<ShaderModelV4>(
+                dev_name, args, cu_count, n_groups, reduced_vgpr_mem);
         }
         else
         {
@@ -392,21 +411,6 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     // All gfx11/gfx120x ASICs are supported
     if(!(StartsWith(dev_name, "gfx11") || StartsWith(dev_name, "gfx120")))
         return false;
-#if WORKAROUND_ISSUE_3044
-    if(dev_name == "gfx1103")
-    {
-        if constexpr(IS2X3)
-        {
-            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3))
-                return false;
-        }
-        if constexpr(IS3X2)
-        {
-            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2))
-                return false;
-        }
-    }
-#endif
 
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;
@@ -519,17 +523,20 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     std::string kernel_postfix = "_fp16_fp16acc";
     std::string kernel_arch    = "_gfx11";
 
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx120");
-
-    if(!is_gfx11 && !is_gfx12)
-        MIOPEN_THROW(miopenStatusInternalError);
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx12  = StartsWith(dev_name, "gfx120");
 
     if(is_gfx12)
     {
         kernel_version = "_v4_6_0";
         kernel_arch    = "_gfx12";
         kernel_postfix = "_fp16_fp32acc";
+    }
+    if(is_gfx117)
+    {
+        kernel_version = "_v4_7_0";
+        kernel_arch    = "_gfx117";
+        kernel_postfix = "_fp16_fp16acc";
     }
 
     kernel_postfix += IS2X3 ? "_f2x3" : "_f3x2";

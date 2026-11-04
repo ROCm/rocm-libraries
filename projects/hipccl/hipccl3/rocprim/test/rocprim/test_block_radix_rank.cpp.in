@@ -1,0 +1,63 @@
+// MIT License
+//
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include "../common_test_header.hpp"
+
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_radix_rank.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/config.hpp>
+
+// required test headers
+#include "test_utils_sort_comparator.hpp"
+#include "test_utils_types.hpp"
+
+// required common headers
+#include "../../common/utils_device_ptr.hpp"
+
+// kernel definitions
+#include "test_block_radix_rank.hpp"
+
+#define SUITE RocprimBlockRadixRank
+
+#define INSTANTIATE(...) INSTANTIATE_TYPED_TEST(SUITE, __VA_ARGS__);
+
+#cmakedefine ROCPRIM_TEST_SUITE_SLICE @ROCPRIM_TEST_SUITE_SLICE@
+#cmakedefine ROCPRIM_TEST_TYPE_SLICE  @ROCPRIM_TEST_TYPE_SLICE@
+
+#if   ROCPRIM_TEST_SUITE_SLICE == 0
+    TYPED_TEST_P(SUITE, RankBasic  ) { test_block_radix_rank_algorithm<rocprim::block_radix_rank_algorithm::basic, TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, RankBasic);
+#elif ROCPRIM_TEST_SUITE_SLICE == 1
+    TYPED_TEST_P(SUITE, RankMemoize) { test_block_radix_rank_algorithm<rocprim::block_radix_rank_algorithm::basic_memoize, TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, RankMemoize);
+#elif ROCPRIM_TEST_SUITE_SLICE == 2
+    TYPED_TEST_P(SUITE, RankMatch  ) { test_block_radix_rank_algorithm<rocprim::block_radix_rank_algorithm::match, TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, RankMatch);
+#endif
+
+#if   ROCPRIM_TEST_TYPE_SLICE == 0
+    INSTANTIATE(BlockParamsIntegral)
+#elif ROCPRIM_TEST_TYPE_SLICE == 1
+    INSTANTIATE(BlockParamsFloating)
+#endif

@@ -1,0 +1,7 @@
+{% extends "common/base.h.jinja2" %}
+{% block config_constructor -%}
+scan_by_key_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} },
+                          {{ config.block_load_method }},
+                          {{ config.block_store_method }},
+                          {{ config.block_scan_algo }} }
+{%- endblock %}

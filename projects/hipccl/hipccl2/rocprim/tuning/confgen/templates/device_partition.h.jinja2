@@ -1,0 +1,18 @@
+{% extends "common/base.h.jinja2" %}
+{% block config_constructor -%}
+partition_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}
+
+{% block target_tparams -%}
+template<class Target, class data_type>
+{%- endblock %}
+
+{% block config_guard scoped %}
+    ({% if not type.data_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<data_type>::value)
+    && (sizeof(data_type) <= {{ type.data_type.size }})
+    {% if type.data_type.size_min > 0 %}&& (sizeof(data_type) > {{ type.data_type.size_min }}){% endif %})
+{%- endblock %}
+
+{% block params_type -%}partition_config_params{% endblock -%}
+
+{% block config_base_type -%}partition_config_params_base<data_type>{%- endblock -%}

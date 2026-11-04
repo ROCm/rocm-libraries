@@ -32,6 +32,8 @@
 
 #include "../config.hpp"
 
+#include <hip/hip_common.h>
+
 BEGIN_HIPCUB_NAMESPACE
 
 namespace detail

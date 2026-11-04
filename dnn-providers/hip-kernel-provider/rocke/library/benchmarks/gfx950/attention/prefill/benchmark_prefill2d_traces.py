@@ -91,12 +91,12 @@ def _use_combo_policy(shape, sliding_window: int) -> bool:
 
 
 class RockeComboBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 120) -> None:
+    def __init__(self, *, compile_backend: str = "llvm", num_cus: int = 120) -> None:
         self.compile_backend = compile_backend
-        self.num_sms = num_sms
+        self.num_cus = num_cus
         self._launchers: dict[tuple[Any, ...], tuple[Any, Any]] = {}
 
-    def _problem(self, shape, sliding_window: int):
+    def _problem(self, shape, sliding_window: int, num_kv_blocks: int = 0):
         from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
@@ -115,8 +115,9 @@ class RockeComboBench:
             use_alibi=shape.has_alibi,
             use_qq_bias=False,
             use_fp8=False,
-            num_sms=self.num_sms,
+            num_cus=self.num_cus,
             compile_backend=self.compile_backend,
+            num_kv_blocks=num_kv_blocks,
         )
 
     def _launcher(self, shape, problem, sliding_window: int):
@@ -126,7 +127,10 @@ class RockeComboBench:
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import (
+            _attn_signature,
+            _enable_i64_kv_addr,
+        )
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -175,12 +179,19 @@ class RockeComboBench:
             use_mfma32_skip_legacy_qreg=use_combo,
             use_transposed_mask_limit=use_combo and sliding_window == 0,
             use_fast_paged_kv_desc=use_combo,
+            use_i64_kv_addr=_enable_i64_kv_addr(problem),
         )
         # The display name intentionally omits several compile-time constants
         # (notably num_seqs/binary_search_iters). Cache on the trace signature
         # as well so shapes with the same kernel_name never reuse an HSACO that
         # was specialized for a different batch geometry.
-        key = (shape.signature, spec.kernel_name(), self.compile_backend)
+        # kernel_name() does not encode the KV addressing width either.
+        key = (
+            shape.signature,
+            spec.kernel_name(),
+            spec.use_i64_kv_addr,
+            self.compile_backend,
+        )
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
             artifact = compile_kernel(kernel, capture_ir_text=False)
@@ -198,11 +209,13 @@ class RockeComboBench:
         return self._launchers[key], use_combo
 
     def benchmark(self, shape, data, *, warmup: int, iterations: int, attention_flops):
-        from kernels.common.attention_unified import _attn_values
+        from kernels.common.attention_unified import _attn_values, _spec_kv_addr_limit
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
         sliding_window = shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
-        problem = self._problem(shape, sliding_window)
+        problem = self._problem(
+            shape, sliding_window, num_kv_blocks=int(data["key_cache"].shape[0])
+        )
         (launcher, spec), use_combo = self._launcher(shape, problem, sliding_window)
         hip_stream = _bench_stream_handle()
         vals = _attn_values(
@@ -223,6 +236,7 @@ class RockeComboBench:
             qq_bias=None,
             qq_bias_stride_0=0,
             include_qq_bias_stride=True,
+            kv_addr_limit=_spec_kv_addr_limit(problem, spec),
         )
         cfg = LaunchConfig(
             grid=(
@@ -349,7 +363,7 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cap-blocks", type=int, default=65536)
-    parser.add_argument("--num-sms", type=int, default=120)
+    parser.add_argument("--num-cus", type=int, default=120)
     parser.add_argument("--compile-backend", choices=("llvm",), default="llvm")
     parser.add_argument(
         "--shape-utils-path",
@@ -403,7 +417,7 @@ def main() -> int:
 
     bench = RockeComboBench(
         compile_backend=args.compile_backend,
-        num_sms=args.num_sms,
+        num_cus=args.num_cus,
     )
     results: list[dict[str, Any]] = []
     for index, shape in enumerate(shapes, 1):

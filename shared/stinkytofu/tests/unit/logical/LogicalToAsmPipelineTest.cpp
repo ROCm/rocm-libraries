@@ -31,6 +31,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
@@ -113,4 +114,137 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
     EXPECT_EQ(asmInstCount, 2) << "All instructions should be StinkyInstruction";
 
     // TODO: Step 4: Emit assembly string and verify output
+}
+
+// gfx1250 FP4/FP4 scaled WMMA: ToStinkyAsmPass must bake the format cost
+// override onto the asm instruction. The descriptor default is latency 8;
+// Gfx1250Instructions.def overrides FP4/FP4 to latency 4 / co-issue 0x0008.
+TEST_F(IRToAsmPipelineTest, MXMFMAFP4BakesCostOverride) {
+    using namespace stinkytofu::test;
+    Function func("kernel");
+    BasicBlock* entryBB = func.createBasicBlock("entry");
+    entryBB->appendIR(MXMFMA("f8f6f4", "f32", "e8", "e8", 16, 16, 128, 1, vgpr(0, 8), vgpr(8, 8),
+                             vgpr(16, 8), vgpr(0, 8), vgpr(24), vgpr(25), false, false,
+                             "MATRIX_FMT_FP4", "MATRIX_FMT_FP4"));
+
+    PassManager pm;
+    GemmTileConfig config;
+    config.arch = {12, 5, 0};
+    pm.setGemmTileConfig(config);
+    pm.addPass(createToStinkyAsmPass());
+    pm.run(func);
+
+    StinkyInstruction* asmInst = nullptr;
+    for (BasicBlock& bb : func)
+        for (IRBase& ir : bb)
+            if (ir.getType() == IRBase::IRType::StinkyTofu)
+                asmInst = static_cast<StinkyInstruction*>(&ir);
+    ASSERT_NE(asmInst, nullptr);
+    EXPECT_EQ(asmInst->issueCycles, 1);
+    EXPECT_EQ(asmInst->latencyCycles, 4);
+    EXPECT_EQ(asmInst->coIssueWindow, 0x0008);
+}
+
+/**
+ * True16Modifiers set on a LogicalInstruction must survive logical->asm
+ * lowering and render as the .l/.h operand suffix, for every instruction shape
+ * that can carry a half. The modifier is the channel a half-select has to ride
+ * on through the logical IR, because op_sel would bypass stinkytofu's
+ * true16-aware SSA/wait passes.
+ *
+ * Scope: this covers lowering and emission only. Producers are tested where
+ * they live -- the pure-Python rocisa_stinkytofu_adaptor's
+ * t16 -> _apply_true16 -> to_stinky_logical chain in its own
+ * tests/test_true16.py and tests/test_emission_consistency.py (the t16-tagged
+ * three-path cases), and the C++ bridge's
+ * attachTrue16ModifiersFromOperands in the rocisa conversion tests. Do not
+ * read a pass here as coverage of either.
+ */
+TEST_F(IRToAsmPipelineTest, True16HalfSelectSurvivesLowering) {
+    using H = HighBitSel;
+    Function func("kernel");
+    BasicBlock* entryBB = func.createBasicBlock("entry");
+
+    // Inject an already-derived modifier: this test deliberately starts after
+    // the derivation step, so it says nothing about whether a producer tags its
+    // operands correctly (see the scope note above).
+    auto add = [&](LogicalInstruction* inst, H dst0, const std::vector<H>& srcs) {
+        inst->true16 = True16Modifiers(dst0, H::NONE, srcs);
+        entryBB->appendIR(static_cast<IRBase*>(inst));
+    };
+
+    // Binary f16 ALU (dst, src0, src1) -- HIGH and LOW both exercised.
+    add(VAddF16(v0, v1, v2), H::HIGH, {H::HIGH, H::HIGH});
+    add(VMulF16(v0, v1, v2), H::HIGH, {H::HIGH, H::HIGH});
+    add(VMaxF16(v0, v1, v2), H::LOW, {H::LOW, H::LOW});
+    add(VMinF16(v0, v1, v2), H::LOW, {H::LOW, H::LOW});
+    // Unary f16 transcendentals (dst, src0).
+    add(VExpF16(v0, v1), H::HIGH, {H::HIGH});
+    add(VRcpF16(v0, v1), H::LOW, {H::LOW});
+    // Ternary fma (dst, src0, src1, src2).
+    add(VFmaF16(v0, v1, v2, v3), H::HIGH, {H::HIGH, H::HIGH, H::HIGH});
+    // f16 compares (mask dst has no half; both srcs do).
+    add(VCmpGTF16(v0, v1, v2), H::NONE, {H::HIGH, H::HIGH});
+    add(VCmpGEF16(v0, v1, v2), H::NONE, {H::LOW, H::LOW});
+    // b16 select (src2 is VCC -> no half) and b16 shift (shift amount is src0).
+    add(VCndMaskB16(v0, v1, v2, v3), H::HIGH, {H::HIGH, H::HIGH});
+    add(VLShiftLeftB16(v0, v1, v2), H::HIGH, {H::NONE, H::HIGH});
+    // Conversions: half rides on whichever operand carries the 16-bit value.
+    add(VCvtF16toF32(v0, v1), H::NONE, {H::HIGH});     // f16 src -> f32 dst
+    add(VCvtF32toF16(v0, v1), H::HIGH, {H::NONE});     // f32 src -> f16 dst
+    add(VCvtPkFP8toF32(v0, v1), H::NONE, {H::HIGH});   // packed-fp8 src
+    add(VCvtPkBF8toF32(v0, v1), H::NONE, {H::HIGH});   // packed-bf8 src
+    add(PVCvtBF16toFP32(v0, v1), H::NONE, {H::HIGH});  // bf16 src
+
+    PassManager pm;
+    GemmTileConfig config;
+    config.arch = {12, 5, 0};  // Gfx1250
+    config.TileA0 = 16;
+    config.TileB0 = 16;
+    config.TileM0 = 16;
+    config.NumGRA = 4;
+    config.NumGRB = 4;
+    config.NumGRM = 4;
+    config.NumWaves = 1;
+    pm.setGemmTileConfig(config);
+    pm.addPass(createCompositeInstructionLoweringPass());
+    pm.addPass(createToStinkyAsmPass());
+    pm.run(func);
+
+    StinkyAsmEmitter emitter;
+    std::string asmText;
+    for (BasicBlock& bb : func) {
+        for (IRBase& ir : bb) {
+            if (ir.getType() == IRBase::IRType::StinkyTofu) {
+                asmText += emitter.emit(static_cast<StinkyInstruction&>(ir)) + "\n";
+            }
+        }
+    }
+
+    // Every expected line must appear verbatim; a dropped half-select would
+    // silently strip the .l/.h suffix (the exact bug this guards against).
+    const std::vector<std::string> expected = {
+        "v_add_f16 v0.h, v1.h, v2.h",
+        "v_mul_f16 v0.h, v1.h, v2.h",
+        "v_max_f16 v0.l, v1.l, v2.l",
+        "v_min_f16 v0.l, v1.l, v2.l",
+        "v_exp_f16 v0.h, v1.h",
+        "v_rcp_f16 v0.l, v1.l",
+        "v_fma_f16 v0.h, v1.h, v2.h, v3.h",
+        "v_cmp_gt_f16 v0, v1.h, v2.h",
+        "v_cmp_ge_f16 v0, v1.l, v2.l",
+        "v_cndmask_b16 v0.h, v1.h, v2.h",
+        "v_lshlrev_b16 v0.h, v1, v2.h",
+        "v_cvt_f32_f16 v0, v1.h",
+        "v_cvt_f16_f32 v0.h, v1",
+        "v_cvt_pk_f32_fp8 v0, v1.h",
+        "v_cvt_pk_f32_bf8 v0, v1.h",
+        "v_cvt_f32_bf16 v0, v1.h",
+    };
+    for (const std::string& want : expected) {
+        EXPECT_NE(asmText.find(want), std::string::npos)
+            << "true16 half-select missing/dropped; expected line:\n  " << want
+            << "\nfull assembly:\n"
+            << asmText;
+    }
 }

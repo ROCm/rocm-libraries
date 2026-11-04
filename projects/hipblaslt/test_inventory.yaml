@@ -1,0 +1,893 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# hipBLASLt + TensileLite test inventory
+#
+# One entry per suite, across both products, recording where it runs today and where the plan in
+# TESTING.md (Improvement Roadmap) would put it. This is documentation data: no CI job reads it.
+# Tier definitions stay in the test_categories.yaml files listed under `categories_file`, which CI
+# does read; this file points at them rather than repeating them.
+#
+# `covers` names the classes from test_coverage_model.yaml that a suite is meant to reach. It is a
+# claim about intent until coverage is measured; `axis.*` means every class on that axis.
+#
+# Everything under `target` and `disposition` is a proposal for the team to review. A `retire` or
+# `merge_into` needs the owning team's agreement before anyone acts on it. Rationales are
+# qualitative for now; unique-coverage and failure-history evidence will come later.
+#
+# Evidence prefixes:
+#   repo:<path>      a file in this repository, relative to the repository root
+#   doc:<file>#<id>  a section of TESTING.md or tensilelite/TESTING.md in this directory
+#   therock:<path>   a file in ROCm/TheRock at the commit this repository pins
+#   external:<name>  configuration outside both repositories (Math CI, rocPTS), not verifiable here
+
+schema_version: 1
+status: proposed
+products: [hipblaslt, tensilelite]
+
+vocabulary:
+  kind:
+    host_unit: "Does this piece of code do what it says? No GPU."
+    static_check: "Is the source, or an artifact generated from it, well formed? No GPU."
+    numerical_correctness: "Does a GEMM on real hardware match a CPU reference?"
+    performance: "Is it at least as fast as it was?"
+  mode:
+    default: "The test as written."
+    host_asan: "Host-only AddressSanitizer."
+    full_asan: "AddressSanitizer with device-side instrumentation."
+    tsan: "ThreadSanitizer."
+    race_check: "Device race detection under rocjitsu emulation."
+    stress: "Large sizes and large memory."
+    multi_gpu: "Two or more GPUs visible to one process."
+    hmm: "Managed memory (HMM)."
+    emulation: "Kernels run under functional emulation instead of hardware."
+    coverage: "Instrumented to measure code coverage."
+    mutation: "Mutation analysis of the tests themselves."
+  cadence: [presubmit, postsubmit, nightly, weekly, prerelease, on_demand, every_build, none]
+  system:
+    therock: "TheRock Multi-Arch CI and TheRock's own CI, testing installed artifacts"
+    github_actions: "Other GitHub Actions workflows in this repository"
+    math_ci: "AMD-internal Jenkins-based CI, posting mci/ checks; being retired"
+    rocpts: "AMD-internal performance tracking service"
+    build: "Runs inside the CMake build rather than as a test"
+    local: "Run by hand"
+  disposition:
+    keep: "Stays as it is, possibly with a changed placement."
+    merge_into: "Folds into another suite named by `into`."
+    migrate: "Moves to another system or kind, usually Math CI to TheRock."
+    demote: "Moves to a slower cadence."
+    retire: "Stops running."
+    new: "Does not exist yet."
+    review: "No proposal yet; needs the owning team's input."
+  placement_action: [keep, change, retire]
+
+# Required checks, from `gh api repos/ROCm/rocm-libraries/rules/branches/develop`.
+required_checks: [Math CI Summary, pre-commit, Multi-Arch CI Summary, Component CI Summary]
+
+# The cadence contract from TESTING.md#cadence-contract.
+cadences:
+  presubmit: {tiers: [quick, standard], budget: "about 30 minutes for standard", gates_merge: true}
+  postsubmit: {tiers: [standard], budget: "same as presubmit", gates_merge: false}
+  nightly: {tiers: [comprehensive], budget: "about 2 hours for the client suite", gates_merge: false}
+  weekly: {tiers: [full, stress, multi_gpu], budget: "hours", gates_merge: false}
+
+workstreams: [inventory, cadence, consolidate, fill_the_holes, keep_it_honest]
+
+suites:
+  # ---------------------------------------------------------------- hipBLASLt
+  - id: hipblaslt-client-gtest
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: default
+    oracle: "CPU reference GEMM, within a per-type tolerance"
+    source: projects/hipblaslt/clients/tests/
+    categories_file: projects/hipblaslt/clients/tests/test_categories.yaml
+    current:
+      - system: math_ci
+        lane: precheckin
+        cadence: presubmit
+        archs: [gfx90a, gfx942, gfx950, gfx12]
+        gates: true
+        required_check: Math CI Summary
+        notes: "Also a compile-only gfx1250 configuration."
+        evidence: ["doc:TESTING.md#pre-submit--ci-gates", "external:math-ci"]
+        action: retire
+      - system: therock
+        lane: multi-arch-ci
+        cadence: presubmit
+        tier: standard
+        archs: [gfx94X-dcgpu, gfx950-dcgpu, gfx110X-windows]
+        gates: true
+        required_check: Multi-Arch CI Summary
+        evidence:
+          - "repo:.github/workflows/therock-multi-arch-ci.yml"
+          - "therock:build_tools/github_actions/fetch_test_configurations.py"
+          - "doc:TESTING.md#integration-testing-strategy"
+        action: keep
+      - system: therock
+        lane: multi-arch-ci-nightly
+        cadence: nightly
+        tier: comprehensive
+        archs: [gfx94X-dcgpu, gfx950-dcgpu, gfx1151-windows]
+        gates: false
+        notes: "Windows gfx1151 is forced to the quick tier for memory reasons."
+        evidence: ["repo:.github/workflows/therock-multi-arch-ci-nightly.yml", "doc:TESTING.md#nightly-validation"]
+        action: keep
+      - system: therock
+        lane: therock-nightly
+        cadence: nightly
+        tier: comprehensive
+        archs: [gfx90a, gfx110X, gfx115X, gfx120X]
+        gates: false
+        notes: "TheRock's own nightly, testing rocm-libraries at the commit TheRock pins."
+        evidence: ["doc:TESTING.md#nightly-validation"]
+        action: keep
+      - system: therock
+        lane: prerelease
+        cadence: prerelease
+        tier: full
+        gates: false
+        evidence: ["doc:TESTING.md#release-validation"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit, tier: standard, archs: "every architecture with pull-request runners"}
+      - {system: therock, cadence: postsubmit, tier: standard, archs: "gfx90a and gfx12, until they have pull-request capacity"}
+      - {system: therock, cadence: nightly, tier: comprehensive, archs: "every supported architecture"}
+      - {system: therock, cadence: weekly, tier: full}
+    disposition: migrate
+    rationale: >-
+      The suite is sound; what changes is where it runs. Math CI's precheckin is today the only
+      pull-request signal on gfx90a and gfx12, so it can retire only once TheRock covers those
+      architectures at some cadence. Pruning redundant numerical variants buys back the runtime.
+    covers:
+      - type_combo.*
+      - shape.degenerate
+      - shape.tiny
+      - shape.tile_unaligned
+      - shape.tuned_sizes
+      - shape.large_k
+      - layout.*
+      - batching.*
+      - epilogue.*
+      - scalars.*
+      - values.*
+      - api_path.core_c_api
+      - api_path.ext_api
+      - api_path.ext_setproblem
+      - api_path.all_solutions
+      - api_path.user_args
+      - api_path.tuning_override
+      - api_path.streamk
+      - kernel_source.tensilelite_generated
+      - kernel_source.rocroller
+      - system.single_gpu
+    tickets: [AIHPBLAS-5036]
+    workstreams: [consolidate, cadence]
+    open_questions:
+      - "No ticket yet for retiring precheckin itself; file one under AIHPBLAS-5028."
+
+  - id: hipblaslt-client-multi-gpu
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: multi_gpu
+    oracle: "CPU reference GEMM"
+    source: projects/hipblaslt/clients/tests/
+    categories_file: projects/hipblaslt/clients/tests/test_categories.yaml
+    current:
+      - system: math_ci
+        lane: precheckin
+        cadence: presubmit
+        archs: [gfx950x2]
+        gates: true
+        required_check: Math CI Summary
+        notes: "Only fused GEMM plus all-to-all, built with HIPBLASLT_ENABLE_GEMM_A2A_FUSION."
+        evidence: ["doc:TESTING.md#integration-testing-strategy", "external:math-ci"]
+        action: retire
+    target:
+      - {system: therock, cadence: weekly, tier: multi_gpu, archs: [gfx94X-dcgpu, gfx950-dcgpu]}
+    disposition: migrate
+    rationale: >-
+      TheRock already has multi-GPU runners for gfx94X and gfx950. A run mode of the correctness
+      suite, not its own suite, and narrow enough today that its coverage needs widening.
+    covers: [system.multi_gpu, device.gfx950]
+    tickets: [AIHPBLAS-4625]
+    workstreams: [fill_the_holes]
+
+  - id: hipblaslt-client-stress
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: stress
+    oracle: "fast_check verification against an exact reference at large sizes"
+    source: projects/hipblaslt/clients/tests/
+    categories_file: projects/hipblaslt/clients/tests/test_categories.yaml
+    current: []
+    target:
+      - {system: therock, cadence: weekly, tier: stress, archs: "runners with 32 GB or more per GPU"}
+    disposition: keep
+    rationale: >-
+      The 2^31, 2^32 and launch-size threshold cases exist and are labeled weekly in the categories
+      file, but no lane in this inventory selects the stress tier yet. They are the systematic
+      answer to a defect class that returned success with wrong output.
+    covers: [shape.past_2_31, shape.past_2_32, shape.launch_limits, values.exact]
+    tickets: [AIHPBLAS-4988]
+    workstreams: [fill_the_holes]
+
+  - id: hipblaslt-client-hmm
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: hmm
+    oracle: "CPU reference GEMM"
+    source: projects/hipblaslt/clients/tests/
+    categories_file: projects/hipblaslt/clients/tests/test_categories.yaml
+    current:
+      - system: therock
+        lane: prerelease
+        cadence: prerelease
+        tier: full
+        gates: false
+        evidence: ["doc:TESTING.md#release-validation"]
+        action: keep
+    target:
+      - {system: therock, cadence: weekly, tier: full, archs: "managed-memory capable hosts"}
+    disposition: keep
+    rationale: "Runs only before a release today; a weekly run would find a break months sooner."
+    covers: [system.managed_memory]
+    tickets: []
+    workstreams: [cadence]
+
+  - id: hipblaslt-kernel-corpus
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: default
+    oracle: "fast_check exact checks, every shipped solution pinned by index; a CPU-reference sample per solution planned"
+    current:
+      - system: local
+        lane: cluster
+        cadence: on_demand
+        archs: [gfx90a, gfx942, gfx950, gfx1100, gfx1101, gfx1200, gfx1201]
+        gates: false
+        notes: "First smoke pass, run by hand on a GPU cluster against TheRock CI artifacts. Not in develop yet."
+        evidence: ["doc:TESTING.md#kernel-corpus-testing"]
+        action: change
+    target:
+      - {system: therock, cadence: presubmit, archs: "every architecture with pull-request runners", notes: "Smoke on every kernel the change affects, boundary up to a cap"}
+      - {system: therock, cadence: postsubmit, archs: "every architecture with pull-request runners", notes: "Every kernel changed since the last postsubmit run"}
+      - {system: therock, cadence: nightly, archs: "every supported architecture", notes: "Changed kernels, a rotating seventh of the corpus, nightly stress checks"}
+      - {system: therock, cadence: weekly, archs: "every supported architecture", notes: "Smoke over the whole corpus, a boundary slice, deep repeats on gfx1250"}
+      - {system: local, cadence: weekly, notes: "Cluster sweep for the devices CI has no runner for, such as MI355X, MI300A and MI308X"}
+    disposition: new
+    rationale: >-
+      The only suite that runs the kernels that ship, rather than whichever ones the client suite's
+      problems happen to select. Its first pass found ROCM-33314. Budgets are starting proposals until
+      each profile has been timed. Once it runs in CI, the kernel-level cases in the client suite
+      become candidates to retire, one at a time and with evidence.
+    covers:
+      - type_combo.*
+      - device.*
+      - kernel_source.tensilelite_generated
+      - api_path.all_solutions
+      - shape.tile_unaligned
+      - shape.past_2_32
+      - layout.padded_ld
+      - batching.strided_batched
+      - batching.grouped
+      - epilogue.gradient
+      - epilogue.aux_output
+      - epilogue.block_scale
+      - values.exact
+    tickets: [AIHPBLAS-3894]
+    workstreams: [fill_the_holes]
+    open_questions:
+      - "Who owns it, and where its harness lives once it lands in develop."
+      - "Whether hipSPARSELt, which also ships TensileLite kernels, shares this corpus."
+
+  - id: hipblaslt-tuning-store-test
+    product: hipblaslt
+    kind: host_unit
+    mode: default
+    oracle: "Expected round-trip of the tuning file format"
+    source: projects/hipblaslt/clients/tests/
+    categories_file: projects/hipblaslt/clients/tests/tuning_store_test_categories.yaml
+    current:
+      - system: therock
+        lane: multi-arch-ci
+        cadence: presubmit
+        tier: standard
+        gates: true
+        required_check: Multi-Arch CI Summary
+        evidence: ["repo:projects/hipblaslt/clients/tests/tuning_store_test_categories.yaml"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit, tier: quick}
+    disposition: keep
+    rationale: "Host-only, well under a second, and already in every tier. The model for the C++ unit tests the library needs."
+    tickets: []
+    workstreams: []
+
+  - id: hipblaslt-cpp-host-unit
+    product: hipblaslt
+    kind: host_unit
+    mode: default
+    oracle: "Expected values for validation, enum mapping, tuning-override parsing, workspace sizing"
+    source: projects/hipblaslt/library/
+    current: []
+    target:
+      - {system: therock, cadence: presubmit, tier: quick}
+    disposition: new
+    rationale: >-
+      Very little of the C++ library is reachable without a GPU. The host-only link target and
+      validation ahead of dispatch unblock it; unifying the enum-to-string tables is the first test
+      worth writing once they land. The client side already has a CPU-only binary,
+      hipblaslt-test-hostunit (PR #9733), whose HostUnit cases run inside hipblaslt-test in CI;
+      library tests would join it once they can link.
+    tickets: [AIHPBLAS-5033, AIHPBLAS-5034, AIHPBLAS-3558]
+    workstreams: [fill_the_holes]
+
+  - id: hipblaslt-public-api
+    product: hipblaslt
+    kind: static_check
+    mode: default
+    oracle: "The public headers compile from C and with more than one toolchain; public names match a list"
+    source: projects/hipblaslt/library/include/
+    current: []
+    target:
+      - {system: therock, cadence: presubmit, tier: quick}
+    disposition: new
+    rationale: "Several public API breaks were found by users first."
+    covers: [api_path.public_headers]
+    tickets: [AIHPBLAS-3579]
+    workstreams: [fill_the_holes]
+
+  - id: geko-tests
+    product: hipblaslt
+    kind: host_unit
+    mode: default
+    oracle: "Expected values; coverage floor of 80%"
+    source: projects/hipblaslt/utilities/geko/
+    categories_file: projects/hipblaslt/utilities/geko/test_categories.yaml
+    current:
+      - system: github_actions
+        lane: "Component CI: GEKO"
+        cadence: presubmit
+        archs: [linux-cpu, windows-cpu]
+        gates: true
+        required_check: Component CI Summary
+        evidence: ["repo:.github/workflows/component-ci-geko.yml"]
+        action: keep
+    target:
+      - {system: github_actions, cadence: presubmit}
+    disposition: keep
+    rationale: "Host-only, fast, and gated through Component CI. Not described in TESTING.md yet."
+    tickets: []
+    workstreams: [inventory]
+
+  - id: hipblaslt-host-asan
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: host_asan
+    oracle: "The client suite's own checks, plus a clean AddressSanitizer and LeakSanitizer report"
+    source: projects/hipblaslt/clients/tests/
+    current:
+      - system: github_actions
+        lane: hipBLASLt ASAN CI
+        cadence: presubmit
+        tier: quick
+        archs: [gfx90a]
+        gates: false
+        notes: "Drives hipblaslt-test through test/therock/test_hipblaslt.py, not the CTest presets."
+        evidence: ["repo:.github/workflows/hipblaslt-asan-ci.yml", "doc:TESTING.md#sanitizer-coverage"]
+        action: change
+      - system: therock
+        lane: multi-arch-ci-asan
+        cadence: presubmit
+        archs: [gfx94X-dcgpu, gfx950-dcgpu]
+        gates: false
+        evidence: ["repo:.github/workflows/therock-multi-arch-ci-asan.yml", "doc:TESTING.md#sanitizer-coverage"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit, tier: quick, gates: true}
+    disposition: keep
+    rationale: >-
+      Two host-only ASAN lanes on different architectures, neither required. Make one required, and
+      run it through the CTest presets so it selects the same cases as every other lane. Whether
+      both lanes are needed is a question for unique-coverage data.
+    covers: [system.memory_safety, device.gfx90a, device.gfx942, device.gfx950]
+    tickets: [AIHPBLAS-1079]
+    workstreams: [cadence]
+
+  - id: hipblaslt-full-asan
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: full_asan
+    oracle: "The client suite's own checks, plus a clean device-instrumented AddressSanitizer report"
+    source: projects/hipblaslt/clients/tests/
+    current:
+      - system: therock
+        lane: multi-arch-ci-asan-nightly
+        cadence: nightly
+        archs: [gfx94X-dcgpu, gfx950-dcgpu]
+        gates: false
+        evidence: ["repo:.github/workflows/therock-multi-arch-ci-asan-nightly.yml", "doc:TESTING.md#sanitizer-coverage"]
+        action: keep
+    target:
+      - {system: therock, cadence: nightly}
+    disposition: keep
+    rationale: "Device-side instrumentation is too slow for presubmit; nightly is the right cadence."
+    covers: [system.memory_safety, device.gfx942, device.gfx950]
+    tickets: []
+    workstreams: []
+
+  - id: hipblaslt-tsan-ubsan
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: tsan
+    oracle: "A clean ThreadSanitizer or UndefinedBehaviorSanitizer report"
+    current: []
+    target:
+      - {system: therock, cadence: nightly}
+    disposition: new
+    rationale: "TSAN build options exist but no lane uses them, and there is no UBSAN at all."
+    covers: [system.multi_thread, system.memory_safety]
+    tickets: [AIHPBLAS-5035]
+    workstreams: [cadence]
+
+  - id: hipblaslt-rocjitsu-race-check
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: race_check
+    oracle: "No device race reported by rocjitsu on two small workloads"
+    current:
+      - system: therock
+        lane: multi-arch-ci (rocjitsu race check)
+        cadence: presubmit
+        archs: [cpu-emulation]
+        gates: false
+        notes: "Advisory: continue-on-error until it is reliably green. Not described in TESTING.md yet."
+        evidence: ["repo:.github/workflows/therock-rocjitsu-race-check-linux.yml"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit}
+    disposition: review
+    rationale: "A device-side race detector that runs without GPU capacity. Its place relative to TSAN needs the owners' view."
+    covers: [kernel_source.tensilelite_generated]
+    tickets: [AIHPBLAS-3605]
+    workstreams: [inventory]
+
+  - id: hipblaslt-perf-nightly
+    product: hipblaslt
+    kind: performance
+    mode: default
+    oracle: "Median of the last 10 runs on the same device, 5% threshold"
+    current:
+      - system: rocpts
+        lane: rocPTS nightly
+        cadence: nightly
+        archs: [gfx950]
+        gates: false
+        notes: "MI350 and MI350P. Both legs failed on most nights at the end of September 2026."
+        evidence: ["doc:TESTING.md#the-nightly-measurement-lane", "external:rocpts"]
+        action: keep
+    target:
+      - {system: rocpts, cadence: nightly, archs: "beyond gfx950, where the library ships tuned kernels"}
+    disposition: keep
+    rationale: "The only performance signal today. Widen its architectures and make it report its own failures."
+    covers: [type_combo.*, shape.tuned_sizes, device.gfx950]
+    tickets: [AIHPBLAS-5030]
+    workstreams: [fill_the_holes]
+
+  - id: hipblaslt-perf-presubmit
+    product: hipblaslt
+    kind: performance
+    mode: default
+    oracle: "A baseline for one commit on a small, fast problem set, with a measured noise floor"
+    current: []
+    target:
+      - {system: therock, cadence: presubmit, gates: false}
+    disposition: new
+    rationale: "Pull requests are not benchmarked, so a regression cannot be attributed to the change that caused it."
+    covers: [shape.tuned_sizes]
+    tickets: [AIHPBLAS-5029]
+    workstreams: [fill_the_holes]
+
+  - id: hipblaslt-cpp-coverage
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: coverage
+    oracle: "Line coverage of the C++ library; the logging and CHECK_NUMERICS passes also fail on a test failure"
+    current:
+      - system: math_ci
+        lane: codecov
+        cadence: presubmit
+        gates: false
+        evidence: ["doc:TESTING.md#coverage", "repo:projects/hipblaslt/cmake/run_coverage_tests.sh", "external:math-ci"]
+        action: retire
+    target:
+      - {system: therock, cadence: presubmit, tier: standard, archs: [gfx950-dcgpu]}
+    disposition: migrate
+    rationale: >-
+      Runs on gfx950 on every pull request and reports to Codecov under the hipBLASLt flag; no floor
+      is enforced. It is more than a report: its HIPBLASLT_LOG_MASK and HIPBLASLT_CHECK_NUMERICS
+      passes are the only runs of those modes over the matmul suite anywhere in CI, so it moves with
+      the rest of Math CI rather than retiring. A coverage floor still means little until the
+      library is unit-testable.
+    covers: [api_path.core_c_api, device.gfx950]
+    tickets: [AIHPBLAS-5033]
+    workstreams: [consolidate]
+
+  - id: tensilelogic-check-all
+    product: tensilelite
+    kind: static_check
+    mode: default
+    oracle: "Rules on chip IDs, matrix instructions, work-group shapes, XCC mapping, custom kernels"
+    source: projects/hipblaslt/tensilelite/tensilelite/TensileLogic/
+    current:
+      - system: build
+        lane: "CMake step ahead of TensileCreateLibrary"
+        cadence: every_build
+        gates: true
+        notes: "Gates implicitly: a failure stops the build. No check name and no test report."
+        evidence: ["doc:tensilelite/TESTING.md#build-time-validation-of-library-logic"]
+        action: keep
+    target:
+      - {system: build, cadence: every_build}
+      - {system: github_actions, cadence: presubmit, notes: "a separate lane running with --strict-known-bugs"}
+    disposition: keep
+    rationale: >-
+      The cheapest layer that can see a bad logic entry, and it reaches every build. Add the strict
+      lane so stale known-bug entries fail, and run derived-parameter assignment so the gate catches
+      what code generation catches today.
+    tickets: [AIHPBLAS-4196, AIHPBLAS-3575]
+    workstreams: [keep_it_honest, fill_the_holes]
+
+  - id: pre-commit
+    product: hipblaslt
+    kind: static_check
+    mode: default
+    oracle: "clang-format, black, and repository hooks"
+    current:
+      - system: github_actions
+        lane: pre-commit
+        cadence: presubmit
+        gates: true
+        required_check: pre-commit
+        evidence: ["repo:.github/workflows/pre-commit.yml"]
+        action: keep
+    target:
+      - {system: github_actions, cadence: presubmit}
+    disposition: keep
+    rationale: "Repository-wide and required."
+    tickets: []
+    workstreams: []
+
+  - id: sensitive-word-scan
+    product: hipblaslt
+    kind: static_check
+    mode: default
+    oracle: "No match against an internally maintained word list"
+    current:
+      - system: math_ci
+        lane: static-analysis
+        cadence: presubmit
+        gates: true
+        required_check: Math CI Summary
+        notes: "A disclosure gate, not code analysis, despite its name."
+        evidence: ["doc:TESTING.md#static-analysis", "external:math-ci"]
+        action: retire
+    target:
+      - {system: github_actions, cadence: presubmit}
+    disposition: migrate
+    rationale: "Needed as long as the repository is public; it has to land somewhere when Math CI retires."
+    tickets: []
+    workstreams: [consolidate]
+    open_questions:
+      - "No ticket yet for moving the scan off Math CI."
+
+  - id: cpp-static-analysis
+    product: hipblaslt
+    kind: static_check
+    mode: default
+    oracle: "clang-tidy with a small, ratcheted rule set; CodeQL for C++"
+    current:
+      - system: github_actions
+        lane: CodeQL
+        cadence: weekly
+        gates: false
+        notes: "Does not cover C++."
+        evidence: ["repo:.github/workflows/codeql.yml"]
+        action: change
+    target:
+      - {system: github_actions, cadence: weekly, notes: "CodeQL with cpp added"}
+      - {system: therock, cadence: presubmit, notes: "clang-tidy in the build"}
+    disposition: new
+    rationale: "No code-quality static analysis runs on the C++ library from any source."
+    tickets: [AIHPBLAS-5032]
+    workstreams: [keep_it_honest]
+
+  # ---------------------------------------------------------------- TensileLite
+  - id: tensilelite-python-unit
+    product: tensilelite
+    kind: host_unit
+    mode: default
+    oracle: "Expected values and invariants; characterization goldens (syrupy) for pinned behavior"
+    transitional: [characterization]
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/
+    categories_file: projects/hipblaslt/tensilelite/test_categories.yaml
+    current:
+      - system: github_actions
+        lane: "Component CI: TensileLite coverage"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "Also enforces the coverage floor and per-file ratchet."
+        evidence: ["repo:.github/workflows/component-ci-tensilelite-coverage.yml", "doc:tensilelite/TESTING.md#where-these-tests-actually-run"]
+        action: keep
+      - system: math_ci
+        lane: "preliminary (unit stage)"
+        cadence: presubmit
+        archs: [gfx12, gfx90a, gfx942, gfx950]
+        gates: true
+        required_check: Math CI Summary
+        notes: "Skipped unless tensilelite/, shared/stinkytofu/ or shared/origami/ changed."
+        evidence: ["doc:tensilelite/TESTING.md#pre-submit--ci-gates", "external:math-ci"]
+        action: retire
+      - system: therock
+        lane: "multi-arch-ci (tensilelite job)"
+        cadence: presubmit
+        tier: standard
+        archs: [gfx94X-dcgpu, gfx950-dcgpu]
+        gates: true
+        required_check: Multi-Arch CI Summary
+        notes: "Against the installed artifact; quick and standard exclude GPU-marked tests."
+        evidence: ["therock:build_tools/github_actions/fetch_test_configurations.py", "doc:tensilelite/TESTING.md#where-these-tests-actually-run"]
+        action: keep
+      - system: math_ci
+        lane: tensilelite-unit-codecov
+        cadence: presubmit
+        archs: [gfx950]
+        gates: false
+        notes: "Python half re-measures what the CPU-only coverage lane already measures."
+        evidence: ["doc:tensilelite/TESTING.md#where-these-tests-actually-run", "external:math-ci"]
+        action: retire
+    target:
+      - {system: github_actions, cadence: presubmit, notes: "host tests and coverage, CPU only"}
+      - {system: therock, cadence: presubmit, tier: standard, notes: "against the installed artifact"}
+      - {system: therock, cadence: nightly, tier: comprehensive, notes: "adds the GPU-marked tests"}
+    disposition: migrate
+    rationale: >-
+      Four lanes run the same tree, and three of them hold a GPU only one needs. Keep one CPU lane
+      for the fast host signal and coverage, and TheRock for the installed artifact. Retire the
+      Math CI copies with the move to TheRock CI. The characterization share shrinks toward a target
+      as modules gain real unit tests.
+    tickets: [AIHPBLAS-3354, AIHPBLAS-5039, AIHPBLAS-5041]
+    workstreams: [consolidate, keep_it_honest]
+
+  - id: tensilelite-common
+    product: tensilelite
+    kind: numerical_correctness
+    mode: default
+    oracle: "Real code generation, build and execution against a CPU reference"
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/common/
+    categories_file: projects/hipblaslt/tensilelite/test_categories.yaml
+    current:
+      - system: math_ci
+        lane: "preliminary (common stage)"
+        cadence: presubmit
+        archs: [gfx12, gfx90a, gfx942, gfx950]
+        gates: true
+        required_check: Math CI Summary
+        notes: "Runs only if the unit stage passed, and is dropped from gating when the PR touches rocroller."
+        evidence: ["doc:tensilelite/TESTING.md#pre-submit--ci-gates", "external:math-ci"]
+        action: retire
+      - system: therock
+        lane: "multi-arch-ci (tensilelite-common job, hw-common)"
+        cadence: presubmit
+        archs: [gfx942, gfx950]
+        gates: true
+        required_check: Multi-Arch CI Summary
+        notes: "Unsharded; about an hour on gfx942 and two on gfx950."
+        evidence: ["repo:projects/hipblaslt/tensilelite/test_categories.yaml", "doc:tensilelite/TESTING.md#pre-submit--ci-gates"]
+        action: change
+      - system: therock
+        lane: "therock postsubmit and nightly (hw-common)"
+        cadence: nightly
+        archs: [gfx90a, gfx120X]
+        gates: false
+        evidence: ["doc:tensilelite/TESTING.md#pre-submit--ci-gates"]
+        action: keep
+      - system: github_actions
+        lane: "gfx1250 HW hipBLASLt + TensileLite Tests"
+        cadence: on_demand
+        archs: [gfx1250]
+        gates: false
+        notes: "Manual dispatch against a prebuilt artifact; gfx1250 runners are scarce. Not described in TESTING.md yet."
+        evidence: ["repo:.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit, archs: [gfx942, gfx950], notes: "sharded"}
+      - {system: therock, cadence: nightly, archs: "every architecture TensileLite supports"}
+    disposition: migrate
+    rationale: >-
+      The GEMM-selection suite that genuinely needs hardware. TheRock already runs it as its own
+      job, so a unit failure cannot hide it. Shard it, extend it to every supported architecture,
+      and retire the Math CI stage with the move.
+    covers:
+      - kernel_source.kernel_parameters
+      - type_combo.*
+      - device.gfx90a
+      - device.gfx942
+      - device.gfx950
+      - device.gfx120X
+    tickets: [AIHPBLAS-5040, "#12491"]
+    workstreams: [cadence, consolidate]
+
+  - id: tensilelite-comm
+    product: tensilelite
+    kind: numerical_correctness
+    mode: multi_gpu
+    oracle: "Cross-device (comm) YAML tests against a CPU reference"
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/
+    current:
+      - system: math_ci
+        lane: "preliminary (two-GPU gfx950 node, tox -e comm)"
+        cadence: presubmit
+        archs: [gfx950x2]
+        gates: true
+        required_check: Math CI Summary
+        evidence: ["doc:tensilelite/TESTING.md#pre-submit--ci-gates", "external:math-ci"]
+        action: retire
+    target:
+      - {system: therock, cadence: weekly, tier: multi_gpu, archs: [gfx950-dcgpu]}
+    disposition: migrate
+    rationale: "The TensileLite side of the multi-GPU feature; should travel with hipblaslt-client-multi-gpu."
+    covers: [system.multi_gpu, device.gfx950]
+    tickets: [AIHPBLAS-3354]
+    workstreams: [consolidate]
+
+  - id: tensilelite-emulation
+    product: tensilelite
+    kind: numerical_correctness
+    mode: emulation
+    oracle: "Common GEMM tests under functional emulation"
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/common/
+    categories_file: projects/hipblaslt/tensilelite/test_categories.yaml
+    current: []
+    target: []
+    disposition: review
+    rationale: >-
+      ffm-quick, emu-fast and emu-full are defined but no TheRock job selects them. Emulation could
+      be the cheapest way to cover architectures without runners, gfx1250 first, so they deserve a
+      decision rather than a silent definition.
+    covers: [kernel_source.kernel_parameters, device.gfx1250]
+    tickets: []
+    workstreams: [inventory]
+
+  - id: tensilelite-cpp-gtest
+    product: tensilelite
+    kind: host_unit
+    mode: default
+    oracle: "Expected values; host-side library behavior"
+    source: projects/hipblaslt/tensilelite/tests/
+    categories_file: projects/hipblaslt/tensilelite/tests/test_categories.yaml
+    current:
+      - system: therock
+        lane: "multi-arch-ci (tensilelite job, C++ suite)"
+        cadence: presubmit
+        tier: standard
+        gates: true
+        required_check: Multi-Arch CI Summary
+        notes: "Appended to the tensilelite job for every tier except quick."
+        evidence: ["therock:build_tools/github_actions/fetch_test_configurations.py", "repo:projects/hipblaslt/tensilelite/tests/test_categories.yaml"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit, tier: quick}
+    disposition: keep
+    rationale: "Host-side and stable; promote to quick once the standard-tier run has proven stable, as its categories file plans."
+    tickets: []
+    workstreams: [cadence]
+
+  - id: rocisa-tests
+    product: tensilelite
+    kind: host_unit
+    mode: default
+    oracle: "Expected instruction encodings and pass behavior"
+    source: projects/hipblaslt/tensilelite/rocisa/
+    categories_file: projects/hipblaslt/tensilelite/test_categories.yaml
+    current:
+      - system: therock
+        lane: "multi-arch-ci (tensilelite job)"
+        cadence: presubmit
+        tier: standard
+        gates: true
+        required_check: Multi-Arch CI Summary
+        evidence: ["repo:projects/hipblaslt/tensilelite/test_categories.yaml"]
+        action: keep
+      - system: github_actions
+        lane: "Component CI: rocISA"
+        cadence: presubmit
+        archs: [linux-cpu, windows-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "Tests a pip install of the package, plus a plugin test mode."
+        evidence: ["repo:.github/workflows/component-ci-rocisa.yml", "doc:tensilelite/TESTING.md#rocisa"]
+        action: keep
+    target:
+      - {system: therock, cadence: presubmit, tier: standard}
+      - {system: github_actions, cadence: presubmit}
+    disposition: keep
+    rationale: "Two lanes testing different things (the suite, and the package install). Not duplication."
+    tickets: []
+    workstreams: []
+
+  - id: tensilelite-logic-corpus-checks
+    product: tensilelite
+    kind: host_unit
+    mode: default
+    oracle: "Whole-corpus consistency: chip-ID arch lock and sibling DeviceNames"
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py
+    current:
+      - system: math_ci
+        lane: "preliminary (unit stage)"
+        cadence: presubmit
+        gates: true
+        required_check: Math CI Summary
+        notes: "Only when the PR touches tensilelite/; the corpus is not on disk in TheRock, so the checks skip there."
+        evidence: ["doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests", "external:math-ci"]
+        action: retire
+    target:
+      - {system: build, cadence: every_build, notes: "inside TensileLogic --check-all"}
+    disposition: merge_into
+    into: tensilelogic-check-all
+    rationale: >-
+      Sibling-DeviceNames already runs in the build gate. Moving the chip-ID arch-lock check there
+      too would make it run everywhere the corpus exists, which is every kernel-generating build,
+      instead of in a pytest copy that can never run in TheRock.
+    tickets: ["#7481"]
+    workstreams: [fill_the_holes]
+
+  - id: tensilelite-mutation
+    product: tensilelite
+    kind: host_unit
+    mode: mutation
+    oracle: "Mutation score of the unit and characterization tests on selected modules"
+    source: projects/hipblaslt/tensilelite/tox.ini
+    current:
+      - system: local
+        lane: "tox -e mutation-unit"
+        cadence: on_demand
+        gates: false
+        evidence: ["repo:projects/hipblaslt/tensilelite/tox.ini"]
+        action: change
+    target:
+      - {system: github_actions, cadence: weekly, gates: false}
+    disposition: keep
+    rationale: "The only evidence that a golden would catch a regression. A report-only weekly run on the modules where it has shown value."
+    tickets: [AIHPBLAS-3868]
+    workstreams: [keep_it_honest]
+
+  - id: tensilelite-lint
+    product: tensilelite
+    kind: static_check
+    mode: default
+    oracle: "flake8, narrowed to pyflakes checks"
+    source: projects/hipblaslt/tensilelite/tox.ini
+    current: []
+    target:
+      - {system: github_actions, cadence: presubmit}
+    disposition: keep
+    rationale: "tox -e lint is configured and invoked by nothing."
+    tickets: [AIHPBLAS-5037]
+    workstreams: [keep_it_honest]
+
+  - id: tensilelite-type-check
+    product: tensilelite
+    kind: static_check
+    mode: default
+    oracle: "A type checker over the TensileLite package"
+    current: []
+    target:
+      - {system: github_actions, cadence: presubmit}
+    disposition: new
+    rationale: "Type hints are a documented style rule, and nothing checks them."
+    tickets: [AIHPBLAS-5038]
+    workstreams: [keep_it_honest]

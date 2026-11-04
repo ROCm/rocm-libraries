@@ -32,7 +32,7 @@ try:
     import yaml
 except ImportError:
     assert 0 and \
-        "You must install PyYAML to use Tensile (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
+        "You must install PyYAML to use TensileLite (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
 
 from dataclasses import dataclass, field
 try:
@@ -42,9 +42,9 @@ except ImportError:
             "You must install tqdm."
 from typing import List
 try:
-    from yaml import CSafeLoader as yamlLoader
+    from yaml import CSafeLoader as SafeLoader
 except ImportError:
-    from yaml import SafeLoader as yamlLoader
+    from yaml import SafeLoader
     assert 0 and "CSafeLoader not installed. Fallback to SafeLoader."
 
 from fix_yaml_types import fix_content
@@ -86,7 +86,7 @@ defaultCreateLogicOptions = {}  # Currently unused
 # Functions
 #####################################################
 #########
-# Need to find a way to call these functions from Tensile package.
+# Need to find a way to call these functions from the TensileLite package.
 def ensurePath(path):
   try:
     os.makedirs(path)
@@ -100,7 +100,7 @@ def ensurePath(path):
 def readYaml(filename):
     try:
         with open(filename, "r") as f:
-            data = yaml.load(f, yamlLoader)
+            data = yaml.load(f, SafeLoader)
             return data
     except:
         str1 = "Failed to read yaml file %s"%filename

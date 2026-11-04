@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -238,12 +238,12 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                                  + " threads per 2d transform",
                              "  (1 2d slab per thread block)"};
 
-        Variable d{"d", "int"};
-        Variable index_along_d{"index_along_d", "size_t"};
-        Variable remaining{"remaining", "size_t"};
-        Variable plength{"plength", "size_t"};
+        Variable d{"d", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
 
-        Variable batch0{"batch0", "size_t"};
+        Variable batch0{"batch0", "integer_type"};
 
         Variable SB_1ST{"SB_1ST", "const StrideBin"};
         Variable SB_2ND{"SB_2ND", "const StrideBin"};
@@ -263,8 +263,8 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += Declaration{lds_linear, "true"};
         body += Declaration{direct_load_to_reg, "false"};
         body += Declaration{direct_store_from_reg, "false"};
-        body += CallbackLoadDeclaration{scalar_type.name, callback_type.name};
-        body += CallbackStoreDeclaration{scalar_type.name, callback_type.name};
+        body += CallbackLoadDeclaration{};
+        body += CallbackStoreDeclaration{};
         body += Declaration{SB_1ST, "SB_UNIT"};
         body += Declaration{SB_2ND, "SB_NONUNIT"};
 

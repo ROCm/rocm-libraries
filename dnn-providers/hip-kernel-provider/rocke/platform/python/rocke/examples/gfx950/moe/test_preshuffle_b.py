@@ -70,7 +70,7 @@ def host_preshuffle_b(B: np.ndarray, block_n: int, block_k: int) -> np.ndarray:
 
 def build_launcher(spec: BatchedGemmSpec) -> KernelLauncher:
     k = build_batched_gemm(spec)
-    hsaco, _ = build_hsaco_from_llvm_ir(lower_kernel_to_llvm(k))
+    hsaco, _ = build_hsaco_from_llvm_ir(lower_kernel_to_llvm(k, arch="gfx950"))
     return KernelLauncher(
         hsaco=hsaco, kernel_name=k.name, signature=batched_gemm_signature(spec)
     )

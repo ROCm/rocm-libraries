@@ -145,12 +145,12 @@ CK_TILE_DEVICE __amdgpu_buffer_rsrc_t cast_to_amdgpu_buffer_rsrc_t(int32x4_t res
 {
     __amdgpu_buffer_rsrc_t as_rsrc;
     static_assert(sizeof(res) == sizeof(as_rsrc) && "Size of buffer resource should match");
-    std::memcpy(&as_rsrc, &res, sizeof(res));
+    __builtin_memcpy(&as_rsrc, &res, sizeof(res));
     return as_rsrc;
 }
 #endif
 
-#if defined(__gfx12__) || defined(__gfx11__)
+#if defined(__gfx12__) || defined(__gfx11__) || defined(__gfx117__)
 #define READ_EXEC __builtin_amdgcn_read_exec_lo
 #define BUFFER_NULL_OFFSET " null "
 #define CMPX_LE_EXEC "v_cmpx_le_u32 "
@@ -178,8 +178,8 @@ struct buffer_load<16, pre_nop>
         using mbuf_t = typename impl::buffer_load_trait<16, T>::payload_t;
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
-        reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b128(
-            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+        reinterpret_cast<mbuf_t&>(value) = bit_cast<mbuf_t>(__builtin_amdgcn_raw_buffer_load_b128(
+            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0));
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -212,8 +212,8 @@ struct buffer_load<8, pre_nop>
         using mbuf_t = typename impl::buffer_load_trait<8, T>::payload_t;
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
-        reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b64(
-            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+        reinterpret_cast<mbuf_t&>(value) = bit_cast<mbuf_t>(__builtin_amdgcn_raw_buffer_load_b64(
+            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0));
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -849,6 +849,9 @@ struct buffer_atomic_add_if<bf16_t, 2, pre_nop>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 4);
+        // A global atomic skips the buffer range check, so apply it here (res[2] = num_records).
+        const index_t in_range = flag && static_cast<uint32_t>(v_offset + i_offset) + sizeof(T) <=
+                                             static_cast<uint32_t>(res[2]);
         auto save_exec = READ_EXEC();
         using mbuf_t   = float;
         asm volatile(CMPX_LE_EXEC "  1, %4\n"
@@ -859,7 +862,7 @@ struct buffer_atomic_add_if<bf16_t, 2, pre_nop>
                        "v"(bit_cast<mbuf_t>(value)),
                        "s"(res.xy),
                        "n"(i_offset),
-                       "v"(flag),
+                       "v"(in_range),
                        "s"(save_exec)
                      : "memory");
     }
@@ -1679,8 +1682,8 @@ CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffe
              (N == 1 || N == 2 || N == 4 || N == 6 || N == 8 || N == 16 || N == 32)) ||
             (std::is_same<T, int32_t>::value &&
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same<T, fp8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same<T, bf8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+            (fp8_format_traits<T>::e4m3 && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+            (fp8_format_traits<T>::e5m2 && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, int8_t>::value &&
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 12 || N == 16)) ||
             (std::is_same<T, uint8_t>::value &&
@@ -2137,8 +2140,8 @@ CK_TILE_DEVICE void amd_buffer_store_impl(const thread_buffer<T, N> src_thread_d
             (std::is_same<T, bf16_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, int32_t>::value &&
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same<T, fp8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same<T, bf8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+            (fp8_format_traits<T>::e4m3 && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+            (fp8_format_traits<T>::e5m2 && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, int8_t>::value &&
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 12 || N == 16)) ||
             (std::is_same<T, uint16_t>::value &&
@@ -2391,6 +2394,14 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                       ,
                   "wrong! not implemented");
 
+    // gfx1250 requires DEVICE scope (16) for cross-CU buffer atomics; CU scope (0) is sufficient
+    // elsewhere.
+#if defined(__gfx125__)
+    constexpr int coherence_flag = 16;
+#else
+    constexpr int coherence_flag = 0;
+#endif
+
     if constexpr(std::is_same<T, float>::value)
     {
         if constexpr(N == 1)
@@ -2399,7 +2410,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset,
-                                                   0);
+                                                   coherence_flag);
         }
         else
         {
@@ -2408,7 +2419,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                        dst_wave_buffer_resource,
                                                        dst_thread_addr_offset,
                                                        dst_wave_addr_offset + i * sizeof(float),
-                                                       0);
+                                                       coherence_flag);
             });
         }
     }
@@ -2420,7 +2431,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                      dst_wave_buffer_resource,
                                                      dst_thread_addr_offset,
                                                      dst_wave_addr_offset,
-                                                     0);
+                                                     coherence_flag);
         }
         else
         {
@@ -2430,7 +2441,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(fp16x2_t),
-                    0);
+                    coherence_flag);
             });
         }
     }
@@ -2442,7 +2453,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                      dst_wave_buffer_resource,
                                                      dst_thread_addr_offset,
                                                      dst_wave_addr_offset,
-                                                     0);
+                                                     coherence_flag);
         }
         else
         {
@@ -2452,7 +2463,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(bf16x2_t),
-                    0);
+                    coherence_flag);
             });
         }
     }
@@ -2464,7 +2475,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                   dst_wave_buffer_resource,
                                                   dst_thread_addr_offset,
                                                   dst_wave_addr_offset,
-                                                  0);
+                                                  coherence_flag);
         }
         else
         {
@@ -2473,7 +2484,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                       dst_wave_buffer_resource,
                                                       dst_thread_addr_offset,
                                                       dst_wave_addr_offset + i * sizeof(int32_t),
-                                                      0);
+                                                      coherence_flag);
             });
         }
     }
@@ -2880,8 +2891,9 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
             (std::is_same_v<T, int32_t> && (N == 1 || N == 2 || N == 3 || N == 4)) ||
             (std::is_same_v<T, half_t> && (N == 2 || N == 4 || N == 8)) ||
             (std::is_same_v<T, bf16_t> && (N == 2 || N == 4 || N == 8)) ||
-            (std::is_same_v<T, fp8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same_v<T, bf8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+            (fp8_format_traits<T>::e4m3 && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+            (fp8_format_traits<T>::e5m2 && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+            (std::is_same_v<T, pk_fp4_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)) ||
             (std::is_same_v<T, int8_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)) ||
             (std::is_same_v<T, uint8_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)),
         "wrong! not implemented");
@@ -3086,6 +3098,50 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
 #endif
 }
 
+// Keep s_wait_xcnt in the same asm as the stores so the compiler cannot reuse their address
+// operands before the wait. Eight per burst is a batching choice, not a hardware limit: an active
+// D128 wave issues two bursts (16 address operands per asm instead of 32); 4 and 16 were not
+// measured. No bounds check; the caller waits on DScnt before and on ASYNCcnt after.
+CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_base,
+                                                            const uint32_t (&global_offset)[8],
+                                                            const uint32_t (&lds_addr)[8])
+{
+#if defined(__gfx125__)
+    asm volatile("global_store_async_from_lds_b128 %0, %8, %16\n\t"
+                 "global_store_async_from_lds_b128 %1, %9, %16\n\t"
+                 "global_store_async_from_lds_b128 %2, %10, %16\n\t"
+                 "global_store_async_from_lds_b128 %3, %11, %16\n\t"
+                 "global_store_async_from_lds_b128 %4, %12, %16\n\t"
+                 "global_store_async_from_lds_b128 %5, %13, %16\n\t"
+                 "global_store_async_from_lds_b128 %6, %14, %16\n\t"
+                 "global_store_async_from_lds_b128 %7, %15, %16\n\t"
+                 "s_wait_xcnt 0x0"
+                 :
+                 : "v"(global_offset[0]),
+                   "v"(global_offset[1]),
+                   "v"(global_offset[2]),
+                   "v"(global_offset[3]),
+                   "v"(global_offset[4]),
+                   "v"(global_offset[5]),
+                   "v"(global_offset[6]),
+                   "v"(global_offset[7]),
+                   "v"(lds_addr[0]),
+                   "v"(lds_addr[1]),
+                   "v"(lds_addr[2]),
+                   "v"(lds_addr[3]),
+                   "v"(lds_addr[4]),
+                   "v"(lds_addr[5]),
+                   "v"(lds_addr[6]),
+                   "v"(lds_addr[7]),
+                   "s"(global_base)
+                 : "memory");
+#else
+    ignore = global_base;
+    ignore = global_offset;
+    ignore = lds_addr;
+#endif
+}
+
 // buffer_store requires:
 //   1) p_dst_wave must point to global memory
 //   2) p_dst_wave must be a wavewise pointer.
@@ -3170,11 +3226,18 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
 #if defined(__gfx942__)
     if constexpr(std::is_same<T, bf16_t>::value)
     {
-        if(dst_thread_element_valid)
-        {
-            amd_global_atomic_add_impl<T, N>(src_thread_data,
-                                             p_dst_wave + dst_thread_element_offset);
-        }
+        // Global atomics have no buffer range check, so drop what the buffer path would drop.
+        // It checks each packed pair on its own.
+        static_for<0, N / 2, 1>{}([&](auto i) {
+            const index_t pair_offset = 2 * i;
+            if(dst_thread_element_valid && dst_thread_element_offset >= -pair_offset &&
+               dst_thread_element_offset <= dst_element_space_size - 2 - pair_offset)
+            {
+                amd_global_atomic_add_impl<T, 2>(
+                    bit_cast<thread_buffer<T, 2>>(src_thread_data.template get_as<bf16x2_t>()[i]),
+                    p_dst_wave + dst_thread_element_offset + pair_offset);
+            }
+        });
     }
     else
     {
@@ -3344,7 +3407,6 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
     if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::half_t>)
     {
 #if defined(__gfx950__)
-        typedef __attribute__((__vector_size__(4 * sizeof(__fp16)))) __fp16 llvm_fp16x4_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_fp16x4_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4f16(lds_ptr));
 #elif defined(__gfx125__)
@@ -3361,7 +3423,6 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_bf16x4_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4bf16(lds_ptr));
 #elif defined(__gfx125__)
-        typedef __attribute__((__vector_size__(8 * sizeof(__bf16)))) __bf16 llvm_bf16x8_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_bf16x8_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_load_tr16_b128_v8bf16(lds_ptr));
 #else
@@ -3419,7 +3480,7 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                         tdm_desc_grp.get(I1),
                                         tdm_desc_grp.get(I2),
                                         tdm_desc_grp.get(I3),
@@ -3445,7 +3506,7 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_store_from_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                            tdm_desc_grp.get(I1),
                                            tdm_desc_grp.get(I2),
                                            tdm_desc_grp.get(I3),

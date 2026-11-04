@@ -45,7 +45,7 @@ import yaml
 import math
 
 from yaml import SafeDumper as yamlDumper
-from yaml import SafeLoader as yamlLoader
+from yaml import SafeLoader
 
 typeIndexToName = {0: "f32_r", 1: "f64_r", 2: "f32_c", 3: "f64_c", 4: "f16_r", 5: "i8_r", 6: "i32_r", 7: "bf16_r", 8: "i8_r", 10: "f8_r", 11: "bf8_r", 12: "f8b8", 13: "b8f8"}
 
@@ -330,7 +330,7 @@ def main():
         print(f" working on {output}")
         yamlName = os.path.join(args.libLogic,libname)
         with open(yamlName) as f:
-            logicData = yaml.load(f, yamlLoader)
+            logicData = yaml.load(f, SafeLoader)
 
         try:
             os.makedirs(args.outDir)

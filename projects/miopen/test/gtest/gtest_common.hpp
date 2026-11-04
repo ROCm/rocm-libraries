@@ -148,8 +148,9 @@ enum class Gpu : int
     gfx103X = 1 << 6,
     gfx110X = 1 << 7,
     gfx115X = 1 << 8,
-    gfx120X = 1 << 9,
-    gfx125X = 1 << 10,
+    gfx117X = 1 << 9,
+    gfx120X = 1 << 10,
+    gfx125X = 1 << 11,
     gfxLast = Gpu::gfx125X, // \note Change the value when adding a new device
     All     = -1
 };
@@ -322,7 +323,6 @@ void invoke_with_params(Check&& check)
 /// Env variables
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_FIND_ONLY_SOLVER)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_MODE)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_WINOGRAD)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_FFT)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_DIRECT)

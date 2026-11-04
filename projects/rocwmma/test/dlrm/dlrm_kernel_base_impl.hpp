@@ -106,17 +106,25 @@ namespace rocwmma
         auto  deviceArch = deviceInfo->getGcnArch();
 
         // Arch
+        // clang-format off
         auto isGfx908 = deviceArch == DeviceInfo::GFX908;
-        auto isGfx11  = (deviceArch == DeviceInfo::GFX1100) || (deviceArch == DeviceInfo::GFX1101)
+        auto isGfx11  = (deviceArch == DeviceInfo::GFX1100)
+                       || (deviceArch == DeviceInfo::GFX1101)
                        || (deviceArch == DeviceInfo::GFX1102)
                        || (deviceArch == DeviceInfo::GFX1103)
                        || (deviceArch == DeviceInfo::GFX1150)
                        || (deviceArch == DeviceInfo::GFX1151)
                        || (deviceArch == DeviceInfo::GFX1152)
-                       || (deviceArch == DeviceInfo::GFX1153);
+                       || (deviceArch == DeviceInfo::GFX1153)
+                       || (deviceArch == DeviceInfo::GFX1170)
+                       || (deviceArch == DeviceInfo::GFX1171)
+                       ;
 
-        auto isGfx12 = (deviceArch == DeviceInfo::GFX1200) || (deviceArch == DeviceInfo::GFX1201)
-                       || (deviceArch == DeviceInfo::GFX1250);
+        auto isGfx12 = (deviceArch == DeviceInfo::GFX1200)
+                       || (deviceArch == DeviceInfo::GFX1201)
+                       || (deviceArch == DeviceInfo::GFX1250)
+                       ;
+        // clang-format on
 
         // Datatypes
         auto isF64 = std::is_same<DataT, float64_t>::value;
@@ -376,6 +384,7 @@ namespace rocwmma
                         CHECK_HIP_ERROR(hipGetLastError());
                         CHECK_HIP_ERROR(hipEventRecord(syncEvent));
                         CHECK_HIP_ERROR(hipEventSynchronize(syncEvent));
+                        CHECK_HIP_ERROR(hipEventDestroy(syncEvent));
 
                         hipExtLaunchKernelGGL((this->kernelBwdImpl()),
                                               (this->gridDim()),

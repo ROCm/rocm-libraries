@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,10 @@ set(gtest_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_GTEST})
 append_cmake_cli_arguments(gtest_cmake_args gtest_cmake_args)
 
 set(gtest_git_repository "https://github.com/google/googletest.git" CACHE STRING "URL to download gtest from")
-set(gtest_git_tag "release-1.11.0" CACHE STRING "URL to download gtest from")
+# pinned-dep googletest: immutable commit (was the mutable "release-1.11.0" tag).
+# Bump only on a deliberate googletest upgrade.
+# grep "pinned-dep" to find every pin that needs bumping.
+set(gtest_git_tag "e2239ee6043f73722e7aa812a459f54a28552929" CACHE STRING "googletest commit (release-1.11.0)")
 
 if(MSVC)
   list(APPEND gtest_cmake_args -Dgtest_force_shared_crt=ON)

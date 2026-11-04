@@ -26,6 +26,11 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+rocsparse_indextype rocsparse::sorted_coo2csr_info_t::get_row_ptr_indextype() const
+{
+    return this->m_row_ptr_indextype;
+}
+
 const void* rocsparse::sorted_coo2csr_info_t::get_row_ptr() const
 {
     return this->m_row_ptr;

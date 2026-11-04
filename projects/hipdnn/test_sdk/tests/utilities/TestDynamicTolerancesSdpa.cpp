@@ -108,8 +108,8 @@ std::vector<SdpaFwdToleranceTestCase>
 
     // headDim=0 => throws
     // seqKv=0 => throws
-    // D=8, Skv=4, x/k/v in [-1,1], default scale = 1/sqrt(8)
-    const double absScaleDefault8 = 1.0 / std::sqrt(8.0);
+    // D=8, Skv=4, x/k/v in [-1,1], default scale = 1.0
+    const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 4, std::nullopt, 0.0, true},
@@ -125,7 +125,7 @@ std::vector<SdpaFwdToleranceTestCase>
              8,
              4,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault8, u)},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault, u)},
             // D=64, Skv=128, all in [-1,1], default scale
             {-1.0,
              1.0,
@@ -136,7 +136,7 @@ std::vector<SdpaFwdToleranceTestCase>
              64,
              128,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 64, 128, 1.0 / std::sqrt(64.0), u)},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 64, 128, absScaleDefault, u)},
             // D=8, Skv=4, all in [0,1], default scale (matches test tensor init range)
             {0.0,
              1.0,
@@ -147,7 +147,7 @@ std::vector<SdpaFwdToleranceTestCase>
              8,
              4,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault8, u)},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault, u)},
             // Custom scale = 1.0
             {-1.0,
              1.0,
@@ -170,7 +170,7 @@ std::vector<SdpaFwdToleranceTestCase>
     getSdpaFwdToleranceTestCases<TypeTriple<float, double, float>>()
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
-    const double absScaleDefault8 = 1.0 / std::sqrt(8.0);
+    const double absScaleDefault = 1.0; // no scale given: no scaling
 
     auto expectedWithCast = [&](int64_t headDimVal, int64_t seqKvVal, double absScale) {
         const double base = expectedSdpaTolerance(1.0, 1.0, 1.0, headDimVal, seqKvVal, absScale, u);
@@ -192,7 +192,7 @@ std::vector<SdpaFwdToleranceTestCase>
              8,
              4,
              std::nullopt,
-             expectedWithCast(8, 4, absScaleDefault8)},
+             expectedWithCast(8, 4, absScaleDefault)},
             // D=64, Skv=128, all in [-1,1]
             {-1.0,
              1.0,
@@ -203,7 +203,7 @@ std::vector<SdpaFwdToleranceTestCase>
              64,
              128,
              std::nullopt,
-             expectedWithCast(64, 128, 1.0 / std::sqrt(64.0))},
+             expectedWithCast(64, 128, absScaleDefault)},
             // Zero V: all error terms involving maxAbsV vanish
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4, std::nullopt, 0.0}};
 }
@@ -215,7 +215,7 @@ std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<ha
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
-    const double absScaleDefault8 = 1.0 / std::sqrt(8.0);
+    const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 4, std::nullopt, 0.0, true},
@@ -229,7 +229,7 @@ std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<ha
              8,
              4,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault8, u) + 1.0 * uHalf},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault, u) + 1.0 * uHalf},
             // Zero V: base tolerance vanishes, output cast also vanishes (maxOutputMagnitude=0)
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4, std::nullopt, 0.0}};
 }
@@ -240,7 +240,7 @@ template <>
 std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<half, half, half>>()
 {
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
-    const double absScaleDefault8 = 1.0 / std::sqrt(8.0);
+    const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 4, std::nullopt, 0.0, true},
@@ -254,7 +254,7 @@ std::vector<SdpaFwdToleranceTestCase> getSdpaFwdToleranceTestCases<TypeTriple<ha
              8,
              4,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault8, u)},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault, u)},
             // Zero V: all terms vanish
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4, std::nullopt, 0.0}};
 }
@@ -266,7 +266,7 @@ std::vector<SdpaFwdToleranceTestCase>
 {
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
     auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    const double absScaleDefault8 = 1.0 / std::sqrt(8.0);
+    const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 4, std::nullopt, 0.0, true},
@@ -280,7 +280,7 @@ std::vector<SdpaFwdToleranceTestCase>
              8,
              4,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault8, u) + 1.0 * uBf16},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault, u) + 1.0 * uBf16},
             // Zero V: output cast vanishes too
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4, std::nullopt, 0.0}};
 }
@@ -292,7 +292,7 @@ std::vector<SdpaFwdToleranceTestCase>
     getSdpaFwdToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
     auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
-    const double absScaleDefault8 = 1.0 / std::sqrt(8.0);
+    const double absScaleDefault = 1.0; // no scale given: no scaling
 
     return {// headDim = 0 => throws
             {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 4, std::nullopt, 0.0, true},
@@ -306,7 +306,7 @@ std::vector<SdpaFwdToleranceTestCase>
              8,
              4,
              std::nullopt,
-             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault8, u)},
+             expectedSdpaTolerance(1.0, 1.0, 1.0, 8, 4, absScaleDefault, u)},
             // Zero V: all terms vanish
             {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 8, 4, std::nullopt, 0.0}};
 }
@@ -548,13 +548,16 @@ TEST(TestCalculateSdpaFwdTolerance, ToleranceScalesWithDimensions)
 // Test custom scale vs default scale
 TEST(TestCalculateSdpaFwdTolerance, CustomScaleVsDefault)
 {
-    // Default scale = 1/sqrt(64) = 0.125
+    // No scale given: 1.0 (no scaling), as in cuDNN.
     auto tolDefault
         = calculateSdpaFwdTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128);
-
-    // Custom scale = 1.0 (8x larger than default for D=64)
-    auto tolLargeScale = calculateSdpaFwdTolerance<float, float, float>(
+    auto tolScaleOne = calculateSdpaFwdTolerance<float, float, float>(
         -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128, 1.0);
+    EXPECT_EQ(tolDefault, tolScaleOne);
+
+    // Custom scale = 8.0 (8x larger than the default)
+    auto tolLargeScale = calculateSdpaFwdTolerance<float, float, float>(
+        -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 64, 128, 8.0);
 
     // Larger scale amplifies Stage 1 score error, so tolerance should be larger
     EXPECT_GT(tolLargeScale, tolDefault)

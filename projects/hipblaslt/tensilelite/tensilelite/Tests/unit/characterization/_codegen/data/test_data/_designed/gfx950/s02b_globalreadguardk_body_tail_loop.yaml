@@ -1,0 +1,45 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S02b globalReadGuardK/Body tail-loop guarded read.
+# Non-buffer (BufferLoad=False) fp32 NN GEMM, K not a multiple of DepthU so the
+# tail loop fires globalReadDo(mode=2) -> globalReadGuardK Body.
+#   - 11029 : else (Not buffer load) VCmpXLtU64 addr<maxAddr masking
+#   - 11227 : BufferLoad=0 checkIn of maxAddr/bpe/zero VGPRs
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - BufferLoad: [False]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 130]

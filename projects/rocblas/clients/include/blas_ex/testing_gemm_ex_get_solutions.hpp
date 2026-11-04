@@ -53,6 +53,14 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     auto                 B_col  = transB == rocblas_operation_none ? N : std::max(K, 1);
     auto                 d_type = arg.d_type;
 
+    // Read back the effective math mode: rocblas_set_math_mode silently keeps the
+    // default when the requested mode is unsupported on this arch (xf32 is gfx942-only).
+    // The CPU reference must down-cast A/B to xfloat32 only when the GPU actually used
+    // TF32, otherwise fp32 hardware output and an xf32 reference would falsely mismatch.
+    rocblas_math_mode math_mode = rocblas_math_mode(arg.math_mode);
+    CHECK_ROCBLAS_ERROR(rocblas_set_math_mode(handle, math_mode));
+    CHECK_ROCBLAS_ERROR(rocblas_get_math_mode(handle, &math_mode));
+
     // check for invalid sizes
     bool invalid_size = M < 0 || N < 0 || K < 0 || lda < A_row || ldb < B_row || ldc < M || ldd < M;
     if(invalid_size)
@@ -105,6 +113,84 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     DEVICE_MEMCHECK(device_vector<Tc>, d_alpha_Tc, (1));
     DEVICE_MEMCHECK(device_vector<Tc>, d_beta_Tc, (1));
 
+    // High-precision accumulate type for the CPU reference (matches testing_gemm_ex).
+    using To_hpa = std::conditional_t<std::is_same_v<To, rocblas_bfloat16>, float, To>;
+
+    // Host data + CPU reference for per-solution numeric validation. Enumerating
+    // solutions and only status-checking them (as this test historically did) cannot
+    // catch a solution that returns wrong numbers. Build the reference once and compare
+    // every solution's actual output against it below.
+    //
+    // Each solution reduces in its own tile/accumulation order, so the comparison uses a
+    // per-type near_check tolerance (not bit-exact) that ignores small precision
+    // differences while still failing on a gross error such as a dropped alpha or beta.
+    const bool check_results = arg.unit_check || arg.norm_check;
+    double     check_tol     = 0.0;
+
+    HOST_MEMCHECK(host_matrix<Ti>, hA, (A_row, A_col, lda));
+    HOST_MEMCHECK(host_matrix<Ti>, hB, (B_row, B_col, ldb));
+    HOST_MEMCHECK(host_matrix<To>, hC, (M, N, ldc));
+    HOST_MEMCHECK(host_matrix<To_hpa>, hD_gold, (M, N, ldd));
+    HOST_MEMCHECK(host_matrix<To>, hD, (M, N, ldd));
+
+    if(check_results)
+    {
+        // Initialize data on host memory
+        rocblas_init_matrix<Ti>(
+            hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true);
+        rocblas_init_matrix<Ti, true>(
+            hB, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, false, true);
+        rocblas_init_matrix<To, true>(
+            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
+
+        // copy inputs to device (C is reset before each solution launch below)
+        CHECK_HIP_ERROR(dA.transfer_from(hA));
+        CHECK_HIP_ERROR(dB.transfer_from(hB));
+
+        // For the xf32 xdl math op, cast A/B from float to xfloat32 so the CPU
+        // reference matches the reduced-precision hardware inputs.
+        if(std::is_same<Ti, float>{} && math_mode == rocblas_xf32_xdl_math_op)
+        {
+            type_to_xdl_math_op_type<rocblas_xfloat32, float>(hA.data(), hA.size());
+            type_to_xdl_math_op_type<rocblas_xfloat32, float>(hB.data(), hB.size());
+        }
+
+        // D = alpha * op(A) * op(B) + beta * C, computed on the CPU.
+        copy_matrix_with_different_leading_dimensions(hC, hD_gold);
+        ref_gemm<Ti, To_hpa, Tc>(transA,
+                                 transB,
+                                 M,
+                                 N,
+                                 K,
+                                 h_alpha_Tc,
+                                 hA,
+                                 lda,
+                                 hB,
+                                 ldb,
+                                 h_beta_Tc,
+                                 (To_hpa*)hD_gold,
+                                 ldd,
+                                 rocblas_bfloat16::rocblas_truncate_t::rocblas_round_near_even);
+
+        // near_check tolerance. Each solution reduces in its own accumulation order, so
+        // a valid result differs from the reference by about K*eps. gfx11 with 16-bit
+        // inputs uses testing_gemm_ex's looser absolute bound as-is (that constant is
+        // calibrated for absolute K*tol use, not for magnitude scaling). Every other
+        // case scales a relative epsilon by an analytical bound on |D|_max, derived from
+        // the init ranges. A gross error such as a dropped alpha or beta term stays well
+        // above either bound and still fails.
+        if(rocblas_handle(handle)->getArchMajor() == 11 && sizeof(Ti) == 2)
+        {
+            check_tol = K * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
+        }
+        else
+        {
+            const double result_bound
+                = gemm_result_abs_bound<Ti, To, Tc>(arg.initialization, K, h_alpha_Tc, h_beta_Tc);
+            check_tol = result_bound * K * get_epsilon<Tc>();
+        }
+    }
+
 #define GEMM_EX_ARGS                                                                        \
     handle, transA, transB, M, N, K, &h_alpha_Tc, dA, arg.a_type, lda, dB, arg.b_type, ldb, \
         &h_beta_Tc, dC, arg.c_type, ldc, dDref, d_type, ldd, arg.compute_type, algo
@@ -141,16 +227,48 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     EXPECT_EQ(ary[size], 0); // one past last index
     EXPECT_EQ(ary[size_large - 1], 0);
 
-    for(auto sol : ary)
+    // Validate each solution. rocblas_gemm_flags_check_solution_index is query-only
+    // (it returns success without launching the kernel), so a status check alone
+    // cannot detect a wrong-result solution. When numeric checking is requested,
+    // actually execute the solution (flags_none) and compare against the CPU
+    // reference; otherwise fall back to the historical query-only status check.
+    auto check_solution = [&](int32_t sol) {
+        if(!check_results)
+        {
+            CHECK_ROCBLAS_ERROR(
+                rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_check_solution_index));
+            return;
+        }
+
+        // reset D (== C for in-place) before each launch, then run the solution
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
+        rocblas_init_nan<To>(hD, M, N, ldd);
+        if(arg.outofplace)
+            CHECK_HIP_ERROR(dDref.transfer_from(hD));
+
+        // Some solutions have alpha/beta restrictions (e.g. alpha == 1 only) that
+        // get_solutions does not filter against. A non-success launch means the solution
+        // is incompatible with the current arguments, not a correctness failure — skip it.
+        if(rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_none) != rocblas_status_success)
+            return;
+
+        CHECK_HIP_ERROR(hD.transfer_from(dDref));
+
+        // Compare against the CPU reference, ignoring small precision differences.
+        near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD, check_tol);
+    };
+
+    // ary is padded to 2*size with trailing zeros; only the first `size` entries are
+    // real solutions. Running the padding zeros would launch a full GEMM per default
+    // solution for no added coverage.
+    for(rocblas_int i = 0; i < size; i++)
     {
-        CHECK_ROCBLAS_ERROR(
-            rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_check_solution_index));
+        check_solution(ary[i]);
     }
 
     // Testing 0 and -1 values work (uses default solution)
-    CHECK_ROCBLAS_ERROR(rocblas_gemm_exM(GEMM_EX_ARGS, 0, rocblas_gemm_flags_check_solution_index));
-    CHECK_ROCBLAS_ERROR(
-        rocblas_gemm_exM(GEMM_EX_ARGS, -1, rocblas_gemm_flags_check_solution_index));
+    check_solution(0);
+    check_solution(-1);
     // always have rocblas fallback
     // CHECK_ROCBLAS_ERROR(rocblas_gemm_exM(
     //     GEMM_EX_ARGS, c_rocblas_source_solution, rocblas_gemm_flags_check_solution_index));

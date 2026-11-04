@@ -5,6 +5,7 @@
 // Verifies that EXHAUSTIVE mode primes engine caches via the global.benchmarking
 // knob and that STANDARD mode does not.
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -219,25 +220,22 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
 // compiled workspace exceeds the provided budget; the plan is still benchmarked
 // unprimed.
 //
-// AutotunePluginEngineWorkspaceGrows reports estimated workspace 1024 and an exhaustive
-// compiled workspace of 8192 for its priming plan (benchmarking knob enabled)
-// but only 1024 for its non-exhaustie real plan. With an allocated workspace
-// size of 4096:
-//   - exhaustive compiled size (8192) > 4096 -> priming skipped
-//   - estimated size (1024) <= 4096          -> triggers warning + errorMessage
+// AutotunePluginEngineWorkspaceGrows reports 8192 for its priming plan (benchmarking knob
+// enabled) and for the estimate of that configuration, but only 1024 for its non-exhaustive
+// real plan. With an allocated workspace size of 4096:
+//   - priming compiled size (8192) > 4096    -> priming skipped
 //   - non-exhaustive compiled (1024) <= 4096 -> benchmarked normally -> succeeded
 //
 // A workspace skip during priming always continues, allowing the plan to run through
 // the benchmarking loop un-primed, regardless of primingFailurePolicy. The skipped
-// plan's result has ranExhaustive = false, and an errorMessage is also attached but
-// only when the pre-compile estimate fit but the larger compiled workspace did not.
+// plan's result has ranExhaustive = false and the skip in exhaustiveNotRunReason.
 TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUnprimed)
 {
     constexpr int64_t ENGINE_WORKSPACE_GROWS_ID
         = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineWorkspaceGrows>();
 
-    // Budget between the engine's estimate (1024) and its priming compiled
-    // workspace (8192), and >= its real compiled workspace (1024).
+    // Budget below the engine's priming compiled workspace (8192) and >= its real
+    // compiled workspace (1024).
     constexpr int64_t WORKSPACE_BUDGET = 4096;
 
     ConvGraphBundle bundle;
@@ -249,9 +247,8 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
     int64_t estimatedWs = 0;
     result = bundle.graph->get_estimated_max_workspace_size(estimatedWs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_LE(estimatedWs, WORKSPACE_BUDGET)
-        << "Estimated workspace (" << estimatedWs << ") must fit the budget (" << WORKSPACE_BUDGET
-        << ") for this test to exercise the estimate-fit priming-skip branch";
+    ASSERT_GT(estimatedWs, WORKSPACE_BUDGET)
+        << "The estimate covers the priming configuration, so it exceeds the budget here";
 
     const Workspace workspace(static_cast<size_t>(WORKSPACE_BUDGET));
 
@@ -288,7 +285,7 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
                "priming skip belongs in exhaustiveNotRunReason. Got: "
             << r.errorMessage;
         EXPECT_FALSE(r.exhaustiveNotRunReason.empty())
-            << "WorkspaceGrows estimate fit but priming compiled did not, so an "
+            << "WorkspaceGrows priming compiled workspace exceeds the budget, so an "
                "exhaustiveNotRunReason describing the workspace skip should be attached";
         EXPECT_NE(r.exhaustiveNotRunReason.find("workspace"), std::string::npos)
             << "exhaustiveNotRunReason should mention the workspace skip; got: "
@@ -297,6 +294,99 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
 
     EXPECT_TRUE(foundWorkspaceGrows) << "WorkspaceGrows engine not found in results";
 }
+
+// Test: a workspace sized from get_estimated_max_workspace_size() is large enough for EXHAUSTIVE
+// priming, whichever add_*() entry point collected the engine. The estimate covers the
+// benchmarking configuration of an engine whose priming plan needs more workspace than its
+// default plan.
+enum class AddEnginePath
+{
+    ADD_ENGINES,
+    ADD_ENGINE_VARIANTS,
+    ADD_ENGINE_SWEEP,
+    ADD_ENGINE_CONFIGS,
+};
+
+class IntegrationAutotuneExhaustiveEstimate : public IntegrationAutotuneExhaustive,
+                                              public ::testing::WithParamInterface<AddEnginePath>
+{
+};
+
+TEST_P(IntegrationAutotuneExhaustiveEstimate, PrimingRunsWhenWorkspaceSizedFromEstimate)
+{
+    constexpr int64_t ENGINE_WORKSPACE_GROWS_ID
+        = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineWorkspaceGrows>();
+
+    ConvGraphBundle bundle;
+    createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
+
+    Error result{ErrorCode::OK, ""};
+    const auto path = GetParam();
+    if(path == AddEnginePath::ADD_ENGINES)
+    {
+        result = bundle.graph->add_engines({ENGINE_WORKSPACE_GROWS_ID});
+    }
+    else if(path == AddEnginePath::ADD_ENGINE_VARIANTS)
+    {
+        result = bundle.graph->add_engine_variants({EngineVariant{ENGINE_WORKSPACE_GROWS_ID, {}}});
+    }
+    else if(path == AddEnginePath::ADD_ENGINE_SWEEP)
+    {
+        result
+            = bundle.graph->add_engine_sweep({EngineSweepSpec{ENGINE_WORKSPACE_GROWS_ID, {}, {}}});
+    }
+    else
+    {
+        std::vector<EngineConfigInfo> configs;
+        result = bundle.graph->get_engine_configs(configs);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        configs.erase(std::remove_if(configs.begin(),
+                                     configs.end(),
+                                     [&](const EngineConfigInfo& config) {
+                                         return config.engineId != ENGINE_WORKSPACE_GROWS_ID;
+                                     }),
+                      configs.end());
+        result = bundle.graph->add_engine_configs(configs);
+    }
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    int64_t estimatedWs = 0;
+    result = bundle.graph->get_estimated_max_workspace_size(estimatedWs);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const Workspace workspace(static_cast<size_t>(estimatedWs));
+
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
+    config.warmupIterations = 1;
+
+    std::vector<AutotuneResult> results;
+    result = bundle.graph->autotune(
+        _handle, bundle.variantPack, workspace.get(), estimatedWs, config, {}, &results);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    bool foundWorkspaceGrows = false;
+    for(const auto& r : results)
+    {
+        if(r.engineId != ENGINE_WORKSPACE_GROWS_ID)
+        {
+            continue;
+        }
+        foundWorkspaceGrows = true;
+        EXPECT_TRUE(r.ranExhaustive) << r.exhaustiveNotRunReason;
+    }
+
+    EXPECT_TRUE(foundWorkspaceGrows) << "WorkspaceGrows engine not found in results";
+}
+
+INSTANTIATE_TEST_SUITE_P(AddEnginePaths,
+                         IntegrationAutotuneExhaustiveEstimate,
+                         ::testing::Values(AddEnginePath::ADD_ENGINES,
+                                           AddEnginePath::ADD_ENGINE_VARIANTS,
+                                           AddEnginePath::ADD_ENGINE_SWEEP,
+                                           AddEnginePath::ADD_ENGINE_CONFIGS));
 
 // Test: the ABORT_ON_PRIMING_FAILURE policy hard-fails when an engine fails priming.
 //

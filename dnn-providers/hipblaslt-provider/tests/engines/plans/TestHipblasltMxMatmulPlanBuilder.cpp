@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
 
@@ -153,8 +154,9 @@ protected:
 };
 
 // GPU fixture: positive cases that construct a real plan via the hipBLASLt
-// handle. Gated on a device + a live hipblasLt handle.
-class TestGpuHipblasltMxMatmulPlanBuilder : public ::testing::Test
+// handle. Gated on a device + a live hipblasLt handle. Split into a base so the
+// typed suites below reuse the same setup.
+class MxGpuPlanBuilderTestBase : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -180,53 +182,116 @@ protected:
     HipdnnEnginePluginHandle _handle;
 };
 
+class TestGpuHipblasltMxMatmulPlanBuilder : public MxGpuPlanBuilderTestBase
+{
+};
+
+// Canonical valid MX graph, varying only the element types under test.
+static flatbuffers::FlatBufferBuilder
+    createMxGraphWithTypes(DT xTypeA, DT cType, DT xTypeB = DT::UNSET)
+{
+    return createValidMxMatmulGraph({32, 128},
+                                    {1, 32},
+                                    {128, 32},
+                                    {32, 1},
+                                    {32, 32},
+                                    {32, 1},
+                                    {32, 4},
+                                    {4, 32},
+                                    xTypeA,
+                                    cType,
+                                    DT::FP8_E8M0,
+                                    DT::FP8_E8M0,
+                                    DT::FLOAT,
+                                    32,
+                                    false,
+                                    false,
+                                    xTypeB);
+}
+
 // ===========================================================================
 // isApplicable — positive cases (GPU-gated via SKIP_IF_NO_DEVICES in SetUp)
 // ===========================================================================
 
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE4M3OutputHalf)
+// Input element type x output element type. The dtype pair lives in the type
+// parameter rather than the test name, so the case name stays free of datatype
+// keywords; -- see MxPlanConfig in TestBlockScaleDequantizePlan.cpp for the same
+// pattern over DataType enum values.
+template <DT XType, DT OutType>
+struct MxDtypeConfig
 {
-    auto fb = createValidMxMatmulGraph();
+    static constexpr DT X_TYPE = XType;
+    static constexpr DT OUT_TYPE = OutType;
+};
+
+using MxDtypeConfigs = ::testing::Types<MxDtypeConfig<DT::FP8_E4M3, DT::HALF>,
+                                        MxDtypeConfig<DT::FP8_E5M2, DT::BFLOAT16>,
+                                        MxDtypeConfig<DT::FP8_E4M3, DT::FLOAT>,
+                                        MxDtypeConfig<DT::FP4_E2M1, DT::HALF>,
+                                        MxDtypeConfig<DT::FP4_E2M1, DT::BFLOAT16>,
+                                        MxDtypeConfig<DT::FP4_E2M1, DT::FLOAT>,
+                                        MxDtypeConfig<DT::FP6_E2M3, DT::HALF>,
+                                        MxDtypeConfig<DT::FP6_E2M3, DT::BFLOAT16>,
+                                        MxDtypeConfig<DT::FP6_E2M3, DT::FLOAT>,
+                                        MxDtypeConfig<DT::FP6_E3M2, DT::HALF>,
+                                        MxDtypeConfig<DT::FP6_E3M2, DT::BFLOAT16>,
+                                        MxDtypeConfig<DT::FP6_E3M2, DT::FLOAT>>;
+
+template <typename ConfigType>
+class TestGpuHipblasltMxMatmulPlanBuilderDtypes : public MxGpuPlanBuilderTestBase
+{
+};
+
+TYPED_TEST_SUITE(TestGpuHipblasltMxMatmulPlanBuilderDtypes, MxDtypeConfigs, );
+
+TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicable)
+{
+    SKIP_IF_WORKAROUND_ISSUE_13715();
+    auto fb = createMxGraphWithTypes(TypeParam::X_TYPE, TypeParam::OUT_TYPE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+    EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
+        << "x=" << EnumNameDataType(TypeParam::X_TYPE)
+        << " out=" << EnumNameDataType(TypeParam::OUT_TYPE);
 }
 
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE5M2OutputBf16)
+// Mixed operand pairs: A and B carry different MX element types. Output is HALF
+// throughout -- the output axis is covered by the suite above.
+template <DT AType, DT BType>
+struct MxMixedConfig
 {
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP8_E5M2,
-                                       DT::BFLOAT16);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
-}
+    static constexpr DT A_TYPE = AType;
+    static constexpr DT B_TYPE = BType;
+};
 
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableE4M3OutputFp32)
+using MxMixedConfigs = ::testing::Types<MxMixedConfig<DT::FP8_E4M3, DT::FP4_E2M1>,
+                                        MxMixedConfig<DT::FP4_E2M1, DT::FP8_E4M3>,
+                                        MxMixedConfig<DT::FP6_E2M3, DT::FP6_E3M2>,
+                                        MxMixedConfig<DT::FP6_E3M2, DT::FP6_E2M3>,
+                                        MxMixedConfig<DT::FP6_E2M3, DT::FP8_E4M3>,
+                                        MxMixedConfig<DT::FP6_E2M3, DT::FP4_E2M1>>;
+
+template <typename ConfigType>
+class TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes : public MxGpuPlanBuilderTestBase
 {
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP8_E4M3,
-                                       DT::FLOAT);
+};
+
+TYPED_TEST_SUITE(TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes, MxMixedConfigs, );
+
+TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes, IsApplicable)
+{
+    SKIP_IF_WORKAROUND_ISSUE_13715();
+    auto fb = createMxGraphWithTypes(TypeParam::A_TYPE, DT::HALF, TypeParam::B_TYPE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+    EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
+        << "a=" << EnumNameDataType(TypeParam::A_TYPE)
+        << " b=" << EnumNameDataType(TypeParam::B_TYPE);
 }
 
 // Dequant nodes emitted in B-then-A order must still be recognized: A/B are
 // resolved by matching dequant Y outputs to matmul inputs, not by node position.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrder)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph({32, 128},
                                        {1, 32},
                                        {128, 32},
@@ -243,103 +308,6 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrd
                                        32,
                                        false,
                                        true /*swapDequantOrder*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
-}
-
-// FP4 (E2M1) inputs, symmetric A/B, across the supported output types.
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputHalf)
-{
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP4_E2M1,
-                                       DT::HALF);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
-}
-
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputBf16)
-{
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP4_E2M1,
-                                       DT::BFLOAT16);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
-}
-
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputFp32)
-{
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP4_E2M1,
-                                       DT::FLOAT);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
-}
-
-// Mixed A/B input types: hipBLASLt supports FP8 OCP + FP4 in either order. Each
-// test sets x_a to one MX type and x_b (the trailing argument) to the other.
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMixedFp8AFp4B)
-{
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP8_E4M3,
-                                       DT::HALF,
-                                       DT::FP8_E8M0,
-                                       DT::FP8_E8M0,
-                                       DT::FLOAT,
-                                       32,
-                                       false,
-                                       false,
-                                       DT::FP4_E2M1 /*xTypeB*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
-}
-
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMixedFp4AFp8B)
-{
-    auto fb = createValidMxMatmulGraph({32, 128},
-                                       {1, 32},
-                                       {128, 32},
-                                       {32, 1},
-                                       {32, 32},
-                                       {32, 1},
-                                       {32, 4},
-                                       {4, 32},
-                                       DT::FP4_E2M1,
-                                       DT::HALF,
-                                       DT::FP8_E8M0,
-                                       DT::FP8_E8M0,
-                                       DT::FLOAT,
-                                       32,
-                                       false,
-                                       false,
-                                       DT::FP8_E4M3 /*xTypeB*/);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
@@ -549,6 +517,61 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsEpilogue)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
+// See WORKAROUND_ISSUE_10811 in Workarounds.hpp.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8AWithFp6B)
+{
+    for(const auto aType : {DT::FP8_E4M3, DT::FP8_E5M2})
+    {
+        for(const auto bType : {DT::FP6_E2M3, DT::FP6_E3M2})
+        {
+            auto fb = createValidMxMatmulGraph({32, 128},
+                                               {1, 32},
+                                               {128, 32},
+                                               {32, 1},
+                                               {32, 32},
+                                               {32, 1},
+                                               {32, 4},
+                                               {4, 32},
+                                               aType,
+                                               DT::HALF,
+                                               DT::FP8_E8M0,
+                                               DT::FP8_E8M0,
+                                               DT::FLOAT,
+                                               32,
+                                               false,
+                                               false,
+                                               bType /*xTypeB*/);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_FALSE(_builder.isApplicable(_handle, graph))
+                << "A=" << EnumNameDataType(aType) << " B=" << EnumNameDataType(bType);
+        }
+    }
+}
+
+// See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt does have gfx1250 MX
+// kernels for these element types, but only for transA=T, transB=N, while this
+// provider always sends transA=N, transB=T, so every MX graph must be declined.
+// A failure here means hipBLASLt now offers a kernel for the provider's problem;
+// see the issue before enabling MX on gfx1250.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOnGfx1250)
+{
+    const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
+    if(!archMatches(archName, "gfx1250", ArchMatchMode::PREFIX))
+    {
+        GTEST_SKIP() << "gfx1250-only check, running on " << archName;
+    }
+    for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
+    {
+        for(const auto cType : {DT::BFLOAT16, DT::FLOAT})
+        {
+            auto fb = createMxGraphWithTypes(xType, cType);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_FALSE(_builder.isApplicable(_handle, graph))
+                << "x=" << EnumNameDataType(xType) << " out=" << EnumNameDataType(cType);
+        }
+    }
+}
+
 // Matmul node compute data type must be FP32 (mirrors the plain matmul builder)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFloatComputeType)
 {
@@ -714,6 +737,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleB)
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeValid)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_NO_THROW(_builder.getWorkspaceSize(_handle, graph));
@@ -732,6 +756,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeThrowsOnInvalidGraph)
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, BuildPlanValid)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     HipdnnEnginePluginExecutionContext ctx;

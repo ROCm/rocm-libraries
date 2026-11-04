@@ -248,6 +248,23 @@ public:
     {
         return math_mode;
     }
+
+    /**
+     * @brief Custom equality hook for convolution-specific attributes
+     */
+    bool logicallyEqualsImpl(const ConvFpropAttributes& other) const
+    {
+        return pre_padding == other.pre_padding && post_padding == other.post_padding
+               && stride == other.stride && dilation == other.dilation
+               && math_mode == other.math_mode;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    /// fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const ConvFpropAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 typedef ConvFpropAttributes Conv_fprop_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

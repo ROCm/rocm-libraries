@@ -25,7 +25,6 @@ import unittest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir_serialize import canonical_equal
-from rocke.dispatch.families.conv import CONV_REGISTRY, ConvRequest, dispatch_conv
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
@@ -39,8 +38,6 @@ from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY, dispatch_gemm_fp16
 
 # examples/common/universal_gemm_verify.py
 GEMM_MNK = (512, 512, 512)
-# examples/common/bake_off_implicit_gemm.py
-CONV_SHAPE = dict(N=8, C=64, K=64, Hi=56, Wi=56, Y=3, X=3, pad_h=1, pad_w=1)
 # examples/gfx1250/fused_mega_moe/fused_mega_moe_bench.py
 MOE_SHAPE = dict(
     num_tokens=128, hidden=2048, intermediate=768, num_experts=256, top_k=8
@@ -60,10 +57,6 @@ def _gemm_reqs(arch, spec_id, dtype):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
 
 
-def _conv_reqs(arch, spec_id, _dtype):
-    yield ConvRequest(arch=arch, spec_id=spec_id, **CONV_SHAPE)
-
-
 def _moe_reqs(arch, spec_id, dtype):
     yield MoeRequest(arch=arch, dtype=dtype, spec_id=spec_id, **MOE_SHAPE)
 
@@ -77,16 +70,15 @@ def _norm_reqs(arch, spec_id, dtype):
 _FAMILIES = (
     (GEMM_FP16_REGISTRY, _gemm_reqs, ("fp16",)),
     (GEMM_BF16_REGISTRY, _gemm_reqs, ("bf16",)),
-    (CONV_REGISTRY, _conv_reqs, ("fp16",)),
     (MOE_REGISTRY, _moe_reqs, ("fp16", "fp8")),
     (NORM_REGISTRY, _norm_reqs, ("fp16",)),
 )
 
 # A floor, not a fixture: it should rise when candidates or arches are added,
-# and a fall means coverage was silently lost. Set below the current 438 with
-# enough slack that removing one candidate does not trip it -- the reachability
-# check below is what catches that precisely.
-_MIN_BUILDS = 400
+# and a fall means coverage was silently lost. Set with enough slack that
+# removing one candidate does not trip it -- the reachability check below is
+# what catches that precisely.
+_MIN_BUILDS = 300
 
 
 class TestEveryRegisteredKernelBuilds(unittest.TestCase):
@@ -175,65 +167,6 @@ class TestExampleParity(unittest.TestCase):
                 ).build()
                 self.assertEqual(by_hand.name, dispatched.name)
                 self.assertTrue(canonical_equal(by_hand, dispatched))
-
-    def test_conv_matches_the_example_exactly(self):
-        # examples/common/bake_off_implicit_gemm.py defaults: 64x64x64 tiles,
-        # 2x2 warps, 32x32 atom at the catalog's largest legal K, mem pipeline,
-        # cshuffle epilogue -- which is conv's cdna_cshuffle candidate.
-        from rocke.instances.common.conv_implicit_gemm import (
-            ConvProblem,
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-
-        target = ArchTarget.from_gfx(self.ARCH)
-        atom = target.mma.select_largest_k(
-            family="mma",
-            a_dtype="fp16",
-            b_dtype="fp16",
-            c_dtype="fp32",
-            m=32,
-            n=32,
-            k_max=64,
-        )
-        dispatched = dispatch_conv(
-            ConvRequest(arch=self.ARCH, spec_id="cdna_cshuffle_64x64", **CONV_SHAPE)
-        )
-        by_hand = build_implicit_gemm_conv(
-            ImplicitGemmConvSpec(
-                problem=ConvProblem(
-                    N=8,
-                    Hi=56,
-                    Wi=56,
-                    C=64,
-                    K=64,
-                    Y=3,
-                    X=3,
-                    sH=1,
-                    sW=1,
-                    pH=1,
-                    pW=1,
-                    dH=1,
-                    dW=1,
-                ),
-                # The example names its kernel after itself; the name is part
-                # of the IR, so match it to compare the bodies.
-                name=dispatched.spec.name,
-                tile_m=64,
-                tile_n=64,
-                tile_k=64,
-                warp_m=2,
-                warp_n=2,
-                warp_tile_m=32,
-                warp_tile_n=32,
-                warp_tile_k=atom.k,
-                wave_size=target.wave_size,
-                pipeline="mem",
-                epilogue="cshuffle",
-            ),
-            arch=self.ARCH,
-        )
-        self.assertTrue(canonical_equal(by_hand, dispatched.build()))
 
     def test_moe_matches_the_example_exactly(self):
         # examples/gfx1250/fused_mega_moe/fused_mega_moe_bench.py defaults:

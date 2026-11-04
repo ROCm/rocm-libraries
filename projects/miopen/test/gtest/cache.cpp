@@ -27,6 +27,7 @@
 
 #include <miopen/binary_cache.hpp>
 #include <miopen/bz2.hpp>
+#include <miopen/db.hpp>
 #include <miopen/kern_db.hpp>
 #include <miopen/temp_file.hpp>
 
@@ -34,6 +35,8 @@
 #include "random.hpp"
 
 #include <algorithm>
+#include <thread>
+#include <type_traits>
 #include <vector>
 
 #if MIOPEN_ENABLE_SQLITE
@@ -133,6 +136,79 @@ TEST(CPU_Cache_NONE, check_kern_db)
         EXPECT_TRUE(err_db.FindRecordUnsafe(cfg0));
         EXPECT_TRUE(err_db.RemoveRecordUnsafe(cfg0));
     }
+}
+
+// Compile-time check: GetDbInstance<KernDb> must resolve to the rank<1> caching overload
+// (returning a reference). If the SFINAE probe drifts again, this fires at build time.
+static_assert(std::is_lvalue_reference_v<decltype(miopen::GetDbInstance<miopen::KernDb>(
+                  miopen::DbKinds::KernelDb, {}, true))>,
+              "GetDbInstance<KernDb> should return an lvalue reference (cached overload)");
+
+TEST(CPU_Cache_NONE, check_kern_db_cached_reuse)
+{
+    miopen::TempFile temp_file("tmp-kerndb-cached");
+    auto& db1 = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    auto& db2 = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    EXPECT_EQ(&db1, &db2);
+    miopen::KernDb::EvictCached(temp_file, false);
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_cached_distinct_paths)
+{
+    miopen::TempFile temp_file_a("tmp-kerndb-cached-a");
+    miopen::TempFile temp_file_b("tmp-kerndb-cached-b");
+    auto& db_a = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_a, false);
+    auto& db_b = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_b, false);
+    EXPECT_NE(&db_a, &db_b);
+    miopen::KernDb::EvictCached(temp_file_a, false);
+    miopen::KernDb::EvictCached(temp_file_b, false);
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_cached_thread_safety)
+{
+    miopen::TempFile temp_file("tmp-kerndb-cached-mt");
+    auto& db = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+
+    constexpr int kNumThreads = 8;
+
+    // Each thread gets its own config with a unique key and blob.
+    struct ThreadData
+    {
+        miopen::KernelConfig cfg;
+        std::vector<char> expected_blob;
+    };
+    std::vector<ThreadData> thread_data(kNumThreads);
+    for(int i = 0; i < kNumThreads; ++i)
+    {
+        thread_data[i].cfg.kernel_name = "kernel_mt_" + std::to_string(i);
+        thread_data[i].cfg.kernel_args = {random_bytes(512).data(), 512};
+        thread_data[i].cfg.kernel_blob = random_bytes(8192);
+        thread_data[i].expected_blob   = thread_data[i].cfg.kernel_blob;
+    }
+
+    // Use vector<int> instead of vector<bool> to avoid bit-packing data races.
+    std::vector<int> results(kNumThreads, 0);
+    std::vector<std::thread> threads;
+
+    for(int i = 0; i < kNumThreads; ++i)
+    {
+        threads.emplace_back([&db, &thread_data, &results, i]() {
+            // Each thread stores its own record, then reads it back.
+            if(!db.StoreRecord(thread_data[i].cfg))
+                return;
+            auto rec = db.FindRecord(thread_data[i].cfg);
+            if(rec && rec.value() == thread_data[i].expected_blob)
+                results[i] = 1;
+        });
+    }
+
+    for(auto& t : threads)
+        t.join();
+
+    for(int i = 0; i < kNumThreads; ++i)
+        EXPECT_EQ(results[i], 1) << "Thread " << i << " failed to store/find its own record";
+
+    miopen::KernDb::EvictCached(temp_file, false);
 }
 #endif
 

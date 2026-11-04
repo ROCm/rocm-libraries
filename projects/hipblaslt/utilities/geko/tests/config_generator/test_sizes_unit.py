@@ -20,7 +20,7 @@ def test_get_sizes_option_zero_requires_sizes() -> None:
 
 
 def test_get_sizes_option_one_default_density_and_generation(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = {"SIZE_OPTION": 1, "CUs": 256, "MACROTILE_OPT": False, "GA": False}
+    cfg = {"SIZE_OPTION": 1, "CUs": 256, "MACROTILE_OPT": False}
     monkeypatch.setattr(gsizes, "_generate_grid_sizes", lambda _c: [[[16, 16, 1, 16], [32, 32, 1, 32]]])
     out = gsizes.get_sizes(cfg)
     assert cfg["GRID_DENSITY"] == 4
@@ -28,8 +28,8 @@ def test_get_sizes_option_one_default_density_and_generation(monkeypatch: pytest
 
 
 def test_get_sizes_option_one_macro_ga_not_supported() -> None:
-    cfg = {"SIZE_OPTION": 1, "CUs": 256, "GRID_DENSITY": 2, "MACROTILE_OPT": True, "GA": True}
-    with pytest.raises(NotImplementedError, match="Grid mode"):
+    cfg = {"SIZE_OPTION": 1, "CUs": 256, "GRID_DENSITY": 2, "MACROTILE_OPT": True}
+    with pytest.raises(NotImplementedError, match="MACROTILE_OPT is not supported in grid mode"):
         gsizes.get_sizes(cfg)
 
 

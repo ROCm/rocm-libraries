@@ -87,14 +87,16 @@ const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* c_dtype,
                                                    int m,
                                                    int n,
-                                                   int k)
+                                                   int k,
+                                                   const rocke_mma_scale_filter_t* scales)
 {
     /* target.mma.op_for_shape(family=..., a/b/c=..., m, n, k). */
     if(t == NULL)
     {
         return NULL;
     }
-    return rocke_mma_catalog_op_for_shape(&t->mma, family, a_dtype, b_dtype, c_dtype, m, n, k);
+    return rocke_mma_catalog_op_for_shape(
+        &t->mma, family, a_dtype, b_dtype, c_dtype, m, n, k, scales);
 }
 
 const rocke_mmaop_t* rocke_archtarget_by_op_id(const rocke_archtarget_t* t, const char* op_id)
@@ -130,6 +132,12 @@ int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const c
 {
     /* ArchTarget.max_vector_load_dwords(dtype). */
     return rocke_arch_max_vector_load_dwords(t, dtype);
+}
+
+int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t)
+{
+    /* ArchTarget.async_lds_max_dwords property. */
+    return rocke_arch_async_lds_max_dwords(t);
 }
 
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t)

@@ -355,6 +355,18 @@ inline __device__ __attribute__((used)) double __hipstdpar_sin_f64(double x)
     return __ocml_sin_f64(x);
 }
 
+inline __device__ __attribute__((used)) decltype(auto) __hipstdpar_sincos_f32(float x) {
+    struct { float s; float c; } r{};
+    r.s = __ocml_sincos_f32(x, (__attribute__((opencl_private)) float*)&r.c);
+    return r;
+}
+
+inline __device__ __attribute__((used)) decltype(auto) __hipstdpar_sincos_f64(double x) {
+    struct { double s; double c; } r{};
+    r.s = __ocml_sincos_f64(x, (__attribute__((opencl_private)) double*)&r.c);
+    return r;
+}
+
 inline __device__ __attribute__((used)) float __hipstdpar_sinh_f32(float x)
 {
     return __ocml_sinh_f32(x);

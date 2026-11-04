@@ -576,7 +576,8 @@ rocke_status_t
                                             "fp32",
                                             ROCKE_GFX1151_DFCP_WMMA,
                                             ROCKE_GFX1151_DFCP_WMMA,
-                                            ROCKE_GFX1151_DFCP_WMMA);
+                                            ROCKE_GFX1151_DFCP_WMMA,
+                                            nullptr);
 
     /* op0 = target.mma.by_op_id(_OP_ID_IU8) if spec.native_int else op
      * op1 = target.mma.by_op_id(_OP_ID_IU4) if spec.native_int else op */

@@ -78,3 +78,26 @@ TEST(TestVersion, OverrideExecuteMinApiVersionLessThanTensorAlignmentMinApiVersi
     const Version alignmentMin{hipdnn_plugin_sdk::K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION};
     EXPECT_TRUE(overrideMin < alignmentMin);
 }
+
+TEST(TestVersion, RaggedOffsetMultiplierMinApiVersionParses)
+{
+    EXPECT_NO_THROW(Version{hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION});
+    const Version v{hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION};
+    EXPECT_EQ(v.major, 1);
+    EXPECT_EQ(v.minor, 4);
+    EXPECT_EQ(v.patch, 0);
+}
+
+TEST(TestVersion, RaggedOffsetMultiplierMinApiVersionEqualsMaxSupported)
+{
+    const Version multiplierMin{hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION};
+    const Version maxSupported{hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION};
+    EXPECT_TRUE(multiplierMin == maxSupported);
+}
+
+TEST(TestVersion, RaggedTensorMinApiVersionLessThanRaggedOffsetMultiplierMinApiVersion)
+{
+    const Version raggedMin{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
+    const Version multiplierMin{hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION};
+    EXPECT_TRUE(raggedMin < multiplierMin);
+}

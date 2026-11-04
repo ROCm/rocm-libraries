@@ -1,0 +1,25 @@
+# hipCCL-scoped trim of rocm-libraries' .github/CODEOWNERS, for the
+# projects that live in this repo. Paths are relative to this repo's root
+# (no "projects/" prefix, matching the flat hipccl3 layout - see ../README.md).
+
+/rocprim/                                  @ROCm/prims-rands-reviewers
+/hipcub/                                   @ROCm/prims-rands-reviewers
+/rocthrust/                                @ROCm/prims-rands-reviewers
+# NOTE(hipccl3): libhipcxx has no equivalent reviewer team on file in
+# rocm-libraries (it isn't a rocm-libraries project); left unowned here
+# pending a decision on who reviews it inside hipCCL.
+
+/rocprim/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/rocprim/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/rocprim/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/rocprim/docs/                             @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/hipcub/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/hipcub/docs/                              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/rocthrust/**/*.md                         @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/rocthrust/**/*.rst                        @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/rocthrust/**/.readthedocs.yaml            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/rocthrust/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers

@@ -31,8 +31,11 @@ from pathlib import Path
 from bundle_utils import (
     canon,
     canonical_uid_map,
+    capture_reference_source,
+    capture_suite_case,
     expand,
     inputs_by_name,
+    read_capture_sidecar,
     remap_graph,
 )
 
@@ -48,29 +51,19 @@ def _load_captured(capture_dir: Path) -> dict:
     if not capture_dir.is_dir():
         return captured
     for graph_path in sorted(capture_dir.rglob("*.json")):
-        if graph_path.name.endswith(".meta.json"):
+        found = capture_suite_case(graph_path, capture_dir)
+        if found is None:
             continue
-        case_dir = graph_path.parent
-        case_name = case_dir.name
-        if graph_path.stem != case_name:
-            continue
-        suite_rel = case_dir.parent.relative_to(capture_dir)
-        suite_name = str(suite_rel)
-        key = f"c++ integration suite: {suite_name}.{case_name}"
+        key = capture_reference_source(*found)
         try:
             with open(graph_path) as f:
                 graph = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
-        meta_path = case_dir / f"{case_name}.meta.json"
-        meta = {}
-        if meta_path.exists():
-            try:
-                with open(meta_path) as f:
-                    meta = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-        captured[key] = (graph, meta)
+        # place_bundles drops an unusable sidecar the same way, so both sides
+        # of the comparison see no captured seed/inputs for it.
+        _, meta, _ = read_capture_sidecar(graph_path)
+        captured[key] = (graph, meta if meta is not None else {})
     return captured
 
 

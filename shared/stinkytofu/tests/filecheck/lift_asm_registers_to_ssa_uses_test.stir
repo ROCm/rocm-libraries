@@ -1,0 +1,27 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
+#
+# LiftAsmRegistersToSSAPass: one value per physical unit, shared by every read.
+#
+# Reads are not merged into a single operand and not deduplicated: an instruction
+# reading one value through two operands binds it twice, so its use-list gains
+# two entries. That precision is what lets allocation compute live ranges without
+# re-deriving anything from physical register numbers. The use-list counts
+# themselves are checked in AttachedSSATest; what the dump shows is the sharing.
+#
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_uses
+#
+# v0 and v1 are live-ins, created in register order.
+# CHECK-NEXT: ^entry(%1:v, %2:v):
+#
+# v0 is read through both operands of the first instruction, so the same value
+# appears in both positions rather than becoming two live-ins.
+# CHECK-NEXT: %3:v = "st.v_add_f32"(%1:v, %1:v)
+#
+# The second instruction reads the same v0 value again, plus v1.
+# CHECK-NEXT: %4:v = "st.v_add_f32"(%1:v, %2:v)
+
+st.func @lift_asm_registers_to_ssa_uses() {
+^entry:
+  v2 = "st.v_add_f32"(v0, v0)
+  v3 = "st.v_add_f32"(v0, v1)
+}

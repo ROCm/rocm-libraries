@@ -12,6 +12,7 @@
 #include "ck_tile/ops/gemm/kernel/mx_gemm_kernel.hpp"
 #include "ck_tile/core/numeric/math.hpp"
 #include "ck/library/utility/gpu_verification.hpp"
+#include "test_mx_gemm_host_helpers.hpp"
 
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
@@ -31,7 +32,8 @@ constexpr ck_tile::index_t get_k_warp_tile()
                              std::is_same_v<PrecType, ck_tile::int8_t>;
     constexpr bool is_mxtype = std::is_same_v<PrecType, ck_tile::fp8_t> ||
                                std::is_same_v<PrecType, ck_tile::bf8_t> ||
-                               std::is_same_v<PrecType, ck_tile::pk_fp4_t>;
+                               std::is_same_v<PrecType, ck_tile::pk_fp4_t> ||
+                               std::is_same_v<PrecType, ck_tile::pk_fp6x16_t>;
     if constexpr(is_mxtype && (M_Warp_Tile == 32 || M_Warp_Tile == 16))
     {
         return 128;
@@ -50,6 +52,11 @@ constexpr ck_tile::index_t get_k_warp_tile()
         return 128;
 #endif
 }
+
+// A test fixture opts into mx_test::mx_gemm_tolerance by declaring
+// `static constexpr bool kUseDerivedMxTolerance = true;`; otherwise calculate_rtol_atol is used.
+template <typename T>
+using use_derived_mx_tolerance_t = decltype(T::kUseDerivedMxTolerance);
 
 template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>
 auto calculate_rtol_atol(const ck_tile::index_t K,
@@ -236,6 +243,8 @@ struct Config
     static constexpr ck_tile::index_t N_Warp      = N_Warp_;
     static constexpr ck_tile::index_t BContiguousItemsPerAccess =
         std::is_same_v<BDataType_, ck_tile::pk_fp4_t> ? 32 : 16;
+    // gfx12 shuffle_b: the MX weight-preshuffle interleaved per-lane K layout.
+    static constexpr bool BPreshuffleLaneInterleavedK = true;
 };
 
 template <typename Tuple, typename Derived>
@@ -277,12 +286,16 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
 
     static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<15, Tuple>{};
 
-    static constexpr ck_tile::index_t M_Warp =
-        PipelineType == MxGemmPipelineType::WeightPreshuffle
-            ? 1
-            : (PipelineType == MxGemmPipelineType::CompEightWaves ? 4 : 2);
-    static constexpr ck_tile::index_t N_Warp =
-        PipelineType == MxGemmPipelineType::WeightPreshuffle ? 4 : 2;
+    // Warps along M and N, from tuple slot 18 (ck_tile::sequence<M_Warp, N_Warp>) if present;
+    // otherwise 1 x 4 for weight preshuffle, 4 x 2 for eight waves and 2 x 2 for the rest.
+    using DefaultWarpLayout =
+        ck_tile::sequence<PipelineType == MxGemmPipelineType::WeightPreshuffle
+                              ? 1
+                              : (PipelineType == MxGemmPipelineType::CompEightWaves ? 4 : 2),
+                          PipelineType == MxGemmPipelineType::WeightPreshuffle ? 4 : 2>;
+    using WarpLayout = ck_tile::tuple_element_or_default_t<Tuple, 18, DefaultWarpLayout>;
+    static constexpr ck_tile::index_t M_Warp = WarpLayout::at(ck_tile::number<0>{});
+    static constexpr ck_tile::index_t N_Warp = WarpLayout::at(ck_tile::number<1>{});
     static constexpr ck_tile::index_t K_Warp = 1;
 
     protected:
@@ -450,6 +463,18 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
     }
 
+    static constexpr bool use_derived_mx_tolerance()
+    {
+        if constexpr(ck_tile::is_detected<use_derived_mx_tolerance_t, Derived>{})
+        {
+            return Derived::kUseDerivedMxTolerance;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
     public:
     std::vector<int> k_batches_;
 
@@ -458,6 +483,21 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         if constexpr(!Derived::check_data_type())
         {
             GTEST_SKIP() << "Unsupported data type combination for mx_gemm pipeline test.";
+        }
+        // The non-cluster 16x16 scale32 path supports revision 0. Keep the
+        // revision gate for other TDM variants, including cluster multicast.
+        constexpr bool supports_revision_zero = !ClusterLaunch && M_Warp_Tile == 16 &&
+                                                N_Warp_Tile == 16 && ScaleBlockSize == 32 &&
+                                                std::is_same_v<AScaleDataType, ck_tile::e8m0_t> &&
+                                                std::is_same_v<BScaleDataType, ck_tile::e8m0_t>;
+        if constexpr(PipelineType == MxGemmPipelineType::CompTDMV1 ||
+                     PipelineType == MxGemmPipelineType::CompTDMV2)
+        {
+            if(!supports_revision_zero && ck_tile::get_device_revision() == 0)
+            {
+                GTEST_SKIP() << "This TDM variant is not enabled on gfx1250 "
+                                "asicRevision=0";
+            }
         }
         // for TDM it's used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == MxGemmPipelineType::CompTDMV1 ||
@@ -566,6 +606,16 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                 elem    = pk_fp4_t::_pack(lo, hi);
             }
         }
+        else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+        {
+            // The integer filler would write one value into all three words of a 12-byte pack;
+            // FP6 is filled through its pk_fp6_t proxy. With |a|, |b| <= 4 and scales <= 2, every
+            // output is bounded by 64 * K, which exceeds the fp16 maximum once K >= 1024 (the
+            // deepest fp16 case is K = 1024). Reaching it needs all K products at the largest
+            // magnitude with the same sign; random signs keep |C| near sqrt(K) times the typical
+            // product.
+            mx_test::fill_mx_operand(a_m_k, -4.f, 4.f, 11939);
+        }
         else
         {
             FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
@@ -580,6 +630,10 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                 auto hi = float_to_mxfp4(std::round(dis(gen)), 1.f);
                 elem    = pk_fp4_t::_pack(lo, hi);
             }
+        }
+        else if constexpr(std::is_same_v<BDataType, pk_fp6x16_t>)
+        {
+            mx_test::fill_mx_operand(b_k_n, -4.f, 4.f, 11940);
         }
         else
         {
@@ -613,14 +667,22 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(scale_padded_N), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
-        // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
-        // Scales start in natural tensor layout and are pre-shuffled into the device layout
-        // for both scale block sizes (the shuffle is the identity for ScaleBlockSize==16,
-        // whose natural layout already matches the warp scale distribution).
+        // Pre-shuffle for gfx1250 (WaveSize=32, WMMA). Scales start in natural tensor layout and
+        // are pre-shuffled into the device (M/N-fastest) layout so the per-K-iteration device
+        // scale load is coalesced. scale16 and scale32 use the same layout (parameterized by the
+        // WMMA WarpTile M/N passed to preShuffleScaleBuffer_gfx1250).
         ck_tile::preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
-            scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
+            scale_a.mData.data(),
+            scale_a_shuffled.mData.data(),
+            scale_padded_M,
+            num_scale_k,
+            M_Warp_Tile);
         ck_tile::preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
-            scale_b.mData.data(), scale_b_shuffled.mData.data(), scale_padded_N, num_scale_k);
+            scale_b.mData.data(),
+            scale_b_shuffled.mData.data(),
+            scale_padded_N,
+            num_scale_k,
+            N_Warp_Tile);
 #elif defined(CK_USE_GFX950)
         constexpr ck_tile::index_t MPerXdl      = M_Warp_Tile;
         constexpr ck_tile::index_t NPerXdl      = N_Warp_Tile;
@@ -769,10 +831,26 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                           AccDataType,
                           CDataType>(a_m_k, b_k_n, c_m_n_host_ref, scale_a_ref, scale_b_ref);
 
-        const float max_accumulated_value =
-            *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
-        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
-            K, kbatch, max_accumulated_value);
+        const auto rtol_atol = [&] {
+            if constexpr(use_derived_mx_tolerance())
+            {
+                const double s_max =
+                    mx_test::mx_sum_abs_max(a_m_k, b_k_n, scale_a_ref, scale_b_ref, ScaleBlockSize);
+                // A zero S_max means a zero reference and a zero tolerance, which an untouched
+                // (zeroed) output would pass.
+                EXPECT_GT(s_max, 0.0) << "the reference is identically zero";
+                const auto tolerance =
+                    mx_test::mx_gemm_tolerance<ADataType, BDataType, CDataType>(K, s_max);
+                return ck_tile::make_tuple(tolerance.rtol, tolerance.atol);
+            }
+            else
+            {
+                const float max_accumulated_value =
+                    *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
+                return calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+                    K, kbatch, max_accumulated_value);
+            }
+        }();
         bool pass = check_err(c_m_n_dev_result,
                               c_m_n_host_ref,
                               "Error: Incorrect results!",

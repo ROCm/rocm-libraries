@@ -68,6 +68,12 @@ namespace fs  = miopen::fs;
 namespace env = miopen::env;
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DBSYNC_CLEAN)
+// Caps StaticFDBSync's worker-thread fan-out (default: min(hardware_concurrency, 32)). CPU-affinity
+// limits (taskset, Docker --cpuset-cpus) do NOT reduce std::thread::hardware_concurrency() on
+// Linux/glibc, so this env var is the only reliable way to run with fewer threads. Needed under the
+// rocjitsu KMD interposer: the 32-thread fan-out can deadlock/stall there on some CK builds (the
+// GPU-free dbsync runner sets this to 1 to run serially). Unset -> unchanged default behavior.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DBSYNC_MAX_THREADS)
 
 struct KDBKey
 {
@@ -968,6 +974,17 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
     auto& handle = get_test_handle(num_cu);
     if(handle.GetDeviceName() != arch)
         GTEST_SKIP();
+    // Skip params whose CU count is not the one this device would actually select its system DB
+    // for. The param's num_cu only picks the DB *basename* (via TestHandle::GetMaxComputeUnits);
+    // CK's grouped-conv occupancy path reads the *real* device CU (hipGetDeviceProperties). Running
+    // a param whose DB was tuned for a different CU count validates it against the wrong occupancy
+    // (e.g. the 228-CU gfx942e4/MI300A DB on a 304-CU MI300X device), which false-flags entries. So
+    // reuse the runtime selector GetSysDbSelectionCu against the real device CU (base
+    // Handle::GetMaxComputeUnits, bypassing the TestHandle override) -- the test then validates
+    // exactly what this device would load. num_cu==0 params (gfx11xx) keep their existing behavior.
+    const auto real_cu = static_cast<int>(handle.miopen::Handle::GetMaxComputeUnits());
+    if(num_cu != 0 && miopen::GetSysDbSelectionCu(arch, real_cu) != static_cast<int>(num_cu))
+        GTEST_SKIP();
     handle.num_cu = num_cu;
     SetupPaths(fdb_file_path, pdb_file_path, kdb_file_path, handle);
     std::cout << "Handle CU count: " << handle.GetMaxComputeUnits()
@@ -1007,7 +1024,9 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
 
     std::atomic<size_t> counter = 0;
     const int total_threads =
-        std::min(std::thread::hardware_concurrency(), static_cast<unsigned int>(32));
+        MIOPEN_DBSYNC_MAX_THREADS
+            ? static_cast<int>(env::value(MIOPEN_DBSYNC_MAX_THREADS))
+            : std::min(static_cast<int>(std::thread::hardware_concurrency()), 32);
     std::vector<std::thread> agents;
     agents.reserve(total_threads);
     for(auto idx = 0; idx < total_threads; ++idx)
@@ -1051,8 +1070,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          std::make_pair("gfx90a", 104),
                                          std::make_pair("gfx90a", 110),
                                          std::make_pair("gfx942", 304),
+                                         std::make_pair("gfx942", 228),
                                          std::make_pair("gfx950", 256),
                                          std::make_pair("gfx1030", 36),
                                          std::make_pair("gfx1100", 0),
                                          std::make_pair("gfx1102", 0),
+                                         std::make_pair("gfx1151", 0),
+                                         std::make_pair("gfx1200", 0),
                                          std::make_pair("gfx1201", 0)));

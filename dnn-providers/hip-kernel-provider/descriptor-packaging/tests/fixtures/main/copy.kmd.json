@@ -1,0 +1,9 @@
+{
+  "version": "0.1",
+  "id": "ddbd74eb-0cf2-5cea-b567-ab8e0bed17e3",
+  "name": "Copy metadata",
+  "fields": [
+    { "name": "dtype", "type": "string" },
+    { "name": "block_size", "type": "int" }
+  ]
+}

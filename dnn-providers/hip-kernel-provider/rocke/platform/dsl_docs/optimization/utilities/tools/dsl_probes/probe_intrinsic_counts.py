@@ -10,6 +10,7 @@ store / fmul / fadd / fmuladd / br / phi).
 The output answers questions like:
 
 - "Is the kernel actually emitting the 32x32x16 MFMA atom I asked for?"
+  (or, on RDNA / gfx12, a WMMA atom)
 - "Is async DRAM→LDS active (``raw.ptr.buffer.load.lds``)?"
 - "Is the softmax using ``ds_swizzle`` or ``ds_bpermute`` for the
   cross-lane reduction?"
@@ -23,7 +24,7 @@ Programmatic use (import the framework; drive it from the library-side
 attention driver ``dsl_probe_attention_demos.py`` for attention specs):
 
     from probe_intrinsic_counts import count_intrinsics
-    text = lower_kernel_to_llvm(kdef)
+    text = lower_kernel_to_llvm(kdef, arch="gfx950")
     counts = count_intrinsics(text)
 """
 
@@ -32,6 +33,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import warnings
 from pathlib import Path
 from typing import Iterable
 
@@ -57,27 +59,31 @@ def _bootstrap_rocke() -> None:
 
 _bootstrap_rocke()
 
-from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
+from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm  # noqa: E402
 
 
-# Patterns most often surface the difference between MFMA-tiled
+# Patterns most often surface the difference between matrix-core-tiled
 # and warp-scalar variants. Add to this list freely; counts are cheap.
+# The older MFMA intrinsics have no dot before the type (``16x16x16f16``,
+# ``16x16x16bf16.1k``); the gfx950 ones do (``16x16x32.f16``).
 DEFAULT_INTRINSIC_PATTERNS = {
-    "mfma.f32.16x16x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.f16",
+    "mfma.f32.16x16x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.?f16",
     "mfma.f32.16x16x32.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x32\.f16",
-    "mfma.f32.16x16x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.bf16",
+    "mfma.f32.16x16x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.?bf16",
     "mfma.f32.16x16x32.bf16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x32\.bf16",
-    "mfma.f32.32x32x8.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x8\.f16",
+    "mfma.f32.32x32x8.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x8\.?f16",
     "mfma.f32.32x32x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x16\.f16",
     "mfma.f32.32x32x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x16\.bf16",
-    "mfma.f32.4x4x4.f16": r"@llvm\.amdgcn\.mfma\.f32\.4x4x4\.f16",
+    "mfma.f32.4x4x4.f16": r"@llvm\.amdgcn\.mfma\.f32\.4x4x4\.?f16",
+    # RDNA / gfx12: one entry per family, any shape and type.
+    "wmma (any)": r"@llvm\.amdgcn\.wmma\.",
+    "swmmac (any)": r"@llvm\.amdgcn\.swmmac\.",
     "raw.ptr.buffer.load.lds (async DMA)": r"@llvm\.amdgcn\.raw\.ptr\.buffer\.load\.lds",
     "raw.ptr.buffer.load (sync VMEM)": r"@llvm\.amdgcn\.raw\.ptr\.buffer\.load[^.l]",
     "raw.ptr.buffer.store": r"@llvm\.amdgcn\.raw\.ptr\.buffer\.store",
     "global.load": r"@llvm\.amdgcn\.global\.load",
     "global.store": r"@llvm\.amdgcn\.global\.store",
     "ds.read.tr16.b64": r"@llvm\.amdgcn\.ds\.read\.tr16\.b64",
-    "ds.read.tr16.b128": r"@llvm\.amdgcn\.ds\.read\.tr16\.b128",
     "ds.bpermute": r"@llvm\.amdgcn\.ds\.bpermute",
     "ds.swizzle": r"@llvm\.amdgcn\.ds\.swizzle",
     "permlane32.swap": r"@llvm\.amdgcn\.permlane32\.swap",
@@ -133,12 +139,17 @@ def probe_intrinsic_counts(
     intrinsics: dict | None = None,
     structural: dict | None = None,
     print_zero: bool = False,
+    arch: str = "gfx950",
 ) -> list[dict]:
-    """Lower each kernel and pretty-print the per-intrinsic histogram."""
+    """Lower each kernel for ``arch`` and pretty-print the per-intrinsic histogram."""
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            ir = lower_kernel_to_llvm(kdef)
+            # A kernel that needs an intrinsic the target provably can't lower
+            # gets no histogram for that target; fail just this entry.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ArchDomainWarning)
+                ir = lower_kernel_to_llvm(kdef, arch=arch)
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === LOWER-FAIL: {type(e).__name__}: {e}")
             continue

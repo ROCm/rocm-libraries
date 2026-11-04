@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,51 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <hip/hip_runtime.h>
+
 namespace rocsparse
 {
+    //
+    // Shared grid helpers for the row-parallel csritsv analysis/solve kernels.
+    // Every one of those kernels maps one thread to one row via a grid-stride
+    // loop. csritsv_grid_index() returns the global thread (row) index of the
+    // current thread and csritsv_grid_stride() the number of rows advanced per
+    // iteration. The launch grid is clamped (see csritsv_grid_stride_blocks) so
+    // the reachable grid index fits in 32 bits; both are therefore computed in
+    // uint32_t. The loop variable stays the (possibly 64-bit) index type J so it
+    // can range over all `m` rows.
+    //
+    // Usage inside a kernel:
+    //   for(J row = rocsparse::csritsv_grid_index<BLOCKSIZE>();
+    //       row < m;
+    //       row += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
+    //   { ... }
+    //
+    template <uint32_t BLOCKSIZE>
+    __device__ __forceinline__ uint32_t csritsv_grid_index()
+    {
+        return BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
+    }
+
+    template <uint32_t BLOCKSIZE>
+    __device__ __forceinline__ uint32_t csritsv_grid_stride()
+    {
+        return BLOCKSIZE * hipGridDim_x;
+    }
+
+    //
+    // Number of blocks to launch for a grid-stride kernel covering `m` rows,
+    // clamped to the device's maximum grid size in the x dimension so the launch
+    // is always valid even when `m` is very large.
+    //
+    template <uint32_t BLOCKSIZE>
+    static uint32_t csritsv_grid_stride_blocks(rocsparse_handle handle, int64_t m)
+    {
+        const int64_t nblocks  = (m - 1) / BLOCKSIZE + 1;
+        const int64_t max_grid = static_cast<int64_t>(handle->properties.maxGridSize[0]);
+        return static_cast<uint32_t>((nblocks < max_grid) ? nblocks : max_grid);
+    }
+
     template <typename I, typename J, typename T>
     rocsparse_status csritsv_buffer_size_template(rocsparse_handle          handle,
                                                   rocsparse_operation       trans,

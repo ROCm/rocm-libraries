@@ -1,0 +1,10 @@
+{
+  "version": "0.1",
+  "id": "708868ca-ec18-5137-a483-6afd39449ec2",
+  "name": "Attention metadata",
+  "fields": [
+    { "name": "family", "type": "string" },
+    { "name": "batch", "type": "int" },
+    { "name": "head_size", "type": "int" }
+  ]
+}

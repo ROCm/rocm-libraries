@@ -28,6 +28,7 @@
 
 #include <miopen/db_path.hpp>
 #include <miopen/handle.hpp>
+#include <miopen/stringutils.hpp>
 #if MIOPEN_ENABLE_SQLITE
 #include <miopen/sqlite_db.hpp>
 #endif
@@ -138,6 +139,7 @@ struct ExecutionContext
                 MIOPEN_LOG_I2("inexact embedded perf database search");
                 const auto db_id        = GetStream().GetTargetProperties().DbId();
                 const int real_cu_count = GetStream().GetMaxComputeUnits();
+                const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
                 int closest_cu          = std::numeric_limits<int>::max();
                 fs::path best_path;
                 for(auto const& entry : miopen_data())
@@ -146,7 +148,8 @@ struct ExecutionContext
                     const auto fname = entry.first.stem().string();
                     MIOPEN_LOG_I2("Testing embedded file:" << fname);
                     const auto& filepath = pdb_path / fname;
-                    if(filepath.extension() == ext &&
+                    // fname carries the full ".db.txt"; extension() would only see ".txt".
+                    if(EndsWith(fname, std::string{ext}) &&
                        fname.rfind(db_id, 0) == 0) // starts with db_id
                     {
                         MIOPEN_LOG_I2("Checking embedded perf db file: " << fname);
@@ -166,11 +169,11 @@ struct ExecutionContext
                             continue;
                         }
 
-                        if(abs(cur_count - real_cu_count) < (closest_cu))
+                        if(abs(cur_count - target_cu) < (closest_cu))
                         {
                             MIOPEN_LOG_I2("Updating best candidate to: " << filepath);
                             best_path  = filepath;
-                            closest_cu = abs(cur_count - real_cu_count);
+                            closest_cu = abs(cur_count - target_cu);
                         }
                     }
                 }
@@ -207,6 +210,7 @@ struct ExecutionContext
                 MIOPEN_LOG_I2("inexact perf database search");
                 const auto db_id        = GetStream().GetTargetProperties().DbId();
                 const int real_cu_count = GetStream().GetMaxComputeUnits();
+                const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
                 if(fs::is_directory(pdb_path))
                 {
                     MIOPEN_LOG_I2("Iterating over perf db directory " << pdb_path);
@@ -219,7 +223,10 @@ struct ExecutionContext
                     for(auto const& filepath : contents)
                     {
                         const auto fname = filepath.stem().string();
-                        if(fs::is_regular_file(filepath) && filepath.extension() == ext &&
+                        // extension() returns only the final component (e.g. ".txt"), so it
+                        // can't match the multi-dot ".db.txt"; match the full filename.
+                        if(fs::is_regular_file(filepath) &&
+                           EndsWith(filepath.filename().string(), std::string{ext}) &&
                            fname.starts_with(db_id))
                         {
                             MIOPEN_LOG_I2("Checking perf db file: " << fname);
@@ -244,11 +251,11 @@ struct ExecutionContext
                                 continue;
                             }
 
-                            if(abs(cur_count - real_cu_count) < (closest_cu))
+                            if(abs(cur_count - target_cu) < (closest_cu))
                             {
                                 MIOPEN_LOG_I2("Updating best candidate to: " << filepath);
                                 best_path  = filepath;
-                                closest_cu = abs(cur_count - real_cu_count);
+                                closest_cu = abs(cur_count - target_cu);
                             }
                         }
                     }
@@ -267,6 +274,9 @@ struct ExecutionContext
 
     fs::path GetPerfDbPath(std::string_view prefix = "") const
     {
+        // An empty system path disables the system perf-db; the user perf-db is unaffected.
+        if(IsSystemDbDisabled())
+            return "";
 #if MIOPEN_EMBED_DB
         return GetPerfDbPathEmbed(prefix);
 #else

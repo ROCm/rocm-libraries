@@ -163,6 +163,7 @@
 #include "blas3/testing_geam_strided_batched.hpp"
 #include "blas3/testing_gemm.hpp"
 #include "blas3/testing_gemm_batched.hpp"
+#include "blas3/testing_gemm_grouped_batched.hpp"
 #include "blas3/testing_gemm_strided_batched.hpp"
 #include "blas3/testing_hemm.hpp"
 #include "blas3/testing_hemm_batched.hpp"
@@ -207,6 +208,7 @@
 #include "blas_ex/testing_dot_strided_batched_ex.hpp"
 #include "blas_ex/testing_gemm_batched_ex.hpp"
 #include "blas_ex/testing_gemm_ex.hpp"
+#include "blas_ex/testing_gemm_grouped_batched_ex.hpp"
 #include "blas_ex/testing_gemm_strided_batched_ex.hpp"
 #include "blas_ex/testing_herk_ex.hpp"
 #include "blas_ex/testing_nrm2_batched_ex.hpp"
@@ -420,9 +422,11 @@ void get_test_name(const Arguments& arg, std::string& name)
         {"geam_strided_batched", testname_geam_strided_batched},
         {"gemm", testname_gemm},
         {"gemm_batched", testname_gemm_batched},
+        {"gemm_grouped_batched", testname_gemm_grouped_batched},
         {"gemm_strided_batched", testname_gemm_strided_batched},
         {"gemm_ex", testname_gemm_ex},
         {"gemm_batched_ex", testname_gemm_batched_ex},
+        {"gemm_grouped_batched_ex", testname_gemm_grouped_batched_ex},
         {"gemm_strided_batched_ex", testname_gemm_strided_batched_ex},
         {"hemm", testname_hemm},
         {"hemm_batched", testname_hemm_batched},
@@ -516,6 +520,7 @@ struct perf_gemm_ex<Ti,
         static const func_map map = {
             {"gemm_ex", testing_gemm_ex<Ti, To, Tc>},
             {"gemm_batched_ex", testing_gemm_batched_ex<Ti, To, Tc>},
+            {"gemm_grouped_batched_ex", testing_gemm_grouped_batched_ex<Ti, To, Tc>},
         };
         run_function(map, arg);
     }
@@ -706,6 +711,7 @@ struct perf_blas<T, U, std::enable_if_t<std::is_same<T, float>{} || std::is_same
             {"trmm_strided_batched", testing_trmm_strided_batched<T>},
             {"gemm", testing_gemm<T>},
             {"gemm_batched", testing_gemm_batched<T>},
+            {"gemm_grouped_batched", testing_gemm_grouped_batched<T>},
             {"gemm_strided_batched", testing_gemm_strided_batched<T>},
             {"symm", testing_symm<T>},
             {"symm_batched", testing_symm_batched<T>},
@@ -1262,7 +1268,8 @@ int run_bench_test(Arguments& arg, int unit_check, int timing)
     if(!strncmp(function, prefix, sizeof(prefix) - 1))
         function += sizeof(prefix) - 1;
 
-    if(!strcmp(function, "gemm") || !strcmp(function, "gemm_batched"))
+    if(!strcmp(function, "gemm") || !strcmp(function, "gemm_batched")
+       || !strcmp(function, "gemm_grouped_batched"))
     {
         // adjust dimension for GEMM routines
         int64_t min_lda = arg.transA == 'N' ? arg.M : arg.K;
@@ -1336,7 +1343,8 @@ int run_bench_test(Arguments& arg, int unit_check, int timing)
         }
     }
 
-    if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex"))
+    if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex")
+       || !strcmp(function, "gemm_grouped_batched_ex"))
     {
         // adjust dimension for GEMM routines
         int64_t min_lda = arg.transA == 'N' ? arg.M : arg.K;

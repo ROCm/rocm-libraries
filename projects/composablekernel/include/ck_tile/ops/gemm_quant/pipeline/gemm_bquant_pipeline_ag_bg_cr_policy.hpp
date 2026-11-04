@@ -41,7 +41,7 @@ struct GemmBQuantPipelineAgBgCrDefaultPolicy
         }
     }
 
-    template <typename Problem>
+    template <typename Problem, bool CompactPreshuffledN = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeBQDramTileDistribution()
     {
         using BQLayout       = remove_cvref_t<typename Problem::BQLayout>;
@@ -67,11 +67,17 @@ struct GemmBQuantPipelineAgBgCrDefaultPolicy
 
         if constexpr(BPreshuffleQuant)
         {
+            // CompV3 indexes coarse preshuffled registers by N quantization group.
+            // Other consumers keep their existing distribution until they opt in.
+            constexpr index_t PreshuffledRowsPerBlock =
+                (CompactPreshuffledN && Problem::BQuantGroupSize::kN > WarpGemm::kN)
+                    ? NPerBlockBQ
+                    : NPerBlock / WarpGemm::kN;
             using TileEncodingPattern = tile_distribution_encoding_pattern_bq<
                 BlockGemmShape,
                 WarpGemm,
                 BlockSize,
-                NPerBlock / WarpGemm::kN,
+                PreshuffledRowsPerBlock,
                 ck_tile::integer_least_multiple(WarpGemm::kN * KPerBlockBQ, get_warp_size()),
                 Problem::BQuantGroupSize::kN,
                 Problem::BQuantGroupSize::kK,
@@ -112,10 +118,8 @@ struct GemmBQuantPipelineAgBgCrDefaultPolicy
                                             WarpTile::at(I1),
                                             WarpTile::at(I2),
                                             Problem::TransposeC>;
-        static_assert(std::is_same_v<typename Problem::AComputeDataType, fp8_t> ||
-                      std::is_same_v<typename Problem::AComputeDataType, bf8_t>);
-        static_assert(std::is_same_v<typename Problem::BComputeDataType, fp8_t> ||
-                      std::is_same_v<typename Problem::BComputeDataType, bf8_t>);
+        static_assert(is_fp8_type_v<typename Problem::AComputeDataType>);
+        static_assert(is_fp8_type_v<typename Problem::BComputeDataType>);
         static_assert(std::is_same_v<typename Problem::CDataType, float>);
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<typename Problem::ADataType,
                                                                       typename Problem::BDataType,

@@ -529,7 +529,20 @@ namespace
         {
             return TensileLite::LazyLoadingInit::gfx950;
         }
+        else if(deviceString.find("gfx1250") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1250;
+        }
         return TensileLite::LazyLoadingInit::None;
+    }
+
+    // Mirrors hipBLASLt's rocblaslt_revisioned_arch_name: an A0 part reporting gfx1250
+    // (asicRevision 0) loads library/gfx1250v0/ only -- B0 kernels are not valid on A0.
+    std::string rocsparselt_revisioned_arch_name(const std::string& baseArch, int asicRevision)
+    {
+        if(baseArch == "gfx1250" && asicRevision == 0)
+            return "gfx1250v0";
+        return baseArch;
     }
 
     /**************************************************
@@ -656,8 +669,32 @@ namespace
                 else
                     path += "/hipsparselt/library";
 
-                if(TestPath(path + "/" + processor))
-                    path += "/" + processor;
+                int asicRevision = -1;
+#if HIP_VERSION >= 307
+                if(processor == "gfx1250")
+                {
+                    hipDeviceProp_t deviceProperties;
+                    HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
+                    asicRevision = deviceProperties.asicRevision;
+                }
+#endif
+                const std::string libArch
+                    = rocsparselt_revisioned_arch_name(processor, asicRevision);
+                if(TestPath(path + "/" + libArch))
+                    path += "/" + libArch;
+                else if(libArch != processor)
+                {
+                    hipsparselt_cerr
+                        << "\nhipsparselt_error: " << processor
+                        << " device with asicRevision 0 (A0) needs the " << libArch
+                        << " GEMM library, but " << path << "/" << libArch
+                        << " does not exist. Build with the " << libArch
+                        << " subtree (the default for -a " << processor
+                        << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a " << processor
+                        << "-strict build. Not falling back to " << path << "/" << processor
+                        << ": its kernels give wrong results on A0." << std::endl;
+                    path += "/" + libArch;
+                }
             }
 
             // only load modules for the current architecture

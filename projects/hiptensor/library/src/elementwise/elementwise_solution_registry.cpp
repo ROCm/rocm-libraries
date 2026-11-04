@@ -34,7 +34,7 @@ namespace hiptensor
     /// Class ElementwiseSolutionRegistry ///
     /////////////////////////////////////////
     std::vector<ElementwiseSolution*>
-        ElementwiseSolutionRegistry::query(std::vector<float> const&                scalarValues,
+        ElementwiseSolutionRegistry::query(std::vector<double> const&               scalarValues,
                                            std::vector<std::size_t> const&          lengths,
                                            std::vector<hiptensorDataType_t> const&  inDataTypes,
                                            std::vector<hiptensorDataType_t> const&  outDataTypes,
@@ -43,8 +43,14 @@ namespace hiptensor
                                            std::vector<hiptensorOperator_t> const&  operators,
                                            ElementwiseExecutionSpaceType_t instanceType) const
     {
-        int nDims = lengths.size();
-        // TODO Only handle all input tensors have the same modes here. Need to handle cases when they are not.
+        // The output carries every mode of the operation, so it defines the index space the
+        // kernels walk and therefore the instance's rank. An input may carry fewer modes and is
+        // broadcast along the ones it lacks, so its own rank cannot be used here.
+        int nDims = outModesArray[0].size();
+
+        // Positions in the first input of each output mode. Modes that the input does not carry
+        // are absent, which leaves `outputDims` shorter than `nDims` and tells selectInstanceParams
+        // that this is a broadcast it has no tuning data for.
         auto outputDims = hiptensor::findIndices(inModesArray[0], outModesArray[0]);
 
         // TODO Only handle A, B have the same types here. Need to handle A, B are different types
@@ -61,7 +67,7 @@ namespace hiptensor
         /// instances have been created.
         bool usePassThroughIfAlphaIsOne
             = (std::all_of(
-                   scalarValues.cbegin(), scalarValues.cend(), [](auto v) { return v == 1.0F; })
+                   scalarValues.cbegin(), scalarValues.cend(), [](auto v) { return v == 1.0; })
                && std::all_of(operators.cbegin(),
                               operators.cend(),
                               [](auto v) { return v == HIPTENSOR_OP_IDENTITY; })

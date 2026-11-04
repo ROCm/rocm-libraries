@@ -336,7 +336,8 @@ void run_mma_layout_test_single()
             const uint32_t k = (case_idx / MmaOp::kN) % MmaOp::kK;
             const uint32_t n = case_idx % MmaOp::kN;
 
-            EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
+            EXPECT_EQ(h_errors[case_idx], 0u)
+                << "Mismatch for SFactor=" << SFactor << " m=" << m << " k=" << k << " n=" << n;
         }
     }
     else
@@ -465,8 +466,8 @@ using Gfx942AndHigherIntrinsics = ::testing::Types<
     amdgcn_mma<F8,   F8,   F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>   // smfmac_f32_32x32x32_fp8_fp8
 >;
 using Gfx942Intrinsics = ::testing::Types<
-    amdgcn_mma<TF32, TF32, F32,  16u, 16u, 8u,   TestTarget, MmaOpFamily::DENSE>,   // mfma_f32_16x16x8_xf32
-    amdgcn_mma<TF32, TF32, F32,  32u, 32u, 4u,   TestTarget, MmaOpFamily::DENSE>    // mfma_f32_32x32x4_xf32
+    amdgcn_mma<TF32, TF32, F32,  16u, 16u, 8u,   Target942, MmaOpFamily::DENSE>,   // mfma_f32_16x16x8_xf32
+    amdgcn_mma<TF32, TF32, F32,  32u, 32u, 4u,   Target942, MmaOpFamily::DENSE>    // mfma_f32_32x32x4_xf32
 >;
 using Gfx950Intrinsics = ::testing::Types<
     amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,   // mfma_f32_16x16x32_f16

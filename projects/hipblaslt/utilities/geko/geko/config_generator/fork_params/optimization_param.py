@@ -14,7 +14,7 @@ from geko.config_generator.shared_utils import (
 class BaseParamBuilder:
     """Common base for classes that create ForkParameter instances.
 
-    Loads Tensile metadata once and provides _make_param for building
+    Loads TensileLite metadata once and provides _make_param for building
     ForkParameter with auto-generated comments (default value + valid range).
     Inherited by both BaseOptimizationParams and BasePostProcessor.
     """
@@ -32,7 +32,7 @@ class BaseParamBuilder:
         active: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ForkParameter:
-        """Build a ForkParameter.  Auto-generates comment from Tensile
+        """Build a ForkParameter.  Auto-generates comment from TensileLite
         metadata when *comment* is not provided."""
         if comment is None and name in self._meta:
             m = self._meta[name]
@@ -60,8 +60,9 @@ class BaseOptimizationParams(BaseParamBuilder):
     Instantiated once per GEMM type.
 
     Decorate per-param methods with @param, per-group methods with @group.
-    generate_for_size discovers them automatically via the method resolution
-    order (MRO).
+    generate_for_size discovers them automatically from the concrete class's
+    own methods (not inherited ones, so mixins must be flattened into the
+    leaf class).
     Methods returning None are stripped.
     """
 

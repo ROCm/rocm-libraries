@@ -34,16 +34,15 @@ that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import math
+from dataclasses import dataclass, field
 import os
 from typing import Optional, Tuple
 
+from kernels.common._lse_store import lse_row_has_mass, lse_store
+
 from rocke.core.ir import (
     BF16,
-    CACHE_ALL,
-    CACHE_GLOBAL,
-    CACHE_STREAM,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -52,15 +51,16 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    NON_TEMPORAL,
     Type,
     Value,
     VectorType,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -336,9 +336,10 @@ class UnifiedAttention2DTiledSpec:
     # voffset, which overflows for paged caches > 2 GiB (~65 K bf16 / ~131 K
     # fp8 blocks) and silently corrupts loads. When True, the per-block
     # ``physical_block`` offset is folded into a 64-bit buffer *base* (small
-    # within-block voffset) so any cache size is addressable. It costs a
-    # per-call ``make_buffer_rsrc`` so the dispatcher only enables it when the
-    # cache actually exceeds the 2 GiB cap (see _enable_i64_kv_addr).
+    # within-block voffset) so any cache size is addressable. The K/V loaders
+    # build one ``make_buffer_rsrc`` per page of a tile; the dispatcher only
+    # enables it when the cache exceeds the i32 buffer range (see
+    # _enable_i64_kv_addr).
     use_i64_kv_addr: bool = False
     # Experimental schedule: issue the current V async copy immediately after
     # the iter-start K drain/barrier, before QK. This gives V the whole QK plus
@@ -479,8 +480,16 @@ class UnifiedAttention2DTiledSpec:
     # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
     # path); no-op-guarded to sliding_window==0.
     use_causal_mask_phase_split: bool = False
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off emits no new IR, so shipped kernels are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -778,11 +787,26 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "8-wave mw32 v1 requires direct-Q + cfvst to stay within LDS"
                 )
-        if self.kv_cache_policy not in ("all", "global", "stream", "nt"):
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
             raise ValueError(
-                "kv_cache_policy must be one of 'all', 'global', 'stream', 'nt' "
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
                 f"(got {self.kv_cache_policy!r})"
             )
+        if self.use_k_hbm_direct:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_k_hbm_direct requires transposed-x8 "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32); "
+                    "the 16x16 QK loop always reads K_lds"
+                )
+            if self.use_k_sliced_ring:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring"
+                )
+            if self.use_global_load_lds_k:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k"
+                )
         if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
@@ -889,9 +913,9 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_register_pv v1 is restricted to dtype='bf16'")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_register_pv v1 does not support fp8 K/V cache")
-            if self.use_sinks or self.sliding_window > 0 or self.has_softcap:
+            if self.sliding_window > 0 or self.has_softcap:
                 raise ValueError(
-                    "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
+                    "use_register_pv v1 requires no sliding window and no softcap"
                 )
             if self.use_alibi or self.use_qq_bias:
                 raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
@@ -951,11 +975,9 @@ class UnifiedAttention2DTiledSpec:
         # AITER/Triton uses a true while-loop binary search. Our IR currently
         # lowers this as a fixed-trip scf.for, so specialize the trip count to
         # the known problem batch size instead of always paying 32 iterations.
-        # Keep 32 as a conservative fallback for direct unit-test specs that do
-        # not provide `num_seqs`.
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        # Falls back to 32 for direct unit-test specs that do not provide
+        # `num_seqs`.
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -972,6 +994,7 @@ class UnifiedAttention2DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            "fnuz" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
@@ -1037,6 +1060,7 @@ class UnifiedAttention2DTiledSpec:
             "iglp1" if self.use_iglp_opt else "",
             "cmps" if self.use_causal_mask_phase_split else "",
             "k1buf" if self.use_k_single_buffer else "",
+            "lse" if self.emit_lse else "",
         )
 
 
@@ -1083,10 +1107,10 @@ def supports_tiled_2d(
         )
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 2D kernel currently supports fp16/bf16 (got {dtype!r})"
-    if head_size not in (64, 128, 256):
+    if head_size not in (64, 128, 192, 256):
         return (
             False,
-            f"tiled 2D kernel only supports head_size in {{64,128,256}} (got {head_size})",
+            f"tiled 2D kernel only supports head_size in {{64,128,192,256}} (got {head_size})",
         )
     if head_size % 32 != 0:
         return (
@@ -1165,18 +1189,25 @@ def supports_tiled_2d(
                 f"tiled 2D kernel: per-wave tokens {per_wave_tokens} exceeds "
                 f"block_size={block_size}; would need lane-divergent block lookup",
             )
-    # The D256 gfx942 fast path (build_gfx942_4warp_gqa) reads paged K direct
+    # The gfx942 4-warp fast path (build_gfx942_4warp_gqa) reads paged K direct
     # HBM->reg, stages V through V_lds, and uses only its own softmax-reduction
     # LDS (5-stage swizzle) -- so the conservative staged-tile LDS model below
     # (K double-buffer + V + Q_lds + P_lds) does NOT apply. Validate the fast
     # path's hard requirements explicitly instead of trusting the flag; earlier
     # checks already covered dtype family, block_size, and tile_size % block_size.
+    # Two cohorts ride this builder (see _gfx942_4warp_fast): the D256 bf16
+    # causal path and the D128 sliding-window path (bf16 AND fp16). The caller
+    # only sets use_d256_fast for a cohort _gfx942_4warp_fast() already fully
+    # validated (arch/dtype/SW/block_size), so accept both geometries here.
     if use_d256_fast:
         if head_size == 256 and dtype == "bf16":
             return True, "supported"
+        if head_size == 128 and dtype in ("fp16", "bf16"):
+            return True, "supported"
         return (
             False,
-            "tiled 2D kernel: d256 gfx942 fast path requires bf16 head_size=256",
+            "tiled 2D kernel: gfx942 4-warp fast path requires bf16 head_size=256 "
+            "or head_size=128 (bf16/fp16)",
         )
     # LDS-budget gate (ahead-of-time compilability). The kernel stages its
     # tiles in LDS (the smem_alloc calls in build_unified_attention_2d_tiled);
@@ -1202,12 +1233,9 @@ def supports_tiled_2d(
         # to gfx950's; gfx942 is tile-limited rather than starved, so the only
         # effect is that the largest T/HD combos (which exceed 64 KB) are
         # rejected here with a clean reason instead of a comgr CODEGEN abort.
-        from rocke.core.arch import ArchTarget
+        from ..common.attention_arch import attention_lds_capacity_bytes
 
-        try:
-            _LDS_CAPACITY_BYTES = ArchTarget.from_gfx(arch).lds_capacity_bytes
-        except KeyError:
-            _LDS_CAPACITY_BYTES = 65536
+        _LDS_CAPACITY_BYTES = attention_lds_capacity_bytes(arch)
         _BPE = 2  # fp16/bf16
         _t_eff = tile_size if tile_size is not None else block_size
         _block_m = num_warps * block_m_per_warp
@@ -1425,12 +1453,7 @@ def build_unified_attention_2d_tiled(
     _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
-    kv_cache_aux = {
-        "all": CACHE_ALL,
-        "global": CACHE_GLOBAL,
-        "stream": CACHE_STREAM,
-        "nt": NON_TEMPORAL,
-    }[spec.kv_cache_policy]
+    kv_cache_aux = cache_policy_from_name(spec.kv_cache_policy)
 
     # gfx942 32x32x8 wide-fragment path (correctness-first flash foundation).
     # ``use_mfma_32x32`` (K=16) stays rejected in the spec; ``use_mfma_32x32x8``
@@ -1557,6 +1580,14 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Appended LAST and only when requested, so the LSE-off ABI is unchanged.
+    lse = (
+        b.param(
+            "lse_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=4
+        )
+        if spec.emit_lse
+        else None
+    )
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -1782,12 +1813,9 @@ def build_unified_attention_2d_tiled(
     # (unpadded) figure, so disable the swizzle if the pad would push the total
     # estimate past the gfx942 LDS budget (otherwise a borderline config would
     # comgr-abort only when the env flag is set). Mirrors the gate's formula.
-    try:
-        from rocke.core.arch import ArchTarget as _ArchTarget
+    from ..common.attention_arch import attention_lds_capacity_bytes
 
-        _LDS_CAP = _ArchTarget.from_gfx(arch).lds_capacity_bytes
-    except Exception:  # noqa: BLE001
-        _LDS_CAP = 65536
+    _LDS_CAP = attention_lds_capacity_bytes(arch)
     _swz_extra_bytes = (T // max(V_ROWS_PER_CALL, 1)) * V_ROWS_PER_CALL * 8 * 2
     _out_stripe_b = 32 if HD <= 64 else HD
     _lds_natural = (
@@ -2305,11 +2333,11 @@ def build_unified_attention_2d_tiled(
         vals = p_regs_f32
         for bit in (0, 1):
             lane_bit = _bit2(lane_col_mod4, bit)
-            reg_bit = 1 << bit
+            reg_bit = 1 << bit  # 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle
             old = vals
             vals = []
             for reg in range(4):
-                partner = b.warp_shuffle_xor(old[reg ^ reg_bit], reg_bit)
+                partner = b.warp_shuffle_xor_dpp(old[reg ^ reg_bit], reg_bit)
                 same_bit = b.cmp_eq(lane_bit, b.const_i32((reg >> bit) & 1))
                 vals.append(b.select(same_bit, old[reg], partner))
 
@@ -2667,6 +2695,61 @@ def build_unified_attention_2d_tiled(
                 ),
             )
 
+    # i64 K/V addressing: load the tile's page ids once and build one buffer
+    # resource per page. A resource per copy would reload its page id and wait
+    # on it, and since vmcnt drains in order, those waits also drain the copies
+    # issued before it. The non-fast K/V loaders below are i32-only otherwise.
+    PAGE_RSRC_I64 = I64_KV_ADDR and not FAST_PAGED_KV_DESC
+    if PAGE_RSRC_I64:
+        # The spec and supports_tiled_2d guarantee both: tile_size is a multiple
+        # of block_size, and a copy (at most 8 warps x 64 lanes x 2 halves) never
+        # exceeds a page (at least 16 x 64 halves), all powers of two. Raised,
+        # not asserted, so python -O cannot emit copies that straddle pages.
+        if T % BS != 0 or (BS * HD) % KV_HALVES_PER_CALL != 0:
+            raise ValueError(
+                f"i64 K/V copies need whole pages per tile and per copy "
+                f"(T={T}, BS={BS}, HD={HD}, halves per copy={KV_HALVES_PER_CALL})"
+            )
+        CALLS_PER_PAGE = (BS * HD) // KV_HALVES_PER_CALL
+
+        def _tile_pages(
+            src: Value, kv_tile_idx: Value
+        ) -> tuple[list[Value], list[Value], Value]:
+            """Base pointers and buffer resources of the tile's pages, and the
+            kv head's byte offset within a page."""
+            first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
+            ptrs = []
+            for page in range(N_BLOCKS_PER_TILE):
+                idx = b.add(first, b.const_i32(page))
+                physical = b.masked_global_load(
+                    block_tables,
+                    idx,
+                    b.cmp_lt(idx, block_table_max_idx),
+                    b.const_i32(0),
+                    dtype=I32,
+                    align=4,
+                )
+                base = b.mul(
+                    b.zext(b.to_sgpr_u32(physical), I64), b.const_i64(kv_stride_blk_b)
+                )
+                ptrs.append(b.global_ptr_add(src, base))
+            rsrcs = [b.buffer_rsrc(ptr, kv_block_bytes_c) for ptr in ptrs]
+            kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+            return ptrs, rsrcs, kv_head_b
+
+        def _page_voff(call: int, kv_head_b: Value) -> Value:
+            # Byte offset of this lane's halves within the call's page.
+            half = b.add(
+                b.const_i32((call % CALLS_PER_PAGE) * KV_HALVES_PER_CALL),
+                lane_half_base,
+            )
+            token = b.div(half, b.const_i32(HD))
+            dim = b.mod(half, b.const_i32(HD))
+            return b.add(
+                b.add(b.mul(token, b.const_i32(kv_stride_tok_b)), kv_head_b),
+                b.mul(dim, b.const_i32(KV_BYTES)),
+            )
+
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
 
@@ -2688,6 +2771,8 @@ def build_unified_attention_2d_tiled(
         K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
+        if PAGE_RSRC_I64:
+            page_ptrs, page_rsrcs, kv_head_b = _tile_pages(key, kv_tile_idx)
         for call in range(kv_calls_per_tile):
             k_rsrc = key_rsrc
             k_ptr = key
@@ -2696,27 +2781,20 @@ def build_unified_attention_2d_tiled(
                 if base_i64 is not None:  # I64_KV_ADDR: per-block 64-bit base
                     k_ptr = b.global_ptr_add(key, base_i64)
                     k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
+            elif PAGE_RSRC_I64:
+                k_ptr = page_ptrs[call // CALLS_PER_PAGE]
+                k_rsrc = page_rsrcs[call // CALLS_PER_PAGE]
+                voff = _page_voff(call, kv_head_b)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
-                    base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                        b,
-                        "physical_block",
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
-                    k_ptr = b.global_ptr_add(key, base_i64)
-                    k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
-                else:
-                    voff, _ = paged_kv_desc.offset(
-                        b,
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
             if USE_GLOBAL_LOAD_LDS_K:
                 b.global_load_lds(
@@ -2828,6 +2906,8 @@ def build_unified_attention_2d_tiled(
         V_wave_base = b.smem_ptr_add(V_lds_addr, v_wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
+        if PAGE_RSRC_I64:
+            _, page_rsrcs, kv_head_b = _tile_pages(value, kv_tile_idx)
         for call in range(kv_calls_per_tile):
             v_rsrc = value_rsrc
             if FAST_PAGED_KV_DESC:
@@ -2836,28 +2916,19 @@ def build_unified_attention_2d_tiled(
                     v_rsrc = b.buffer_rsrc(
                         b.global_ptr_add(value, base_i64), kv_block_bytes_c
                     )
+            elif PAGE_RSRC_I64:
+                v_rsrc = page_rsrcs[call // CALLS_PER_PAGE]
+                voff = _page_voff(call, kv_head_b)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
-                    base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                        b,
-                        "physical_block",
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
-                    v_rsrc = b.buffer_rsrc(
-                        b.global_ptr_add(value, base_i64), kv_block_bytes_c
-                    )
-                else:
-                    voff, _ = paged_kv_desc.offset(
-                        b,
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             v_dst = b.smem_ptr_add(
                 V_wave_base, b.const_i64(call * V_BYTES_PER_CALL_SWZ)
             )
@@ -4184,8 +4255,11 @@ def build_unified_attention_2d_tiled(
                             # default kg%3 map at k_groups=4 (D128): at kg=1 the
                             # depth-3 prefetch targets slice 3 -> slot 0, the slot
                             # slice 0 used. Without this fence the QK accumulation
-                            # is corrupted (max_abs ~0.5-1.3 at magnitude); D64
-                            # (k_groups=2) never reuses a slot so it is unaffected.
+                            # is corrupted (max_abs ~0.5-1.3 at magnitude). A ring
+                            # with k_groups <= ring_depth touches each slot at most
+                            # once and never reaches this branch -- that was D64 at
+                            # the 32-wide slice; D64 now routes to width 16, so it
+                            # is k_groups=4 and does reuse.
                             # (CK's LdsSeq map hits the same reuse and always
                             # relied on this drain; it now applies to every map.)
                             if kg > 0 and next_slot == _kslot(kg - 1):
@@ -4509,6 +4583,7 @@ def build_unified_attention_2d_tiled(
                 # full ``l_new = alpha * l_old + l_sum`` updates are applied
                 # by that shared downstream block, not here.
                 m_new = [st_m_new for _ in range(SOFTMAX_STATE_SLOTS)]
+                m_carry = [st_m_raw for _ in range(SOFTMAX_STATE_SLOTS)]
                 l_local = [st_l_sum for _ in range(SOFTMAX_STATE_SLOTS)]
                 # In the transposed orientation we already have masked /
                 # scaled / softcapped scores in ``st_scores`` and softmax
@@ -4677,6 +4752,7 @@ def build_unified_attention_2d_tiled(
                     masked[(n, reg)] = score
 
             m_new = []
+            m_carry = []
             s_local = {}
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -4688,6 +4764,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             l_local = []
             for reg in range(REGS_PER_LANE):
@@ -4766,6 +4843,7 @@ def build_unified_attention_2d_tiled(
             # repeated for every N-tile. Local lane-max across N-tiles, then 4-stage
             # XOR butterfly across the 16 lanes in the row-group.
             m_new = []
+            m_carry = []
             s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -4778,6 +4856,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             # ---- compute P = exp2(S - m_new) and l_local = sum(P) per row ----
             # P_lds[row, col] = exp2(S[row, col] - m_new[row]). Each warp publishes
@@ -5376,9 +5455,14 @@ def build_unified_attention_2d_tiled(
             for atom in range(M_ATOMS_PER_WARP):
                 new_acc[n * M_ATOMS_PER_WARP + atom] = acc_per_atom[atom]
 
+        # Carry the unclamped running max: it stays -inf until the row has seen a
+        # key. ``m_new`` (-inf replaced by 0) is only the exponent reference for
+        # P and alpha. Carrying the clamped 0 instead pins m at 0 when a row's
+        # first tile is fully masked (sliding window), and exp2(s - 0) then
+        # underflows P for very negative scores so the row's O collapses.
         yields = []
         for r in range(SOFTMAX_STATE_SLOTS):
-            yields.append(m_new[r])
+            yields.append(m_carry[r])
             yields.append(new_l_vals[r])
         for n in range(ACC_N_TILES):
             for atom in range(ACC_M_ATOMS):
@@ -5439,6 +5523,12 @@ def build_unified_attention_2d_tiled(
 
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+    # Loop carry is (m0, l0, m1, l1, ..., acc...); m is in log2 units
+    # (qk_scale = scale * log2(e)). Read only for LSE so the LSE-off IR is
+    # unchanged.
+    m_final = (
+        [final[2 * r] for r in range(SOFTMAX_STATE_SLOTS)] if spec.emit_lse else None
+    )
     ml_count_final = 2 * SOFTMAX_STATE_SLOTS
     # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
@@ -5450,9 +5540,34 @@ def build_unified_attention_2d_tiled(
     def _acc_final_get(n: int, atom: int) -> Value:
         return acc_final[n * ACC_M_ATOMS + atom]
 
-    # Per-row reciprocal of L (computed once, reused across stripes).
+    # Per-row reciprocal of L (computed once, reused across stripes). Only an
+    # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
     rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
-    l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+    l_zero = [b.fcmp("oeq", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+
+    def _store_row_lse(row: Value, slot: int, writer: Value) -> None:
+        """Write LSE for CTA row ``row`` from softmax state ``slot``.
+
+        Same token/head/validity mapping as the O stores below. ``writer``
+        picks one lane among the lanes that hold a replicated copy of the
+        row's (m, l). ``!(l == 0)`` is the row-has-mass test, the inverse of
+        the O guard: all-masked rows end with l == 0, a zero-trip loop with
+        m == -inf (lse_store writes -inf for both), and a NaN l gives NaN LSE.
+        """
+        pos = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+        qh = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
+        ok = b.land(b.cmp_lt(pos, cur_batch_q_len), b.cmp_lt(qh, b.const_i32(NUM_QH)))
+        if VALID_ROWS < BLOCK_M:
+            ok = b.land(ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
+        with b.scf_if(b.land(writer, ok)):
+            lse_store(
+                b,
+                lse,
+                b.add(b.mul(b.add(cu_q_start, pos), b.const_i32(NUM_QH)), qh),
+                m_final[slot],
+                l_final[slot],
+                row_has_mass=lse_row_has_mass(b, l_final[slot]),
+            )
 
     if USE_MFMA_32X32:
         if TRANSPOSED_QK_32X32:
@@ -5487,7 +5602,26 @@ def build_unified_attention_2d_tiled(
                 dim=b.const_i32(0),
             )
             inv_l_t = b.rcp(l_final[0])
-            l_nonzero_t = b.fcmp("ogt", l_final[0], zero_f)
+            l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
+            if spec.emit_lse:
+                # One query row per lane (lane % 32); lanes l and l^32 hold the
+                # same state (xor-32 reductions). The lower half writes. Slot 0:
+                # scalar state has 1 slot; without it all 16 slots are
+                # identical and O also reads slot 0.
+                # Same operand order as gfx950: the C fastkv_regp wrapper builds
+                # gfx950 kernels through this arch's C epilogue.
+                with b.scf_if(b.land(op_mask_t, b.cmp_eq(lane_half32, b.const_i32(0)))):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(b.add(cu_q_start, op_pos_t), b.const_i32(NUM_QH)),
+                            op_qh_t,
+                        ),
+                        m_final[0],
+                        l_final[0],
+                        row_has_mass=lse_row_has_mass(b, l_final[0]),
+                    )
             for n in range(ACC_N_TILES):
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
@@ -5497,7 +5631,7 @@ def build_unified_attention_2d_tiled(
                     v = b.vec_extract(acc32, reg)
                     normalized = b.fmul(v, inv_l_t)
                     final_h = b.cast_f32_to(
-                        b.select(l_nonzero_t, normalized, zero_f), dtype
+                        b.select(l_zero_t, zero_f, normalized), dtype
                     )
                     with b.scf_if(op_mask_t):
                         b.global_store(
@@ -5539,6 +5673,17 @@ def build_unified_attention_2d_tiled(
             head=op_qh32_base,
             dim=b.const_i32(0),
         )
+        if spec.emit_lse:
+            # Slot r is C-row wave_row_base + _mfma_32x32_c_row(lane, r); the
+            # 32 lanes of a half share it (_warp_xor_reduce_sum_32lane). Lanes
+            # 0 and 32 write; together they cover the warp's 32 rows. These
+            # stores come before the first Acc_lds b.sync(), so the barrier
+            # pattern is unchanged.
+            writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
+            for r in range(SOFTMAX_STATE_SLOTS):
+                _store_row_lse(
+                    b.add(wave_row_base, _mfma_32x32_c_row(b, lane, r)), r, writer32
+                )
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
@@ -5547,7 +5692,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(acc32, reg)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
             b.sync()
@@ -5657,7 +5802,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(_acc_final_get(n, atom), in_atom)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
         b.sync()
@@ -5676,6 +5821,17 @@ def build_unified_attention_2d_tiled(
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    if spec.emit_lse:
+        # After the O stripes, not before: emitted ahead of them, the LSE store
+        # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
+        # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
+        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
+        # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
+        # (lane_col == 0) write; each owns REGS_PER_LANE rows.
+        writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for r in range(SOFTMAX_STATE_SLOTS):
+            _store_row_lse(b.add(wave_row_base, _in_warp_row(r)), r, writer16)
     return b.kernel
 
 
@@ -5694,14 +5850,55 @@ def build_unified_attention_2d_tiled(
 # standalone (experiments/d256_4warp_gqa/build_e2e_T3_ragged_bf16o.py): parity+
 # with AITER at Sq4096/8192. Wired for the ``_d256_gfx942_fast`` cohort only.
 _4WGQA_LOG2E = 1.4426950408889634
+# Head sizes the lean natural-QK body serves. Every head-dim extent derives from
+# ``spec.head_size`` (``NK``, ``NDdim``, ``V_lds`` and the V-staging per-thread
+# stride ``BN*HD/256``). D192 runs here too: the general 4-warp body
+# (``build_gfx942_4warp_gqa``) spills past the 256-VGPR budget at D192, while the
+# lean body keeps Q streamed from global and fits. Other head sizes (e.g. D128)
+# are served by the general 4-warp body and the default tiled builder.
+_4WGQA_LEAN_HEAD_SIZES = (192, 256)
 
 
-def build_gfx942_4warp_gqa(
+def _online_softmax_rescale(
+    b, Sm, m_old, l_old, *, NKEYT, CPL, NKpv, BPL, sc, ninf, zf, bperm, dtype, exp
+):
+    """Shared online-softmax reduction/rescale for the natural-QK 4-warp bodies.
+
+    Given the masked score tiles ``Sm`` and the running ``(m_old, l_old)``, emit
+    the per-tile max (cross-lane via ``bperm``), the ``alpha`` rescale, the
+    probability tile ``P`` / running sum ``l_new``, and the packed ``Bp`` PV
+    operand. ``exp`` selects the exponential (``b.exp2`` or ``b.exp2_fast``); the
+    op sequence is otherwise identical to the previously inlined copies, so
+    emitted IR is byte-identical per caller. The mask build and the memory/PV
+    schedule stay in each body -- those are what legitimately diverge.
+    """
+    local = ninf
+    for kt in range(NKEYT):
+        for i in range(CPL):
+            local = b.fmax(local, b.fmul(Sm[kt][i], sc))
+    m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
+    alpha = exp(b.fsub(m_old, m_new))
+    P = [[None] * CPL for _ in range(NKEYT)]
+    lsum = zf
+    for kt in range(NKEYT):
+        for i in range(CPL):
+            p = exp(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
+            lsum = b.fadd(lsum, p)
+            P[kt][i] = b.cast_f32_to(p, dtype)
+    l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
+    Bp = [
+        b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
+        for kk in range(NKpv)
+    ]
+    return m_new, alpha, l_new, Bp
+
+
+def _build_gfx942_4warp_gqa_lean(
     spec: UnifiedAttention2DTiledSpec,
     *,
     arch: str = "gfx942",
 ) -> KernelDef:
-    """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
+    """Emit the gfx942 4-warp GQA lean natural-QK paged-attention ``KernelDef``."""
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -5709,20 +5906,28 @@ def build_gfx942_4warp_gqa(
         raise NotImplementedError("4-warp GQA kernel is bf16-only")
     dtype = spec.dtype_ir
     HD = spec.head_size
-    if HD != 256:
-        raise NotImplementedError("4-warp GQA kernel is head_size=256 only")
+    if HD not in _4WGQA_LEAN_HEAD_SIZES:
+        raise NotImplementedError(
+            f"4-warp GQA lean body is validated for head_size in "
+            f"{_4WGQA_LEAN_HEAD_SIZES} only"
+        )
+    if spec.sliding_window:
+        raise NotImplementedError(
+            "4-warp GQA lean body is causal-only (no sliding-window mask)"
+        )
     H = spec.num_query_heads
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
     BN = 64  # 4-warp: 64-key tiles
-    BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
     NKEYT = BN // 32
     NK = HD // K
     NDdim = HD // 32
     NKpv = BN // K
+    # V-fill: elements per thread (256 = 4 wave64 threads), 8-wide loads.
+    v_fill_epw = (BN * HD) // 256
     ITERS = spec.binary_search_iters
 
     b = IRBuilder(spec.kernel_name() + "_4wgqa")
@@ -5787,18 +5992,26 @@ def build_gfx942_4warp_gqa(
     ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
         b.ret()
 
-    V_lds = b.smem_alloc(dtype, [64, 256], name_hint="Vlds")
+    V_lds = b.smem_alloc(dtype, [BN, HD], name_hint="Vlds")
     q_desc = TensorDescriptor.naive(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # Every K/V key is bounded by the last valid key and every Q row by the last
+    # token of its sequence: the 64-key tiles and 128-row Q block otherwise read
+    # block-table entries, K/V rows and Q rows past the sequence when its length
+    # is not a tile multiple (an unbounded block-table read returns an arbitrary
+    # page id, so the K/V load faults). Clamped keys are masked to -inf (P = 0)
+    # and clamped rows are never stored, so only the addresses change.
+    k_last = b.sub(klen, b.const_i32(1))
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
+        key = b.select(b.cmp_lt(key, k_last), key, k_last)
+        lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
         pb = b.global_load_i32(BT, lblk)
-        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)
@@ -5822,10 +6035,11 @@ def build_gfx942_4warp_gqa(
         m_old = carry[0]
         l_old = carry[1]
         accs = list(carry[2:])
-        for c in range(8):
-            lin = b.add(b.mul(tid, b.const_i32(64)), b.const_i32(c * 8))
-            key = b.div(lin, b.const_i32(256))
-            hd = b.mod(lin, b.const_i32(256))
+        b.sync()  # WAR: prev iter's PV reads of V_lds must finish before this tile overwrites it
+        for c in range(v_fill_epw // 8):
+            lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
+            key = b.div(lin, b.const_i32(HD))
+            hd = b.mod(lin, b.const_i32(HD))
             pk = phys_key(kv, key)
             velem = b.add(
                 b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
@@ -5844,6 +6058,7 @@ def build_gfx942_4warp_gqa(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -5868,24 +6083,22 @@ def build_gfx942_4warp_gqa(
                 Sm[kt][i] = b.select(
                     b.lor(m_causal, m_varlen), ninf, b.vec_extract(S_T[kt], i)
                 )
-        local = ninf
-        for kt in range(NKEYT):
-            for i in range(CPL):
-                local = b.fmax(local, b.fmul(Sm[kt][i], sc))
-        m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
-        alpha = b.exp2(b.fsub(m_old, m_new))
-        P = [[None] * CPL for _ in range(NKEYT)]
-        lsum = zf
-        for kt in range(NKEYT):
-            for i in range(CPL):
-                p = b.exp2(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
-                lsum = b.fadd(lsum, p)
-                P[kt][i] = b.cast_f32_to(p, dtype)
-        l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
-        Bp = [
-            b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
-            for kk in range(NKpv)
-        ]
+        m_new, alpha, l_new, Bp = _online_softmax_rescale(
+            b,
+            Sm,
+            m_old,
+            l_old,
+            NKEYT=NKEYT,
+            CPL=CPL,
+            NKpv=NKpv,
+            BPL=BPL,
+            sc=sc,
+            ninf=ninf,
+            zf=zf,
+            bperm=bperm,
+            dtype=dtype,
+            exp=b.exp2_fast,
+        )
         newaccs = []
         for nt in range(NDdim):
             pv = at.zero_acc(b)
@@ -5940,3 +6153,619 @@ def build_gfx942_4warp_gqa(
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
     return b.kernel
+
+
+def build_gfx942_4warp_gqa(
+    spec: UnifiedAttention2DTiledSpec,
+    *,
+    arch: str = "gfx942",
+) -> KernelDef:
+    """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
+    from ..common.attention_arch import require_tiled_attention_arch
+    from ..common.attention_unified import _GFX942_4WARP_LSE_REFUSAL
+
+    require_tiled_attention_arch(arch)
+    if spec.emit_lse:
+        # This body has no LSE store; refuse rather than build a kernel that
+        # carries the "lse" name but takes no lse_ptr and writes nothing.
+        raise NotImplementedError(_GFX942_4WARP_LSE_REFUSAL)
+    if spec.use_i64_kv_addr:
+        # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
+        # under a spec that claims i64; dispatch keeps the flag off through
+        # kv_addr_width_for_builder.
+        raise NotImplementedError(
+            "4-warp GQA kernel does not support use_i64_kv_addr: its K/V are i32 "
+            "element offsets, correct up to 2^31 elements of the cache dtype"
+        )
+    if spec.dtype not in ("bf16", "fp16"):
+        raise NotImplementedError("4-warp GQA kernel supports dtype in {bf16, fp16}")
+    dtype = spec.dtype_ir
+    HD = spec.head_size
+    if HD not in (128, 192, 256):
+        raise NotImplementedError(
+            "4-warp GQA kernel supports head_size in {128, 192, 256}"
+        )
+    if HD in _4WGQA_LEAN_HEAD_SIZES:
+        return _build_gfx942_4warp_gqa_lean(spec, arch=arch)
+    H = spec.num_query_heads
+    HKV = spec.num_kv_heads
+    GQAG = spec.num_queries_per_kv
+    BS = spec.block_size
+    HD128 = HD == 128
+    # Double-buffer prefetch pipeline (BN=32 LDS-staged K/V + swizzle) is D128 AND bs<=32.
+    # bs64 forces BN>=64 (1 block/tile min); BN=64 double-buffer overflows 64KB LDS, so
+    # bs64-D128 runs the single-buffer (D256-style) path at BN=64 (bs64 extension).
+    HD128_PIPE = HD128 and BS <= 32
+    BN = 32 if HD128_PIPE else 64
+    BPT = BN // BS
+    at = MfmaAtom.bf16_32x32x8() if spec.dtype == "bf16" else MfmaAtom.f16_32x32x8()
+    APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
+    NKEYT = BN // 32
+    NK = HD // K
+    NDdim = HD // 32
+    NKpv = BN // K
+    v_fill_epw = (
+        BN * HD
+    ) // 256  # V-fill: elements per thread (256 = 4 wave64 threads)
+    v_fill_nloads = v_fill_epw // 8  # 8-wide (dwordx4) loads per thread
+    ITERS = spec.binary_search_iters
+    from ..common.attention_unified import gfx942_gqa_fold_eligible
+
+    # GQA head-fold is the DEFAULT for the qualifying cohort (D128, GQA 4:1, sliding-
+    # window, bf16, paged block_size<=32): fold 4 query heads into the 128-row M-tile
+    # so KV loads once per kv-head. The SAME predicate drives the launch grid (no drift).
+    _FOLD = HD128_PIPE and gfx942_gqa_fold_eligible(
+        HD, GQAG, spec.sliding_window, spec.dtype, BS
+    )
+    # How many heads share the M-tile. This is TILE GEOMETRY -- 128 M-rows split
+    # into FOLD_HEADS heads x TOKBLK tokens -- and is deliberately NOT spelled
+    # GQAG. The two are equal only because ``gfx942_gqa_fold_eligible`` pins
+    # num_queries_per_kv == 4. Widening that predicate moves GQAG, but the 128-row
+    # tile cannot follow (8:1 would need 8 heads x 32 tokens = 256 rows), so the
+    # row split must stay a geometry constant and the head BASE must stay
+    # ``kv_head * GQAG``. The guard below makes that coupling a build error rather
+    # than silent address corruption.
+    FOLD_HEADS = 4
+    if _FOLD and GQAG != FOLD_HEADS:
+        raise ValueError(
+            f"GQA head-fold is wired for exactly {FOLD_HEADS} query heads per KV "
+            f"head (128-row M-tile = {FOLD_HEADS} heads x {128 // FOLD_HEADS} "
+            f"tokens), got num_queries_per_kv={GQAG}. Widening the fold cohort "
+            f"requires re-deriving the M-tile row split, not just the predicate."
+        )
+    TOKBLK = (128 // FOLD_HEADS) if _FOLD else 128  # query tokens per CTA
+
+    b = IRBuilder(spec.kernel_name() + ("_4wgqa_fold" if _FOLD else "_4wgqa"))
+    b.kernel.attrs["max_workgroup_size"] = 256  # 4 wave64 warps
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+
+    # ---- production _attn_signature (18-arg paged ABI) ----
+    C = b.param(
+        "output_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
+    )
+    Q = b.param(
+        "query_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    Kp = b.param(
+        "key_cache_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    Vp = b.param(
+        "value_cache_ptr",
+        PtrType(dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
+    )
+    b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
+    BT = b.param("block_tables_ptr", PtrType(I32, "global"), readonly=True, align=16)
+    KL = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    CUQ = b.param(
+        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=16
+    )
+    scale_p = b.param("scale", F32)
+    b.param("k_scale", F32)
+    b.param("v_scale", F32)
+    b.param("out_scale", F32)
+    b.param("softcap", F32)
+    num_seqs_p = b.param("num_seqs", I32)
+    bt_stride_p = b.param("block_table_stride", I32)
+
+    tid = b.thread_id_x()
+    wid = b.div(tid, b.const_i32(64))
+    lane = b.mod(tid, b.const_i32(64))
+    ld = decode_mfma_lanes(b, at, lane)
+    wq = b.mul(wid, b.const_i32(32))
+    # FOLD: grid.x = num_kv_heads (one CTA covers GQAG q-heads for one kv-head, KV
+    # loaded once); non-fold: grid.x = num_query_heads (one head per CTA).
+    if _FOLD:
+        qhead = None
+        kvh = b.block_id_x()
+    else:
+        qhead = b.block_id_x()  # grid.x = num_query_heads
+        kvh = b.div(qhead, b.const_i32(GQAG))
+    gqb = b.block_id_y()  # fold: 32-token q-block; else BLOCK_M=128 q-block
+
+    # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
+    sid = binary_search_seq_idx(
+        b, CUQ, gqb, num_seqs_p, block_q=TOKBLK, iterations=ITERS
+    )
+    cu_q_start = b.global_load_i32(CUQ, sid)
+    cu_q_stop = b.global_load_i32(CUQ, b.add(sid, b.const_i32(1)))
+    qlen = b.sub(cu_q_stop, cu_q_start)
+    q_block_start = b.add(b.div(cu_q_start, b.const_i32(TOKBLK)), sid)
+    lqb = b.sub(gqb, q_block_start)
+    klen = b.global_load_i32(KL, sid)
+    qbase = b.mul(lqb, b.const_i32(TOKBLK))
+    qstart = b.add(cu_q_start, qbase)
+    with b.scf_if(
+        b.cmp_ge(qbase, qlen)
+    ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
+        b.ret()
+
+    V_lds = b.smem_alloc(
+        dtype, [64, HD], name_hint="Vlds"
+    )  # D128: 2x 32-key buffers (swizzled); D256: 64-key single
+    K_lds = (
+        b.smem_alloc(dtype, [64, HD], name_hint="Klds") if HD128_PIPE else None
+    )  # D256/bs64 stays direct-K
+
+    # Build-time LDS-capacity guard (defense-in-depth behind the admission gate
+    # in ``supports_tiled_2d``). This builder's only LDS is the K/V staging:
+    # V_lds [64, HD] always, K_lds [64, HD] on the D128 double-buffer pipe --
+    # both live across the KV loop (the output epilogue stores direct-to-global,
+    # so there is no Acc_lds to alias). Assert the footprint fits the arch LDS
+    # capacity so a future tile/HD change that overflows LDS fails loudly here
+    # instead of silently spilling or aborting in comgr CODEGEN. Cap comes from
+    # the arch catalog (gfx942 -> 65536 B); ``<= cap`` matches the admission
+    # gate above (which rejects only ``> cap``).
+    from rocke.core.arch import ArchTarget
+
+    try:
+        _lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
+    except Exception:  # noqa: BLE001
+        _lds_cap = 65536
+    _bpe = 2  # fp16/bf16 (guaranteed by the dtype check above)
+    _v_lds_bytes = 64 * HD * _bpe
+    _k_lds_bytes = 64 * HD * _bpe if HD128_PIPE else 0
+    _lds_bytes = _v_lds_bytes + _k_lds_bytes
+    assert _lds_bytes <= _lds_cap, (
+        f"4-warp GQA kernel LDS footprint {_lds_bytes} B "
+        f"(V_lds {_v_lds_bytes} + K_lds {_k_lds_bytes}, HD={HD}, "
+        f"HD128_PIPE={HD128_PIPE}) exceeds the {arch} {_lds_cap} B LDS capacity"
+    )
+    q_desc = TensorDescriptor.naive(
+        "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
+    )
+
+    def phys_key(kv, keytile):
+        lblk = b.add(
+            b.mul(sid, bt_stride_p),
+            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
+        )
+        pb = b.global_load_i32(BT, lblk)
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+
+    sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
+    ninf = b.const_f32(-1e30)
+    zf = b.const_f32(0.0)
+
+    def bperm(v):
+        partner = b.mul(b.xor(lane, b.const_i32(32)), b.const_i32(4))
+        return b.bitcast(b.ds_bpermute(partner, b.bitcast(v, I32)), F32)
+
+    iters = [("m", ninf), ("l", zf)] + [
+        (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
+    ]
+    context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
+    window = int(spec.sliding_window)  # 0 = causal; >0 = SWA (keep dist < window)
+    causal_t = b.div(
+        b.add(b.add(context_off, qbase), b.const_i32(TOKBLK + BN - 1)), b.const_i32(BN)
+    )
+    klen_t = b.div(b.add(klen, b.const_i32(BN - 1)), b.const_i32(BN))
+    kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
+    # E6: windowed KV-loop start - skip tiles fully before the window (bounded work)
+    if window > 0:
+        _ks = b.sub(b.add(context_off, qbase), b.const_i32(window))
+        _ks = b.select(b.cmp_gt(_ks, b.const_i32(0)), _ks, b.const_i32(0))
+        kvstart = b.div(_ks, b.const_i32(BN))
+    else:
+        kvstart = b.const_i32(0)
+    # RUN1 (VALU cut): loop-split so fully-interior tiles skip the per-element causal+
+    # window mask entirely. A tile needs NO mask iff for ALL q in the block and key in
+    # [kv*BN,kv*BN+BN): causal(key<=q) AND window(q-key<window) AND varlen(key<klen).
+    q_blk_lo = b.add(context_off, qbase)  # min q_g
+    q_blk_hi = b.add(
+        b.add(context_off, qbase), b.const_i32(TOKBLK - 1)
+    )  # max q_g (TOKBLK query tokens per CTA: 32 folded, 128 unfolded)
+    _cn = b.sub(q_blk_lo, b.const_i32(BN - 1))  # causal-interior: kv*BN+BN-1<=q_blk_lo
+    int_end_c = b.select(
+        b.cmp_lt(_cn, b.const_i32(0)),
+        b.const_i32(0),
+        b.add(b.div(_cn, b.const_i32(BN)), b.const_i32(1)),
+    )
+    int_end_r = b.div(klen, b.const_i32(BN))  # varlen-interior: (kv+1)*BN<=klen
+    int_end = b.select(b.cmp_lt(int_end_c, int_end_r), int_end_c, int_end_r)
+    if window > 0:
+        _sn = b.sub(
+            b.add(q_blk_hi, b.const_i32(1)), b.const_i32(window)
+        )  # window-interior: kv*BN>=q_blk_hi-window+1
+        _cs = b.div(b.add(_sn, b.const_i32(BN - 1)), b.const_i32(BN))  # ceil
+        int_start = b.select(b.cmp_lt(_sn, b.const_i32(0)), kvstart, _cs)
+    else:
+        int_start = kvstart
+
+    def _clamp(x, lo, hi):
+        x = b.select(b.cmp_lt(x, lo), lo, x)
+        return b.select(b.cmp_lt(hi, x), hi, x)
+
+    _a = _clamp(int_start, kvstart, kvend)
+    _bnd = _clamp(int_end, _a, kvend)
+
+    def swz(
+        row, col
+    ):  # zero-waste 8-block XOR swizzle: consecutive rows -> different banks
+        return b.add(
+            b.mul(
+                b.xor(b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(16))),
+                b.const_i32(8),
+            ),
+            b.mod(col, b.const_i32(8)),
+        )
+
+    # LDS swizzle-hoist: precompute the bank-swizzle columns once per lane instead
+    # of recomputing swz() (div/mod/xor/mul/add integer VALU) on every K/V store
+    # and read. Enabled for bf16 as well as fp16: this cohort is the small-tile
+    # BN=32 wide-flash path (HD128_PIPE => BS<=32), whose register pressure leaves
+    # headroom for the precomputed columns (the earlier bf16 spill concern was for
+    # larger tiles this path never uses). buf_off is 0 mod 16 so swz depends only
+    # on key/col, letting the columns be hoisted out of the tile loop.
+    _SWZH = HD128_PIPE and spec.dtype in ("fp16", "bf16")
+    SWZ_ST, SWZ_K, SWZ_V = [], {}, {}
+    if _SWZH:
+        _mia = ld.m_in_atom
+        _kbapl = b.mul(ld.k_blk, b.const_i32(APL))
+        for _c in range(v_fill_nloads):
+            _lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(_c * 8))
+            SWZ_ST.append(
+                swz(b.div(_lin, b.const_i32(HD)), b.mod(_lin, b.const_i32(HD)))
+            )
+        for _h in range(NK):
+            _koff = b.add(b.const_i32(_h * K), _kbapl)
+            for _kt in range(NKEYT):
+                SWZ_K[(_h, _kt)] = swz(b.add(b.const_i32(_kt * 32), _mia), _koff)
+        for _kk in range(NKpv):
+            for _nt in range(NDdim):
+                _colv = b.add(b.const_i32(_nt * 32), _mia)
+                for _j in range(APL):
+                    _rnb = b.add(b.const_i32(_kk * K), b.add(_kbapl, b.const_i32(_j)))
+                    SWZ_V[(_kk, _nt, _j)] = swz(_rnb, _colv)
+
+    def fill_tile(tkv, buf_off):
+        for c in range(v_fill_nloads):
+            lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
+            key = b.div(lin, b.const_i32(HD))
+            hd = b.mod(lin, b.const_i32(HD))
+            pk = phys_key(tkv, key)
+            velem = b.add(
+                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
+            )
+            row = b.add(buf_off, key)
+            b.smem_store_vN(
+                V_lds,
+                [row, SWZ_ST[c] if _SWZH else (swz(row, hd) if HD128_PIPE else hd)],
+                b.global_load_vN(Vp, velem, dtype, 8, align=16),
+                8,
+            )
+            if HD128_PIPE:
+                b.smem_store_vN(
+                    K_lds,
+                    [row, SWZ_ST[c] if _SWZH else swz(row, hd)],
+                    b.global_load_vN(Kp, velem, dtype, 8, align=16),
+                    8,
+                )
+
+    def fill_load(
+        tkv,
+    ):  # PREFETCH phase 1: issue global loads early -> latency hides under compute
+        pf = []
+        for c in range(v_fill_nloads):
+            lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
+            key = b.div(lin, b.const_i32(HD))
+            hd = b.mod(lin, b.const_i32(HD))
+            pk = phys_key(tkv, key)
+            velem = b.add(
+                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
+            )
+            vr = b.global_load_vN(Vp, velem, dtype, 8, align=16)
+            kr = b.global_load_vN(Kp, velem, dtype, 8, align=16)
+            pf.append((vr, kr, key, hd))
+        return pf
+
+    def fill_store(
+        pf, buf_off
+    ):  # PREFETCH phase 2: store prefetched regs (loads already drained)
+        for c, (vr, kr, key, hd) in enumerate(pf):
+            row = b.add(buf_off, key)
+            _col = SWZ_ST[c] if _SWZH else swz(row, hd)
+            b.smem_store_vN(V_lds, [row, _col], vr, 8)
+            b.smem_store_vN(K_lds, [row, _col], kr, 8)
+
+    def body(kv, carry, masked):
+        m_old = carry[0]
+        l_old = carry[1]
+        accs = list(carry[2:])
+        if HD128_PIPE:
+            buf_off = b.mul(
+                b.mod(kv, b.const_i32(2)), b.const_i32(32)
+            )  # prefilled buffer (pipeline)
+            pk_kt = None
+            knext = b.select(
+                b.cmp_lt(b.add(kv, b.const_i32(1)), kvend),
+                b.add(kv, b.const_i32(1)),
+                b.sub(kvend, b.const_i32(1)),
+            )
+            nbuf_off = b.mul(
+                b.mod(b.add(kv, b.const_i32(1)), b.const_i32(2)), b.const_i32(32)
+            )
+            pf = fill_load(
+                knext
+            )  # issue next-tile loads NOW (hide under this tile's QK/softmax/PV)
+        else:
+            buf_off = b.const_i32(0)  # D256: single buffer, fill current tile in-body
+            b.sync()  # D256 WAR: guard prev-iter PV V_lds reads before overwrite
+            fill_tile(kv, buf_off)
+            b.sync()  # D256 RAW: V_lds ready
+            pk_kt = [
+                phys_key(kv, b.add(b.const_i32(kt * 32), ld.m_in_atom))
+                for kt in range(NKEYT)
+            ]
+        S_T = [at.zero_acc(b) for _ in range(NKEYT)]
+        for h in range(NK):
+            koff = b.add(
+                b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
+            )
+            if _FOLD:
+                # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
+                # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
+                # geometry); head BASE strides by GQAG (the GQA group).
+                _m = b.add(wq, ld.n_in_atom)
+                _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+                _hd = b.add(
+                    b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
+                )
+                q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
+            else:
+                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+            q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
+            for kt in range(NKEYT):
+                if HD128_PIPE:
+                    row_k = b.add(buf_off, b.add(b.const_i32(kt * 32), ld.m_in_atom))
+                    _kcol = SWZ_K[(h, kt)] if _SWZH else swz(row_k, koff)
+                    kf = b.smem_load_vN(K_lds, row_k, _kcol, dtype=dtype, n=APL)
+                else:
+                    kelem = b.add(
+                        b.mul(
+                            b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh),
+                            b.const_i32(HD),
+                        ),
+                        koff,
+                    )
+                    kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
+                S_T[kt] = at.emit(b, kf, q, S_T[kt])
+        Sm = [[None] * CPL for _ in range(NKEYT)]
+        for kt in range(NKEYT):
+            for i in range(CPL):
+                raw = b.vec_extract(S_T[kt], i)
+                if masked:
+                    rr, cc = at.lane_to_output(b, lane, i)
+                    key_g = b.add(
+                        b.add(b.mul(kv, b.const_i32(BN)), b.const_i32(kt * 32)), rr
+                    )
+                    if _FOLD:
+                        # fold: token = qbase + (wq+cc)//FOLD_HEADS
+                        # (mask is head-independent)
+                        q_g = b.add(
+                            context_off,
+                            b.add(
+                                qbase,
+                                b.div(b.add(wq, cc), b.const_i32(FOLD_HEADS)),
+                            ),
+                        )
+                    else:
+                        q_g = b.add(context_off, b.add(qbase, b.add(wq, cc)))
+                    mask_cond = b.lor(b.cmp_gt(key_g, q_g), b.cmp_ge(key_g, klen))
+                    if window > 0:
+                        mask_cond = b.lor(
+                            mask_cond, b.cmp_ge(b.sub(q_g, key_g), b.const_i32(window))
+                        )
+                    Sm[kt][i] = b.select(mask_cond, ninf, raw)
+                else:
+                    Sm[kt][i] = raw
+        # exp2_fast: both exp arguments (m_old-m_new and Sm*sc-m_new) are <= 0 by the
+        # running-max invariant, so exp2's overflow/underflow range-reduction guard is
+        # unnecessary and v_exp_f32 flushes the tail correctly.
+        m_new, alpha, l_new, Bp = _online_softmax_rescale(
+            b,
+            Sm,
+            m_old,
+            l_old,
+            NKEYT=NKEYT,
+            CPL=CPL,
+            NKpv=NKpv,
+            BPL=BPL,
+            sc=sc,
+            ninf=ninf,
+            zf=zf,
+            bperm=bperm,
+            dtype=dtype,
+            exp=b.exp2_fast,
+        )
+        # In-place rescale-then-accumulate (HD128_PIPE / D128 sliding-window path only):
+        # fold acc *= alpha, then MFMA-accumulate PV directly into acc, dropping the separate
+        # `pv` accumulator (~64 VGPR) so the D128 kernel stays spill-free at the gfx942
+        # 256-VGPR cap. D256 / bs64 (non-HD128_PIPE) keep the original zero-init + fma path.
+        if HD128_PIPE:
+            acc_tgt = [
+                b.vec_pack(
+                    [b.fmul(b.vec_extract(accs[nt], i), alpha) for i in range(CPL)], F32
+                )
+                for nt in range(NDdim)
+            ]
+        else:
+            acc_tgt = [at.zero_acc(b) for _ in range(NDdim)]
+        for kk in range(NKpv):
+            for nt in range(NDdim):
+                col_v = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), ld.m_in_atom)
+                vparts = []
+                for j in range(APL):
+                    row_v = b.add(
+                        buf_off,
+                        b.add(
+                            b.mul(b.const_i32(kk), b.const_i32(K)),
+                            b.add(b.mul(ld.k_blk, b.const_i32(APL)), b.const_i32(j)),
+                        ),
+                    )
+                    vparts.append(
+                        b.vec_extract(
+                            b.smem_load_vN(
+                                V_lds,
+                                row_v,
+                                (
+                                    SWZ_V[(kk, nt, j)]
+                                    if _SWZH
+                                    else (swz(row_v, col_v) if HD128_PIPE else col_v)
+                                ),
+                                dtype=dtype,
+                                n=1,
+                            ),
+                            0,
+                        )
+                    )
+                va = b.vec_pack(vparts, dtype)
+                acc_tgt[nt] = at.emit(b, va, Bp[kk], acc_tgt[nt])
+        if HD128_PIPE:
+            newaccs = acc_tgt
+        else:
+            newaccs = [
+                b.vec_pack(
+                    [
+                        b.fma(
+                            b.vec_extract(accs[nt], i),
+                            alpha,
+                            b.vec_extract(acc_tgt[nt], i),
+                        )
+                        for i in range(CPL)
+                    ],
+                    F32,
+                )
+                for nt in range(NDdim)
+            ]
+        if HD128_PIPE:
+            fill_store(pf, nbuf_off)  # store prefetched tile (loads hid under compute)
+            b.sync()  # single barrier/iter (RAW next + WAR this)
+        return (m_new, l_new, *newaccs)
+
+    def run_loop(start, end, init_iters, masked, iv):
+        lp = b.scf_for_iter(start, end, b.const_i32(1), init_iters, iv_name=iv)
+        with lp as (kv, carry):
+            b.scf_yield(*body(kv, carry, masked))
+        return lp
+
+    if HD128_PIPE:  # pipeline prologue: prefill first tile (D256/bs64 fills in-body)
+        with b.scf_if(b.cmp_lt(kvstart, kvend)):
+            fill_tile(kvstart, b.mul(b.mod(kvstart, b.const_i32(2)), b.const_i32(32)))
+        b.sync()
+    l1 = run_loop(kvstart, _a, iters, True, "kva")
+    it1 = [("m2", l1.results[0]), ("l2", l1.results[1])] + [
+        (f"b{nt}", l1.results[2 + nt]) for nt in range(NDdim)
+    ]
+    l2 = run_loop(_a, _bnd, it1, False, "kvb")
+    it2 = [("m3", l2.results[0]), ("l3", l2.results[1])] + [
+        (f"c{nt}", l2.results[2 + nt]) for nt in range(NDdim)
+    ]
+    l3 = run_loop(_bnd, kvend, it2, True, "kvc")
+    m_f = l3.results[0]
+    l_f = l3.results[1]
+    accs_f = l3.results[2:]
+    recip = b.rcp_fast(l_f)
+    for nt in range(NDdim):
+        for i in range(CPL):
+            r, c = at.lane_to_output(b, lane, i)
+            dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
+            if _FOLD:
+                # inverse m-map: token = qstart + (wq+c)//FOLD_HEADS,
+                # head = kvh*GQAG + (wq+c)%FOLD_HEADS
+                _m = b.add(wq, c)
+                _tl = b.div(_m, b.const_i32(FOLD_HEADS))
+                _hl = b.mod(_m, b.const_i32(FOLD_HEADS))
+                q_inseq = b.add(qbase, _tl)
+                oi = b.add(
+                    b.mul(b.add(qstart, _tl), b.const_i32(H)),
+                    b.add(b.mul(kvh, b.const_i32(GQAG)), _hl),
+                )
+            else:
+                q_inseq = b.add(qbase, b.add(wq, c))
+                oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
+            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            with b.scf_if(b.cmp_lt(q_inseq, qlen)):
+                b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
+    b.ret()
+    return b.kernel
+
+
+def supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_2d`` (gfx942 variant).
+
+    ``supports_tiled_2d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads every parameter the predicate has off the spec and
+    delegates, making the 2D unified builder validatable at pack time. The flags
+    below size the LDS estimate, so each one is forwarded: a spec is judged by
+    the layout it will be built with, not by the predicate's defaults.
+    ``use_d256_fast`` is derived from the builder, not the spec: see
+    :func:`supports_gfx942_4warp_gqa_spec`.
+    """
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=False)
+
+
+def supports_gfx942_4warp_gqa_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """:func:`supports_tiled_2d_spec` for ``build_gfx942_4warp_gqa``, the
+    ``use_d256_fast=True`` path."""
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=True)
+
+
+def _supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str, use_d256_fast: bool
+) -> Tuple[bool, str]:
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        num_warps=spec.num_warps,
+        block_m_per_warp=spec.block_m_per_warp,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        tile_size=spec.tile_size,
+        arch=arch,
+        use_mfma_32x32x8=spec.use_mfma_32x32x8,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+        use_conflict_free_v_store=spec.use_conflict_free_v_store,
+        use_k_sliced_ring=spec.use_k_sliced_ring,
+        ring_depth=spec.ring_depth,
+        k_slice_hd=spec.k_slice_hd,
+        use_d256_fast=use_d256_fast,
+    )

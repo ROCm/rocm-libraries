@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "e2564353-856f-43dc-b82c-1400a4c1929d",
+  "name": "conv_fwd dispatch",
+  "dispatch_symbol": "hipkernel.conv_fwd.dispatch"
+}

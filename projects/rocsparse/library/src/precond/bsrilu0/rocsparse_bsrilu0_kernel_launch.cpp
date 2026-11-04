@@ -40,7 +40,7 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
     rocsparse::bsrilu0_kernel_launch_t launch        = nullptr;
     const std::string                  gcn_arch_name = rocsparse::handle_get_arch_name(handle);
 
-    const bool sleep     = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+    const bool sleep     = (gcn_arch_name == rocsparse_arch_names::gfx908 && handle->asic_rev < 2);
     const auto block_dim = A->block_dim;
 
     if(sleep || (handle->wavefront_size == 32) || (block_dim > 64)
@@ -64,14 +64,22 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
     //
     // Set done array to zero.
     //
+    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                                  0,
-                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 sizeof(int32_t) * A->rows * A_batch_count,
                                                  handle->stream));
 
     //
     // Launch gpu kernel.
     //
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsrilu0_info, A, boost, buffer_size, buffer));
+
+    // Every instance aliases instance 0, so they all share its pivot.
+    if(A->batch_stride == 0 && A->batch_count > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, bsrilu0_info->get_singularity_numeric_exact(), A->batch_count));
+    }
     return rocsparse_status_success;
 }

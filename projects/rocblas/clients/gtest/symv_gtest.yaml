@@ -390,4 +390,22 @@ Tests:
   stride_c: 2 # alpha stride
   stride_d: 2 # beta stride
   pointer_mode_host: false
+
+- name: symv_stride_alpha_beta_ILP64
+  category: pre_checkin
+  function:
+    - symv_batched
+    - symv_strided_batched
+  precision: *single_precision
+  uplo: [ U, L ]
+  arguments:
+    - { N: 2, lda: 2, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  alpha_beta: *alpha_beta_range_small
+  stride_scale: [ 1 ]
+  alpha_beta_stride: true
+  stride_c: 1 # alpha stride
+  stride_d: 1 # beta stride
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
 ...

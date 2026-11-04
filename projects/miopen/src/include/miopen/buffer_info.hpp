@@ -169,8 +169,6 @@ struct WinogradBufferInfo
 {
 
     const int WinoDataHW[2] = {WinoDataH, WinoDataW}, WinoFilterHW[2] = {WinoFilterH, WinoFilterW};
-    const bool direct[2] = {(WinoDataW == 1) && (WinoFilterW == 1),
-                            (WinoDataH == 1) && (WinoFilterH == 1)};
 
     struct WinoInfo
     {

@@ -74,6 +74,49 @@ bool host_side_fill_kernel();
 void set_ulp_positive_init_state(bool enable);
 bool ulp_positive_init();
 
+// Value patterns for integer_exact A, B and C (the integer_exact_pattern test argument).
+//   standard: A and C in {0, 1, 2}; B in {-2, ..., 2}, signs in a checkerboard.
+//   ternary:  A, B and C in {-1, 0, 1}.
+//   sparse_k: as standard, except that each row of A has values in {1, 2} at one K index in each
+//             of kIntegerExactSparseKTerms equal stretches of K and at the last K index, and is
+//             zero elsewhere. The
+//             kept offset changes from stretch to stretch and from row to row, so with at least
+//             K / kIntegerExactSparseKTerms rows every K index is nonzero in some row, and a wrong
+//             read of B anywhere along K changes D. Partial sums stay small whatever K is.
+enum class IntegerExactPattern
+{
+    standard,
+    ternary,
+    sparse_k,
+};
+constexpr size_t kIntegerExactSparseKTerms = 16;
+
+// Returns false when name is not a pattern; the empty string is standard.
+bool parse_integer_exact_pattern(const char* name, IntegerExactPattern& pattern);
+
+// Selects the pattern for the integer_exact fills on this thread. K is the GEMM's inner dimension,
+// and a_k_is_row says whether K runs along the rows of A as stored (A transposed).
+void set_integer_exact_pattern_state(IntegerExactPattern pattern, size_t K, bool a_k_is_row);
+
+// Restores the standard pattern when it goes out of scope, so a pattern never leaks into the
+// fills of a later test.
+struct IntegerExactPatternScope
+{
+    ~IntegerExactPatternScope()
+    {
+        set_integer_exact_pattern_state(IntegerExactPattern::standard, 0, false);
+    }
+};
+
+// True when sparse_k keeps K index k of A's row `row` nonzero. constexpr so device fills can
+// call it.
+constexpr bool integer_exact_sparse_k_kept(size_t k, size_t K, size_t row)
+{
+    const size_t width = (K + kIntegerExactSparseKTerms - 1) / kIntegerExactSparseKTerms;
+    const size_t s     = width > 0 ? width : 1;
+    return k % s == (k / s + row) % s || k + 1 == K;
+}
+
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipblaslt_initialization init,
                            bool                     is_nan,

@@ -1,0 +1,36 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count1_debde7",
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count3_332126",
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count3_c15c83",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count2_27ff0f",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count2_9e6f1e",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count4_295832",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count1",
+          "2_2_3_2_bfp16_nchw_normalized_dim_count1_535f1f",
+          "2_2_3_2_bfp16_nchw_normalized_dim_count2_81e129",
+          "2_2_3_2_bfp16_nchw_normalized_dim_count3_d60024",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count1_c92483",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count2_916d66",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count3_ead7d3",
+          "2_2_3_2_fp32_nchw_normalized_dim_count1"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

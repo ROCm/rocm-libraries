@@ -1,0 +1,200 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#include <thrust/detail/config.h>
+
+#if !defined(THRUST_LEGACY_GCC)
+
+#  include <thrust/device_vector.h>
+#  include <thrust/iterator/zip_iterator.h>
+#  include <thrust/remove.h>
+#  include <thrust/sort.h>
+#  include <thrust/transform.h>
+#  include <thrust/zip_function.h>
+
+#  include <iostream>
+
+#  include "test_param_fixtures.hpp"
+#  include "test_utils.hpp"
+
+#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <iterator>
+#  endif
+
+using IntType = ::testing::Types<Params<int>>;
+
+using IntFloatType = ::testing::Types<Params<int>, Params<float>>;
+
+using ThirtyTwoBitTypes = ::testing::Types<Params<int>, Params<unsigned int>, Params<float>>;
+
+TESTS_DEFINE(ZipFunctionIntTests, IntType);
+TESTS_DEFINE(ZipFunctionIntFloatTests, IntFloatType);
+TESTS_DEFINE(ZipFunctionThirtyTwoBitTests, ThirtyTwoBitTypes);
+
+struct SumThree
+{
+  template <typename T1, typename T2, typename T3>
+  THRUST_HOST_DEVICE auto operator()(T1 x, T2 y, T3 z) const THRUST_DECLTYPE_RETURNS(x + y + z)
+}; // end SumThree
+
+struct SumThreeTuple
+{
+  template <typename Tuple>
+  THRUST_HOST_DEVICE auto operator()(Tuple x) const
+    THRUST_DECLTYPE_RETURNS(thrust::get<0>(x) + thrust::get<1>(x) + thrust::get<2>(x))
+}; // end SumThreeTuple
+
+TYPED_TEST(ZipFunctionIntTests, TestZipFunctionCtor)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  ASSERT_EQ(thrust::zip_function<SumThree>()(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+  ASSERT_EQ(thrust::zip_function<SumThree>(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+#  ifdef __cpp_deduction_guides
+  ASSERT_EQ(thrust::zip_function(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+#  endif // __cpp_deduction_guides
+}
+
+TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using T = typename TestFixture::input_type;
+  using namespace thrust;
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    host_vector<T> h_data0 = random_samples<T>(size);
+    host_vector<T> h_data1 = random_samples<T>(size);
+    host_vector<T> h_data2 = random_samples<T>(size);
+
+    device_vector<T> d_data0 = h_data0;
+    device_vector<T> d_data1 = h_data1;
+    device_vector<T> d_data2 = h_data2;
+
+    host_vector<T> h_result_tuple(size);
+    host_vector<T> h_result_zip(size);
+    device_vector<T> d_result_zip(size);
+
+    // Tuple base case
+    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+              h_result_tuple.begin(),
+              SumThreeTuple{});
+    // Zip Function
+    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+              h_result_zip.begin(),
+              make_zip_function(SumThree{}));
+    transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+              make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
+              d_result_zip.begin(),
+              make_zip_function(SumThree{}));
+
+    ASSERT_EQ(h_result_tuple, h_result_zip);
+    ASSERT_EQ(h_result_tuple, d_result_zip);
+  }
+}
+
+struct RemovePred
+{
+  THRUST_HOST_DEVICE bool operator()(const thrust::tuple<uint32_t, uint32_t>& ele1, const float&)
+  {
+    return thrust::get<0>(ele1) == thrust::get<1>(ele1);
+  }
+};
+TYPED_TEST(ZipFunctionIntFloatTests, TestZipFunctionMixed)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<uint32_t> vecA{0, 0, 2, 0};
+  thrust::device_vector<uint32_t> vecB{0, 2, 2, 2};
+  thrust::device_vector<float> vecC{88.0f, 88.0f, 89.0f, 89.0f};
+  thrust::device_vector<float> expected{88.0f, 89.0f};
+
+  auto inputKeyItBegin = thrust::make_zip_iterator(thrust::make_zip_iterator(vecA.begin(), vecB.begin()), vecC.begin());
+  auto endIt =
+    thrust::remove_if(inputKeyItBegin, inputKeyItBegin + vecA.size(), thrust::make_zip_function(RemovePred{}));
+  auto numEle = endIt - inputKeyItBegin;
+  vecA.resize(numEle);
+  vecB.resize(numEle);
+  vecC.resize(numEle);
+
+  ASSERT_EQ(numEle, 2);
+  ASSERT_EQ(vecC, expected);
+}
+
+struct NestedFunctionCall
+{
+  THRUST_HOST_DEVICE bool
+  operator()(const thrust::tuple<uint32_t, thrust::tuple<thrust::tuple<int, int>, thrust::tuple<int, int>>>& idAndPt)
+  {
+    thrust::tuple<thrust::tuple<int, int>, thrust::tuple<int, int>> ele1 = thrust::get<1>(idAndPt);
+    thrust::tuple<int, int> p1                                           = thrust::get<0>(ele1);
+    thrust::tuple<int, int> p2                                           = thrust::get<1>(ele1);
+    return thrust::get<0>(p1) == thrust::get<0>(p2) || thrust::get<1>(p1) == thrust::get<1>(p2);
+  }
+};
+
+TYPED_TEST(ZipFunctionIntFloatTests, TestNestedZipFunction)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> PX{0, 1, 2, 3};
+  thrust::device_vector<int> PY{0, 1, 2, 2};
+  thrust::device_vector<uint32_t> SS{0, 1, 2};
+  thrust::device_vector<uint32_t> ST{1, 2, 3};
+  thrust::device_vector<float> vecC{88.0f, 88.0f, 89.0f, 89.0f};
+
+  auto segIt = thrust::make_zip_iterator(
+    thrust::make_zip_iterator(thrust::make_permutation_iterator(PX.begin(), SS.begin()),
+                              thrust::make_permutation_iterator(PY.begin(), SS.begin())),
+    thrust::make_zip_iterator(thrust::make_permutation_iterator(PX.begin(), ST.begin()),
+                              thrust::make_permutation_iterator(PY.begin(), ST.begin())));
+  auto idAndSegIt = thrust::make_zip_iterator(thrust::make_counting_iterator(0u), segIt);
+
+  thrust::device_vector<bool> isMH{false, false, false};
+  thrust::device_vector<bool> expected{false, false, true};
+  thrust::transform(idAndSegIt, idAndSegIt + SS.size(), isMH.begin(), NestedFunctionCall{});
+  ASSERT_EQ(isMH, expected);
+}
+
+struct SortPred
+{
+  THRUST_DEVICE THRUST_FORCEINLINE bool
+  operator()(const thrust::tuple<thrust::tuple<int, int>, int>& a, const thrust::tuple<thrust::tuple<int, int>, int>& b)
+  {
+    return thrust::get<1>(a) < thrust::get<1>(b);
+  }
+};
+
+TYPED_TEST(ZipFunctionIntFloatTests, TestNestedZipFunction2)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> A(5);
+  thrust::device_vector<int> B(5);
+  thrust::device_vector<int> C(5);
+  auto n = A.size();
+
+  auto tupleIt       = thrust::make_zip_iterator(_THRUST_STD::begin(A), _THRUST_STD::begin(B));
+  auto nestedTupleIt = thrust::make_zip_iterator(tupleIt, _THRUST_STD::begin(C));
+  thrust::sort(nestedTupleIt, nestedTupleIt + n, SortPred{});
+}
+#endif // !THRUST_LEGACY_GCC

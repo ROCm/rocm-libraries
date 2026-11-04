@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1167,11 +1167,25 @@ void testing_amax(const Arguments& argus)
 {
     LocalVector<T> vec = getTestVector<T>(argus.size);
 
+    // Without an accelerator, the vector stays on the host
+    vec.MoveToAccelerator();
+
+    // The largest entry is the last one
     T   max_value = 0.0;
     int max_index = vec.Amax(max_value);
 
     EXPECT_EQ(max_index, argus.size - 1);
     EXPECT_EQ(max_value, static_cast<T>(argus.size));
+
+    // Make a negative entry in the middle the largest in magnitude
+    vec.MoveToHost();
+    vec[argus.size / 2] = static_cast<T>(-2 * argus.size);
+    vec.MoveToAccelerator();
+
+    max_index = vec.Amax(max_value);
+
+    EXPECT_EQ(max_index, argus.size / 2);
+    EXPECT_EQ(max_value, static_cast<T>(2 * argus.size));
 }
 
 // Helper function to read binary file contents into a vector
@@ -1400,10 +1414,10 @@ void testing_extract_coarse_mapping()
     int map[3];
 
     // Call the ExtractCoarseMapping method
-    EXPECT_NO_THROW(vec.ExtractCoarseMapping(0, 5, index, 3, &size, map));
+    EXPECT_NO_THROW(vec.ExtractCoarseMapping(0, 3, index, 5, &size, map));
 
     // Validate the extracted mapping
-    EXPECT_EQ(size, 5);
+    EXPECT_EQ(size, 3);
     EXPECT_EQ(map[0], 0);
 }
 

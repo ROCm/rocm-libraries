@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
 
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_reduce_by_key.hpp>
@@ -91,7 +92,18 @@ using Suite = testing::Types<
     TestParams<common::custom_type<double, double, true>>
 >;
 
-TYPED_TEST_SUITE(RocprimLookbackReproducibilityTests, Suite);
+struct RocprimLookbackReproducibilityTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::input_type>();
+    }
+};
+
+TYPED_TEST_SUITE(RocprimLookbackReproducibilityTests,
+                 Suite,
+                 RocprimLookbackReproducibilityTestsNameGenerator);
 
 template<typename S, typename F>
 void test_reproducibility(S scan_op, F run_test)

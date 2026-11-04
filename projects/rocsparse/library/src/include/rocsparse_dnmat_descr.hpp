@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,3 +44,25 @@ struct _rocsparse_dnmat_descr
     int64_t batch_count{};
     int64_t batch_stride{};
 };
+
+namespace rocsparse
+{
+    rocsparse_status dnmat_transpose(rocsparse_handle            handle,
+                                     rocsparse_const_dnvec_descr alpha,
+                                     rocsparse_const_dnmat_descr source,
+                                     rocsparse_dnmat_descr       target,
+                                     rocsparse_error*            p_error);
+
+    rocsparse_status dnmat_switch_order(rocsparse_handle            handle,
+                                        rocsparse_const_dnvec_descr alpha,
+                                        rocsparse_const_dnmat_descr source,
+                                        rocsparse_dnmat_descr       target,
+                                        rocsparse_error*            p_error);
+
+    rocsparse_status dnmat_copy_data(rocsparse_handle            handle,
+                                     rocsparse_const_dnvec_descr alpha,
+                                     rocsparse_const_dnmat_descr source,
+                                     rocsparse_dnmat_descr       target,
+                                     rocsparse_error*            p_error);
+
+}

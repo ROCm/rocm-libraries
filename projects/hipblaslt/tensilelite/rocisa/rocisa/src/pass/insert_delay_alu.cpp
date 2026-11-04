@@ -236,7 +236,7 @@ namespace rocisa
 
     void insertDelayAlu(std::shared_ptr<Module> module)
     {
-        if(!rocIsa::getInstance().getAsmCaps()["s_delay_alu"])
+        if(!capOrDefault(rocIsa::getInstance().getAsmCaps(), "s_delay_alu"))
         {
             return;
         }

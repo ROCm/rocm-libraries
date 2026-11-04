@@ -8,33 +8,23 @@ if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/T
   set(HIPSPARSE_HAS_CTEST_CATEGORIES ON)
 endif()
 
-find_package(GTest REQUIRED)
+# Provide the client matrices; ClientMatrices.cmake converts only the .bin files that are missing
+set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/clients/matrices" CACHE STRING "Matrices directory.")
+set(CONVERT_SOURCE "${PROJECT_SOURCE_DIR}/deps/convert.cpp" CACHE STRING "Convert tool mtx2csr.")
+include("${PROJECT_SOURCE_DIR}/cmake/ClientMatrices.cmake")
 
-# Download or copy client matrices
-if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
-    # Download matrices
-    set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/clients/matrices" CACHE STRING "Matrices directory.")
-    file(MAKE_DIRECTORY "${CMAKE_MATRICES_DIR}")
-    
-    set(CONVERT_SOURCE "${PROJECT_SOURCE_DIR}/deps/convert.cpp" CACHE STRING "Convert tool mtx2csr.")
-    include("${PROJECT_SOURCE_DIR}/cmake/ClientMatrices.cmake")
-else()
-    # Copy matrices
-    if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/clients/matrices")
-        message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/clients/matrices")
+# Copy matrices
+if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/clients/matrices")
+    message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/clients/matrices")
 
-        file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/clients/matrices)
-
-        if(STATUS AND NOT STATUS EQUAL 0)
-            message(FATAL_ERROR "Failed to copy matrix .bin files, aborting.")
-        endif()
-    endif()
+    file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/clients/matrices)
 endif()
 
 add_executable(hipsparse-test)
 
 target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_device_malloc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpyi.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gthr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gthrz.cpp"
@@ -119,6 +109,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_batched_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo.cpp"
@@ -133,26 +124,12 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
 )
-
-if(HIPSPARSE_ENABLE_SPMV_BSR)
-    target_sources(hipsparse-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
-    )
-endif()
-
-if(BUILD_WITH_CSC_TRSV)
-    target_sources(hipsparse-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
-    )
-endif()
-
-if(BUILD_WITH_CSC_TRSM)
-    target_sources(hipsparse-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
-    )
-endif()
 
 if(HIPSPARSE_ENABLE_HIP)
     target_sources(hipsparse-test PRIVATE

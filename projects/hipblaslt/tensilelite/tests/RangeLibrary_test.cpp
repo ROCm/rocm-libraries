@@ -53,6 +53,10 @@ struct RangeLibraryTest
     {
         std::tie(hardware, filename, hasNavi, solutionRequired) = GetParam();
 
+        if(hardware.processor == AMDGPU::Processor::gfx950 && hardware.deviceName == "MI350")
+            GTEST_SKIP() << "AIHPBLAS-3506: known assertion failure on gfx950 (MI350); "
+                            "remove this skip once the underlying issue is fixed.";
+
         if(hardware.processor == AMDGPU::Processor::gfx1010 && !hasNavi)
             GTEST_SKIP();
 

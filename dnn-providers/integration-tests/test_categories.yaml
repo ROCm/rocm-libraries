@@ -4,76 +4,108 @@
 # hipdnn-integration-tests Test Categories Configuration.
 #
 # GTest-filter categories applied to the component's own GTest binaries
-# (hipdnn_integration_tests_unit_tests and hipdnn_gpu_ref_tests) via
-# apply_test_category_labels(). Each category becomes one CTest suite whose
-# --gtest_filter is built from test_patterns/exclude; labels are cumulative so
-# `ctest -L standard` runs quick + standard, etc.
+# (hipdnn_integration_tests_unit_tests and hipdnn_golden_data_tests) via
+# apply_test_category_labels(). hipdnn_gpu_ref_tests uses
+# test_categories_gpu_ref.yaml instead (fp32-only quick tier). Each category
+# becomes one CTest suite whose --gtest_filter is built from test_patterns/exclude;
+# labels are cumulative so `ctest -L standard` runs quick + standard, etc.
 #
-# Tier prefixes: gpu-ref conv tests use "Smoke", RMSNorm uses "Quick", plus
-# "Standard"/"Comprehensive"/"Full"; framework unit tests carry no tier prefix
-# and are caught by the quick catch-all (everything not Standard/Comprehensive/
-# Full). The external hipdnn_integration_tests bundle binary is categorized by
-# each provider's test_categories_integration.yaml, not this file.
+# Tier prefixes: framework unit tests carry no tier prefix and are caught by the
+# quick catch-all (everything not Standard/Comprehensive/Full).
+# hipdnn_golden_data_tests names its tests after the bundle's path, so their tier
+# prefix is the lowercase data directory: "standard_", "comprehensive_" or
+# "full_" (quick-tier bundles start "quick_" and fall into the catch-all).
+# GTest filters are case-sensitive, so every tier is excluded from the catch-all
+# in both spellings; miss one and that tier's bundles run in the quick lanes.
+# The external hipdnn_integration_tests bundle binary is categorized by each
+# provider's test_categories_integration.yaml, not this file.
 #
-# The "comprehensive" and "full" tiers are commented out below: the
-# corresponding Comprehensive*/Full* GTest cases require ROCm-side (rock)
-# changes that haven't landed yet and would fail without them. Uncomment the
-# category blocks, their cascading labels in quick/standard, and their
-# category_timeouts entries once those changes land.
+# The "comprehensive" and "full" tiers here select the lowercase bundle-named
+# golden-data tests ("comprehensive_*", "full_*"). The PascalCase
+# Comprehensive*/Full* GPU reference cases are selected by
+# test_categories_gpu_ref.yaml.
+# Tiers cascade through labels: quick carries quick+standard+comprehensive+full,
+# standard carries standard+comprehensive+full, comprehensive carries
+# comprehensive+full, so `ctest -L standard` selects quick + standard,
+# `ctest -L comprehensive` selects quick + standard + comprehensive and
+# `ctest -L full` selects everything.
 test_categories:
   quick:
-    description: "Smoke/quick GPU reference cases plus all framework unit tests (catch-all: everything not Standard/Comprehensive/Full)"
+    description: "Quick-tier golden-data bundles plus all framework unit tests (catch-all: everything not Standard/Comprehensive/Full)"
     test_patterns:
       - "*"
     exclude:
       - "*DISABLED*"
       - "Standard*"
+      - "standard_*"
       - "Comprehensive*"
+      - "comprehensive_*"
       - "Full*"
+      - "full_*"
     labels:
       - "quick"
       - "standard"
-      # - "comprehensive"  # disabled: see header comment
-      # - "full"           # disabled: see header comment
+      - "comprehensive"
+      - "full"
 
   standard:
-    description: "Standard-tier GPU reference cases"
+    description: "Standard-tier cases (Standard* tests and standard_* golden-data bundles)"
     test_patterns:
       - "Standard*"
+      - "standard_*"
     exclude:
       - "*DISABLED*"
-      # Standard/TestGpuRMSNormFwdRef{4D,5D}Bfp16.MatchesCpuRef fail on gfx950
-      # with bf16 output rounding exceeding absolute tolerance for several
-      # large 4D/5D shapes (NCHW/NHWC/NDHWC). Tracked in
-      # https://github.com/ROCm/rocm-libraries/issues/10560.
-      - "Standard/TestGpuRMSNormFwdRef4DBfp16.MatchesCpuRef*"
-      - "Standard/TestGpuRMSNormFwdRef5DBfp16.MatchesCpuRef*"
     labels:
       - "standard"
-      # - "comprehensive"  # disabled: see header comment
-      # - "full"           # disabled: see header comment
+      - "comprehensive"
+      - "full"
       - "slow"
 
-  # comprehensive:
-  #   description: "Comprehensive-tier GPU reference cases"
-  #   test_patterns:
-  #     - "Comprehensive*"
-  #   exclude:
-  #     - "*DISABLED*"
-  #   labels:
-  #     - "comprehensive"
-  #     - "full"
-  #     - "slow"
+  comprehensive:
+    description: "Comprehensive-tier golden-data bundle cases"
+    test_patterns:
+      - "comprehensive_*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "slow"
 
-  # full:
-  #   description: "Full-tier GPU reference cases"
-  #   test_patterns:
-  #     - "Full*"
-  #   exclude:
-  #     - "*DISABLED*"
-  #   labels:
-  #     - "full"
-  #     - "slow"
+  full:
+    description: "Full-tier golden-data bundle cases"
+    test_patterns:
+      - "full_*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "full"
+      - "slow"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus the quick-tier SDPA golden-data GPU-reference cases"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Standard*"
+      - "standard_*"
+      - "Comprehensive*"
+      - "comprehensive_*"
+      - "Full*"
+      - "full_*"
+      # The GPU SDPA reference recomputes QK^T per output element, so cost tracks
+      # B*H*Sq*Skv*D. On the FFM simulator even the smallest quick-tier bundle
+      # (1x8x256x128, 36 ms on MI300X) took 329 s, hd192 took 484 s, and the
+      # 2x32x2048x128 bundle had not finished after 40 minutes.
+      # referenceShapeIsAffordable() gates only the CPU reference, on the
+      # assumption that the GPU reference runs these shapes in milliseconds;
+      # that holds on hardware, not on FFM. Real-GPU lanes still run these
+      # cases and the CpuRef lane still validates the same bundles on the host.
+      - "quick_SdpaFwd_*_GpuRef.*"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
 
 execution_settings:
   default_timeout: 600
@@ -81,5 +113,6 @@ execution_settings:
   category_timeouts:
     quick: 600            # 10 minutes (was add_tiered_test_target SMOKE_TIMEOUT default)
     standard: 1800        # 30 minutes
-    # comprehensive: 3600   # 60 minutes (disabled: see header comment)
-    # full: 7200            # 120 minutes (disabled: see header comment)
+    comprehensive: 3600   # 60 minutes
+    full: 7200            # 120 minutes
+    ffm-quick: 7200       # 2 hours

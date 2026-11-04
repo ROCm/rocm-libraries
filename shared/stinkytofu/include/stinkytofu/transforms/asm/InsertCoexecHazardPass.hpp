@@ -28,12 +28,12 @@
 
 namespace stinkytofu {
 class Pass;
-class StinkyAsmModule;
 
 /// Insert V_NOPs for gfx1250 co-execution data hazards HW cannot detect: forward-walk
 /// each consumer, scan back for an overlapping XDL/TRANS producer, and space them by
 /// VALU-pipe co-execution slots.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertCoexecHazardPass(StinkyAsmModule& module);
+///
+/// Per-function pass; run over all functions via createFunctionToModuleAdaptor.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertCoexecHazardPass();
 
 }  // namespace stinkytofu

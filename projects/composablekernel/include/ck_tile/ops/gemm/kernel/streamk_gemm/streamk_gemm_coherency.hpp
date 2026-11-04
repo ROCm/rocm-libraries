@@ -38,16 +38,16 @@ struct StreamKCoherency<
     core::arch::enable_if_target_id_t<CompilerTarget,
                                       core::arch::amdgcn_target_id::GFX1200,
                                       core::arch::amdgcn_target_id::GFX1201,
+                                      core::arch::amdgcn_target_id::GFX1250,
                                       core::arch::amdgcn_target_id::GFX12_GENERIC>>
 {
     static constexpr amd_buffer_coherence_enum BUFFER_COHERENCE = amd_buffer_coherence_enum::DEVICE;
 };
 
 template <typename CompilerTarget>
-struct StreamKCoherency<
-    CompilerTarget,
-    core::arch::enable_if_target_family_id_t<CompilerTarget,
-                                             core::arch::amdgcn_target_family_id::GFX11>>
+struct StreamKCoherency<CompilerTarget,
+                        std::enable_if_t<core::arch::is_target_family_gfx11<CompilerTarget>() ||
+                                         core::arch::is_target_family_gfx117<CompilerTarget>()>>
 {
     static constexpr amd_buffer_coherence_enum BUFFER_COHERENCE =
         amd_buffer_coherence_enum::glc_dlc;

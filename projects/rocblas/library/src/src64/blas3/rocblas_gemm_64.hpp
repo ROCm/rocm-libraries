@@ -73,6 +73,25 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                               rocblas_stride    stride_c,
                                               int64_t           batch_count);
 
+template <typename T>
+ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
+    rocblas_internal_gemm_grouped_batched_template_64(rocblas_handle           handle,
+                                                      const rocblas_operation* transa_array,
+                                                      const rocblas_operation* transb_array,
+                                                      const int64_t*           m_array,
+                                                      const int64_t*           n_array,
+                                                      const int64_t*           k_array,
+                                                      const T*                 alpha_array,
+                                                      const T* const*          Aarray,
+                                                      const int64_t*           lda_array,
+                                                      const T* const*          Barray,
+                                                      const int64_t*           ldb_array,
+                                                      const T*                 beta_array,
+                                                      T* const*                Carray,
+                                                      const int64_t*           ldc_array,
+                                                      int64_t                  group_count,
+                                                      const int64_t*           group_size);
+
 template <bool BATCHED, typename TScal, typename TConstPtr, typename TPtr>
 rocblas_status rocblas_internal_gemm_64(rocblas_handle    handle,
                                         rocblas_operation trans_a,

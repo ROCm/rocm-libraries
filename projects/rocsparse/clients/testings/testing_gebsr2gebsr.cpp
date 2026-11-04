@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,6 +123,31 @@ void testing_gebsr2gebsr_bad_arg(const Arguments& arg)
                             rocsparse_status_invalid_size);
     EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr_nnz(PARAMS_NNZ), rocsparse_status_invalid_size);
     EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr<T>(PARAMS), rocsparse_status_invalid_size);
+
+    // Check mb * row_block_dim_A > INT32_MAX: the intermediate CSR matrix
+    // cannot be represented with rocsparse_int indices.
+    col_block_dim_C = safe_size;
+    if(sizeof(rocsparse_int) == sizeof(int32_t))
+    {
+        mb              = 65536;
+        row_block_dim_A = 32768;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr_buffer_size<T>(PARAMS_BUFFER_SIZE),
+                                rocsparse_status_invalid_size);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr_nnz(PARAMS_NNZ),
+                                rocsparse_status_invalid_size);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr<T>(PARAMS), rocsparse_status_invalid_size);
+
+        // Check nb * col_block_dim_A > INT32_MAX
+        mb              = safe_size;
+        row_block_dim_A = safe_size;
+        nb              = 65536;
+        col_block_dim_A = 32768;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr_buffer_size<T>(PARAMS_BUFFER_SIZE),
+                                rocsparse_status_invalid_size);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr_nnz(PARAMS_NNZ),
+                                rocsparse_status_invalid_size);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_gebsr2gebsr<T>(PARAMS), rocsparse_status_invalid_size);
+    }
 #undef PARAMS
 #undef PARAMS_NNZ
 #undef PARAMS_BUFFER_SIZE

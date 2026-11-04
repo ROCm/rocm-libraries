@@ -3,7 +3,11 @@
 
 target_sources(stinkytofu_objs PRIVATE
     AsmSetSymbolMap.cpp
+    ReadWriteOperands.cpp
+    SymbolicRegName.cpp
     StinkyAsmIR.cpp
     StinkyModifiers.cpp
     StinkySignature.cpp
 )
+
+add_subdirectory(ssa)

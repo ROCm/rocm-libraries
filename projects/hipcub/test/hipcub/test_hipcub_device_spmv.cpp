@@ -20,13 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "experimental/sparse_matrix.hpp"
-
 #include <hipcub/device/device_spmv.hpp>
 #include <hipcub/util_allocator.hpp>
 
 #include "common_test_header.hpp"
 #include "test_utils_assertions.hpp"
+
+// after the HIP headers: it has a global "using namespace std"
+#include "experimental/sparse_matrix.hpp"
 
 hipcub::CachingDeviceAllocator g_allocator;
 

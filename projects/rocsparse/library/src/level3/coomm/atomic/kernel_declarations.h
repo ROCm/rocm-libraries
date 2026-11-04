@@ -101,6 +101,7 @@ namespace rocsparse
                                  int64_t nnz,
                                  I       m,
                                  I       n,
+                                 I       k,
                                  int64_t batch_count,
                                  int64_t batch_stride_A,
                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),

@@ -28,12 +28,16 @@
 
 namespace rocsparse
 {
+    // col_offset is the first dense column of the panel this block handles. The kernel
+    // wrapper supplies it from a grid-stride loop, so a grid.y clamped to 65535 still
+    // covers every column of B and C.
     template <rocsparse_int BSR_BLOCK_DIM,
               rocsparse_int BLK_SIZE_Y,
               rocsparse_int UNROLL_SIZE_Y,
               typename T>
     ROCSPARSE_DEVICE_ILF void
-        gebsrmm_large_blockdim_device_ext(rocsparse_direction direction,
+        gebsrmm_large_blockdim_device_ext(rocsparse_int       col_offset,
+                                          rocsparse_direction direction,
                                           rocsparse_operation trans_B,
                                           rocsparse_int       Mb,
                                           rocsparse_int       N,
@@ -62,7 +66,7 @@ namespace rocsparse
         rocsparse_int cols[UNROLL_SIZE_Y]{};
         for(rocsparse_int l = 0; l < UNROLL_SIZE_Y; ++l)
         {
-            cols[l]      = (tidy + BLK_SIZE_Y * l) + hipBlockIdx_y * (BLK_SIZE_Y * UNROLL_SIZE_Y);
+            cols[l]      = (tidy + BLK_SIZE_Y * l) + col_offset;
             col_valid[l] = (cols[l] < N);
         }
 

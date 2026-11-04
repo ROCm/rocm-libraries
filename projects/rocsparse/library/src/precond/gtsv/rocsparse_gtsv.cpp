@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "internal/precond/rocsparse_gtsv.h"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_gtsv.hpp"
 
 #include "gtsv_device.h"
@@ -167,6 +168,7 @@ namespace rocsparse
             handle->stream,
             m,
             m_pad,
+            1,
             m_pad,
             dl,
             dl_pad,
@@ -180,6 +182,7 @@ namespace rocsparse
             handle->stream,
             m,
             m_pad,
+            1,
             m_pad,
             d,
             d_pad,
@@ -193,6 +196,7 @@ namespace rocsparse
             handle->stream,
             m,
             m_pad,
+            1,
             m_pad,
             du,
             du_pad,
@@ -200,12 +204,13 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_transpose_and_pad_array_shared_kernel<BLOCKSIZE, BLOCKDIM>),
-            dim3((m_pad - 1) / BLOCKSIZE + 1, n),
+            dim3((m_pad - 1) / BLOCKSIZE + 1, rocsparse::get_grid_size_y(handle, n)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
             m_pad,
+            n,
             ldb,
             B,
             rhs_pad,
@@ -234,7 +239,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_LBM_rhs_kernel<BLOCKSIZE, BLOCKDIM, 8>),
-                dim3(gridsize, n / 8),
+                dim3(gridsize, rocsparse::get_grid_size_y(handle, n / 8)),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -252,7 +257,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_LBM_rhs_kernel<BLOCKSIZE, BLOCKDIM, 4>),
-                dim3(gridsize, n / 4),
+                dim3(gridsize, rocsparse::get_grid_size_y(handle, n / 4)),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -270,7 +275,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_LBM_rhs_kernel<BLOCKSIZE, BLOCKDIM, 2>),
-                dim3(gridsize, n / 2),
+                dim3(gridsize, rocsparse::get_grid_size_y(handle, n / 2)),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -288,7 +293,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_LBM_rhs_kernel<BLOCKSIZE, BLOCKDIM, 1>),
-                dim3(gridsize, n),
+                dim3(gridsize, rocsparse::get_grid_size_y(handle, n)),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -310,7 +315,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_spike_block_level_kernel<BLOCKSIZE, BLOCKDIM>),
-            dim3(gridsize, n),
+            dim3(gridsize, rocsparse::get_grid_size_y(handle, n)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -330,7 +335,7 @@ namespace rocsparse
         if(gridsize == 2)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<2>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(2),
                                                0,
                                                handle->stream,
@@ -344,7 +349,7 @@ namespace rocsparse
         else if(gridsize == 4)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<4>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(4),
                                                0,
                                                handle->stream,
@@ -358,7 +363,7 @@ namespace rocsparse
         else if(gridsize == 8)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<8>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(8),
                                                0,
                                                handle->stream,
@@ -372,7 +377,7 @@ namespace rocsparse
         else if(gridsize == 16)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<16>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(16),
                                                0,
                                                handle->stream,
@@ -386,7 +391,7 @@ namespace rocsparse
         else if(gridsize == 32)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<32>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(32),
                                                0,
                                                handle->stream,
@@ -400,7 +405,7 @@ namespace rocsparse
         else if(gridsize == 64)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<64>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(64),
                                                0,
                                                handle->stream,
@@ -414,7 +419,7 @@ namespace rocsparse
         else if(gridsize == 128)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<128>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(128),
                                                0,
                                                handle->stream,
@@ -428,7 +433,7 @@ namespace rocsparse
         else if(gridsize == 256)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<256>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(256),
                                                0,
                                                handle->stream,
@@ -442,7 +447,7 @@ namespace rocsparse
         else if(gridsize == 512)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_solve_spike_grid_level_kernel<512>),
-                                               dim3(1, n),
+                                               dim3(1, rocsparse::get_grid_size_y(handle, n)),
                                                dim3(512),
                                                0,
                                                handle->stream,
@@ -456,7 +461,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_solve_spike_propagate_kernel<BLOCKSIZE, BLOCKDIM>),
-            dim3(gridsize, n),
+            dim3(gridsize, rocsparse::get_grid_size_y(handle, n)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -470,7 +475,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_spike_backward_substitution_kernel<BLOCKSIZE, BLOCKDIM>),
-            dim3(gridsize, n),
+            dim3(gridsize, rocsparse::get_grid_size_y(handle, n)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -483,12 +488,13 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_transpose_back_array_kernel<BLOCKSIZE, BLOCKDIM>),
-            dim3((m_pad - 1) / BLOCKSIZE + 1, n),
+            dim3((m_pad - 1) / BLOCKSIZE + 1, rocsparse::get_grid_size_y(handle, n)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
             m_pad,
+            n,
             ldb,
             rhs_pad,
             B);

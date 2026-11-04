@@ -35,6 +35,8 @@ using F32 = float;
 using I8 = int8_t;
 /** @brief 32-bit signed integer type */
 using I32 = int32_t;
+/** @brief 64-bit floating point (double precision) type */
+using F64 = double;
 
 /**
  * @brief Calculate relative error threshold for numerical comparisons
@@ -52,19 +54,20 @@ template <typename ComputeDataType, typename OutDataType, typename AccDataType =
 CK_TILE_HOST double get_relative_threshold(const int number_of_accumulations = 1)
 {
 
-    static_assert(is_any_of<ComputeDataType,
-                            F8,
-                            BF8,
-                            F16,
-                            BF16,
-                            F32,
-                            tf32_t,
-                            pk_fp4_t,
-                            pk_fp4_raw_t,
-                            pk_int4_t,
-                            I8,
-                            I32,
-                            int>::value,
+    static_assert(is_fp8_type_v<ComputeDataType> || is_any_of<ComputeDataType,
+                                                              F8,
+                                                              BF8,
+                                                              F16,
+                                                              BF16,
+                                                              F32,
+                                                              F64,
+                                                              tf32_t,
+                                                              pk_fp4_t,
+                                                              pk_fp4_raw_t,
+                                                              pk_int4_t,
+                                                              I8,
+                                                              I32,
+                                                              int>::value,
                   "Warning: Unhandled ComputeDataType for setting up the relative threshold!");
 
     double compute_error = 0;
@@ -78,7 +81,9 @@ CK_TILE_HOST double get_relative_threshold(const int number_of_accumulations = 1
     }
 
     static_assert(
-        is_any_of<OutDataType, F8, BF8, F16, BF16, F32, tf32_t, pk_int4_t, I8, I32, int>::value,
+        is_fp8_type_v<OutDataType> ||
+            is_any_of<OutDataType, F8, BF8, F16, BF16, F32, F64, tf32_t, pk_int4_t, I8, I32, int>::
+                value,
         "Warning: Unhandled OutDataType for setting up the relative threshold!");
 
     double output_error = 0;
@@ -93,7 +98,9 @@ CK_TILE_HOST double get_relative_threshold(const int number_of_accumulations = 1
     double midway_error = std::max(compute_error, output_error);
 
     static_assert(
-        is_any_of<AccDataType, F8, BF8, F16, BF16, F32, tf32_t, pk_int4_t, I8, I32, int>::value,
+        is_fp8_type_v<AccDataType> ||
+            is_any_of<AccDataType, F8, BF8, F16, BF16, F32, F64, tf32_t, pk_int4_t, I8, I32, int>::
+                value,
         "Warning: Unhandled AccDataType for setting up the relative threshold!");
 
     double acc_error = 0;
@@ -126,19 +133,20 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
                                            const int number_of_accumulations = 1)
 {
 
-    static_assert(is_any_of<ComputeDataType,
-                            F8,
-                            BF8,
-                            F16,
-                            BF16,
-                            F32,
-                            tf32_t,
-                            pk_fp4_t,
-                            pk_fp4_raw_t,
-                            pk_int4_t,
-                            I8,
-                            I32,
-                            int>::value,
+    static_assert(is_fp8_type_v<ComputeDataType> || is_any_of<ComputeDataType,
+                                                              F8,
+                                                              BF8,
+                                                              F16,
+                                                              BF16,
+                                                              F32,
+                                                              F64,
+                                                              tf32_t,
+                                                              pk_fp4_t,
+                                                              pk_fp4_raw_t,
+                                                              pk_int4_t,
+                                                              I8,
+                                                              I32,
+                                                              int>::value,
                   "Warning: Unhandled ComputeDataType for setting up the absolute threshold!");
 
     // Use discrete exponent (floor of log2) to match actual floating-point exponent levels
@@ -156,7 +164,9 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
     }
 
     static_assert(
-        is_any_of<OutDataType, F8, BF8, F16, BF16, F32, tf32_t, pk_int4_t, I8, I32, int>::value,
+        is_fp8_type_v<OutDataType> ||
+            is_any_of<OutDataType, F8, BF8, F16, BF16, F32, F64, tf32_t, pk_int4_t, I8, I32, int>::
+                value,
         "Warning: Unhandled OutDataType for setting up the absolute threshold!");
 
     double output_error = 0;
@@ -174,7 +184,9 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
     double midway_error = std::max(compute_error, output_error);
 
     static_assert(
-        is_any_of<AccDataType, F8, BF8, F16, BF16, F32, tf32_t, pk_int4_t, I8, I32, int>::value,
+        is_fp8_type_v<AccDataType> ||
+            is_any_of<AccDataType, F8, BF8, F16, BF16, F32, F64, tf32_t, pk_int4_t, I8, I32, int>::
+                value,
         "Warning: Unhandled AccDataType for setting up the absolute threshold!");
 
     double acc_error = 0;
@@ -547,7 +559,7 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
  */
 template <typename Range, typename RefRange>
 std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_value_t<RefRange>> &&
-                  std::is_same_v<ranges::range_value_t<Range>, fp8_t>),
+                  fp8_format_traits<ranges::range_value_t<Range>>::e4m3),
                  bool>
     CK_TILE_HOST check_err(const Range& out,
                            const RefRange& ref,
@@ -567,10 +579,8 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         return either_not_finite && !(allow_infinity_ref && both_infinite_and_same);
     };
 
-    static const auto get_rounding_point_distance = [](fp8_t o, fp8_t r) -> unsigned {
-        static const auto get_sign_bit = [](fp8_t v) -> bool {
-            return 0x80 & bit_cast<uint8_t>(v);
-        };
+    static const auto get_rounding_point_distance = [](auto o, auto r) -> unsigned {
+        static const auto get_sign_bit = [](auto v) -> bool { return 0x80 & bit_cast<uint8_t>(v); };
 
         if(get_sign_bit(o) ^ get_sign_bit(r))
         {
@@ -588,8 +598,8 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
     double max_err = std::numeric_limits<float>::min();
     for(std::size_t i = 0; i < ref.size(); ++i)
     {
-        const fp8_t o_fp8   = *std::next(std::begin(out), i);
-        const fp8_t r_fp8   = *std::next(std::begin(ref), i);
+        const auto o_fp8    = *std::next(std::begin(out), i);
+        const auto r_fp8    = *std::next(std::begin(ref), i);
         const double o_fp64 = type_convert<float>(o_fp8);
         const double r_fp64 = type_convert<float>(r_fp8);
         err                 = std::abs(o_fp64 - r_fp64);
@@ -632,7 +642,7 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
  */
 template <typename Range, typename RefRange>
 std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_value_t<RefRange>> &&
-                  std::is_same_v<ranges::range_value_t<Range>, bf8_t>),
+                  fp8_format_traits<ranges::range_value_t<Range>>::e5m2),
                  bool>
     CK_TILE_HOST check_err(const Range& out,
                            const RefRange& ref,

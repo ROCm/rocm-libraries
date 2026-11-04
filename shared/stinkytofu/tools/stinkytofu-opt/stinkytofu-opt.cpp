@@ -46,6 +46,7 @@
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 using namespace stinkytofu;
 
@@ -130,6 +131,19 @@ std::unique_ptr<Pass> createPassByName(const std::string& passName,
     return nullptr;
 }
 
+// Flags of the removed cap / throttle ds_load pacing and hide-budget prescan. Still accepted,
+// no longer read.
+static bool isRemovedDsPacingFlag(const std::string& a) {
+    for (const char* flag : {"--ds-read-throttle-latency", "--ds-read-throttle-transition-factor",
+                             "--ds-read-throttle-transition-entries", "--ds-read-per-cap",
+                             "--ds-issue-cap-span-cycles", "--ds-issue-cap-mode", "--ds-slot-first",
+                             "--enable-wmma-hide-budget-prescan", "--barrier-half-slack"}) {
+        const std::string f = flag;
+        if (a == f || a.starts_with(f + "=")) return true;
+    }
+    return false;
+}
+
 static void trimWhitespace(std::string& s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
         s.erase(0, 1);
@@ -173,14 +187,36 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
-                arg == "--verify-each" || arg == "--preserve-symbolic-regs" ||
-                arg == "--preserve-comments" || arg.starts_with("--ds-read-order=") ||
-                arg.starts_with("--ds-read-queue-depth=") ||
+                arg == "--verify-each" || arg == "--dump-passes" || arg == "--time-passes" ||
+                arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
-                arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--ds-read-throttle-transition-factor=") ||
+                arg.starts_with("--ds-read-throttle-transition-entries=") ||
+                arg.starts_with("--ds-read-per-cap=") ||
+                arg.starts_with("--ds-issue-cap-span-cycles=") ||
+                arg.starts_with("--ds-issue-cap-mode=") ||
+                arg.starts_with("--tensor-load-wmma-space=") ||
+                arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
+                arg.starts_with("--wmma-queue-depth=") ||
+                arg.starts_with("--wmma-queue-cover-cycles=") ||
+                arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
+                arg == "--ds-spread" || arg == "--no-ds-spread" ||
+                arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-barrier-cover-cycles=") ||
+                arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
+                arg.starts_with("--ds-read-cycles-per-load=") ||
+                arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
+                arg.starts_with("--merge-barrier-threshold=") ||
+                arg == "--enable-wmma-hide-budget-prescan" ||
+                arg == "--enable-esm2-track-valu-vsrc" ||
+                arg.starts_with("--wait-alu-hold-strict-count=") ||
+                arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
+                arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
+                arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
                 arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
@@ -301,6 +337,8 @@ static void printKernelConfigHelp(std::ostream& os) {
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -308,9 +346,19 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
+        std::cerr << "                   May carry target ID qualifiers (xnack+, xnack-,\n";
+        std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
+        std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
+        std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
+        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -366,9 +414,19 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
+        std::cerr << "                   May carry target ID qualifiers (xnack+, xnack-,\n";
+        std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
+        std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
+        std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
+        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -402,6 +460,13 @@ int main(int argc, char** argv) {
 
     // Parse architecture option
     std::array<int, 3> arch = {12, 5, 0};  // default gfx1250
+    // Concrete stepping identity when the user named one (e.g. "gfx1250v0"). Steppings that share
+    // an ISA triple (gfx1250 v1 vs gfx1250v0 on {12,5,0}) are indistinguishable by triple, so the
+    // triple-based getGfxArchID() first-matches v1. When the user names a stepping, resolve the
+    // GfxArchID by identity instead. Empty => no name given, keep the legacy triple behavior.
+    std::string resolvedArchName;
+    // Set by a `:xnack-` qualifier on --arch; see the target ID split below.
+    bool xnackReplayOff = false;
     int irFileIdx = 1;
     int passStartIdx = 2;
 
@@ -415,14 +480,58 @@ int main(int argc, char** argv) {
         }
 
         std::string archStr = argv[2];
-        if (!BackendRegistry::parseArchKey(archStr, arch)) {
-            std::cerr << "Error: Invalid architecture format '" << archStr
+        // A target ID may carry qualifiers (gfx1250:xnack-), spelled as TensileLite and the
+        // hipBLASLt/hipSPARSELt builds spell them. A qualifier names a driver configuration, not
+        // a different architecture, so split it off before resolving the arch and let it stand in
+        // for the rocisa archCaps only TensileLite can supply. An unrecognized qualifier is an
+        // error rather than ignored: a typo that quietly left replay protection on would look
+        // exactly like a successful run.
+        const std::string archSpec = archStr;
+        if (const auto colon = archStr.find(':'); colon != std::string::npos) {
+            std::stringstream qualifiers(archStr.substr(colon + 1));
+            archStr = archStr.substr(0, colon);
+            std::string qualifier;
+            // A target ID settles each feature once. Seeing one twice means the
+            // spec contradicts itself (gfx1250:xnack-:xnack+) or repeats itself,
+            // and first-one-wins would quietly pick a replay mode for a spec that
+            // never named one -- the same silent-wrong-answer an unknown
+            // qualifier is rejected to avoid.
+            bool sawXnack = false, sawSramecc = false;
+            while (std::getline(qualifiers, qualifier, ':')) {
+                const bool isXnack = qualifier == "xnack+" || qualifier == "xnack-";
+                const bool isSramecc = qualifier == "sramecc+" || qualifier == "sramecc-";
+                if (!isXnack && !isSramecc) {
+                    std::cerr << "Error: Unknown target ID qualifier '" << qualifier << "' in '"
+                              << archSpec << "'. Supported: xnack+, xnack-, sramecc+, sramecc-\n";
+                    return 1;
+                }
+                if ((isXnack && sawXnack) || (isSramecc && sawSramecc)) {
+                    std::cerr << "Error: Repeated target ID qualifier '" << qualifier << "' in '"
+                              << archSpec << "'; a target ID names each feature at most once.\n";
+                    return 1;
+                }
+                sawXnack = sawXnack || isXnack;
+                sawSramecc = sawSramecc || isSramecc;
+                if (qualifier == "xnack-") xnackReplayOff = true;
+            }
+        }
+        // Resolve by concrete identity name first so a stepping variant sharing a triple
+        // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
+        // not registered as an identity in this build (no assert), so a plain triple spelling
+        // (e.g. gfx942 in a gfx1250 build) falls through to the triple parser, and a stepping name
+        // absent from this build fails cleanly at the getArchPipeline() check below.
+        if (const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archStr)) {
+            arch = {static_cast<int>(namedInfo->major), static_cast<int>(namedInfo->minor),
+                    static_cast<int>(namedInfo->stepping)};
+            resolvedArchName = archStr;
+        } else if (!BackendRegistry::parseArchKey(archStr, arch)) {
+            std::cerr << "Error: Invalid architecture format '" << archSpec
                       << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
             return 1;
         }
 
         if (!BackendRegistry::getArchPipeline(arch)) {
-            std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
+            std::cerr << "Error: Unsupported architecture '" << archSpec << "'\n";
             std::cerr << "Supported architectures:";
             for (const auto& key : BackendRegistry::getRegisteredArchKeys())
                 std::cerr << " " << key;
@@ -432,7 +541,7 @@ int main(int argc, char** argv) {
 
         irFileIdx = 3;
         passStartIdx = 4;
-        std::cout << "Target architecture: " << archStr << "\n";
+        std::cout << "Target architecture: " << archSpec << "\n";
     }
 
     std::string filename = argv[irFileIdx];
@@ -485,14 +594,67 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadQueueDepth = std::stoi(a.substr(22));
         } else if (a.starts_with("--ds-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
-        } else if (a.starts_with("--ds-read-throttle-latency=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
-        } else if (a.starts_with("--ds-read-per-wmma=")) {
-            passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (isRemovedDsPacingFlag(a)) {
+            std::cerr << "warning: " << a.substr(0, a.find('=')) << " was removed with the legacy "
+                      << "ds_load pacing and is ignored\n";
+        } else if (a.starts_with("--tensor-load-wmma-space=")) {
+            passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
+        } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
+            passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
+                std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
+        } else if (a.starts_with("--wmma-queue-depth=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueDepth =
+                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
+        } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
+                std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
+        } else if (a == "--wmma-barrier-cover-cycles" ||
+                   a.starts_with("--wmma-barrier-cover-cycles=")) {
+            std::cerr << "warning: --wmma-barrier-cover-cycles was removed; a barrier issues "
+                      << "when its threshold is met, and the flag is ignored\n";
+        } else if (a == "--ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = true;
+        } else if (a == "--no-ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = false;
+        } else if (a.starts_with("--ds-batch-wmmas=")) {
+            passFeatureConfig.dagFeatures.dsBatchWmmas =
+                std::stoi(a.substr(std::string("--ds-batch-wmmas=").size()));
+        } else if (a.starts_with("--ds-catch-up-pace=")) {
+            passFeatureConfig.dagFeatures.dsCatchUpPace =
+                std::stoi(a.substr(std::string("--ds-catch-up-pace=").size()));
+        } else if (a.starts_with("--ds-read-cycles-per-load=")) {
+            passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
+                std::stoi(a.substr(std::string("--ds-read-cycles-per-load=").size()));
+        } else if (a.starts_with("--wmma-refill-mode=")) {
+            const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
+            passFeatureConfig.dagFeatures.wmmaRefillMode =
+                (v == "dynamic" || v == "1")
+                    ? stinkytofu::PassFeatureConfig::WmmaRefillMode::Dynamic
+                    : stinkytofu::PassFeatureConfig::WmmaRefillMode::Fixed;
+        } else if (a.starts_with("--wmma-batch-size=")) {
+            passFeatureConfig.dagFeatures.wmmaBatchSize =
+                std::max(1, std::stoi(a.substr(std::string("--wmma-batch-size=").size())));
+        } else if (a.starts_with("--wmma-refill-to-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaRefillToCycles =
+                std::stoi(a.substr(std::string("--wmma-refill-to-cycles=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
+        } else if (a == "--enable-esm2-track-valu-vsrc") {
+            passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
+        } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
+            passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
+        } else if (a == "--wait-alu-scoreboard") {
+            passFeatureConfig.dagFeatures.waitAluScoreboard = true;
+        } else if (a.starts_with("--prefetch-lead-wmmas=")) {
+            passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
+        } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {
+            passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
+        } else if (a.starts_with("--war-gate-wmmas=")) {
+            passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
+        } else if (a.starts_with("--merge-barrier-threshold=")) {
+            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
     }
 
@@ -535,6 +697,11 @@ int main(int argc, char** argv) {
     bool emitAsm = false;
     bool enableRemarks = false;
     bool verifyEach = false;
+    // Off by default: createDebugPrintInstrumentation() opens before.txt/after.txt
+    // eagerly, so installing it unconditionally littered the working directory of every
+    // run. Mirrors the needsFileOutput gate the pipeline path already has.
+    bool dumpPasses = false;
+    bool timePasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -545,9 +712,13 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--verify-each") verifyEach = true;
+        if (std::string(argv[i]) == "--dump-passes") dumpPasses = true;
+        if (std::string(argv[i]) == "--time-passes") timePasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            // Naming a pass to debug is only meaningful with the dumps on.
+            dumpPasses = true;
             stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
         }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
@@ -582,7 +753,11 @@ int main(int argc, char** argv) {
     fileBuffer << inputFile.rdbuf();
     std::string fileContent = fileBuffer.str();
 
-    GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
+    // Prefer the named stepping's identity when the user gave one; the triple alone first-matches
+    // v1 for steppings that share it. resolvedArchName is only set after getArchInfo(name)
+    // confirmed the name is registered, so getGfxArchID(name) here never hits its assert path.
+    GfxArchID archID = resolvedArchName.empty() ? getGfxArchID(arch[0], arch[1], arch[2])
+                                                : getGfxArchID(resolvedArchName);
 
     stinkytofu::MultiParseResult parsed;
     std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
@@ -641,13 +816,13 @@ int main(int argc, char** argv) {
         std::string origFuncName = parsed.functions[0]->funcName;
         auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
 
-        // Find from-label and to-label positions
+        // Find from-label and to-label positions (first occurrence, in case a
+        // label name repeats elsewhere in the file).
         int fromIdx = -1, toIdx = -1;
         for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == fromLabel)
-                fromIdx = idx;
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == toLabel)
-                toIdx = idx;
+            if (!originalInsts[idx]->isLabel) continue;
+            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
+            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
         }
         if (fromIdx < 0) {
             std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
@@ -734,6 +909,10 @@ int main(int argc, char** argv) {
         emitVerbatim(preResult);
     }
 
+    // Set to true if any analysis/verification pass reports a failure; surfaced as a
+    // non-zero exit code after all functions and output have been processed.
+    bool analysisFailed = false;
+
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         if (optLevel >= 0) {
@@ -742,6 +921,32 @@ int main(int argc, char** argv) {
             moduleOpts.OptLevel = optLevel;
             moduleOpts.EnableRemarks = enableRemarks;
             moduleOpts.VerifyEach = verifyEach;
+            moduleOpts.TimePasses = timePasses;
+            // The --Tile*/--NumGR*/--NumWaves flags are parsed for both modes but
+            // used to be applied only in individual-pass mode, so pipeline mode
+            // silently ran every kernel with a zeroed tile config. Backend's entry
+            // gate now rejects that, which is the right answer for a real kernel
+            // but would make these flags unusable here. Forward them instead.
+            // GemmTileConfig::NumWaves is WaveGroup0 * WaveGroup1 downstream, so a
+            // flat --NumWaves goes in as WaveGroup0 with WaveGroup1 = 1.
+            moduleOpts.TileA0 = static_cast<int>(gemmTileConfig.TileA0);
+            moduleOpts.TileB0 = static_cast<int>(gemmTileConfig.TileB0);
+            moduleOpts.TileM0 = static_cast<int>(gemmTileConfig.TileM0);
+            moduleOpts.NumGRA = gemmTileConfig.NumGRA;
+            moduleOpts.NumGRB = gemmTileConfig.NumGRB;
+            moduleOpts.NumGRM = gemmTileConfig.NumGRM;
+            moduleOpts.WaveGroup0 = static_cast<int>(gemmTileConfig.NumWaves);
+            moduleOpts.WaveGroup1 = 1;
+            // Stand in for rocisa's archCaps, as the individual-pass branch below
+            // does. ModuleOptions zero-initialises, so leaving these unset is not
+            // "unknown" but an explicit no: pipeline mode would report gfx1250 as
+            // having neither XNACK replay nor the volatile-VMEM requirement, and
+            // every pass that drains on those would go quiet. Both branches have
+            // to answer alike, or -O<N> and the same passes named individually
+            // optimise two different machines.
+            const bool isGfx1250 = arch == std::array<int, 3>{12, 5, 0};
+            moduleOpts.RequiresXCntForVolatileVMEM = isGfx1250;
+            moduleOpts.EnableXnackReplay = isGfx1250 && !xnackReplayOff;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -766,10 +971,17 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
-            passManager.addInstrumentation(createDebugPrintInstrumentation());
+            // Pipeline mode gets its session from Backend (ModuleOptions.TimePasses);
+            // here there is no module, so the driver owns it.
+            stinkytofu::TimePassesSession timing(timePasses, parsedFunc->funcName, std::cerr);
+
+            if (dumpPasses) passManager.addInstrumentation(createDebugPrintInstrumentation());
             if (verifyEach) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
+            }
+            if (auto timer = stinkytofu::getActiveTimePasses()) {
+                passManager.addInstrumentation(std::move(timer));
             }
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
@@ -778,6 +990,7 @@ int main(int argc, char** argv) {
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
+            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0} && !xnackReplayOff;
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
@@ -802,6 +1015,7 @@ int main(int argc, char** argv) {
             }
 
             passManager.run(func);
+            if (passManager.getPassContext().getAnalysisFailed()) analysisFailed = true;
 
             emitFunction(func);
         }
@@ -809,5 +1023,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return 0;
+    return analysisFailed ? 1 : 0;
 }

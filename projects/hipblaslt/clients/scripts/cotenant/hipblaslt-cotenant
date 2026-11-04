@@ -4,16 +4,16 @@
 
 """Run a command (typically hipblaslt-bench) under CU contention.
 
-Launches a persistent HIP "busy" kernel pinned to a fixed number of CUs
-(one workgroup per CU), waits until all its workgroups are resident, then runs
-the given command while that contention is in effect. The cotenant is always
-killed when the command finishes or this script is interrupted.
+Launches a persistent HIP "busy" kernel with configurable LDS reservation,
+waits until all its workgroups are resident, then runs the given command while
+that contention is in effect. The cotenant is always killed when the command
+finishes or this script is interrupted.
 
     hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 
-A precompiled hipblaslt-cotenant-kernel beside this script is used if present;
-otherwise it is built on first use with hipcc (override the compiler with
-HIPCC=...) into a per-user cache. The cotenant log defaults to ./cotenant.<pid>.log.
+The hipblaslt build places hipblaslt-cotenant-kernel beside this script (in
+<build>/clients and in the installed bin/); --binary overrides it. The cotenant
+log defaults to ./cotenant.<pid>.log.
 """
 
 from __future__ import annotations
@@ -29,114 +29,39 @@ from pathlib import Path
 from typing import TextIO
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE / "hipblaslt-cotenant-kernel.hip"
-# A precompiled binary installed next to this script (the shipped case), if present.
-SHIPPED_BIN = HERE / "hipblaslt-cotenant-kernel"
+# Built and installed by hipblaslt next to this script.
+KERNEL_BIN = HERE / "hipblaslt-cotenant-kernel"
 
 
-def cache_dir() -> Path:
-    """Writable per-user dir for a self-built binary; the script's own dir may be read-only when installed."""
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".cache"
-    )
-    return Path(base) / "hipblaslt" / "cotenant"
-
-
-def probe_device(env: dict[str, str]) -> tuple[str | None, int | None]:
-    """Return (gfx_arch, total_cus) for the first GPU via rocminfo, or (None, None)."""
+def probe_cus(env: dict[str, str]) -> int | None:
+    """Return the CU count of the first GPU via rocminfo, or None."""
     try:
         out = subprocess.check_output(
             ["rocminfo"], text=True, env=env, stderr=subprocess.DEVNULL
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
-        return None, None
-    arch, cus, in_gpu = None, None, False
+        return None
+    in_gpu = False
     for line in out.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[0] == "Name:" and fields[1].startswith("gfx"):
-            arch, in_gpu = fields[1], True
+            in_gpu = True
         elif in_gpu and line.strip().startswith("Compute Unit:"):
-            cus = int(fields[-1])
-            break
-    return arch, cus
+            return int(fields[-1])
+    return None
 
 
-def resolve_binary(arch: str | None, env: dict[str, str], explicit: str | None) -> Path:
-    """Locate the cotenant binary: --binary, else a precompiled one beside the script, else build it."""
-    if explicit:
-        path = Path(explicit)
-        if not (path.is_file() and os.access(path, os.X_OK)):
+def resolve_binary(explicit: str | None) -> Path:
+    """Locate the cotenant kernel binary: --binary, else the one beside this script."""
+    path = Path(explicit) if explicit else KERNEL_BIN
+    if not (path.is_file() and os.access(path, os.X_OK)):
+        if explicit:
             sys.exit(f"ERROR: --binary {path} is not an executable file.")
-        return path
-    if os.access(SHIPPED_BIN, os.X_OK):
-        return SHIPPED_BIN
-    return build_cotenant(arch, env)
-
-
-def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
-    """Build the kernel into the per-user cache and return its path (rebuilds when stale)."""
-    if not SRC.is_file():
         sys.exit(
-            f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH."
+            f"ERROR: {path} not found or not executable. Run hipblaslt-cotenant from the hipblaslt build "
+            "(<build>/clients) or install, or pass --binary PATH."
         )
-    out = cache_dir() / "hipblaslt-cotenant-kernel"
-    stamp = cache_dir() / "arch"
-    try:
-        fresh = (
-            out.exists()
-            and out.stat().st_mtime >= SRC.stat().st_mtime
-            and stamp.exists()
-            and stamp.read_text().strip() == arch
-        )
-    except OSError:
-        fresh = False
-    if fresh:
-        return out
-    hipcc = os.environ.get("HIPCC", "hipcc")
-    print(f"building hipblaslt-cotenant-kernel for {arch} (cache: {out.parent}) ...")
-    try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        sys.exit(f"ERROR: could not create cache dir {out.parent} ({e.strerror}).")
-    # Build to a temp file and rename into place, so concurrent builders (a
-    # parallel sweep with a cold cache) can't corrupt or ETXTBSY each other.
-    fd, tmp_name = tempfile.mkstemp(dir=str(out.parent), prefix=".build-")
-    os.close(fd)
-    tmp = Path(tmp_name)
-    try:
-        subprocess.run(
-            [
-                hipcc,
-                "-O2",
-                "-std=c++17",
-                f"--offload-arch={arch}",
-                str(SRC),
-                "-o",
-                str(tmp),
-            ],
-            check=True,
-            env=env,
-        )
-        os.chmod(tmp, 0o755)
-        os.replace(tmp, out)
-    except FileNotFoundError:
-        tmp.unlink(missing_ok=True)
-        sys.exit(f"ERROR: '{hipcc}' not found; install ROCm or set HIPCC to its path.")
-    except subprocess.CalledProcessError as e:
-        tmp.unlink(missing_ok=True)
-        sys.exit(
-            f"ERROR: building hipblaslt-cotenant-kernel failed (hipcc exited {e.returncode})."
-        )
-    except OSError as e:
-        tmp.unlink(missing_ok=True)
-        sys.exit(f"ERROR: could not write {out} ({e.strerror}).")
-    try:
-        stamp.write_text(arch)
-    except OSError as e:
-        print(
-            f"WARNING: could not write build cache stamp {stamp} ({e.strerror}); will rebuild next run."
-        )
-    return out
+    return path
 
 
 def resolve_log_path(explicit: str | None) -> Path:
@@ -206,20 +131,22 @@ def main() -> int:
         type=int,
         required=True,
         metavar="N",
-        help="number of CUs the cotenant occupies (0 = uncontended baseline, no cotenant)",
+        help="cotenant workgroup count (one per CU at max occupancy 1; 0 = uncontended baseline)",
+    )
+    ap.add_argument(
+        "--max-occupancy",
+        type=int,
+        default=1,
+        metavar="N",
+        help="LDS-based workgroups-per-CU limit, 1–64 (default: 1); each workgroup reserves about 1/N of CU LDS",
     )
     ap.add_argument(
         "--device", metavar="N", help="set HIP_VISIBLE_DEVICES for cotenant and command"
     )
     ap.add_argument(
-        "--arch",
-        metavar="GFX",
-        help="build target arch (default: rocminfo auto-detect)",
-    )
-    ap.add_argument(
         "--binary",
         metavar="PATH",
-        help="prebuilt hipblaslt-cotenant-kernel to use (default: one beside this script, else build into the cache)",
+        help="hipblaslt-cotenant-kernel to use (default: the one beside this script)",
     )
     ap.add_argument(
         "--log",
@@ -247,6 +174,8 @@ def main() -> int:
 
     if args.cus < 0:
         sys.exit("ERROR: --cus must be >= 0.")
+    if not 1 <= args.max_occupancy <= 64:
+        sys.exit("ERROR: --max-occupancy must be in [1, 64].")
     if not args.wait >= 0:
         sys.exit("ERROR: --wait must be >= 0.")
     if not args.grace >= 0:
@@ -268,15 +197,12 @@ def main() -> int:
 
     # rocminfo selects via ROCR_VISIBLE_DEVICES; mirror the device the kernel
     # will actually use (HIP_VISIBLE_DEVICES, from --device or the environment)
-    # so the arch/CU probe targets that GPU on heterogeneous multi-GPU hosts.
+    # so the CU probe targets that GPU on heterogeneous multi-GPU hosts.
     probe_env = env.copy()
     hip_visible = env.get("HIP_VISIBLE_DEVICES")
     if hip_visible is not None:
         probe_env["ROCR_VISIBLE_DEVICES"] = hip_visible
-    arch, total_cus = probe_device(probe_env)
-    arch = args.arch or arch
-    if arch is None:
-        sys.exit("ERROR: could not detect GPU arch via rocminfo; pass --arch gfxNNN.")
+    total_cus = probe_cus(probe_env)
 
     if total_cus is None:
         print(
@@ -284,15 +210,14 @@ def main() -> int:
         )
     elif args.cus > total_cus:
         sys.exit(f"ERROR: --cus {args.cus} exceeds the device CU count ({total_cus}).")
-    elif args.cus == total_cus:
-        sys.exit(
-            f"ERROR: --cus {args.cus} would occupy all {total_cus} CUs and starve the benchmark; use fewer."
-        )
 
-    binary = resolve_binary(arch, env, args.binary)
+    binary = resolve_binary(args.binary)
 
     log_path = resolve_log_path(args.log)
-    print(f"launching cotenant on {args.cus} CUs (log: {log_path})")
+    print(
+        f"launching cotenant with {args.cus} workgroups "
+        f"(max occupancy: {args.max_occupancy}, log: {log_path})"
+    )
     try:
         log = open(log_path, "w")
     except OSError as e:
@@ -304,7 +229,7 @@ def main() -> int:
         # terminal signals (SIGINT/SIGHUP) reach it directly even if our cleanup
         # never runs. It is not a group leader, so cleanup uses os.kill, not killpg.
         cotenant = subprocess.Popen(
-            [str(binary), str(args.cus)],
+            [str(binary), str(args.cus), str(args.max_occupancy)],
             stdout=log,
             stderr=subprocess.STDOUT,
             env=env,

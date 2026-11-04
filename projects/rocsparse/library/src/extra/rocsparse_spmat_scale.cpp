@@ -31,9 +31,6 @@
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_utility.hpp"
 
-// rocsparse_spmat_scale is gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
-
 namespace rocsparse
 {
     // Scale the value array of the target in place by alpha. The memory space of alpha is taken
@@ -184,7 +181,11 @@ namespace rocsparse
         case rocsparse_format_sell:
             return mat->sell_colval_size;
         case rocsparse_format_bell:
-            return mat->rows * mat->ell_cols * mat->block_dim * mat->block_dim;
+            // The Blocked-ELL value array is padded to rows*ell_cols scalar entries (ell_cols
+            // already counts the padded scalar ELL columns block_dim*ell_blocks), matching the
+            // length validated in rocsparse_create_bell_descr. It must not be multiplied by
+            // block_dim^2 again.
+            return mat->rows * mat->ell_cols;
         }
         return 0;
     }
@@ -292,5 +293,3 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-
-#endif /* ROCSPARSE_WITH_SPMAT_SCALE */

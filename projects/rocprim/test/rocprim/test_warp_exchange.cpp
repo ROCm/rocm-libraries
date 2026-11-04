@@ -27,6 +27,7 @@
 #include "../../common/warp_exchange.hpp"
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/device/config_types.hpp>
@@ -199,7 +200,35 @@ std::vector<T> stripe_vector(const std::vector<T>& v,
     return striped;
 }
 
-TYPED_TEST_SUITE(WarpExchangeTest, WarpExchangeTestParams);
+struct WarpExchangeTestNameGenerator
+{
+    template<class Op>
+    static std::string op_tag()
+    {
+        if constexpr(std::is_same_v<Op, void>) return "";
+        else if constexpr(std::is_same_v<Op, common::BlockedToStripedOp>)
+            return "_BlockedToStriped";
+        else if constexpr(std::is_same_v<Op, common::BlockedToStripedShuffleOp>)
+            return "_BlockedToStripedShuffle";
+        else if constexpr(std::is_same_v<Op, common::StripedToBlockedOp>)
+            return "_StripedToBlocked";
+        else if constexpr(std::is_same_v<Op, common::StripedToBlockedShuffleOp>)
+            return "_StripedToBlockedShuffle";
+        else
+            static_assert(dependent_false<Op>::value,
+                          "op_tag: add a case for this exchange op");
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::type>() + "_i"
+               + std::to_string(Params::items_per_thread) + "_w"
+               + std::to_string(Params::warp_size) + op_tag<typename Params::exchange_op>();
+    }
+};
+
+TYPED_TEST_SUITE(WarpExchangeTest, WarpExchangeTestParams, WarpExchangeTestNameGenerator);
 
 TYPED_TEST(WarpExchangeTest, WarpExchange)
 {
@@ -245,7 +274,7 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
     ASSERT_EQ(expected, output);
 }
 
-TYPED_TEST_SUITE(WarpExchangeTest, WarpExchangeTestParams);
+TYPED_TEST_SUITE(WarpExchangeTest, WarpExchangeTestParams, WarpExchangeTestNameGenerator);
 
 TYPED_TEST(WarpExchangeTest, WarpExchangeNotInplace)
 {
@@ -339,7 +368,9 @@ void warp_exchange_scatter_kernel(T* d_input, T* d_output, OffsetT* d_ranks)
     }
 }
 
-TYPED_TEST_SUITE(WarpExchangeScatterTest, WarpExchangeScatterTestParams);
+TYPED_TEST_SUITE(WarpExchangeScatterTest,
+                 WarpExchangeScatterTestParams,
+                 WarpExchangeTestNameGenerator);
 
 TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
 {

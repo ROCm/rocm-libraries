@@ -441,6 +441,36 @@ RppStatus rppt_histogram_equalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
                                   RpptRoiType roiType, rppHandle_t rppHandle,
                                   RppBackend executionBackend);
 
+/*! \brief Tone Map augmentation on HOST backend for a NCHW/NHWC layout tensor
+ * \details The tone map augmentation performs Reinhard global tone mapping on a batch of RGB(3
+ * channel) images with an NHWC/NCHW tensor layout.<br>
+ * The algorithm computes pixel luminance using Rec.709 coefficients (L = 0.2126*R + 0.7152*G +
+ * 0.0722*B), applies the Reinhard operator (L_mapped = L / (1 + L)) to compress the dynamic range,
+ * and scales the RGB channels accordingly.<br>
+ * - srcPtr depth ranges - Rpp8u (0 to 255), Rpp16f (0 to 1), Rpp32f (0 to 1), Rpp8s (-128 to 127).
+ * - dstPtr depth ranges - Will be same depth as srcPtr.
+ * \param [in] srcPtr source tensor in HOST memory
+ * \param [in] srcDescPtr source tensor descriptor (Restrictions - numDims = 4,
+ * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = 1/3)
+ * \param [out] dstPtr destination tensor in HOST memory
+ * \param [in] dstDescPtr destination tensor descriptor (Restrictions - numDims = 4,
+ * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr)
+ * \param [in] gammaTensor gamma values for tone map gamma correction (1D tensor in HOST memory,
+ * of size batchSize with gammaTensor[i] >= 0 for each image in batch)
+ * \param [in] roiTensorPtrSrc ROI data in HOST memory, for each image in source tensor (2D
+ * tensor of size batchSize * 4, in either format - XYWH(xy.x, xy.y, roiWidth, roiHeight) or
+ * LTRB(lt.x, lt.y, rb.x, rb.y))
+ * \param [in] roiType ROI type used (RpptRoiType::XYWH or RpptRoiType::LTRB)
+ * \param [in] rppHandle RPP HOST handle created with <tt>\ref rppCreate()</tt>
+ * \param [in] executionBackend backend for execution (RppBackend::RPP_HOST_BACKEND)
+ * \return A <tt> \ref RppStatus</tt> enumeration.
+ * \retval RPP_SUCCESS Successful completion.
+ * \retval RPP_ERROR* Unsuccessful completion.
+ */
+RppStatus rppt_tone_map(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
+                        RpptDescPtr dstDescPtr, Rpp32f* gammaTensor, RpptROIPtr roiTensorPtrSrc,
+                        RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend);
+
 /*! @}
  */
 

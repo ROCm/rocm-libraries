@@ -53,7 +53,7 @@ using hipdnn_data_sdk::types::half;
  * @param vMax     Maximum value in V tensor
  * @param headDim  D - the head dimension (Q@K^T dot product length)
  * @param seqKv    Skv - key/value sequence length (softmax + P@V accumulation length)
- * @param scale    Attention scale factor (nullopt = use default 1/sqrt(D))
+ * @param scale    Attention scale factor (nullopt = 1.0, no scaling)
  * @return Calculated tolerance value as float
  *
  * Known Limitations:
@@ -98,8 +98,8 @@ float calculateSdpaFwdTolerance(double qMin,
     const double maxAbsK = std::max(std::abs(kMin), std::abs(kMax));
     const double maxAbsV = std::max(std::abs(vMin), std::abs(vMax));
 
-    // Resolve scale: use provided value or default 1/sqrt(headDim)
-    const double absScale = std::abs(scale.value_or(1.0 / std::sqrt(static_cast<double>(headDim))));
+    // An absent scale is 1.0 (no scaling), as in cuDNN.
+    const double absScale = std::abs(scale.value_or(1.0F));
 
     const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 

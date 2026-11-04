@@ -29,17 +29,34 @@
 namespace rocsparse
 {
     // Create identity permutation
-    template <uint32_t BLOCKSIZE, typename I>
+    // GRID_STRIDE is set when grid.x was clamped below the number of blocks n
+    // needs. Otherwise grid.x * BLOCKSIZE fits the 32-bit dispatch limit and the
+    // unsigned-int global id of the straight-line path is exact.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void identity_kernel(I n, I* p)
     {
-        I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= n)
+        if constexpr(GRID_STRIDE)
         {
-            return;
-        }
+            const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        p[gid] = gid;
+            for(int64_t gid = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
+                gid < n;
+                gid += stride)
+            {
+                p[gid] = static_cast<I>(gid);
+            }
+        }
+        else
+        {
+            const int64_t gid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
+
+            if(gid >= n)
+            {
+                return;
+            }
+
+            p[gid] = static_cast<I>(gid);
+        }
     }
 }

@@ -29,14 +29,11 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+#include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "RunListener.hpp"
 
 #include <cstddef>
-
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 
 namespace TensileLite
 {
@@ -144,19 +141,18 @@ namespace TensileLite
         }
 
         void MetaRunListener::postWarmup(TimingEvents const& startEvents,
-                                         TimingEvents const& stopEvents,
-                                         hipStream_t const&  stream)
+                                         TimingEvents const& stopEvents)
         {
             for(auto iter = m_listeners.rbegin(); iter != m_listeners.rend(); iter++)
-                (*iter)->postWarmup(startEvents, stopEvents, stream);
+                (*iter)->postWarmup(startEvents, stopEvents);
         }
 
-        void MetaRunListener::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                              TimingEvents const&            startEvents,
-                                              TimingEvents const&            stopEvents)
+        void MetaRunListener::validateWarmups(std::vector<size_t> const& slots,
+                                              TimingEvents const&        startEvents,
+                                              TimingEvents const&        stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateWarmups(inputs, startEvents, stopEvents);
+                (*iter)->validateWarmups(slots, startEvents, stopEvents);
         }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -219,26 +215,25 @@ namespace TensileLite
                 (*iter)->setNumEnqueuesPerSync(count);
         }
 
-        void MetaRunListener::preEnqueues(hipStream_t const& stream)
+        void MetaRunListener::preEnqueues()
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->preEnqueues(stream);
+                (*iter)->preEnqueues();
         }
 
         void MetaRunListener::postEnqueues(TimingEvents const& startEvents,
-                                           TimingEvents const& stopEvents,
-                                           hipStream_t const&  stream)
+                                           TimingEvents const& stopEvents)
         {
             for(auto iter = m_listeners.rbegin(); iter != m_listeners.rend(); iter++)
-                (*iter)->postEnqueues(startEvents, stopEvents, stream);
+                (*iter)->postEnqueues(startEvents, stopEvents);
         }
 
-        void MetaRunListener::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                               TimingEvents const&            startEvents,
-                                               TimingEvents const&            stopEvents)
+        void MetaRunListener::validateEnqueues(std::vector<size_t> const& slots,
+                                               TimingEvents const&        startEvents,
+                                               TimingEvents const&        stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateEnqueues(inputs, startEvents, stopEvents);
+                (*iter)->validateEnqueues(slots, startEvents, stopEvents);
         }
 
         void MetaRunListener::finalizeReport()

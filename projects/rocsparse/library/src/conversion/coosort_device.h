@@ -33,7 +33,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coosort_permute_kernel(J nnz, const J* in, const J* perm, J* out)
     {
-        J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= nnz)
         {

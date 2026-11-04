@@ -25,6 +25,10 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0_driver.hpp"
 
+// The sync_split_fusion algorithm is deprecated and no longer exercised by the
+// test suite; exclude its implementation from coverage reporting.
+// LCOV_EXCL_START
+
 template <>
 struct rocsparse::csritilu0_driver_t<deprecated_rocsparse_itilu0_alg_sync_split_fusion>
 {
@@ -194,3 +198,5 @@ INSTANTIATE(double, rocsparse_int);
 INSTANTIATE(rocsparse_int, rocsparse_int);
 
 #undef INSTANTIATE
+
+// LCOV_EXCL_STOP

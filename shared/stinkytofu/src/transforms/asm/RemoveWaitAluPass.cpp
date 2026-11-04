@@ -54,9 +54,6 @@ class RemoveWaitAluPassImpl : public Pass {
    public:
     static char ID;
 
-    explicit RemoveWaitAluPassImpl(std::vector<Function*> functions)
-        : functions(std::move(functions)) {}
-
     const char* getName() const override {
         return "RemoveWaitAluPass";
     }
@@ -70,16 +67,7 @@ class RemoveWaitAluPassImpl : public Pass {
         const GfxArchID arch = getGfxArchID(archTriple[0], archTriple[1], archTriple[2]);
         const uint16_t schedModeId = HwReg::schedModeId(arch);
         const HwReg::SubField depMode = HwReg::schedModeDepMode(arch);
-
-        // Whole-kernel: scrub the entry function and every callable function.
-        // Falls back to the single pipeline Function when no function list is given.
-        if (!functions.empty()) {
-            for (Function* f : functions) {
-                if (f) removeInFunction(*f, passCtx, schedModeId, depMode);
-            }
-        } else {
-            removeInFunction(func, passCtx, schedModeId, depMode);
-        }
+        removeInFunction(func, passCtx, schedModeId, depMode);
         return preserveCFGAnalyses();
     }
 
@@ -148,8 +136,6 @@ class RemoveWaitAluPassImpl : public Pass {
                              << " cleared_wait_alu=" << clearedWaitAlu
                              << " hold_cnt_survivors=" << holdCntSurvivors << "\n");
     }
-
-    std::vector<Function*> functions;
 };
 
 char RemoveWaitAluPassImpl::ID = 0;
@@ -157,7 +143,7 @@ char RemoveWaitAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createRemoveWaitAluPass(std::vector<Function*> functions) {
-    return std::make_unique<RemoveWaitAluPassImpl>(std::move(functions));
+std::unique_ptr<Pass> createRemoveWaitAluPass() {
+    return std::make_unique<RemoveWaitAluPassImpl>();
 }
 }  // namespace stinkytofu

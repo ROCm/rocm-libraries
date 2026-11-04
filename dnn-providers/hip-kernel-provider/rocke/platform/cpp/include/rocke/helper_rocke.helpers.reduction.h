@@ -126,7 +126,7 @@ int rocke_block_lds_reduce_pair(rocke_ir_builder_t* b,
 /* block_lds_reduce_with_wave_prologue(...) analogue: wave-XOR butterfly +
  * cross-warp LDS. Six (for wave_size=64) cross-lane shuffle stages with no LDS,
  * then one sync over a num_warps-slot scratch in ``lds_buf``. Returns NULL (and
- * sets sticky error) on non-f32 input. */
+ * sets sticky error) on input that is not f32 or f64. */
 rocke_value_t* rocke_block_lds_reduce_with_wave_prologue(rocke_ir_builder_t* b,
                                                          rocke_value_t* val,
                                                          rocke_value_t* lds_buf,

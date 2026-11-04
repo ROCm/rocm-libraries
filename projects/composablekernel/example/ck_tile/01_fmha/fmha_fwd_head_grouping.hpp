@@ -223,7 +223,15 @@ inline size_t get_default_llc_cache_bytes_for_arch(const std::string& arch)
         return 64ull * 1024ull * 1024ull;
     if(arch == "gfx1102")
         return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1103")
+        return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1150")
+        return 32ull * 1024ull * 1024ull;
     if(arch == "gfx1151")
+        return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1152")
+        return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1153")
         return 32ull * 1024ull * 1024ull;
     if(arch == "gfx1200")
         return 32ull * 1024ull * 1024ull;
@@ -359,7 +367,7 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
                            ck_tile::index_t nhead,
                            ck_tile::index_t nhead_k,
                            ck_tile::index_t group_size_q,
-                           bool use_blockscale_qscale,
+                           bool descale_varies_by_head,
                            RunKernelFn&& run_kernel_fn)
 {
     auto base_args                   = base_args_in;
@@ -395,7 +403,7 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
         args.rand_val_ptr = ptr_offset<RandValOutputDataType>(
             base_args.rand_val_ptr, head_start * base_args.nhead_stride_randval);
 
-        if(use_blockscale_qscale)
+        if(descale_varies_by_head)
         {
             args.q_descale_ptr = ptr_offset<float>(base_args.q_descale_ptr,
                                                    head_start * base_args.nhead_stride_q_descale);

@@ -10,6 +10,8 @@
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 
+using namespace hip_kernel_provider::core::utils;
+
 namespace hip_kernel_provider::batchnorm
 {
 

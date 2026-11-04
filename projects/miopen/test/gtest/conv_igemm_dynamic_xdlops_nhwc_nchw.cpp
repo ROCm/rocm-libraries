@@ -237,6 +237,8 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + "  --input  1 1 8 8 --weights 1 1 2 2 --pads_strides_dilations 0 0 1 1 2 2" + args_nhwc_wrw},
     {flags + "  --input  1 128 56 56 --weights 1 128 5 5 --pads_strides_dilations 0 0 2 2 1 1" + args_nhwc_wrw},
     {flags + "  --input  2 64 19 19 --weights 510 64 3 3 --pads_strides_dilations 1 1 1 1 1 1" + args_nhwc_wrw},
+    // tensor larger than 4GB
+    {flags + "  --input 2048  1 512 1024 --weights 1  1 1 1 --pads_strides_dilations 0 0 1 1 1 1" + args_nhwc_wrw},
     // ho=wo=1 stride=2
     {flags + "  --input  256 2048 2 2 --weights 1024  2048  1 1 --pads_strides_dilations 0 0 2 2 1 1" + args_nhwc_wrw},
 

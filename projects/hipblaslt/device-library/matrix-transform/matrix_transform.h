@@ -29,11 +29,7 @@
 #include <hip/hip_runtime.h>
 
 #if defined(__HIP_PLATFORM_AMD__)
-#if HIP_VERSION_MAJOR < 7
-#define HIPBLASLT_HIPVEC_ACCESS(x) x.data
-#else
 #define HIPBLASLT_HIPVEC_ACCESS(x) x
-#endif
 #endif
 
 #define TRANSFORM_FUNC_NAME_HELPER(                                           \

@@ -867,7 +867,7 @@ requires-dist = [
     { name = "cmake" },
     { name = "hip-python" },
     { name = "joblib", specifier = ">=1.4.0" },
-    { name = "msgpack" },
+    { name = "msgpack", specifier = ">=1.0" },
     { name = "nanobind" },
     { name = "numpy" },
     { name = "orjson" },
@@ -886,7 +886,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest", specifier = ">=5.4.1" },
     { name = "pytest-cov" },
-    { name = "pytest-xdist", specifier = ">=1.32.0" },
+    { name = "pytest-xdist", specifier = ">=3.2" },
     { name = "rocisa", editable = "rocisa" },
     { name = "syrupy" },
 ]

@@ -281,7 +281,11 @@ namespace rocalution
         tau2            = this->Norm_(*r0);
         double res_norm = std::abs(tau2);
 
-        this->iter_ctrl_.InitResidual(res_norm);
+        if(this->iter_ctrl_.InitResidual(res_norm) == false)
+        {
+            log_debug(this, "QMRCGStab::SolveNonPrecond_()", " #*# end");
+            return;
+        }
 
         // rho = (r0,r)
         rho = r0->Dot(*r);
@@ -509,7 +513,11 @@ namespace rocalution
         tau2            = this->Norm_(*r0);
         double res_norm = std::abs(tau2);
 
-        this->iter_ctrl_.InitResidual(res_norm);
+        if(this->iter_ctrl_.InitResidual(res_norm) == false)
+        {
+            log_debug(this, "QMRCGStab::SolvePrecond_()", " #*# end");
+            return;
+        }
 
         // rho = (r0,r)
         rho = r0->Dot(*r);

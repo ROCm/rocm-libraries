@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -94,7 +94,7 @@ protected:
 public:
     bool                CreateDeviceResources() override;
     std::vector<size_t> CollapsibleDims() override;
-    bool                UseOutputLengthForPadding() override
+    bool                OutputLengthMatchesOutStride() const override
     {
         // with embedded r2c, stockham nodes will change length, so the
         // output length is different from the input length.
@@ -181,6 +181,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
+    bool                CreateDeviceResources() override;
     std::vector<size_t> CollapsibleDims() override;
 };
 
@@ -218,7 +219,7 @@ public:
     {
         return true;
     }
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }

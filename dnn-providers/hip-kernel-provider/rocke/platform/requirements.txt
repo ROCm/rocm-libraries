@@ -8,8 +8,8 @@
 # ROCm is NOT a pip package and cannot be pinned here. It is a system dependency
 # (libamd_comgr, libamdhip64, hipcc/amdclang) that must be installed separately.
 #   Required:    ROCm 7.x with comgr + HIP discoverable by the dynamic linker.
-#   Recommended: ROCm 7.2 (its comgr emits the `llvm22` IR flavor; set
-#                ROCKE_LLVM_FLAVOR=llvm22 to match it, else llvm20 for 7.0/7.1).
+#   Recommended: ROCm 7.2. AUTO queries the loaded COMGR compiler to select
+#                the LLVM IR flavor; package-release metadata is not that evidence.
 # Torch is intentionally NOT listed here: the default PyPI wheel is CPU-only.
 # Install a ROCm torch wheel separately, matching the system ROCm version (see
 # README.md and AGENTS.md for commands), before running GPU/numeric lanes.
@@ -26,6 +26,8 @@ pybind11>=3.0
 # --- test / dev --------------------------------------------------------------
 pytest>=7.0
 pytest-subtests>=0.11
+# Independent FP4/FP6/FP8 reference types:
+ml_dtypes>=0.6.0
 
 # --- optional: kernel-selection heuristics training --------------------------
 # lightgbm>=4.0

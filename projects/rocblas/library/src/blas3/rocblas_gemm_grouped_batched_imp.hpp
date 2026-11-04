@@ -98,6 +98,9 @@ namespace
     {
         if(!handle)
             return rocblas_status_invalid_handle;
+
+        rocblas_internal_api_scope api_scope(handle, rocblas_gemm_grouped_batched_name<T>);
+
         RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle);
 
         std::vector<T> alpha_h, beta_h;
@@ -201,22 +204,22 @@ namespace
         }
 
         rocblas_status status
-            = rocblas_internal_gemm_grouped_batched_template<API_INT, T>(handle,
-                                                                         transa_array,
-                                                                         transb_array,
-                                                                         m_array,
-                                                                         n_array,
-                                                                         k_array,
-                                                                         alpha_host,
-                                                                         Aarray,
-                                                                         lda_array,
-                                                                         Barray,
-                                                                         ldb_array,
-                                                                         beta_host,
-                                                                         Carray,
-                                                                         ldc_array,
-                                                                         group_count,
-                                                                         group_size);
+            = ROCBLAS_API(rocblas_internal_gemm_grouped_batched_template)(handle,
+                                                                          transa_array,
+                                                                          transb_array,
+                                                                          m_array,
+                                                                          n_array,
+                                                                          k_array,
+                                                                          alpha_host,
+                                                                          Aarray,
+                                                                          lda_array,
+                                                                          Barray,
+                                                                          ldb_array,
+                                                                          beta_host,
+                                                                          Carray,
+                                                                          ldc_array,
+                                                                          group_count,
+                                                                          group_size);
 
         if(status != rocblas_status_success)
             return status;

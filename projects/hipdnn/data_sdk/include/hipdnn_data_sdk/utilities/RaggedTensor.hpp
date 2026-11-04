@@ -22,9 +22,12 @@ namespace hipdnn_data_sdk::utilities
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
-/// Sequence-axis index for the ragged-legal BSHD layout [B, S, H, D]: S is the
-/// outermost non-batch axis, so each batch occupies one contiguous run.
+/// Sequence-axis index for tensors whose dims are physically ordered [B, S, H, D].
 inline constexpr int BSHD_SEQ_AXIS = 1;
+
+/// Sequence-axis index for SDPA tensors, which keep logical dims [B, H, S, D] (cuDNN
+/// convention); ragged SDPA tensors carry the BSHD physical layout in their strides.
+inline constexpr int SDPA_SEQ_AXIS = 2;
 
 /**
  * @brief Shared, ragged-aware base for RaggedTensor<T> and ShallowRaggedTensor<T>.
@@ -46,16 +49,19 @@ public:
                      std::vector<int64_t> strides,
                      int seqAxis,
                      std::shared_ptr<ITensor> raggedOffset,
-                     std::optional<size_t> physicalElementCount)
+                     std::optional<size_t> physicalElementCount,
+                     int64_t raggedOffsetMultiplier = 1)
         : _paddedDims(std::move(paddedDims))
         , _strides(std::move(strides))
         , _seqAxis(seqAxis)
         , _raggedOffset(std::move(raggedOffset))
+        , _raggedOffsetMultiplier(raggedOffsetMultiplier)
     {
         // Structural checks first, so readOffset below only sees a supported element size and
         // _seqAxis is a valid index into _strides.
         validateRaggedStructure();
         _seqStride = _strides[static_cast<size_t>(_seqAxis)];
+        validateSequenceOutermostLayout();
 
         // Snapshot and validate the B+1 offset table. Reading the aux may trigger a device->host
         // sync if it lives in device memory.
@@ -115,8 +121,9 @@ public:
     }
 
 protected:
-    // Ragged addressing: base each batch at ragged_offset[b], then add the remaining
-    // indices against the padded strides. A bare index {b} bases at ragged_offset[b].
+    // Ragged addressing: base each batch at the element-unit ragged offset
+    // (stored_offset * multiplier), then add the remaining indices against the padded
+    // strides. A bare index {b} bases at the batch's element offset.
     int64_t getIndexImpl(const std::vector<int64_t>& indices) const override
     {
         if(indices.empty())
@@ -124,7 +131,7 @@ protected:
             return 0;
         }
 
-        const int64_t base = readOffset(static_cast<size_t>(indices[0]));
+        const int64_t base = readElementOffset(static_cast<size_t>(indices[0]));
         return base
                + std::inner_product(std::next(indices.begin()),
                                     indices.end(),
@@ -147,12 +154,24 @@ protected:
         }
     }
 
+    // ragged_offset[b] recovered to element units (stored_offset * multiplier), letting
+    // the aux be stored in coarser (e.g. token) units.
+    int64_t readElementOffset(size_t b) const
+    {
+        return readOffset(b) * _raggedOffsetMultiplier;
+    }
+
     // Constructor-time structural validation, shared by both concrete types (RFC 0014 §4.5.5).
     void validateRaggedStructure() const
     {
         if(_raggedOffset == nullptr)
         {
             throw std::invalid_argument("ragged_offset must not be null");
+        }
+        if(_raggedOffsetMultiplier < 1)
+        {
+            throw std::invalid_argument("ragged_offset_multiplier must be >= 1 (got "
+                                        + std::to_string(_raggedOffsetMultiplier) + ")");
         }
         if(_paddedDims.size() < 2)
         {
@@ -189,7 +208,52 @@ protected:
         }
     }
 
-    // Reads the B+1 offset table from the aux, each widened to int64_t.
+    // Each batch must occupy one contiguous run of whole sequence rows, so one row's footprint
+    // over the non-batch, non-sequence axes must fit inside the sequence stride. Size-1 axes add
+    // nothing to the footprint, which keeps H=1, D=1 and S_max=1 unambiguous.
+    void validateSequenceOutermostLayout() const
+    {
+        if(_seqStride <= 0)
+        {
+            throw std::invalid_argument("sequence-axis stride must be positive");
+        }
+
+        const auto seqAxisIdx = static_cast<size_t>(_seqAxis);
+        std::vector<int64_t> rowDims;
+        std::vector<int64_t> rowStrides;
+        for(size_t axis = 1; axis < _paddedDims.size(); ++axis)
+        {
+            if(axis == seqAxisIdx)
+            {
+                continue;
+            }
+            if(_strides[axis] < 0)
+            {
+                throw std::invalid_argument("ragged tensor strides must be non-negative");
+            }
+            rowDims.push_back(_paddedDims[axis]);
+            rowStrides.push_back(_strides[axis]);
+        }
+
+        // A zero-sized axis holds no elements, and the span formula would underflow on it.
+        if(std::find(rowDims.begin(), rowDims.end(), int64_t{0}) != rowDims.end())
+        {
+            return;
+        }
+
+        const size_t rowSpan = TensorBase<T>::calculateElementSpace(rowDims, rowStrides);
+        if(rowSpan > static_cast<size_t>(_seqStride))
+        {
+            throw std::invalid_argument(
+                "ragged tensor must be sequence-outermost within a batch: one sequence row spans "
+                + std::to_string(rowSpan) + " elements but strides()[seqAxis] is "
+                + std::to_string(_seqStride));
+        }
+    }
+
+    // Reads the B+1 offset table from the aux, each widened to int64_t. The single
+    // boundary where the multiplier is applied, so every downstream consumer operates on
+    // element units and the existing element-stride math needs no change.
     std::vector<int64_t> collectRowOffsets() const
     {
         const auto batchCount = static_cast<size_t>(_paddedDims[0]);
@@ -197,7 +261,7 @@ protected:
         offsets.reserve(batchCount + 1);
         for(size_t b = 0; b <= batchCount; ++b)
         {
-            offsets.push_back(readOffset(b));
+            offsets.push_back(readElementOffset(b));
         }
         return offsets;
     }
@@ -217,10 +281,6 @@ protected:
                                         + std::to_string(offsets.front()) + ")");
         }
 
-        if(_seqStride <= 0)
-        {
-            throw std::invalid_argument("sequence-axis stride must be positive");
-        }
         const int64_t sMax = _paddedDims[static_cast<size_t>(_seqAxis)];
 
         const int64_t batchCount = static_cast<int64_t>(offsets.size()) - 1;
@@ -252,9 +312,10 @@ protected:
     std::vector<int64_t> _strides;
     int _seqAxis;
     int64_t _seqStride{1};
-    size_t _iteratedElementCount{0}; ///< ragged_offset[B]
-    size_t _physicalElementCount{0}; ///< allocated buffer size (== ragged_offset[B])
+    size_t _iteratedElementCount{0}; ///< ragged_offset[B] in element units
+    size_t _physicalElementCount{0}; ///< allocated buffer size (== ragged_offset[B] elements)
     std::shared_ptr<ITensor> _raggedOffset; ///< non-null, fixed at construction, never reseated
+    int64_t _raggedOffsetMultiplier{1}; ///< stored_offset -> element_offset scale
 };
 
 /**
@@ -273,12 +334,14 @@ public:
                  std::vector<int64_t> strides,
                  int seqAxis,
                  std::shared_ptr<ITensor> raggedOffset,
-                 std::optional<size_t> physicalElementCount = std::nullopt)
+                 std::optional<size_t> physicalElementCount = std::nullopt,
+                 int64_t raggedOffsetMultiplier = 1)
         : RaggedTensorBase<T>(std::move(paddedDims),
                               std::move(strides),
                               seqAxis,
                               std::move(raggedOffset),
-                              physicalElementCount)
+                              physicalElementCount,
+                              raggedOffsetMultiplier)
     {
         _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(this->elementSpace());
     }

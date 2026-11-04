@@ -515,3 +515,93 @@ TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, PassesForFiniteValues)
 
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
+
+/* ======== Ragged comparison tests (TYPED_TEST across fp types) ======== */
+
+template <typename T>
+class CpuFpReferenceMiopenRmsValidationRagged : public ::testing::Test
+{
+};
+
+using RaggedRmsFpValidationTypes = ::testing::Types<float, half, bfloat16>;
+TYPED_TEST_SUITE(CpuFpReferenceMiopenRmsValidationRagged, RaggedRmsFpValidationTypes, );
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, PassesForIdenticalTensors)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, SkipsInBlockNaNReference)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+    reference.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 1, 1, 2, 1);
+    implementation.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, FailsForInBlockDifference)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+    implementation.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+// Batch 0 holds the only 8 compared elements, one of which differs by 1.0 from a 1.0
+// reference: the relative RMS error is 1 / (2 * sqrt(8)) ~= 0.177 over the compared
+// elements, but would be 1 / (2 * sqrt(20)) ~= 0.112 if the NaN-skipped batch 1 counted.
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, RmsCountsOnlyComparedElements)
+{
+    auto reference = createRaggedSdpaTensor<TypeParam>(1.0f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(1.0f);
+    iterateAlongDimensions(RAGGED_SDPA_DIMS, [&](const std::vector<int64_t>& indices) {
+        if(indices[0] == 1 && indices[2] < 3)
+        {
+            reference.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), indices);
+        }
+    });
+    implementation.setHostValue(TypeParam(2.0f), 0, 1, 1, 1);
+
+    EXPECT_FALSE(CpuFpReferenceMiopenRmsValidation<TypeParam>(TypeParam(0.15f))
+                     .allClose(reference, implementation));
+    EXPECT_TRUE(CpuFpReferenceMiopenRmsValidation<TypeParam>(TypeParam(0.2f))
+                    .allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, FailsWhenEveryReferenceValueIsNaN)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    auto reference = createRaggedSdpaTensor<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, FailsForMismatchedRaggedLayouts)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f, {0, 3, 5});
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, FailsForRaggedAgainstDense)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    auto ragged = createRaggedSdpaTensor<TypeParam>(0.5f);
+    Tensor<TypeParam> dense(RAGGED_SDPA_DIMS);
+    dense.fillTensorWithValue(0.5f);
+
+    EXPECT_FALSE(refValidation.allClose(ragged, dense));
+    EXPECT_FALSE(refValidation.allClose(dense, ragged));
+}

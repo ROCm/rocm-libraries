@@ -46,7 +46,7 @@ class TestVerifyDslDocsAttention(unittest.TestCase):
     def test_unified_attention_2d_build_and_lower(self) -> None:
         p = self._make_problem()
         ir = lower_kernel_to_llvm(
-            build_unified_attention_2d(UnifiedAttention2DSpec(problem=p))
+            build_unified_attention_2d(UnifiedAttention2DSpec(problem=p)), arch="gfx950"
         )
         self.assertIsInstance(ir, str)
         self.assertGreater(len(ir), 0)
@@ -54,7 +54,7 @@ class TestVerifyDslDocsAttention(unittest.TestCase):
     def test_unified_attention_3d_build_and_lower(self) -> None:
         p = self._make_problem()
         ir = lower_kernel_to_llvm(
-            build_unified_attention_3d(UnifiedAttention3DSpec(problem=p))
+            build_unified_attention_3d(UnifiedAttention3DSpec(problem=p)), arch="gfx950"
         )
         self.assertIsInstance(ir, str)
         self.assertGreater(len(ir), 0)
@@ -64,7 +64,8 @@ class TestVerifyDslDocsAttention(unittest.TestCase):
         ir = lower_kernel_to_llvm(
             build_unified_attention_reduce(
                 UnifiedAttentionReduceSpec(problem=p, num_segments=8)
-            )
+            ),
+            arch="gfx950",
         )
         self.assertIsInstance(ir, str)
         self.assertGreater(len(ir), 0)

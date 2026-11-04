@@ -43,7 +43,6 @@ target_include_directories(hipsolver-bench
 target_include_directories(hipsolver-bench
   SYSTEM PRIVATE
     $<BUILD_INTERFACE:${CBLAS_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
 )
 
 target_link_libraries(hipsolver-bench PRIVATE
@@ -65,7 +64,7 @@ endif()
 
 add_armor_flags(hipsolver-bench "${ARMOR_LEVEL}")
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   target_link_libraries(hipsolver-bench PRIVATE hip::host)
 
   if(CUSTOM_TARGET)
@@ -78,12 +77,11 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   endif()
 else()
   target_compile_definitions(hipsolver-bench PRIVATE __HIP_PLATFORM_NVIDIA__)
-
+  target_link_libraries(hipsolver-bench PRIVATE hip::host)
   target_include_directories(hipsolver-bench
     PRIVATE
       $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
   )
-
   target_link_libraries(hipsolver-bench PRIVATE ${CUDA_LIBRARIES} Threads::Threads)
 endif()
 
@@ -92,3 +90,8 @@ set_target_properties(hipsolver-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PRO
 rocm_install(TARGETS hipsolver-bench COMPONENT benchmarks)
 
 target_compile_definitions(hipsolver-bench PRIVATE HIPSOLVER_BENCH ROCM_USE_FLOAT16)
+
+# Mirror feature flags to test behaviour
+if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(hipsolver-bench PRIVATE HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()

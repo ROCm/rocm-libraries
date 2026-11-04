@@ -1,0 +1,9 @@
+{% extends "device_transform.h.jinja2" %}
+
+{% block config_constructor scoped -%}
+transform_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} }, {{ config.load_type }} }
+{%- endblock %}
+
+{%- block target_guard scoped %}
+    std::enable_if_t<std::is_same_v<Target, {{ mk_comp_target(target) }}>, {% block params_type -%}transform_config_params{% endblock -%}>
+{% endblock -%}

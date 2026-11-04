@@ -33,27 +33,30 @@ namespace rocsparse
 {
 
     template <int BLOCKSIZE, int WFSIZE, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void kernel_correction_no_norm(const J m_,
-                                   const I nnz_,
-                                   const I* __restrict__ ptr_begin_,
-                                   const I* __restrict__ ptr_end_,
-                                   const J* __restrict__ ind_,
-                                   const T* __restrict__ val_,
-                                   const rocsparse_index_base base_,
+    // Async (in-place) sweep: L/U/D factor arrays (lval_/uval_/dval_) are read by some
+    // threads while written by others within the same launch, so they must NOT be
+    // __restrict__ (clang lowers it to LLVM noalias, which excludes other-thread writes
+    // and would let the compiler serve stale cross-thread reads).
+    ROCSPARSE_KERNEL(BLOCKSIZE) void kernel_correction_no_norm(const J m_,
+                                                               const I nnz_,
+                                                               const I* __restrict__ ptr_begin_,
+                                                               const I* __restrict__ ptr_end_,
+                                                               const J* __restrict__ ind_,
+                                                               const T* __restrict__ val_,
+                                                               const rocsparse_index_base base_,
 
-                                   const I* __restrict__ lptr_begin_,
-                                   const I* __restrict__ lptr_end_,
-                                   const J* __restrict__ lind_,
-                                   T* __restrict__ lval_,
-                                   const rocsparse_index_base lbase_,
+                                                               const I* __restrict__ lptr_begin_,
+                                                               const I* __restrict__ lptr_end_,
+                                                               const J* __restrict__ lind_,
+                                                               T*                         lval_,
+                                                               const rocsparse_index_base lbase_,
 
-                                   const I* __restrict__ uptr_begin_,
-                                   const I* __restrict__ uptr_end_,
-                                   const J* __restrict__ uind_,
-                                   T* __restrict__ uval_,
-                                   const rocsparse_index_base ubase_,
-                                   T* __restrict__ dval_)
+                                                               const I* __restrict__ uptr_begin_,
+                                                               const I* __restrict__ uptr_end_,
+                                                               const J* __restrict__ uind_,
+                                                               T*                         uval_,
+                                                               const rocsparse_index_base ubase_,
+                                                               T*                         dval_)
 
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
@@ -237,29 +240,30 @@ namespace rocsparse
     }
 
     template <int BLOCKSIZE, int WFSIZE, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void kernel_correction(const J m_,
-                           const I nnz_,
-                           const I* __restrict__ ptr_begin_,
-                           const I* __restrict__ ptr_end_,
-                           const J* __restrict__ ind_,
-                           const T* __restrict__ val_,
-                           const rocsparse_index_base base_,
+    // Async (in-place) sweep: see note above kernel_correction_no_norm; lval_/uval_/dval_
+    // are exchanged across threads and therefore must not be __restrict__.
+    ROCSPARSE_KERNEL(BLOCKSIZE) void kernel_correction(const J m_,
+                                                       const I nnz_,
+                                                       const I* __restrict__ ptr_begin_,
+                                                       const I* __restrict__ ptr_end_,
+                                                       const J* __restrict__ ind_,
+                                                       const T* __restrict__ val_,
+                                                       const rocsparse_index_base base_,
 
-                           const I* __restrict__ lptr_begin_,
-                           const I* __restrict__ lptr_end_,
-                           const J* __restrict__ lind_,
-                           T* __restrict__ lval_,
-                           const rocsparse_index_base lbase_,
+                                                       const I* __restrict__ lptr_begin_,
+                                                       const I* __restrict__ lptr_end_,
+                                                       const J* __restrict__ lind_,
+                                                       T*                         lval_,
+                                                       const rocsparse_index_base lbase_,
 
-                           const I* __restrict__ uptr_begin_,
-                           const I* __restrict__ uptr_end_,
-                           const J* __restrict__ uind_,
-                           T* __restrict__ uval_,
-                           const rocsparse_index_base ubase_,
-                           T* __restrict__ dval_,
-                           floating_data_t<T>*       nrm_,
-                           const floating_data_t<T>* nrm0_)
+                                                       const I* __restrict__ uptr_begin_,
+                                                       const I* __restrict__ uptr_end_,
+                                                       const J* __restrict__ uind_,
+                                                       T*                         uval_,
+                                                       const rocsparse_index_base ubase_,
+                                                       T*                         dval_,
+                                                       floating_data_t<T>*        nrm_,
+                                                       const floating_data_t<T>*  nrm0_)
 
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
@@ -617,7 +621,7 @@ public:
                                     const I* __restrict__ lptr_begin_,
                                     const I* __restrict__ lptr_end_,
                                     const J* __restrict__ lind_,
-                                    T* __restrict__ lval_,
+                                    T*                   lval_,
                                     rocsparse_index_base lbase_,
                                     rocsparse_diag_type  udiag_type_,
                                     rocsparse_direction  udir_,
@@ -626,10 +630,10 @@ public:
                                     const I* __restrict__ uptr_end_,
                                     const J* __restrict__ uind_,
 
-                                    T* __restrict__ uval_,
+                                    T*                   uval_,
                                     rocsparse_index_base ubase_,
-                                    T* __restrict__ dval_,
-                                    size_t buffer_size_,
+                                    T*                   dval_,
+                                    size_t               buffer_size_,
                                     void* __restrict__ buffer_)
         {
             hipStream_t stream  = handle_->stream;

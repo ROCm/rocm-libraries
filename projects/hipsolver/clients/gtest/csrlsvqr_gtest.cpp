@@ -87,6 +87,15 @@ protected:
         arg.batch_count = 1;
         testing_csrlsvqr<HOST, T>(arg);
     }
+
+    template <typename T>
+    void run_stream_tests()
+    {
+        Arguments arg = csrlsvqr_setup_arguments(GetParam());
+        arg.set<rocblas_int>("stream", 1);
+        arg.batch_count = 1;
+        testing_csrlsvqr<HOST, T>(arg);
+    }
 };
 
 class CSRLSVQR : public CSRLSVQR_BASE<false>
@@ -117,6 +126,24 @@ TEST_P(CSRLSVQR, __float_complex)
 TEST_P(CSRLSVQR, __double_complex)
 {
     run_tests<rocblas_double_complex>();
+}
+
+// Run cross stream tests
+TEST_P(CSRLSVQR, stream__float)
+{
+    run_stream_tests<float>();
+}
+TEST_P(CSRLSVQR, stream__double)
+{
+    run_stream_tests<double>();
+}
+TEST_P(CSRLSVQR, stream__float_complex)
+{
+    run_stream_tests<rocblas_float_complex>();
+}
+TEST_P(CSRLSVQR, stream__double_complex)
+{
+    run_stream_tests<rocblas_double_complex>();
 }
 
 // TEST_P(CSRLSVQRHOST, __float)

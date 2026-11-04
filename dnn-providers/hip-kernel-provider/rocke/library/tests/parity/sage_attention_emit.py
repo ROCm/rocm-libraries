@@ -4,7 +4,7 @@
 #
 # tests/parity/sage_attention_emit.py -- Python reference emitter for the Sage
 # attention forward (instance_sage_attention) parity harness. Selects one of the
-# sampled configs by argv[1] (the config index 0..5), builds the
+# sampled configs by argv[1] (the config index 0..6), builds the
 # SageAttentionSpec, builds the kernel via build_sage_attention(arch='gfx950')
 # and prints lower_kernel_to_llvm(arch='gfx950') to stdout so it can be
 # byte-compared with the C emitter sage_attention_emit.c.
@@ -168,6 +168,34 @@ def _spec(idx: int) -> SageAttentionSpec:
             seqlen_q=32,
             seqlen_k=128,
         )
+    if idx == 6:
+        # Scale blocks of 48 positions: the position -> scale-block magic division is by 48.
+        # A power-of-two divisor has multiplier 1 and makes the magic sum just the dividend;
+        # this one makes the sum carry a real multiply-high term.
+        shape = FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=8)
+        common = FmhaCommonSpec(shape=shape, dtype="f16", mask_mode="none")
+        qs = QkScaleSpec(
+            layout="per_block",
+            scale_block=48,
+            stride_batch=128,
+            stride_head=8,
+            stride_block=1,
+        )
+        ks = QkScaleSpec(
+            layout="per_block",
+            scale_block=48,
+            stride_batch=128,
+            stride_head=8,
+            stride_block=1,
+        )
+        return SageAttentionSpec(
+            common=common,
+            quant_mode="fp16_bf16",
+            q_scale=qs,
+            k_scale=ks,
+            seqlen_q=96,
+            seqlen_k=144,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -175,7 +203,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_sage_attention,
-        usage="usage: sage_attention_emit.py <config_index 0..5> [mode]\n",
+        usage="usage: sage_attention_emit.py <config_index 0..6> [mode]\n",
     )
 
 

@@ -27,7 +27,7 @@ def _find_hipblaslt_root() -> Path:
 
 
 def _ensure_paths(root: Path, build_dir: Path, lib_logic_path: Path) -> None:
-    """Prepend sys.path entries so `import rocisa` and Tensile resolve.
+    """Prepend sys.path entries so `import rocisa` and tensilelite resolve.
 
     CMake places the nanobind module under build/tensilelite/rocisa/rocisa/
     (_rocisa*.so). The importable package root is build/tensilelite/rocisa.
@@ -115,16 +115,18 @@ def main() -> None:
     lib_logic_path, passthrough = _parse_argv(root)
     _ensure_paths(root, build_dir, lib_logic_path)
 
-    default_known_bugs = (
-        root / "tensilelite" / "Tensile" / "TensileLogic" / "known_bugs.yaml"
+    has_known_bugs_option = any(
+        arg in ("--known-bugs", "--use-bundled-known-bugs")
+        or arg.startswith("--known-bugs=")
+        for arg in passthrough
     )
-    if default_known_bugs.is_file() and "--known-bugs" not in passthrough:
-        passthrough = ["--known-bugs", str(default_known_bugs)] + passthrough
+    if not has_known_bugs_option:
+        passthrough = ["--use-bundled-known-bugs"] + passthrough
 
     # TensileLogic: LOGIC_PATH [options] --check-all
     sys.argv = ["TensileLogic", str(lib_logic_path.resolve())] + passthrough + ["--check-all"]
 
-    from Tensile.TensileLogic import main as tensile_logic_main
+    from tensilelite.TensileLogic import main as tensile_logic_main
     tensile_logic_main()
 
 

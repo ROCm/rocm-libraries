@@ -325,12 +325,6 @@ def _to_sgpr(arg):
     return arg
 
 
-def _to_vgpr(arg):
-    if isinstance(arg, (int, str)):
-        return vgpr(arg)
-    return arg
-
-
 def _get_vgpr(arg, idx):
     if isinstance(arg, int):
         return vgpr(arg + idx)
@@ -620,24 +614,16 @@ def scalarStaticDivideAndRemainder(qReg, rReg, dReg, divisor,
 
         shift = 33
         magic = ((1 << shift) // divisor) + 1
-        magicHi = magic >> 16
-        magicLo = magic & 0xFFFF
 
-        module.add(SMovB32(dst=tmpSgpr1, src=0,
-                           comment=f"STATIC_DIV: divisor={divisor}"))
-        module.add(SMulI32(dst=tmpSgpr, src0=magicHi, src1=dRegSgpr,
-                           comment="tmp1 = dividend * magic hi"))
-        module.add(SLShiftLeftB64(dst=tmp2Sgpr, shiftHex=16, src=tmp2Sgpr,
-                                  comment="left shift 16 bits"))
-        module.add(SMulI32(dst=qRegSgpr, src0=dRegSgpr, src1=magicLo,
-                           comment="tmp0 = dividend * magic lo"))
-        module.add(SAddU32(dst=tmpSgpr, src0=qRegSgpr, src1=tmpSgpr,
-                           comment="add lo"))
-        module.add(SAddCU32(dst=tmpSgpr1, src0=tmpSgpr1, src1=0,
-                            comment="add hi"))
+        # Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+        # product wraps once dividend * magic reaches 2^32.
+        module.add(SMulHIU32(dst=tmpSgpr1, src0=dRegSgpr, src1=magic,
+                             comment=f"STATIC_DIV: divisor={divisor}"))
+        module.add(SMulI32(dst=tmpSgpr, src0=dRegSgpr, src1=magic,
+                           comment="tmp = dividend * magic"))
         module.add(SLShiftRightB64(
             dst=tmp2Sgpr, shiftHex=shift, src=tmp2Sgpr,
-            comment="tmp1 = (dividend * magic) << shift"))
+            comment="tmp = (dividend * magic) >> shift"))
         module.add(SMovB32(dst=qRegSgpr, src=tmpSgpr, comment="quotient"))
 
         if doRemainder:
@@ -678,21 +664,13 @@ def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes=None):
 
         shift = 33
         magic = ((1 << shift) // divisor) + 1
-        magicHi = magic >> 16
-        magicLo = magic & 0xFFFF
 
-        module.add(SMovB32(dst=tmpSgpr1, src=0,
-                           comment=f"STATIC_DIV: divisor={divisor}"))
-        module.add(SMulI32(dst=tmpSgpr, src0=magicHi, src1=dRegSgpr,
-                           comment="tmp1 = dividend * magic hi"))
-        module.add(SLShiftLeftB64(dst=tmp2Sgpr, shiftHex=16, src=tmp2Sgpr,
-                                  comment="left shift 16 bits"))
-        module.add(SMulI32(dst=qRegSgpr, src0=dRegSgpr, src1=magicLo,
-                           comment="tmp0 = dividend * magic lo"))
-        module.add(SAddU32(dst=tmpSgpr, src0=qRegSgpr, src1=tmpSgpr,
-                           comment="add lo"))
-        module.add(SAddCU32(dst=tmpSgpr1, src0=tmpSgpr1, src1=0,
-                            comment="add hi"))
+        # Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+        # product wraps once dividend * magic reaches 2^32.
+        module.add(SMulHIU32(dst=tmpSgpr1, src0=dRegSgpr, src1=magic,
+                             comment=f"STATIC_DIV: divisor={divisor}"))
+        module.add(SMulI32(dst=tmpSgpr, src0=dRegSgpr, src1=magic,
+                           comment="tmp = dividend * magic"))
         module.add(SLShiftRightB64(dst=tmp2Sgpr, shiftHex=shift,
                                    src=tmp2Sgpr, comment="tmp0 = quotient"))
         module.add(SMulI32(dst=tmpSgpr1, src0=tmpSgpr, src1=divisor,
@@ -859,42 +837,47 @@ def scalarUInt32DivideAndRemainder(qReg, dReg, divReg, rReg, tmpVgprRes,
 
     pEXEC = EXEC()
 
-    module.add(VCvtU32toF32(dst=tmpVgpr, src=divRegSgpr, comment=dComment))
-    module.add(VRcpIFlagF32(dst=tmpVgpr, src=tmpVgpr, comment=dComment))
-    module.add(VCvtU32toF32(dst=tmpVgpr1, src=dRegSgpr, comment=dComment))
-    module.add(VMulF32(dst=tmpVgpr, src0=tmpVgpr, src1=tmpVgpr1,
-                       comment=dComment))
-    module.add(VCvtF32toU32(dst=tmpVgpr, src=tmpVgpr, comment=dComment))
-    module.add(VMulU32U24(dst=tmpVgpr1, src0=tmpVgpr, src1=divRegSgpr,
-                          comment=dComment))
-    module.add(VSubU32(dst=tmpVgpr1, src0=dRegSgpr, src1=tmpVgpr1,
-                       comment=dComment))
-    module.add(VCmpXEqU32(dst=pEXEC, src0=tmpVgpr1, src1=divRegSgpr,
-                          comment=dComment))
-    module.add(VAddU32(dst=tmpVgpr, src0=1, src1=tmpVgpr, comment=dComment))
-
-    if doRemainder:
-        module.add(VMovB32(dst=tmpVgpr1, src=0, comment=rComment))
-
     def _resetExec():
         if wavewidth == 64:
             module.add(SMovB64(dst=pEXEC, src=-1, comment="Reset exec"))
         else:
             module.add(SMovB32(dst=pEXEC, src=-1, comment="Reset exec"))
 
-    _resetExec()
-    module.add(VCmpXGtU32(dst=pEXEC, src0=tmpVgpr1, src1=divRegSgpr,
-                          comment="overflow happened in remainder"))
-    module.add(VSubU32(dst=tmpVgpr, src0=tmpVgpr, src1=1,
-                       comment="quotient - 1"))
+    # Exact for every 32-bit dividend and nonzero divisor (the LLVM AMDGPU
+    # udiv32 expansion). The 0x4f7ffffe scale (2^32 - 512) keeps the
+    # reciprocal estimate below 2^32 / divisor for a 1-ulp v_rcp_iflag_f32,
+    # which the Newton step and the two corrections below rely on. The scale
+    # move sits between v_rcp_iflag_f32 and its consumer because gfx942,
+    # gfx950 and gfx1250 need one wait state there.
+    module.add(VCvtU32toF32(dst=tmpVgpr, src=divRegSgpr, comment=dComment))
+    module.add(VRcpIFlagF32(dst=tmpVgpr, src=tmpVgpr, comment=dComment))
+    module.add(VMovB32(dst=tmpVgpr1, src="0x4f7ffffe", comment="2^32 - 512"))
+    module.add(VMulF32(dst=tmpVgpr, src0=tmpVgpr1, src1=tmpVgpr,
+                       comment="2^32 / divisor"))
+    module.add(VCvtF32toU32(dst=tmpVgpr, src=tmpVgpr, comment=dComment))
+    module.add(VMulLOU32(dst=tmpVgpr1, src0=tmpVgpr, src1=divRegSgpr,
+                         comment="refine 2^32 / divisor"))
+    module.add(VSubU32(dst=tmpVgpr1, src0=0, src1=tmpVgpr1,
+                       comment="refine 2^32 / divisor"))
+    module.add(VMulHIU32(dst=tmpVgpr1, src0=tmpVgpr, src1=tmpVgpr1,
+                         comment="refine 2^32 / divisor"))
+    module.add(VAddU32(dst=tmpVgpr, src0=tmpVgpr, src1=tmpVgpr1,
+                       comment="refine 2^32 / divisor"))
+    module.add(VMulHIU32(dst=tmpVgpr, src0=dRegSgpr, src1=tmpVgpr,
+                         comment=dComment))
+    module.add(VMulLOU32(dst=tmpVgpr1, src0=tmpVgpr, src1=divRegSgpr,
+                         comment=dComment))
+    module.add(VSubU32(dst=tmpVgpr1, src0=dRegSgpr, src1=tmpVgpr1,
+                       comment=rComment if doRemainder else dComment))
+    for _ in range(2):
+        module.add(VCmpXGeU32(dst=pEXEC, src0=tmpVgpr1, src1=divRegSgpr,
+                              comment="remainder >= divisor?"))
+        module.add(VAddU32(dst=tmpVgpr, src0=1, src1=tmpVgpr,
+                           comment="quotient + 1"))
+        module.add(VSubU32(dst=tmpVgpr1, src0=tmpVgpr1, src1=divRegSgpr,
+                           comment="remainder - divisor"))
+        _resetExec()
 
-    if doRemainder:
-        module.add(VMulU32U24(dst=tmpVgpr1, src0=tmpVgpr, src1=divRegSgpr,
-                              comment="re-calculate remainder"))
-        module.add(VSubU32(dst=tmpVgpr1, src0=dRegSgpr, src1=tmpVgpr1,
-                           comment="re-calculate remainder"))
-
-    _resetExec()
     module.add(VReadfirstlaneB32(dst=qRegSgpr, src=tmpVgpr,
                                  comment="quotient"))
 

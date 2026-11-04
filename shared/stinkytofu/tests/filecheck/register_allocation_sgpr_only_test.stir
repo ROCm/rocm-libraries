@@ -1,0 +1,47 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=s --RegisterAllocationPass=allocator=greedy,classes=s,apply --print-output
+#
+# Reallocating one register class and leaving the other exactly as written.
+#
+# Both scopes are narrowed to scalars: the lift turns only SGPRs into SSA values,
+# and the allocator is only allowed to move SGPRs. A VGPR operand therefore never
+# becomes a value at all, contributes no slot, and SSA destruction has nothing to
+# rewrite for it.
+#
+# The contrast that makes this a real test is v300 against s200. Both name a
+# register outside what an operand can encode, so both are unreachable hints that
+# first-fit would compact. The scalar one moves and the vector one does not, and
+# the only reason is that the vector class was left physical.
+#
+# s200 is *written* here, not read. A register a function only reads is a live-in:
+# its value arrives in that register before any instruction runs, so it is pinned
+# and an out-of-range one makes the function uncolourable rather than compactable.
+# Only a value the function defines can be relocated.
+#
+# CHECK-LABEL: @register_allocation_sgpr_only
+# CHECK: ^entry:
+#
+# Scalar tuples whose original registers are in range keep them, so a descriptor
+# is not disturbed just because its class is being allocated. greedy follows
+# hints, so nothing here asks a multi-SGPR operand to relocate.
+# CHECK-NEXT: "st.tensor_load_to_lds"(s[8:11], s[12:19])
+#
+# s200 cannot be encoded, so its hint is unreachable and it is packed down into
+# the addressable range. The operands it reads are live-ins and keep s20 and s21.
+# CHECK-NEXT: s0 = "st.s_add_u32"(s20, s21)
+#
+# Every vector operand survives verbatim, v300 included.
+# CHECK-NEXT: v[20:23] = "st.ds_load_b128"(v300)
+# CHECK-NEXT: v9 = "st.v_mov_b32"(s0)
+# CHECK-NEXT: "st.ds_store_b128"(v300, v[20:23])
+#
+# Applying the colouring clears the attached SSA, so nothing symbolic is left.
+# CHECK-NOT: %
+
+st.func @register_allocation_sgpr_only() {
+^entry:
+  "st.tensor_load_to_lds"(s[8:11], s[12:19])
+  s200 = "st.s_add_u32"(s20, s21)
+  v[20:23] = "st.ds_load_b128"(v300)
+  v9 = "st.v_mov_b32"(s200)
+  "st.ds_store_b128"(v300, v[20:23])
+}

@@ -169,6 +169,31 @@ rocblas_status rocblas_internal_gemm_64(rocblas_handle    handle,
                 }
             }
         }
+
+        if(status == rocblas_status_success
+           && (handle->layer_mode & rocblas_layer_mode_log_kernel_select))
+        {
+            rocblas_internal_log_kernel_select(handle,
+                                               rocblas_make_gemm_problem<BATCHED>(trans_a,
+                                                                                  trans_b,
+                                                                                  m_64,
+                                                                                  n_64,
+                                                                                  k_64,
+                                                                                  alpha,
+                                                                                  lda_64,
+                                                                                  stride_a,
+                                                                                  ldb_64,
+                                                                                  stride_b,
+                                                                                  beta,
+                                                                                  ldc_64,
+                                                                                  stride_c,
+                                                                                  batch_count_64),
+                                               "source",
+                                               k_64 == 0 || (alpha && *alpha == 0)
+                                                   ? "rocblas_gemm_scale_launcher_64"
+                                                   : "rocblas_gemm_source_solution_64",
+                                               "none");
+        }
     }
 
     return status;
@@ -337,31 +362,81 @@ INST_GEMM_BATCHED_TEMPLATE_64(rocblas_double_complex)
 
 #undef INST_GEMM_BATCHED_TEMPLATE_64
 
-#ifdef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE
-#error INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE already defined
+template <typename T>
+ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
+    rocblas_internal_gemm_grouped_batched_template_64(rocblas_handle           handle,
+                                                      const rocblas_operation* transa_array,
+                                                      const rocblas_operation* transb_array,
+                                                      const int64_t*           m_array,
+                                                      const int64_t*           n_array,
+                                                      const int64_t*           k_array,
+                                                      const T*                 alpha_array,
+                                                      const T* const*          Aarray,
+                                                      const int64_t*           lda_array,
+                                                      const T* const*          Barray,
+                                                      const int64_t*           ldb_array,
+                                                      const T*                 beta_array,
+                                                      T* const*                Carray,
+                                                      const int64_t*           ldc_array,
+                                                      int64_t                  group_count,
+                                                      const int64_t*           group_size)
+{
+    int64_t idx = 0;
+    for(rocblas_int g = 0; g < group_count; ++g)
+    {
+        rocblas_status status = (rocblas_internal_gemm_batched_template_64)(handle,
+                                                                            transa_array[g],
+                                                                            transb_array[g],
+                                                                            m_array[g],
+                                                                            n_array[g],
+                                                                            k_array[g],
+                                                                            alpha_array + g,
+                                                                            Aarray + idx,
+                                                                            0,
+                                                                            lda_array[g],
+                                                                            0,
+                                                                            Barray + idx,
+                                                                            0,
+                                                                            ldb_array[g],
+                                                                            0,
+                                                                            beta_array + g,
+                                                                            Carray + idx,
+                                                                            0,
+                                                                            ldc_array[g],
+                                                                            0,
+                                                                            group_size[g]);
+        if(status != rocblas_status_success)
+            return status;
+        idx += group_size[g];
+    }
+    return rocblas_status_success;
+}
+
+#ifdef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64
+#error INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64 already defined
 #endif
 
-#define INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(TI_, T_)       \
-    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status     \
-        rocblas_internal_gemm_grouped_batched_template<TI_, T_>( \
-            rocblas_handle           handle,                     \
-            const rocblas_operation* transa_array,               \
-            const rocblas_operation* transb_array,               \
-            const TI_*               m_array,                    \
-            const TI_*               n_array,                    \
-            const TI_*               k_array,                    \
-            const T_*                alpha_array,                \
-            const T_* const*         Aarray,                     \
-            const TI_*               lda_array,                  \
-            const T_* const*         Barray,                     \
-            const TI_*               ldb_array,                  \
-            const T_*                beta_array,                 \
-            T_* const*               Carray,                     \
-            const TI_*               ldc_array,                  \
-            TI_                      group_count,                \
-            const TI_*               group_size);
+#define INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64(T_)       \
+    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status   \
+        rocblas_internal_gemm_grouped_batched_template_64<T_>( \
+            rocblas_handle           handle,                   \
+            const rocblas_operation* transa_array,             \
+            const rocblas_operation* transb_array,             \
+            const int64_t*           m_array,                  \
+            const int64_t*           n_array,                  \
+            const int64_t*           k_array,                  \
+            const T_*                alpha_array,              \
+            const T_* const*         Aarray,                   \
+            const int64_t*           lda_array,                \
+            const T_* const*         Barray,                   \
+            const int64_t*           ldb_array,                \
+            const T_*                beta_array,               \
+            T_* const*               Carray,                   \
+            const int64_t*           ldc_array,                \
+            int64_t                  group_count,              \
+            const int64_t*           group_size);
 
-INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(int64_t, float)
-INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE(int64_t, double)
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64(float)
+INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64(double)
 
-#undef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE
+#undef INSTANTIATE_GEMM_GROUPED_BATCHED_TEMPLATE_64

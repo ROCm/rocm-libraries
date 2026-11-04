@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "1f6b9ff2-b690-5e8b-9491-f087eb1916f2",
+  "name": "example pointwise variant fields",
+  "fields": [
+    { "name": "block_size", "type": "int", "default_value": 256 },
+    { "name": "dtype", "type": "string" },
+    { "name": "operation", "type": "string" }
+  ]
+}

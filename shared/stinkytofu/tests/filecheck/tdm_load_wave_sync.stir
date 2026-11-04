@@ -1,0 +1,831 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --TDMLoadWaveSyncPass --print-output 2>&1
+#
+# TDMLoadWaveSyncPass (gfx1250). Runs AFTER tensorcnt insertion. The
+# s_wait_tensorcnt is the trigger; the DRAINED (urgent) token set S is read from
+# the wait's own MemTokenData, which StinkyWaitCntInsertionPass now attaches (the
+# exact union of the tokens of every tensor_load the wait drains). A wait with no
+# memtoken (e.g. a manually-inserted source fence) yields no drained set and inserts
+# nothing (Case 13). Backward from the wait, a tensor_load is URGENT iff any of its tokens is
+# in S, DEFERRABLE iff none is; the barrier (an s_barrier_signal -1 /
+# s_barrier_wait -1 pair, tagged with the union of the boundary tokens) is planted
+# before the earliest deferrable load. The scan follows CFG predecessors across
+# basic-block boundaries (via getPredecessors()), including the loop back-edge
+# exactly once, so it works for prologue prefetch AND steady-state in-loop splits.
+# A barrier already sitting at the split suppresses insertion (no redundant one).
+#
+# Cases: 1 flat insert, 2 flat idempotent, 3 cross-BB prologue->loop,
+#        4 steady-state in-loop (split across the loop back-edge),
+#        5 loop header with two live predecessors,
+#        6 barrier BEFORE the urgent group does not suppress insertion,
+#        7 two distinct waits (branch arms) on the same boundary dedup to one barrier,
+#        8 multiple distinct transitions in one block -> multiple barriers,
+#        9 overlapping multi-element token vectors are the same group (no barrier),
+#        10 negative: homogeneous loads, no transition, no barrier,
+#        11 diamond/merge: only the predecessor path that carries a transition
+#           anchors a barrier (per-path scan state),
+#        12 diamond/merge: different urgent tokens per path union at one anchor,
+#        13 wait with no MemTokenData inserts nothing (no drained set to act on),
+#        14 barrier between two deferrable loads must not suppress (reset path),
+#        15 multiple deferrable groups: one barrier at earliest, union of all tokens,
+#        16 unequal-depth merge, multi-token drained wait: per-path barrier tokens
+#           (urgent tokens on different paths -> different barrier memtoken per arm),
+#        17 back-edge over-reach: prologue-only urgent must NOT pair with loop-body
+#           deferrable across the top-of-loop wait (intervening same-S drain) -> no barrier,
+#        18 genuine in-loop split still inserts even when a prologue also issues the
+#           urgent token (closer in-loop boundary wins; the drain terminator does not
+#           over-suppress),
+#        19 separate intervening same-S drain (flat, no loop) stops the scan -> no barrier,
+#        20 diamond nested in a loop: per-arm barriers where the split straddles the
+#           back-edge and both arms merge at the shared loop header,
+#        21 multi-token drained S with a partial-drain wait on one merge arm: tok0
+#           drained on that arm is excluded from the join barrier,
+#        22 partial-drain arm leaves a DIFFERENT urgent token in flight: crossing a wait
+#           shrinks the urgent set by only its drained tokens, so a survivor still splits.
+
+# --- Case 1: insertion ---
+# Stream: A(tok0); B(tok0); C(tok1); s_wait_tensorcnt; ds_load(tok0 anchor). The
+# anchor drains tok0, so A,B are urgent and C(tok1) is deferrable; the barrier goes
+# before C: A; B; s_barrier_signal/wait(tok{0,1}); C.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_insert
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_insert() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 2: idempotency / no-redundant-barrier ---
+# Same stream, but a barrier (split pair) ALREADY sits between the urgent group and
+# C. The backward scan from the wait hits that barrier before the boundary, so the
+# pass inserts nothing.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_idempotent
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-NEXT: s_barrier_wait
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# No second barrier is inserted.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_idempotent() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 11, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 3: double prefetch, groups straddle a basic-block boundary ---
+# The urgent group A(tok0) is in ^entry; the deferrable group C(tok1), the wait, and
+# the tok0 anchor are in the successor ^loop (models PGR=2: the awaited urgent group
+# sits in a CFG predecessor). The backward scan follows the predecessor edge to
+# classify A(tok0) as urgent and plant the barrier before C in ^loop.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_xbb
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_xbb() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop
+^loop:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 4: steady-state IN-LOOP, groups split across the loop back-edge ---
+# Self-loop body ^loop. The s_wait_tensorcnt sits at the TOP; its tok0 anchor drains
+# the urgent A(tok0) group issued earlier in the body. Scanning backward from the
+# top wait reaches block start, follows the back-edge into the SAME block (previous
+# iteration), and scans it from the bottom: C(tok1) at the loop tail is deferrable,
+# A(tok0) above is urgent. Barrier planted before C at the loop tail. The visited
+# guard follows the back-edge exactly once.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_inloop
+# CHECK: s_wait_tensorcnt
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+
+st.func @tdm_load_wave_sync_inloop() {
+^entry:
+  Successors: ^loop
+^loop:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^loop
+}
+
+# --- Case 5: loop header with TWO live predecessors (preheader + back-edge) ---
+# ^header has a single top-of-loop wait (tok0 anchor) but two predecessors, each
+# carrying its own A(tok0)/C(tok1) split: the preheader prefetch and the loop tail.
+# Policy is "all paths": the wait plants a barrier at BOTH transitions — one in
+# ^preheader (before its C) and one at the loop tail in ^header (before its C).
+#
+# CHECK-LABEL: @tdm_load_wave_sync_twopred
+# ^preheader: barrier between its A and C.
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# ^header: loop-tail barrier between its A and C.
+# CHECK: s_wait_tensorcnt
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+
+st.func @tdm_load_wave_sync_twopred() {
+^preheader:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[40:43], s[44:51]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^header
+^header:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^header
+}
+
+# --- Case 6: a barrier BEFORE the urgent group does NOT suppress insertion ---
+# Stream: s_barrier(tok0); A(tok0); B(tok1); s_wait_tensorcnt; ds_load(tok0 anchor).
+# The pre-existing barrier sits ABOVE the urgent group A, outside the A->B split.
+# Backward from the wait: B(tok1) is deferrable, A(tok0) is urgent — the boundary is
+# between them; the earlier barrier is never inside the gap, so barrierInGap stays
+# false and a NEW barrier (union tok{0,1}) is planted before B.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_barrier_before_urgent
+# The pre-existing barrier above the urgent group (tokens = [0]).
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# Newly inserted barrier at the A->B split (union tokens).
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_barrier_before_urgent() {
+^entry:
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 11, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 7: two DISTINCT waits resolving to the SAME boundary dedup to one barrier ---
+# Two straight-line waits for the same drained set can't coexist (redundant-wait
+# elision), so this needs branches: ^entry issues A(tok0); C(tok1), then forks. Each
+# arm has its OWN s_wait_tensorcnt(drains tok0) + ds_load(tok0) consumer — they live
+# on mutually-exclusive paths, so neither is a redundant no-op. Both waits scan back
+# through ^entry to the same A->C boundary and record the SAME anchor (C), so the
+# per-anchor merge emits exactly ONE barrier, in ^entry before C (union tok{0,1}).
+#
+# CHECK-LABEL: @tdm_load_wave_sync_dedup_two_waits
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# Exactly one barrier despite two waits (one per arm) on the same boundary.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_dedup_two_waits() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^join:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+# --- Case 8: multiple DISTINCT transitions in one block -> multiple barriers ---
+# Stream: A(tok0); B(tok1); wait1; ds_load(tok0); C(tok2); wait2; ds_load(tok1).
+# wait1 drains tok0: A urgent, B(tok1) deferrable -> barrier {0,1} before B. wait2
+# drains tok1: B urgent, C(tok2) deferrable -> barrier {1,2} before C. Two
+# independent boundaries, two barriers.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_multi_split
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_multi_split() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [1] } }
+  v[2:3] = "st.ds_load_b64"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+}
+
+# --- Case 9: multi-element token vectors that OVERLAP are the same group ---
+# Stream: A(tokens=[1,2]); B(tokens=[2,3]); wait; ds_load(tokens=[1,2] anchor). The
+# anchor drains {1,2}. Classification is ANY-OVERLAP: a load is urgent iff any of
+# its tokens is in the drained set. A shares {1,2} and B shares token 2, so BOTH are
+# urgent — they overlap, i.e. the same wait group — so there is no deferrable group
+# and NO barrier is inserted. Verifies overlapping multi-token loads are not split.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_multitoken
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1,2]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [2,3]
+# CHECK-NOT: s_barrier_signal
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_multitoken() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1,2] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2,3] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [1,2] } }
+  v[0:3] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1,2] } }
+}
+
+# --- Case 10: negative — a single homogeneous group gets NO barrier ---
+# Stream: A(tok0); B(tok0); wait; ds_load(tok0 anchor). The anchor drains tok0, so
+# both loads are urgent — no deferrable load anywhere, so no boundary and nothing is
+# inserted. Guards against spuriously splitting a group that was never split.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_no_split
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK-NOT: s_barrier_signal
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_no_split() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 0 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 11: diamond/merge — only the transition-carrying path anchors ---
+# ^entry forks to ^left (A tok0) and ^right (B tok1); both merge into ^join, which
+# holds the deferrable C(tok1), the wait, and a tok0 anchor. The scan forks a
+# private ScanState per predecessor:
+#   - ^left: A(tok0) is urgent (in drained set {0}) -> boundary, barrier before C.
+#   - ^right: B(tok1) not in {0} -> deferrable, extends the group, then ^entry with
+#     no further load -> no urgent load, no barrier on this path.
+# So exactly one barrier in ^join, and the two paths never contaminate each other.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_diamond
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+# Exactly one barrier across the whole diamond.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_diamond() {
+^entry:
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 12: diamond, DIFFERENT urgent tokens per path merge at one anchor ---
+# ^entry forks to ^left (A tok0) and ^right (B tok1); both merge into ^join, which
+# holds the deferrable C(tok2), the wait, and an anchor draining {0,1}. Both scan
+# paths resolve to the SAME anchor (C in ^join) with different urgent tokens:
+#   - ^left: A(tok0) urgent -> records anchor C with union {0,2}.
+#   - ^right: B(tok1) urgent -> records the same anchor C with union {1,2}.
+# One physical barrier at C, so the entries are UNIONed (not first-wins) -> {0,1,2}.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_diamond_union
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+# Exactly one barrier (the two same-anchor entries merged, not duplicated).
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_diamond_union() {
+^entry:
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0,1] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0,1] } }
+}
+
+# --- Case 13: wait with NO MemTokenData inserts nothing (no drained set to act on) ---
+# The drained set S comes ONLY from the wait's own MemTokenData. A wait without one —
+# e.g. a manually-inserted source-template fence — yields S = {} and the pass inserts
+# no barrier, rather than guessing S from a nearby consumer (which would misclassify).
+# The CFG here is deliberately a shape that WOULD produce a barrier if S were {0}: an
+# urgent U0(tok0) in ^entry forks to ^left (empty) and ^right (deferrable Cr tok1),
+# merging into ^join whose wait has no memtoken. With no S, no boundary is found and
+# nothing is inserted — the reverse of the memtoken-driven cases above.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_no_memtoken_wait
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+# No barrier: the wait carries no drained set.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_no_memtoken_wait() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 14: barrier BETWEEN two deferrable loads must NOT suppress (reset path) ---
+# Stream: A(tok0); B(tok1); barrier(tok1); C(tok1); wait(S={0}); ds_load(tok0).
+# The deferrable group is {B, C} (both tok1); the pre-existing barrier sits between
+# two loads of that SAME deferrable group, not at the urgent->deferrable split.
+# Backward from the wait: C deferrable, then the barrier (flags a possible existing
+# split), then B — same token as C, so it extends the deferrable group and clears
+# that flag (the barrier was intra-group, not at the split). A(tok0) is the urgent
+# boundary, so a NEW barrier (union tok{0,1}) is planted before B; the old
+# intra-group barrier survives. Without the flag reset, the needed barrier would be
+# wrongly suppressed — this case guards that behavior.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_gap_reset
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# Newly inserted barrier at the real A->B split.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# The pre-existing intra-group barrier (tok1) survives between B and C.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_gap_reset() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 11, mod.memtoken = { tokens = [1] } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 15: multiple deferrable groups before the urgent load ---
+# Stream: A(tok0); B(tok1); C(tok2); D(tok3); wait(S={0}); ds_load(tok0). Only A is
+# urgent; B, C, D are three distinct deferrable groups. The backward scan pushes
+# deferFirst back across D, C, B (accumulating deferSeen = {1,2,3}) and stops at the
+# A->B boundary. Exactly ONE barrier is planted before the EARLIEST deferrable load
+# B (not D), tagged with the union [0,1,2,3]. Guards deferFirst tracking earliest
+# (not latest) and deferSeen accumulating every deferrable token.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_multi_defer
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1,2,3]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1,2,3]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [3]
+# CHECK: s_wait_tensorcnt
+# Exactly one barrier despite three deferrable groups.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_multi_defer() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[20:23], s[24:31]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[32:35], s[36:43]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [3] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 3 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 16: merge with UNEQUAL-depth branches; one merged join wait ---
+# Shared urgent A(tok0) in ^entry; the block forks. ^left issues ONE deferrable load
+# (tok2); ^right issues TWO (tok1, tok2) — unequal per-pred FIFO depth. ^join holds a
+# single merged s_wait_tensorcnt draining S={0,1}: the two urgent tokens live on
+# DIFFERENT paths — tok0 in ^entry, tok1 in ^right. The pass forks a per-path scan
+# from that one wait:
+#   - ^left: only tok2 (∉ S) is deferrable; scanning back crosses to ^entry's tok0
+#     (∈ S, urgent) -> barrier [0,2] before ^left's tok2.
+#   - ^right: tok2 (∉ S) deferrable, but the immediately-preceding tok1 IS in S
+#     (urgent), so the boundary is inside ^right -> barrier [1,2] before tok2 (the
+#     shared ^entry ancestor is never reached on this path).
+# Two distinct anchors -> two barriers, each token-exact to its own path, from one
+# multi-token drained wait.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_merge_unequal
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# ^left arm: urgent tok0 is in ^entry; barrier [0,2] before ^left's deferrable tok2.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# ^right arm: urgent tok1 sits just before the deferrable tok2; barrier [1,2] between.
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_merge_unequal() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[32:35], s[36:43]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  Successors: ^join
+^join:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0, 1] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 17: back-edge over-reach must NOT pair prologue-urgent with loop-body-deferrable ---
+# Models the real double-prefetch shape. ^prologue issues the urgent U(tok0) group.
+# ^loop's TOP wait drains S={0}; the loop body issues a deferrable C(tok1) AFTER the
+# wait, then back-edges. Backward from the top wait, the scan crosses the back-edge and
+# sees C(tok1) below the wait (deferrable), then keeps going up and would reach the
+# prologue U(tok0) (urgent) — pairing them across the wait. But in FORWARD order every
+# path from U to C passes THROUGH this same wait, which drains S={0}: U is gone from the
+# FIFO before C issues, so U and C are never co-resident and NO barrier is needed. The
+# scan must stop when it re-reaches a wait draining S (here the top wait itself via the
+# back-edge). Regression guard: without the drain-terminator the pass inserts a spurious
+# per-iteration barrier here.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_backedge_overreach
+# CHECK: s_wait_tensorcnt
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# No barrier anywhere: the only urgent group is prologue-only, separated from the
+# loop-body deferrable by the draining wait itself.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_backedge_overreach() {
+^prologue:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop
+^loop:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 0 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^loop
+}
+
+# --- Case 18: a genuine in-loop split still inserts, even with a prologue urgent load ---
+# Like Case 17 but the loop body ALSO issues the urgent A(tok0) below the deferrable
+# C(tok1), so there is a real steady-state boundary A->C reached WITHOUT crossing the
+# wait (it is below the wait, on the back-edge, above C). The drain-terminator stops the
+# scan only when it re-reaches a wait draining S; here the urgent A is found first, so
+# the barrier is still planted before C. Guards that the fix does not over-suppress the
+# legitimate Case-4-style in-loop split.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_inloop_with_prologue
+# CHECK: s_wait_tensorcnt
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+
+st.func @tdm_load_wave_sync_inloop_with_prologue() {
+^prologue:
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop
+^loop:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^loop
+}
+
+# --- Case 19: a SEPARATE intervening wait (not the trigger) that drains S stops the scan ---
+# Same U->D->wait ordering as Case 17 but FLAT (no loop/back-edge), so the suppression
+# cannot be attributed to CFG shape — only to the intervening drain. Stream:
+#   U(tok0); wait S={0} [intervening drain]; D(tok1); wait S={0} [trigger]; ds_load(tok0)
+# The trigger drains S={0}. Scanning backward from it: D(tok1) is deferrable, then it
+# reaches the INTERVENING wait, which also drains {0} (overlaps S). In forward order U is
+# drained by that intervening wait before D issues, so U and D are never co-resident and
+# NO barrier is needed. The scan must stop at the intervening same-S drain. Without the
+# drain-terminator the scan skips that wait, reaches U(tok0), and inserts a spurious
+# barrier before D. (The intervening wait itself, scanned as a trigger, finds U urgent
+# immediately above with no deferrable between -> it inserts nothing either.)
+#
+# CHECK-LABEL: @tdm_load_wave_sync_intervening_drain
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_intervening_drain() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 0 }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Case 20: diamond nested inside a loop; split straddles the back-edge ---
+# ^header holds the top-of-loop wait (S={0}) and issues the urgent A(tok0); it forks
+# to ^left (deferrable D1 tok1) and ^right (deferrable D2 tok2), which reconverge at
+# ^latch and back-edge to ^header. In steady state the wait drains A(tok0) issued in
+# the PREVIOUS iteration (FIFO {A, D}, tlcnt=1 keeps the newest deferrable, drains A),
+# so tlcnt=1 with drained set [0] is consistent. Scanning backward from the wait
+# crosses ^latch into BOTH arms: each arm's deferrable load is an anchor, and both arms
+# then reach the SHARED predecessor ^header where A(tok0) is urgent -> boundary. Two
+# distinct anchors -> two token-exact per-arm barriers ([0,1] before D1, [0,2] before
+# D2), reached across the loop back-edge through the shared header. Exercises the
+# frontier merge at a shared predecessor combined with back-edge traversal.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_diamond_in_loop
+# CHECK: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# ^left arm: barrier [0,1] before its deferrable tok1.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,1]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# ^right arm: barrier [0,2] before its deferrable tok2.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+
+st.func @tdm_load_wave_sync_diamond_in_loop() {
+^preheader:
+  Successors: ^header
+^header:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^latch
+^right:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  Successors: ^latch
+^latch:
+  SCC1 = "st.s_cmp_eq_u32"(s61, 0x1)
+  "st.s_cbranch_scc1"("header", SCC1)
+  Successors: ^header, ^exit
+^exit:
+}
+
+# --- Case 21: multi-token drained S with a partial-drain wait on one merge arm ---
+# ^entry issues urgent A(tok0), then forks. ^left holds a wait that drains only [0];
+# ^right issues B(tok1). They merge into ^join which issues deferrable C(tok2) and the
+# trigger wait, whose drained S = [0,1] (union across arms). Scanning back from the
+# trigger with workingS = {0,1}:
+#   - ^right arm: C(tok2) deferrable, then B(tok1) urgent -> boundary, contributes {1}.
+#   - ^left arm: C(tok2) deferrable, then the wait draining [0] shrinks workingS to {1};
+#     no tok1 load exists on this arm, so it reaches the top with no urgent found and
+#     contributes nothing. A(tok0) is drained on this path, so it is NOT urgent here.
+# One barrier before C tagged [1,2] (not [0,1,2]): tok0 is excluded because it was
+# drained on the only arm that reaches it.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_merge_partial_drain
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+# Exactly one barrier; tok0 is not pulled in from the drained ^left path.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_merge_partial_drain() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 0 }, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0,1] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0,1] } }
+}
+
+# --- Case 22: partial-drain arm leaves a DIFFERENT urgent token in flight ---
+# Like Case 21 but ^entry issues TWO urgent loads, A(tok0) then E(tok3); the trigger's
+# drained S = [0,1,3]. On the ^left arm the wait drains only tok0 (tlcnt=1 keeps the
+# newest, E), so after crossing it the still-urgent set shrinks {0,1,3} -> {1,3}: A is
+# gone but E(tok3) is STILL in flight and co-resident with the deferrable C(tok2). So:
+#   - ^right arm: C(tok2) deferrable, then B(tok1) urgent -> contributes {1}.
+#   - ^left arm: C(tok2) deferrable, cross the wait (drop tok0), reach E(tok3) which is
+#     still urgent (3 in workingS) -> contributes {3}. tok0 is NOT pulled in (drained).
+# Merged join barrier before C = [1,2,3] (NOT [0,1,2,3]: tok0 was drained on ^left; and
+# NOT [1,2]: tok3 stays urgent there). A separate barrier [0,3] is planted by the ^left
+# wait's own trigger, before E. Guards the shrinking-workingS rule: crossing a wait
+# removes only ITS drained tokens, leaving other in-flight urgent tokens live.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_merge_partial_drain_survivor
+# ^left wait's own barrier, before E(tok3).
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,3]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,3]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [3]
+# Join barrier before the deferrable C(tok2): [1,2,3], tok0 excluded, tok3 kept.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1,2,3]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1,2,3]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_merge_partial_drain_survivor() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[32:35], s[36:43]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [3] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0,1,3] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0,1,3] } }
+}

@@ -53,13 +53,6 @@ bool Op1dTensorGeneric::IsApplicable([[maybe_unused]] const ExecutionContext& co
     return false;
 }
 
-std::size_t Op1dTensorGeneric::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution
 Op1dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
                                const miopen::tensorOp::ProblemDescription& problem) const

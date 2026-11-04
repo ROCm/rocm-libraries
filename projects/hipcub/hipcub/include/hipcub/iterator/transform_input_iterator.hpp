@@ -30,6 +30,8 @@
 #ifndef HIPCUB_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 #define HIPCUB_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/iterator/transform_input_iterator.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

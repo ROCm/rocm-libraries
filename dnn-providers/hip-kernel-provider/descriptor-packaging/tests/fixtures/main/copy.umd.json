@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-copy",
+  "name": "Copy matcher",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.copy.match"
+}

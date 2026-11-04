@@ -1,0 +1,59 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S01 graFinalOffsetsSingleLoop: DTL + UseInstOffsetForGRO scalar arm.
+#
+# Target: Tensile/KernelWriterAssembly.py graFinalOffsetsSingleLoop
+#   scalar arm computeScalarGroImpl (needs _UseSgprForGRO):
+#     4444 : if DirectToLds%tc and UseInstOffsetForGRO
+#     4457 : ldsInc = (ldsInc*graIdx) % buff_load_inst_offset_max
+#
+# Mechanism: DirectToLdsA=1 makes UseInstOffsetForGRO auto-derive to 1
+# (Solution.py). With UseSgprForGRO=1 the SCALAR arm computeScalarGroImpl
+# (4444/4457) is taken. LdsBlockSizePerPadA is set to exercise the pad math
+# feeding the ldsInc modulo above 4457.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - UseInstOffsetForGRO: [1]
+        - UseSgprForGRO: [1]
+        - GlobalReadVectorWidthA: [2]
+        - GlobalReadVectorWidthB: [2]
+        - LocalReadVectorWidth: [-1]
+        - LdsBlockSizePerPadA: [128]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

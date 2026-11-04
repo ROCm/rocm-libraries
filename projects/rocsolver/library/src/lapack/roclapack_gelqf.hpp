@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     November 2019
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -97,17 +97,17 @@ void rocsolver_gelqf_getMemorySize(const rocblas_int m,
     }
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename U, typename I = rocblas_int>
 rocblas_status rocsolver_gelqf_template(rocblas_handle handle,
-                                        const rocblas_int m,
-                                        const rocblas_int n,
+                                        const I m,
+                                        const I n,
                                         U A,
-                                        const rocblas_int shiftA,
-                                        const rocblas_int lda,
+                                        const rocblas_stride shiftA,
+                                        const I lda,
                                         const rocblas_stride strideA,
                                         T* ipiv,
                                         const rocblas_stride strideP,
-                                        const rocblas_int batch_count,
+                                        const I batch_count,
                                         T* scalars,
                                         void* work_workArr,
                                         T* Abyx_norms_trfact,
@@ -130,11 +130,11 @@ rocblas_status rocsolver_gelqf_template(rocblas_handle handle,
                                            batch_count, scalars, work_workArr, Abyx_norms_trfact,
                                            diag_tmptr);
 
-    rocblas_int dim = std::min(m, n); // total number of pivots
-    rocblas_int jb, j = 0;
+    I dim = std::min(m, n); // total number of pivots
+    I jb, j = 0;
 
-    rocblas_int nb = GExQF_BLOCKSIZE;
-    rocblas_int ldw = GExQF_BLOCKSIZE;
+    I nb = GExQF_BLOCKSIZE;
+    I ldw = GExQF_BLOCKSIZE;
     rocblas_stride strideW = rocblas_stride(ldw) * ldw;
 
     while(j < dim - GExQF_GExQ2_SWITCHSIZE)
@@ -149,10 +149,10 @@ rocblas_status rocsolver_gelqf_template(rocblas_handle handle,
         if(j + jb < m)
         {
             // compute block reflector
-            rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_row_wise, n - j,
-                                        jb, A, shiftA + idx2D(j, j, lda), lda, strideA, (ipiv + j),
-                                        strideP, Abyx_norms_trfact, ldw, strideW, batch_count,
-                                        scalars, (T*)work_workArr, workArr);
+            rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_row_wise,
+                                        (n - j), jb, A, shiftA + idx2D(j, j, lda), lda, strideA,
+                                        (ipiv + j), strideP, Abyx_norms_trfact, ldw, strideW,
+                                        batch_count, scalars, (T*)work_workArr, workArr);
 
             // apply the block reflector
             rocsolver_larfb_template<BATCHED, STRIDED, T>(

@@ -59,6 +59,7 @@ RppStatus hip_exec_audio_tensor_add_tensor(Rpp32f* srcPtr1, Rpp32f* srcPtr2, Rpp
                        dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
                        handle.GetStream(), srcPtr1, srcDescPtr->strides.nStride, dstPtr,
                        dstDescPtr->strides.nStride, srcLengthTensor, srcPtr2);
+    HIP_CHECK_LAUNCH_RETURN();
 
     return RPP_SUCCESS;
 }

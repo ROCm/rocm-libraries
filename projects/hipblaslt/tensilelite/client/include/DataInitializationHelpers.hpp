@@ -78,6 +78,100 @@ namespace TensileLite
                 }
             }
             // ----------------------------------------------------------------
+            //  downsampleMXScaleFreeDim
+            //
+            // A 2D MX scaling tile shares one scale across mxBlockFree free-dim
+            // elements, but DGen::ScaleBlockLayout only blocks one axis and always
+            // emits one scale per free element. Collapse those groups here.
+            //
+            // The representative is the group maximum: the data bytes were
+            // quantized against the scales being dropped, so a max can only shrink
+            // a product, never overflow it to inf. Byte-wise max is exact for E8
+            // (UE8M0, byte == unsigned exponent); other encodings take the first
+            // element. Reference and kernel both read what this writes, so they
+            // agree either way -- only value conditioning is lost, not consistency.
+            // ----------------------------------------------------------------
+            inline void downsampleMXScaleFreeDim(uint8_t*       dst,
+                                                 uint8_t const* src,
+                                                 size_t         compactFreeDim,
+                                                 size_t         kBlocks,
+                                                 size_t         mxBlockFree,
+                                                 size_t         elemBytes,
+                                                 bool           kFast,
+                                                 bool           unsignedExponentScale)
+            {
+                if(mxBlockFree <= 1 || compactFreeDim == 0 || kBlocks == 0)
+                    return;
+
+                size_t const tiledFreeDim = (compactFreeDim + mxBlockFree - 1) / mxBlockFree;
+
+                // kFast (bound dim at index 0 -> TN A / NT B) lays the buffer out as
+                // [free][kBlock], so a free step skips a whole row of K-blocks.
+                // Otherwise K-blocks are the slow axis.
+                size_t const srcFreeStride = kFast ? kBlocks : 1;
+                size_t const srcKStride    = kFast ? 1 : compactFreeDim;
+                size_t const dstFreeStride = kFast ? kBlocks : 1;
+                size_t const dstKStride    = kFast ? 1 : tiledFreeDim;
+
+                bool const useMax = unsignedExponentScale && elemBytes == 1;
+
+                for(size_t g = 0; g < tiledFreeDim; g++)
+                {
+                    size_t const fBegin = g * mxBlockFree;
+                    size_t const fEnd   = std::min(fBegin + mxBlockFree, compactFreeDim);
+                    for(size_t kb = 0; kb < kBlocks; kb++)
+                    {
+                        uint8_t const* best
+                            = src + (fBegin * srcFreeStride + kb * srcKStride) * elemBytes;
+                        if(useMax)
+                        {
+                            for(size_t f = fBegin + 1; f < fEnd; f++)
+                            {
+                                uint8_t const* cand
+                                    = src + (f * srcFreeStride + kb * srcKStride) * elemBytes;
+                                if(*cand > *best)
+                                    best = cand;
+                            }
+                        }
+                        std::memcpy(dst + (g * dstFreeStride + kb * dstKStride) * elemBytes,
+                                    best,
+                                    elemBytes);
+                    }
+                }
+            }
+            // ----------------------------------------------------------------
+            //  varyMXScaleFreeTiles
+            //
+            // Random-like data with a mirrored scale init quantizes every block
+            // against the same exponent, so after downsampleMXScaleFreeDim every
+            // 2D tile holds 0x7F and a kernel that reads the wrong scale row still
+            // validates. Offset each E8 by a small exponent (-2..2) that differs
+            // between neighbouring free tiles and K-blocks. The data bytes are
+            // untouched; kernel and reference read the same scales, so products
+            // only move by a power of two. 0x00 / 0xFF (zero / NaN) are kept.
+            // Layout matches downsampleMXScaleFreeDim's dst (compact K-blocks).
+            // ----------------------------------------------------------------
+            inline void varyMXScaleFreeTiles(uint8_t* scale,
+                                             size_t   tiledFreeDim,
+                                             size_t   kBlocks,
+                                             bool     kFast)
+            {
+                size_t const freeStride = kFast ? kBlocks : 1;
+                size_t const kStride    = kFast ? 1 : tiledFreeDim;
+                for(size_t g = 0; g < tiledFreeDim; g++)
+                {
+                    for(size_t kb = 0; kb < kBlocks; kb++)
+                    {
+                        uint8_t& b = scale[g * freeStride + kb * kStride];
+                        if(b == 0x00 || b == 0xFF)
+                            continue;
+                        // Steps by 1 (mod 5) per free tile, so adjacent rows differ.
+                        int const delta = static_cast<int>((g + 2 * kb) % 5) - 2;
+                        b = static_cast<uint8_t>(std::clamp(static_cast<int>(b) + delta, 1, 254));
+                    }
+                }
+            }
+            // ----------------------------------------------------------------
             //  decodeE8M0  : matches mxScaleElementAsFloat(rocisa::DataType::E8,..)
             //                used by Reference.cpp - keep them in sync.
             //  decodeMXElement : thin dispatch over DGen::toFloatPacked / toFloat

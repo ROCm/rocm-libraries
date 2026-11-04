@@ -3,14 +3,14 @@
 
 """Generic GPU parity harness for non-attention CK Tile counterparts.
 
-This is the small-op analogue of
-``rocke/examples/gfx950/attention/parity_unified_attention.py``. It runs the
-CK DSL kernels for elementwise, layernorm2d, rmsnorm2d, reduce2d,
+This is the small-op analogue of the attention parity harnesses at
+``rocke/library/builders/<arch>/attention/prefill/parity_unified_attention.py``.
+It runs the rocKE kernels for elementwise, layernorm2d, rmsnorm2d, reduce2d,
 transpose2d, batched GEMM, and grouped GEMM against torch / numpy
 reference implementations and reports::
 
   - max_abs / mean_abs / max_rel error vs reference
-  - DSL kernel wall-time (HIP event timing, identical to
+  - rocKE kernel wall-time (HIP event timing, identical to
     :func:`rocke.runtime.launcher.time_launches`)
   - torch baseline wall-time (where a directly-comparable torch op
     exists)

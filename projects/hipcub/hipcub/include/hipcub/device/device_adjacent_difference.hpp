@@ -29,6 +29,8 @@
 #ifndef HIPCUB_DEVICE_DEVICE_ADJACENT_DIFFERENCE_HPP_
 #define HIPCUB_DEVICE_DEVICE_ADJACENT_DIFFERENCE_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/device/device_adjacent_difference.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

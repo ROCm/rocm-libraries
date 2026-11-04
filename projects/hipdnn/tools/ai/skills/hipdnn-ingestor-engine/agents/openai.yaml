@@ -1,0 +1,10 @@
+interface:
+  display_name: "hipDNN Ingestor Engine"
+  short_description: "Integrate engines through final artifact, native, device and corpus proof"
+  default_prompt: >-
+    Use $hipdnn-ingestor-engine for a complete create or extend integration. Read
+    SKILL.md for entry and completion requirements, then execute RUNBOOK.md as the
+    only ordered workflow, consulting its linked domain pages for contracts. Use only
+    documented CLI capabilities. Report
+    final-installation evidence and exact limitations, never generation, skipped
+    work, another engine's results or an unchanged extension baseline.

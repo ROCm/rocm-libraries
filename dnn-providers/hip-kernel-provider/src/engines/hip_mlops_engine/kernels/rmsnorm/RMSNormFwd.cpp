@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "HipKernelActivation.hpp"
 #include "VectorTypes.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
@@ -13,11 +14,13 @@ using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 
 extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
-                                      const ScaleType* __restrict__ weight,
+                                      const ScaleType* __restrict__ scale,
                                       const ScaleType* __restrict__ bias,
                                       OutputType* __restrict__ y,
                                       ComputeType* __restrict__ rstd,
-                                      float eps)
+                                      float eps,
+                                      ComputeType alpha,
+                                      ComputeType beta)
 {
     // ComputeType must be float to prevent precision loss
     static_assert(std::is_same<ComputeType, float>::value,
@@ -63,11 +66,14 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
         float y_val = hip_kernel_provider::cast<float>(x[idx]) * prstd
-                      * hip_kernel_provider::cast<float>(weight[i]);
+                      * hip_kernel_provider::cast<float>(scale[i]);
         if(bias != nullptr)
         {
             y_val += hip_kernel_provider::cast<float>(bias[i]);
         }
+        y_val = hip_kernel_provider::applyActivation<
+            float,
+            hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}>(y_val, alpha, beta);
         y[idx] = hip_kernel_provider::cast<OutputType>(y_val);
     }
 }

@@ -54,7 +54,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -65,8 +65,9 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const index_t num_k_per_block)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
-#if defined(__gfx11__)
+#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
+    defined(__gfx117__))
+#if defined(__gfx11__) || defined(__gfx117__)
     if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
     {
 #endif
@@ -76,36 +77,38 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         auto epilogue_args            = SelectedEpilogue{};
 
         constexpr index_t LDS_size =
-            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
-        __shared__ char p_shared[LDS_size];
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>(get_device_arch());
+        if constexpr(LDS_size <= get_lds_size(get_device_arch()))
+        {
+            __shared__ char p_shared[LDS_size];
 
-        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
-                                   AGridDesc_AK0_M_K1,
-                                   BGridDesc_BK0_N_K1,
-                                   ck::Tuple<>, // Empty tuple
-                                   CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                   decltype(block_2_ctile_map_),
-                                   ComputePtrOffsetOfBatch,
-                                   ComputePtrOffsetOfBatch, // placeholder
-                                   1,
-                                   HasMainKBlockLoop,
-                                   CGlobalMemoryDataOperation,
-                                   false,
-                                   TailNum,
-                                   decltype(epilogue_args)>(
-            p_shared,
-            a_grid_desc_ak0_m_ak1,
-            b_grid_desc_bk0_n_bk1,
-            ck::Tuple<>(), // placeholder
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            block_2_ctile_map_,
-            compute_ptr_offset_of_batch,
-            ComputePtrOffsetOfBatch{}, // placeholder
-            num_k_per_block,
-            karg,
-            epilogue_args);
-
-#if defined(__gfx11__)
+            GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
+                                       AGridDesc_AK0_M_K1,
+                                       BGridDesc_BK0_N_K1,
+                                       ck::Tuple<>, // Empty tuple
+                                       CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                       decltype(block_2_ctile_map_),
+                                       ComputePtrOffsetOfBatch,
+                                       ComputePtrOffsetOfBatch, // placeholder
+                                       1,
+                                       HasMainKBlockLoop,
+                                       CGlobalMemoryDataOperation,
+                                       false,
+                                       TailNum,
+                                       decltype(epilogue_args)>(
+                p_shared,
+                a_grid_desc_ak0_m_ak1,
+                b_grid_desc_bk0_n_bk1,
+                ck::Tuple<>(), // placeholder
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                block_2_ctile_map_,
+                compute_ptr_offset_of_batch,
+                ComputePtrOffsetOfBatch{}, // placeholder
+                num_k_per_block,
+                karg,
+                epilogue_args);
+        }
+#if defined(__gfx11__) || defined(__gfx117__)
     }
 #endif
 #else
@@ -163,7 +166,9 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeA                          = InDataType,
           typename ComputeTypeB                          = ComputeTypeA,
           index_t MaxTransposeTransferSrcScalarPerVector = 1,
-          index_t MaxTransposeTransferDstScalarPerVector = 1>
+          index_t MaxTransposeTransferDstScalarPerVector = 1,
+          bool UseLdsTranspose                           = false,
+          bool TransposeC                                = false>
 struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -420,7 +425,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
         false, // PermuteA
         false, // permuteB
         false, // IsBPreshuffle
-        true>; // ForceThreadTileTransfer
+        true,  // ForceThreadTileTransfer
+        false, // IsFusedKernel
+        UseLdsTranspose,
+        TransposeC>;
 
     // Argument
     using CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock =
@@ -431,7 +439,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
-            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
             {
                 return;
             }
@@ -874,36 +882,9 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     typename GridwiseGemm::Argument gemm_arg_ = gemm_arg;
 
-                    std::array<std::size_t, GridwiseGemm::NumATensor> size_as_buffers;
-                    size_as_buffers[0] = arg.a_grid_desc_kbatch_k0_m_k1_.GetElementSpaceSize() *
-                                         sizeof(ADataType) / GridwiseGemm::APackedSize;
-
-                    std::array<std::size_t, GridwiseGemm::NumBTensor> size_bs_buffers;
-                    size_bs_buffers[0] = arg.b_grid_desc_kbatch_k0_n_k1_.GetElementSpaceSize() *
-                                         sizeof(BDataType) / GridwiseGemm::BPackedSize;
-
-                    std::array<std::size_t, GridwiseGemm::NumDTensor> size_ds_buffers;
-
-                    ck::utility::RotatingMemWrapperMultiABD<typename GridwiseGemm::Argument,
-                                                            Tuple<ADataType>,
-                                                            Tuple<BDataType>,
-                                                            Tuple<>>
-                        rotating_mem(gemm_arg_,
-                                     stream_config.rotating_count,
-                                     size_as_buffers,
-                                     size_bs_buffers,
-                                     size_ds_buffers);
-                    rotating_mem.Print();
-
-                    auto run_flush_cache = [&]() {
-                        // flush icache
-                        ck::utility::flush_icache();
-                        // rotating mem
-                        rotating_mem.Next();
-                    };
-                    ave_time += ck::utility::launch_and_time_kernel_with_preprocess<false>(
+                    ave_time += launch_and_time_kernel_with_preprocess_flush_cache(
                         stream_config,
-                        run_flush_cache,
+                        clear_workspace,
                         kernel,
                         dim3(gdx, gdy, gdz),
                         dim3(BlockSize),
@@ -1063,7 +1044,28 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
     static bool IsSupportedArgument(const Argument& arg)
     {
         if(arg.stride_overflow)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Stride overflow!" << " In " << __FILE__ << ":" << __LINE__
+                          << ", in function: " << __func__ << std::endl;
+            }
             return false;
+        }
+
+        if constexpr(UseLdsTranspose)
+        {
+            if(!ck::is_gfx125_supported())
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "LDS Transpose instances not supported on this architecture!"
+                              << " In " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+        }
 
         const index_t GemmM = arg.a_grid_desc_kbatch_k0_m_k1_.GetLength(I1);
         const index_t GemmN = arg.b_grid_desc_kbatch_k0_n_k1_.GetLength(I1);
@@ -1099,7 +1101,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
         }
 
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
@@ -1108,20 +1110,20 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             return false;
         }
 
-        if(gemm_arg.KBatch > 1 && ck::is_gfx11_supported())
+        if(gemm_arg.KBatch > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
                 std::cout << "Unsupported splitK on gfx11." << std::endl;
             }
-            // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
+            // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
             return false;
         }
 
         if constexpr(std::is_same_v<ComputeTypeA, f8_t> || std::is_same_v<ComputeTypeA, bf8_t> ||
                      std::is_same_v<ComputeTypeB, f8_t> || std::is_same_v<ComputeTypeB, bf8_t>)
         {
-            if(ck::is_gfx11_supported())
+            if(ck::is_gfx11_supported() || ck::is_gfx117_supported())
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -1308,15 +1310,18 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                  const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                 const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                 const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                 const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                 const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                 const std::array<index_t, NDimSpatial>& input_left_pads,
+                 const std::array<index_t, NDimSpatial>& input_right_pads,
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 const ck::index_t split_k)
+                 const index_t split_k)
     {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
         return Argument{p_in_grid,
                         p_wei_grid,
                         p_out_grid,
@@ -1335,7 +1340,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                         in_element_op,
                         wei_element_op,
                         out_element_op,
-                        split_k};
+                        split_k,
+                        stride_ovf};
     }
 
     static auto MakeArgument(const InDataType* p_in_grid,
@@ -1422,6 +1428,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                         OutElementwiseOperation out_element_op,
                         const ck::index_t split_k) override
     {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
+
         return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
                                           static_cast<WeiDataType*>(p_wei_grid),
                                           static_cast<const OutDataType*>(p_out_grid),
@@ -1440,7 +1450,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                                           in_element_op,
                                           wei_element_op,
                                           out_element_op,
-                                          split_k);
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseArgument>

@@ -1,0 +1,11 @@
+/**
+@brief rocPRIM Warp-wide parallel primitives
+@author
+@file
+*/
+
+/**
+ * \defgroup warpmodule Warp-wide
+ * \ingroup primitivesmodule
+ *
+ */

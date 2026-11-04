@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Integration Testing"
+  short_description: "Doc-driven guide to running and extending the cross-provider integration suite"
+  default_prompt: "Use $hipdnn-integration-testing to load the integration-test docs (dnn-providers/integration-tests/docs/) and apply them: run hipdnn_integration_tests against an engine, read its coverage and support-claim summaries, add bundles, and update .support.json claims when a run reports unclaimed_support."

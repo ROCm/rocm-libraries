@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,20 @@
     #else
         #define USE_DEVICE_DISPATCH 0
     #endif
+#endif
+
+/**
+ * \brief Marks an internal rocRAND kernel with hidden visibility.
+ *
+ * HIP emits host-side kernel handle symbols for every __global__ template
+ * instantiation, and these do not reliably inherit -fvisibility=hidden.
+ * Without this attribute they end up in librocrand.so's dynamic symbol table.
+ * Mirrors ROCPRIM_KERNEL in rocPRIM's config.hpp.
+ */
+#if defined(__HIP_PLATFORM_AMD__) || defined(__GNUC__) || defined(__clang__)
+    #define ROCRAND_INTERNAL_KERNEL __global__ __attribute__((__visibility__("hidden")))
+#else
+    #define ROCRAND_INTERNAL_KERNEL __global__
 #endif
 
 #include <rocrand/rocrand_common.h>

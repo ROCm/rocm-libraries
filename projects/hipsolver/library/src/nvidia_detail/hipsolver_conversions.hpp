@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,12 @@
 
 HIPSOLVER_BEGIN_NAMESPACE
 
+struct hipsolverDnHandle
+{
+    cusolverDnHandle_t handle;
+    cublasHandle_t     blas_handle;
+};
+
 cublasOperation_t hip2cuda_operation(hipsolverOperation_t op);
 
 hipsolverOperation_t cuda2hip_operation(cublasOperation_t op);
@@ -37,6 +43,10 @@ hipsolverOperation_t cuda2hip_operation(cublasOperation_t op);
 cublasFillMode_t hip2cuda_fill(hipsolverFillMode_t fill);
 
 hipsolverFillMode_t cuda2hip_fill(cublasFillMode_t fill);
+
+cublasDiagType_t hip2cuda_diag(hipsolverDiagType_t diag);
+
+hipsolverDiagType_t cuda2hip_diag(cublasDiagType_t diag);
 
 cublasSideMode_t hip2cuda_side(hipsolverSideMode_t side);
 
@@ -63,6 +73,12 @@ cusolverDeterministicMode_t hip2cuda_deterministic(hipsolverDeterministicMode_t 
 
 hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t mode);
 #endif
+
+cusolverDirectMode_t hip2cuda_direct(hipsolverDirectMode_t direct);
+
+cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev);
+
+hipsolverStatus_t cuda2hip_status(cublasStatus_t cuStatus);
 
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);
 

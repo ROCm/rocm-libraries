@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -125,14 +125,27 @@ namespace
                 static bool query_device = true;
                 if(query_device)
                 {
-                    if(hipGetDevice(&dev) != hipSuccess)
+                    // main() has already selected and queried this device; this is a backstop.
+                    // Returning false here would filter out every test as another architecture,
+                    // and the binary would pass having run nothing.
+                    const hipError_t get_status = hipGetDevice(&dev);
+                    if(get_status != hipSuccess)
                     {
-                        return false;
+                        std::cerr << "rocsparse-test error: hipGetDevice failed: "
+                                  << hipGetErrorString(get_status) << " (" << get_status << ")"
+                                  << std::endl;
+                        exit(EXIT_FAILURE);
                     }
-                    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+
+                    const hipError_t prop_status = hipGetDeviceProperties(&prop, dev);
+                    if(prop_status != hipSuccess)
                     {
-                        return false;
+                        std::cerr << "rocsparse-test error: cannot get properties of device ID "
+                                  << dev << ": " << hipGetErrorString(prop_status) << " ("
+                                  << prop_status << ")" << std::endl;
+                        exit(EXIT_FAILURE);
                     }
+
                     query_device = false;
                 }
 
@@ -273,6 +286,7 @@ namespace
                     break;
                 }
                 case rocsparse_test_dispatch_enum::iabct:
+                case rocsparse_test_dispatch_enum::iabct_sddmm:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_datatype2string(arg.a_type) << '_'

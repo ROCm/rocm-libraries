@@ -38,6 +38,7 @@ from ..core.arch import ArchTarget, LayoutMap, MmaOp
 from ..core.ir import (
     IRBuilder,
     Value,
+    dtype_to_ir_type,
 )
 from .distribution import TileDistributionEncoding
 
@@ -247,11 +248,13 @@ class MfmaAtom:
         ``f8f6f4`` instruction whose LLVM intrinsic is
         ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (there is NO plain
         ``mfma.f32.16x16x128.fp8.fp8`` — only the sparse ``smfmac`` and the
-        scaled ``f8f6f4`` exist). The lowering pins the in-instruction E8M0
-        scale operands to 0 (exponent 0 => scale factor 2^0 == 1.0), and
-        the format selectors ``cbsz=0`` / ``blgp=0`` (fp8e4m3 for both A
-        and B), making the instruction numerically equivalent to a plain
-        unscaled fp8 MFMA. This is the block-scale design's intended use:
+        scaled ``f8f6f4`` exist). The lowering passes literal 0 for both
+        scale operands. The backend then selects the unscaled instruction
+        ``v_mfma_f32_16x16x128_f8f6f4`` (LLVM pattern
+        ``UnscaledMFMAOptimizationPat``). The format selectors
+        ``cbsz=0`` / ``blgp=0`` choose fp8e4m3 for both A and B. A literal 0
+        marks "no scale". As an E8M0 value, 0 would mean 2^-127, so a loaded
+        or computed 0 must never replace the literal. This is the block-scale design's intended use:
         the per-block dequant is applied to the f32 accumulator afterward,
         NOT in-instruction.
 
@@ -346,6 +349,29 @@ class MfmaAtom:
             name="mfma_f32_32x32x2_f32",
         )
 
+    # ---- FP64 atoms (gfx942) ----
+
+    @classmethod
+    def f64_16x16x4(cls) -> "MfmaAtom":
+        """FP64 MFMA, 16x16 output, K=4 per atom.
+
+        Per-lane layout on wave64:
+        A: scalar double, B: scalar double, C: <4 x double>
+        A/B lane mapping: same as f32_16x16x4.
+        C lane[i] -> output (i * 4 + lane / 16, lane % 16).
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=4,
+            a_per_lane=1,
+            b_per_lane=1,
+            c_per_lane=4,
+            dtype_in="fp64",
+            dtype_out="f64",
+            name="mfma_f64_16x16x4_f64",
+        )
+
     @classmethod
     def bf16_16x16x16(cls) -> "MfmaAtom":
         """BF16 sibling of :meth:`f16_16x16x16` (legacy CDNA atom)."""
@@ -409,41 +435,6 @@ class MfmaAtom:
             dtype_in="bf16",
             dtype_out="f32",
             name="mfma_f32_32x32x16_bf16",
-        )
-
-    @classmethod
-    def fp4_16x16x128(cls) -> "MfmaAtom":
-        """fp4 MX MFMA atom (gfx950+, P52).
-
-        Per-lane: A = 16 fp4 nibbles packed as i64 (= 8 bytes per
-        lane × 2 nibbles); B same; C = ``<4 x float>``. K = 128
-        elements per atom — the densest gfx950 MFMA shape.
-        """
-        return cls(
-            m=16,
-            n=16,
-            k=128,
-            a_per_lane=16,
-            b_per_lane=16,
-            c_per_lane=4,
-            dtype_in="fp4",
-            dtype_out="f32",
-            name="mfma_f32_16x16x128_fp4",
-        )
-
-    @classmethod
-    def fp6_16x16x96(cls) -> "MfmaAtom":
-        """fp6 MX MFMA atom (gfx950+, P52)."""
-        return cls(
-            m=16,
-            n=16,
-            k=96,
-            a_per_lane=12,
-            b_per_lane=12,
-            c_per_lane=4,
-            dtype_in="fp6",
-            dtype_out="f32",
-            name="mfma_f32_16x16x96_fp6",
         )
 
     @classmethod
@@ -519,8 +510,11 @@ class MfmaAtom:
         ``self.n`` and ``KPerXDL`` is ``self.k`` (== :attr:`k_per_xdlops`).
         Raises for atom shapes outside the ``NPerXDL in {16, 32}`` table
         (the batched 4x4 atom), matching the C++ which only instantiates
-        the scheduler for the 16x16 / 32x32 XDL shapes.
+        the scheduler for the 16x16 / 32x32 XDL shapes. The fp64 16x16x4
+        atom takes 32 cycles.
         """
+        if self.dtype_in == "fp64" and self.n == 16:
+            return 32
         speedup = 2 if self.is_f4f6 else 1
         if self.n == 16:
             return (32 if self.k == 128 else 16) // speedup
@@ -581,6 +575,9 @@ class MfmaAtom:
         c: Value,
         a_scale: Value,
         b_scale: Value,
+        *,
+        a_format: str = "fp8e4m3",
+        b_format: str = "fp8e4m3",
     ) -> Value:
         """Issue a scaled MX MFMA (P15).
 
@@ -589,16 +586,23 @@ class MfmaAtom:
         per-output-row scale broadcast happens inside the
         instruction. Future expansion: dedicated scaled intrinsics
         for the 32x32 hero shape if AMDGPU exposes them.
+
+        ``a_format`` and ``b_format`` pass through to
+        :meth:`IRBuilder.mfma_scale_f32_16x16x128_f8f6f4`. A and B must use
+        the same format in this version; see that method for the formats and
+        the operand width.
         """
-        return b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, c, a_scale, b_scale)
+        return b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, c, a_scale, b_scale, a_format=a_format, b_format=b_format
+        )
 
     def zero_acc(self, b: IRBuilder) -> Value:
-        """Allocate a fresh `<c_per_lane x float>` accumulator (all zeros).
+        """Allocate a fresh `<c_per_lane x dtype_out>` accumulator (all zeros).
 
         This is the accumulator initial value that the K-loop carries
         through `scf.for_iter`'s `iter_args`.
         """
-        return b.zero_vec_f32(self.c_per_lane)
+        return b.zero_vec(dtype_to_ir_type(self.dtype_out), self.c_per_lane)
 
     # ---- output lane layout ----
 
@@ -618,7 +622,8 @@ class MfmaAtom:
         16x16 atoms (c_per_lane=4):
         m_blk = lane / 16
         n_in_atom = lane % 16
-        row = m_blk * 4 + i
+        row = m_blk * 4 + i       (f32 accumulator)
+        row = i * 4 + m_blk       (f64 accumulator)
         col = n_in_atom
 
         32x32 atoms (c_per_lane=16):
@@ -638,6 +643,8 @@ class MfmaAtom:
             c_atom_n = b.const_i32(self.n)
             n_in_atom = b.mod(lane, c_atom_n)
             m_blk = b.div(lane, c_atom_n)
+            if self.dtype_out == "f64":
+                return b.add(b.const_i32(i * 4), m_blk), n_in_atom
             row = b.add(b.mul(m_blk, b.const_i32(self.c_per_lane)), b.const_i32(i))
             return row, n_in_atom
         if (self.m, self.n) == (32, 32):
@@ -800,6 +807,7 @@ class WmmaAtom:
 # where (from ``warp_gemm_attribute_mfma_impl.hpp``):
 #   16x16 atoms: kCMLane=4, kCNLane=16, kCM0PerLane=1, kCM1PerLane=4
 #   32x32 atoms: kCMLane=2, kCNLane=32, kCM0PerLane=4, kCM1PerLane=4
+#   16x16 f64 atom: kCMLane=4, kCNLane=16, kCM0PerLane=4, kCM1PerLane=1
 #
 # Reading the encoding (single-warp, wave64) the lane decomposes as
 # ``(m_blk, n) = (lane // kCNLane, lane % kCNLane)`` and the per-lane
@@ -811,11 +819,12 @@ class WmmaAtom:
 # atom (verified element-by-element against the SSA both helpers emit).
 
 
-# (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane) for each (m, n) C tile.
+# (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane) for each (m, n, dtype_out) C tile.
 # Sourced from the kC* constants in warp_gemm_attribute_mfma_impl.hpp.
-_C_WARP_PARAMS: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {
-    (16, 16): (1, 4, 4, 16),
-    (32, 32): (4, 2, 4, 32),
+_C_WARP_PARAMS: Dict[Tuple[int, int, str], Tuple[int, int, int, int]] = {
+    (16, 16, "f32"): (1, 4, 4, 16),
+    (32, 32, "f32"): (4, 2, 4, 32),
+    (16, 16, "f64"): (4, 4, 1, 16),
 }
 
 
@@ -829,10 +838,10 @@ def c_warp_params(atom: "MfmaAtom") -> Tuple[int, int, int, int]:
     M/N spatial tiling (64 on wave64). Raises for atom shapes CK Tile
     does not give a ``CWarpDstrEncoding`` for (the batched 4x4 atom).
     """
-    key = (atom.m, atom.n)
+    key = (atom.m, atom.n, atom.dtype_out)
     if key not in _C_WARP_PARAMS:
         raise NotImplementedError(
-            f"no CWarpDstrEncoding for atom {atom.m}x{atom.n} "
+            f"no CWarpDstrEncoding for atom {atom.m}x{atom.n} {atom.dtype_out} "
             f"(only the 16x16 and 32x32 MFMA C tiles are supported)"
         )
     m0, m_lane, m1, n_lane = _C_WARP_PARAMS[key]
@@ -900,6 +909,8 @@ MFMA_F32_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.f32_32x32x2(),
 )
 
+MFMA_F64_ATOMS: Tuple[MfmaAtom, ...] = (MfmaAtom.f64_16x16x4(),)
+
 MFMA_BF16_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.bf16_16x16x16(),
     MfmaAtom.bf16_16x16x32(),
@@ -915,19 +926,13 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_16x16x128(),
 )
 
-# P52: MX fp4 / fp6 atoms (gfx950+).
-MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
-    MfmaAtom.fp4_16x16x128(),
-    MfmaAtom.fp6_16x16x96(),
-)
-
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
 # factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
 MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
-    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_F64_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
 )
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,
@@ -943,6 +948,9 @@ _DTYPE_ALIAS = {
     "f32": "fp32",
     "fp32": "fp32",
     "float": "fp32",
+    "f64": "fp64",
+    "fp64": "fp64",
+    "double": "fp64",
     "bf16": "bf16",
     "bfloat16": "bf16",
 }

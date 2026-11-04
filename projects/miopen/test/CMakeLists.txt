@@ -50,6 +50,7 @@ option( MIOPEN_TEST_GFX906 "Test on Vega20 (gfx906)" OFF )
 option( MIOPEN_TEST_GFX103X "Test on Navi21/22 (gfx1030/31)" OFF )
 option( MIOPEN_TEST_GFX110X "Test on Navi31/32/33/Phoenix (gfx1100/03)" OFF )
 option( MIOPEN_TEST_GFX115X "Test on Navi35 strix halo (gfx1150/51/52/53)" OFF )
+option( MIOPEN_TEST_GFX117X "Test on gfx1170/71" OFF )
 option( MIOPEN_TEST_GFX120X "Test on gfx1200/01" OFF )
 option( MIOPEN_TEST_GFX125X "Test on gfx1250" OFF )
 option( MIOPEN_TEST_GPU_XNACK_ENABLED "Test as if XNACK mode is enabled" OFF )
@@ -111,7 +112,7 @@ endif()
 set(MIOPEN_TEST_GPU_DETECTION_FAILED FALSE)
 set(MIOPEN_NO_GPU FALSE)
 
-if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX115X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_GFX125X OR MIOPEN_TEST_HIP_NOGPU))
+if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX115X OR MIOPEN_TEST_GFX117X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_GFX125X OR MIOPEN_TEST_HIP_NOGPU))
     # Try to find rocminfo first, then hipinfo as fallback (for Windows)
     find_program(ROCMINFO
         NAMES rocminfo hipinfo
@@ -142,6 +143,8 @@ if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN
             set(MIOPEN_TEST_GFX110X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx115.")
             set(MIOPEN_TEST_GFX115X ON)
+        elseif(ROCMINFO_OUTPUT MATCHES "gfx117.")
+            set(MIOPEN_TEST_GFX117X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx120.")
             set(MIOPEN_TEST_GFX120X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx125.")
@@ -199,6 +202,7 @@ message(STATUS "MIOPEN_TEST_GFX95X ${MIOPEN_TEST_GFX95X}")
 message(STATUS "MIOPEN_TEST_GFX103X ${MIOPEN_TEST_GFX103X}")
 message(STATUS "MIOPEN_TEST_GFX110X ${MIOPEN_TEST_GFX110X}")
 message(STATUS "MIOPEN_TEST_GFX115X ${MIOPEN_TEST_GFX115X}")
+message(STATUS "MIOPEN_TEST_GFX117X ${MIOPEN_TEST_GFX117X}")
 message(STATUS "MIOPEN_TEST_GFX120X ${MIOPEN_TEST_GFX120X}")
 message(STATUS "MIOPEN_TEST_GFX125X ${MIOPEN_TEST_GFX125X}")
 message(STATUS "MIOPEN_TEST_GPU_XNACK_ENABLED ${MIOPEN_TEST_GPU_XNACK_ENABLED}")
@@ -228,6 +232,11 @@ add_custom_target(miopen-check
 )
 add_custom_target(miopen-tests COMMENT "Aggregate target for MIOpen tests")
 
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
+    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
+endif()
+
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
     add_custom_target(miopen-gpu-detection-check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1 COMMENT "Reporting failed GPU detection")
     add_dependencies(miopen-check miopen-gpu-detection-check)
@@ -243,48 +252,22 @@ endif()
 set(MIOPEN_GTEST_SUFFIX)
 set(MIOPEN_TEST_FLOAT_ARG)
 set(MIOPEN_TEST_FLOAT FALSE)
-set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT8)
-set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT32)
-set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_FLOAT)
 if(MIOPEN_TEST_HALF)
     set(MIOPEN_GTEST_SUFFIX FP16)
     set(MIOPEN_TEST_FLOAT_ARG --half)
-    set(MIOPENDRIVER_MODE_CONV convfp16)
-    set(MIOPENDRIVER_MODE_BN bnormfp16)
-    set(MIOPENDRIVER_MODE_POOL poolfp16)
-    set(MIOPENDRIVER_MODE_GEMM gemmfp16)
 elseif(MIOPEN_TEST_INT8)
     set(MIOPEN_GTEST_SUFFIX I8)
     set(MIOPEN_TEST_FLOAT_ARG --int8)
-    set(MIOPENDRIVER_MODE_CONV convint8)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
-    set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT8 --output_type int8)
-    set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_INT32 --output_type int32)
-    set(MIOPEN_TEST_CONV_INT8_OUTPUT_TYPE_FLOAT --output_type float)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(MIOPEN_GTEST_SUFFIX BFP16)
     set(MIOPEN_TEST_FLOAT_ARG --bfloat16)
-    set(MIOPENDRIVER_MODE_CONV convbfp16)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
 elseif(MIOPEN_TEST_TF32)
     set(MIOPEN_GTEST_SUFFIX TF32)
     set(MIOPEN_TEST_FLOAT_ARG --float)  # TODO: not integrated in test_conv2d
-    set(MIOPENDRIVER_MODE_CONV conv)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
 else()
     set(MIOPEN_GTEST_SUFFIX FP32)
     set(MIOPEN_TEST_FLOAT_ARG --float)
     set(MIOPEN_TEST_FLOAT TRUE)
-    set(MIOPENDRIVER_MODE_CONV conv)
-    set(MIOPENDRIVER_MODE_BN bnorm)
-    set(MIOPENDRIVER_MODE_POOL pool)
-    set(MIOPENDRIVER_MODE_GEMM gemm)
 endif()
 
 message(STATUS "MIOPEN_GTEST_SUFFIX ${MIOPEN_GTEST_SUFFIX}")
@@ -306,11 +289,7 @@ if(MIOPEN_TEST_INT8)
               test_tensor_vec test_tensor_trans test_tensor_transform test_conv2d test_conv2d_find2)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(SKIP_ALL_EXCEPT_TESTS
-              test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
-              test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
-              test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
+              test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d)
 endif()
 
 if(MIOPEN_NO_GPU)
@@ -348,12 +327,6 @@ if(SKIP_ALL_EXCEPT_TESTS)
 endif()
 message(STATUS "SKIP_TESTS: ${SKIP_TESTS}")
 message(STATUS "SKIP_ALL_EXCEPT_TESTS: ${SKIP_ALL_EXCEPT_TESTS}")
-
-# List of tests that depend on the XNACK mode.
-# Options convention: Tests that depend on the XNACK mode should support the "--xnack" option.
-# If "--xnack 0" is specified (this is the default), then such tests should run in XNACK OFF mode.
-# If XNACK is enabled on the GPU, then the testing mode must be changed by the --xnack 1 option.
-set(XNACK_TESTS test_mdgraph)
 
 # Register a ctest entry for NAME, honoring skip lists and GDB/Windows modes.
 function(add_test_command NAME EXE)
@@ -408,10 +381,6 @@ function(add_test_executable TEST_NAME)
         endif()
     endif()
     set(TEST_COMMAND ${TEST_COMMAND} ${MIOPEN_TEST_FLAGS_ARGS})
-
-    if(MIOPEN_TEST_GPU_XNACK_ENABLED AND (${TEST_NAME} IN_LIST XNACK_TESTS))
-        set(TEST_COMMAND ${TEST_COMMAND} --xnack 1)
-    endif()
 
     if(WORKAROUND_ISSUE_936 AND (${TEST_NAME} MATCHES "test_conv2d" OR ${TEST_NAME} MATCHES "test_immed_conv2d") )
         set(TEST_COMMAND ${TEST_COMMAND} --tolerance 130) #increased by 1.625 times
@@ -481,7 +450,6 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
 # Assign a ctest COST to a test so long-running tests are scheduled first.
@@ -597,9 +565,9 @@ endfunction()
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Defaults: FLOAT_ENABLED HALF_DISABLED BF16_DISABLED INT8_DISABLED
 #
-# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/02, GFX115X
+# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/02, GFX115X, GFX117X
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
-#   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED, GFX115X_DISABLED
+#   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED, GFX115X_DISABLED, GFX117X_DISABLED
 #
 # Testing mode:
 #   SKIP_UNLESS_ALL - The test should be only run if MIOPEN_TEST_ALL=TRUE. Intended for long tests.
@@ -617,7 +585,7 @@ function(add_custom_test NAME)
     set(options
         BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED TF32_ENABLED TF32_DISABLED FLOAT_ENABLED FLOAT_DISABLED
         GFX900_ENABLED GFX900_DISABLED GFX906_ENABLED GFX906_DISABLED GFX908_ENABLED GFX908_DISABLED
-            GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX115X_ENABLED GFX115X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
+            GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX115X_ENABLED GFX115X_DISABLED GFX117X_ENABLED GFX117X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
         SKIP_UNLESS_MLIR SKIP_UNLESS_COMPOSABLEKERNEL SKIP_UNLESS_ALL TEST_PERF_DB_RECORD_NOT_FOUND TEST_TUNING SKIP_XNACK_ON
         HIP_ENABLED HIP_DISABLED HIP_NOGPU_ENABLED HIP_NOGPU_DISABLED
     )
@@ -697,6 +665,10 @@ function(add_custom_test NAME)
     option_support_check(${PARSE_GFX115X_ENABLED} ${PARSE_GFX115X_DISABLED} ${GFX115X_TEST_DEFAULT} is_gfx115x_check)
     bool_and_f(${MIOPEN_TEST_GFX115X} ${is_gfx115x_check} is_gfx115x_check)
 
+    set(GFX117X_TEST_DEFAULT FALSE)
+    option_support_check(${PARSE_GFX117X_ENABLED} ${PARSE_GFX117X_DISABLED} ${GFX117X_TEST_DEFAULT} is_gfx117x_check)
+    bool_and_f(${MIOPEN_TEST_GFX117X} ${is_gfx117x_check} is_gfx117x_check)
+
     # When SKIP_XNACK_ON is set, the test will be skipped if MIOPEN_TEST_GPU_XNACK_ENABLED is set.
     bool_and_f(${PARSE_SKIP_XNACK_ON} ${MIOPEN_TEST_GPU_XNACK_ENABLED} is_xnack_on_check)
     bool_not_f(${is_xnack_on_check} is_xnack_on_check)
@@ -725,12 +697,11 @@ function(add_custom_test NAME)
         AND (${NAME} MATCHES "test_conv_3d"
           OR ${NAME} MATCHES "test_conv_group"
           OR ${NAME} MATCHES "test_conv_extra"
-          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"
-          OR ${NAME} MATCHES "test_conv_ck_igemm_fwd_v6r1_dlops_nchw"))
+          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"))
         set_tests_properties(${NAME} PROPERTIES RUN_SERIAL On)
     endif()
 
-    if ((is_gfx900_check OR is_gfx906_check OR is_gfx908_check OR is_gfx103x_check OR is_gfx110x_check OR is_gfx115x_check OR is_gfx90a_check OR is_gfx94x_check OR is_gfx95x_check)
+    if ((is_gfx900_check OR is_gfx906_check OR is_gfx908_check OR is_gfx103x_check OR is_gfx110x_check OR is_gfx115x_check OR is_gfx117x_check OR is_gfx90a_check OR is_gfx94x_check OR is_gfx95x_check)
      AND is_full_check
      AND is_xnack_on_check
      AND is_mlir_check
@@ -770,10 +741,6 @@ set(TEST_CONV_VERBOSE_F ${MIOPEN_TEST_FLOAT_ARG} --verbose --disable-backward-da
 set(TEST_CONV_VERBOSE_B ${MIOPEN_TEST_FLOAT_ARG} --verbose --disable-forward --disable-backward-weights)
 set(TEST_CONV_VERBOSE_W ${MIOPEN_TEST_FLOAT_ARG} --verbose --disable-forward --disable-backward-data)
 
-set(IMPLICITGEMM_MLIR_ENV_F_XDLOPS ${IMPLICITGEMM_MLIR_ENV_BASE} MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmFwdXdlops)
-set(IMPLICITGEMM_MLIR_ENV_B_XDLOPS ${IMPLICITGEMM_MLIR_ENV_BASE} MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmBwdXdlops)
-set(IMPLICITGEMM_MLIR_ENV_W_XDLOPS ${IMPLICITGEMM_MLIR_ENV_BASE} MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvMlirIgemmWrWXdlops)
-
 set(IMPLICITGEMM_TESTING_ENV
  MIOPEN_DEBUG_CONV_WINOGRAD=0
  MIOPEN_DEBUG_CONV_FFT=0
@@ -786,70 +753,11 @@ if(MIOPEN_TEST_DEEPBENCH)
     add_custom_test(test_deepbench_rnn GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED GFX115X_ENABLED)
 endif()
 
-set(DYNAMIC_IMPLICITGEMM_COMMON
-    MIOPEN_FIND_MODE=normal)
-set(DYNAMIC_IMPLICITGEMM_XDLOPS_NHWC_FWD_ENVS
-    ${DYNAMIC_IMPLICITGEMM_COMMON}
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC)
-set(DYNAMIC_IMPLICITGEMM_XDLOPS_NHWC_BWD_ENVS
-    ${DYNAMIC_IMPLICITGEMM_COMMON}
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
-
-set(DYNAMIC_IMPLICITGEMM_DLOPS_NCHWC_FWD_ENVS
-    ${DYNAMIC_IMPLICITGEMM_COMMON}
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC)
-
-set(ARGS_NCHWC_NCHWC_FWD_FP16x4
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout NCHW
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 4)
-
-set(ARGS_NCHWC_NCHWC_FWD_FP16x8
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout NCHW
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 8)
-
-set(ARGS_NCHWC_CHWNC_FWD_FP16x4
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout CHWN
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 4)
-
-set(ARGS_NCHWC_CHWNC_FWD_FP16x8
-    --cmode convfp16
-    --disable-backward-data
-    --disable-backward-weights
-    --in_layout NCHW
-    --fil_layout CHWN
-    --out_layout NCHW
-    --tensor_vect 1
-    --vector_length 8)
-
 add_custom_test(test_regression_issue_2624 SKIP_UNLESS_ALL GFX900_DISABLED GFX906_DISABLED
     # Regression test for SWDEV-433714 (issue 2624)
     ENVIRONMENT ${IMPLICITGEMM_TESTING_ENV} MIOPEN_LOG_LEVEL=5
     COMMAND $<TARGET_FILE:test_conv2d> ${MIOPEN_TEST_FLOAT_ARG} --verbose --input 2 1 22 22 --weights 1 1 4 4 --pads_strides_dilations 1 2 4 4 3 2 --disable-backward-data --disable-backward-weights
 )
-
-# MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW is explicitly enabled due to the kernel is disabled by default via #2306
-set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
-    MIOPEN_FIND_MODE=normal
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvCkIgemmFwdV6r1DlopsNchw
-    MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW=1)
 
 # NOTES ON WRITING TESTS FOR TUNABLE SOLVERS
 # * Enforce tuning (SEARCH_DB_UPDATE).
@@ -904,10 +812,4 @@ if(MIOPEN_TEST_DISCRETE)
 add_subdirectory(gtest EXCLUDE_FROM_ALL)
 else()
 add_subdirectory(gtest)
-endif()
-
-# Legacy targets are defined for CI support ONLY. Always use the 'miopen-' targets.
-if(NOT ROCM_LIBS_SUPERBUILD)
-    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
-    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
 endif()

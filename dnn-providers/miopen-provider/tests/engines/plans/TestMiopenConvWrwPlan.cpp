@@ -3,14 +3,15 @@
 
 #include <memory>
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
+#include "common/ConvPlanFindModeCheck.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
 using namespace miopen_plugin;
@@ -47,6 +48,54 @@ TEST(TestConvWrwParams, InitializesAllTensorsFromValidGraph)
     EXPECT_NO_THROW(params.dw());
     EXPECT_NO_THROW(params.dy());
     EXPECT_NO_THROW(params.conv());
+}
+
+TEST(TestConvWrwParams, PadsOneDimensionalGraphToTwoDimensions)
+{
+    // NCL tensors with one spatial dimension. MIOpen has no 1D convolution, so
+    // the provider pads the tensors to 4D and the convolution to 2 spatial dims.
+    const std::vector<int64_t> xDims = {1, 4, 8};
+    const std::vector<int64_t> xStrides = {32, 8, 1};
+    const std::vector<int64_t> dwDims = {4, 4, 3};
+    const std::vector<int64_t> dwStrides = {12, 3, 1};
+    const std::vector<int64_t> dyDims = {1, 4, 6};
+    const std::vector<int64_t> dyStrides = {24, 6, 1};
+    const std::vector<int64_t> convPrePadding = {0};
+    const std::vector<int64_t> convPostPadding = {0};
+    const std::vector<int64_t> convStrides = {1};
+    const std::vector<int64_t> convDilation = {1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph(xDims,
+                                                                       xStrides,
+                                                                       dwDims,
+                                                                       dwStrides,
+                                                                       dyDims,
+                                                                       dyStrides,
+                                                                       convPrePadding,
+                                                                       convPostPadding,
+                                                                       convStrides,
+                                                                       convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionWrwAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    const ConvWrwParams params(*attrs, graph.getTensorMap());
+
+    for(const auto* tensor : {&params.x(), &params.dw(), &params.dy()})
+    {
+        int dimCount = 0;
+        EXPECT_EQ(miopenGetTensorDescriptorSize(tensor->tensorDescriptor(), &dimCount),
+                  miopenStatusSuccess);
+        EXPECT_EQ(dimCount, 4);
+    }
+
+    int convSpatialDimCount = 0;
+    EXPECT_EQ(miopenGetConvolutionSpatialDim(params.conv().convDescriptor(), &convSpatialDimCount),
+              miopenStatusSuccess);
+    EXPECT_EQ(convSpatialDimCount, 2);
 }
 
 TEST(TestConvWrwParams, ThrowsOnAssymetricPadding)
@@ -243,6 +292,18 @@ TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
     // Create plan
     const HipdnnMiopenSettings executionSettings;
     ConvWrwPlan(*_handle, std::move(params), executionSettings);
+}
+
+TEST_F(TestGpuConvWrwPlan, BenchmarkingSelectsNormalFindMode)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    auto* attrs = graph.getNode(0).attributes_as_ConvolutionWrwAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    test_conv_common::expectBenchmarkingSelectsNormalFindMode<ConvWrwParams, ConvWrwPlan>(
+        *_handle, graph, *attrs);
 }
 
 TEST_F(TestGpuConvWrwPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)

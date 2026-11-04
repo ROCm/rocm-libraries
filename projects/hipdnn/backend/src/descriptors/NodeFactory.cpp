@@ -45,6 +45,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::MoeGroupedMatmulAttributes:
         return MoeGroupedMatmulOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes:
+        return MoeGroupedMatmulBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PointwiseAttributes:
         return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ReductionAttributes:

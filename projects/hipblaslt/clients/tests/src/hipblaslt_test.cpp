@@ -224,11 +224,7 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
     // Set up the return point, and handle siglongjmp returning back to here
     if(sigsetjmp(t_handler.sigjmp_buf_, true))
     {
-#if (__GLIBC__ < 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 32)
-        FAIL() << "Received " << sys_siglist[t_handler.signal] << " signal";
-#else
-        FAIL() << "Received " << sigdescr_np(t_handler.signal) << " signal";
-#endif
+        FAIL() << "Received " << strsignal(t_handler.signal) << " signal";
     }
 #else
     if(setjmp(t_handler.sigjmp_buf_))
@@ -354,20 +350,6 @@ std::string RocBlasLt_TestName_to_string(std::unordered_map<std::string, size_t>
     return name;
 }
 
-static const char* const validCategories[]
-    = {"smoke", "quick", "pre_checkin", "nightly", "multi_gpu", "HMM", "known_bug", NULL};
-
-static bool valid_category(const char* category)
-{
-    int i = 0;
-    while(validCategories[i])
-    {
-        if(!strcmp(category, validCategories[i++]))
-            return true;
-    }
-    return false;
-}
-
 bool hipblaslt_client_global_filters(const Arguments& args)
 {
     int             deviceId;
@@ -384,11 +366,17 @@ bool hipblaslt_client_global_filters(const Arguments& args)
 }
 
 /********************************************************************************************
- * Function which matches Arguments with a category, accounting for arg.known_bug_platforms *
+ * Returns true when a parameter is a known bug that must not run on the current platform.  *
  ********************************************************************************************/
-bool match_test_category(const Arguments& arg, const char* category)
+bool is_known_bug_for_platform(const Arguments& arg)
 {
-    // category is currently unused as "_" for all categories
+    // Unconditional known-bug entries are tagged category == "known_bug" at
+    // gentest time (no known_bug_platforms list).
+    if(!strcmp(arg.category, "known_bug"))
+        return true;
+
+    // Per-GPU known bugs: the parameter is a known bug only when the current arch
+    // is listed in the entry's known_bug_platforms.
     if(*arg.known_bug_platforms)
     {
         // Regular expression for token delimiters
@@ -398,7 +386,8 @@ bool match_test_category(const Arguments& arg, const char* category)
         char* archName;
         if(hipblasLtGetArchName(&archName) != HIPBLAS_STATUS_SUCCESS)
             return false;
-        static const std::string platform(archName);
+        const std::string platform(archName);
+        free(archName);
 
         // Token iterator
         std::cregex_token_iterator iter{arg.known_bug_platforms,
@@ -409,25 +398,12 @@ bool match_test_category(const Arguments& arg, const char* category)
         // Iterate across tokens in known_bug_platforms, looking for matches with platform
         for(; iter != std::cregex_token_iterator(); ++iter)
         {
-            // If a platform matches, set category to "known_bug"
             if(!strcasecmp(iter->str().c_str(), platform.c_str()))
-            {
-                // We know that underlying arg object is non-const, so we can use const_cast
-                strcpy(const_cast<char*>(arg.category), "known_bug");
-                break;
-            }
+                return true;
         }
-        free(archName);
     }
 
-    // we are now bypassing the category key
-    // Return whether arg.category matches the requested category
-    // return !strcmp(arg.category, category);
-
-    // valid_category can be used if we add unused category
-    // return valid_category(arg.category);
-
-    return true;
+    return false;
 }
 
 TEST(aux_handle_test, set_sm_count_target_default_is_zero)
@@ -503,6 +479,104 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
+TEST(aux_handle_test, set_uniform_summation_order_default_is_one)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_NE(handle, nullptr);
+
+    int32_t value = -42;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_round_trip)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 1), HIPBLAS_STATUS_SUCCESS);
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 0), HIPBLAS_STATUS_SUCCESS);
+    value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_rejects_out_of_range)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 1), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 2), HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Out-of-range input must leave the previously stored value untouched.
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, -1), HIPBLAS_STATUS_INVALID_VALUE);
+    value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, get_uniform_summation_order_rejects_null_pointer)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_rejects_null_handle)
+{
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(nullptr, 1), HIPBLAS_STATUS_NOT_INITIALIZED);
+}
+
+TEST(aux_handle_test, get_uniform_summation_order_rejects_null_handle)
+{
+    int32_t value = 0;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_does_not_mutate_desc)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 1), HIPBLAS_STATUS_SUCCESS);
+
+    int32_t desc_value  = -1;
+    size_t  sizeWritten = 0;
+    ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
+                                              HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                              &desc_value,
+                                              sizeof(desc_value),
+                                              &sizeWritten),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(desc_value, -1);
+
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
 TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_default_is_off)
 {
     hipblaslt_ext::GemmPreference pref;
@@ -521,6 +595,34 @@ TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_round_trip)
 
     pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
     ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+}
+
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_default_is_handle_default)
+{
+    hipblaslt_ext::GemmPreference pref;
+    ASSERT_EQ(pref.getUniformSummationOrder(), -1);
+}
+
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+
+    pref.setUniformSummationOrder(1);
+    ASSERT_EQ(pref.getUniformSummationOrder(), 1);
+
+    // GemmPreferenceImpl is copied member-wise by the hand-rolled copy
+    // constructor and copy assignment, so both have to carry the new member.
+    hipblaslt_ext::GemmPreference copy_constructed(pref);
+    ASSERT_EQ(copy_constructed.getUniformSummationOrder(), 1);
+
+    hipblaslt_ext::GemmPreference copy_assigned;
+    copy_assigned = pref;
+    ASSERT_EQ(copy_assigned.getUniformSummationOrder(), 1);
+
+    pref.setUniformSummationOrder(0);
+    ASSERT_EQ(pref.getUniformSummationOrder(), 0);
+    ASSERT_EQ(copy_constructed.getUniformSummationOrder(), 1);
+    ASSERT_EQ(copy_assigned.getUniformSummationOrder(), 1);
 }
 
 TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_out_of_range)

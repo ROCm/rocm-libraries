@@ -377,9 +377,9 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 //
 // deserializeGraph() must reject a serialized Graph whose
 // min_required_engine_api_version exceeds what this build understands
-// (the ceiling is K_MAX_SUPPORTED_API_VERSION == "1.3.0", the highest
+// (the ceiling is K_MAX_SUPPORTED_API_VERSION == "1.4.0", the highest
 // version constant any graph feature can currently gate on), and must accept
-// the baseline "1.0.0" and the ceiling "1.3.0". An unstamped field (a graph a
+// the baseline "1.0.0" and the ceiling "1.4.0". An unstamped field (a graph a
 // writer never populated, e.g. a hand-built fixture) is treated as "1.0.0".
 // Exercised through the public C API hipdnnBackendCreateAndDeserializeGraph_ext,
 // which surfaces the guard's HipdnnException as HIPDNN_STATUS_NOT_SUPPORTED.
@@ -387,8 +387,8 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 // Complementary contract: a graph built via the backend API stamps
 // min_required_engine_api_version to the highest feature floor it triggers --
 // "1.2.0" for a runtime pass-by-value tensor, "1.3.0" for a non-default tensor
-// alignment, else "1.0.0" -- see
-// hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(), the single
+// alignment, "1.4.0" for a non-default ragged offset multiplier, else "1.0.0" --
+// see hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(), the single
 // shared graph -> required-version mapping used by both this guard and
 // EnginePluginResourceManager's plugin applicability filter.
 // ============================================================================
@@ -434,9 +434,12 @@ flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
 // Read back the stamped min_required_engine_api_version from a graph built and
 // serialized through the backend C API. `runtimePassByValue` toggles the
 // runtime flag on the reduction input tensor; `tensorAlignment` sets the input
-// tensor's byte alignment (16 is the schema default and leaves it unstamped).
+// tensor's byte alignment (16 is the schema default and leaves it unstamped);
+// `raggedOffsetMultiplier` sets the input tensor's ragged offset multiplier (1 is
+// the schema default and leaves it unstamped).
 hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassByValue,
-                                                               int64_t tensorAlignment = 16)
+                                                               int64_t tensorAlignment = 16,
+                                                               int64_t raggedOffsetMultiplier = 1)
 {
     const std::vector<int64_t> inDims = {4, 8};
     const std::vector<int64_t> inStrides = {8, 1};
@@ -473,6 +476,12 @@ hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassB
     }
     EXPECT_EQ(hipdnnBackendSetAttribute(
                   xDesc, HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT, HIPDNN_TYPE_INT64, 1, &tensorAlignment),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(xDesc,
+                                        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &raggedOffsetMultiplier),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendFinalize(xDesc), HIPDNN_STATUS_SUCCESS);
 
@@ -545,11 +554,11 @@ hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassB
 } // namespace
 
 // A serialized graph demanding a newer engine plugin API version than this
-// build's ceiling (K_MAX_SUPPORTED_API_VERSION == "1.3.0") must be rejected, not
-// silently accepted. "1.4.0" is used as a version strictly above that ceiling.
+// build's ceiling (K_MAX_SUPPORTED_API_VERSION == "1.4.0") must be rejected, not
+// silently accepted. "1.5.0" is used as a version strictly above that ceiling.
 TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 4, 0);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 5, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -558,10 +567,10 @@ TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureApiVersion)
     EXPECT_EQ(descriptor, nullptr);
 }
 
-// "1.3.0" sits at this build's ceiling (K_MAX_SUPPORTED_API_VERSION) and must deserialize.
+// "1.4.0" sits at this build's ceiling (K_MAX_SUPPORTED_API_VERSION) and must deserialize.
 TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsCeilingApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 3, 0);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 4, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -638,6 +647,31 @@ TEST_F(IntegrationGraphDescriptorApi, StampsBaselineVersionForDefaultAlignment)
 {
     const auto stamped
         = buildAndReadStampedVersion(/*runtimePassByValue=*/false, /*tensorAlignment=*/16);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped,
+              hipdnn_data_sdk::utilities::Version{
+                  hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE});
+}
+
+// A graph carrying a tensor with a non-default ragged offset multiplier stamps
+// "1.4.0" so that plugins predating multiplier support refuse it. The multiplier
+// floor dominates the alignment floor, so it wins even with a custom alignment.
+TEST_F(IntegrationGraphDescriptorApi, StampsRaggedOffsetMultiplierVersionForNonDefaultMultiplier)
+{
+    const auto stamped = buildAndReadStampedVersion(
+        /*runtimePassByValue=*/false, /*tensorAlignment=*/32, /*raggedOffsetMultiplier=*/512);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped,
+              hipdnn_data_sdk::utilities::Version{
+                  hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION});
+}
+
+// The default ragged offset multiplier (1) must not raise the floor: such a graph
+// stays at the baseline "1.0.0".
+TEST_F(IntegrationGraphDescriptorApi, StampsBaselineVersionForDefaultRaggedOffsetMultiplier)
+{
+    const auto stamped = buildAndReadStampedVersion(
+        /*runtimePassByValue=*/false, /*tensorAlignment=*/16, /*raggedOffsetMultiplier=*/1);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     EXPECT_EQ(stamped,
               hipdnn_data_sdk::utilities::Version{

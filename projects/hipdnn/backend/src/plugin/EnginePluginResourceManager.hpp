@@ -5,13 +5,16 @@
 
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "hipdnn_backend.h"
@@ -103,6 +106,22 @@ public:
     virtual void setStream(hipStream_t stream) const;
     virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc,
                                                         bool findFirst = false) const;
+
+    /// @brief Asks whether one explicitly chosen engine applies to a graph.
+    ///
+    /// Only the plugin that owns @p engineId is queried, under the same API-version gating and
+    /// ID validation as getApplicableEngineIds(). Unlike that query, which skips a plugin that
+    /// cannot answer so the remaining plugins still contribute engines, a failure of the owning
+    /// plugin propagates unchanged: it is the real reason the engine cannot be used. A plugin
+    /// that does not own @p engineId is never consulted.
+    ///
+    /// @param engineId  Engine ID to test.
+    /// @param graphDesc Graph the engine would run; must not be null.
+    /// @return true when the owning plugin lists the engine as applicable; false when the
+    ///         engine is unknown, gated out, or not offered for the graph.
+    /// @throws HipdnnException whatever the owning plugin's query throws.
+    [[nodiscard]] virtual bool isEngineApplicable(int64_t engineId,
+                                                  const GraphDescriptor* graphDesc) const;
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const GraphDescriptor* graphDesc) const;
@@ -132,10 +151,68 @@ public:
     virtual size_t getEngineCount() const;
     virtual std::vector<EngineInfo> getEngineInfos() const;
 
+    /// @brief Resolves the name for an engine: plugin entry point -> static
+    /// registry -> hex ID.
+    /// Never throws; always returns a non-empty string.
+    /// @param engineId    Engine ID as reported by the owning plugin.
+    /// @param detailsName Name recorded in EngineDetails.name, or std::nullopt
+    ///                    when there is no graph. Never a source for the result,
+    ///                    since load-time admission cannot see this field: it is
+    ///                    compared against the entry point when one answers, and
+    ///                    reported as a plugin defect otherwise. The referenced
+    ///                    storage must outlive this call.
+    [[nodiscard]] virtual std::string
+        resolveEngineName(int64_t engineId, std::optional<std::string_view> detailsName) const;
+
+    /// @brief Resolves a name to the engine ID that carries it.
+    ///
+    /// The exact inverse of the names getEngineInfos() reports: a name from that
+    /// enumeration always resolves, and to exactly one engine, because an engine
+    /// whose name does not hash to its ID is dropped at load. Unlike
+    /// engineNameToId(), which hashes any string, this also confirms the engine
+    /// is loaded.
+    ///
+    /// An engine named only through the graph-scoped EngineDetails.name is
+    /// indexed under its registry or hex name instead, the same limitation
+    /// getEngineInfos() carries.
+    ///
+    /// @param engineName Name to resolve. An empty name never matches.
+    /// @return The owning engine ID, or std::nullopt when no loaded engine
+    ///         carries the name.
+    [[nodiscard]] virtual std::optional<int64_t>
+        findEngineIdByName(std::string_view engineName) const;
+
+    /// @brief Resolves an engine ID to the name the enumeration reports for it.
+    ///
+    /// The exact inverse of findEngineIdByName(). Unlike resolveEngineName(),
+    /// which names any ID, this answers only for engines that survived load-time
+    /// admission, which is what makes the round trip total.
+    ///
+    /// @param engineId Engine ID to name.
+    /// @return The engine's name, or std::nullopt when no loaded engine carries
+    ///         the ID.
+    [[nodiscard]] virtual std::optional<std::string> findEngineNameById(int64_t engineId) const;
+
     // Inherited from base: getLoadedPluginFiles()
     using PluginResourceManagerBase::getLoadedPluginFiles;
 
     virtual std::string toString() const;
+
+    /// Owns a validated bounded page independently of the plugin allocation.
+    virtual std::vector<uint8_t> enumerateCandidates(int64_t engineId,
+                                                     const hipdnnPluginConstData_t& engineConfig,
+                                                     const GraphDescriptor* graph,
+                                                     uint64_t offset,
+                                                     uint64_t limit) const;
+
+    /// Queries one engine without changing applicability, in the config's ranking metric
+    /// (empty = default; unregistered throws BAD_PARAM). The host-owned result always carries
+    /// that metric; malformed or other-metric answers are returned as INVALID.
+    virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getEnginePrediction(const hipdnnPluginConstData_t& engineConfig,
+                            const hipdnnPluginConstData_t& opGraph,
+                            hipdnnEnginePredictionKind_t kind,
+                            bool evaluate = true) const;
 
 protected:
     // Note: _pm member is inherited from PluginResourceManagerBase
@@ -148,6 +225,14 @@ private:
                                   hipdnnPluginConstData_t* engineDetails) const;
     virtual void destroyEngineDetails(int64_t engineId,
                                       hipdnnPluginConstData_t* engineDetails) const;
+
+    /// @brief Shared core of getApplicableEngineIds() and isEngineApplicable().
+    /// @param pinnedEngineId When set, only that engine's owning plugin is queried and its
+    ///                       failure propagates; otherwise every plugin is queried and a
+    ///                       failing plugin is skipped.
+    std::vector<int64_t> queryApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                  bool findFirst,
+                                                  std::optional<int64_t> pinnedEngineId) const;
 
     [[nodiscard]] virtual hipdnnEnginePluginExecutionContext_t
         createExecutionContext(int64_t engineId,
@@ -165,9 +250,25 @@ private:
                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                         uint32_t numDeviceBuffers) const;
 
+    /// @brief Materializes and memoizes the engine enumeration together with its
+    /// name -> ID reverse index, and returns the enumeration by reference.
+    ///
+    /// Both memos are filled in the same pass so they can never disagree about
+    /// which engine carries which name.
+    ///
+    /// Safe to call concurrently: the fill happens once under _engineIndexMutex
+    /// and is never invalidated, so the returned reference stays valid.
+    const std::vector<EngineInfo>& buildEngineIndex() const;
+
     std::unordered_map<hipdnnEnginePluginHandle_t, const EnginePlugin*> _handleToPlugin;
     std::unordered_map<int64_t, hipdnnEnginePluginHandle_t> _engineIdToHandle;
+
+    /// Guards the one-time fill of the two memos below. Not the class-static
+    /// getMutex(), which is already held across getOrCreatePluginManager() and
+    /// would deadlock a future path that indexes while loading.
+    mutable std::mutex _engineIndexMutex;
     mutable std::optional<std::vector<EngineInfo>> _cachedEngineInfos;
+    mutable std::optional<std::unordered_map<std::string, int64_t>> _cachedEngineIdsByName;
 
     friend class EngineDetailsWrapper;
     friend class EngineExecutionContextWrapper;

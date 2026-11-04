@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -300,7 +301,13 @@ static int parse_arguments(int                          argc,
                 else if(arg == "--initialization")
                 {
                     std::string initializationStr = argv[++i];
-                    initialization = string2hipblaslt_initialization(initializationStr);
+                    if(auto parsed = string2hipblaslt_initialization(initializationStr))
+                        initialization = *parsed;
+                    else
+                    {
+                        std::cerr << "Invalid initialization type: " << initializationStr << '\n';
+                        return EXIT_FAILURE;
+                    }
                 }
                 else if(arg == "--sync_count")
                 {
@@ -1070,7 +1077,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                             hd[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]))
                             {
                                 printf(
-                                    "Err: Index %ld: %f vs %f\n",
+                                    "Err: Index %" PRId64 ": %f vs %f\n",
                                     i1 + i2 * ldd[i] + i3 * stride_d[i],
                                     static_cast<float>(
                                         hd_gold[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]),

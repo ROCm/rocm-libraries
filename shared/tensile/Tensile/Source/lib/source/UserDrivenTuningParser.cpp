@@ -87,7 +87,8 @@ namespace Tensile
         const size_t entries_n = entries.size();
         if((entries_n != 15) && (entries_n != 18))
         {
-            return std::make_pair(ProblemOverride<ContractionProblem>{}, -1);
+            return std::make_pair(ProblemOverride<ContractionProblem>{},
+                                  InvalidOverrideSolutionIndex);
         }
 
         // Common
@@ -103,7 +104,7 @@ namespace Tensile
         DataType outputType  = DataType::None;
         DataType computeType = DataType::None;
 
-        int solution_idx = -1;
+        int solution_idx = InvalidOverrideSolutionIndex;
 
         try
         {
@@ -154,17 +155,20 @@ namespace Tensile
         }
         catch(std::invalid_argument const& ex)
         {
-            return std::make_pair(ProblemOverride<ContractionProblem>{}, -1);
+            return std::make_pair(ProblemOverride<ContractionProblem>{},
+                                  InvalidOverrideSolutionIndex);
         }
         catch(std::out_of_range const& ex)
         {
-            return std::make_pair(ProblemOverride<ContractionProblem>{}, -1);
+            return std::make_pair(ProblemOverride<ContractionProblem>{},
+                                  InvalidOverrideSolutionIndex);
         }
 
         if(inputType == DataType::None || outputType == DataType::None
            || computeType == DataType::None)
         {
-            return std::make_pair(ProblemOverride<ContractionProblem>{}, -1);
+            return std::make_pair(ProblemOverride<ContractionProblem>{},
+                                  InvalidOverrideSolutionIndex);
         }
 
         bool HPA = (dataTypeSize(computeType) > dataTypeSize(inputType));
@@ -331,8 +335,11 @@ namespace Tensile
                 entries.push_back(entry);
             }
 
+            // clients may remap but 0 and InvalidOverrideSolutionIndex are reserved for invalid indices and discarded
+            // 0 means default solution, InvalidOverrideSolutionIndex means no solution found
             auto problemSolution = problemFromEntries<ContractionProblem>(entries);
-            if(problemSolution.second > 0)
+            auto solutionIndex   = problemSolution.second;
+            if(solutionIndex != 0 && solutionIndex != InvalidOverrideSolutionIndex)
             {
                 out.push_back(problemSolution);
             }

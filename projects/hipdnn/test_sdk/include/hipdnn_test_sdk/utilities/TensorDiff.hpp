@@ -4,10 +4,12 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -54,23 +56,40 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
     summary.maxAbsDiff = 0.0f;
     summary.meanAbsDiff = 0.0f;
 
+    const auto raggedLayout = reference.raggedIterationInfo();
     if(reference.elementCount() != implementation.elementCount()
-       || reference.dims() != implementation.dims())
+       || reference.dims() != implementation.dims()
+       || raggedLayout != implementation.raggedIterationInfo())
     {
         return summary;
     }
-
-    summary.totalElements = reference.elementCount();
+    const bool isRagged = raggedLayout.has_value();
 
     hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
     hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
     double sumAbsDiff = 0.0;
     std::mutex mtx;
+    std::atomic<size_t> comparedCount(0);
 
     auto diffFunc = [&](const std::vector<int64_t>& indices) {
+        if(isRagged && raggedLayout->isOutOfBlock(indices))
+        {
+            return;
+        }
+
         T refValue = refView.getHostValue(indices);
         T implValue = implView.getHostValue(indices);
+
+        // A ragged reference marks the positions it leaves undefined with NaN (RFC 0014).
+        if(isRagged)
+        {
+            if(std::isnan(static_cast<float>(refValue)))
+            {
+                return;
+            }
+            comparedCount.fetch_add(1, std::memory_order_relaxed);
+        }
 
         auto absDiff = static_cast<float>(fabs(implValue - refValue));
         auto threshold = absoluteTolerance + relativeTolerance * fabs(static_cast<float>(refValue));
@@ -119,6 +138,8 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
     auto parallelFunc
         = hipdnn_test_sdk::detail::makeParallelTensorFunctor(diffFunc, reference.dims());
     parallelFunc(std::thread::hardware_concurrency());
+
+    summary.totalElements = isRagged ? comparedCount.load() : reference.elementCount();
 
     if(summary.mismatchCount > 0)
     {
@@ -171,6 +192,28 @@ inline void printTensorDiffSummary(std::ostream& os,
     os << std::defaultfloat;
 }
 
+inline void printRaggedLayoutMismatch(std::ostream& os,
+                                      const std::string& tensorName,
+                                      const hipdnn_data_sdk::utilities::ITensor& reference,
+                                      const hipdnn_data_sdk::utilities::ITensor& implementation)
+{
+    auto describeLayout = [](const hipdnn_data_sdk::utilities::ITensor& tensor) {
+        const auto layout = tensor.raggedIterationInfo();
+        if(!layout.has_value())
+        {
+            return std::string("dense");
+        }
+        std::ostringstream description;
+        description << "ragged row offsets " << StreamVec(layout->rowOffsets) << " seq axis "
+                    << layout->seqAxis << " seq stride " << layout->seqStride;
+        return description.str();
+    };
+
+    os << "  Tensor diff for \"" << tensorName << "\": ragged layout mismatch - reference "
+       << describeLayout(reference) << " vs implementation " << describeLayout(implementation)
+       << "\n";
+}
+
 template <class T>
 void printTensorDiff(std::ostream& os,
                      const std::string& tensorName,
@@ -198,8 +241,12 @@ bool validateAndReport(std::ostream& os,
     os << "  " << tensorName << ": " << (valid ? "successful" : "failed") << "\n";
     if(!valid)
     {
-        if(reference.elementCount() != implementation.elementCount()
-           || reference.dims() != implementation.dims())
+        if(reference.raggedIterationInfo() != implementation.raggedIterationInfo())
+        {
+            printRaggedLayoutMismatch(os, tensorName, reference, implementation);
+        }
+        else if(reference.elementCount() != implementation.elementCount()
+                || reference.dims() != implementation.dims())
         {
             os << "  Tensor diff for \"" << tensorName << "\": shape mismatch - reference "
                << StreamVec(reference.dims()) << " vs implementation "

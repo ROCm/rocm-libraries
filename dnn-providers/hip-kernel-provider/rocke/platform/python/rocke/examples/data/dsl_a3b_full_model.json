@@ -31,7 +31,7 @@
       "baseline_us": 51.58454418182373,
       "dsl_us": 53.43616485595703,
       "speedup": 0.9653489227918107,
-      "notes": "kv=1024 GQA-8 hdim=64 path=3d num_sms=30"
+      "notes": "kv=1024 GQA-8 hdim=64 path=3d num_cus=30"
     },
     {
       "name": "o_proj",

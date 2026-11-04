@@ -40,6 +40,9 @@ typedef struct rocke_ati_arch_row
 {
     const char* gfx;
     const rocke_arch_target_t* target; /* fully-built singleton descriptor */
+    /* The generic target this row takes its facts from (arch_specs.json
+     * "facts_of"), or NULL for a row that holds its own facts. */
+    const char* facts_of;
 } rocke_ati_arch_row_t;
 
 /* The registry of all known arches, sorted by gfx token (so rocke_known_arches
@@ -56,14 +59,17 @@ extern const int rocke_ati_arch_registry_len;
  * in sync. */
 extern const char* const rocke_ati_known_arches[];
 
-/* ------------------------------------------------------- dtype normalisation */
+/* One catalogued LLVM generic processor and its NULL-terminated concrete
+ * members (arch_specs.json "generic_targets"). */
+typedef struct rocke_ati_generic_row
+{
+    const char* generic;
+    const char* const* members;
+} rocke_ati_generic_row_t;
 
-/* The canonical-key core of rocke_normalize_dtype, shared so both buckets resolve
- * spellings identically. `lowered` is a caller buffer that receives the
- * strip+lower of `name` (used as the pass-through result for unknown spellings).
- * Returns a static interned canonical string for a known alias, else `lowered`.
- * Defined in bucket 0. */
-const char* rocke_ati_normalize_dtype(const char* name, char* lowered, size_t cap);
+/* Generic target rows, terminated by a row whose .generic == NULL. Defined in
+ * bucket 0. */
+extern const rocke_ati_generic_row_t rocke_ati_generic_targets[];
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -10,6 +10,9 @@ and 1 distinct. Verifies:
   2. place_bundles produces 1 sweep (2 cases) + 1 standalone
   3. verify_migration round-trip passes for all 3
   4. import_graph detects an exact duplicate (skip) and a new case (append)
+  5. import_graph round-trip refusals name the mismatch and write nothing
+  6. place_bundles keeps manual cases of an existing sweep on regeneration
+  7. import_graph takes metadata from the capture sidecar, as place_bundles does
 
 No C++ binary needed — everything is pure Python on synthetic data.
 
@@ -18,7 +21,9 @@ Usage::
     python3 test_migration.py [-v]
 """
 
+import copy
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -170,6 +175,63 @@ def test_place_and_verify():
         print("  PASS: place_and_verify")
 
 
+def test_place_keeps_manual_cases():
+    """Regenerating a sweep keeps its manual cases, or refuses and writes nothing.
+
+    A manual case (metadata.generator == "manual") has no C++ test behind it, so
+    no capture reproduces it. A rerun of place_bundles over the same tree must
+    keep it. One that no longer fits the template fails the run and leaves the
+    sweep as it was.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        bundle_dir = tmp / "bundles"
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp32", "small_fp32", g1)
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp16", "small_fp16", g2)
+        place = [
+            sys.executable,
+            str(SCRIPT_DIR / "place_bundles.py"),
+            "--capture-dir",
+            str(capture_dir),
+            "--output-dir",
+            str(bundle_dir),
+        ]
+        r = run(place)
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        (sweep_path,) = bundle_dir.rglob("sweep.json")
+
+        sweep = json.loads(sweep_path.read_text())
+        manual = copy.deepcopy(sweep["cases"][0])
+        manual["id"] = "runtime_scalar"
+        manual["tensor_patches"] = [
+            {"uid": 0, "set": {"is_runtime_pass_by_value": True}, "remove": []}
+        ]
+        manual["metadata"] = {"format_version": 1, "generator": "manual"}
+        sweep["cases"].append(manual)
+        sweep_path.write_text(json.dumps(sweep, indent=2) + "\n")
+
+        r = run(place)
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        cases = json.loads(sweep_path.read_text())["cases"]
+        assert len(cases) == 3, [c["id"] for c in cases]
+        assert cases[-1] == manual, f"manual case changed or dropped: {cases}"
+
+        # A manual case missing a template tensor cannot be expanded any more.
+        sweep = json.loads(sweep_path.read_text())
+        sweep["cases"][-1]["values"]["tensors"].pop()
+        stale = json.dumps(sweep, indent=2) + "\n"
+        sweep_path.write_text(stale)
+
+        r = run(place, check=False)
+        assert r.returncode == 1, f"expected failure:\n{r.stderr}"
+        assert "'runtime_scalar' does not fit" in r.stderr, r.stderr
+        assert sweep_path.read_text() == stale, "sweep must be left unchanged"
+        print("  PASS: place_keeps_manual_cases")
+
+
 def test_import_dedup():
     """import_graph detects exact dups and appends new cases."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -259,6 +321,219 @@ def test_import_dedup():
         ), f"expected 2 cases after append, got {len(sweep['cases'])}"
 
         print("  PASS: import_dedup")
+
+
+def test_import_append_preserves_case_fields():
+    """Appending a new case must not drop existing keys like golden/
+    tensor_patches, nor an unrelated top-level sweep key (mirrors
+    integration-test-bundles/quick/BatchnormFwdInference/Inference/sweep.json,
+    whose cases carry a 'golden' key alongside values/metadata).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+        sweep["note"] = "hand-authored top-level key"
+        sweep["cases"][0]["golden"] = {"path": "golden/g1/tensors.dvc"}
+        sweep["cases"][0]["tensor_patches"] = {"1": {"seed": 7}}
+        with open(sweep_path, "w") as f:
+            json.dump(sweep, f, indent=2)
+            f.write("\n")
+
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0, f"append import failed: {r.stderr}"
+        assert "appended" in r.stderr
+
+        with open(sweep_path) as f:
+            after = json.load(f)
+        assert (
+            after["note"] == "hand-authored top-level key"
+        ), "unknown top-level sweep key must survive an append"
+        assert len(after["cases"]) == 2
+        assert after["cases"][0]["golden"] == {
+            "path": "golden/g1/tensors.dvc"
+        }, "existing case's golden must survive an append"
+        assert after["cases"][0]["tensor_patches"] == {
+            "1": {"seed": 7}
+        }, "existing case's tensor_patches must survive an append"
+        print("  PASS: import_append_preserves_case_fields")
+
+
+def test_import_new_topology_never_clobbers():
+    """A second, structurally distinct graph whose derived directory already
+    holds a sweep must land in a fresh directory, following place_bundles.py's
+    Default/Variant2/... convention; the original template/sweep survive
+    byte-identical.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Matmul", [0, 1], [2, 3], [3, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"first import failed: {r.stderr}"
+
+        default_dir = bundle_dir / "quick" / "Matmul" / "Default"
+        assert (default_dir / "sweep.json").exists(), r.stderr
+        before_template = (default_dir / "graph.template.json").read_bytes()
+        before_sweep = (default_dir / "sweep.json").read_bytes()
+
+        # Same op and same rank (-> same preferred "Default" topo name), but
+        # an extra unconnected tensor gives it a different skeleton hash, so
+        # it is NOT a structural match and must take the new-topology path.
+        g2 = _make_graph("Matmul", [0, 1, 2], [2, 3], [3, 1], "float")
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0, f"second import failed: {r.stderr}"
+        assert "created new bundle" in r.stderr, r.stderr
+
+        variant_dir = bundle_dir / "quick" / "Matmul" / "Variant2"
+        assert (
+            variant_dir / "sweep.json"
+        ).exists(), f"expected a fresh Variant2 dir, not a clobber:\n{r.stderr}"
+        assert (
+            default_dir / "graph.template.json"
+        ).read_bytes() == before_template, "Default template must be untouched"
+        assert (
+            default_dir / "sweep.json"
+        ).read_bytes() == before_sweep, "Default sweep must be untouched"
+        print("  PASS: import_new_topology_never_clobbers")
+
+
+def test_import_new_topology_case_id_is_descriptive():
+    """A brand-new topology's sole case gets a real id, not the literal
+    'case' -- the id doubles as the gtest name."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"import failed: {r.stderr}"
+
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+        case_id = sweep["cases"][0]["id"]
+        assert (
+            case_id != "case"
+        ), f"new-topology case id must be descriptive, got {case_id!r}"
+        assert re.match(r"^[a-z0-9_]+$", case_id), case_id
+        print("  PASS: import_new_topology_case_id_is_descriptive")
+
+
+def test_import_support_json_sidecar():
+    """Every sweep import_graph creates or touches gets an empty canonical
+    support.json that verify_support_claims.verify_all() accepts; an existing
+    support.json is never modified.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    import verify_support_claims
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        # New topology -> gets a fresh, empty, canonical support.json.
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+        assert "created empty support.json" in r.stderr, r.stderr
+
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        support_path = sweep_path.parent / "support.json"
+        assert support_path.exists()
+        raw = support_path.read_bytes()
+        assert raw == b'{\n  "claims": {},\n  "version": 1\n}\n', raw
+        assert b"\r\n" not in raw, "support.json must use LF line endings"
+
+        with open(sweep_path) as f:
+            case_id = json.load(f)["cases"][0]["id"]
+
+        # Overwrite with a hand-written, valid, non-empty claims sidecar; an
+        # append into this same sweep must leave it byte-for-byte alone.
+        hand_written = (
+            json.dumps(
+                {
+                    "claims": {
+                        "SOME_ENGINE": [
+                            {"cases": [case_id], "support": {"gfx90a": ["linux"]}}
+                        ]
+                    },
+                    "version": 1,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode()
+        support_path.write_bytes(hand_written)
+
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0, f"append import failed: {r.stderr}"
+        assert "created empty support.json" not in r.stderr, r.stderr
+        assert (
+            support_path.read_bytes() == hand_written
+        ), "an existing support.json must never be modified"
+
+        errors = verify_support_claims.verify_all(bundle_dir)
+        assert not errors, f"verify_support_claims flagged our output:\n{errors}"
+        print("  PASS: import_support_json_sidecar")
+
+
+def test_import_generator_metadata_default():
+    """metadata['generator'] defaults to 'import_graph.py'; an explicit
+    --meta generator=... wins, and a missing reference_source warns."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"default-generator import failed: {r.stderr}"
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+        assert sweep["cases"][0]["metadata"]["generator"] == "import_graph.py"
+        assert (
+            "reference_source in metadata" in r.stderr
+        ), "a missing --meta reference_source must warn"
+
+        bundle_dir2 = tmp / "bundles2"
+        bundle_dir2.mkdir()
+        g2 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(
+            tmp,
+            "g2",
+            g2,
+            bundle_dir2,
+            "--meta",
+            "generator=custom_gen",
+            "--meta",
+            "reference_source=unit-test",
+        )
+        assert r.returncode == 0, f"explicit-generator import failed: {r.stderr}"
+        sweep_path2 = next(bundle_dir2.rglob("sweep.json"))
+        with open(sweep_path2) as f:
+            sweep2 = json.load(f)
+        assert sweep2["cases"][0]["metadata"]["generator"] == "custom_gen"
+        assert (
+            "reference_source in metadata" not in r.stderr
+        ), "an explicit reference_source must not warn"
+        print("  PASS: import_generator_metadata_default")
 
 
 def test_round_trip_expansion():
@@ -645,6 +920,952 @@ def test_import_inputs_uid_canonicalized_by_name():
         print("  PASS: import_inputs_uid_canonicalized_by_name")
 
 
+def _inventory(root):
+    """{relative path: file bytes, or None for a directory} under root."""
+    return {
+        str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+        for p in sorted(root.rglob("*"))
+    }
+
+
+def _import(tmp, name, graph, bundle_dir, *extra, check=True):
+    """Write graph to tmp/<name>.json and run import_graph.py on it."""
+    graph_path = tmp / f"{name}.json"
+    with open(graph_path, "w") as f:
+        json.dump(graph, f)
+    return run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "import_graph.py"),
+            "--graph",
+            str(graph_path),
+            "--bundle-dir",
+            str(bundle_dir),
+            *extra,
+        ],
+        check=check,
+    )
+
+
+def _reported(stderr, label):
+    """Rendered value of a '    <label>:  <value>  (<side>)' diagnostic line."""
+    prefix = f"    {label}:"
+    for line in stderr.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip().rsplit("  (", 1)[0]
+    raise AssertionError(f"no '{label}' line in stderr:\n{stderr}")
+
+
+def _assert_refused(r, bundle_dir, before, where):
+    """Import exited 1 at the named round-trip site and wrote nothing.
+
+    The ERROR line directly follows the preamble's `operation:` line.
+    """
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}:\n{r.stderr}"
+    lines = r.stderr.splitlines()
+    operation = next(
+        (i for i, line in enumerate(lines) if line.startswith("  operation:")), None
+    )
+    assert operation is not None and lines[operation + 1 : operation + 2] == [
+        f"  ERROR: round-trip verify failed {where}"
+    ], f"expected failure {where} directly after the preamble:\n{r.stderr}"
+    assert "Traceback" not in r.stderr, f"diagnostics crashed:\n{r.stderr}"
+    assert _inventory(bundle_dir) == before, "refused import changed the bundle tree"
+
+
+def test_roundtrip_mismatch_walk():
+    """_first_mismatch walks sorted keys then indices; _brief bounds renderings.
+
+    An absent side is the _MISSING object, so a key that is absent stays
+    distinguishable from a key whose value is null or a string that reads like
+    the absence marker.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from import_graph import _MISSING, _brief, _first_mismatch
+
+    found = _first_mismatch({"b": 1, "a": [1, 2]}, {"b": 2, "a": [1]})
+    assert found[0] == "a[1]" and found[1] == 2, f"sorted-key walk: {found}"
+    assert found[2] is _MISSING, f"missing list element must be _MISSING: {found}"
+
+    found = _first_mismatch([1], [1, 3])
+    assert found[0] == "[1]" and found[1] is _MISSING and found[2] == 3, found
+
+    found = _first_mismatch({"x": {"y": [{"z": 1}]}}, {"x": {"y": [{"z": 2}]}})
+    assert found == ("x.y[0].z", 1, 2), f"nested path: {found}"
+    assert _first_mismatch(1, 2) == ("<root>", 1, 2)
+    assert _first_mismatch({"a": 1}, {"a": 1.0}) is None, "walk adds no equality"
+
+    found = _first_mismatch({"k": None}, {})
+    assert found[1] is None and found[2] is _MISSING, f"null vs absent: {found}"
+    assert (_brief(found[1]), _brief(found[2])) == ("null", "<absent>")
+
+    found = _first_mismatch({"k": "<absent>"}, {})
+    assert found[1] == "<absent>" and found[1] is not _MISSING, found
+    assert found[2] is _MISSING, found
+    assert _brief(found[1]) == '"<absent>"' and _brief(found[2]) == "<absent>"
+
+    assert _brief("x" * 198) == '"' + "x" * 198 + '"', "200 chars must not truncate"
+    over = _brief("x" * 199)
+    assert len(over) == 200 and over.endswith("..."), f"201 chars: {over!r}"
+    assert len(_brief("x" * 500)) == 200
+    print("  PASS: roundtrip_mismatch_walk")
+
+
+def test_import_extraction_failure_diagnostics():
+    """A failed extraction round-trip names sweep, match counts and field; no write.
+
+    Two structural matches exist (full/ then quick/); the tier-preferred quick/
+    sweep is the one reported. The input's long top-level name is not a
+    template placeholder, so the expanded template cannot reproduce it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir, "--tier", "full")
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+        full_sweep = next((bundle_dir / "full").rglob("sweep.json"))
+        quick_dir = (
+            bundle_dir / "quick" / full_sweep.parent.relative_to(bundle_dir / "full")
+        )
+        shutil.copytree(full_sweep.parent, quick_dir)
+        quick_sweep = quick_dir / "sweep.json"
+
+        bad = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        bad["name"] = "n" * 500
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "bad", bad, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+
+        assert (
+            f"selected sweep: {quick_sweep} (of 2 structural match(es),"
+            f" 1 in tier 'quick')" in r.stderr
+        ), f"sweep path/count not reported:\n{r.stderr}"
+        assert _reported(r.stderr, "field") == "name", r.stderr
+        expected = _reported(r.stderr, "expected")
+        assert len(expected) == 200 and expected.endswith("..."), expected
+        assert expected.startswith('"nnn'), expected
+        assert _reported(r.stderr, "actual") == '""', r.stderr
+        print("  PASS: import_extraction_failure_diagnostics")
+
+
+def test_import_canonical_only_difference():
+    """int 1 vs float 1.0 compares equal field-wise; report canonical offsets.
+
+    The walk finds no unequal field, so the report gives the first differing
+    offset of the two canonical renderings and at most 60 characters of each.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import canon, canonical_uid_map_by_name, remap_graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g_int = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g_int["nodes"][0]["alpha"] = 1
+        r = _import(tmp, "g_int", g_int, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        g_float = json.loads(json.dumps(g_int))
+        g_float["nodes"][0]["alpha"] = 1.0
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "g_float", g_float, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+        assert not any(
+            line.startswith("    field:") for line in r.stderr.splitlines()
+        ), r.stderr
+
+        want = canon(remap_graph(g_float, canonical_uid_map_by_name(g_float)))
+        got = canon(remap_graph(g_int, canonical_uid_map_by_name(g_int)))
+        at = next(i for i, (a, b) in enumerate(zip(want, got)) if a != b)
+        assert len(want) - at > 60 and len(got) - at > 60, "fixture too short"
+        assert _reported(r.stderr, "at offset") == str(at), r.stderr
+        assert _reported(r.stderr, "expected") == want[at : at + 60], r.stderr
+        assert _reported(r.stderr, "actual") == got[at : at + 60], r.stderr
+        print("  PASS: import_canonical_only_difference")
+
+
+def test_import_absent_vs_literal_marker():
+    """A key absent from the template is not confused with a look-alike string.
+
+    The input carries the literal string "<absent>" where the template has no
+    key at all: the input side renders as a quoted JSON string, the absent side
+    as the bare marker.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        bad = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        bad["nodes"][0]["note"] = "<absent>"
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "bad", bad, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+        assert _reported(r.stderr, "field") == "nodes[0].note", r.stderr
+        assert _reported(r.stderr, "expected") == '"<absent>"', r.stderr
+        assert _reported(r.stderr, "actual") == "<absent>", r.stderr
+        print("  PASS: import_absent_vs_literal_marker")
+
+
+def test_import_new_template_failure_diagnostics():
+    """A failed new-template round-trip names the field and writes nothing.
+
+    A tensor without a uid cannot bind its per-tensor placeholders, so the
+    expanded template leaves them unresolved. An unrelated existing bundle
+    keeps the before/after inventory non-empty.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        conv = _make_graph("Conv", [0, 1, 2], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "conv", conv, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        bad = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        bad["tensors"].append(
+            {
+                "name": "orphan",
+                "dims": [7],
+                "strides": [1],
+                "data_type": "float",
+                "virtual": False,
+            }
+        )
+        before = _inventory(bundle_dir)
+        assert before, "fixture must start from a non-empty bundle tree"
+        r = _import(tmp, "bad", bad, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "for new template")
+        assert "selected sweep" not in r.stderr, r.stderr
+        assert _reported(r.stderr, "field") == "tensors[1].data_type", r.stderr
+        assert _reported(r.stderr, "tensor") == 'name="orphan"', r.stderr
+        assert _reported(r.stderr, "expected") == '"float"', r.stderr
+        assert _reported(r.stderr, "actual") == '"${UNRESOLVED:data_type}"', r.stderr
+        print("  PASS: import_new_template_failure_diagnostics")
+
+
+# --------------------------------------------------------------------------
+# Capture sidecar (.meta.json) handling in import_graph
+# --------------------------------------------------------------------------
+
+_SUITE = "Smoke/IntegrationGpuTernaryFp32"
+
+
+def _ternary_graph(uids, dims=(2, 3, 4, 5)):
+    """Named-tensor ternary op; uids = {name: uid}, out is virtual."""
+    strides = [1] * len(dims)
+    for i in range(len(dims) - 2, -1, -1):
+        strides[i] = strides[i + 1] * dims[i + 1]
+    return {
+        "nodes": [
+            {
+                "type": "TernaryAttributes",
+                "name": "",
+                "inputs": {
+                    "dy_tensor_uid": uids["dy"],
+                    "scale_tensor_uid": uids["scale"],
+                    "x_tensor_uid": uids["x"],
+                },
+                "outputs": {"out_tensor_uid": uids["out"]},
+            }
+        ],
+        "tensors": [
+            {
+                "uid": uids[nm],
+                "name": nm,
+                "dims": list(dims),
+                "strides": strides,
+                "data_type": "float",
+                "virtual": (nm == "out"),
+            }
+            for nm in ("x", "dy", "scale", "out")
+        ],
+        "io_data_type": "float",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+
+_UIDS0 = {"x": 1, "dy": 2, "scale": 3, "out": 4}
+_UIDS1 = {"x": 3, "dy": 4, "scale": 1, "out": 2}  # shuffled
+
+
+def _sidecar(case_name, uids=None, seed=None, specs=None, suite=_SUITE):
+    """A sidecar shaped like the one --capture-bundles writes.
+
+    specs = {tensor name: fill spec}; keyed by that capture's own UIDs.
+    """
+    meta = {
+        "format_version": 1,
+        "operation": suite,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+    }
+    if seed is not None:
+        meta["seed"] = seed
+    if specs is not None:
+        meta["inputs"] = {str(uids[nm]): spec for nm, spec in specs.items()}
+    meta["notes"] = f"Captured from C++ graph test {suite}.{case_name}"
+    return meta
+
+
+def _capture(capture_dir, case_name, graph, sidecar, suite=_SUITE):
+    """Write a Hop A capture; sidecar is a dict, raw text, or None (absent)."""
+    if isinstance(sidecar, dict):
+        _write_captured(capture_dir, suite, case_name, graph, meta=sidecar)
+    else:
+        _write_captured(capture_dir, suite, case_name, graph)
+        meta_path = capture_dir / suite / case_name / f"{case_name}.meta.json"
+        if sidecar is None:
+            meta_path.unlink()
+        else:
+            meta_path.write_text(sidecar)
+    return capture_dir / suite / case_name / f"{case_name}.json"
+
+
+def _import_capture(graph_path, bundle_dir, *extra):
+    return run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "import_graph.py"),
+            "--graph",
+            str(graph_path),
+            "--bundle-dir",
+            str(bundle_dir),
+            *extra,
+        ],
+        check=False,
+    )
+
+
+def _cases(bundle_dir):
+    """All sweep cases under bundle_dir."""
+    out = []
+    for p in sorted(bundle_dir.rglob("sweep.json")):
+        with open(p) as f:
+            out.extend(json.load(f)["cases"])
+    return out
+
+
+def _only_metadata(bundle_dir):
+    cases = _cases(bundle_dir)
+    assert len(cases) == 1, f"expected 1 case, got {cases}"
+    return cases[0]["metadata"]
+
+
+def _inputs_by_name(bundle_dir, metadata):
+    """Re-key a case's inputs from canonical UIDs to tensor names."""
+    tpl_path = next(bundle_dir.rglob("graph.template.json"))
+    with open(tpl_path) as f:
+        uid_to_name = {t["uid"]: t["name"] for t in json.load(f)["tensors"]}
+    return {uid_to_name[int(u)]: s for u, s in metadata["inputs"].items()}
+
+
+def test_import_reads_sidecar():
+    """With the sidecar present, import records what place_bundles records.
+
+    No --meta/--seed: the seed, the explicit inputs entry, and every other
+    sidecar field come from the capture. x's range [0.5, 2.0] is deliberately
+    not the FREE[-1, 1] declaration default, so a dropped entry would show. The
+    two captures use shuffled UIDs, so inputs must be remapped with the graph.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        specs = {
+            "x": {"kind": "free", "lo": 0.5, "hi": 2.0},
+            "scale": {"kind": "fixed", "value": 1.0},
+        }
+        paths = [
+            _capture(
+                capture_dir,
+                "case0",
+                _ternary_graph(_UIDS0),
+                _sidecar("case0", _UIDS0, seed=1234, specs=specs),
+            ),
+            _capture(
+                capture_dir,
+                "case1",
+                _ternary_graph(_UIDS1, dims=(4, 6, 8, 10)),
+                _sidecar("case1", _UIDS1, seed=99, specs=specs),
+            ),
+        ]
+
+        placed_dir = tmp / "placed"
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "place_bundles.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--output-dir",
+                str(placed_dir),
+            ]
+        )
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+
+        imported_dir = tmp / "imported"
+        imported_dir.mkdir()
+        for p in paths:
+            r = _import_capture(p, imported_dir)
+            assert r.returncode == 0, f"import of {p} failed:\n{r.stderr}"
+            assert "WARN" not in r.stderr, f"clean sidecar must be quiet:\n{r.stderr}"
+            assert "no reference_source" not in r.stderr, r.stderr
+
+        def by_source(cases):
+            return {c["metadata"]["reference_source"]: c["metadata"] for c in cases}
+
+        placed = by_source(_cases(placed_dir))
+        imported = by_source(_cases(imported_dir))
+        assert len(placed) == 2, f"place_bundles should sweep both: {placed}"
+        assert imported == placed, (
+            f"import metadata differs from place_bundles:\n"
+            f"  imported: {imported}\n  placed:   {placed}"
+        )
+        for ref, meta in imported.items():
+            assert meta["seed"] in (1234, 99), f"captured seed lost: {meta}"
+            assert (
+                _inputs_by_name(imported_dir, meta) == specs
+            ), f"inputs entry not preserved by name for {ref}: {meta['inputs']}"
+        print("  PASS: import_reads_sidecar")
+
+
+def test_import_cli_overrides_sidecar():
+    """--seed and --meta win over the sidecar; untouched sidecar fields stay."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        captured = {"x": {"kind": "free", "lo": 0.5, "hi": 2.0}}
+        supplied = {"x": {"kind": "free", "lo": -3.0, "hi": 3.0}}
+        graph_path = _capture(
+            tmp / "captured",
+            "case0",
+            _ternary_graph(_UIDS1),
+            _sidecar("case0", _UIDS1, seed=42, specs=captured),
+        )
+        inputs = {str(_UIDS1[nm]): s for nm, s in supplied.items()}
+        r = _import_capture(
+            graph_path,
+            bundle_dir,
+            "--seed",
+            "7",
+            "--meta",
+            "notes=hand-written",
+            "--meta",
+            f"inputs={json.dumps(inputs)}",
+        )
+        assert r.returncode == 0, f"import failed:\n{r.stderr}"
+        meta = _only_metadata(bundle_dir)
+        assert meta["seed"] == 7, meta
+        assert meta["notes"] == "hand-written", meta
+        assert _inputs_by_name(bundle_dir, meta) == supplied, meta
+        assert meta["generator"] == "capture-bundles", f"sidecar base lost: {meta}"
+        for flag in ("--seed", "--meta notes", "--meta inputs"):
+            assert (
+                f"WARN: {flag} " in r.stderr
+            ), f"no override warning for {flag}:\n{r.stderr}"
+        print("  PASS: import_cli_overrides_sidecar")
+
+
+def test_import_seed_override_warns():
+    """Overriding the captured seed warns with both values and the sidecar path.
+
+    Agreeing values, a sidecar without a seed, and no sidecar stay quiet;
+    --strict turns the override into a refusal that writes nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        graph_path = _capture(
+            capture_dir, "case0", _ternary_graph(_UIDS0), _sidecar("case0", seed=42)
+        )
+        sidecar_path = graph_path.with_suffix(".meta.json")
+
+        bundle_dir = tmp / "override"
+        bundle_dir.mkdir()
+        r = _import_capture(graph_path, bundle_dir, "--seed", "7")
+        assert r.returncode == 0, f"override must still import:\n{r.stderr}"
+        warn = [ln for ln in r.stderr.splitlines() if "WARN" in ln]
+        assert len(warn) == 1, f"expected one warning:\n{r.stderr}"
+        for part in ("--seed 7", "captured 42", str(sidecar_path)):
+            assert part in warn[0], f"warning lacks {part!r}: {warn[0]}"
+        assert _only_metadata(bundle_dir)["seed"] == 7, "override not applied"
+
+        quiet = {
+            "agree": (graph_path, ["--seed", "42"]),
+            "sidecar without seed": (
+                _capture(
+                    capture_dir, "case1", _ternary_graph(_UIDS0), _sidecar("case1")
+                ),
+                ["--seed", "7"],
+            ),
+            "no sidecar": (
+                _capture(capture_dir, "case2", _ternary_graph(_UIDS0), None),
+                ["--seed", "7"],
+            ),
+        }
+        for label, (path, extra) in quiet.items():
+            d = tmp / label.replace(" ", "_")
+            d.mkdir()
+            r = _import_capture(path, d, *extra)
+            assert r.returncode == 0, f"{label}: import failed:\n{r.stderr}"
+            assert "WARN" not in r.stderr, f"{label}: must be quiet:\n{r.stderr}"
+
+        strict_dir = tmp / "strict"
+        strict_dir.mkdir()
+        r = _import_capture(graph_path, strict_dir, "--seed", "7", "--strict")
+        assert r.returncode == 1, f"--strict override must fail:\n{r.stderr}"
+        assert "ERROR: --seed 7 overrides captured 42" in r.stderr, r.stderr
+        assert _inventory(strict_dir) == {}, "--strict refusal wrote files"
+        print("  PASS: import_seed_override_warns")
+
+
+def test_import_no_sidecar_unchanged():
+    """Without a sidecar, metadata is exactly what the CLI says, as before."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _ternary_graph(_UIDS0)
+        runs = {
+            "loose graph, no flags": (
+                tmp / "loose",
+                (),
+                {"format_version": 1, "generator": "import_graph.py"},
+            ),
+            "loose graph, flags": (
+                tmp / "loose_flags",
+                ("--seed", "5", "--meta", "notes=n"),
+                {
+                    "format_version": 1,
+                    "generator": "import_graph.py",
+                    "seed": 5,
+                    "notes": "n",
+                },
+            ),
+        }
+        for label, (bundle_dir, extra, expected) in runs.items():
+            bundle_dir.mkdir()
+            r = _import(tmp, bundle_dir.name, graph, bundle_dir, *extra, check=False)
+            assert r.returncode == 0, f"{label}: import failed:\n{r.stderr}"
+            assert "WARN" not in r.stderr, f"{label}: must be quiet:\n{r.stderr}"
+            assert "no reference_source" in r.stderr, f"{label}: {r.stderr}"
+            meta = _only_metadata(bundle_dir)
+            assert meta == expected, f"{label}: {meta} != {expected}"
+
+        # Capture layout but the sidecar is missing: no reference_source is
+        # invented, the metadata is still just the default.
+        bundle_dir = tmp / "capture_layout"
+        bundle_dir.mkdir()
+        path = _capture(tmp / "captured", "case0", graph, None)
+        r = _import_capture(path, bundle_dir)
+        assert r.returncode == 0 and "WARN" not in r.stderr, r.stderr
+        assert "no reference_source" in r.stderr, r.stderr
+        assert _only_metadata(bundle_dir) == {
+            "format_version": 1,
+            "generator": "import_graph.py",
+        }
+        print("  PASS: import_no_sidecar_unchanged")
+
+
+def _tiers_by_source(bundle_dir):
+    """{reference_source: tier folder} for every sweep case and standalone."""
+    out = {}
+    for p in sorted(bundle_dir.rglob("*.json")):
+        with open(p) as f:
+            doc = json.load(f)
+        if p.name == "sweep.json":
+            metas = [c["metadata"] for c in doc["cases"]]
+        elif p.name.endswith(".meta.json"):
+            metas = [doc]  # place_bundles' single-case standalone bundle
+        else:
+            continue
+        for meta in metas:
+            out[meta.get("reference_source")] = p.relative_to(bundle_dir).parts[0]
+    return out
+
+
+def test_import_tier_from_sidecar():
+    """Without --tier, the suite prefix picks the tier as in place_bundles.
+
+    A Full/ capture must land in full/, not the quick/ default, or it moves to
+    the smoke CI lane. Each capture is imported into an empty tree, so it takes
+    the new-topology path that a misfiled tier would silently write to.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        suites = [
+            "Smoke/IntegrationGpuTernaryFp32",
+            "Full/IntegrationGpuTernaryFp32",
+            "Standard/IntegrationGpuTernaryFp32",
+            "Comprehensive/IntegrationGpuTernaryFp32",
+            "IntegrationGpuTernaryFp32",  # no tier prefix
+        ]
+        paths = {
+            suite: _capture(
+                capture_dir,
+                "case0",
+                _ternary_graph(_UIDS0),
+                _sidecar("case0", seed=seed, suite=suite),
+                suite=suite,
+            )
+            for seed, suite in enumerate(suites)
+        }
+
+        placed_dir = tmp / "placed"
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "place_bundles.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--output-dir",
+                str(placed_dir),
+            ]
+        )
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        placed = _tiers_by_source(placed_dir)
+
+        imported = {}
+        for i, path in enumerate(paths.values()):
+            bundle_dir = tmp / f"imported{i}"
+            bundle_dir.mkdir()
+            r = _import_capture(path, bundle_dir)
+            assert r.returncode == 0, f"import of {path} failed:\n{r.stderr}"
+            assert "--tier" not in r.stderr, r.stderr
+            imported.update(_tiers_by_source(bundle_dir))
+
+        assert len(placed) == len(suites), f"place_bundles lost cases: {placed}"
+        assert imported == placed, (
+            f"import tiers differ from place_bundles:\n"
+            f"  imported: {imported}\n  placed:   {placed}"
+        )
+        assert sorted(imported.values()) == [
+            "comprehensive",
+            "full",
+            "quick",
+            "quick",
+            "standard",
+        ]
+
+        # --tier still wins over the sidecar, but not silently.
+        full_case = paths["Full/IntegrationGpuTernaryFp32"]
+        override_dir = tmp / "override"
+        override_dir.mkdir()
+        r = _import_capture(full_case, override_dir, "--tier", "standard")
+        assert r.returncode == 0, r.stderr
+        assert "WARN: --tier" in r.stderr and '"full"' in r.stderr, r.stderr
+        assert list(_tiers_by_source(override_dir).values()) == ["standard"]
+
+        # A --tier that agrees with the sidecar is quiet.
+        agree_dir = tmp / "agree"
+        agree_dir.mkdir()
+        r = _import_capture(full_case, agree_dir, "--tier", "full", "--strict")
+        assert r.returncode == 0, r.stderr
+        assert "--tier" not in r.stderr, r.stderr
+        assert list(_tiers_by_source(agree_dir).values()) == ["full"]
+
+        # Under --strict a contradicting --tier refuses and writes nothing.
+        strict_dir = tmp / "strict"
+        strict_dir.mkdir()
+        r = _import_capture(full_case, strict_dir, "--tier", "quick", "--strict")
+        assert r.returncode != 0, "strict tier override should fail"
+        assert "ERROR: --tier" in r.stderr, r.stderr
+        assert not any(strict_dir.iterdir()), list(strict_dir.rglob("*"))
+
+        # No sidecar: quick, as before.
+        full_case.with_suffix(".meta.json").unlink()
+        bare_dir = tmp / "bare"
+        bare_dir.mkdir()
+        r = _import_capture(full_case, bare_dir)
+        assert r.returncode == 0, r.stderr
+        assert list(_tiers_by_source(bare_dir).values()) == ["quick"]
+
+        # No sidecar means nothing to contradict: --tier is quiet even strict.
+        bare_tier_dir = tmp / "bare_tier"
+        bare_tier_dir.mkdir()
+        r = _import_capture(full_case, bare_tier_dir, "--tier", "full", "--strict")
+        assert r.returncode == 0, r.stderr
+        assert "--tier" not in r.stderr, r.stderr
+        assert list(_tiers_by_source(bare_tier_dir).values()) == ["full"]
+        print("  PASS: import_tier_from_sidecar")
+
+
+def test_import_sidecar_outside_capture_layout():
+    """A sidecar still sets the tier when the graph is not at its capture path.
+
+    The suite is recorded in the sidecar, so a capture copied to a flat
+    directory keeps its tier; the case name is not, so no reference_source is
+    derived. A hand-written sidecar with no ``operation`` has no suite at all:
+    quick, as with no sidecar.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        suite = "Full/IntegrationGpuTernaryFp32"
+        captured = _capture(
+            tmp / "captured",
+            "case0",
+            _ternary_graph(_UIDS0),
+            _sidecar("case0", seed=7, suite=suite),
+            suite=suite,
+        )
+        flat = tmp / "flat"
+        flat.mkdir()
+        for p in (captured, captured.with_suffix(".meta.json")):
+            (flat / p.name).write_text(p.read_text())
+
+        bundle_dir = tmp / "moved"
+        bundle_dir.mkdir()
+        r = _import_capture(flat / captured.name, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "WARN" not in r.stderr, r.stderr
+        assert list(_tiers_by_source(bundle_dir)) == [None], "reference_source invented"
+        assert list(_tiers_by_source(bundle_dir).values()) == ["full"]
+        assert _only_metadata(bundle_dir)["seed"] == 7
+
+        # Hand-written sidecar, no operation: quick, no reference_source.
+        no_op = _sidecar("case1", seed=8, suite=suite)
+        del no_op["operation"]
+        path = _capture(
+            tmp / "captured", "case1", _ternary_graph(_UIDS0), no_op, suite=suite
+        )
+        bundle_dir = tmp / "no_operation"
+        bundle_dir.mkdir()
+        r = _import_capture(path, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "WARN" not in r.stderr, r.stderr
+        assert _tiers_by_source(bundle_dir) == {None: "quick"}
+        assert _only_metadata(bundle_dir)["seed"] == 8
+        print("  PASS: import_sidecar_outside_capture_layout")
+
+
+def test_import_meta_override_checks():
+    """--meta is checked against everything the capture recorded, as typed values.
+
+    A numeric --meta restating the captured value is quiet and stays a number
+    (so it dedups); overriding the derived reference_source warns, and fails
+    under --strict; an inputs map keyed by non-UIDs is refused, not a crash.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph_path = _capture(
+            tmp / "captured",
+            "case0",
+            _ternary_graph(_UIDS0),
+            _sidecar("case0", seed=42),
+        )
+        ref = f"c++ integration suite: {_SUITE}.case0"
+
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import_capture(graph_path, bundle_dir, "--meta", "seed=42", "--strict")
+        assert r.returncode == 0, f"restating the seed must pass:\n{r.stderr}"
+        assert "--meta seed" not in r.stderr, r.stderr
+        meta = _only_metadata(bundle_dir)
+        assert meta["seed"] == 42 and isinstance(meta["seed"], int), meta
+        assert meta["reference_source"] == ref, meta
+
+        before = _inventory(bundle_dir)
+        r = _import_capture(graph_path, bundle_dir, "--meta", "seed=42")
+        assert r.returncode == 0, r.stderr
+        assert "DUPLICATE" in r.stderr, f"--meta seed=42 must dedup:\n{r.stderr}"
+        assert _inventory(bundle_dir) == before, "duplicate was written"
+
+        quiet_dir = tmp / "ref_agree"
+        quiet_dir.mkdir()
+        r = _import_capture(
+            graph_path, quiet_dir, "--meta", f"reference_source={ref}", "--strict"
+        )
+        assert r.returncode == 0, r.stderr
+        assert "--meta reference_source" not in r.stderr, r.stderr
+
+        warn_dir = tmp / "ref_override"
+        warn_dir.mkdir()
+        r = _import_capture(graph_path, warn_dir, "--meta", "reference_source=manual")
+        assert r.returncode == 0, r.stderr
+        warn = [
+            ln for ln in r.stderr.splitlines() if "WARN: --meta reference_source" in ln
+        ]
+        assert len(warn) == 1 and ref in warn[0], f"no warning:\n{r.stderr}"
+        assert _only_metadata(warn_dir)["reference_source"] == "manual"
+
+        strict_dir = tmp / "ref_strict"
+        strict_dir.mkdir()
+        r = _import_capture(
+            graph_path, strict_dir, "--meta", "reference_source=manual", "--strict"
+        )
+        assert r.returncode == 1, f"--strict override must fail:\n{r.stderr}"
+        assert "ERROR: --meta reference_source" in r.stderr, r.stderr
+        assert _inventory(strict_dir) == {}, "--strict refusal wrote files"
+
+        bad_dir = tmp / "bad_inputs"
+        bad_dir.mkdir()
+        r = _import_capture(
+            graph_path, bad_dir, "--meta", 'inputs={"x": {"kind": "free"}}'
+        )
+        assert r.returncode == 1, f"non-UID inputs key must fail:\n{r.stderr}"
+        assert "Traceback" not in r.stderr, r.stderr
+        assert "not a tensor UID" in r.stderr, r.stderr
+        assert _inventory(bad_dir) == {}, "refusal wrote files"
+
+        r = _import_capture(graph_path, bad_dir, "--meta", "inputs=[1]")
+        assert r.returncode == 1, f"non-object inputs must fail:\n{r.stderr}"
+        assert "Traceback" not in r.stderr, r.stderr
+        assert "inputs: expected a JSON object" in r.stderr, r.stderr
+        assert _inventory(bad_dir) == {}, "refusal wrote files"
+        print("  PASS: import_meta_override_checks")
+
+
+def test_import_meta_value_types():
+    """Only the non-string metadata keys parse as JSON; NaN and inf are refused.
+
+    A string key keeps its text as given, so ``notes=NaN`` cannot write a bare
+    NaN that makes the whole sweep.json unreadable. A typed key that is not a
+    finite JSON value is refused with a message, not a traceback.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph_path = _capture(
+            tmp / "captured", "case0", _ternary_graph(_UIDS0), _sidecar("case0")
+        )
+
+        bundle_dir = tmp / "strings"
+        bundle_dir.mkdir()
+        r = _import_capture(
+            graph_path,
+            bundle_dir,
+            "--meta",
+            "notes=NaN",
+            "--meta",
+            "precision_profile=123",
+            "--meta",
+            "minimum_vram_mb=512",
+        )
+        assert r.returncode == 0, r.stderr
+        meta = _only_metadata(bundle_dir)
+        assert meta["notes"] == "NaN", meta
+        assert meta["precision_profile"] == "123", meta
+        assert meta["minimum_vram_mb"] == 512, meta
+        sweep = next(bundle_dir.rglob("sweep.json")).read_text()
+        assert "NaN" not in sweep.replace('"NaN"', ""), "bare NaN written"
+
+        for bad in ("seed=NaN", "seed=Infinity", "seed=1e400", "seed=abc"):
+            bad_dir = tmp / f"bad_{bad.split('=')[1]}"
+            bad_dir.mkdir()
+            r = _import_capture(graph_path, bad_dir, "--meta", bad)
+            assert r.returncode == 1, f"{bad} must fail:\n{r.stderr}"
+            assert "Traceback" not in r.stderr, f"{bad}: crashed:\n{r.stderr}"
+            assert "import_graph: --meta seed:" in r.stderr, r.stderr
+            assert _inventory(bad_dir) == {}, f"{bad}: refusal wrote files"
+        print("  PASS: import_meta_value_types")
+
+
+def test_import_malformed_sidecar_refused():
+    """A sidecar that exists but is unusable is refused, with or without --strict.
+
+    Proceeding without it would land the case in quick/ with no
+    reference_source. place_bundles, which knows the suite from the path, warns
+    and places the case without the sidecar instead of crashing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        bad = {
+            "truncated": '{"seed": 4',
+            "not an object": "[1, 2]",
+            # Parses, but remap_meta_inputs would crash on int("x").
+            "inputs key not a UID": '{"seed": 4, "inputs": {"x": {"kind": "free"}}}',
+            "inputs not an object": '{"seed": 4, "inputs": [1]}',
+            "operation empty": '{"seed": 4, "operation": ""}',
+            "operation not a string": '{"seed": 4, "operation": 7}',
+        }
+        for i, (label, text) in enumerate(bad.items()):
+            path = _capture(capture_dir, f"case{i}", _ternary_graph(_UIDS0), text)
+            sidecar_path = path.with_suffix(".meta.json")
+            for strict in ([], ["--strict"]):
+                bundle_dir = tmp / f"refused{i}{len(strict)}"
+                bundle_dir.mkdir()
+                r = _import_capture(path, bundle_dir, "--seed", "3", *strict)
+                assert r.returncode == 1, f"{label} {strict}: must fail:\n{r.stderr}"
+                assert "Traceback" not in r.stderr, f"{label}: crashed:\n{r.stderr}"
+                assert (
+                    f"ERROR: bad sidecar {sidecar_path}" in r.stderr
+                ), f"{label}: no error:\n{r.stderr}"
+                assert _inventory(bundle_dir) == {}, f"{label}: refusal wrote files"
+
+        placed_dir = tmp / "placed"
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "place_bundles.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--output-dir",
+                str(placed_dir),
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, f"place_bundles failed:\n{r.stderr}"
+        assert "Traceback" not in r.stderr, r.stderr
+        assert "WARN: bad meta" in r.stderr and "not a tensor UID" in r.stderr, r.stderr
+        placed = _tiers_by_source(placed_dir)
+        assert len(placed) == len(bad), f"place_bundles lost cases: {placed}"
+        print("  PASS: import_malformed_sidecar_refused")
+
+
+def test_import_seed_only_difference_distinct_cases():
+    """Identical graphs that differ only by seed are distinct cases.
+
+    Covers both a second captured seed and an unknown (absent) seed: neither
+    may be treated as a duplicate of a case with an explicit seed.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        graph = _ternary_graph(_UIDS0)
+        seed1 = _capture(capture_dir, "seed1", graph, _sidecar("seed1", seed=1))
+        seed2 = _capture(capture_dir, "seed2", graph, _sidecar("seed2", seed=2))
+
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        for p in (seed1, seed2):
+            r = _import_capture(p, bundle_dir)
+            assert r.returncode == 0, f"import of {p} failed:\n{r.stderr}"
+            assert (
+                "DUPLICATE" not in r.stderr
+            ), f"seed-only difference deduped:\n{r.stderr}"
+        cases = _cases(bundle_dir)
+        assert [c["metadata"]["seed"] for c in cases] == [1, 2], cases
+        assert len({c["id"] for c in cases}) == 2, f"ids collide: {cases}"
+
+        # Re-importing a captured seed is still a duplicate.
+        r = _import_capture(seed1, bundle_dir)
+        assert "DUPLICATE" in r.stderr, f"same seed must dedup:\n{r.stderr}"
+
+        # An unknown seed does not match an explicit one.
+        bundle_dir = tmp / "unknown"
+        bundle_dir.mkdir()
+        r = _import_capture(seed1, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        r = _import(tmp, "no_seed", graph, bundle_dir, check=False)
+        assert r.returncode == 0, r.stderr
+        assert "DUPLICATE" not in r.stderr, f"unknown seed deduped:\n{r.stderr}"
+        cases = _cases(bundle_dir)
+        assert len(cases) == 2 and len({c["id"] for c in cases}) == 2, cases
+        print("  PASS: import_seed_only_difference_distinct_cases")
+
+
 def _write_sweep(bundle_dir, tier, operation, variant, cases):
     """Write a minimal sweep.json under <tier>/<operation>/<variant>/."""
     d = bundle_dir / tier / operation / variant
@@ -771,6 +1992,212 @@ def test_diff_coverage_suite_qualified_join():
         print("  PASS: diff_coverage_suite_qualified_join")
 
 
+def _retier_graph_template(clip):
+    return {
+        "name": "g",
+        "io_data_type": "${case.io_data_type}",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+            }
+        ],
+        "nodes": [{"type": "PointwiseAttributes", "inputs": {"relu_lower_clip": clip}}],
+    }
+
+
+def _retier_case(case_id, clip_attr=None):
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {"uid": 0, "dims": [1, 2], "strides": [2, 1], "data_type": "float"}
+        ],
+    }
+    if clip_attr is not None:
+        values["attributes"] = {"relu_lower_clip": clip_attr}
+    return {
+        "id": case_id,
+        "values": values,
+        "metadata": {"format_version": 1, "notes": case_id},
+    }
+
+
+def _retier_write(root, tier, template, cases, claims):
+    d = root / tier / "Op" / "Default"
+    d.mkdir(parents=True)
+    for name, obj in (
+        ("graph.template.json", template),
+        ("sweep.json", {"version": 1, "cases": cases}),
+        ("support.json", {"version": 1, "claims": claims}),
+    ):
+        with open(d / name, "w") as f:
+            json.dump(obj, f, indent=2)
+
+
+def _retier_load(root, tier):
+    d = root / tier / "Op" / "Default"
+    return {
+        n: json.load(open(d / n))
+        for n in ("graph.template.json", "sweep.json", "support.json")
+    }
+
+
+def test_retier_bundles():
+    """Moving cases between tiers keeps every case's expanded graph and claims.
+
+    The quick template hard-codes relu_lower_clip while the full template takes it
+    from the case, so a case moving from quick to a tier that uses the full
+    template has to gain the literal as an explicit attribute. Cases that stay put,
+    single-graph bundles and per-engine claims must come through unchanged, and a
+    plan that loses or duplicates a case must be refused before anything is written.
+    """
+    script = SCRIPT_DIR / "retier_bundles.py"
+    win = {"gfx1151": ["windows"]}
+    lin = {"gfx942": ["linux"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(
+            root,
+            "quick",
+            _retier_graph_template(None),
+            [_retier_case("a"), _retier_case("b")],
+            {
+                "MIOPEN_ENGINE": [
+                    {"cases": ["a"], "support": win},
+                    {"cases": ["b"], "support": lin},
+                ]
+            },
+        )
+        _retier_write(
+            root,
+            "full",
+            _retier_graph_template("${case.attributes.relu_lower_clip}"),
+            [_retier_case("0c", clip_attr=0.5)],
+            {"MIOPEN_ENGINE": [{"cases": ["0c"], "support": win}]},
+        )
+        single = root / "quick" / "Op2" / "nchw" / "fp32" / "Small"
+        single.mkdir(parents=True)
+        with open(single / "Small.json", "w") as f:
+            json.dump({"name": "s"}, f)
+        with open(single / "Small.meta.json", "w") as f:
+            json.dump({"format_version": 1}, f)
+
+        asg = Path(tmp) / "asg.json"
+
+        def write_assignments(rows):
+            with open(asg, "w") as f:
+                json.dump(
+                    [dict(current_tier=t, key=k, proposed_tier=n) for t, k, n in rows],
+                    f,
+                )
+
+        plan = [
+            ("quick", "Op/Default/a", "standard"),
+            ("quick", "Op/Default/b", "quick"),
+            ("full", "Op/Default/0c", "quick"),
+            ("quick", "Op2/nchw/fp32/Small", "full"),
+        ]
+
+        # A case without an assignment is refused and nothing is written.
+        write_assignments(plan[:-1])
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "no assignment" in r.stderr, r.stderr
+        assert (single / "Small.json").is_file() and not (root / "standard").exists()
+
+        # Two copies of one id may not land in the same sweep.
+        dup = root / "full" / "Op" / "Default"
+        sweep = json.load(open(dup / "sweep.json"))
+        sweep["cases"].append(_retier_case("a", clip_attr=1.0))
+        json.dump(sweep, open(dup / "sweep.json", "w"))
+        write_assignments(plan + [("full", "Op/Default/a", "standard")])
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "twice" in r.stderr, r.stderr
+        sweep["cases"].pop()
+        json.dump(sweep, open(dup / "sweep.json", "w"))
+
+        write_assignments(plan)
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ]
+        )
+        assert r.returncode == 0, r.stderr
+        assert "identical before and after" in r.stdout, r.stdout
+
+        std, quick = _retier_load(root, "standard"), _retier_load(root, "quick")
+        assert not (root / "full" / "Op").exists(), "emptied tier dir should be removed"
+        assert (
+            root / "full" / "Op2" / "nchw" / "fp32" / "Small" / "Small.meta.json"
+        ).is_file()
+        assert not single.exists()
+        # Unified template: the placeholder form, in every tier.
+        placeholder = "${case.attributes.relu_lower_clip}"
+        for tier_files in (std, quick):
+            assert (
+                tier_files["graph.template.json"]["nodes"][0]["inputs"][
+                    "relu_lower_clip"
+                ]
+                == placeholder
+            )
+        # "a" came from the literal-null template and carries it explicitly.
+        (case_a,) = std["sweep.json"]["cases"]
+        assert case_a["id"] == "a" and case_a["values"]["attributes"] == {
+            "relu_lower_clip": None
+        }
+        # "0c" kept its own value; "b" (stayed) gained the explicit null.
+        by_id = {c["id"]: c for c in quick["sweep.json"]["cases"]}
+        assert by_id["0c"]["values"]["attributes"] == {"relu_lower_clip": 0.5}
+        assert by_id["b"]["values"]["attributes"] == {"relu_lower_clip": None}
+        # Claims follow their case: b and 0c have different arch maps, so two groups.
+        groups = quick["support.json"]["claims"]["MIOPEN_ENGINE"]
+        assert {tuple(g["cases"]): g["support"] for g in groups} == {
+            ("b",): lin,
+            ("0c",): win,
+        }
+        # Canonical text: "0c" arrived after "b" but sorts first, and the sidecar
+        # tools refuse any file whose groups are not in sorted-first-case order.
+        sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+        from support_sidecar import parse
+
+        for tier in ("quick", "standard"):
+            path = root / tier / "Op" / "Default" / "support.json"
+            parse(path, path.read_text("utf-8"))
+        assert std["support.json"]["claims"]["MIOPEN_ENGINE"] == [
+            {"cases": ["a"], "support": win}
+        ]
+        print("  PASS: retier_bundles")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -780,10 +2207,32 @@ def main() -> int:
         test_round_trip_expansion,
         test_case_ids,
         test_place_and_verify,
+        test_place_keeps_manual_cases,
         test_import_dedup,
+        test_import_append_preserves_case_fields,
+        test_import_new_topology_never_clobbers,
+        test_import_new_topology_case_id_is_descriptive,
+        test_import_support_json_sidecar,
+        test_import_generator_metadata_default,
         test_inputs_uid_canonicalized_by_name,
         test_import_inputs_uid_canonicalized_by_name,
+        test_roundtrip_mismatch_walk,
+        test_import_extraction_failure_diagnostics,
+        test_import_canonical_only_difference,
+        test_import_absent_vs_literal_marker,
+        test_import_new_template_failure_diagnostics,
+        test_import_reads_sidecar,
+        test_import_cli_overrides_sidecar,
+        test_import_seed_override_warns,
+        test_import_no_sidecar_unchanged,
+        test_import_tier_from_sidecar,
+        test_import_sidecar_outside_capture_layout,
+        test_import_meta_override_checks,
+        test_import_meta_value_types,
+        test_import_malformed_sidecar_refused,
+        test_import_seed_only_difference_distinct_cases,
         test_diff_coverage_suite_qualified_join,
+        test_retier_bundles,
     ]
 
     for t in tests:

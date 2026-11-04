@@ -33,6 +33,9 @@ edge:
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
 
+  - ``device_info``  : reads HIP's target ID and ASIC revision, and derives
+                      target names for compilation and architecture lookup.
+
   - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
                       `pack_args_kernelparams`) for the AMDGPU kernarg
                       ABI. Used by both the numpy and torch paths.
@@ -66,6 +69,10 @@ edge:
                           create HIP events; the launchers themselves
                           are event-free so production calls stay
                           overhead-free.
+                        * :func:`time_launches_staged` -- one stalled
+                          event pair per call (:class:`StallGate`), the
+                          way hipDNN's benchmark times a call; for
+                          numbers compared against hipDNN or MIOpen.
 
 The previous monolithic ``launch_torch_kernel`` is now a thin
 back-compat shim over :class:`KernelLauncher` + :func:`time_launches`;
@@ -84,6 +91,7 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .device_info import DeviceInfo, get_device_info
 from .hip_module import HipError, Runtime
 from .launcher import (
     DeviceMem,
@@ -99,6 +107,7 @@ from .launcher import (
     wait_stream_and_release,
 )
 from .packing import pack_args
+from .stall_gate import StallGate, StallTimeout, time_launches_staged
 from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
@@ -109,6 +118,7 @@ from .torch_interop import (
 __all__ = [
     "ComgrError",
     "ComgrTimings",
+    "DeviceInfo",
     "DeviceMem",
     "HipError",
     "KernelLauncher",
@@ -116,10 +126,13 @@ __all__ = [
     "LaunchSummary",
     "PipelineLauncher",
     "Runtime",
+    "StallGate",
+    "StallTimeout",
     "TorchLaunchSummary",
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
     "empty_workspace",
+    "get_device_info",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",
@@ -127,5 +140,6 @@ __all__ = [
     "resolve_stream",
     "synchronize_and_release",
     "time_launches",
+    "time_launches_staged",
     "wait_stream_and_release",
 ]

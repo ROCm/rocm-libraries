@@ -65,17 +65,17 @@ namespace rocwmma
             ROCWMMA_HOST_DEVICE constexpr static auto splittableSpace();
 
             // Finds the iterative sub-space for each split
-            ROCWMMA_DEVICE constexpr static auto calcSplitStrides(uint32_t splitCount);
+            ROCWMMA_HOST_DEVICE constexpr static auto calcSplitStrides(uint32_t splitCount);
 
         public:
             // Finds a suitable power of 2 divisor for equal distribution among waves
             ROCWMMA_HOST_DEVICE constexpr static uint32_t calcMaxSplits(uint32_t splitCount);
 
             // Overrides for MatrixLayout interface
-            ROCWMMA_DEVICE constexpr static inline auto strideCounts(const uint32_t waveCount
-                                                                     = WaveCount);
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strideCounts(const uint32_t waveCount
+                                                                          = WaveCount);
 
-            ROCWMMA_DEVICE constexpr static inline auto strides();
+            ROCWMMA_HOST_DEVICE constexpr static inline auto strides();
 
             ROCWMMA_DEVICE constexpr static inline auto baseOffset(const int waveIndex,
                                                                    const int waveCount = WaveCount);

@@ -1092,10 +1092,9 @@ void rocsparse_matrix_factory<T, I, J>::init_bell(
 
     // Build a Blocked-ELL matrix from a randomly generated block sparsity pattern. The raw
     // init_bell helper works in block units: it takes the number of block-rows/columns and
-    // produces the column index array (one entry per block, length ell_block_width * mb) and the
-    // value array (length mb * block_dim * ell_cols, i.e. one dense block_dim x block_dim block per
-    // ELL slot). The bell_matrix stores exactly these arrays with m = block-rows,
-    // width = ell_block_width and bdim = block_dim.
+    // produces the column index array (one block-column index per ELL slot, length
+    // block_rows * ell_cols / block_dim) and the value array (length rows * ell_cols). The
+    // bell_matrix stores these arrays with scalar rows/cols and a scalar ell_cols.
     I mb             = (m + block_dim - 1) / block_dim;
     I nb             = (n + block_dim - 1) / block_dim;
     I ell_cols       = 0;
@@ -1106,13 +1105,15 @@ void rocsparse_matrix_factory<T, I, J>::init_bell(
 
     this->init_bell(bell_col_ind, bell_val, mb, nb, ell_cols, ell_block_size, base);
 
-    const I ell_block_width = (block_dim > 0) ? (ell_cols / block_dim) : 0;
+    // Scalar dimensions (ell_cols is already the scalar padded ELL column count).
+    const I rows = mb * block_dim;
+    const I cols = nb * block_dim;
 
-    that.define(mb, nb, ell_block_width, rocsparse_direction_row, block_dim, base);
+    that.define(rows, cols, ell_cols, block_dim, base);
 
-    // Report back the (possibly adjusted) block dimensions to the caller.
-    m = mb;
-    n = nb;
+    // Report back the (possibly adjusted) scalar dimensions to the caller.
+    m = rows;
+    n = cols;
 
     for(size_t i = 0; i < bell_col_ind.size(); ++i)
     {

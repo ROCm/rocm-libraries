@@ -95,35 +95,37 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
                                     rocsparse_datatype   datatype_,
                                     size_t* __restrict__ buffer_size_)
         {
+            using layout_t = buffer_layout_contiguous_t;
+
             size_t buffer_size = 0;
-            buffer_size += buffer_layout_contiguous_t::get_sizeof_double() * sizeof(double);
+            buffer_size += layout_t::get_header_size();
 
             //
             // solution.
             //
             if(datatype_ == rocsparse_datatype_f32_r)
             {
-                buffer_size += sizeof(float) * nnz_;
+                buffer_size += rocsparse::align_size<float>(nnz_);
             }
             else if(datatype_ == rocsparse_datatype_f64_r)
             {
-                buffer_size += sizeof(double) * nnz_;
+                buffer_size += rocsparse::align_size<double>(nnz_);
             }
             else if(datatype_ == rocsparse_datatype_f32_c)
             {
-                buffer_size += sizeof(rocsparse_float_complex) * nnz_;
+                buffer_size += rocsparse::align_size<rocsparse_float_complex>(nnz_);
             }
             else if(datatype_ == rocsparse_datatype_f64_c)
             {
-                buffer_size += sizeof(rocsparse_double_complex) * nnz_;
+                buffer_size += rocsparse::align_size<rocsparse_double_complex>(nnz_);
             }
 
-            buffer_size += sizeof(I) * 1; // lnnz
-            buffer_size += sizeof(I) * (m_ + 1); // lptr
-            buffer_size += sizeof(I) * 1; // unnz
-            buffer_size += sizeof(I) * (m_ + 1); // uptr
-            buffer_size += sizeof(J) * nnz_; // ind
-            buffer_size += sizeof(I) * nnz_; // perm
+            buffer_size += rocsparse::align_size<I>(1); // lnnz
+            buffer_size += rocsparse::align_size<I>(m_ + 1); // lptr
+            buffer_size += rocsparse::align_size<I>(1); // unnz
+            buffer_size += rocsparse::align_size<I>(m_ + 1); // uptr
+            buffer_size += rocsparse::align_size<J>(nnz_); // ind
+            buffer_size += rocsparse::align_size<I>(nnz_); // perm
 
             size_t buffer_size_csritilu0x = 0;
             RETURN_IF_ROCSPARSE_ERROR(

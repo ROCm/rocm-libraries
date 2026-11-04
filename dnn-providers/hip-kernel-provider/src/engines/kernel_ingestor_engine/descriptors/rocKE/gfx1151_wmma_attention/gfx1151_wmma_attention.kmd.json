@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "id": "3cd28975-c675-4575-b00a-73c829e33f20",
+  "name": "Gfx1151WmmaAttention variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "kind",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "head_size_v",
+      "type": "int"
+    },
+    {
+      "name": "mask_mode",
+      "type": "string"
+    },
+    {
+      "name": "bias",
+      "type": "string"
+    },
+    {
+      "name": "block_size",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "dv_split",
+      "type": "int"
+    }
+  ]
+}

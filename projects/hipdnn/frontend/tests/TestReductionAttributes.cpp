@@ -128,3 +128,85 @@ TEST(TestReductionAttributes, ReductionAttributesTypedefExists)
     attrs.set_mode(ReductionMode::ADD);
     EXPECT_EQ(attrs.get_mode().value(), ReductionMode::ADD);
 }
+
+TEST(TestReductionAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::ReductionAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_mode(hipdnn_frontend::ReductionMode::ADD);
+    attr1.set_is_deterministic(true);
+
+    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_x(x1);
+
+    auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    y1->set_uid(2).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_y(y1);
+
+    hipdnn_frontend::graph::ReductionAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_mode(hipdnn_frontend::ReductionMode::ADD);
+    attr2.set_is_deterministic(true);
+
+    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_x(x2);
+
+    auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    y2->set_uid(2).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_y(y2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchX->set_uid(99).set_name("MismatchedX");
+    attr2.set_x(structuralMismatchX);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_x(x2); // Revert
+
+    // Mode mismatch: semantic, must fail both checks
+    attr2.set_mode(hipdnn_frontend::ReductionMode::AMAX);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_mode(hipdnn_frontend::ReductionMode::ADD); // Revert
+
+    // is_deterministic mismatch: semantic, must fail both checks
+    attr2.set_is_deterministic(false);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_is_deterministic(true); // Revert
+
+    // Unset-vs-unset mode: two attrs that never called set_mode should
+    // still compare equal
+    hipdnn_frontend::graph::ReductionAttributes sparse1;
+    sparse1.set_is_deterministic(false);
+    hipdnn_frontend::graph::ReductionAttributes sparse2;
+    sparse2.set_is_deterministic(false);
+    EXPECT_TRUE(sparse1 == sparse2);
+    EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
+
+    // Set-vs-unset mode should differ
+    sparse2.set_mode(hipdnn_frontend::ReductionMode::MUL);
+    EXPECT_FALSE(sparse1 == sparse2);
+    EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchX
+        ->set_uid(555) // Diverges from attr1's x1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's x1 ("X")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_x(logicalMatchX);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

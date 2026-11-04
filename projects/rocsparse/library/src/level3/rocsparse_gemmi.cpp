@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -76,44 +76,86 @@ namespace rocsparse
         // Stream
         hipStream_t stream = handle->stream;
 
+        // The element count of C is a product of two rocsparse_int extents and has to
+        // be formed in 64 bits before it reaches scale_array: computing it in
+        // rocsparse_int overflows at m = n = 46341 and hands the helper an already
+        // truncated length, from which it then sizes a correspondingly wrong grid
+        // (AISPARSE-699). scale_array is instantiated for an int64_t length.
+        const int64_t nelm_C = static_cast<int64_t>(m) * n;
+
         // If k == 0, scale C with beta
         if(k == 0)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m * n, beta, C));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, nelm_C, beta, C));
             return rocsparse_status_success;
         }
-
-#define GEMMIT_DIM 256
-        dim3 gemmit_blocks((m - 1) / GEMMIT_DIM + 1, std::min(n, (rocsparse_int)65535));
-        dim3 gemmit_threads(GEMMIT_DIM);
 
         const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
         if(on_host && (*alpha == static_cast<T>(0)))
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m * n, beta, C));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, nelm_C, beta, C));
             return rocsparse_status_success;
         }
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gemmit_kernel<GEMMIT_DIM>),
-                                           gemmit_blocks,
-                                           gemmit_threads,
-                                           0,
-                                           stream,
-                                           m,
-                                           n,
-                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-                                           A,
-                                           lda,
-                                           csr_row_ptr,
-                                           csr_col_ind,
-                                           csr_val,
-                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),
-                                           C,
-                                           ldc,
-                                           descr->base,
-                                           handle->pointer_mode == rocsparse_pointer_mode_host);
+        // RDNA4/wave32 launch tuning:
+        // The workgroup spans the C-row (m) dimension with GEMMIT_DIM threads. The
+        // historical fixed size of 256 threads is 8 wavefronts on wave32, so when m is
+        // small a whole workgroup is launched with most of its wavefronts inactive
+        // (e.g. m <= 64 leaves 6 of 8 wavefronts idle), wasting occupancy. Shrinking the
+        // block to just cover m removes those idle wavefronts and markedly improves
+        // throughput for small m, while leaving the large-m regime (where 256 is already
+        // good and amortizes the shared per-row CSR loads) unchanged. Numerics identical.
+        rocsparse_int gemmit_dim = 256;
+        if(handle->wavefront_size == 32)
+        {
+            if(m <= 64)
+            {
+                gemmit_dim = 64;
+            }
+            else if(m <= 128)
+            {
+                gemmit_dim = 128;
+            }
+        }
 
-#undef GEMMIT_DIM
+#define LAUNCH_GEMMIT(DIM)                                                                       \
+    {                                                                                            \
+        dim3 gemmit_blocks((m - 1) / (DIM) + 1, std::min(n, (rocsparse_int)65535));              \
+        dim3 gemmit_threads(DIM);                                                                \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gemmit_kernel<DIM>),                      \
+                                           gemmit_blocks,                                        \
+                                           gemmit_threads,                                       \
+                                           0,                                                    \
+                                           stream,                                               \
+                                           m,                                                    \
+                                           n,                                                    \
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),     \
+                                           A,                                                    \
+                                           lda,                                                  \
+                                           csr_row_ptr,                                          \
+                                           csr_col_ind,                                          \
+                                           csr_val,                                              \
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),      \
+                                           C,                                                    \
+                                           ldc,                                                  \
+                                           descr->base,                                          \
+                                           handle->pointer_mode == rocsparse_pointer_mode_host); \
+    }
+
+        switch(gemmit_dim)
+        {
+        case 64:
+            LAUNCH_GEMMIT(64);
+            break;
+        case 128:
+            LAUNCH_GEMMIT(128);
+            break;
+        default:
+            LAUNCH_GEMMIT(256);
+            break;
+        }
+
+#undef LAUNCH_GEMMIT
 
         return rocsparse_status_success;
     }

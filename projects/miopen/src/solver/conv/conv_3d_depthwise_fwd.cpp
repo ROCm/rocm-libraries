@@ -133,7 +133,7 @@ ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
     if(problem.IsFp16())
         kernel.comp_options = std::string(" -DIO_DTYPE=__half");
     else
-        kernel.comp_options = std::string(" -DIO_DTYPE=__hip_bfloat16");
+        kernel.comp_options = std::string(" -DIO_DTYPE=hip_bfloat16");
 
     result.invoker_factory = [](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];

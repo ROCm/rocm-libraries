@@ -1,0 +1,45 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install
+    title: Install rocThrust
+  - file: install/source-build
+    title: Build from source
+
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocThrust-synchronization-and-blocking
+    title: Synchronization and blocking
+
+- caption: How to
+  entries:
+  - file: how-to/rocThrust-build-for-backends.rst
+    title: Build for different backends
+  - file: how-to/rocThrust-hip-policies
+    title: Avoid synchronization barriers
+  - file: how-to/use-rocThrust-in-a-project.rst
+    title: Add rocThrust to a CMake project
+  - file: how-to/run-rocThrust-tests-on-multiple-gpus
+    title: Run tests on multiple GPUs
+  - file: how-to/rocThrust-hipstdpar
+    title: Use HIPSTDPAR
+
+- caption: Reference
+  entries:
+  - file: reference/rocThrust-data-type-support
+    title: Precision support
+  - file: reference/rocThrust-bitwise-repro
+    title: Bitwise reproducibility
+  - file: reference/rocThrust-using-atomic-path
+    title: Atomic path
+  - file: cpp_api
+
+- caption: About
+  entries:
+  - file: license

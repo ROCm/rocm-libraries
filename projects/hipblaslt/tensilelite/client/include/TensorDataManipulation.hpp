@@ -169,12 +169,6 @@ namespace Tensor
         class Tensor
         {
         public:
-            template <typename T>
-            static Tensor create(const Shape shape)
-            {
-                return Tensor(shape, sizeof(T));
-            }
-
             Tensor(const Shape shape, float elementSize)
                 : desc(shape)
                 , elementSize(elementSize)
@@ -388,46 +382,5 @@ namespace Tensor
             return permuted;
         }
 
-        template <typename T>
-        void printTensorData(std::ostream& os, const Tensor& tensor)
-        {
-            const auto* data        = tensor.as<T>();
-            const auto  numElements = tensor.getDesc().flattenSize();
-            os << "[";
-
-            for(size_t i = 0; i < numElements; ++i)
-            {
-                os << float(data[i]) << ", ";
-            }
-
-            os << "]\n";
-        }
-
-        template <typename T>
-        void printTensorDataMultiDims(std::ostream& os, const Tensor& tensor)
-        {
-            os << "[";
-
-            Indices indices(tensor.getDesc().numDims(), 0);
-
-            iterate(
-                tensor.getDesc().getShape(),
-                0,
-                indices,
-                [&os, &tensor](const Indices& idx) {
-                    os << float(tensor.getValue<T>(idx)) << ", ";
-                },
-                [&os](size_t dim) { os << "["; },
-                [&os, &tensor](size_t dim) {
-                    os << "], ";
-
-                    if(dim + 1 == tensor.getDesc().numDims())
-                    {
-                        os << '\n';
-                    }
-                });
-
-            os << "]\n";
-        }
     }
 }

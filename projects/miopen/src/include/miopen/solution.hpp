@@ -198,6 +198,17 @@ private:
     void LogDriverCommand(const FusedProblem& problem_) const;
 };
 
+/// Validates a work-dimensions vector deserialized from a serialized Solution
+/// blob. A valid vector is non-empty and has at most 3 entries (the fixed
+/// capacity of the destination std::array in the kernel objects). Throws
+/// miopenStatusInvalidValue otherwise. This rejects a malicious/corrupt blob at
+/// load time, before any kernel object is constructed or GPU work is scheduled.
+/// \param work_dims The deserialized work-dimensions vector.
+/// \param name      A short label for the offending field (e.g. "local" or
+///                  "global"), included in the thrown message.
+MIOPEN_INTERNALS_EXPORT void ValidateSerializedWorkDims(const std::vector<size_t>& work_dims,
+                                                        const char* name);
+
 } // namespace miopen
 
 inline std::ostream& operator<<(std::ostream& stream, const miopen::Solution& solution)

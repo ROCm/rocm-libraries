@@ -20,9 +20,9 @@ ConvWrwParams::ConvWrwParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
-    , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _dw(miopen_utils::createTensor(tensorMap, attributes.dw_tensor_uid()))
-    , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
+    , _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _dw(miopen_utils::createPaddedTensor(tensorMap, attributes.dw_tensor_uid()))
+    , _dy(miopen_utils::createPaddedTensor(tensorMap, attributes.dy_tensor_uid()))
 {
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
@@ -71,6 +71,9 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
+    miopen_utils::setBenchmarkingFindMode(_params.conv().convDescriptor(),
+                                          _executionSettings.benchmarkingEnabled());
+
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
@@ -138,9 +141,6 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
-                                         _executionSettings.benchmarkingEnabled());
-
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionBackwardWeightsAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
@@ -162,21 +162,21 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;
 
-            THROW_ON_MIOPEN_FAILURE(
-                miopenFindConvolutionBackwardWeightsAlgorithm(handle.miopenHandle,
-                                                              _params.dy().tensorDescriptor(),
-                                                              yBuffer.ptr,
-                                                              _params.x().tensorDescriptor(),
-                                                              xBuffer.ptr,
-                                                              _params.conv().convDescriptor(),
-                                                              _params.dw().tensorDescriptor(),
-                                                              wBuffer.ptr,
-                                                              requestCount,
-                                                              &returnedAlgoCount,
-                                                              perfResults.data(),
-                                                              workspace,
-                                                              workspaceSize,
-                                                              false));
+            THROW_ON_MIOPEN_FAILURE(miopenFindConvolutionBackwardWeightsAlgorithm(
+                handle.miopenHandle,
+                _params.dy().tensorDescriptor(),
+                yBuffer.ptr,
+                _params.x().tensorDescriptor(),
+                xBuffer.ptr,
+                _params.conv().convDescriptor(),
+                _params.dw().tensorDescriptor(),
+                wBuffer.ptr,
+                requestCount,
+                &returnedAlgoCount,
+                perfResults.data(),
+                workspace,
+                workspaceSize,
+                _executionSettings.benchmarkingEnabled()));
 
             if(returnedAlgoCount <= 0)
             {

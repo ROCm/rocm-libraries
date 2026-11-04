@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_sort_checker.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/device/config_types.hpp>
@@ -121,7 +122,21 @@ std::vector<std::tuple<size_t, size_t>> get_sizes()
     return sizes;
 }
 
-TYPED_TEST_SUITE(RocprimDeviceMergeTests, RocprimDeviceMergeTestsParams);
+struct RocprimDeviceMergeTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::key_type>() + "_"
+                        + type_tag<typename Params::value_type>();
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceMergeTests,
+                 RocprimDeviceMergeTestsParams,
+                 RocprimDeviceMergeTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 {

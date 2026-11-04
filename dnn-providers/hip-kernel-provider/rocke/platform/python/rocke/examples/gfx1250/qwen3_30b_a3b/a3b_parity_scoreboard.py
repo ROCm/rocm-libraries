@@ -448,12 +448,12 @@ def _run_attention(args) -> dict:
         use_sinks=use_sinks,
         use_fp8=False,
     )
-    ok, why = au.supports_native_unified_attention_3d_tiled(problem)
+    ok, why = au.supports_native_unified_attention_3d_tiled(problem, args.arch)
     if not ok:
         raise SystemExit(f"[{args.arch}] decode3d UNSUPPORTED: {why}")
 
     Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(args.arch)
-    base_seg_spec = au._tiled_3d_spec_from_problem(problem)
+    base_seg_spec = au._tiled_3d_spec_from_problem(problem, args.arch)
     from dataclasses import replace as _replace
 
     seg_spec = _replace(base_seg_spec, num_segments=NUM_SEG)

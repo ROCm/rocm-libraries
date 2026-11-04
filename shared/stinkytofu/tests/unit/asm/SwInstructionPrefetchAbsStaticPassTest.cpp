@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -19,7 +20,9 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
@@ -40,6 +43,14 @@ void appendAlignDirective(BasicBlock* bb, int64_t alignBytes) {
 
 /// Mirror sw_instruction_prefetch_rel_static.stir @at_p0_k0_wmma layout.
 /// Pre-insert totalLayoutBytes = 32640 + 4 = 32644 > P(0). Static pass runs.
+// A kernel whose pre-insertion layout totals exactly \p totalBytes: 4 B of
+// v_add, padding, then a trailing 4 B v_add.
+void buildKernelOfSize(BasicBlock* bb, GfxArchID arch, int64_t totalBytes) {
+    createVAddInBlock(bb, arch, 0, 1, 2);
+    appendAlignDirective(bb, static_cast<int>(totalBytes - 4));
+    createVAddInBlock(bb, arch, 3, 4, 5);
+}
+
 void buildAboveP0Kernel(BasicBlock* bb, GfxArchID arch) {
     createVAddInBlock(bb, arch, 0, 1, 2);
     appendAlignDirective(bb, 32632);
@@ -75,6 +86,12 @@ int countSPrefetchInst(const Function& func) {
     return c;
 }
 
+int countSWaitXcnt(const Function& func) {
+    int c = 0;
+    for (const BasicBlock& bb : func) c += countInstructions(bb, "s_wait_xcnt");
+    return c;
+}
+
 bool hasLabel(const BasicBlock& bb, std::string_view labelName) {
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         const IRBase* n = it.getNodePtr();
@@ -90,6 +107,18 @@ bool hasLabel(const BasicBlock& bb, std::string_view labelName) {
 
 bool hasSGetpc(const BasicBlock& bb) {
     return countInstructions(bb, "s_getpc_b64") > 0;
+}
+
+uint32_t getpcDestIndex(const BasicBlock& bb) {
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+        const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+        if (m && std::strcmp(m, "s_getpc_b64") == 0 && !inst.getDestRegs().empty())
+            return inst.getDestRegs().front().reg.idx;
+    }
+    return ~0u;
 }
 
 }  // namespace
@@ -112,12 +141,30 @@ class SwInstructionPrefetchAbsStaticPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    PassManager makePm(int baseSgpr = 64) {
+    // xnackReplay defaults to the shipping mode. Before this PR the drain was
+    // unconditional, so a default of false would have moved every pre-existing
+    // case in this file to the xnack- configuration and left the mode that
+    // ships covered by the two XnackDrain_* cases alone.
+    PassManager makePm(int baseSgpr = 64, bool afterSgprCompact = false, bool xnackReplay = true) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
-        pm.addPass(createSwInstructionPrefetchAbsStaticPass(baseSgpr));
+        AsmCapsConfig caps;
+        caps.enableXnackReplay = xnackReplay;
+        pm.setAsmCapsConfig(caps);
+        pm.addPass(createSwInstructionPrefetchAbsStaticPass(baseSgpr, {}, afterSgprCompact));
         return pm;
+    }
+
+    /// Name s57 as the kernel's highest SGPR, as if compact had renumbered it,
+    /// and publish where the dispatch stopped filling — without that line the
+    /// burst cannot tell a reusable register from a preloaded kernarg.
+    void compactedTo57(bool publishDispatchLine = true) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        mov->addDestReg(StinkyRegister("s", 57, 1));
+        mov->addSrcReg(StinkyRegister(0));
+        if (publishDispatchLine) func->setMetaData(kSigDispatchFilledSgprsMetaKey, 8);
     }
 
     GfxArchID arch{};
@@ -197,6 +244,68 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_InsertsOnePrefetchAndLabe
     // Entry BB must have: site label, s_getpc_b64, s_prefetch_inst.
     EXPECT_TRUE(hasLabel(*bb, kSwPrefetchAbsSiteLabel));
     EXPECT_TRUE(hasSGetpc(*bb));
+}
+
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, AfterCompactTakesABlockInsideTheAllocatedRange) {
+    // Compact may have reused Tensile's reserved triple. This burst is at kernel
+    // entry, so it can take its 3 registers from inside the kernel's own range
+    // (s[52:54]) without growing the count: s[56:57] is left for the prologue.
+    buildAboveP0Kernel(bb, arch);
+    compactedTo57();
+
+    auto pm = makePm(/*baseSgpr=*/64, /*afterSgprCompact=*/true);
+    pm.run(*func);
+
+    EXPECT_EQ(countSPrefetchInst(*func), 1);
+    EXPECT_EQ(getpcDestIndex(*bb), 52u);
+}
+
+// With no published dispatch line every register inside the range could be a
+// preloaded kernarg, so the burst has to stay above everything named (s58).
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, AfterCompactStaysAboveTheRangeWithoutADispatchLine) {
+    buildAboveP0Kernel(bb, arch);
+    compactedTo57(/*publishDispatchLine=*/false);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*afterSgprCompact=*/true);
+    pm.run(*func);
+
+    EXPECT_EQ(countSPrefetchInst(*func), 1);
+    EXPECT_EQ(getpcDestIndex(*bb), 58u);
+}
+
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, AfterCompactBurstStaysOffTheProloguePair) {
+    // Pipeline order: prologue first, then abs prefetch. The prologue's
+    // global_prefetch_b8 reads s[56:57] and the burst follows it immediately, so
+    // the burst must not write that pair back: it sits on s[52:54] instead.
+    buildAboveP0Kernel(bb, arch);
+    compactedTo57();
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createInsertInitialUnclausedVmemPass(/*afterSgprCompact=*/true));
+    pm.addPass(createSwInstructionPrefetchAbsStaticPass(64, {}, /*afterSgprCompact=*/true));
+    pm.run(*func);
+
+    ASSERT_EQ(countSPrefetchInst(*func), 1);
+
+    uint32_t prologueIdx = ~0u;
+    uint32_t prefetchIdx = ~0u;
+    for (auto it = bb->begin(); it != bb->end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+        const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+        if (m && std::strcmp(m, "s_mov_b64") == 0 && !inst.getDestRegs().empty() &&
+            prologueIdx == ~0u)
+            prologueIdx = inst.getDestRegs().front().reg.idx;
+        if (m && std::strcmp(m, "s_getpc_b64") == 0 && !inst.getDestRegs().empty())
+            prefetchIdx = inst.getDestRegs().front().reg.idx;
+    }
+    EXPECT_EQ(prologueIdx, 56u);
+    EXPECT_EQ(prefetchIdx, 52u);
+    // s[52:54] against s[56:57]: the burst's scratch (base+2) clears the pair.
+    EXPECT_LT(prefetchIdx + 2u, prologueIdx);
 }
 
 TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_TargetLabelInserted) {
@@ -289,6 +398,40 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_SiteBeforeGetpcBeforePref
 }
 
 // ---------------------------------------------------------------------------
+// gfx1250 hardware-entrypoint prologue
+// ---------------------------------------------------------------------------
+
+// With the prologue present (s_mov_b64 s[64:65], 0 / v_nop / global_prefetch_b8, inserted by
+// InsertInitialUnclausedVmemPass), the entry burst must go AFTER it so the prologue stays the
+// kernel's first executed code.
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_BurstFollowsEntryPrologue) {
+    buildAboveP0Kernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createInsertInitialUnclausedVmemPass());
+    pm.addPass(createSwInstructionPrefetchAbsStaticPass(64));
+    pm.run(*func);
+
+    ASSERT_EQ(countSPrefetchInst(*func), 1);
+
+    // The first four StinkyTofu nodes are the 3 prologue instructions then the burst site label.
+    std::vector<uint16_t> head;
+    for (auto it = bb->begin(); it != bb->end() && head.size() < 4; ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        head.push_back(cast<StinkyInstruction>(n)->getUnifiedOpcode());
+    }
+    ASSERT_EQ(head.size(), 4u);
+    EXPECT_EQ(head[0], GFX::s_mov_b64);
+    EXPECT_EQ(head[1], GFX::v_nop);
+    EXPECT_EQ(head[2], GFX::global_prefetch_b8);
+    EXPECT_EQ(head[3], GFX::LABEL) << "burst site label must follow the prologue";
+    EXPECT_TRUE(hasLabel(*bb, kSwPrefetchAbsSiteLabel));
+}
+
+// ---------------------------------------------------------------------------
 // Debug output
 // ---------------------------------------------------------------------------
 
@@ -350,4 +493,25 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, DebugFile_BelowThreshold_NoOpMess
 
     EXPECT_NE(text.find("no-op"), std::string::npos);
     EXPECT_NE(text.find("32640"), std::string::npos);
+}
+
+// The burst's fixed size feeds the fixed-point that solves N, so dropping the
+// drain is not only four bytes of output: it can change how many prefetches
+// fit. At a pre-insertion total of 36708 the two modes land either side of the
+// P(1) boundary, which pins burstFixedBytes from the outside -- hard-coding it
+// to either 20 or 24 fails one of these two.
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, XnackDrain_Size36708_ModesDiffer) {
+    buildKernelOfSize(bb, arch, 36708);
+    auto pm = makePm(64, /*afterSgprCompact=*/false, /*xnackReplay=*/true);
+    pm.run(*func);
+    EXPECT_EQ(countSPrefetchInst(*func), 2);
+    EXPECT_EQ(countSWaitXcnt(*func), 1);  // one drain per contiguous burst
+}
+
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, NoXnackDrain_Size36708_ModesDiffer) {
+    buildKernelOfSize(bb, arch, 36708);
+    auto pm = makePm(64, /*afterSgprCompact=*/false, /*xnackReplay=*/false);
+    pm.run(*func);
+    EXPECT_EQ(countSPrefetchInst(*func), 1);
+    EXPECT_EQ(countSWaitXcnt(*func), 0);
 }

@@ -39,16 +39,13 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
     * :ref:`dynamic-ordering-configuration`
     * :doc:`Random number generators <./conceptual/generator-types>`
 
-  .. grid-item-card:: How to
-
-    * :doc:`Use primbench for benchmarking <./how-to/rocRAND-primbench>`
-
   .. grid-item-card:: Examples
 
     * `Examples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand/python/rocrand/examples>`_
 
   .. grid-item-card:: API reference
 
+    * `Benchmarking with Primbench <https://rocm.docs.amd.com/projects/primbench/en/latest>`_
     * :doc:`rocRAND precision support <api-reference/data-type-support>`
     * :ref:`cpp-api`
     * :ref:`python-api`

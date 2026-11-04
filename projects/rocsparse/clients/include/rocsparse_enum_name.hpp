@@ -235,6 +235,15 @@ const char* rocsparse_gtsv_interleaved_alg_name(rocsparse_gtsv_interleaved_alg v
 ///
 const char* rocsparse_gpsv_interleaved_alg_name(rocsparse_gpsv_interleaved_alg value);
 
+#if defined(ROCSPARSE_WITH_SPSORT)
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
+const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value);
+#endif
+
 ///
 /// @brief Get the litteral name of the enumeration.
 /// @param[in] value value of the enumeration.
@@ -534,3 +543,15 @@ inline const char* rocsparse_enum_name(rocsparse_gpsv_interleaved_alg value)
 {
     return rocsparse_gpsv_interleaved_alg_name(value);
 }
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
+inline const char* rocsparse_enum_name(rocsparse_spsort_alg value)
+{
+    return rocsparse_spsort_alg_name(value);
+}
+#endif

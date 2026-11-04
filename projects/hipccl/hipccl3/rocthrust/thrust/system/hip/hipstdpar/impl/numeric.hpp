@@ -1,0 +1,724 @@
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+/*
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+/*! \file thrust/system/hip/hipstdpar/impl/numeric.hpp
+ *  \brief <tt>Numeric operations</tt> implementation detail header for HIPSTDPAR.
+ */
+
+#pragma once
+
+#if defined(__HIPSTDPAR__)
+
+#  include <thrust/adjacent_difference.h>
+#  include <thrust/detail/config/namespace.h>
+#  include <thrust/execution_policy.h>
+#  include <thrust/inner_product.h>
+#  include <thrust/reduce.h>
+#  include <thrust/scan.h>
+#  include <thrust/transform.h>
+#  include <thrust/transform_reduce.h>
+#  include <thrust/transform_scan.h>
+
+#  include <algorithm>
+#  include <execution>
+#  include <type_traits>
+#  include <utility>
+
+#  include "hipstd.hpp"
+
+namespace std
+{
+// BEGIN ADJACENT_DIFFERENCE
+template <typename I, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::adjacent_difference(THRUST_NS_QUALIFIER::device, fi, li, fo);
+}
+
+template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+{
+  ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                          typename iterator_traits<O>::iterator_category>();
+
+  return ::std::adjacent_difference(::std::execution::par, fi, li, fo);
+}
+
+template <typename I,
+          typename O,
+          typename Op,
+          enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+        return THRUST_NS_QUALIFIER::adjacent_difference(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(fn));
+    },
+    "hipstdpar adjacent_difference: failed to synchronize",
+    op
+  );
+}
+
+template <typename I,
+          typename O,
+          typename Op,
+          enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op>())
+  {
+    ::hipstd::unsupported_callable_type<Op>();
+  }
+
+  return ::std::adjacent_difference(::std::execution::par, fi, li, fo, ::std::move(op));
+}
+// END ADJACENT_DIFFERENCE
+
+// BEGIN REDUCE
+template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+inline typename iterator_traits<I>::value_type reduce(execution::parallel_unsequenced_policy, I f, I l)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::reduce(THRUST_NS_QUALIFIER::device, f, l);
+}
+
+template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+inline typename iterator_traits<I>::value_type reduce(execution::parallel_unsequenced_policy, I f, I l)
+{
+  ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category>();
+
+  return ::std::reduce(::std::execution::par, f, l);
+}
+
+template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::reduce(THRUST_NS_QUALIFIER::device, f, l, ::std::move(x));
+}
+
+template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
+inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
+{
+  ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category>();
+
+  return ::std::reduce(::std::execution::par, f, l, ::std::move(x));
+}
+
+template <typename I,
+          typename T,
+          typename Op,
+          enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return THRUST_NS_QUALIFIER::reduce(THRUST_NS_QUALIFIER::device, f, l, ::std::move(x), ::std::move(fn));
+    },
+    "hipstdpar reduce: failed to synchronize",
+    op
+  );
+}
+
+template <typename I,
+          typename T,
+          typename Op,
+          enable_if_t<!::hipstd::is_offloadable_iterator<I>() || !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op>())
+  {
+    ::hipstd::unsupported_callable_type<Op>();
+  }
+
+  return ::std::reduce(::std::execution::par, f, l, ::std::move(x), ::std::move(op));
+}
+// END REDUCE
+
+// BEGIN EXCLUSIVE_SCAN
+template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::exclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(x));
+}
+
+template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x)
+{
+  ::hipstd::unsupported_iterator_category<typename std::iterator_traits<I>::iterator_category,
+                                          typename std::iterator_traits<O>::iterator_category>();
+
+  return ::std::exclusive_scan(::std::execution::par, fi, li, fo, ::std::move(x));
+}
+
+template <typename I,
+          typename O,
+          typename T,
+          typename Op,
+          enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x, Op op)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return THRUST_NS_QUALIFIER::exclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(x), ::std::move(fn));
+    },
+    "hipstdpar exclusive_scan: failed to synchronize",
+    op
+  );
+}
+
+template <typename I,
+          typename O,
+          typename T,
+          typename Op,
+          enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x, Op op)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op>())
+  {
+    ::hipstd::unsupported_callable_type<Op>();
+  }
+
+  return ::std::exclusive_scan(::std::execution::par, fi, li, fo, ::std::move(x), ::std::move(op));
+}
+// END EXCLUSIVE_SCAN
+
+// BEGIN INCLUSIVE_SCAN
+template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo);
+}
+
+template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
+inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo)
+{
+  ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                          typename iterator_traits<O>::iterator_category>();
+
+  return ::std::inclusive_scan(::std::execution::par, fi, li, fo);
+}
+
+template <typename I,
+          typename O,
+          typename Op,
+          enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(fn));
+    },
+    "hipstdpar inclusive_scan: failed to synchronize",
+    op
+  );
+}
+
+template <typename I,
+          typename O,
+          typename Op,
+          enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op>())
+  {
+    ::hipstd::unsupported_callable_type<Op>();
+  }
+
+  return ::std::inclusive_scan(::std::execution::par, fi, li, fo, ::std::move(op));
+}
+
+template <typename I,
+          typename O,
+          typename Op,
+          typename T,
+          enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op, T x)
+{ // TODO: this is highly inefficient due to rocThrust not exposing
+  //       this particular interface where the user provides x.
+  ::hipstd::warn_if_no_xnack();
+  if (fi == li)
+  {
+    return fo;
+  }
+
+  ::hipstd::__maybe_bind_globals();
+
+  if constexpr (::std::is_trivially_destructible_v<Op>)
+  {
+    // op is safe to copy into the asynchronous scan; only the transform functor
+    // (which may capture a non-trivial x) can outlive its kernel.
+    auto lo = THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, op);
+
+    auto fn    = [op = ::std::move(op), x = ::std::move(x)](auto&& y) { return op(x, y); };
+    using fn_t = decltype(fn);
+
+    if constexpr (::std::is_trivially_destructible_v<fn_t>)
+    {
+      return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fo, lo, fo, ::std::move(fn));
+    }
+    else
+    {
+      ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+      O result;
+      try
+      {
+        result =
+          THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      }
+      catch (...)
+      {
+        (void) ::hipDeviceSynchronize();
+        throw;
+      }
+      THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+        ::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
+      guard.destroy_and_free();
+      return result;
+    }
+  }
+  else
+  {
+    // op is non-trivial: keep a device-resident copy alive for the whole stream so
+    // that both the scan and the transform (which references op) outlive their kernels.
+    ::hipstd::detail::device_callable_guard<Op> op_guard(::std::move(op));
+    ::hipstd::detail::callable_proxy<Op> op_proxy{op_guard.get()};
+
+    auto lo = THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, op_proxy);
+
+    auto fn    = [op_proxy, x = ::std::move(x)](auto&& y) { return op_proxy(x, y); };
+    using fn_t = decltype(fn);
+    ::hipstd::detail::device_callable_guard<fn_t> fn_guard(::std::move(fn));
+
+    O result;
+    try
+    {
+      result = THRUST_NS_QUALIFIER::transform(
+        THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{fn_guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
+    fn_guard.destroy_and_free();
+    op_guard.destroy_and_free();
+    return result;
+  }
+}
+
+template <typename I,
+          typename O,
+          typename Op,
+          typename T,
+          enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op>()>* = nullptr>
+inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op, T x)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op>())
+  {
+    ::hipstd::unsupported_callable_type<Op>();
+  }
+
+  return ::std::inclusive_scan(::std::execution::par, fi, li, fo, ::std::move(op), ::std::move(x));
+}
+// END INCLUSIVE_SCAN
+
+// BEGIN TRANSFORM_REDUCE
+template <typename I0, typename I1, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, T x)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::inner_product(THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(x));
+}
+
+template <typename I0, typename I1, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
+inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, T x)
+{
+  ::hipstd::unsupported_iterator_category<typename iterator_traits<I0>::iterator_category,
+                                          typename iterator_traits<I1>::iterator_category>();
+
+  return ::std::transform_reduce(::std::execution::par, f0, l0, f1, ::std::move(x));
+}
+
+template <
+  typename I0,
+  typename I1,
+  typename T,
+  typename Op0,
+  typename Op1,
+  enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, T x, Op0 op0, Op1 op1)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn0, auto fn1) {
+        return THRUST_NS_QUALIFIER::inner_product(THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(x), ::std::move(fn0), ::std::move(fn1));
+      },
+      "hipstdpar transform_reduce: failed to synchronize",
+      op0,
+      op1
+  );
+}
+
+template <
+  typename I0,
+  typename I1,
+  typename T,
+  typename Op0,
+  typename Op1,
+  enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>() || !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, T x, Op0 op0, Op1 op1)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I0, I1>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I0>::iterator_category,
+                                            typename iterator_traits<I1>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>())
+  {
+    ::hipstd::unsupported_callable_type<Op0, Op1>();
+  }
+
+  return ::std::transform_reduce(::std::execution::par, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
+}
+
+template <typename I,
+          typename T,
+          typename Op0,
+          typename Op1,
+          enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op0 op0, Op1 op1)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn0, auto fn1) {
+        return THRUST_NS_QUALIFIER::transform_reduce(THRUST_NS_QUALIFIER::device, f, l, ::std::move(fn1), ::std::move(x), ::std::move(fn0));
+    },
+    "hipstdpar transform_reduce: failed to synchronize",
+    op0,
+    op1
+  );
+}
+
+template <
+  typename I,
+  typename T,
+  typename Op0,
+  typename Op1,
+  enable_if_t<!::hipstd::is_offloadable_iterator<I>() || !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op0 op0, Op1 op1)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>())
+  {
+    ::hipstd::unsupported_callable_type<Op0, Op1>();
+  }
+
+  return ::std::transform_reduce(::std::execution::par, f, l, ::std::move(x), ::std::move(op0), ::std::move(op1));
+}
+// END TRANSFORM_REDUCE
+
+// BEGIN TRANSFORM_EXCLUSIVE_SCAN
+template <
+  typename I,
+  typename O,
+  typename T,
+  typename Op0,
+  typename Op1,
+  enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x, Op0 op0, Op1 op1)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn0, auto fn1) {
+        return THRUST_NS_QUALIFIER::transform_exclusive_scan(
+            THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(fn1), ::std::move(x), ::std::move(fn0));
+    },
+    "hipstdpar transform_exclusive_scan: failed to synchronize",
+    op0,
+    op1
+  );
+}
+
+template <
+  typename I,
+  typename O,
+  typename T,
+  typename Op0,
+  typename Op1,
+  enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x, Op0 op0, Op1 op1)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>())
+  {
+    ::hipstd::unsupported_callable_type<Op0, Op1>();
+  }
+
+  return ::std::transform_exclusive_scan(
+    ::std::execution::par, fi, li, fo, ::std::move(x), ::std::move(op0), ::std::move(op1));
+}
+// END TRANSFORM_EXCLUSIVE_SCAN
+
+// BEGIN TRANSFORM_INCLUSIVE_SCAN
+template <
+  typename I,
+  typename O,
+  typename Op0,
+  typename Op1,
+  enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op0 op0, Op1 op1)
+{
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn0, auto fn1) {
+          return THRUST_NS_QUALIFIER::transform_inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(fn1), ::std::move(fn0));
+      },
+      "hipstdpar transform_inclusive_scan: failed to synchronize",
+      op0,
+      op1
+  );
+}
+
+template <
+  typename I,
+  typename O,
+  typename Op0,
+  typename Op1,
+  enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op0 op0, Op1 op1)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>())
+  {
+    ::hipstd::unsupported_callable_type<Op0, Op1>();
+  }
+
+  return ::std::transform_inclusive_scan(::std::execution::par, fi, li, fo, ::std::move(op0), ::std::move(op1));
+}
+
+template <
+  typename I,
+  typename O,
+  typename Op0,
+  typename Op1,
+  typename T,
+  enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op0 op0, Op1 op1, T x)
+{ // TODO: this is inefficient.
+  ::hipstd::warn_if_no_xnack();
+  if (fi == li)
+  {
+    return fo;
+  }
+
+  ::hipstd::__maybe_bind_globals();
+
+  using op0_t = ::std::decay_t<Op0>;
+  using op1_t = ::std::decay_t<Op1>;
+
+  if constexpr (::std::is_trivially_destructible_v<op0_t> && ::std::is_trivially_destructible_v<op1_t>)
+  {
+    // Both operators are safe to copy into the asynchronous scan.  Only the
+    // transform functor (which may capture a non-trivial x) can outlive its kernel.
+    auto lo = THRUST_NS_QUALIFIER::transform_inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(op1), op0);
+
+    auto fn    = [op0 = ::std::move(op0), x = ::std::move(x)](auto&& y) { return op0(x, y); };
+    using fn_t = decltype(fn);
+
+    if constexpr (::std::is_trivially_destructible_v<fn_t>)
+    {
+      return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fo, lo, fo, ::std::move(fn));
+    }
+    else
+    {
+      ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+      O result;
+      try
+      {
+        result =
+          THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      }
+      catch (...)
+      {
+        (void) ::hipDeviceSynchronize();
+        throw;
+      }
+      THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+        ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
+      guard.destroy_and_free();
+      return result;
+    }
+  }
+  else
+  {
+    // Keep device-resident copies of both operators alive for the whole stream:
+    // op1 feeds the scan, op0 feeds both the scan and the transform.
+    ::hipstd::detail::device_callable_guard<op0_t> op0_guard(::std::move(op0));
+    ::hipstd::detail::device_callable_guard<op1_t> op1_guard(::std::move(op1));
+    ::hipstd::detail::callable_proxy<op0_t> op0_proxy{op0_guard.get()};
+
+    auto fn    = [op0_proxy, x = ::std::move(x)](auto&& y) { return op0_proxy(x, y); };
+    using fn_t = decltype(fn);
+    ::hipstd::detail::device_callable_guard<fn_t> fn_guard(::std::move(fn));
+
+    O result;
+    try
+    {
+        auto lo = ::thrust::transform_inclusive_scan(
+        ::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()}, op0_proxy);
+      result = ::thrust::transform(
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{fn_guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
+    fn_guard.destroy_and_free();
+    op1_guard.destroy_and_free();
+    op0_guard.destroy_and_free();
+    return result;
+  }
+}
+
+template <
+  typename I,
+  typename O,
+  typename Op0,
+  typename Op1,
+  typename T,
+  enable_if_t<!::hipstd::is_offloadable_iterator<I, O>() || !::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
+inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op0 op0, Op1 op1, T x)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<Op0, Op1>())
+  {
+    ::hipstd::unsupported_callable_type<Op0, Op1>();
+  }
+
+  return ::std::transform_inclusive_scan(
+    ::std::execution::par, fi, li, fo, ::std::move(op0), ::std::move(op1), ::std::move(x));
+}
+// END TRANSFORM_INCLUSIVE_SCAN
+} // namespace std
+#else // __HIPSTDPAR__
+#  error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."
+#endif // __HIPSTDPAR__

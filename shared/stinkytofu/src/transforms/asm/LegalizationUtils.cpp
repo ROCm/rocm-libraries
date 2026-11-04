@@ -29,6 +29,7 @@
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
@@ -104,11 +105,13 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, inst);
 
-    // Replace EXEC destination with VCC
-    StinkyRegister destReg = destRegs[0];
-    if (destReg.reg.type == RegType::EXEC || destReg.reg.type == RegType::EXEC_LO) {
-        destReg = StinkyRegister::getVCCRegister(wavefrontSize);
-    }
+    // Any v_cmpx that reaches here writes EXEC (CMPXWritesSGPR is false on this
+    // arch), so the split v_cmp must target VCC regardless of how the source path
+    // represented the EXEC destination. The rocisa->asm path types dest[0] as
+    // RegType::EXEC/EXEC_LO; the logical/adaptor path may encode EXEC as a plain
+    // SGPR (index 126/127), which a type-only check missed — leaving v_cmp writing
+    // EXEC and tripping the emulator's isVcmpX assertion. Remap unconditionally.
+    StinkyRegister destReg = StinkyRegister::getVCCRegister(wavefrontSize);
     cmpInst->addDestReg(destReg);
 
     // Copy source registers
@@ -149,11 +152,11 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 }
 
 Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
+    // Only legalize on gfx12.5 (either stepping).
     // TODO: Support other SeparateVMcnt + SeparateLGKMcnt archs (e.g. gfx1200,
     // gfx1201). Need to verify whether they also support combined instructions
     // (s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt).
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get wait count data from modifiers
     const SWaitCntData* waitData = inst->getModifier<SWaitCntData>();
@@ -171,7 +174,7 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     bool hasKmcnt = (waitData->kmcnt != -1);
 
     // Combine dlcnt and dscnt into a single dscnt for gfx1250
-    int8_t combinedDscnt = -1;
+    int combinedDscnt = -1;
     if (hasDlcnt && hasDscnt) {
         combinedDscnt = std::min(waitData->dlcnt, waitData->dscnt);
     } else if (hasDlcnt) {
@@ -186,22 +189,22 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     StinkyInstruction* lastInst = nullptr;
 
     // Helper to create single wait instruction before inst
-    auto createSingleWait = [&](GFX opcode, int8_t count) -> StinkyInstruction* {
+    auto createSingleWait = [&](GFX opcode, int count) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        waitInst->addSrcReg(StinkyRegister(static_cast<int>(count)));
+        waitInst->addSrcReg(StinkyRegister(clampToWaitCntField(count)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
         return waitInst;
     };
 
-    // Helper to create combined wait instruction before inst
-    auto createCombinedWait = [&](GFX opcode, int8_t count1, int8_t count2) -> StinkyInstruction* {
+    // Helper to create combined wait instruction before inst. memCount is the
+    // loadcnt or storecnt half, dsCount the dscnt half.
+    auto createCombinedWait = [&](GFX opcode, int memCount, int dsCount) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        uint16_t combinedCount = ((count1 & 0xFF) << 8) | (count2 & 0xFF);
-        waitInst->addSrcReg(StinkyRegister(static_cast<int>(combinedCount)));
+        waitInst->addSrcReg(StinkyRegister(packMemDsWaitCnt(memCount, dsCount)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
@@ -251,42 +254,42 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
 }
 
 Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    return legalizeBarrier(inst, irBuilder, archId, -1, false, false);
+}
+
+Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
+                          int barrierId, bool separate, bool wait) {
+    // Only legalize on gfx12.5 (either stepping).
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get modifiers to transfer
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
     const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
 
-    // Create s_barrier_signal -1 (signal global barrier)
-    const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
-    StinkyInstruction* signalInst = irBuilder.create(signalDesc, inst);
-    signalInst->addSrcReg(StinkyRegister(-1));  // -1 = global barrier
+    auto createBarrier = [&](GFX opcode) {
+        const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
+        StinkyInstruction* barrier = irBuilder.create(desc, inst);
+        barrier->addSrcReg(StinkyRegister(barrierId));
+        if (memTokenMod) barrier->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
+        return barrier;
+    };
 
-    // Create s_barrier_wait -1 (wait on global barrier)
-    const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-    StinkyInstruction* waitInst = irBuilder.create(waitDesc, inst);
-    waitInst->addSrcReg(StinkyRegister(-1));  // -1 = global barrier
-    if (!comment.empty()) {
-        waitInst->addModifier<CommentData>(CommentData{comment});
+    StinkyInstruction* firstInst = nullptr;
+    StinkyInstruction* lastInst = nullptr;
+    if (separate) {
+        firstInst = lastInst = createBarrier(wait ? GFX::s_barrier_wait : GFX::s_barrier_signal);
+    } else {
+        firstInst = createBarrier(GFX::s_barrier_signal);
+        lastInst = createBarrier(GFX::s_barrier_wait);
     }
-    if (memTokenMod) {
-        signalInst->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
-        waitInst->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
-    }
+
+    if (!comment.empty()) lastInst->addModifier<CommentData>(CommentData{comment});
 
     // Remove the original s_barrier instruction
     inst->erase();
 
-    return {signalInst, waitInst};
-}
-
-/// Helper: compute MSB offset for VGPR when hasVgprMsb is true.
-/// When regIdx crosses 256 boundary (e.g., 256, 512), the offset differs from the base.
-static int16_t getVgprMsbOffsetForIdx(RegType type, uint32_t regIdx, bool hasVgprMsb) {
-    if (!hasVgprMsb || type != RegType::V) return 0;
-    return static_cast<int16_t>((regIdx / 256) * (-256));
+    return {firstInst, lastInst};
 }
 
 /// Helper function to adjust symbolic register name for split instructions
@@ -310,8 +313,7 @@ static std::string adjustSymbolicRegName(const std::string& symbolicName, int of
     return baseName + "+" + std::to_string(newDigitBase);
 }
 
-Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
-                             bool hasVgprMsb) {
+Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     // DSLoadB192: ds_load_b192 v[a:a+5], v[b] offset:X
     // →
     // ds_load_b128 v[a:a+3], v[b] offset:X
@@ -337,9 +339,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
     const HwInstDesc* desc1 = getMCIDByUOp(GFX::ds_load_b128, archId);
     StinkyInstruction* load1 = irBuilder.create(desc1, inst);
 
-    StinkyRegister dstData1{origDst.reg.type, origDst.reg.idx,
-                            4,  // 4 registers
-                            origDst.reg.offset};
+    StinkyRegister dstData1{origDst.reg.type, origDst.reg.idx, 4};
 
     if (!origDst.getSymbolicName().empty()) {
         dstData1.setSymbolicName(origDst.getSymbolicName());
@@ -369,11 +369,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
            "Invalid destination register index");
 
     uint32_t dstData2Idx = static_cast<uint16_t>(origDst.reg.idx + 4);
-    int16_t dstData2Offs = (hasVgprMsb && origDst.reg.type == RegType::V)
-                               ? getVgprMsbOffsetForIdx(origDst.reg.type, dstData2Idx, hasVgprMsb)
-                               : origDst.reg.offset;
-
-    StinkyRegister dstData2{origDst.reg.type, dstData2Idx, 2, dstData2Offs};
+    StinkyRegister dstData2{origDst.reg.type, dstData2Idx, 2};
 
     if (!origDst.getSymbolicName().empty()) {
         std::string adjustedName = adjustSymbolicRegName(origDst.getSymbolicName(), 4);
@@ -404,8 +400,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
     return {load1, load2};
 }
 
-Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
-                              bool hasVgprMsb) {
+Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     // DSStoreB192: ds_store_b192 v[addr], v[b:b+5] offset:X
     // →
     // ds_store_b128 v[addr], v[b:b+3] offset:X
@@ -433,9 +428,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
 
     store1->addSrcReg(origDstAddr);
 
-    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx,
-                            4,  // 4 registers
-                            origSrcData.reg.offset};
+    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx, 4};
 
     if (!origSrcData.getSymbolicName().empty()) {
         srcData1.setSymbolicName(origSrcData.getSymbolicName());
@@ -466,12 +459,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
            "Invalid source register index");
 
     uint32_t srcData2Idx = static_cast<uint16_t>(origSrcData.reg.idx + 4);
-    int16_t srcData2Offs =
-        (hasVgprMsb && origSrcData.reg.type == RegType::V)
-            ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
-            : origSrcData.reg.offset;
-
-    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 2, srcData2Offs};
+    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 2};
 
     if (!origSrcData.getSymbolicName().empty()) {
         std::string adjustedName = adjustSymbolicRegName(origSrcData.getSymbolicName(), 4);
@@ -501,8 +489,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     return {store1, store2};
 }
 
-Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
-                              bool hasVgprMsb) {
+Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     // DSStoreB256: ds_store_b256 v[addr], v[b:b+7] offset:X
     // →
     // ds_write_b128/ds_store_b128 v[addr], v[b:b+3] offset:X
@@ -531,9 +518,7 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
 
     store1->addSrcReg(origDstAddr);
 
-    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx,
-                            4,  // 4 registers
-                            origSrcData.reg.offset};
+    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx, 4};
 
     if (!origSrcData.getSymbolicName().empty()) {
         srcData1.setSymbolicName(origSrcData.getSymbolicName());
@@ -563,12 +548,7 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
            "Invalid source register index");
 
     uint32_t srcData2Idx = static_cast<uint16_t>(origSrcData.reg.idx + 4);
-    int16_t srcData2Offs =
-        (hasVgprMsb && origSrcData.reg.type == RegType::V)
-            ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
-            : origSrcData.reg.offset;
-
-    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 4, srcData2Offs};
+    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 4};
 
     if (!origSrcData.getSymbolicName().empty()) {
         std::string adjustedName = adjustSymbolicRegName(origSrcData.getSymbolicName(), 4);
@@ -628,6 +608,40 @@ void legalizeImplicitSpecialRegisters(StinkyInstruction* inst, uint32_t wavefron
         addUniqueSpecialSrc(inst, StinkyRegister::getEXECRegister(wavefrontSize));
     if (inst->is(IF_ImplicitWriteEXEC))
         addUniqueSpecialDest(inst, StinkyRegister::getEXECRegister(wavefrontSize));
+}
+
+void legalizeReadWriteSources(StinkyInstruction* inst) {
+    if (inst == nullptr) return;
+    const HwInstDesc* desc = inst->getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    // operandFields describes the printed operands in order, so the slot a dest
+    // field names is its position among the dest fields -- the same walk
+    // collectReadWriteTies and the verifier use, so all three agree on which
+    // register a field means.
+    size_t destSlot = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t slot = destSlot++;
+        if (!readsDestination(*inst, slot)) continue;
+        if (slot >= inst->getDestRegs().size()) continue;
+
+        // By value: addSrcReg can reallocate the dest vector's neighbour, and a
+        // reference into getDestRegs() would not survive that.
+        const StinkyRegister rw = inst->getDestRegs()[slot];
+        if (!rw.isRegister()) continue;
+
+        // Full-operand equality, matching collectReadWriteTies: a source that
+        // merely overlaps is a different value and would not tie.
+        bool present = false;
+        for (const StinkyRegister& src : inst->getSrcRegs()) {
+            if (src == rw) {
+                present = true;
+                break;
+            }
+        }
+        if (!present) inst->addSrcReg(rw);
+    }
 }
 
 }  // namespace stinkytofu

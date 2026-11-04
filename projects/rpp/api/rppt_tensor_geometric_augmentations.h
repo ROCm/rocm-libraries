@@ -395,40 +395,32 @@ RppStatus rppt_crop_and_patch(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr sr
 
 /*! \brief Flip voxel augmentation on HIP/HOST backend
  * \details The flip voxel augmentation performs a mask-controlled horizontal/vertical/depth flip on
- a generic 4D tensor. <br> Support added for f32 -> f32 and u8 -> u8 dataypes.
- * \image html
- https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- Sample Input
- * \image html
- https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/geometric_augmentations_flip_150x150x4.gif
- Sample Output
- * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for HOST
- backend)
- * \param [in] srcGenericDescPtr source tensor descriptor (Restrictions - numDims = 5, offsetInBytes
- >= 0, dataType = U8/F32, layout = NCDHW/NDHWC, c = 1/3)
+ * a generic 4D tensor. <br> Support added for f32 -> f32 and u8 -> u8 dataypes.
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html geometric_augmentations_flip_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * (for HOST backend) \param [in] srcGenericDescPtr source tensor descriptor (Restrictions - numDims
+ * = 5, offsetInBytes
+ * >= 0, dataType = U8/F32, layout = NCDHW/NDHWC, c = 1/3)
  * \param [out] dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST
- backend)
+ * backend)
  * \param [in] dstGenericDescPtr destination tensor descriptor (Restrictions - numDims = 5,
- offsetInBytes >= 0, dataType = U8/F32, layout = NCDHW/NDHWC, c = 1/3)
+ * offsetInBytes >= 0, dataType = U8/F32, layout = NCDHW/NDHWC, c = 1/3)
  * \param [in] horizontalTensor horizontal flag values to set horizontal flip on/off (1D tensor in
- pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, with
- horizontalTensor[i] = 0/1)
+ * pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, with
+ * horizontalTensor[i] = 0/1)
  * \param [in] verticalTensor vertical flag values to set vertical flip on/off (1D tensor in pinned
- / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, with
- verticalTensor[i] = 0/1)
+ * / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, with
+ * verticalTensor[i] = 0/1)
  * \param [in] depthTensor depth flag values to set depth flip on/off (1D tensor in pinned / HIP
- memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, with depthTensor[i]
- = 0/1)
- * \param [in] roiGenericPtrSrc ROI data for each image in source tensor (tensor of batchSize
- RpptRoiGeneric values)
- * \param [in] roiType ROI type used (RpptRoi3DType::XYZWHD or RpptRoi3DType::LTFRBB)
- * \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt>
- * \param [in] executionBackend execution backend to run the augmentation on
- (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND)
- * \return A <tt> \ref RppStatus</tt> enumeration.
- * \retval RPP_SUCCESS Successful completion.
- * \retval RPP_ERROR* Unsuccessful completion.
- * \ingroup group_tensor_geometric
+ * memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, with
+ * depthTensor[i] = 0/1) \param [in] roiGenericPtrSrc ROI data for each image in source tensor
+ * (tensor of batchSize RpptRoiGeneric values) \param [in] roiType ROI type used
+ * (RpptRoi3DType::XYZWHD or RpptRoi3DType::LTFRBB) \param [in] rppHandle RPP HIP/HOST handle
+ * created with <tt>\ref rppCreate()</tt> \param [in] executionBackend execution backend to run the
+ * augmentation on (RppBackend::RPP_HOST_BACKEND or RppBackend::RPP_HIP_BACKEND) \return A <tt> \ref
+ * RppStatus</tt> enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR*
+ * Unsuccessful completion. \ingroup group_tensor_geometric
  */
 RppStatus rppt_flip_voxel(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppPtr_t dstPtr,
                           RpptGenericDescPtr dstGenericDescPtr, Rpp32u* horizontalTensor,
@@ -595,9 +587,10 @@ RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr src
  *          It introduces artifacts seen in lossy JPEG compression by converting the image to the
  * frequency domain using the Discrete Cosine Transform (DCT), applying quantization, and then
  * reconstructing the image using the inverse DCT (IDCT). This process introduces
- * compression-related distortions similar to those in JPEG images. \image html img150x150.png
- * Sample Input \image html geometric_augmentations_jpeg_compression_distortion_img_150x150.png
- * Sample Output \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * compression-related distortions similar to those in JPEG images.
+ * \image html img150x150.png "Sample Input"
+ * \image html geometric_augmentations_jpeg_compression_distortion_img_150x150.png "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param [in] srcGenericDescPtr source tensor descriptor \param [out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstGenericDescPtr destination tensor descriptor \param [in] qualityTensor JPEG quality factor

@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 using namespace miopen_plugin;
 using namespace miopen_utils;
@@ -96,7 +97,7 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
+TEST(TestMiopenUtils, CreatePaddedTensor4dPassthrough)
 {
     // 4D NCHW tensor should pass through unchanged
     const std::vector<int64_t> dims = {2, 3, 14, 14};
@@ -115,7 +116,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     EXPECT_EQ(result.uid(), 42);
 
@@ -141,7 +142,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
     EXPECT_EQ(resultStrides[3], 1);
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
+TEST(TestMiopenUtils, CreatePaddedTensor5dPassthrough)
 {
     // 5D NCDHW tensor should pass through unchanged
     const std::vector<int64_t> dims = {2, 3, 4, 14, 14};
@@ -160,7 +161,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     EXPECT_EQ(result.uid(), 42);
 
@@ -188,7 +189,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
     EXPECT_EQ(resultStrides[4], 1);
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
+TEST(TestMiopenUtils, CreatePaddedTensor3dNclPadsToNchw)
 {
     // NCL (channels-first): dims [N, C, L], strides [C*L, L, 1]
     // C stride (14) > L stride (1) = channels-first
@@ -208,7 +209,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     // Should be padded to 4D with W=1 and stride[3]=1 for NCHW
     int numDims = 0;
@@ -229,7 +230,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
     EXPECT_EQ(resultStrides[3], 1); // W stride = 1 for channels-first
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor3dNlcPadsToNhwc)
+TEST(TestMiopenUtils, CreatePaddedTensor3dNlcPadsToNhwc)
 {
     // NLC (channels-last): dims [N, C, L], strides [C*L, 1, C]
     // C stride (1) < L stride (3) = channels-last
@@ -249,7 +250,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNlcPadsToNhwc)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     // Should be padded to 4D with W=1 and stride[3]=C for NHWC
     int numDims = 0;
@@ -379,6 +380,77 @@ TEST(TestMiopenUtils, MapPointwiseModeClamp)
     EXPECT_EQ(result.mode, miopenActivationCLAMP);
     EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(lowerClip));
     EXPECT_DOUBLE_EQ(result.beta, static_cast<double>(upperClip));
+}
+
+namespace
+{
+
+struct ReluAttrsHolder
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* attrs = nullptr;
+
+    ReluAttrsHolder(flatbuffers::Optional<float> lowerClip,
+                    flatbuffers::Optional<float> upperClip,
+                    flatbuffers::Optional<float> slope)
+    {
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+            builder,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            lowerClip,
+            upperClip,
+            slope));
+        attrs = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+    }
+};
+
+} // namespace
+
+TEST(TestMiopenUtils, HasLeakyReluSlope)
+{
+    EXPECT_FALSE(hasLeakyReluSlope(*ReluAttrsHolder(0.f, 6.f, flatbuffers::nullopt).attrs));
+    EXPECT_FALSE(hasLeakyReluSlope(*ReluAttrsHolder(0.f, 6.f, 0.f).attrs));
+    EXPECT_TRUE(hasLeakyReluSlope(*ReluAttrsHolder(0.f, 6.f, 0.01f).attrs));
+    EXPECT_TRUE(hasLeakyReluSlope(*ReluAttrsHolder(0.f, 6.f, -0.01f).attrs));
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeReluZeroSlopeIsStandardRelu)
+{
+    for(const auto lowerClip : {flatbuffers::Optional<float>(), flatbuffers::Optional<float>(0.f)})
+    {
+        const ReluAttrsHolder h(lowerClip, flatbuffers::nullopt, 0.f);
+        ActivationParams result;
+        ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*h.attrs));
+        EXPECT_EQ(result.mode, miopenActivationRELU);
+    }
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeClippedReluZeroSlope)
+{
+    const ReluAttrsHolder h(flatbuffers::nullopt, 6.f, 0.f);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*h.attrs));
+    EXPECT_EQ(result.mode, miopenActivationCLIPPEDRELU);
+    EXPECT_DOUBLE_EQ(result.alpha, 6.0);
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeClampZeroSlope)
+{
+    const ReluAttrsHolder h(-1.f, 6.f, 0.f);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*h.attrs));
+    EXPECT_EQ(result.mode, miopenActivationCLAMP);
+    EXPECT_DOUBLE_EQ(result.alpha, -1.0);
+    EXPECT_DOUBLE_EQ(result.beta, 6.0);
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipAndZeroSlopeThrows)
+{
+    // A zero slope must not route a shifted knee into LEAKYRELU, which would drop the clip.
+    const ReluAttrsHolder h(0.5f, flatbuffers::nullopt, 0.f);
+    EXPECT_THROW(mapPointwiseModeToMiopenActivation(*h.attrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeSigmoid)
@@ -571,13 +643,65 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestMiopenUtils, EnvFindEnforceIsSetOnlyForEnforcingValues)
+{
+    // MIOpen reads NONE and 1 as "nothing enforced" and throws on values it cannot parse, so
+    // none of them may disable the benchmarking tuning policy.
+    for(const char* value : {"", "NONE", "none", "1", "0", "6", "bogus"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
+            "MIOPEN_FIND_ENFORCE", value);
+        EXPECT_FALSE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
+    }
+    // Numbers are read as std::stoul reads them, as MIOpen does.
+    for(const char* value :
+        {"DB_UPDATE", "search", "SEARCH_DB_UPDATE", "db_clean", "2", "5", "04", " 3", "4x"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
+            "MIOPEN_FIND_ENFORCE", value);
+        EXPECT_TRUE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
+    }
+}
+
 // =============================================================================
 // GPU-required tests for ScopedTuningPolicy
 // =============================================================================
 
 class TestGpuScopedTuningPolicy : public test_common::MiopenHandleFixture
 {
+protected:
+    // Cleared so a runner's MIOPEN_FIND_ENFORCE cannot change what each case asserts.
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _clearFindEnforce{
+        "MIOPEN_FIND_ENFORCE"};
 };
+
+TEST_F(TestGpuScopedTuningPolicy, EnvFindEnforceTakesPrecedenceOverBenchmarking)
+{
+    // MIOpen applies MIOPEN_FIND_ENFORCE only while the handle policy is None, so the
+    // guard must not set Search when the user set the variable (PyTorch never does).
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce("MIOPEN_FIND_ENFORCE",
+                                                                              "DB_UPDATE");
+    ASSERT_EQ(miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone), miopenStatusSuccess);
+
+    const ScopedTuningPolicy guard(_miopenHandle, true);
+
+    miopenTuningPolicy_t currentPolicy;
+    ASSERT_EQ(miopenGetTuningPolicy(_miopenHandle, &currentPolicy), miopenStatusSuccess);
+    EXPECT_EQ(currentPolicy, miopenTuningPolicyNone);
+}
+
+TEST_F(TestGpuScopedTuningPolicy, NonEnforcingEnvKeepsSearchPolicy)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce("MIOPEN_FIND_ENFORCE",
+                                                                              "NONE");
+    ASSERT_EQ(miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone), miopenStatusSuccess);
+
+    const ScopedTuningPolicy guard(_miopenHandle, true);
+
+    miopenTuningPolicy_t currentPolicy;
+    ASSERT_EQ(miopenGetTuningPolicy(_miopenHandle, &currentPolicy), miopenStatusSuccess);
+    EXPECT_EQ(currentPolicy, miopenTuningPolicySearch);
+}
 
 TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
 {

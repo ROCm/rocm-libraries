@@ -56,11 +56,6 @@ double dlange_(char* norm_type, int* m, int* n, double* A, int* lda, double* wor
 float  clange_(char* norm_type, int* m, int* n, std::complex<float>* A, int* lda, float* work);
 double zlange_(char* norm_type, int* m, int* n, std::complex<double>* A, int* lda, double* work);
 
-float  slansy_(char* norm_type, char* uplo, int* n, float* A, int* lda, float* work);
-double dlansy_(char* norm_type, char* uplo, int* n, double* A, int* lda, double* work);
-
-void saxpy_(int* n, float* alpha, float* x, int* incx, float* y, int* incy);
-void daxpy_(int* n, double* alpha, double* x, int* incx, double* y, int* incy);
 }
 
 /*! \brief  Overloading: norm check for general Matrix: half/float/doubel/complex */
@@ -82,26 +77,6 @@ inline float xlange(char* norm_type, int* m, int* n, std::complex<float>* A, int
 inline double xlange(char* norm_type, int* m, int* n, std::complex<double>* A, int* lda, double* work)
 {
     return zlange_(norm_type, m, n, A, lda, work);
-}
-
-inline float xlanhe(char* norm_type, char* uplo, int* n, float* A, int* lda, float* work)
-{
-    return slansy_(norm_type, uplo, n, A, lda, work);
-}
-
-inline double xlanhe(char* norm_type, char* uplo, int* n, double* A, int* lda, double* work)
-{
-    return dlansy_(norm_type, uplo, n, A, lda, work);
-}
-
-inline void xaxpy(int* n, float* alpha, float* x, int* incx, float* y, int* incy)
-{
-    return saxpy_(n, alpha, x, incx, y, incy);
-}
-
-inline void xaxpy(int* n, double* alpha, double* x, int* incx, double* y, int* incy)
-{
-    return daxpy_(n, alpha, x, incx, y, incy);
 }
 
 template <typename T>
@@ -448,7 +423,7 @@ double norm_check_general(
     return cumulative_error;
 }
 
-double norm_check_general(
+inline double norm_check_general(
     char norm_type, int64_t M, int64_t N, int64_t lda, void* hCPU, void* hGPU, hipDataType type)
 {
     switch(type)
@@ -523,15 +498,15 @@ double norm_check_general(
     }
 }
 
-double norm_check_general(char        norm_type,
-                          int64_t     M,
-                          int64_t     N,
-                          int64_t     lda,
-                          int64_t     stride_a,
-                          void*       hCPU,
-                          void*       hGPU,
-                          int64_t     batch_count,
-                          hipDataType type)
+inline double norm_check_general(char        norm_type,
+                                 int64_t     M,
+                                 int64_t     N,
+                                 int64_t     lda,
+                                 int64_t     stride_a,
+                                 void*       hCPU,
+                                 void*       hGPU,
+                                 int64_t     batch_count,
+                                 hipDataType type)
 {
     switch(type)
     {
@@ -649,6 +624,29 @@ double norm_check_general(char        norm_type,
     }
 }
 
+// The types the norm_check_general overloads above compare; for any other they return 0.
+inline bool norm_check_general_supports(hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+    case HIP_R_64F:
+    case HIP_C_32F:
+    case HIP_C_64F:
+    case HIP_R_16F:
+    case HIP_R_16BF:
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
+    case HIP_R_32I:
+    case HIP_R_8I:
+        return true;
+    default:
+        return false;
+    }
+}
+
 template <typename T>
 bool norm_check(double norm_error)
 {
@@ -676,7 +674,7 @@ bool norm_check(double norm_error)
 }
 
 // TODO: tune norm tolerance for MX FP6 and FP8 types
-double norm_tolerance(hipDataType type)
+inline double norm_tolerance(hipDataType type)
 {
     switch(type)
     {
@@ -712,17 +710,17 @@ double norm_tolerance(hipDataType type)
     }
 }
 
-bool norm_check(double norm_error, hipDataType type)
+inline bool norm_check(double norm_error, hipDataType type)
 {
     double tol = norm_tolerance(type);
     return tol > 0.0 && norm_error < tol;
 }
 
-bool norm_check(double                 norm_error,
-                hipDataType            outputType,
-                hipblasComputeType_t   compute_type,
-                hipDataType            inputTypeA = static_cast<hipDataType>(-1),
-                hipDataType            inputTypeB = static_cast<hipDataType>(-1))
+// The norm_error limit for a GEMM; 0 means no limit is known for these types.
+inline double norm_tolerance(hipDataType          outputType,
+                             hipblasComputeType_t compute_type,
+                             hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                             hipDataType          inputTypeB = static_cast<hipDataType>(-1))
 {
     double tol = norm_tolerance(outputType);
 
@@ -734,5 +732,15 @@ bool norm_check(double                 norm_error,
     if(static_cast<int>(inputTypeB) >= 0)
         tol = std::max(tol, norm_tolerance(inputTypeB));
 
+    return tol;
+}
+
+inline bool norm_check(double               norm_error,
+                       hipDataType          outputType,
+                       hipblasComputeType_t compute_type,
+                       hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                       hipDataType          inputTypeB = static_cast<hipDataType>(-1))
+{
+    double tol = norm_tolerance(outputType, compute_type, inputTypeA, inputTypeB);
     return tol > 0.0 && norm_error < tol;
 }

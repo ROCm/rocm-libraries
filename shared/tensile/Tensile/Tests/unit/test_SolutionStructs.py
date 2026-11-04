@@ -38,8 +38,8 @@ def test_disable_preload_kernel_arguments_clears_delay():
     assert state["DelayRemainingArguments"] is False
 
 
-def test_gfx12_wmma_mi_input_per_thread_uses_generic_formula():
-    isa = (12, 0, 1)
+@pytest.mark.parametrize("isa", [(11, 7, 0), (12, 0, 1)])
+def test_gfx117_and_gfx12_wmma_mi_input_per_thread_use_generic_formula(isa):
     oldAsmCaps = globalParameters.get("AsmCaps")
     globalParameters["AsmCaps"] = {isa: {"HasMFMA": False, "HasWMMA": True}}
     state = {

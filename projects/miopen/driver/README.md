@@ -230,6 +230,6 @@ Each solution outputs a JSON object with performance configs. Each config contai
 - `kernels`: Array of individual kernel data (only present in levels 2 & 4, null in levels 1 & 3)
 
 **Kernel Level (when included):**
-- `kernel_name`: Full kernel name
+- `kernel_name`: Full kernel name. The `ConvHipConv` solver names its hipconv kernel `family[field=value,...]` (for example `direct_l1[waves_k=2,kh=3,kw=3,direction=fprop]`); the bracketed field list is the descriptor `hipconv` itself accepts, and this name also becomes the config's `config_name`.
 - `time_executions_ms`: Array of execution times across multiple runs
 - `is_transformation`: Boolean indicating if kernel is a transpose/transform operation
