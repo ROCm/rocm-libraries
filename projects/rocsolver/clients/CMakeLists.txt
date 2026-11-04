@@ -99,6 +99,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_orgxl_ungxl.cpp
     common/auxiliary/testing_orglx_unglx.cpp
     common/auxiliary/testing_orgbr_ungbr.cpp
+    common/auxiliary/testing_orghr_unghr.cpp
     common/auxiliary/testing_orgtr_ungtr.cpp
     common/auxiliary/testing_ormxr_unmxr.cpp
     common/auxiliary/testing_ormxl_unmxl.cpp
