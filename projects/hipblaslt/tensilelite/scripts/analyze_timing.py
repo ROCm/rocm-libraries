@@ -301,6 +301,10 @@ TIMING_HIERARCHY = {
             "python_library_client_subprocess": {},
         },
     },
+    # Test harness (Tests/common), outside the Tensile invocation: packing the build's output into
+    # the per-config .tar.gz artifact (--build-only) and unpacking it before the run (--use-cache).
+    "python_artifact_compress": {},
+    "python_artifact_extract": {},
 }
 
 # Display grouping for C++ phases (rendering concern only).
@@ -387,6 +391,8 @@ G_PY_BOOKKEEPING = "SHARED: cache & solution files"
 G_DUCTILE = "Ductile GA search (Python)"
 G_LIBRARY_CLIENT = "Library client (Python)"
 G_LIBRARY_LOGIC = "Library logic (Python)"
+G_ARTIFACT_PACK = "Artifact packing (test harness, .tar.gz)"
+G_ARTIFACT_UNPACK = "Artifact extraction (test harness, .tar.gz)"
 G_UNATTRIBUTED = "UNATTRIBUTED (untracked time & timer overhead)"
 
 PURPOSE_OF = {
@@ -405,6 +411,8 @@ PURPOSE_OF = {
     "python_ductile_verification": G_DUCTILE,
     "python_library_logic": G_LIBRARY_LOGIC,
     "python_client_writer": G_LIBRARY_CLIENT,
+    "python_artifact_compress": G_ARTIFACT_PACK,
+    "python_artifact_extract": G_ARTIFACT_UNPACK,
     # C++ client: one launch's setup and teardown
     "python_client_execution": G_BOOKKEEPING,
     "python_client_write_run_script": G_LAUNCH,
@@ -479,8 +487,8 @@ PURPOSE_TRANSPARENT = {
 STAGES = [
     ("RUN: benchmark client",
      [G_REFERENCE, G_INPUT, G_VALIDATION, G_KERNEL, G_BOOKKEEPING, G_LAUNCH,
-      G_LIBRARY_CLIENT, G_LIBRARY_LOGIC]),
-    ("BUILD: solution generation & compile", [G_BUILD, G_DUCTILE]),
+      G_LIBRARY_CLIENT, G_LIBRARY_LOGIC, G_ARTIFACT_UNPACK]),
+    ("BUILD: solution generation & compile", [G_BUILD, G_DUCTILE, G_ARTIFACT_PACK]),
 ]
 ROOT_NAME = "TOTAL RUNTIME"
 
@@ -904,11 +912,17 @@ def build_staged_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
 
 
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
-    """Parse a TIMING: line and return a TimingRecord."""
+    """Parse a TIMING: line and return a TimingRecord.
+
+    The record may follow other text after whitespace: with ``pytest -v -s`` the records the test
+    harness prints before the Tensile invocation (python_artifact_extract) land on the line of the
+    test id.
+    """
     start_sentinel = 'TIMING:'
-    if not line.startswith(start_sentinel):
+    idx = line.find(start_sentinel)
+    if idx < 0 or (idx > 0 and not line[idx - 1].isspace()):
         return None
-    parts = line.split(':', 2)
+    parts = line[idx:].split(':', 2)
     if len(parts) != 3:
         return None
     try:

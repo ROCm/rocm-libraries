@@ -77,6 +77,17 @@ Some trailing output
 
 
 class TestParseTimingLine:
+    def test_record_after_a_pytest_test_id(self):
+        line = ("tensilelite/Tests/common/test_config_run.py::test_config_run[x.yaml] "
+                "TIMING:python_artifact_extract:735.372\n")
+        rec = parse_timing_line(line)
+        assert rec is not None
+        assert rec.category == "python_artifact_extract"
+        assert rec.duration_ms == pytest.approx(735.372)
+
+    def test_record_glued_to_other_text_is_ignored(self):
+        assert parse_timing_line("fooTIMING:x:1.0\n") is None
+
     """Tests for parse_timing_line function."""
 
     def test_valid_timing_line(self):
@@ -119,8 +130,11 @@ class TestParseTimingLine:
         assert record.duration_ms == pytest.approx(0.00032)
 
     def test_timing_line_with_surrounding_text(self):
-        # Should not match if TIMING is not at start
-        assert parse_timing_line("prefix TIMING:category:123.0") is None
+        # A record after other text matches only when whitespace separates them (pytest -v puts
+        # the test id before the first record, see test_record_after_a_pytest_test_id); trailing
+        # text after the value does not match.
+        assert parse_timing_line("prefixTIMING:category:123.0") is None
+        assert parse_timing_line("TIMING:category:123.0 trailing") is None
 
 
 class TestParseContextLine:
@@ -676,3 +690,18 @@ class TestStagedHierarchy:
         known = set(PURPOSE_OF.values())
         for _stage, members in STAGES:
             assert set(members) <= known
+
+    def test_artifact_packing_is_build_time_in_the_total(self):
+        # Packing runs after the Tensile invocation, so it is a top-level phase of its own.
+        timings = dict(self.BUILD, python_artifact_compress=[250.0])
+        root, top = self._tree(timings)
+        assert root.total_ms == pytest.approx(1250.0, abs=0.05)
+        build = top["BUILD: solution generation & compile"]
+        assert "Artifact packing (test harness, .tar.gz)" in {c.name for c in build.children}
+
+    def test_artifact_extraction_is_run_time_in_the_total(self):
+        timings = dict(self.RUN, python_artifact_extract=[40.0])
+        root, top = self._tree(timings)
+        assert root.total_ms == pytest.approx(540.0, abs=0.05)
+        run = top["RUN: benchmark client"]
+        assert "Artifact extraction (test harness, .tar.gz)" in {c.name for c in run.children}
