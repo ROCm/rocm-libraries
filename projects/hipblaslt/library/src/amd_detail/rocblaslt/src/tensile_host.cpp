@@ -3612,8 +3612,8 @@ struct TensileDataGemm
     TensileLite::ContractionInputs             inputs;
     std::vector<TensileLite::KernelInvocation> kernels;
     int                                        algoIndex = std::numeric_limits<int>::max();
-    // -1 keeps every kernel layout. Set from the Rocblaslt scale types.
-    int                                        requiredMxScaleFormat = -1;
+    // Written with problem, from the same RocblasltContractionProblem.
+    rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 
     // Built from the RocblasltContractionProblem this object was created from,
     // by the same builder the C API uses, so both APIs look up the same key.
@@ -3634,7 +3634,41 @@ struct TensileDataGroupedGemm
     std::shared_ptr<void>                      hipHostMemory;
     size_t                                     hipHostMemorySize;
     bool                                       useUserArgs = false;
+    // Combined over every group's scale types by groupedGemmCreate.
+    rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 };
+
+bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob);
+
+namespace
+{
+    void updateTensileData(const RocblasltContractionProblem& prob, TensileDataGemm& data)
+    {
+        updateTensileProblem(prob, data.problem);
+        data.mxScaleNeed = rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType);
+    }
+
+    // One kernel runs every group, so it must suit all of their scale types.
+    rocblaslt_mx_scale_need
+        groupedMxScaleNeed(const std::vector<RocblasltContractionProblem>& probs)
+    {
+        auto need = rocblaslt_mx_scale_need::Any;
+        for(const auto& prob : probs)
+            need = rocblaslt_mx_scale_need_combine(
+                need, rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType));
+        return need;
+    }
+
+    // The need the Tensile path applies. A problem useRocRoller() sends elsewhere
+    // is served by kernels chosen for it by name, so their layout is not checked.
+    rocblaslt_mx_scale_need tensileMxScaleNeed(rocblaslt_handle                   handle,
+                                               const RocblasltContractionProblem& prob)
+    {
+        if(useRocRoller(handle, prob))
+            return rocblaslt_mx_scale_need::Any;
+        return rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType);
+    }
+}
 
 namespace
 {
@@ -4809,11 +4843,7 @@ namespace
     {
         std::vector<int> indexes;
         if(gemmData)
-        {
-            auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-            data->requiredMxScaleFormat = rocblaslt_gfx950_required_mx_scale_format(
-                handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType);
-        }
+            updateTensileData(prob, *std::static_pointer_cast<TensileDataGemm>(gemmData));
         if(TuningPolicy::allKernels())
         {
             std::vector<rocblaslt_matmul_heuristic_result> all;
@@ -5787,7 +5817,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
         }
-        updateTensileProblem(prob, data->problem);
+        updateTensileData(prob, *data);
 
         // A re-selected solution runs through a copy of the caller's algo with
         // its index replaced; the caller's algo stays as queried.
@@ -6123,7 +6153,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // data->problem from whatever it is handed, so after benchmarking it
             // describes the scratch problem, whose D and possibly C point
             // elsewhere. That also resets the hint a re-selection pinned.
-            updateTensileProblem(prob, data->problem);
+            updateTensileData(prob, *data);
             if(atQueryHint >= 0)
                 data->problem.setParams().setSmCountTarget(atQueryHint);
         }
@@ -6197,14 +6227,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
+        if(const auto need = tensileMxScaleNeed(handle, prob);
+           !rocblaslt_mx_scale_layout_ok(need, solution->problemType.mxScaleFormat))
         {
-            const int required = rocblaslt_gfx950_required_mx_scale_format(
-                handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType);
-            if(!rocblaslt_kernel_mx_scale_format_ok(required, solution->problemType.mxScaleFormat))
-            {
-                log_error(__func__, rocblaslt_mx_layout_reject_message(required));
-                return rocblaslt_status_not_implemented;
-            }
+            log_error(__func__, rocblaslt_mx_scale_mismatch_message(need));
+            return rocblaslt_status_invalid_value;
         }
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
@@ -6349,8 +6376,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     return status;
 }
 
-rocblaslt_status gemmCreate(rocblaslt_handle                   handle,
-                            RocblasltContractionProblem const& problem,
+rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
                             std::shared_ptr<void>&             gemmData,
                             size_t&                            gemmCount)
 {
@@ -6379,18 +6405,15 @@ rocblaslt_status gemmCreate(rocblaslt_handle                   handle,
 
         // Building the key queries the device, and this runs on every gemm
         // object creation, so only when a tuning file will be consulted.
-        const bool cacheTuningKey   = TensileLite::selectTuningFile().active;
-        const int  requiredMxLayout = rocblaslt_gfx950_required_mx_scale_format(
-            handle->properties.gcnArchName, problem.scaleAType, problem.scaleBType);
+        const bool cacheTuningKey = TensileLite::selectTuningFile().active;
 
         if(gemmData)
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
-            updateTensileProblem(problem, data->problem);
+            updateTensileData(problem, *data);
             data->inputs         = GetTensileInputs(problem);
             data->enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
-            data->requiredMxScaleFormat = requiredMxLayout;
             if(cacheTuningKey)
                 data->tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
         }
@@ -6400,7 +6423,7 @@ rocblaslt_status gemmCreate(rocblaslt_handle                   handle,
             data.problem        = ConstructTensileProblem(problem);
             data.inputs         = GetTensileInputs(problem);
             data.enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
-            data.requiredMxScaleFormat = requiredMxLayout;
+            data.mxScaleNeed = rocblaslt_mx_scale_need_for(problem.scaleAType, problem.scaleBType);
             if(cacheTuningKey)
                 data.tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
 
@@ -6464,6 +6487,7 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
                     enableEpilogue = true;
             }
             data->enableEpilogue = enableEpilogue;
+            data->mxScaleNeed    = groupedMxScaleNeed(probs);
         }
         else
         {
@@ -6490,6 +6514,7 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
                     enableEpilogue = true;
             }
             data.enableEpilogue = enableEpilogue;
+            data.mxScaleNeed    = groupedMxScaleNeed(probs);
 
             gemmData
                 = std::static_pointer_cast<void>(std::make_shared<TensileDataGroupedGemm>(data));
@@ -6560,12 +6585,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
-            if(!rocblaslt_kernel_mx_scale_format_ok(data->requiredMxScaleFormat,
-                                                    solution->problemType.mxScaleFormat))
+            if(!rocblaslt_mx_scale_layout_ok(data->mxScaleNeed,
+                                             solution->problemType.mxScaleFormat))
             {
-                log_error(__func__,
-                          rocblaslt_mx_layout_reject_message(data->requiredMxScaleFormat));
-                return rocblaslt_status_not_implemented;
+                log_error(__func__, rocblaslt_mx_scale_mismatch_message(data->mxScaleNeed));
+                return rocblaslt_status_invalid_value;
             }
 
             if(data->problem.getParams().uniformSummationOrder() == 1)
@@ -6640,6 +6664,12 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(!solution)
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
+                return rocblaslt_status_invalid_value;
+            }
+            if(!rocblaslt_mx_scale_layout_ok(data->mxScaleNeed,
+                                             solution->problemType.mxScaleFormat))
+            {
+                log_error(__func__, rocblaslt_mx_scale_mismatch_message(data->mxScaleNeed));
                 return rocblaslt_status_invalid_value;
             }
 
@@ -7283,7 +7313,8 @@ inline auto getSolutions(
     const std::shared_ptr<TensileLite::Hardware>& hardware,
     TensileLite::ContractionProblemGemm&          tensile_prob,
     bool                                          enableEpilogue,
-    const int&                                    requestedAlgoCount)
+    const int&                                    requestedAlgoCount,
+    rocblaslt_mx_scale_need                       mxScaleNeed)
 {
     // Cached from TENSILE_DB at first use; off by default, so the whole
     // diagnostic costs one predictable branch per lookup.
@@ -7292,28 +7323,23 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    // Library logic can rank a custom kernel ahead of the kernels it replaces,
+    // and ranks kernels of every MX scale layout together. Drop the ones this
+    // problem cannot run and widen the search, so the caller still gets up to
+    // requestedAlgoCount solutions it can.
+    TensileLite::SolutionVector<TensileLite::ContractionSolution> solutions;
+    if(mxScaleNeed != rocblaslt_mx_scale_need::Conflict)
+        solutions = rocblaslt_find_top_kept(
+            [&](int count) { return library->findTopSolutions(tensile_prob, *hardware, count); },
+            requestedAlgoCount,
+            [&](auto const& solution) {
+                return isCustomKernelForPointerArray(tensile_prob, *solution)
+                       || !rocblaslt_mx_scale_layout_ok(mxScaleNeed,
+                                                        solution->problemType.mxScaleFormat);
+            });
 
-    // Library logic can rank a custom kernel ahead of the kernels it replaces. For
-    // a pointer-array problem drop it and widen the search, so the caller still
-    // gets up to requestedAlgoCount solutions that can run it.
-    for(int request = requestedAlgoCount;;)
-    {
-        size_t const found = solutions.size();
-        solutions.erase(std::remove_if(solutions.begin(),
-                                       solutions.end(),
-                                       [&](auto const& solution) {
-                                           return isCustomKernelForPointerArray(tensile_prob,
-                                                                                *solution);
-                                       }),
-                        solutions.end());
-        size_t const dropped = found - solutions.size();
-        if(dropped == 0 || solutions.size() >= static_cast<size_t>(requestedAlgoCount)
-           || found < static_cast<size_t>(request))
-            break;
-        request += static_cast<int>(dropped);
-        solutions = library->findTopSolutions(tensile_prob, *hardware, request);
-    }
+    if(solutions.empty() && mxScaleNeed != rocblaslt_mx_scale_need::Any)
+        log_info(__func__, rocblaslt_mx_scale_mismatch_message(mxScaleNeed));
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
@@ -7341,36 +7367,30 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     }
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
-    data->requiredMxScaleFormat = rocblaslt_gfx950_required_mx_scale_format(
-        handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType);
+    updateTensileData(prob, *data);
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    auto solutions = getSolutions(prob,
+                                  library,
+                                  hardware,
+                                  data->problem,
+                                  enableEpilogue,
+                                  requestedAlgoCount,
+                                  data->mxScaleNeed);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no solutions found, try to fallback");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
-        solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
-    }
-    if(data->requiredMxScaleFormat != -1)
-    {
-        const size_t before = solutions.size();
-        solutions.erase(std::remove_if(solutions.begin(),
-                                       solutions.end(),
-                                       [&](auto const& solution) {
-                                           return !rocblaslt_kernel_mx_scale_format_ok(
-                                               data->requiredMxScaleFormat,
-                                               solution->problemType.mxScaleFormat);
-                                       }),
-                        solutions.end());
-        if(before > 0 && solutions.empty())
-            log_error(__func__, rocblaslt_mx_layout_reject_message(data->requiredMxScaleFormat));
+        solutions = getSolutions(prob,
+                                 library,
+                                 hardware,
+                                 data->problem,
+                                 enableEpilogue,
+                                 requestedAlgoCount,
+                                 data->mxScaleNeed);
     }
 
     return solutions;
@@ -7536,37 +7556,30 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     }
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
-    data->requiredMxScaleFormat = rocblaslt_gfx950_required_mx_scale_format(
-        handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType);
+    updateTensileData(prob, *data);
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    auto solutions = getSolutions(prob,
+                                  library,
+                                  hardware,
+                                  data->problem,
+                                  enableEpilogue,
+                                  requestedAlgoCount,
+                                  data->mxScaleNeed);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
-        solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
-    }
-
-    const int requiredMxLayout = data->requiredMxScaleFormat;
-    if(requiredMxLayout != -1)
-    {
-        const size_t before = solutions.size();
-        solutions.erase(std::remove_if(solutions.begin(),
-                                       solutions.end(),
-                                       [&](auto const& solution) {
-                                           return !rocblaslt_kernel_mx_scale_format_ok(
-                                               requiredMxLayout, solution->problemType.mxScaleFormat);
-                                       }),
-                        solutions.end());
-        if(before > 0 && solutions.empty())
-            log_error(__func__, rocblaslt_mx_layout_reject_message(requiredMxLayout));
+        solutions = getSolutions(prob,
+                                 library,
+                                 hardware,
+                                 data->problem,
+                                 enableEpilogue,
+                                 requestedAlgoCount,
+                                 data->mxScaleNeed);
     }
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
@@ -7599,7 +7612,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes,
-                                 int                                             requiredMxLayout = -1)
+                                 rocblaslt_mx_scale_need                         mxScaleNeed)
 {
     log_api(__func__, "Entering function");
 
@@ -7667,15 +7680,10 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     int i                 = 0;
     int duplicated_counts = 0;
-    bool droppedLayout    = false;
     for(auto solution : orderedSolutions)
     {
-        if(!rocblaslt_kernel_mx_scale_format_ok(requiredMxLayout,
-                                                solution->problemType.mxScaleFormat))
-        {
-            droppedLayout = true;
+        if(!rocblaslt_mx_scale_layout_ok(mxScaleNeed, solution->problemType.mxScaleFormat))
             continue;
-        }
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
@@ -7721,8 +7729,6 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         i++;
     }
     heuristicResults.resize(i);
-    if(droppedLayout && i == 0)
-        log_error(__func__, rocblaslt_mx_layout_reject_message(requiredMxLayout));
     log_api(__func__, "Final hardware solutions: ", heuristicResults.size());
     log_api(__func__, "Leaving function, duplicated counts: ", duplicated_counts);
 
@@ -7751,10 +7757,12 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
         return rocblaslt_status_success;
     }
 #endif
-    auto        tensile_prob = ConstructTensileProblem(prob);
-    const int   required     = rocblaslt_gfx950_required_mx_scale_format(
-        handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType);
-    return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes, required);
+    auto tensile_prob = ConstructTensileProblem(prob);
+    return getAllSolutions(tensile_prob,
+                           handle,
+                           heuristicResults,
+                           maxWorkSpaceBytes,
+                           rocblaslt_mx_scale_need_for(prob.scaleAType, prob.scaleBType));
 }
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
@@ -7762,25 +7770,14 @@ rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&      
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes)
 {
-    int required = -1;
-    for(const auto& prob : probs)
-    {
-        const int one = rocblaslt_gfx950_required_mx_scale_format(
-            handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType);
-        if(one == -1)
-            continue;
-        if(required == -1)
-            required = one;
-        else if(required != one)
-            required = -2;
-    }
     TensileLite::ContractionProblemGroupedGemm tensile_probs;
     for(int i = 0; i < probs.size(); i++)
     {
         tensile_probs.gemms.push_back(ConstructTensileProblem(probs[i]));
         tensile_probs.gemms[i].setGroupedGemm(true);
     }
-    return getAllSolutions(tensile_probs, handle, heuristicResults, maxWorkSpaceBytes, required);
+    return getAllSolutions(
+        tensile_probs, handle, heuristicResults, maxWorkSpaceBytes, groupedMxScaleNeed(probs));
 }
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
@@ -7793,17 +7790,15 @@ rocblaslt_status getAllSolutions(std::shared_ptr<void>                          
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status = getAllSolutions(data->problem,
-                                 handle,
-                                 heuristicResults,
-                                 maxWorkSpaceBytes,
-                                 data->requiredMxScaleFormat);
+        status = getAllSolutions(
+            data->problem, handle, heuristicResults, maxWorkSpaceBytes, data->mxScaleNeed);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
         std::shared_ptr<TensileDataGroupedGemm> data
             = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status = getAllSolutions(
+            data->problem, handle, heuristicResults, maxWorkSpaceBytes, data->mxScaleNeed);
     }
     else
     {
@@ -7889,13 +7884,13 @@ rocblaslt_status
 }
 
 template <typename MyProblem, typename Inputs, typename Tuning>
-rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
-                                     MyProblem&             tensile_prob,
-                                     Inputs&                inputs,
-                                     rocblaslt_matmul_algo* algo,
-                                     const Tuning*          tuning,
-                                     size_t*                workspaceSizeInBytes,
-                                     int                    requiredMxLayout = -1)
+rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
+                                     MyProblem&              tensile_prob,
+                                     Inputs&                 inputs,
+                                     rocblaslt_matmul_algo*  algo,
+                                     const Tuning*           tuning,
+                                     size_t*                 workspaceSizeInBytes,
+                                     rocblaslt_mx_scale_need mxScaleNeed)
 {
     GemmMasterLibraryPtr                   library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7929,14 +7924,10 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             return rocblaslt_status_invalid_value;
         }
 
-        int required = requiredMxLayout;
-        if constexpr(std::is_same<Inputs, RocblasltContractionProblem>::value)
-            required = rocblaslt_gfx950_required_mx_scale_format(
-                handle->properties.gcnArchName, inputs.scaleAType, inputs.scaleBType);
-        if(!rocblaslt_kernel_mx_scale_format_ok(required, solution->problemType.mxScaleFormat))
+        if(!rocblaslt_mx_scale_layout_ok(mxScaleNeed, solution->problemType.mxScaleFormat))
         {
-            log_error(__func__, rocblaslt_mx_layout_reject_message(required));
-            return rocblaslt_status_not_implemented;
+            log_error(__func__, rocblaslt_mx_scale_mismatch_message(mxScaleNeed));
+            return rocblaslt_status_invalid_value;
         }
 
         if(isCustomKernelForPointerArray(tensile_prob, *solution))
@@ -8038,6 +8029,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 << " (solution missing from library map; check Tensile packaging or version "
                    "skew)";
             log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
+        if(!rocblaslt_mx_scale_layout_ok(mxScaleNeed, solution->problemType.mxScaleFormat))
+        {
+            log_error(__func__, rocblaslt_mx_scale_mismatch_message(mxScaleNeed));
             return rocblaslt_status_invalid_value;
         }
 
@@ -8147,9 +8143,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    updateTensileData(prob, *data);
     rocblaslt::RocTuningV2* tuning = nullptr;
-    return isSolutionSupported(handle, data->problem, prob, algo, tuning, workspaceSizeInBytes);
+    return isSolutionSupported(handle,
+                               data->problem,
+                               prob,
+                               algo,
+                               tuning,
+                               workspaceSizeInBytes,
+                               tensileMxScaleNeed(handle, prob));
 }
 
 rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
@@ -8196,7 +8198,7 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
 #endif
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    updateTensileData(prob, *data);
 
     // All that the check below sets on the problem.
     const auto params    = data->problem.getParams();
@@ -8210,8 +8212,13 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
     rocblaslt::RocTuningV2*     tuning = nullptr;
     try
     {
-        const rocblaslt_status status = isSolutionSupported(
-            handle, data->problem, inputs, algo, tuning, workspaceSizeInBytes);
+        const rocblaslt_status status = isSolutionSupported(handle,
+                                                            data->problem,
+                                                            inputs,
+                                                            algo,
+                                                            tuning,
+                                                            workspaceSizeInBytes,
+                                                            tensileMxScaleNeed(handle, prob));
         restore();
         return status;
     }
@@ -8286,7 +8293,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                        &algo,
                                        tuning,
                                        &workspaceSizeInBytes,
-                                       data->requiredMxScaleFormat);
+                                       data->mxScaleNeed);
         };
 
         return dispatchByComputeType(data->problem.computeType(), checkSupportForTypeTag);
@@ -8328,8 +8335,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                 setRestrictions<T>(prob, a, b);
             }
 
-            return isSolutionSupported(
-                handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+            return isSolutionSupported(handle,
+                                       data->problem,
+                                       data->inputs,
+                                       &algo,
+                                       tuning,
+                                       &workspaceSizeInBytes,
+                                       data->mxScaleNeed);
         };
 
         return dispatchByComputeType(dt, checkGroupedSupportForTypeTag);
@@ -8368,7 +8380,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                       hardware,
                                       data->problem,
                                       data->enableEpilogue,
-                                      requestedAlgoCount);
+                                      requestedAlgoCount,
+                                      data->mxScaleNeed);
 
         // when there is no solution for xfloat32, fallback comput_type to fp32
         if(solutions.size() == 0 && data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
@@ -8379,21 +8392,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                      hardware,
                                      data->problem,
                                      data->enableEpilogue,
-                                     requestedAlgoCount);
-        }
-        if(data->requiredMxScaleFormat != -1)
-        {
-            const size_t before = solutions.size();
-            solutions.erase(std::remove_if(solutions.begin(),
-                                           solutions.end(),
-                                           [&](auto const& solution) {
-                                               return !rocblaslt_kernel_mx_scale_format_ok(
-                                                   data->requiredMxScaleFormat,
-                                                   solution->problemType.mxScaleFormat);
-                                           }),
-                            solutions.end());
-            if(before > 0 && solutions.empty())
-                log_error(__func__, rocblaslt_mx_layout_reject_message(data->requiredMxScaleFormat));
+                                     requestedAlgoCount,
+                                     data->mxScaleNeed);
         }
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
@@ -8435,8 +8435,20 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                 data->problem.gemms[i].setGroupedGemm(true);
         }
 
-        auto solutions = library->findTopSolutionsGroupedGemm(
-            data->problem.gemms, *hardware, requestedAlgoCount);
+        TensileLite::SolutionVector<TensileLite::ContractionSolution> solutions;
+        if(data->mxScaleNeed != rocblaslt_mx_scale_need::Conflict)
+            solutions = rocblaslt_find_top_kept(
+                [&](int count) {
+                    return library->findTopSolutionsGroupedGemm(
+                        data->problem.gemms, *hardware, count);
+                },
+                requestedAlgoCount,
+                [&](auto const& solution) {
+                    return !rocblaslt_mx_scale_layout_ok(data->mxScaleNeed,
+                                                         solution->problemType.mxScaleFormat);
+                });
+        if(solutions.empty() && data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
+            log_info(__func__, rocblaslt_mx_scale_mismatch_message(data->mxScaleNeed));
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;

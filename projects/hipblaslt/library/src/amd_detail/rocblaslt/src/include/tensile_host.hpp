@@ -78,8 +78,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        RocblasltContractionProblem const& problem,
                                        std::shared_ptr<void>              gemmData);
 
-rocblaslt_status gemmCreate(rocblaslt_handle                   handle,
-                            RocblasltContractionProblem const& problem,
+rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
                             std::shared_ptr<void>&             gemmData,
                             size_t&                            gemmCount);
 
