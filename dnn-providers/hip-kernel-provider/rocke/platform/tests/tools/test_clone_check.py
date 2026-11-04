@@ -78,7 +78,7 @@ class Repo:
     def write(self, rel: str, text: str) -> None:
         target = self.path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, newline="\n")
+        target.write_text(text, encoding="utf-8", newline="\n")
 
     def commit(self) -> str:
         self.git("add", "-A")
@@ -943,7 +943,7 @@ def test_linked_worktree_gives_the_same_result(repo, tmp_path):
     linked = tmp_path.parent / (tmp_path.name + "-linked")
     repo.git("worktree", "add", "-q", str(linked), "HEAD")
     assert (linked / ".git").is_file()
-    (linked / "library/kernels/new.py").write_text(func("f2"))
+    (linked / "library/kernels/new.py").write_text(func("f2"), newline="\n")
     _, report = repo.check("--base", base, root=linked)
     assert kinds(report) == ["NEW COPY"]
 
@@ -1801,3 +1801,26 @@ def test_the_text_report_survives_a_console_that_cannot_show_its_symbols(repo):
     proc = run_tool(repo, "--base", base, "--head", head, env=env)
     assert proc.returncode == 0, proc.stderr
     assert "NEW COPY" in proc.stdout
+
+
+MULTILINE_STRING = '''\
+    v1 = b.add(base, b.mul(row, stride))
+    v2 = b.log("""first line
+second line""", v1)
+    v3 = b.select(ok, v2, zero)
+    v4 = b.fmul(v3, v1)
+    b.store(out, v3, v4)
+'''
+
+
+def test_a_crlf_working_tree_file_matches_the_lf_blobs_of_its_copies(repo):
+    # Windows checkouts with core.autocrlf=true hold CRLF files; the base side
+    # always comes from LF blobs. A multi-line string keeps its line ending.
+    block = func("f", MULTILINE_STRING)
+    repo.write("library/kernels/a.py", block)
+    repo.write("library/kernels/b.py", block)
+    base = repo.commit()
+    crlf = repo.path / "library" / "kernels" / "c.py"
+    crlf.write_bytes(block.replace("\n", "\r\n").encode())
+    (finding,) = repo.check("--base", base)[1]["findings"]
+    assert (finding["copies_before"], finding["copies_after"]) == (2, 3)
