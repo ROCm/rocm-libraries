@@ -9,8 +9,8 @@
  *        There are two such buffers and both must read back all-zero once a
  *        kernel that used them has retired:
  *          - `Synchronizer`: the GSU MultipleBufferSingleKernel reduction flags
- *            and the amaxD counter, one slot per problem, shared across
- *            streams. Scanned whole.
+ *            and the amaxD counter. Each stream owns one block of slots, and
+ *            only that block is scanned. Another stream may be mid-kernel.
  *          - `StreamKFlags`: the Stream-K work-queue and fixup flags, one block
  *            per (stream, problem). Only the block bound to this launch is
  *            scanned. Another stream may be mid-kernel with legitimately
@@ -26,13 +26,10 @@
  *
  *        The scan synchronizes the stream, stages the readback in a
  *        thread-local host buffer, and zeroes whichever region it found dirty.
- *        The two buffers differ in how safe that is. The Stream-K block is
- *        private to its (stream, problem), so scanning and zeroing it is safe
- *        with other streams running. The GSU `Synchronizer` region is shared
- *        across streams and un-partitioned by design, so scanning and zeroing
- *        it assumes no other stream is concurrently in an MBSK launch -- the
- *        same assumption that region's own design already makes. Skipped during
- *        HIP graph capture, where the synchronize and the memset are illegal.
+ *        Both buffers are partitioned by stream. The scan reads and zeroes only
+ *        the block this launch was given, and leaves every other stream's flags
+ *        untouched. Skipped during HIP graph capture, where the synchronize
+ *        and the memset are illegal.
  */
 
 #pragma once
@@ -143,11 +140,18 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
     void* streamKFlags = nullptr;
     static_cast<void>(handle->streamKFlagsForStream(stream, 0, &streamKFlags));
 
-    if(!handle->Synchronizer && !streamKFlags)
+    // The block rocblaslt_matmul_impl already claimed for this stream.
+    // Looking the stream up again returns that same block. Scanning from the
+    // base of the allocation would read and zero a block another stream owns.
+    void* gsuRegion = nullptr;
+    static_cast<void>(handle->gsuFlagsForStream(stream, 0, &gsuRegion));
+
+    if(!gsuRegion && !streamKFlags)
         return;
 
-    constexpr size_t gsuCount = _rocblaslt_handle::c_syncGsuTotalElements;
-    constexpr size_t skCount  = _rocblaslt_handle::c_syncSkSlotElements;
+    constexpr size_t gsuCount = _rocblaslt_handle::c_syncGsuSlotsPerStream
+                                * _rocblaslt_handle::c_syncGsuSlotElements;
+    constexpr size_t skCount = _rocblaslt_handle::c_syncSkSlotElements;
 
     if(hipError_t err = hipStreamSynchronize(stream); err != hipSuccess)
     {
@@ -159,7 +163,7 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
     }
 
     hipblaslt_check_synchronizer_detail::scan_region(
-        label, "Synchronizer", handle->Synchronizer, gsuCount);
+        label, "Synchronizer", gsuRegion, gsuCount);
     hipblaslt_check_synchronizer_detail::scan_region(label, "StreamKFlags", streamKFlags, skCount);
 }
 
