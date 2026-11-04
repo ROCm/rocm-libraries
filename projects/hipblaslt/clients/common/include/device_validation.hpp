@@ -10,6 +10,7 @@
 #include <roc/hostnumerics/freivalds.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <span>
 #include <string>
@@ -78,6 +79,13 @@ ValidationResult
 // unlike sysinfo's freeram. Before reporting a shortfall, releases idle client-pool buffers and
 // queries again, since those buffers otherwise hide memory available to the next case.
 std::string validation_memory_shortfall(size_t device_bytes, size_t host_bytes);
+
+// As above, with the free device memory read by free_device_bytes (false: unknown) instead of
+// hipMemGetInfo. hipMemGetInfo reports the whole device, which other processes sharing the GPU
+// change at any moment; tests pass their own reader so the result depends only on this process.
+std::string validation_memory_shortfall(size_t                                   device_bytes,
+                                        size_t                                   host_bytes,
+                                        const std::function<bool(size_t& free)>& free_device_bytes);
 
 // Reads element i of a host buffer of the given type as a double.
 double load_validation_scalar(const void* data, hipDataType type, size_t i);

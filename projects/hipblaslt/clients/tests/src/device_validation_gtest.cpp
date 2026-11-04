@@ -625,16 +625,37 @@ namespace
 
     TEST(DeviceBounds_pre_checkin, MemoryPreflightReclaimsOnlyIdleBuffers)
     {
+#if HIPBLASLT_TEST_ASAN_BUILD
+        GTEST_SKIP() << "ASAN quarantine delays freeing GPU memory.";
+#endif
+        // Hold one live allocation while returning another to the client pool. The latter
+        // is reusable capacity, so it must not make an otherwise fitting case skip.
         auto live = memory_pool<d_memory>::Get(4096);
         ASSERT_NE(live.get(), nullptr);
         ASSERT_EQ(hipMemset(live.get(), 42, live.bytes()), hipSuccess);
         auto cached = memory_pool<d_memory>::Get(size_t(16) << 20);
         ASSERT_NE(cached.get(), nullptr);
-        const size_t capacity = cached.capacity();
+        const size_t          capacity = cached.capacity();
+        const void*           idle     = cached.get();
+        hipPointerAttribute_t attr{};
+        ASSERT_EQ(hipPointerGetAttributes(&attr, idle), hipSuccess);
+        ASSERT_EQ(attr.type, hipMemoryTypeDevice);
         memory_pool<d_memory>::Restore(cached);
-        size_t freeBytes = 0, totalBytes = 0;
-        ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
-        EXPECT_EQ(validation_memory_shortfall(freeBytes + capacity / 2, 0), "");
+        const size_t cached_bytes = memory_pool<d_memory>::CachedBytes();
+        ASSERT_GE(cached_bytes, capacity);
+        // Free device memory as only the pool changes it: nothing until it releases its idle
+        // buffers. hipMemGetInfo would also count other processes on the GPU (e.g. parallel test
+        // shards) allocating between two reads, which made this test flaky.
+        auto released = [&](size_t& free) {
+            free = cached_bytes - memory_pool<d_memory>::CachedBytes();
+            return true;
+        };
+        EXPECT_EQ(validation_memory_shortfall(capacity / 2, 0, released), "");
+        EXPECT_EQ(memory_pool<d_memory>::CachedBytes(), 0u);
+        // Released means returned to the device, not just dropped from the pool's list.
+        attr = {};
+        EXPECT_TRUE(hipPointerGetAttributes(&attr, idle) != hipSuccess
+                    || attr.type != hipMemoryTypeDevice);
         unsigned char value = 0;
         ASSERT_EQ(hipMemcpy(&value, live.get(), 1, hipMemcpyDeviceToHost), hipSuccess);
         EXPECT_EQ(value, 42);

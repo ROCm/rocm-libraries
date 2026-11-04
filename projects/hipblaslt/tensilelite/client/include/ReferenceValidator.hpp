@@ -124,6 +124,10 @@ namespace TensileLite
                 return m_referenceInputs.at(card);
             }
 
+        protected:
+            // Allow lifecycle tests to observe validation without device transfers.
+            virtual void validateSlots(std::vector<size_t> const& slots);
+
         private:
             void prepareFreivalds(size_t card);
             bool validateFreivalds(size_t card, const ProblemInputs& inputs);
@@ -148,7 +152,8 @@ namespace TensileLite
             ContractionProblem* m_problem = nullptr;
 
             bool m_enabled;
-            bool m_fusedA2A = false;
+            bool m_fusedA2A              = false;
+            bool m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -174,7 +179,6 @@ namespace TensileLite
             size_t m_errorsReported    = 0;
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
-            void validateSlots(std::vector<size_t> const& slots);
             bool recvMatches(size_t dst, ContractionInputs const& inputs);
         };
     } // namespace Client
