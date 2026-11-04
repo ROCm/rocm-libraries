@@ -18,7 +18,9 @@ public:
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMapLocal)
-        : IValidator(tensorMapLocal) {};
+        : IValidator(tensorMapLocal)
+    {
+    }
 
     void checkTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes& resampleAttr);
