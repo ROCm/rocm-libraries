@@ -332,6 +332,11 @@ TEST(LocalKernelPersist, SavedKernelsLoadInNewProcess)
     auto lines = journalLines(library);
     ASSERT_FALSE(lines.empty());
     EXPECT_EQ(lines[0].rfind("V 1 ", 0), 0u) << "the journal starts with its version";
+    const std::string version = "journal-" + std::to_string(HIPBLASLT_VERSION_MAJOR) + "."
+                                + std::to_string(HIPBLASLT_VERSION_MINOR) + "."
+                                + std::to_string(HIPBLASLT_VERSION_PATCH);
+    EXPECT_EQ(journalPath(library).filename().string().rfind(version, 0), 0u)
+        << "the journal is named for the hipBLASLt version, with or without a git stamp";
     EXPECT_GE(countRecords(lines, 'R'), 1u);
     EXPECT_EQ(countRecords(lines, 'E'), 1u);
     for(auto const& entry : fs::directory_iterator(library / "objects"))
@@ -1192,11 +1197,27 @@ TEST(LocalKernelPersist, SavesForTheHandlesDevice)
 // fail after a bounded wait instead of waiting with it.
 TEST(LocalKernelPersist, DISABLED_LockedJournalWorker)
 {
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
     hipblasLtHandle_t handle;
     ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-    const auto start = std::chrono::steady_clock::now();
-    size_t     added = 123;
-    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_INTERNAL_ERROR);
+    auto   start = std::chrono::steady_clock::now();
+    size_t added = 123;
+    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_INTERNAL_ERROR)
+        << "a reader gives up";
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(30));
+
+    start          = std::chrono::steady_clock::now();
+    int numIndices = -1;
+    EXPECT_EQ(hipblasLtLocalKernelRegister(handle,
+                                           (candidates[0] + ".dat").c_str(),
+                                           (candidates[0] + ".co").c_str(),
+                                           nullptr,
+                                           0,
+                                           &numIndices),
+              HIPBLAS_STATUS_INTERNAL_ERROR)
+        << "a writer gives up";
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(30));
     EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
@@ -1287,6 +1308,11 @@ TEST(LocalKernelPersist, DISABLED_RepairedPayloadWorker)
 
     Registered r = registerUsable(handle, p, candidates);
     ASSERT_GE(r.index, 0);
+    size_t added = 123;
+    ASSERT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(topIndex(handle, p), r.index)
+        << "the saved mapping applies once its payload is registered";
+
     ASSERT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K),
               HIPBLAS_STATUS_SUCCESS);
     EXPECT_EQ(topIndex(handle, p), r.index) << "a mapping reported as made is applied";

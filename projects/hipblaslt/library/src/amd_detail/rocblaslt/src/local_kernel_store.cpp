@@ -76,15 +76,25 @@ namespace rocblaslt
                        || c == '-';
             }
 
-            /** The build stamp, with any character not safe in a file name replaced. */
+            /**
+             * The version and build stamp, e.g. 1.5.0-3c1c5d13b19, with any
+             * character not safe in a file name replaced. A build from sources
+             * without git history has no stamp, so the version is what keeps
+             * one release's journal from another's.
+             */
             std::string const& buildStamp()
             {
                 static const std::string stamp = [] {
-                    std::string text = TO_STR(HIPBLASLT_VERSION_TWEAK);
+                    std::string text = std::to_string(HIPBLASLT_VERSION_MAJOR) + "."
+                                       + std::to_string(HIPBLASLT_VERSION_MINOR) + "."
+                                       + std::to_string(HIPBLASLT_VERSION_PATCH);
+                    const std::string tweak = TO_STR(HIPBLASLT_VERSION_TWEAK);
+                    if(!tweak.empty())
+                        text += "-" + tweak;
                     for(char& c : text)
                         if(!isNameChar(c))
                             c = '_';
-                    return text.empty() ? std::string("unknown") : text;
+                    return text;
                 }();
                 return stamp;
             }
@@ -894,7 +904,12 @@ namespace rocblaslt
                || !makePrivateDirectory(fs::path(path).parent_path(), error))
                 return false;
 
-            std::lock_guard<std::mutex> lock(m_mutex);
+            ScopeJournal* journal = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                journal = &m_journals[scope];
+            }
+            std::lock_guard<std::mutex> lock(journal->mutex);
 
             Fd fd;
             if(!openJournal(path, true, &fd, error))
@@ -913,7 +928,7 @@ namespace rocblaslt
 
             // Re-read under the lock: another process may have appended, or
             // replaced the journal.
-            JournalState& state = m_journals[scope];
+            JournalState& state = journal->state;
             std::string   prefix;
             if(!complete)
             {

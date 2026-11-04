@@ -24,11 +24,13 @@
  *     R <datHash> <coHash> <dat|dat.zlib> <sum>
  *     E <datHash> <coHash> <payloadIndex> <m> <n> <batch> <k> <sum>
  *
- * <scope> names the architecture and compute unit count of the device the
- * records were made on, e.g. gfx942_CU304: a payload's hardware predicate
- * usually names both, and a mapping is tuned for that device. <build> is the
- * hipBLASLt build stamp that user-driven tuning files are checked against. A
- * saved code object takes the kernel arguments its build's launch code
+ * <scope> names the kind of device the records were made on: its kernel
+ * target, compute unit count and PCI chip ID, e.g. gfx942_CU304 or
+ * gfx950_CU256_ID75a3. A payload's hardware predicate usually names these,
+ * and a mapping is tuned for that kind of device. <build> is the
+ * hipBLASLt version followed by the build stamp that user-driven tuning files
+ * are checked against, e.g. 1.5.0-3c1c5d13b19; a build without git history
+ * has only the version. A saved code object takes the kernel arguments its build's launch code
  * passes, so each build keeps its own journal. The V line starts every
  * journal, and a journal whose V line is not this build's is not read.
  * <journalId> is random, so a journal that is deleted and created again is
@@ -265,8 +267,16 @@ namespace rocblaslt
 
             std::string m_root;
 
+            // An append can wait for another process's lock on one scope's
+            // journal, so each scope has its own mutex; m_mutex guards only
+            // the map.
+            struct ScopeJournal
+            {
+                std::mutex   mutex;
+                JournalState state;
+            };
             mutable std::mutex                          m_mutex;
-            mutable std::map<std::string, JournalState> m_journals;
+            mutable std::map<std::string, ScopeJournal> m_journals;
         };
     } // namespace local_kernel_store
 } // namespace rocblaslt
