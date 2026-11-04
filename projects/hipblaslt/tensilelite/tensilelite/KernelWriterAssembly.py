@@ -3611,13 +3611,11 @@ class KernelWriterAssembly(KernelWriter):
       # remapped PersistentWorkGroupIndex % numQueues skews the per-queue home-workgroup count
       # and the counter drifts off 0. We snapshot the raw id (== physical XCD
       # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
-      # slot that is provably dead in the [prologue, queue-read) window on both
-      # the SK4 and SK5 dynamic paths (its first real write is after the queue
-      # read in graWorkGroup; for SK5 it aliases PersistentIteration, whose only
-      # in-window writes live on the mutually-exclusive SK3-static path). Reusing
-      # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
-      # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
-      # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
+      # slot that is dead until initialize() (for Hybrid it aliases
+      # PersistentIteration, written only by the static sub-mode). Reusing it
+      # costs ZERO additional persistent SGPRs (a dedicated SGPR overflows the
+      # SGPR file on tuned high-register SKXCC kernels). initialize() then moves
+      # it to PersistentWorkGroupIndex (emitRawRankRestore).
       # Once-per-workgroup setup only -- no steady-state instructions added.
       # The occupancy probe's ProbeGrid test reads the same snapshot.
       if Component.WorkAssignment.usesRawQueueRank(self, kernel) or self.states.probeKernArgOffset >= 0:
@@ -5720,16 +5718,18 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
+    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # contiguous dimension and the unroll stride when it is not (TLU=1), where
+    # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
     for tP in tPs:
       tc = tP["tensorChar"]
       if tc not in ("A", "B", "MXSA", "MXSB"):
         return module
       strideF = self.strideRef(tc, tP['tileIdx'])
-      if self.isConstUnitStride(strideF):
-        return module
       isMx = tc in ("MXSA", "MXSB")
+      kRowStride = None
       if isMx:
         tcab = "A" if tc == "MXSA" else "B"
         mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
@@ -5741,6 +5741,10 @@ class KernelWriterAssembly(KernelWriter):
           return module
         mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
         isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+        # A swizzled scale is block-linear in K whatever the operand layout, as
+        # computeLoadSrd assumes; only an unswizzled TLU=1 scale lacks a K-linear limit.
+        if self.isConstUnitStride(strideF) and not isMxSwizzledScale:
+          return module
         swizzleSize0 = 32 if isMxSwizzledScale else 1
         if swizzleSize0 % mxBlock != 0:
           return module
@@ -5750,22 +5754,25 @@ class KernelWriterAssembly(KernelWriter):
       else:
         kPad = 1
         bpeForLimit = float(tP["bpeGR"])
-      tcKpadBpeList.append((tc, kPad, bpeForLimit))
+        if self.isConstUnitStride(strideF):
+          kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
+      tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
     # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
     # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp in tcKpadBpeList):
+    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
       return module
-    tcs = [t for t, _, _ in tcKpadBpeList]
+    tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
 
-    with self.allocTmpSgpr(1, tag="computeTailLoopSrdLimit_tmpSgprInfo") as tmpSgprInfo:
+    with self.allocTmpSgpr(2, tag="computeTailLoopSrdLimit_tmpSgprInfo") as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
+      sbytes = stmp + 1
       module.addComment1(
-        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s"
+        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s (* K-row stride when TLU=1)"
         % (",".join(tcs), kPad,
            "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
 
@@ -5784,12 +5791,18 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      # delta_bytes = delta_K * bpe_K_byteStride (handles bpe=0.5 via SShr 1)
-      module.add(scalarMultiplyBpe(stmp, stmp, bpeForLimit,
-                                   comment="delta_bytes"))
-      for tc in tcs:
+      for tc, _, _, kRowStride in tcKpadBpeList:
+        # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
+        if kRowStride is None:
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+                                       comment="delta_bytes"))
+        else:
+          module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
+                             comment="delta_K rows * %s K-row stride" % tc))
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+                                       comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
-                           src1=sgpr(stmp),
+                           src1=sgpr(sbytes),
                            comment="Srd%s+2 -= delta_bytes (tail-loop tight)" % tc))
 
     return module
@@ -16648,7 +16661,25 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SOrB32(sgprLo, sgprLo, sgpr(stmpRes.idx)))
         module.add(SLShiftRightB32(sgprHi, 7, sgprHi))
     return module
- 
+
+  def vecSrdNonNullMask(self, addressStr, laneSGPRCount) -> Module:
+    """Lane mask "Srd<addressStr> has records" into sgprAddress<addressStr>.
+
+    A null vector pointer gets num_records = 0, which the epilogue turns into a 1.0 scale.
+    On gfx125x shiftSrd keeps the low 7 bits of num_records in Srd+1[31:25], so Srd+2 alone
+    is 0 for any buffer under 128 bytes (e.g. a ScaleA vector with M <= 31) and a valid
+    vector would read as null. Fold Srd+1[31:25] back in before comparing. The address
+    SGPRs are overwritten with the mask anyway, so the first one serves as the temp.
+    """
+    module = Module("vecSrdNonNullMask")
+    numRecords = sgpr("Srd%s+2"%addressStr)
+    if self.states.version[:2] == (12, 5):
+      numRecords = sgpr("Address%s"%addressStr)
+      module.add(SLShiftRightB32(dst=numRecords, shiftHex=25, src=sgpr("Srd%s+1"%addressStr), comment="num_records low bits (gfx125x)"))
+      module.add(SOrB32(dst=numRecords, src0=numRecords, src1=sgpr("Srd%s+2"%addressStr), comment="num_records != 0 iff any bit set"))
+    module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, laneSGPRCount), src0=numRecords, src1=0, comment=" == 0 ?"))
+    return module
+
   def allocPostLoopSrd(self, ch: str, kernel, labelSuffix: str = ""):
     # labelSuffix disambiguates the labels when this SRD-init is emitted a second
     # time (PostLoopStoreInNll: the FUSED NLL store computes SrdD with suffix="Fused"
@@ -18623,6 +18654,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
           module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
+          module.add(self.shiftSrd("ScaleAlphaVec"))
         for d in range(len(factorDims)):
           vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
 
@@ -20710,8 +20742,8 @@ class KernelWriterAssembly(KernelWriter):
 
     if setToOne:
       if kernel["BufferLoad"]:
-        # SRD+2 holds num records; compare to 0 to check if address is valid
-        module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+        # num_records == 0 means the address is null
+        module.add(self.vecSrdNonNullMask(addressStr, self.states.laneSGPRCount))
       else:
         # For flat addressing, check if the base pointer is non-null
         module.add(VCmpNeU64(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Address%s"%addressStr, 2), src1=0, comment="address != 0 ?"))

@@ -233,6 +233,10 @@ globalParameters["BatchMode"] = 0
 # corrupting a later launch rather than the one that left it. Only StreamK,
 # GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
 globalParameters["CheckSynchronizer"] = True
+# Validate final output and (when enabled) synchronizer state after each enqueue
+# group. Keeps consecutive launches uninterrupted; adds readback between groups.
+# Requires CEqualD=False so repeated launches preserve the reference inputs.
+globalParameters["ValidateAfterEnqueues"] = False
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -363,6 +367,9 @@ globalParameters["IcacheRotateCopies"] = 0
 #   loosely targeting ~2x a typical L1 I-cache.
 #   Non-Linux: used directly as the raw extras count (no ELF parsing).
 globalParameters["IcacheRotateSize"] = 64
+
+# Fused GEMM+A2A: benchmark only the problems whose world is listed; [] runs all.
+globalParameters["WorldFilter"] = []
 
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
