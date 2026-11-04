@@ -34,7 +34,7 @@ RUN if [ "$compiler_version" = "therock" ]; then \
         else \
             echo "Discovering latest tarball from $TARBALL_BASE..." && \
             TARBALL_URL="${TARBALL_BASE}/$(curl -sL "${TARBALL_BASE}/" \
-                | grep -oP '"name":\s*"\K'"${TARBALL_PATTERN}"'-[^"]+\.tar\.gz' \
+                | grep -oP '"name":\s*"\K'"${TARBALL_PATTERN}"'(?!-tests)-[^"]+\.tar\.gz' \
                 | sort -V | tail -1)" && \
             echo "Found: $TARBALL_URL" ; \
         fi && \
