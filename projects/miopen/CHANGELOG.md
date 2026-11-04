@@ -71,6 +71,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the
   gfx950 `direct_wgrad` kernel when built with clang 23. See
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
+* [Conv] Added `ConvHipImplicitGemmFma3dFwd`, a forward 3D convolution solver for RDNA (`gfx101X`,
+  `gfx103X`, `gfx110X`, `gfx115X`, `gfx117X`, `gfx120X`). It is an implicit GEMM on plain FMA
+  instructions, so it also runs on targets without WMMA, and covers fp32, fp16 and bf16, NCDHW and
+  NDHWC, and grouped convolutions with at least 16 output channels per group. On gfx1151 it is
+  2.3x to 4.4x faster than `GemmFwdRest` on fp32 3x3x3 convolutions and is selected through Find
+  mode.
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
