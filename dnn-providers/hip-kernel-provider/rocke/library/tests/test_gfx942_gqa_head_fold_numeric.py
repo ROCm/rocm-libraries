@@ -61,7 +61,8 @@ def _gpu_ready():
         import torch
     except Exception:  # noqa: BLE001
         return False
-    if not torch.cuda.is_available():
+    # gcnArchName exists only on ROCm builds of torch.
+    if not torch.cuda.is_available() or torch.version.hip is None:
         return False
     # Gate on ``gcnArchName`` (the ISA target), not the marketing name, which
     # varies across gfx942 parts.

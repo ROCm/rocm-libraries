@@ -37,7 +37,8 @@ def _gpu_ready():
         import torch
     except Exception:  # noqa: BLE001
         return False
-    if not torch.cuda.is_available():
+    # gcnArchName exists only on ROCm builds of torch.
+    if not torch.cuda.is_available() or torch.version.hip is None:
         return False
     return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
 
