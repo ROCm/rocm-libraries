@@ -28,7 +28,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tensilelite.CustomKernels import _metadataArgToCustomArg, rocRollerOccupancy
+from tensilelite.CustomKernels import (
+    _buildCustomKernelFromMetadata,
+    _computeTypeBytes,
+    _metadataArgToCustomArg,
+    rocRollerOccupancy,
+)
 from tensilelite.RocRollerStreamK import (
     SK_POINTER_ROLES,
     SK_ROLE_ORDER,
@@ -349,3 +354,111 @@ def test_occupancy_matches_hip(vgpr, agpr, lds, flat, expected):
         ".wavefront_size": 64,
     }
     assert rocRollerOccupancy(meta) == expected
+
+
+# --------------------------------------------------------------------------
+# The CustomKernel block inferred from a Stream-K kernel's metadata. No
+# Stream-K kernel ships any more, so the captured descriptors stand in for one.
+# --------------------------------------------------------------------------
+
+
+def _streamk_metadata_yaml(kernel):
+    return {
+        "amdhsa.kernels": [
+            {
+                ".args": kernel["args"],
+                ".vgpr_count": kernel["vgpr_count"],
+                ".agpr_count": kernel["agpr_count"],
+                ".group_segment_fixed_size": kernel["group_segment_fixed_size"],
+                ".max_flat_workgroup_size": kernel["max_flat_workgroup_size"],
+                ".wavefront_size": kernel["wavefront_size"],
+            }
+        ]
+    }
+
+
+def _streamk_config(macrotile, compute_type="s"):
+    return {
+        "MatrixInstruction": [16, 16, 128, 1],
+        "MIWaveTile": [macrotile[0] // 16, macrotile[1] // 16],
+        "MIWaveGroup": [1, 1],
+        "DepthU": macrotile[2],
+        "ProblemType": {"ComputeDataType": compute_type},
+        "InternalSupportParams": {"UseUniversalArgs": False},
+    }
+
+
+@pytest.mark.parametrize("name,kernel", _kernels(), ids=_kernel_ids())
+def test_streamk_metadata_infers_a_rocroller_streamk_launch(name, kernel):
+    ck = _buildCustomKernelFromMetadata(
+        name, _streamk_metadata_yaml(kernel), _streamk_config(kernel["macrotile"])
+    )
+
+    assert ck["macrotile"] == kernel["macrotile"]
+    # rocRoller decomposes the work from the hoisted kernargs and reads only
+    # workgroup X, so neither Tensile's Stream-K grid nor a tile grid fits.
+    assert ck["grid"] == ["RocRollerStreamK", "One", "One"]
+    # Partial tiles are stored unconditionally; a zero-byte workspace faults.
+    assert ck["workspaceType"] == "RocRollerStreamK"
+    assert ck["workspaceSizePerElemC"] == 4
+    assert ck["occupancy"] == rocRollerOccupancy(
+        _streamk_metadata_yaml(kernel)["amdhsa.kernels"][0]
+    )
+
+
+@pytest.mark.parametrize("compute_type,expected", [("s", 4), ("h", 2), ("d", 8)])
+def test_streamk_workspace_is_sized_by_the_compute_type(compute_type, expected):
+    name, kernel = _kernels()[0]
+    ck = _buildCustomKernelFromMetadata(
+        name,
+        _streamk_metadata_yaml(kernel),
+        _streamk_config(kernel["macrotile"], compute_type),
+    )
+    assert ck["workspaceSizePerElemC"] == expected
+
+
+@pytest.mark.parametrize(
+    "config,expected",
+    [
+        ({"ProblemType": {"ComputeDataType": "Half"}}, 2),
+        ({"ProblemType": {"DataType": "bf16"}}, 2),
+        ({"ProblemType": {"ComputeDataType": "f64"}}, 8),
+        # Unknown, non-string or absent types fall back to the default.
+        ({"ProblemType": {"ComputeDataType": "x"}}, 4),
+        ({"ProblemType": {"ComputeDataType": 0}}, 4),
+        ({"ProblemType": None}, 4),
+        ({}, 4),
+    ],
+)
+def test_compute_type_bytes(config, expected):
+    assert _computeTypeBytes(config) == expected
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # Nothing to compute the tile from, and the name carries no MTaxbxc.
+        {},
+        # A tile, but no DepthU.
+        {"MatrixInstruction": [16, 16, 128, 1], "MIWaveTile": [1, 1], "MIWaveGroup": [1, 1]},
+    ],
+    ids=["no-tile", "no-depth-u"],
+)
+def test_a_streamk_kernel_without_a_macrotile_is_refused(config):
+    # Every hoisted kernarg divides by the macrotile, so a zero cannot be
+    # deferred to launch time.
+    name, kernel = _kernels()[0]
+    with pytest.raises(RuntimeError, match="rocRoller Stream-K kernel"):
+        _buildCustomKernelFromMetadata("k", _streamk_metadata_yaml(kernel), config)
+
+
+def test_occupancy_unknown_when_the_metadata_cannot_decide():
+    # A negative workgroup size gives no waves per group.
+    assert rocRollerOccupancy({".max_flat_workgroup_size": -64, ".wavefront_size": 64}) == 0
+    # More VGPRs than one SIMD holds leaves no room for a single wave.
+    assert (
+        rocRollerOccupancy(
+            {".max_flat_workgroup_size": 256, ".wavefront_size": 64, ".vgpr_count": 513}
+        )
+        == 0
+    )
