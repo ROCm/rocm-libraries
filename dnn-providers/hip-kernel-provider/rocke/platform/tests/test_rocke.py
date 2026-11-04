@@ -7653,6 +7653,49 @@ class TestResolveStream(unittest.TestCase):
             self.assertEqual(resolve_stream(0), 99)
 
 
+class TestTorchDtypeAndDeviceTensor(unittest.TestCase):
+    """``torch_interop.torch_dtype`` / ``device_tensor``: the torch glue a
+    library binding uses instead of importing torch itself."""
+
+    def test_torch_dtype_resolves_by_name(self):
+        import sys
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import torch_dtype
+
+        fake = SimpleNamespace(int32="i32", float16="f16")
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            self.assertEqual(torch_dtype("int32"), "i32")
+            self.assertEqual(torch_dtype("float16"), "f16")
+            with self.assertRaisesRegex(ValueError, "no dtype 'int31'"):
+                torch_dtype("int31")
+
+    def test_device_tensor_passes_values_dtype_and_device(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import device_tensor
+
+        fake = mock.MagicMock()
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            out = device_tensor(range(3), dtype="i32", device="dev")
+        fake.tensor.assert_called_once_with([0, 1, 2], dtype="i32", device="dev")
+        self.assertIs(out, fake.tensor.return_value)
+
+    def test_both_raise_when_torch_absent(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import device_tensor, torch_dtype
+
+        with mock.patch.dict(sys.modules, {"torch": None}):
+            with self.assertRaisesRegex(RuntimeError, "requires torch"):
+                torch_dtype("int32")
+            with self.assertRaisesRegex(RuntimeError, "requires torch"):
+                device_tensor([1], dtype=None, device=None)
+
+
 class TestPackArgsKernargABI(unittest.TestCase):
     """``pack_args`` / ``pack_args_kernelparams`` -- AMDGPU kernarg ABI.
 

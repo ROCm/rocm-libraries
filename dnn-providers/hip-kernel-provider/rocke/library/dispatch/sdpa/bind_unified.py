@@ -27,7 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
-from rocke.runtime.torch_interop import empty_workspace, resolve_stream
+from rocke.runtime.torch_interop import (
+    device_tensor,
+    empty_workspace,
+    resolve_stream,
+    torch_dtype,
+)
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -47,7 +52,6 @@ from .bind_shared import (
     host_ints,
     keeps_asked_keys,
     to_attention_request,
-    torch_dtype,
     value_rejects,
 )
 
@@ -329,19 +333,12 @@ class _LaunchPlan:
             (slots, self.block, req.h_v, req.d_v), dtype=dtype, device=device
         ).zero_()
 
-        # No torch_interop constructor builds an index tensor from a Python
-        # list/range (only workspace shapes), so this is the one place in the
-        # module that still imports torch directly.
-        import torch
-
         int32 = torch_dtype("int32")
-        self.block_table = (
-            torch.arange(slots, dtype=int32, device=device)
-            .view(batch, self.pages)
-            .contiguous()
+        self.block_table = device_tensor(range(slots), dtype=int32, device=device).view(
+            batch, self.pages
         )
-        self.cu_seqlens_q = torch.tensor(cu, dtype=int32, device=device)
-        self.seqused_k = torch.tensor(self.kv_len, dtype=int32, device=device)
+        self.cu_seqlens_q = device_tensor(cu, dtype=int32, device=device)
+        self.seqused_k = device_tensor(self.kv_len, dtype=int32, device=device)
         self.lse = (
             None
             if self.stats is None

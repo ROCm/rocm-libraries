@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding, opt_in_probe
-from rocke.runtime.torch_interop import empty_workspace, resolve_stream
+from rocke.runtime.torch_interop import empty_workspace, resolve_stream, torch_dtype
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -51,7 +51,6 @@ from .bind_shared import (
     declined_table,
     keeps_asked_keys,
     to_attention_request,
-    torch_dtype,
     value_rejects,
 )
 

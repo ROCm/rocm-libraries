@@ -23,7 +23,12 @@ torch = pytest.importorskip("torch")
 
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
-from dispatch.sdpa.bind_unified import _LaunchPlan, sdpa_unified_admits
+from dispatch.sdpa.bind_unified import (
+    _lengths,
+    _LaunchPlan,
+    sdpa_unified_admits,
+    sdpa_unified_bind,
+)
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs
@@ -129,6 +134,54 @@ def test_padded_rows_are_zero_and_neg_inf():
     assert torch.all(tensors["o"][1] == 0)
     assert torch.all(torch.isneginf(tensors["stats"][1]))
     assert torch.all(torch.isfinite(tensors["stats"][0]))
+
+
+# seq_len_q / seq_len_kv become cu_seqlens_q / seqused_k, which bound the
+# kernel's Q and K/V reads on the device; a bad value must be refused at bind.
+_BAD_LENGTHS = [
+    ("seq_len_q", [2, 1], r"seq_len_q: need 2 lengths in \[0, 1\]"),
+    ("seq_len_q", [-1, 1], r"seq_len_q: need 2 lengths in \[0, 1\]"),
+    ("seq_len_q", [1, 1, 1], "seq_len_q: need 2 lengths"),
+    ("seq_len_kv", [17, 16], r"seq_len_kv: need 2 lengths in \[0, 16\]"),
+    ("seq_len_kv", [-1, 16], r"seq_len_kv: need 2 lengths in \[0, 16\]"),
+    ("seq_len_kv", [16], "seq_len_kv: need 2 lengths"),
+]
+
+
+@pytest.mark.parametrize(
+    "key,values,match", _BAD_LENGTHS, ids=[f"{k}={v}" for k, v, _ in _BAD_LENGTHS]
+)
+def test_invalid_seq_len_is_refused_before_launch(monkeypatch, key, values, match):
+    from kernels.common import attention_unified
+
+    def must_not_launch(**_kw):
+        raise AssertionError("kernel launched with invalid lengths")
+
+    monkeypatch.setattr(
+        attention_unified, "run_unified_attention_torch", must_not_launch
+    )
+    req = replace(
+        make_request(d=64, s_q=1, s_kv=16),
+        padding_mask=True,
+        seq_len_q=packed((2, 1, 1, 1), "int32"),
+        seq_len_kv=packed((2, 1, 1, 1), "int32"),
+    )
+    assert sdpa_unified_admits(req)[0]
+    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors["seq_len_q"] = torch.tensor([1, 1], dtype=torch.int32)
+    tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
+    tensors[key] = torch.tensor(values, dtype=torch.int32)
+    with pytest.raises(ValueError, match=match):
+        sdpa_unified_bind(req, tensors)
+
+
+def test_seq_len_past_the_ragged_lengths_is_refused():
+    class RaggedK:
+        lengths = [8, 16]
+
+    lens = {"seq_len_kv": torch.tensor([16, 16], dtype=torch.int32)}
+    with pytest.raises(ValueError, match="exceeds the ragged lengths"):
+        _lengths(object(), lens, "seq_len_kv", RaggedK(), 2, 16)
 
 
 def test_a_tensor_that_disagrees_with_the_request_is_refused():

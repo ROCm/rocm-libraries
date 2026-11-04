@@ -31,29 +31,14 @@ __all__ = [
     "keeps_asked_keys",
     "kept_keys",
     "to_attention_request",
-    "torch_dtype",
     "value_rejects",
 ]
 
 # ``SdpaRequest`` dispatch selectors; only ``"auto"`` is served.
 _DISPATCH_PINS = ("algorithm", "spec_id", "tuning_id")
 
+# Torch dtype names, resolved through ``rocke.runtime.torch_interop.torch_dtype``.
 TORCH_DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
-
-
-def torch_dtype(name: str):
-    """A ``torch.dtype`` by attribute name (e.g. ``"float16"``, ``"float32"``).
-
-    The one place the unified and dense bindings resolve a dtype by name, so
-    neither binding module reaches for ``getattr(torch, ...)`` itself. This
-    does not make either binding torch-free: ``bind_unified.py`` still
-    imports torch directly to build the index tensors (``block_table``,
-    ``cu_seqlens_q``, ``seqused_k``) its paged ABI needs from a Python
-    list/range, which neither this helper nor ``empty_workspace`` cover.
-    """
-    import torch
-
-    return getattr(torch, name)
 
 
 def to_attention_request(req: SdpaRequest) -> AttentionRequest:
@@ -318,10 +303,7 @@ class Operand:
         """Batch ``b``'s first ``n`` rows as ``(n, heads, d)``."""
         if self.starts is None:
             return self.tensor[b, :, :n, :].transpose(0, 1)
-        import torch
-
-        return torch.as_strided(
-            self.flat,
+        return self.flat.as_strided(
             (n, self.heads, self.width),
             self.row_strides,
             self.flat.storage_offset() + self.starts[b],
