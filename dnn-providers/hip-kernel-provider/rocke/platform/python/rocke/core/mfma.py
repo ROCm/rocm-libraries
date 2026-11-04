@@ -53,12 +53,23 @@ _CARRIER_BITS = {
 }
 
 
+def _carrier_element(ty: Type) -> tuple[Type | None, int]:
+    """The scalar element/count of a well-formed register carrier, or no shape."""
+    if type(ty) is Type:
+        return ty, 1
+    if (
+        isinstance(ty, VectorType)
+        and type(ty.elem) is Type
+        and type(ty.count) is int
+        and ty.count > 0
+    ):
+        return ty.elem, ty.count
+    return None, 0
+
+
 def _carrier_bits(ty: Type) -> int:
-    if isinstance(ty, VectorType):
-        if type(ty.elem) is not Type or type(ty.count) is not int or ty.count <= 0:
-            return 0
-        return _CARRIER_BITS.get(ty.elem.name, 0) * ty.count
-    return _CARRIER_BITS.get(ty.name, 0) if type(ty) is Type else 0
+    element, count = _carrier_element(ty)
+    return _CARRIER_BITS.get(element.name, 0) * count if element is not None else 0
 
 
 def _fixed_type_matches(actual: Type, expected: Type) -> bool:
@@ -93,17 +104,8 @@ def validate_mfma(op: Op) -> None:
     if bits is not None:
         for role, value in enumerate(op.operands[:2]):
             actual = value.type
-            element = actual.elem if isinstance(actual, VectorType) else actual
-            valid_shape = type(actual) is Type or (
-                isinstance(actual, VectorType)
-                and type(actual.count) is int
-                and actual.count > 0
-            )
-            if (
-                valid_shape
-                and type(element) is Type
-                and element.name not in _CARRIER_BITS
-            ):
+            element, _ = _carrier_element(actual)
+            if element is not None and element.name not in _CARRIER_BITS:
                 raise ValueError(
                     f"MFMA unsupported packed carrier - src{role}={actual.name}, "
                     f"expected a supported {bits}-bit register carrier"

@@ -922,7 +922,9 @@ class _Lowerer:
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
         self._require_wmma_arch("wmma_f32_16x16x16_f16")
-        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=16)
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16, source_count=16, arch=self.arch
+        )
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32("
@@ -932,7 +934,7 @@ class _Lowerer:
     def _op_tile_wmma_gfx12_f32_16x16x16_f16(self, op: Op) -> None:
         # RDNA4 builtin: distinct ``_gfx12`` suffix, 8-wide operands.
         self._require_wmma_arch("wmma_gfx12_f32_16x16x16_f16")
-        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=8)
+        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=8, arch=self.arch)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -944,7 +946,9 @@ class _Lowerer:
         # gfx1250 builtin: K=32, 16-wide f16 operands, 8-operand form:
         # (negA, A, negB, B, fmt, C, reuseA, reuseB).
         self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_f16")
-        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=16)
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16, source_count=16, arch=self.arch
+        )
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -970,7 +974,7 @@ class _Lowerer:
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
         op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
         self._require_wmma_arch(op_id)
-        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
+        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8, arch=self.arch)
         a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
         b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
         self._emit(
@@ -1013,7 +1017,9 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
         # Same gfx1250 K=32 ABI as the f16 form, but operands are true bf16 vectors.
         self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_bf16")
-        validate_unscaled_wmma(op, F32, source_elem=BF16, source_count=16)
+        validate_unscaled_wmma(
+            op, F32, source_elem=BF16, source_count=16, arch=self.arch
+        )
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -1037,7 +1043,9 @@ class _Lowerer:
     def _emit_gfx11_integer_wmma(self, op: Op, op_id: str) -> None:
         builtin, words = _GFX11_INTEGER_WMMA[op_id]
         self._require_wmma_arch(op_id)
-        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=words)
+        validate_unscaled_wmma(
+            op, I32, source_elem=I32, source_count=words, arch=self.arch
+        )
         a = self._mma_operand(op, op_id, "a", VectorType(I32, words))
         b = self._mma_operand(op, op_id, "b", VectorType(I32, words))
         signed_a, signed_b = self._signedness_flags(op_id)

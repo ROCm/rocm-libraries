@@ -154,13 +154,23 @@ class AsIs(_Form):
         self.check_operand(lowerer, op, role)
         return lowerer._mma_operand(op, role, self.register_type_at(lowerer._flavor))
 
+    def check_result(self, lowerer, op: Op) -> bool:
+        """Validate the result without declaring an intrinsic or emitting IR."""
+        result = op.results[0]
+        if not isinstance(result.type, Type):
+            raise ValueError(f"MMA result of {_op_id(op)!r} must define an IR type")
+        return mma_result_needs_reinterpret(
+            _op_id(op),
+            result.type,
+            self.register_type_at(lowerer._flavor),
+            lowerer._backend.arch,
+        )
+
     def emit_result(self, lowerer, op: Op, call: str) -> None:
         """Emit ``call`` and bind its value to ``op``'s result."""
         register = self.register_type_at(lowerer._flavor)
         result = op.results[0]
-        if not mma_result_needs_reinterpret(
-            _op_id(op), result.type, register, lowerer._backend.arch
-        ):
+        if not self.check_result(lowerer, op):
             lowerer._current().emit(f"  {result.name} = {call}")
             return
         returned = lowerer._fresh("mma_d")
@@ -273,8 +283,8 @@ class EvenHalves(_Form):
     def _logical(register: VectorType) -> VectorType:
         return VectorType(register.elem, register.count // 2)
 
-    def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
-        """Operand ``role`` of ``op`` spread into the even half-slots; returns its name."""
+    def check_operand(self, lowerer, op: Op, role: MmaOperandRole) -> None:
+        """Validate the complete logical input before any spreading emits IR."""
         register = self.register_type_at(lowerer._flavor)
         logical = self._logical(register)
         value = mma_operand_value(op, role)
@@ -293,6 +303,15 @@ class EvenHalves(_Form):
                 f"{_llvm_type(register)} -- pass the {logical.count} logical "
                 "accumulator values"
             )
+        mma_operand_needs_reinterpret(
+            _op_id(op), role, value.type, logical, lowerer._backend.arch
+        )
+
+    def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
+        """Operand ``role`` of ``op`` spread into the even half-slots; returns its name."""
+        self.check_operand(lowerer, op, role)
+        register = self.register_type_at(lowerer._flavor)
+        logical = self._logical(register)
         values = lowerer._mma_operand(op, role, logical)
         mask = ", ".join(f"i32 {i}, i32 {logical.count}" for i in range(logical.count))
         spread = lowerer._fresh("mma_spread")
@@ -302,11 +321,13 @@ class EvenHalves(_Form):
         )
         return spread
 
-    def emit_result(self, lowerer, op: Op, call: str) -> None:
-        """Emit ``call`` and gather its even half-slots into ``op``'s result."""
+    def check_result(self, lowerer, op: Op) -> bool:
+        """Validate the logical result before the call or a gather is emitted."""
         register = self.register_type_at(lowerer._flavor)
         logical = self._logical(register)
         result = op.results[0]
+        if not isinstance(result.type, Type):
+            raise ValueError(f"MMA result of {_op_id(op)!r} must define an IR type")
         if not (
             isinstance(result.type, VectorType)
             and type_bits(result.type) == type_bits(logical)
@@ -317,9 +338,16 @@ class EvenHalves(_Form):
                 f"returns {logical.count} results in the even halves of "
                 f"{_llvm_type(register)}"
             )
-        reinterpret = mma_result_needs_reinterpret(
+        return mma_result_needs_reinterpret(
             _op_id(op), result.type, logical, lowerer._backend.arch
         )
+
+    def emit_result(self, lowerer, op: Op, call: str) -> None:
+        """Emit ``call`` and gather its even half-slots into ``op``'s result."""
+        register = self.register_type_at(lowerer._flavor)
+        logical = self._logical(register)
+        result = op.results[0]
+        reinterpret = self.check_result(lowerer, op)
         returned = lowerer._fresh("mma_d")
         lowerer._current().emit(f"  {returned} = {call}")
         gathered = lowerer._fresh("mma_gather") if reinterpret else result.name

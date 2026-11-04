@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from unittest.mock import patch
 
 import pytest
 
@@ -58,6 +59,35 @@ def _kernel(case, *, atom=None, use_result=False):
         b.global_store(out, b.const_i32(0), b.vec_extract(d, 7))
     b.ret()
     return b.kernel, op
+
+
+@pytest.mark.parametrize("gfx", ["gfx1100", "gfx1101", "gfx1151", "gfx1250"])
+@pytest.mark.parametrize("concrete", [False, True])
+def test_hip_validation_uses_the_actual_target(gfx, concrete):
+    from rocke.core import mma_operand
+
+    case = (
+        (gfx, "wmma_gfx1250_f32_16x16x64_fp8_fp8", I32, 8, F32)
+        if gfx == "gfx1250"
+        else (gfx, "wmma_i32_16x16x16_iu8", I32, 4, I32)
+    )
+    kernel, op = _kernel(case)
+    if concrete:
+        op.name = f"tile.{case[1]}"
+        op.attrs.pop("op_id")
+    seen = []
+    real = mma_operand.mma_operand_needs_reinterpret
+
+    def check_target(*args, **kwargs):
+        seen.append(args[4].gfx)
+        return real(*args, **kwargs)
+
+    with patch.object(
+        mma_operand, "mma_operand_needs_reinterpret", side_effect=check_target
+    ):
+        text = lower_kernel_to_hip(kernel, arch=gfx)
+    assert "__builtin_amdgcn_wmma" in text
+    assert seen == [gfx, gfx]
 
 
 def _type_error(case):

@@ -33,6 +33,7 @@ from ..arch import ArchTarget, known_arches, listed_arch_for
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import BF16, F16, F32, I32, I64, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
+from ..mfma import _carrier_element
 from ..wmma import validate_unscaled_wmma
 from .matrix_call_lowering import emit_matrix_call
 from .matrix_calls import MATRIX_CALLS
@@ -159,14 +160,13 @@ class ISABackend:
             ):
                 source = call.a.register_type_at(lowerer._flavor)
                 result = call.result.register_type_at(lowerer._flavor)
+                source_elem, source_count = _carrier_element(source)
                 validate_unscaled_wmma(
                     named,
                     result.elem,
                     result.count,
-                    source_elem=(
-                        source.elem if isinstance(source, VectorType) else source
-                    ),
-                    source_count=source.count if isinstance(source, VectorType) else 1,
+                    source_elem=source_elem,
+                    source_count=source_count,
                     arch=self.arch,
                 )
             emit_matrix_call(lowerer, named, call)
@@ -467,7 +467,11 @@ class Gfx11RdnaBackend(ISABackend):
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
         validate_unscaled_wmma(
-            op, F32, source_elem=F16 if ssa_elt == "half" else BF16, source_count=16
+            op,
+            F32,
+            source_elem=F16 if ssa_elt == "half" else BF16,
+            source_count=16,
+            arch=self.arch,
         )
         a, b, c = op.operands
         lowerer._need(decl_key)
@@ -523,7 +527,11 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
         validate_unscaled_wmma(
-            op, F32, source_elem=F16 if ssa_elt == "half" else BF16, source_count=8
+            op,
+            F32,
+            source_elem=F16 if ssa_elt == "half" else BF16,
+            source_count=8,
+            arch=self.arch,
         )
         a, b, c = op.operands
         lowerer._need(decl_key)
@@ -639,7 +647,11 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             )
         decl_key, intrinsic, elt = spec
         validate_unscaled_wmma(
-            op, F32, source_elem=F16 if elt == "half" else BF16, source_count=16
+            op,
+            F32,
+            source_elem=F16 if elt == "half" else BF16,
+            source_count=16,
+            arch=self.arch,
         )
         a, b, c = op.operands
         lowerer._need(decl_key)
@@ -664,7 +676,7 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         reuse immediates pinned to 0 (plain unscaled MMA).
         """
         decl_key, intrinsic = spec
-        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
+        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8, arch=self.arch)
         c = op.operands[2]
         lowerer._need(decl_key)
         a_arg = lowerer._mma_operand(op, "a", VectorType(I32, 8))

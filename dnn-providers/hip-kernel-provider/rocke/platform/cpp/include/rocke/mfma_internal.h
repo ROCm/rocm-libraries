@@ -9,19 +9,22 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "rocke/ir.h"
+#include "rocke/ir_internal.h"
+
+static inline const rocke_type_t* rocke_mfma_carrier_element(const rocke_type_t* type)
+{
+    if(!type || (type->kind != ROCKE_TYPE_SCALAR && type->kind != ROCKE_TYPE_VECTOR)
+       || rocke_i_count_of(type) <= 0)
+        return NULL;
+    const auto* element = rocke_i_elem_of(type);
+    return element && element->kind == ROCKE_TYPE_SCALAR ? element : NULL;
+}
 
 static inline int rocke_mfma_carrier_bits(const rocke_type_t* type)
 {
-    int count = 1;
+    const int count = rocke_i_count_of(type);
+    type = rocke_mfma_carrier_element(type);
     if(!type)
-        return 0;
-    if(type->kind == ROCKE_TYPE_VECTOR)
-    {
-        count = type->count;
-        type = type->elem;
-    }
-    if(!type || type->kind != ROCKE_TYPE_SCALAR || count <= 0)
         return 0;
     int bits;
     switch(type->scalar)
@@ -138,14 +141,8 @@ static inline const char* rocke_mfma_operand_error(const rocke_op_t* op,
                     source_type);
             else if(packed_bits)
             {
-                const rocke_type_t* element
-                    = type && type->kind == ROCKE_TYPE_VECTOR ? type->elem : type;
-                const int valid_shape
-                    = type
-                      && (type->kind == ROCKE_TYPE_SCALAR
-                          || (type->kind == ROCKE_TYPE_VECTOR && type->count > 0));
-                if(valid_shape && element && element->kind == ROCKE_TYPE_SCALAR
-                   && !rocke_mfma_carrier_bits(element))
+                const rocke_type_t* element = rocke_mfma_carrier_element(type);
+                if(element && !rocke_mfma_carrier_bits(element))
                     snprintf(message,
                              capacity,
                              "MFMA unsupported packed carrier - src%d=%s, expected a supported "

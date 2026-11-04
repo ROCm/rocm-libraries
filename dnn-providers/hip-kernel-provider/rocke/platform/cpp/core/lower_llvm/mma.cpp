@@ -561,8 +561,8 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
                                     op,
                                     result->elem,
                                     result->count,
-                                    source->kind == ROCKE_TYPE_VECTOR ? source->elem : source,
-                                    source->kind == ROCKE_TYPE_VECTOR ? source->count : 1);
+                                    rocke_i_elem_of(source),
+                                    rocke_i_count_of(source));
         }
         rocke_ll_emit_matrix_call(L, op, op_id, call);
         return;

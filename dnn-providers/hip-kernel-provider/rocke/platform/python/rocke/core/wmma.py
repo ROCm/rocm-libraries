@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from .arch import ArchTarget
 from .ir import I32, Op, Type, VectorType
 
 
@@ -14,7 +15,7 @@ def validate_unscaled_wmma(
     *,
     source_elem: Type,
     source_count: int,
-    arch=None,
+    arch: ArchTarget,
 ) -> None:
     """Reject values that cannot use the selected instruction's fixed ABI.
 
@@ -22,6 +23,8 @@ def validate_unscaled_wmma(
     concrete emitter can impose the physical accumulator/result signature.
     Mirrors ``_validate_unscaled_wmma`` in the native LLVM lowerer.
     """
+    if arch is None:
+        raise ValueError("unscaled WMMA requires an architecture target")
     if len(op.operands) != 3 or len(op.results) != 1:
         raise ValueError("unscaled WMMA expects 3 operands and 1 result")
     expected = VectorType(elem, count)
@@ -32,19 +35,14 @@ def validate_unscaled_wmma(
         # Integer/FP8 entry points render the same-width register bridge.
         if source_elem == I32:
             from .mma_operand import mma_operand_needs_reinterpret
-            from .arch import ArchTarget
 
             op_id = op.attrs.get("op_id", op.name.removeprefix("tile."))
-            target = arch
-            if target is None:
-                gfx = "gfx1250" if "gfx1250" in op_id else "gfx1151"
-                target = ArchTarget.from_gfx(gfx)
             mma_operand_needs_reinterpret(
                 op_id,
                 "a" if role == 0 else "b",
                 op.operands[role].type,
                 source,
-                target,
+                arch,
             )
         elif op.operands[role].type != source:
             raise ValueError(f"unscaled WMMA requires src{role} to be {source.name}")
