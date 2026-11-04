@@ -24,7 +24,7 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ! hipRAND on ROCm reports rocRAND's version, so the module's HIPRAND_VERSION is
-! checked against HIPRAND_FORTRAN_EXPECTED_VERSION (set in-tree) instead.
+! checked against HIPRAND_FORTRAN_EXPECTED_VERSION instead, when that is set.
 program hiprand_version_test
 
     use iso_c_binding
