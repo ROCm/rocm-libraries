@@ -473,20 +473,39 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
         launch_all()
         sync_all()
 
-    wall_times, halo_times = [], []
+    # The real (wall_ms) measurement: halo_exchange() + launch_all() + one
+    # sync_all(), with no intermediate barrier between them. halo_exchange()
+    # only touches each shard's own trailing rows and launch_all() only reads
+    # them back on that same device's default stream, so stream FIFO order
+    # already makes every launch see its halo copy -- a mid-barrier isn't
+    # needed for correctness (the P=1 baseline's correctness gate above
+    # already covers that), only for isolating a halo_ms number. Keeping it
+    # in the timed loop was a real cost: it forces every device's launch to
+    # wait on every other device's halo copy, which is most of why P=4 (3
+    # halo copies) scaled worse than P=2 (1 copy) beyond what pure kernel
+    # concurrency explains (see the no_fence concurrency probe referenced
+    # above the launch_values cache).
+    wall_times = []
+    for _ in range(a.iters):
+        t0 = time.perf_counter()
+        halo_exchange()
+        launch_all()
+        sync_all()
+        t2 = time.perf_counter()
+        wall_times.append((t2 - t0) * 1e3)
+    wall_ms = statistics.median(wall_times)
+
+    # halo_ms is diagnostic only: measured in its own pass (with the
+    # intermediate barrier the real measurement above no longer pays), purely
+    # to report a compute/halo breakdown -- not used by wall_ms or speedup.
+    halo_times = []
     for _ in range(a.iters):
         t0 = time.perf_counter()
         halo_exchange()
         sync_all()
         t1 = time.perf_counter()
-        launch_all()
-        sync_all()
-        t2 = time.perf_counter()
         halo_times.append((t1 - t0) * 1e3)
-        wall_times.append((t2 - t0) * 1e3)
-
     halo_ms = statistics.median(halo_times)
-    wall_ms = statistics.median(wall_times)
     compute_ms = wall_ms - halo_ms
     per_device_tflops = (float(shard_problem.flops) / compute_ms) * 1e-9 if compute_ms > 0 else float("nan")
 
