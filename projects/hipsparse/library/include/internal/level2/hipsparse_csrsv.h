@@ -738,9 +738,9 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  \details
 *  \p hipsparseXcsrsv2_solve solves a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in CSR storage format, a dense solution vector
-*  \f$y\f$, and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$x\f$, and the right-hand side \f$f\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
-*    op(A) \cdot y = \alpha \cdot x,
+*    op(A) \cdot x = \alpha \cdot f,
 *  \f]
 *  with
 *  \f[
@@ -760,7 +760,7 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix
 *  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size,
 *  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$, while the
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. After all calls to
+*  computation stage can be repeatedly used with different \f$f\f$ and \f$x\f$ vectors. After all calls to
 *  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated.
 *
 *  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is
@@ -857,9 +857,9 @@ hipsparseStatus_t hipsparseScsrsv2_solve(hipsparseHandle_t         handle,
 *  \details
 *  \p hipsparseXcsrsv2_solve solves a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in CSR storage format, a dense solution vector
-*  \f$y\f$, and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$x\f$, and the right-hand side \f$f\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
-*    op(A) \cdot y = \alpha \cdot x,
+*    op(A) \cdot x = \alpha \cdot f,
 *  \f]
 *  with
 *  \f[
@@ -879,7 +879,7 @@ hipsparseStatus_t hipsparseScsrsv2_solve(hipsparseHandle_t         handle,
 *  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix
 *  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size,
 *  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$, while the
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. After all calls to
+*  computation stage can be repeatedly used with different \f$f\f$ and \f$x\f$ vectors. After all calls to
 *  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated.
 *
 *  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is
@@ -975,9 +975,9 @@ hipsparseStatus_t hipsparseDcsrsv2_solve(hipsparseHandle_t         handle,
 *  \details
 *  \p hipsparseXcsrsv2_solve solves a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in CSR storage format, a dense solution vector
-*  \f$y\f$, and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$x\f$, and the right-hand side \f$f\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
-*    op(A) \cdot y = \alpha \cdot x,
+*    op(A) \cdot x = \alpha \cdot f,
 *  \f]
 *  with
 *  \f[
@@ -997,7 +997,7 @@ hipsparseStatus_t hipsparseDcsrsv2_solve(hipsparseHandle_t         handle,
 *  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix
 *  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size,
 *  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$, while the
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. After all calls to
+*  computation stage can be repeatedly used with different \f$f\f$ and \f$x\f$ vectors. After all calls to
 *  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated.
 *
 *  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is
@@ -1093,9 +1093,9 @@ hipsparseStatus_t hipsparseCcsrsv2_solve(hipsparseHandle_t         handle,
 *  \details
 *  \p hipsparseXcsrsv2_solve solves a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in CSR storage format, a dense solution vector
-*  \f$y\f$, and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$x\f$, and the right-hand side \f$f\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
-*    op(A) \cdot y = \alpha \cdot x,
+*    op(A) \cdot x = \alpha \cdot f,
 *  \f]
 *  with
 *  \f[
@@ -1115,7 +1115,7 @@ hipsparseStatus_t hipsparseCcsrsv2_solve(hipsparseHandle_t         handle,
 *  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix
 *  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size,
 *  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$, while the
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. After all calls to
+*  computation stage can be repeatedly used with different \f$f\f$ and \f$x\f$ vectors. After all calls to
 *  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated.
 *
 *  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is

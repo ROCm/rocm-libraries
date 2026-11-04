@@ -326,22 +326,22 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *  @param[in]
 *  bsrVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim  elements of the sparse general BSR matrix.
 *  @param[in]
-*  bsrRowPtr   array of \p m+1 elements that point to the start of every row of the
+*  bsrRowPtr   array of \p mb+1 elements that point to the start of every row of the
 *              sparse general BSR matrix.
 *  @param[in]
-*  bsrColInd   array of \p nnz elements containing the column indices of the sparse
+*  bsrColInd   array of \p nnzb elements containing the column indices of the sparse
 *              general BSR matrix.
 *  @param[in]
 *  rowBlockDim row size of the blocks in the sparse general BSR matrix.
 *  @param[in]
 *  colBlockDim col size of the blocks in the sparse general BSR matrix.
 *  @param[out]
-*  bscVal      array of \p nnz elements of the sparse BSC matrix.
+*  bscVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim elements of the sparse BSC matrix.
 *  @param[out]
-*  bscRowInd   array of \p nnz elements containing the row indices of the sparse BSC
+*  bscRowInd   array of \p nnzb elements containing the row indices of the sparse BSC
 *              matrix.
 *  @param[out]
-*  bscColPtr   array of \p n+1 elements that point to the start of every column of the
+*  bscColPtr   array of \p nb+1 elements that point to the start of every column of the
 *              sparse BSC matrix.
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -458,22 +458,22 @@ hipsparseStatus_t hipsparseSgebsr2gebsc(hipsparseHandle_t    handle,
 *  @param[in]
 *  bsrVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim  elements of the sparse general BSR matrix.
 *  @param[in]
-*  bsrRowPtr   array of \p m+1 elements that point to the start of every row of the
+*  bsrRowPtr   array of \p mb+1 elements that point to the start of every row of the
 *              sparse general BSR matrix.
 *  @param[in]
-*  bsrColInd   array of \p nnz elements containing the column indices of the sparse
+*  bsrColInd   array of \p nnzb elements containing the column indices of the sparse
 *              general BSR matrix.
 *  @param[in]
 *  rowBlockDim row size of the blocks in the sparse general BSR matrix.
 *  @param[in]
 *  colBlockDim col size of the blocks in the sparse general BSR matrix.
 *  @param[out]
-*  bscVal      array of \p nnz elements of the sparse BSC matrix.
+*  bscVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim elements of the sparse BSC matrix.
 *  @param[out]
-*  bscRowInd   array of \p nnz elements containing the row indices of the sparse BSC
+*  bscRowInd   array of \p nnzb elements containing the row indices of the sparse BSC
 *              matrix.
 *  @param[out]
-*  bscColPtr   array of \p n+1 elements that point to the start of every column of the
+*  bscColPtr   array of \p nb+1 elements that point to the start of every column of the
 *              sparse BSC matrix.
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -589,22 +589,22 @@ hipsparseStatus_t hipsparseDgebsr2gebsc(hipsparseHandle_t    handle,
 *  @param[in]
 *  bsrVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim  elements of the sparse general BSR matrix.
 *  @param[in]
-*  bsrRowPtr   array of \p m+1 elements that point to the start of every row of the
+*  bsrRowPtr   array of \p mb+1 elements that point to the start of every row of the
 *              sparse general BSR matrix.
 *  @param[in]
-*  bsrColInd   array of \p nnz elements containing the column indices of the sparse
+*  bsrColInd   array of \p nnzb elements containing the column indices of the sparse
 *              general BSR matrix.
 *  @param[in]
 *  rowBlockDim row size of the blocks in the sparse general BSR matrix.
 *  @param[in]
 *  colBlockDim col size of the blocks in the sparse general BSR matrix.
 *  @param[out]
-*  bscVal      array of \p nnz elements of the sparse BSC matrix.
+*  bscVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim elements of the sparse BSC matrix.
 *  @param[out]
-*  bscRowInd   array of \p nnz elements containing the row indices of the sparse BSC
+*  bscRowInd   array of \p nnzb elements containing the row indices of the sparse BSC
 *              matrix.
 *  @param[out]
-*  bscColPtr   array of \p n+1 elements that point to the start of every column of the
+*  bscColPtr   array of \p nb+1 elements that point to the start of every column of the
 *              sparse BSC matrix.
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -720,22 +720,22 @@ hipsparseStatus_t hipsparseCgebsr2gebsc(hipsparseHandle_t    handle,
 *  @param[in]
 *  bsrVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim  elements of the sparse general BSR matrix.
 *  @param[in]
-*  bsrRowPtr   array of \p m+1 elements that point to the start of every row of the
+*  bsrRowPtr   array of \p mb+1 elements that point to the start of every row of the
 *              sparse general BSR matrix.
 *  @param[in]
-*  bsrColInd   array of \p nnz elements containing the column indices of the sparse
+*  bsrColInd   array of \p nnzb elements containing the column indices of the sparse
 *              general BSR matrix.
 *  @param[in]
 *  rowBlockDim row size of the blocks in the sparse general BSR matrix.
 *  @param[in]
 *  colBlockDim col size of the blocks in the sparse general BSR matrix.
 *  @param[out]
-*  bscVal      array of \p nnz elements of the sparse BSC matrix.
+*  bscVal      array of \p nnzb * \p rowBlockDim * \p colBlockDim elements of the sparse BSC matrix.
 *  @param[out]
-*  bscRowInd   array of \p nnz elements containing the row indices of the sparse BSC
+*  bscRowInd   array of \p nnzb elements containing the row indices of the sparse BSC
 *              matrix.
 *  @param[out]
-*  bscColPtr   array of \p n+1 elements that point to the start of every column of the
+*  bscColPtr   array of \p nb+1 elements that point to the start of every column of the
 *              sparse BSC matrix.
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.

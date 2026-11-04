@@ -60,7 +60,7 @@ extern "C" {
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds, \p dl,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,
 *              \p d, \p du, \p dw, \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -110,7 +110,7 @@ hipsparseStatus_t hipsparseSgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds, \p dl,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,
 *              \p d, \p du, \p dw, \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -159,7 +159,7 @@ hipsparseStatus_t hipsparseDgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds, \p dl,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,
 *              \p d, \p du, \p dw, \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -208,7 +208,7 @@ hipsparseStatus_t hipsparseCgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds, \p dl,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,
 *              \p d, \p du, \p dw, \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -238,7 +238,7 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$P^{i}\f$ is a sparse pentadiagonal matrix and
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
 *  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
-*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest diagonals.
 *  See below for a description of the interleaved memory pattern.
 *
 *  Solving the batched pentadiagonal system involves two steps. First, the user calls
@@ -275,7 +275,7 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  \f[
 *    \begin{align}
 *    \text{lowest} &= \begin{bmatrix} 0 & 0 & 0 & 0 & 0 & 0 & t^{0}_{20} & t^{1}_{20} & t^{2}_{20} \end{bmatrix} \\
-*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{1}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
+*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{2}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
 *    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{1}_{00} & t^{2}_{00} & t^{0}_{11} & t^{1}_{11} & t^{2}_{11} & t^{0}_{22} & t^{1}_{22} & t^{2}_{22} \end{bmatrix} \\
 *    \text{higher} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
@@ -314,7 +314,7 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  pBuffer     Temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds,
 *              \p dl, \p d, \p du, \p dw, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -343,7 +343,7 @@ hipsparseStatus_t hipsparseSgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$P^{i}\f$ is a sparse pentadiagonal matrix and
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
 *  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
-*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest diagonals.
 *  See below for a description of the interleaved memory pattern.
 *
 *  Solving the batched pentadiagonal system involves two steps. First, the user calls
@@ -380,7 +380,7 @@ hipsparseStatus_t hipsparseSgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  \f[
 *    \begin{align}
 *    \text{lowest} &= \begin{bmatrix} 0 & 0 & 0 & 0 & 0 & 0 & t^{0}_{20} & t^{1}_{20} & t^{2}_{20} \end{bmatrix} \\
-*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{1}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
+*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{2}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
 *    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{1}_{00} & t^{2}_{00} & t^{0}_{11} & t^{1}_{11} & t^{2}_{11} & t^{0}_{22} & t^{1}_{22} & t^{2}_{22} \end{bmatrix} \\
 *    \text{higher} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
@@ -419,7 +419,7 @@ hipsparseStatus_t hipsparseSgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  pBuffer     Temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds,
 *              \p dl, \p d, \p du, \p dw, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -447,7 +447,7 @@ hipsparseStatus_t hipsparseDgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$P^{i}\f$ is a sparse pentadiagonal matrix and
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
 *  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
-*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest diagonals.
 *  See below for a description of the interleaved memory pattern.
 *
 *  Solving the batched pentadiagonal system involves two steps. First, the user calls
@@ -484,7 +484,7 @@ hipsparseStatus_t hipsparseDgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  \f[
 *    \begin{align}
 *    \text{lowest} &= \begin{bmatrix} 0 & 0 & 0 & 0 & 0 & 0 & t^{0}_{20} & t^{1}_{20} & t^{2}_{20} \end{bmatrix} \\
-*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{1}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
+*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{2}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
 *    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{1}_{00} & t^{2}_{00} & t^{0}_{11} & t^{1}_{11} & t^{2}_{11} & t^{0}_{22} & t^{1}_{22} & t^{2}_{22} \end{bmatrix} \\
 *    \text{higher} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
@@ -523,7 +523,7 @@ hipsparseStatus_t hipsparseDgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  pBuffer     Temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds,
 *              \p dl, \p d, \p du, \p dw, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -551,7 +551,7 @@ hipsparseStatus_t hipsparseCgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$P^{i}\f$ is a sparse pentadiagonal matrix and
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
 *  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
-*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest diagonals.
 *  See below for a description of the interleaved memory pattern.
 *
 *  Solving the batched pentadiagonal system involves two steps. First, the user calls
@@ -588,7 +588,7 @@ hipsparseStatus_t hipsparseCgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  \f[
 *    \begin{align}
 *    \text{lowest} &= \begin{bmatrix} 0 & 0 & 0 & 0 & 0 & 0 & t^{0}_{20} & t^{1}_{20} & t^{2}_{20} \end{bmatrix} \\
-*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{1}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
+*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{2}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
 *    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{1}_{00} & t^{2}_{00} & t^{0}_{11} & t^{1}_{11} & t^{2}_{11} & t^{0}_{22} & t^{1}_{22} & t^{2}_{22} \end{bmatrix} \\
 *    \text{higher} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
@@ -627,7 +627,7 @@ hipsparseStatus_t hipsparseCgpsvInterleavedBatch(hipsparseHandle_t handle,
 *  pBuffer     Temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds,
 *              \p dl, \p d, \p du, \p dw, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */

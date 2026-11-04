@@ -562,8 +562,12 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *  \p hipsparseXbsric02 computes the incomplete Cholesky factorization with 0 fill-ins
  *  and no pivoting of a sparse \f$mb \times mb\f$ BSR matrix \f$A\f$, such that
  *  \f[
- *    A \approx LL^T
+ *    A \approx LL^H
  *  \f]
+ *
+ *  \note
+ *  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$. For real data
+ *  types \f$L^H = L^T\f$, so it reduces to the standard \f$A \approx L L^T\f$.
  *
  *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling
@@ -647,8 +651,12 @@ hipsparseStatus_t hipsparseSbsric02(hipsparseHandle_t         handle,
  *  \p hipsparseXbsric02 computes the incomplete Cholesky factorization with 0 fill-ins
  *  and no pivoting of a sparse \f$mb \times mb\f$ BSR matrix \f$A\f$, such that
  *  \f[
- *    A \approx LL^T
+ *    A \approx LL^H
  *  \f]
+ *
+ *  \note
+ *  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$. For real data
+ *  types \f$L^H = L^T\f$, so it reduces to the standard \f$A \approx L L^T\f$.
  *
  *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling
@@ -731,8 +739,12 @@ hipsparseStatus_t hipsparseDbsric02(hipsparseHandle_t         handle,
  *  \p hipsparseXbsric02 computes the incomplete Cholesky factorization with 0 fill-ins
  *  and no pivoting of a sparse \f$mb \times mb\f$ BSR matrix \f$A\f$, such that
  *  \f[
- *    A \approx LL^T
+ *    A \approx LL^H
  *  \f]
+ *
+ *  \note
+ *  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$. For real data
+ *  types \f$L^H = L^T\f$, so it reduces to the standard \f$A \approx L L^T\f$.
  *
  *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling
@@ -815,8 +827,12 @@ hipsparseStatus_t hipsparseCbsric02(hipsparseHandle_t         handle,
  *  \p hipsparseXbsric02 computes the incomplete Cholesky factorization with 0 fill-ins
  *  and no pivoting of a sparse \f$mb \times mb\f$ BSR matrix \f$A\f$, such that
  *  \f[
- *    A \approx LL^T
+ *    A \approx LL^H
  *  \f]
+ *
+ *  \note
+ *  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$. For real data
+ *  types \f$L^H = L^T\f$, so it reduces to the standard \f$A \approx L L^T\f$.
  *
  *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling

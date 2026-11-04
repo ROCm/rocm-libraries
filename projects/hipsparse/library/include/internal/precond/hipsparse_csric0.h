@@ -696,18 +696,23 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
 *  \p hipsparseXcsric02 computes the incomplete Cholesky factorization with 0 fill-ins
 *  and no pivoting of a sparse \f$m \times m\f$ CSR matrix \f$A\f$, such that
 *  \f[
-*    A \approx LL^T
+*    A \approx LL^H
 *  \f]
 *  where the lower triangular matrix \f$L\f$ is computed using:
 *  \f[
 *    L_{ij} = \left\{
 *    \begin{array}{ll}
-*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
-*        \frac{1}{L_{jj}}(A_{jj} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2}},   & \text{if i == j} \\
+*        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times \overline{L_{jk}}), & \text{if i > j}
 *    \end{array}
 *    \right.
 *  \f]
 *  for each entry found in the CSR matrix \f$A\f$.
+*
+*  \note
+*  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$ (note the
+*  conjugation in the formula above). For real data types \f$L^H = L^T\f$, so it reduces to the standard
+*  \f$A \approx L L^T\f$.
 *
 *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
 *  the user determines the size of the required temporary storage buffer by calling
@@ -721,7 +726,7 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
 *
 *  When computing the Cholesky factorization, it is possible that \f$L_{jj} == 0\f$, which would result in a division by zero.
 *  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because
-*  \f$A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
+*  \f$A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
 *  factorization on the following matrix:
 *  \f[
 *    \begin{bmatrix}
@@ -763,7 +768,7 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
 *                    buffer);
 *
 *  // Check for zero pivot
-*  if(CUSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
+*  if(HIPSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
 *  {
 *      printf("L has structural and/or numerical zero at L(%d,%d)\n", position, position);
 *  }
@@ -858,18 +863,23 @@ hipsparseStatus_t hipsparseScsric02(hipsparseHandle_t         handle,
 *  \p hipsparseXcsric02 computes the incomplete Cholesky factorization with 0 fill-ins
 *  and no pivoting of a sparse \f$m \times m\f$ CSR matrix \f$A\f$, such that
 *  \f[
-*    A \approx LL^T
+*    A \approx LL^H
 *  \f]
 *  where the lower triangular matrix \f$L\f$ is computed using:
 *  \f[
 *    L_{ij} = \left\{
 *    \begin{array}{ll}
-*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
-*        \frac{1}{L_{jj}}(A_{jj} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2}},   & \text{if i == j} \\
+*        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times \overline{L_{jk}}), & \text{if i > j}
 *    \end{array}
 *    \right.
 *  \f]
 *  for each entry found in the CSR matrix \f$A\f$.
+*
+*  \note
+*  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$ (note the
+*  conjugation in the formula above). For real data types \f$L^H = L^T\f$, so it reduces to the standard
+*  \f$A \approx L L^T\f$.
 *
 *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
 *  the user determines the size of the required temporary storage buffer by calling
@@ -883,7 +893,7 @@ hipsparseStatus_t hipsparseScsric02(hipsparseHandle_t         handle,
 *
 *  When computing the Cholesky factorization, it is possible that \f$L_{jj} == 0\f$, which would result in a division by zero.
 *  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because
-*  \f$A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
+*  \f$A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
 *  factorization on the following matrix:
 *  \f[
 *    \begin{bmatrix}
@@ -925,7 +935,7 @@ hipsparseStatus_t hipsparseScsric02(hipsparseHandle_t         handle,
 *                    buffer);
 *
 *  // Check for zero pivot
-*  if(CUSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
+*  if(HIPSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
 *  {
 *      printf("L has structural and/or numerical zero at L(%d,%d)\n", position, position);
 *  }
@@ -1019,18 +1029,23 @@ hipsparseStatus_t hipsparseDcsric02(hipsparseHandle_t         handle,
 *  \p hipsparseXcsric02 computes the incomplete Cholesky factorization with 0 fill-ins
 *  and no pivoting of a sparse \f$m \times m\f$ CSR matrix \f$A\f$, such that
 *  \f[
-*    A \approx LL^T
+*    A \approx LL^H
 *  \f]
 *  where the lower triangular matrix \f$L\f$ is computed using:
 *  \f[
 *    L_{ij} = \left\{
 *    \begin{array}{ll}
-*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
-*        \frac{1}{L_{jj}}(A_{jj} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2}},   & \text{if i == j} \\
+*        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times \overline{L_{jk}}), & \text{if i > j}
 *    \end{array}
 *    \right.
 *  \f]
 *  for each entry found in the CSR matrix \f$A\f$.
+*
+*  \note
+*  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$ (note the
+*  conjugation in the formula above). For real data types \f$L^H = L^T\f$, so it reduces to the standard
+*  \f$A \approx L L^T\f$.
 *
 *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
 *  the user determines the size of the required temporary storage buffer by calling
@@ -1044,7 +1059,7 @@ hipsparseStatus_t hipsparseDcsric02(hipsparseHandle_t         handle,
 *
 *  When computing the Cholesky factorization, it is possible that \f$L_{jj} == 0\f$, which would result in a division by zero.
 *  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because
-*  \f$A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
+*  \f$A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
 *  factorization on the following matrix:
 *  \f[
 *    \begin{bmatrix}
@@ -1086,7 +1101,7 @@ hipsparseStatus_t hipsparseDcsric02(hipsparseHandle_t         handle,
 *                    buffer);
 *
 *  // Check for zero pivot
-*  if(CUSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
+*  if(HIPSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
 *  {
 *      printf("L has structural and/or numerical zero at L(%d,%d)\n", position, position);
 *  }
@@ -1180,18 +1195,23 @@ hipsparseStatus_t hipsparseCcsric02(hipsparseHandle_t         handle,
 *  \p hipsparseXcsric02 computes the incomplete Cholesky factorization with 0 fill-ins
 *  and no pivoting of a sparse \f$m \times m\f$ CSR matrix \f$A\f$, such that
 *  \f[
-*    A \approx LL^T
+*    A \approx LL^H
 *  \f]
 *  where the lower triangular matrix \f$L\f$ is computed using:
 *  \f[
 *    L_{ij} = \left\{
 *    \begin{array}{ll}
-*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
-*        \frac{1}{L_{jj}}(A_{jj} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2}},   & \text{if i == j} \\
+*        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times \overline{L_{jk}}), & \text{if i > j}
 *    \end{array}
 *    \right.
 *  \f]
 *  for each entry found in the CSR matrix \f$A\f$.
+*
+*  \note
+*  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$ (note the
+*  conjugation in the formula above). For real data types \f$L^H = L^T\f$, so it reduces to the standard
+*  \f$A \approx L L^T\f$.
 *
 *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
 *  the user determines the size of the required temporary storage buffer by calling
@@ -1205,7 +1225,7 @@ hipsparseStatus_t hipsparseCcsric02(hipsparseHandle_t         handle,
 *
 *  When computing the Cholesky factorization, it is possible that \f$L_{jj} == 0\f$, which would result in a division by zero.
 *  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because
-*  \f$A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
+*  \f$A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
 *  factorization on the following matrix:
 *  \f[
 *    \begin{bmatrix}
@@ -1247,7 +1267,7 @@ hipsparseStatus_t hipsparseCcsric02(hipsparseHandle_t         handle,
 *                    buffer);
 *
 *  // Check for zero pivot
-*  if(CUSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
+*  if(HIPSPARSE_STATUS_ZERO_PIVOT == hipsparseXcsric02_zeroPivot(handle, info, &position))
 *  {
 *      printf("L has structural and/or numerical zero at L(%d,%d)\n", position, position);
 *  }
