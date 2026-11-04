@@ -1410,20 +1410,23 @@ class CallFiles:
         return RunWriter(self.dir).write_json(path.with_suffix(".json").name, data)
 
 
-def check_search_options(args, variant: str, conflicts=()) -> SearchSettings:
-    """The validated ``--search-config`` of a driver run. ``conflicts`` lists
-    the driver's (option, args attribute) pairs a search run does not take.
-    Raises SettingsError for a missing or conflicting option, another
-    ``--variant``, invalid settings or an output dir holding an earlier run."""
+def check_search_options(args, conflicts=(), required=()) -> SearchSettings:
+    """The validated ``--search-config`` of a driver run. The op passes its
+    driver's options: ``conflicts`` the (option, args attribute) pairs a
+    search run does not take, ``required`` the (option, args attribute,
+    value) triples it needs; no other driver option is read. Raises
+    SettingsError for a missing or conflicting option, another required
+    value, invalid settings or an output dir holding an earlier run."""
     if not (args.search_config and args.search_output_dir):
         raise SettingsError(
             "--search-config and --search-output-dir go together, each with a path")
     for opt, attr in conflicts:
         if getattr(args, attr):
             raise SettingsError(f"--search-config does not take {opt}")
-    if args.variant != variant:
-        raise SettingsError(
-            f"--search-config supports --variant {variant} only, got {args.variant}")
+    for opt, attr, value in required:
+        if getattr(args, attr) != value:
+            raise SettingsError(f"--search-config supports {opt} {value} only, "
+                                f"got {getattr(args, attr)}")
     settings = SearchSettings.from_json(args.search_config)
     RunWriter(args.search_output_dir).check_fresh()
     return settings

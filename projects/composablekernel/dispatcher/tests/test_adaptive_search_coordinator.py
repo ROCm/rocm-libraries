@@ -14,6 +14,7 @@ run once end to end at the bottom.
 No GPU or compiler needed. Run: python3 -m pytest -q tests/test_adaptive_search_coordinator.py
 """
 
+import argparse
 import hashlib
 import itertools
 import json
@@ -1155,6 +1156,20 @@ def test_settings_defaults_paths_and_round_trip(tmp_path):
 
 
 # ------------------------------------------------- seeds, warm, prior
+
+
+def test_option_check_reads_only_the_options_the_op_names(tmp_path):
+    # A driver without --variant (batched, multi_d, stream-k) binds the shared
+    # check with its own options: no other attribute of its args is read.
+    cfg = tmp_path / "search.json"
+    cfg.write_text(json.dumps({"schema_version": 1, "strategy": "tpe",
+                               "trials_per_problem": 2, "new_builds_per_run": 4}))
+    args = argparse.Namespace(search_config=str(cfg), batch_count=8,
+                              search_output_dir=str(tmp_path / "out"), csv=None)
+    assert AS.check_search_options(args).strategy == "tpe"
+    assert AS.check_search_options(args, [("--csv", "csv")]).trials_per_problem == 2
+    with pytest.raises(AS.SettingsError, match="supports --batch-count 4 only, got 8"):
+        AS.check_search_options(args, required=[("--batch-count", "batch_count", 4)])
 
 
 @pytest.mark.parametrize("policy, seeds", [("shared", [7, 7, 7]),

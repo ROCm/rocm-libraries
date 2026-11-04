@@ -61,7 +61,6 @@ from adaptive_search import (  # noqa: E402
     valid_latency,
 )
 
-SEARCH_VARIANT = "gemm_universal"
 # Driver options a search run does not take: it writes its own outputs and
 # confirms its finalists itself.
 CONFLICTS = (
@@ -69,6 +68,7 @@ CONFLICTS = (
     ("--repeat-top", "repeat_top"),
     ("--failures-csv", "failures_csv"),
 )
+REQUIRED = (("--variant", "variant", "gemm_universal"),)  # the one searched
 # Driver failure kind (--failures-csv) -> outcome status. The first kind in
 # this order that a request has decides its outcome.
 FAILURE_STATUS = {
@@ -116,7 +116,7 @@ class DriverHooks:
 def check_search_options(args) -> SearchSettings:
     """The validated ``--search-config`` of a GEMM driver run (SettingsError
     otherwise, see ``adaptive_search.check_search_options``)."""
-    return adaptive_search.check_search_options(args, SEARCH_VARIANT, CONFLICTS)
+    return adaptive_search.check_search_options(args, CONFLICTS, REQUIRED)
 
 
 def parse_verified(value) -> Optional[bool]:
