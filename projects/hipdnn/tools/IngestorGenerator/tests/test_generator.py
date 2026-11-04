@@ -3515,7 +3515,12 @@ class TestHeuristicBindings:
         """The fixture is `uhd_gen promote --role sort_kernel_catalog` run on the
         gfx942 unified-3d bundle (AICK-2545): `default` + one gfx942 model, knobs after.
         """
-        promoted = (self.PROMOTED / "gfx942_attention_unified3d.ued.json").read_bytes()
+        # Text, not bytes: the generator writes LF, while an autocrlf checkout (Windows
+        # CI) holds this git-tracked fixture as CRLF, as test_registry_regeneration's g2
+        # notes for the shipped descriptors.
+        promoted = (self.PROMOTED / "gfx942_attention_unified3d.ued.json").read_text(
+            encoding="utf-8"
+        )
         doc = json.loads(promoted)
         config = make_minimal_config(
             engine=make_engine(
@@ -3529,7 +3534,7 @@ class TestHeuristicBindings:
             "kmd": doc["metadata"],
             "uhd": doc["sort_kernel_catalog"]["default"],
         }
-        assert _dump(build_ued(config, ids)).encode() == promoted
+        assert _dump(build_ued(config, ids)) == promoted
 
     def test_regeneration_keeps_bytes_and_ids_around_a_heuristics_tree(
         self, generator, scale_add_config, tmp_path
