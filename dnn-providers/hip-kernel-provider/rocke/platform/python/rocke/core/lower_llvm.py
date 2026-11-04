@@ -7012,7 +7012,7 @@ class _Lowerer:
         first loop to define a name keeps it, and a loop that would define a
         name again adds ``.<header_label>`` (unique in the kernel) to all of
         its names. An earlier loop may have named a value like that itself
-        (``%s.for.header.5``), so while a suffixed name is still taken the loop
+        (``%acc.for.header.5``), so while a suffixed name is still taken the loop
         adds ``.<header_label>.<n>`` instead, for the first ``n = 1, 2, ...``
         that leaves all of its names free.
         """
