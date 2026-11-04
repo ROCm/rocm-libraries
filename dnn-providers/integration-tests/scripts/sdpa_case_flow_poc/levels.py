@@ -21,10 +21,11 @@ Per level, in recipe order:
      complete combination of their values is one value of it, counts as one change, and is paired
      with every value of every other setting; pairs between the listed axes are not asked for.
   3. One-at-a-time rows from the shared base, targeted cases and real-world cases, when the recipe
-     asks for them. Targeted and real-world cases skip the level's labels. Seeds (`seeds`) are
-     completed with the fewest changes; one whose row the references can check joins the
-     real-world cases, any other one runs in the last level. Seeds are written as origin
-     real_world, detail seed:<id>.
+     asks for them. Targeted and real-world cases skip the level's labels. A targeted case whose
+     row an answer_key_needs rule matches waits for the next level with `targeted` that is not
+     `answerable`. Seeds (`seeds`) are completed with the fewest changes; one whose row the
+     references can check joins the real-world cases, any other one runs in the last level.
+     Seeds are written as origin real_world, detail seed:<id>.
   4. Every row is expanded over the level's shape tiers, subject to the level's per-case ceiling.
      A level can restrict its own new cases (the cases it does not keep move up one level):
        larger_tiers: size_sensitive   a case at a tier other than S is kept only if its row changes,
@@ -46,8 +47,37 @@ Per level, in recipe order:
      order, until its cumulative time plus the per-run overhead reaches headroom x budget. A
      filled case obeys the level's `larger_tiers` and `tiers_per_row` too.
 
-A level's `size_sweep` labels are checked against SIZE_SWEEP_LABELS. This generator emits no
-size-sweep rows, and it does not read the `numeric_domains` and `size_sweep` sections.
+Size sweep (origin size-sweep). The sweep sizes of each size axis come from `numeric_domains`,
+`size_sweep`, `shape_tiers` and `class_to_value`, with no seed:
+  typical   the representative values of the axis's classes: the sizes of every shape tier but
+            the stress tier, and the class_to_value numbers.
+  corner    boundary values next to an anchor (a representative value or a tile edge): each
+            anchor and the values one above and one below it that are boundaries and lie in a
+            class range, without the representative values; ordered by distance to the nearest
+            anchor, then by value; the first `per_axis` of them.
+  stress    the axis's extent in the stress tier, or its largest representative value when that
+            is larger. An axis that the sizes override cannot set (page size, window bounds) takes
+            its longest class value at the stress tier's key length.
+A sweep row is the plain row (the shared base, or for a crossing the fewest-change row that holds
+one `size_sensitive` non-base value the level accepts) with one size replaced. Its class columns
+hold the classes of its sizes, and its `sizes` give every extent. A level takes the labels its
+`size_sweep` names:
+  typical, corner_plain, stress   the plain base row with each value of each axis, at tier S;
+  corner_crossed                  each crossing value with the first `per_crossed_value` entries
+                                  of the interleaved corner list (corner 1 of every axis, then
+                                  corner 2, ...) that its row can take, at tier S;
+  corner_crossed_at_L             the corner_crossed pairs again, at tier L.
+A sweep row that breaks a rule, a level label, an answer_key_needs rule or a numeric domain is not
+emitted. Nor is a row whose cost is outside the cost model's fitted range, or a row at a tier other
+than S above the level's per-case ceiling (as for every case, a ceiling never removes a tier-S
+row). The summary lists each one with its reason. A sweep row whose sizes equal the sizes of its
+own class row is that class row and is not emitted.
+
+Checkable coverage (origin coverage). A row is checkable when no answer_key_needs rule matches it
+and none of its values has answer key "no". Every value whose answer key is not "no" appears in a
+checkable row: for a value that no row holds so, the fewest-change checkable row that holds it is
+added to the last level at tier S. The summary lists a value with no such row, and the values
+whose answer key is "no".
 
 Run: python3 -m sdpa_case_flow_poc.levels --model-dir DIR --out-dir DIR [--seed N]
          [--timings ARCH=CSV ...]
@@ -78,15 +108,41 @@ from .solver import Solver
 
 BASE = "shared"
 TIER_ORDER = ("S", "H", "M", "L", "X")
-ORIGIN_ORDER = ("low-change", "pairwise", "one-at-a-time", "targeted", "real_world")
-HEAD_DIM = {"d1": 1, "d64": 64, "d128": 128, "d192": 192, "d256": 256}
-SIZE_SWEEP_LABELS = (
-    "typical",
-    "corner_plain",
-    "corner_crossed",
-    "corner_crossed_at_L",
-    "stress",
+SWEEP = "size-sweep"
+COVERAGE = "coverage"
+ORIGIN_ORDER = (
+    "low-change",
+    "pairwise",
+    "one-at-a-time",
+    "targeted",
+    "real_world",
+    SWEEP,
+    COVERAGE,
 )
+HEAD_DIM = {"d1": 1, "d64": 64, "d128": 128, "d192": 192, "d256": 256}
+# Size-sweep label: the shape tier its rows start from.
+SIZE_SWEEP_LABELS = {
+    "typical": "S",
+    "corner_plain": "S",
+    "corner_crossed": "S",
+    "corner_crossed_at_L": "L",
+    "stress": "S",
+}
+# Sweep axis: the extent the sizes override sets for it.
+SWEEP_EXTENT = {
+    "seq_q": "S_q",
+    "seq_kv": "S_kv",
+    "head_dim_qk": "D_qk",
+    "head_dim_v": "D_v",
+    "q_heads": "H_q",
+    "batch_size": "B",
+}
+# Sweep axis that the sizes override cannot set: the class value that reaches the key length.
+SWEEP_BY_KEY_LENGTH = {
+    "page_size": "whole_sequence",
+    "window_left": "whole_span",
+    "window_right": "whole_span",
+}
 OUT_CSV = "levels.csv"
 OUT_SUMMARY = "levels-summary.md"
 
@@ -137,6 +193,9 @@ class Recipe:
     sensitive: dict = field(default_factory=dict)
     over_budget: str = "move"
     seeds: list = field(default_factory=list)
+    domains: dict = field(default_factory=dict)
+    sweep: dict = field(default_factory=dict)
+    class_to_value: dict = field(default_factory=dict)
 
 
 def _as_list(x):
@@ -288,6 +347,10 @@ def load_recipe(model: Model, model_dir: Path) -> Recipe:
                     int(table["k_and_v_differ"][hq]["H_v"]),
                 ),
             }
+    sweep = doc.get("size_sweep") or {}
+    domains = doc.get("numeric_domains") or {}
+    if any(spec.get("size_sweep") for spec in doc["levels"]):
+        check_sweep_config(model, sweep, domains, ll["shape_tiers"])
     return Recipe(
         levels=doc["levels"],
         labels=labels,
@@ -303,7 +366,40 @@ def load_recipe(model: Model, model_dir: Path) -> Recipe:
         sensitive=sensitive,
         over_budget=over_budget,
         seeds=ll.get("seeds") or [],
+        domains=domains,
+        sweep=sweep,
+        class_to_value=ctv,
     )
+
+
+def check_sweep_config(model: Model, sweep: dict, domains: dict, tiers: dict) -> None:
+    """Fail on a size_sweep or numeric_domains section the sweep cannot read."""
+    order = sweep.get("axis_order")
+    if not isinstance(order, list) or not order:
+        raise ModelError("size_sweep.axis_order is not a non-empty list")
+    for a in order:
+        if a not in SWEEP_EXTENT and a not in SWEEP_BY_KEY_LENGTH:
+            raise ModelError(f"size_sweep.axis_order: no sweep rule for axis {a}")
+        if a not in model.values or a not in (domains.get("axes") or {}):
+            raise ModelError(
+                f"size_sweep.axis_order: {a} is not a model axis with a domain"
+            )
+    for a, v in SWEEP_BY_KEY_LENGTH.items():
+        if a in order and v not in model.values[a]:
+            raise ModelError(f"size sweep: {a} has no value {v}")
+    corner = sweep.get("corner") or {}
+    for key in ("anchors", "per_axis", "per_crossed_value"):
+        if key not in corner:
+            raise ModelError(f"size_sweep.corner has no `{key}`")
+    if sweep.get("stress", {}).get("tier") not in tiers:
+        raise ModelError("size_sweep.stress.tier is not a shape tier")
+    for t in set(SIZE_SWEEP_LABELS.values()):
+        if t not in tiers:
+            raise ModelError(f"size sweep: shape tier {t} is missing")
+    b = domains.get("boundaries") or {}
+    for key in ("powers_of_two", "multiples_of", "neighbours", "int32_limit"):
+        if key not in b:
+            raise ModelError(f"numeric_domains.boundaries has no `{key}`")
 
 
 def accepts(spec: dict, label: tuple, ignore=()) -> bool:
@@ -537,8 +633,8 @@ def concrete_sizes(row: dict, tier: dict, alibi_heads: dict | None = None) -> di
         "H_v": hv,
         "S_q": sq,
         "S_kv": skv,
-        "D_qk": HEAD_DIM[row["head_dim_qk"]],
-        "D_v": HEAD_DIM[row["head_dim_v"]],
+        "D_qk": tier.get("D_qk", HEAD_DIM[row["head_dim_qk"]]),
+        "D_v": tier.get("D_v", HEAD_DIM[row["head_dim_v"]]),
     }
 
 
@@ -629,6 +725,573 @@ def seed_completions(model: Model, recipe: Recipe) -> list:
     return out
 
 
+# ------------------------------------------------------------------ size sweep
+class SweepReject(Exception):
+    """A size-sweep row that a rule, a level, a ceiling or a numeric domain refuses."""
+
+
+def class_ranges(recipe: Recipe, axis: str) -> dict:
+    """{class: (low, high)} of a sweep axis; high None means no upper end."""
+    dom = recipe.domains["axes"][axis]
+    top = dom["domain"]["max"]
+    out = {}
+    for cls, rng in dom["classes"].items():
+        lo, hi = rng
+        if hi == "max":
+            hi = top if isinstance(top, int) else None
+        if not isinstance(lo, int) or not (hi is None or isinstance(hi, int)):
+            raise ModelError(
+                f"numeric_domains.{axis}.classes.{cls}: not a numeric range"
+            )
+        out[cls] = (lo, hi)
+    return out
+
+
+def class_of(ranges: dict, x: int):
+    for cls, (lo, hi) in ranges.items():
+        if x >= lo and (hi is None or x <= hi):
+            return cls
+    return None
+
+
+def is_boundary(bounds: dict, x: int) -> bool:
+    def base(v):
+        if v <= 0:
+            return False
+        if v == bounds["int32_limit"]:
+            return True
+        if bounds["powers_of_two"] and v & (v - 1) == 0:
+            return True
+        return any(v % m == 0 for m in bounds["multiples_of"])
+
+    return base(x) or any(base(x - n) for n in bounds["neighbours"])
+
+
+def representative_values(recipe: Recipe, axis: str) -> set:
+    """The axis's representative values: every non-stress shape tier and class_to_value."""
+    stress = recipe.sweep["stress"]["tier"]
+    tiers = [t for name, t in recipe.tiers.items() if name != stress]
+    ctv = recipe.class_to_value
+    if axis in ("seq_q", "seq_kv"):
+        out = {t["S"] for t in tiers} | {t.get("S_short", t["S"] // 2) for t in tiers}
+        key = "S_q" if axis == "seq_q" else "S_kv"
+        return out | {int(e[key]) for e in ctv["seq_lengths"]}
+    if axis in ("head_dim_qk", "head_dim_v"):
+        return {int(v) for k, v in ctv["head_dim"].items() if k != "note"}
+    if axis == "q_heads":
+        return {t["H_q"] for t in tiers} | {int(v) for v in ctv["q_heads"].values()}
+    if axis == "batch_size":
+        return {t["B"] for t in tiers} | {int(v) for v in ctv["batch_size"].values()}
+    raise ModelError(f"size sweep: no representative values for {axis}")
+
+
+def stress_extent(recipe: Recipe, axis: str, reps: set):
+    tier = recipe.tiers[recipe.sweep["stress"]["tier"]]
+    key = {"seq_q": "S", "seq_kv": "S", "q_heads": "H_q", "batch_size": "B"}.get(axis)
+    extent = tier.get(key) if key else None
+    return max(reps) if extent is None else max(extent, max(reps))
+
+
+def derive_sweep(recipe: Recipe) -> dict:
+    """{axis: {typical, corner, stress}} for the expressible axes, in axis_order.
+
+    A pure function of numeric_domains, size_sweep, shape_tiers and class_to_value.
+    """
+    corner = recipe.sweep["corner"]
+    edges = [a for a in corner["anchors"] if isinstance(a, int)]
+    if any(
+        a != "representative_values"
+        for a in corner["anchors"]
+        if not isinstance(a, int)
+    ):
+        raise ModelError("size_sweep.corner.anchors: unknown anchor")
+    bounds = recipe.domains["boundaries"]
+    out = {}
+    for axis in recipe.sweep["axis_order"]:
+        if axis not in SWEEP_EXTENT:
+            continue
+        ranges = class_ranges(recipe, axis)
+        reps = {x for x in representative_values(recipe, axis) if class_of(ranges, x)}
+        distance = {}
+        for cls in ranges:
+            own = {x for x in reps if class_of(ranges, x) == cls}
+            anchors = own | {e for e in edges if class_of(ranges, e) == cls}
+            for a in anchors:
+                for x in (a - 1, a, a + 1):
+                    if (
+                        class_of(ranges, x) == cls
+                        and is_boundary(bounds, x)
+                        and x not in reps
+                    ):
+                        distance[x] = min(distance.get(x, abs(x - a)), abs(x - a))
+        ordered = sorted(distance, key=lambda x: (distance[x], x))
+        out[axis] = {
+            "typical": sorted(reps),
+            "corner": ordered[: int(corner["per_axis"])],
+            "stress": stress_extent(recipe, axis, reps),
+        }
+    return out
+
+
+def interleaved_corners(sweep: dict) -> list:
+    """(axis, corner) in the order corner 1 of every axis, then corner 2, ..."""
+    out = []
+    depth = max((len(v["corner"]) for v in sweep.values()), default=0)
+    for i in range(depth):
+        for axis, v in sweep.items():
+            if i < len(v["corner"]):
+                out.append((axis, v["corner"][i]))
+    return out
+
+
+def _sign(x) -> int:
+    return (x > 0) - (x < 0)
+
+
+def head_dim_value(
+    model: Model, recipe: Recipe, axis: str, d: int, other_d: int, other: str
+) -> str:
+    """The head-size value whose class holds d, whose size compares with the other head size's
+    value as d compares with other_d, and whose size is nearest (smaller on a tie)."""
+    table = recipe.class_to_value["head_dim"]
+    ranges = class_ranges(recipe, axis)
+    want = class_of(ranges, d)
+    vals = [
+        v
+        for v in model.values[axis]
+        if v in table
+        and class_of(ranges, table[v]) == want
+        and _sign(table[v] - table[other]) == _sign(d - other_d)
+    ]
+    if not vals:
+        raise SweepReject(
+            f"{axis}: no value of class {want} compares with {other} as {d} with {other_d}"
+        )
+    return min(vals, key=lambda v: (abs(table[v] - d), table[v]))
+
+
+def numeric_problems(recipe: Recipe, row: dict, z: dict) -> list:
+    """Sizes that break a numeric domain or contradict the row's size classes."""
+    out = []
+    dom = recipe.domains["axes"]
+    for key in ("B", "H_q", "H_k", "H_v", "S_q", "S_kv", "D_qk", "D_v"):
+        if z[key] < 1:
+            out.append(f"numeric_domains: {key} {z[key]} is below 1")
+    for axis, key in (
+        ("batch_size", "B"),
+        ("q_heads", "H_q"),
+        ("seq_q", "S_q"),
+        ("seq_kv", "S_kv"),
+    ):
+        got = class_of(class_ranges(recipe, axis), z[key])
+        if got != row[axis]:
+            out.append(
+                f"numeric_domains.{axis}: {key} {z[key]} is class {got}, the row says {row[axis]}"
+            )
+    for axis, key in (("head_dim_qk", "D_qk"), ("head_dim_v", "D_v")):
+        ranges = class_ranges(recipe, axis)
+        table = recipe.class_to_value["head_dim"]
+        if class_of(ranges, z[key]) != class_of(ranges, table[row[axis]]):
+            out.append(
+                f"numeric_domains.{axis}: {key} {z[key]} is not in the class of {row[axis]}"
+            )
+    table = recipe.class_to_value["head_dim"]
+    order = (z["D_qk"] > z["D_v"]) - (z["D_qk"] < z["D_v"])
+    named = (table[row["head_dim_qk"]] > table[row["head_dim_v"]]) - (
+        table[row["head_dim_qk"]] < table[row["head_dim_v"]]
+    )
+    if order != named:
+        out.append(
+            f"head_dim: D_qk {z['D_qk']} and D_v {z['D_v']} compare unlike "
+            f"{row['head_dim_qk']} and {row['head_dim_v']}"
+        )
+    sq, skv = z["S_q"], z["S_kv"]
+    rel = "shorter" if sq < skv else ("longer" if sq > skv else "equal")
+    if rel != row["seq_q_vs_seq_kv"]:
+        out.append(
+            f"seq_q_vs_seq_kv: S_q {sq}, S_kv {skv} is {rel}, the row says {row['seq_q_vs_seq_kv']}"
+        )
+    hq = z["H_q"]
+    must = dom["k_v_heads"]["domain"].get("must_divide")
+    for axis, key in (("k_head_sharing", "H_k"), ("v_head_sharing", "H_v")):
+        h, sharing = z[key], row[axis]
+        if must == "H_q" and hq % h:
+            out.append(f"numeric_domains.k_v_heads: {key} {h} does not divide H_q {hq}")
+        fits = {"mha": h == hq, "mqa": h == 1, "gqa": 2 <= h <= hq - 1}.get(
+            sharing, True
+        )
+        if not fits:
+            out.append(
+                f"numeric_domains.k_v_heads: {axis}={sharing} with {key} {h} and H_q {hq}"
+            )
+    if (row["k_heads_vs_v_heads"] == "equal") != (z["H_k"] == z["H_v"]):
+        out.append(
+            f"k_heads_vs_v_heads={row['k_heads_vs_v_heads']} with H_k {z['H_k']} and H_v {z['H_v']}"
+        )
+    return out
+
+
+def tier_sizes(recipe: Recipe, tier: str) -> dict:
+    return {k: v for k, v in recipe.tiers[tier].items() if k != "why"}
+
+
+def apply_size(
+    model: Model, recipe: Recipe, row: dict, tier: str, axis: str, value: int
+):
+    """(row, sizes, concrete sizes) of `row` at `tier` with the axis's extent set to `value`."""
+    t = tier_sizes(recipe, tier)
+    try:
+        z0 = concrete_sizes(row, t, recipe.alibi_heads)
+    except ModelError as e:
+        raise SweepReject(str(e)) from e
+    new, over = dict(row), {}
+    if axis in ("seq_q", "seq_kv"):
+        sq, skv = (value, z0["S_kv"]) if axis == "seq_q" else (z0["S_q"], value)
+        new["seq_q"] = class_of(class_ranges(recipe, "seq_q"), sq)
+        new["seq_kv"] = class_of(class_ranges(recipe, "seq_kv"), skv)
+        rel = "shorter" if sq < skv else ("longer" if sq > skv else "equal")
+        new["seq_q_vs_seq_kv"] = rel
+        if sq == 1 or skv == 1 or rel == "equal":
+            over["S"] = max(sq, skv)
+        elif rel == "shorter":
+            over["S"], over["S_short"] = skv, sq
+        else:
+            over["S"], over["S_short"] = sq, skv
+    elif axis in ("head_dim_qk", "head_dim_v"):
+        other = "head_dim_v" if axis == "head_dim_qk" else "head_dim_qk"
+        new[axis] = head_dim_value(
+            model, recipe, axis, value, z0[SWEEP_EXTENT[other]], row[other]
+        )
+        over[SWEEP_EXTENT[axis]] = value
+    elif axis in ("q_heads", "batch_size"):
+        new[axis] = class_of(class_ranges(recipe, axis), value)
+        over[SWEEP_EXTENT[axis]] = value
+    else:
+        raise ModelError(f"size sweep: the sizes override cannot set {axis}")
+    sizes = {**t, **over}
+    try:
+        z = concrete_sizes(new, sizes, recipe.alibi_heads)
+    except ModelError as e:
+        raise SweepReject(str(e)) from e
+    if z[SWEEP_EXTENT[axis]] != value:
+        raise SweepReject(
+            f"the row gives {SWEEP_EXTENT[axis]} {z[SWEEP_EXTENT[axis]]}, not {value}"
+        )
+    probs = numeric_problems(recipe, new, z)
+    if probs:
+        raise SweepReject("; ".join(probs))
+    return new, sizes, z
+
+
+def level_problems(model: Model, recipe: Recipe, spec: dict, row: dict) -> list:
+    """Why a row cannot be a case of the level: structure, rules, labels, answer key."""
+    out = [f"structure: {e}" for e in model.structure_errors(row)]
+    out += [f"rule {r}" for r in model.violated_rules(row)]
+    ok = accepted_values(model, recipe, spec)
+    out += [
+        f"held back at {spec['name']}: {a}={row[a]}"
+        for a in model.axes
+        if row[a] is not None and row[a] not in ok[a]
+    ]
+    if spec.get("answerable"):
+        out += [
+            f"answer key {r.id}"
+            for r in recipe.answer_rules
+            if any(all(row[a] in vs for a, vs in c.items()) for c in r.conjs)
+        ]
+    return out
+
+
+def sweep_row(model, recipe, spec, row, tier, axis, value, plain_sizes=True):
+    """(row, sizes) of one sweep row at a level, or SweepReject."""
+    new, sizes, z = apply_size(model, recipe, row, tier, axis, value)
+    if plain_sizes and z == concrete_sizes(
+        new, tier_sizes(recipe, tier), recipe.alibi_heads
+    ):
+        raise SweepReject("its sizes are its class row's sizes")
+    probs = level_problems(model, recipe, spec, new)
+    ceiling = spec.get("ceiling_mflop")
+    mflop = work_flops(z) / 1e6
+    fitted = recipe.cost["fitted_range"]
+    if mflop > float(fitted["max_mflop"]) or tensor_mb(new, z) > float(
+        fitted["max_tensor_mb"]
+    ):
+        probs.append(
+            f"{mflop:.0f} MFLOP, {tensor_mb(new, z):.0f} MB is outside the cost model's fitted range"
+        )
+    if tier != "S" and ceiling is not None and mflop > ceiling:
+        probs.append(
+            f"{work_flops(z) / 1e6:.0f} MFLOP is above the {spec['name']} ceiling {ceiling}"
+        )
+    if probs:
+        raise SweepReject("; ".join(probs))
+    return new, sizes
+
+
+@dataclass
+class SweepReport:
+    values: dict = field(default_factory=dict)
+    emitted: Counter = field(default_factory=Counter)
+    rejected: list = field(default_factory=list)
+    crossed: dict = field(default_factory=dict)
+    not_crossed: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
+    merged: list = field(default_factory=list)
+    coverage: dict = field(default_factory=dict)
+    key_length: list = field(default_factory=list)
+
+
+def sweep_rows(model: Model, recipe: Recipe):
+    """Return ([(level index, row, detail, tier, sizes)], SweepReport) for every level's size_sweep."""
+    base = model.base_cases[BASE]
+    names = [s["name"] for s in recipe.levels]
+    placed = {}
+    for li, spec in enumerate(recipe.levels):
+        for label in spec.get("size_sweep") or []:
+            placed.setdefault(label, li)
+    rep = SweepReport()
+    out = []
+    if not placed:
+        return out, rep
+    sweep = derive_sweep(recipe)
+    rep.values = sweep
+    order = interleaved_corners(sweep)
+    k_cross = int(recipe.sweep["corner"]["per_crossed_value"])
+
+    def emit(label, li, row, axis, value, tier, crossed=None, plain_sizes=True):
+        spec = recipe.levels[li]
+        what = f"{axis}={value}" + (
+            f" with {crossed[0]}={crossed[1]}" if crossed else ""
+        )
+        try:
+            new, sizes = sweep_row(
+                model, recipe, spec, row, tier, axis, value, plain_sizes
+            )
+        except SweepReject as e:
+            rep.rejected.append((label, names[li], what, str(e)))
+            return False
+        out.append((li, new, f"{label} {what}", tier, sizes, label))
+        return True
+
+    for label in ("typical", "corner_plain", "stress"):
+        if label not in placed:
+            continue
+        li = placed[label]
+        tier = SIZE_SWEEP_LABELS[label]
+        for axis, v in sweep.items():
+            values = {
+                "typical": v["typical"],
+                "corner_plain": v["corner"],
+                "stress": [v["stress"]],
+            }[label]
+            for value in values:
+                emit(label, li, base, axis, value, tier)
+    if "stress" in placed:
+        li = placed["stress"]
+        spec = recipe.levels[li]
+        x = recipe.tiers[recipe.sweep["stress"]["tier"]]["S"]
+        lc = LowChange(
+            model,
+            Solver(
+                model, rules=list(model.rules) + level_rules(model, recipe, spec)[0]
+            ),
+            base,
+            len(model.axes),
+        )
+        for axis in recipe.sweep["axis_order"]:
+            if axis not in SWEEP_BY_KEY_LENGTH:
+                continue
+            got = lc.complete({axis: SWEEP_BY_KEY_LENGTH[axis]})
+            if got is None:
+                rep.rejected.append(
+                    (
+                        "stress",
+                        names[li],
+                        f"{axis}={SWEEP_BY_KEY_LENGTH[axis]}",
+                        "no valid row holds it",
+                    )
+                )
+                continue
+            rep.key_length.append(axis)
+            emit(
+                "stress",
+                li,
+                got[0],
+                "seq_kv",
+                x,
+                "S",
+                crossed=(axis, SWEEP_BY_KEY_LENGTH[axis]),
+                plain_sizes=False,
+            )
+    crossings = []
+    if "corner_crossed" in placed:
+        li = placed["corner_crossed"]
+        spec = recipe.levels[li]
+        extra, _ = level_rules(model, recipe, spec)
+        lc = LowChange(
+            model, Solver(model, rules=list(model.rules) + extra), base, len(model.axes)
+        )
+        ok = accepted_values(model, recipe, spec)
+        for axis in model.axes:
+            if not recipe.sensitive[axis]:
+                continue
+            for value in model.values[axis]:
+                if value == base[axis]:
+                    continue
+                if value not in ok[axis]:
+                    rep.not_crossed.append(
+                        (f"{axis}={value}", f"held back at {spec['name']}")
+                    )
+                    continue
+                got = lc.complete({axis: value})
+                if got is None:
+                    rep.not_crossed.append(
+                        (f"{axis}={value}", f"no row of {spec['name']} holds it")
+                    )
+                    continue
+                taken = []
+                for xaxis, corner in order:
+                    if len(taken) == k_cross:
+                        break
+                    if xaxis == axis:
+                        continue
+                    try:
+                        new, _ = sweep_row(
+                            model,
+                            recipe,
+                            spec,
+                            got[0],
+                            "S",
+                            xaxis,
+                            corner,
+                            plain_sizes=False,
+                        )
+                    except SweepReject as e:
+                        rep.skipped.append(
+                            (f"{axis}={value}", f"{xaxis}={corner}", str(e))
+                        )
+                        continue
+                    if new[axis] != value:
+                        rep.skipped.append(
+                            (
+                                f"{axis}={value}",
+                                f"{xaxis}={corner}",
+                                f"it sets {axis}={new[axis]}",
+                            )
+                        )
+                        continue
+                    if emit(
+                        "corner_crossed",
+                        li,
+                        got[0],
+                        xaxis,
+                        corner,
+                        "S",
+                        crossed=(axis, value),
+                        plain_sizes=False,
+                    ):
+                        taken.append((xaxis, corner))
+                        crossings.append((got[0], axis, value, xaxis, corner))
+                rep.crossed[f"{axis}={value}"] = taken
+                if len(taken) < k_cross:
+                    rep.not_crossed.append(
+                        (
+                            f"{axis}={value}",
+                            f"{len(taken)} of {k_cross} corners fit its row",
+                        )
+                    )
+    if "corner_crossed_at_L" in placed:
+        li = placed["corner_crossed_at_L"]
+        for row, axis, value, xaxis, corner in crossings:
+            emit(
+                "corner_crossed_at_L",
+                li,
+                row,
+                xaxis,
+                corner,
+                SIZE_SWEEP_LABELS["corner_crossed_at_L"],
+                crossed=(axis, value),
+                plain_sizes=False,
+            )
+    return out, rep
+
+
+# ------------------------------------------------------------------ checkable coverage
+def answer_rule_ids(recipe: Recipe, row: dict) -> list:
+    return [
+        r.id
+        for r in recipe.answer_rules
+        if any(all(row[a] in vs for a, vs in c.items()) for c in r.conjs)
+    ]
+
+
+def checkable(model: Model, recipe: Recipe, row: dict) -> bool:
+    if answer_rule_ids(recipe, row):
+        return False
+    return all(
+        row[a] is None or recipe.labels[a][row[a]][2] != "no" for a in model.axes
+    )
+
+
+def checkable_rules(model: Model, recipe: Recipe) -> list:
+    """The answer_key_needs rules plus one rule per axis that forbids its answer-key-"no" values."""
+    out = list(recipe.answer_rules)
+    for a in model.axes:
+        no = frozenset(v for v in model.values[a] if recipe.labels[a][v][2] == "no")
+        if no:
+            out.append(
+                Rule(
+                    f"ANSWER-KEY-NO-{a}",
+                    "answer_key",
+                    "exclusion",
+                    ({a: no},),
+                    "model.yaml:labels",
+                )
+            )
+    return out
+
+
+def coverage_rows(model: Model, recipe: Recipe, rows: list):
+    """Return ([(row, detail)], blocked [(value, blockers)], no-values) for checkable coverage."""
+    base = model.base_cases[BASE]
+    held = set()
+    for row in rows:
+        if checkable(model, recipe, row):
+            held.update((a, row[a]) for a in model.axes if row[a] is not None)
+    extra = checkable_rules(model, recipe)
+    lc = LowChange(
+        model, Solver(model, rules=list(model.rules) + extra), base, len(model.axes)
+    )
+    added, blocked, no_values = [], [], []
+    for a in model.axes:
+        for v in model.values[a]:
+            if recipe.labels[a][v][2] == "no":
+                no_values.append(f"{a}={v}")
+                continue
+            if (a, v) in held:
+                continue
+            got = lc.complete({a: v})
+            if got is not None:
+                added.append((got[0], f"{a}={v}"))
+                held.update((x, got[0][x]) for x in model.axes if got[0][x] is not None)
+                continue
+            if not Solver(model).feasible({a: v}):
+                blocked.append((f"{a}={v}", ["no valid row (rules.yaml)"]))
+                continue
+            why = []
+            for r in extra:
+                rest = [x for x in extra if x is not r]
+                if LowChange(
+                    model,
+                    Solver(model, rules=list(model.rules) + rest),
+                    base,
+                    len(model.axes),
+                ).feasible({a: v}):
+                    why.append(r.id)
+            blocked.append((f"{a}={v}", why or ["several answer-key rules together"]))
+    return added, blocked, no_values
+
+
 # ------------------------------------------------------------------ assignment
 def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
     base_solver = Solver(model)
@@ -638,7 +1301,8 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
     covered: set = set()
     stats = []
     notes = []
-    targeted_done = real_world_done = False
+    real_world_done = False
+    pending_targeted = None
     seed_rows = seed_completions(model, recipe)
 
     def add_srow(row, origin, detail, li, fixed_tier=None, sizes=None):
@@ -747,18 +1411,32 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
             for meta, r in rows:
                 n_oat += add_srow(r, "one-at-a-time", meta["varied"], li)
         n_tg = 0
-        if spec.get("targeted") and not targeted_done:
-            targeted_done = True
-            for t in recipe.targeted:
-                r = base_solver.complete(dict(t["changes"]), prefs=base)
-                if r is None:
-                    notes.append(
-                        f"targeted {t['id']}: no valid row holds its changes; skipped"
-                    )
+        if spec.get("targeted"):
+            if pending_targeted is None:
+                pending_targeted = []
+                for t in recipe.targeted:
+                    r = base_solver.complete(dict(t["changes"]), prefs=base)
+                    if r is None:
+                        notes.append(
+                            f"targeted {t['id']}: no valid row holds its changes; skipped"
+                        )
+                        continue
+                    pending_targeted.append((t, r))
+            waiting = []
+            for t, r in pending_targeted:
+                blocking = answer_rule_ids(recipe, r)
+                if spec.get("answerable") and blocking:
+                    waiting.append((t, r))
                     continue
+                if blocking:
+                    notes.append(
+                        f"targeted {t['id']}: answer_key_needs {', '.join(blocking)} matches its row; "
+                        f"it runs at {spec['name']}, the first targeted level that is not answerable"
+                    )
                 n_tg += add_srow(
                     r, "targeted", t["id"], li, t.get("tier", "S"), t.get("sizes")
                 )
+            pending_targeted = waiting
         n_rw = 0
         if spec.get("real_world") and not real_world_done:
             real_world_done = True
@@ -792,6 +1470,8 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
             {
                 "level": spec["name"],
                 "pairs": len(pairs),
+                "new_sweep_rows": 0,
+                "new_coverage_rows": 0,
                 "warm_covered": len(pairs) - len(remaining),
                 "super_values": {
                     g: len({f[1] for p in pairs for f in p if f[0] == g})
@@ -808,6 +1488,30 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
                 "banned_values": len(banned),
             }
         )
+
+    for t, _ in pending_targeted or []:
+        notes.append(
+            f"targeted {t['id']}: an answer_key_needs rule matches its row and no later "
+            "targeted level is not answerable; skipped"
+        )
+
+    sweep, report = sweep_rows(model, recipe)
+    for li, row, detail, tier, sizes, label in sweep:
+        if add_srow(row, SWEEP, detail, li, tier, sizes):
+            report.emitted[label] += 1
+            stats[li]["new_sweep_rows"] += 1
+        else:
+            report.merged.append(detail)
+
+    last = len(recipe.levels) - 1
+    added, blocked, no_values = coverage_rows(model, recipe, [sr.row for sr in srows])
+    for row, detail in added:
+        stats[last]["new_coverage_rows"] += add_srow(row, COVERAGE, detail, last, "S")
+    report.coverage = {
+        "added": [d for _, d in added],
+        "blocked": blocked,
+        "no": no_values,
+    }
 
     cases = []
     seen = set()
@@ -850,9 +1554,15 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
             raise AssertionError(
                 f"{sr.origin} {sr.detail}: its tier {sr.fixed_tier} fits no level"
             )
+    keys = Counter(case_key(model, c) for c in cases)
+    twice = [k for k, n in keys.items() if n > 1]
+    if twice:
+        raise AssertionError(
+            f"{len(twice)} case keys belong to more than one case: {twice[:5]}"
+        )
     for li, trim in restrict_tiers(model, recipe, cases).items():
         stats[li]["tier_trim"] = trim
-    return srows, cases, stats, notes
+    return srows, cases, stats, notes, report
 
 
 def size_sensitive(model: Model, recipe: Recipe, row: dict) -> bool:
@@ -888,7 +1598,7 @@ def restrict_tiers(model: Model, recipe: Recipe, cases: list) -> dict:
                 f"level {spec['name']}: the last level cannot hand cases up"
             )
         name = spec["name"]
-        mine = [c for c in cases if c.level == li]
+        mine = [c for c in cases if c.level == li and c.srow.origin != SWEEP]
         allowed = [c for c in mine if tier_allowed(model, recipe, spec, c)]
         by_row: dict = {}
         for c in mine:
@@ -1049,7 +1759,11 @@ def fill_budgets(recipe: Recipe, cases: list) -> list:
             "over_after": 0.0,
         }
         if budget is not None and total > budget * 60.0 and li + 1 < n:
-            movable = [c for c in cases if c.level == li and c.tier != "S"]
+            movable = [
+                c
+                for c in cases
+                if c.level == li and c.tier != "S" and c.srow.origin != SWEEP
+            ]
             movable.sort(key=lambda c: (-TIER_ORDER.index(c.tier), -c.seconds))
             report_only = recipe.over_budget == "report"
             entry["over_before"] = total - budget * 60.0
@@ -1140,6 +1854,7 @@ def fill_down(model: Model, recipe: Recipe, cases: list) -> list:
             c
             for c in cases
             if c.level > li
+            and c.srow.origin != SWEEP
             and c.tier in spec["shapes"]
             and c.cost_source != "UNMEASURED"
             and (ceiling is None or c.mflop <= ceiling)
@@ -1252,6 +1967,7 @@ def summary(
     seed: int,
     csv_sha: str,
     found: dict,
+    report: SweepReport | None = None,
 ) -> str:
     names = [s["name"] for s in recipe.levels]
     cost, fill = recipe.cost, recipe.fill or {}
@@ -1473,7 +2189,112 @@ def summary(
             + "."
         )
     out += [f"- {n}" for n in notes]
+    if report is not None:
+        out += sweep_summary(recipe, cases, report)
     return "\n".join(out) + "\n"
+
+
+def sweep_summary(recipe: Recipe, cases, report: SweepReport) -> list:
+    names = [s["name"] for s in recipe.levels]
+    lo, hi = (recipe.sweep.get("target_rows") or [None, None])[:2]
+    total = sum(report.emitted.values())
+    out = [
+        "",
+        "## Size sweep",
+        "",
+        "Sweep values per axis (from numeric_domains, size_sweep, shape_tiers and class_to_value):",
+        "",
+        "| Axis | typical | corner | stress |",
+        "|---|---|---|---|",
+    ]
+    for axis, v in report.values.items():
+        out.append(
+            f"| {axis} | {' '.join(map(str, v['typical']))} | {' '.join(map(str, v['corner']))} | {v['stress']} |"
+        )
+    for axis in report.key_length:
+        out.append(
+            f"| {axis} | - | - | {SWEEP_BY_KEY_LENGTH[axis]} at the stress tier's key length |"
+        )
+    out += [
+        "",
+        "Rows per label (setting rows; a row equal to an earlier sweep row is merged into it):",
+        "",
+        "| Label | Level | Rows |",
+        "|---|---|---|",
+    ]
+    for label in SIZE_SWEEP_LABELS:
+        lv = next(
+            (s["name"] for s in recipe.levels if label in (s.get("size_sweep") or [])),
+            "-",
+        )
+        out.append(f"| {label} | {lv} | {report.emitted.get(label, 0)} |")
+    out.append(f"| total | | {total} |")
+    target = (
+        ""
+        if lo is None
+        else f" The target is {lo} to {hi} rows; the total is "
+        + ("inside it." if lo <= total <= hi else "OUTSIDE it.")
+    )
+    sweep_cases = [c for c in cases if c.srow.origin == SWEEP]
+    per_level = Counter(names[c.level] for c in sweep_cases)
+    secs = Counter()
+    for c in sweep_cases:
+        secs[names[c.level]] += c.seconds
+    out += [
+        "",
+        f"Sweep cases per level: "
+        + ", ".join(
+            f"{n} {per_level.get(n, 0)} ({secs.get(n, 0.0):.1f} s)" for n in names
+        )
+        + f".{target}",
+        f"Merged into an earlier row: {len(report.merged)}"
+        + (f" ({'; '.join(report.merged)})" if report.merged else "")
+        + ".",
+        "",
+        "Crossed values and the corners each one takes:",
+        "",
+    ]
+    for value, taken in report.crossed.items():
+        out.append(f"- {value}: " + (", ".join(f"{a}={c}" for a, c in taken) or "none"))
+    out += ["", "Values not crossed, or crossed with fewer corners:", ""]
+    out += [f"- {v}: {why}" for v, why in report.not_crossed] or ["- none"]
+    out += [
+        "",
+        "Rejected sweep rows (label, level, row, reason):",
+        "",
+    ]
+    out += [
+        f"- {label}, {lv}, {what}: {why}" for label, lv, what, why in report.rejected
+    ] or ["- none"]
+    out += [
+        "",
+        f"Corners a crossing row could not take, so the next corner was tried: {len(report.skipped)}.",
+        "",
+    ]
+    out += [f"- {v} x {c}: {why}" for v, c, why in report.skipped]
+    cov = report.coverage
+    out += [
+        "",
+        "## Checkable coverage",
+        "",
+        'Every value whose answer key is not "no" is in a checkable row. Rows added for it '
+        f"(origin {COVERAGE}, last level, tier S): "
+        + (", ".join(cov.get("added", [])) or "none")
+        + ".",
+        "Values with no checkable row: "
+        + (
+            "; ".join(
+                f"{v} (blocked by {', '.join(why)})"
+                for v, why in cov.get("blocked", [])
+            )
+            or "none"
+        )
+        + ".",
+        'Values whose answer key is "no" (never in a checkable row): '
+        + (", ".join(cov.get("no", [])) or "none")
+        + ".",
+    ]
+    return out
 
 
 def parse_args(argv):
@@ -1500,7 +2321,7 @@ def main(argv=None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     model = load_model(args.model_dir)
     recipe = load_recipe(model, args.model_dir)
-    srows, cases, stats, notes = assign(
+    srows, cases, stats, notes, report = assign(
         model, recipe, args.seed, candidates=args.candidates
     )
     files = []
@@ -1526,6 +2347,7 @@ def main(argv=None) -> int:
         args.seed,
         hashlib.sha256(data).hexdigest(),
         found,
+        report,
     )
     (args.out_dir / OUT_SUMMARY).write_text(text, encoding="utf-8")
     for li, s in enumerate(recipe.levels):

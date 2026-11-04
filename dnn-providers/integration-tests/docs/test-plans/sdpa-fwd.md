@@ -249,12 +249,18 @@ alignment".
 
 - **Targeted cases** (`level_labels.targeted`, X2 to X10): the base case plus a
   few changes, each aimed at one known hazard. Example: X6b, "a scale tensor may
-  be ignored (scale 1.0 used)".
+  be ignored (scale 1.0 used)". A targeted case that the references cannot check
+  (an answer-key rule matches its row) goes to full. X3c is such a case.
 - **Real-world cases** (`level_labels.real_world`, 11 entries): settings of
   public models, for example Llama 3 8B decode and Mistral 7B sliding window.
 - **Seeds** (`level_labels.seeds`, 15 entries): combinations that public
   defect reports or serving workloads showed to matter. Example: S1, Stats with
   ragged queries over a paged GQA decode.
+- **Coverage rows** (origin `coverage`): every value whose answer key is not
+  "no" is in a row that the references can check. If no other row holds a value
+  that way, the generator adds the checkable row with the fewest changes that
+  holds it, in full at shape tier S. The levels summary lists each added row,
+  and each value that no checkable row can hold.
 
 ## 5. The rules file
 
@@ -359,8 +365,20 @@ in `levels:`). quick takes the typical sizes, which are most likely to pass.
 standard takes the corner sizes, which are most likely to find a defect: on the
 plain case, and crossed with the settings whose `size_sensitive` label is
 "yes". comprehensive takes standard's crossings again at shape tier L. full
-takes the stress sizes of shape tier X. The model holds the rule
-(`size_sweep`); the generator does not make sweep rows yet.
+takes the stress sizes of shape tier X.
+
+The generator derives the sweep sizes from `numeric_domains`, `size_sweep`,
+the shape tiers and `class_to_value`. Each size is one row (origin
+`size-sweep`): the plain row, or for a crossing the row with the fewest changes
+that holds the crossed value, with one size changed. The row starts from the
+sizes of shape tier S (tier L for comprehensive), and its class columns follow
+its sizes. The `sizes` column gives every size. The levels summary lists the
+derived sizes per axis, the rows per label, and every row the generator did
+not make, with the reason (a rule, a label, an answer-key rule, a numeric
+domain, the cost model's fitted range, or a ceiling above tier S). The sizes
+override sets the batch, the head counts, the sequence lengths and the head
+sizes. Page size and the window bounds get only a stress row: the class value
+that reaches the key length, at the key length of shape tier X.
 
 The base value of each axis is always allowed. A required child axis whose
 values all have `changes_numbers` "no" (for example `max_seq_len_kv` under
@@ -407,10 +425,10 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,599 | 1,599 | 65.6 | 53.0 | 21.9 % |
-| standard | 9,004 | 10,603 | 557.4 | 419.2 | 31.0 % |
-| comprehensive | 4,208 | 14,811 | 2,156.7 | 1,557.9 | 59.9 % |
-| full | 7,181 | 21,992 | 5,327.8 | 3,825.8 | — |
+| quick | 1,612 | 1,612 | 66.4 | 53.6 | 22.1 % |
+| standard | 9,206 | 10,818 | 568.0 | 427.1 | 31.6 % |
+| comprehensive | 4,377 | 15,195 | 2,207.3 | 1,594.2 | 61.3 % |
+| full | 7,177 | 22,372 | 5,394.0 | 3,873.1 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
@@ -441,7 +459,7 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 21,992 rows. It has no quoted fields. A `-`
+`levels.csv` has one row per case: 22,372 rows. It has no quoted fields. A `-`
 means that a child axis is not active in that row. Each row has 93 columns: 13
 case columns, then 80 axis columns.
 
@@ -452,8 +470,8 @@ case columns, then 80 axis columns.
 | `case_id` | `lv-NNNN`, the row number. A change to the model can shift it. Do not use it as a key. |
 | `level` | The tier: `quick`, `standard`, `comprehensive` or `full`. |
 | `shape_tier` | `S`, `H`, `M`, `L` or `X`. |
-| `origin` | `low-change`, `pairwise` (packed), `one-at-a-time`, `targeted` or `real_world`. |
-| `detail` | For low-change rows: the number of changes. For other rows: the id of the targeted case, real-world case or seed. |
+| `origin` | `low-change`, `pairwise` (packed), `one-at-a-time`, `targeted`, `real_world`, `size-sweep` or `coverage`. |
+| `detail` | For low-change rows: the number of changes. For size-sweep rows: the label, the size and the crossed value. For coverage rows: the value. For other rows: the id of the targeted case, real-world case or seed. |
 | `filled_from` | Empty, or the tier that the recipe gave the case before a fill pulled it down. |
 | `est_seconds` | The time of the case on gfx942. |
 | `cost_source` | `measured`, `modelled` or `UNMEASURED` (outside the range of the fitted estimate). |
@@ -723,9 +741,8 @@ caller-supplied dropout mask. Rows with such a setting are excluded
   They are rows of the generated CSV, but no bundle holds them.
 - The rejection probes and the API-path variants in `injections.yaml` are not
   bundles. They belong to a rejection suite.
-- The model holds the numeric domains and the size-sweep rule, but the
-  generator does not make size-sweep rows (sizes that do not fit tile edges)
-  yet.
+- The sizes override cannot set the page size or the window bounds, so the
+  size sweep gives them no typical or corner sizes.
 - The suite is expected to read the CSV directly in a later step. The bundles
   under `SdpaFwdPlan` will then be removed.
 

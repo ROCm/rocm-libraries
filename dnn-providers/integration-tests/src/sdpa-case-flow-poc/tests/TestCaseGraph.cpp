@@ -32,7 +32,8 @@ constexpr const char* CLASS_VALUES_JSON = R"json({
   "head_dim": {"d64": 64, "d128": 128},
   "dtype_differs": {"by_dtype_q": {"bf16": "fp8_e4m3"},
                     "by_arch": {"gfx942": {"fp8_e4m3": "fp8_e4m3_fnuz"}}},
-  "dim_order": {"bhsd": ["B", "H", "S", "D"], "bshd": ["B", "S", "H", "D"]},
+  "dim_order": {"bhsd": ["B", "H", "S", "D"], "bshd": ["B", "S", "H", "D"],
+                "bsdh": ["B", "S", "D", "H"]},
   "scale_value": {"inverse_sqrt_d": ["1/sqrt(head_dim_qk)"]},
   "dropout_probability": {"zero": 0.0},
   "dropout_seed_offset": {"seed": 1234, "offset": 0},
@@ -163,6 +164,21 @@ const Contents& contentsOf(const BuiltCase& built, const std::string& name)
 std::vector<int64_t> integersOf(const BuiltCase& built, const std::string& name)
 {
     return std::get<std::vector<int64_t>>(contentsOf(built, name).values);
+}
+
+std::vector<int64_t> stridesOf(const BuiltCase& built, const std::string& name)
+{
+    return built.graph->getTensorsByName().at(name)->get_stride();
+}
+
+// V is a view into K, or K a view into Q; the view's layout values are `inherited`.
+Row viewRow(const std::string& view)
+{
+    auto row = baseRow();
+    row["tensor_overlap"] = "inputs_overlap";
+    row["strides_" + view] = "inherited";
+    row["dim_order_" + view] = "inherited";
+    return row;
 }
 
 std::vector<int64_t> scaled(std::vector<int64_t> tokens, int64_t stride)
@@ -508,4 +524,82 @@ TEST(TestCaseGraph, ClassValuesRejectAnUnknownLengthTerm)
     const std::string term = "\"divide\": 2";
     text.replace(text.find(term), term.size(), "\"halve\": 2");
     EXPECT_THROW(sdpa_case_flow::parseClassValues(text), sdpa_case_flow::ClassValuesError);
+}
+
+TEST(TestCaseGraph, ViewOfKReadsThroughKStrides)
+{
+    auto z = sizes(2, 32, 64);
+    z.dqk = 192;
+    const auto built = build(viewRow("v"), z);
+    // K is packed bhsd with D 192, so a V row of 128 elements starts 192 elements after the last.
+    EXPECT_EQ(stridesOf(built, "v"), (std::vector<int64_t>{8 * 64 * 192, 64 * 192, 192, 1}));
+    EXPECT_EQ(stridesOf(built, "v"), stridesOf(built, "k"));
+    EXPECT_NE(built.realised.find("v_view_of=k"), std::string::npos) << built.realised;
+    EXPECT_EQ(built.realised.find("view_exceeds_owner"), std::string::npos) << built.realised;
+}
+
+TEST(TestCaseGraph, ViewOfQReadsThroughQStrides)
+{
+    auto row = viewRow("k");
+    row["dim_order_q"] = "bshd";
+    const auto built = build(row, sizes(2, 64, 32));
+    // Q is packed bshd with S_q 64; K, with S_kv 32, takes Q's strides.
+    EXPECT_EQ(stridesOf(built, "k"), (std::vector<int64_t>{64 * 8 * 128, 128, 8 * 128, 1}));
+    EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
+    EXPECT_NE(built.realised.find("k_view_of=q"), std::string::npos) << built.realised;
+}
+
+TEST(TestCaseGraph, ViewLargerThanItsOwnerIsMarked)
+{
+    auto row = viewRow("k");
+    row["dim_order_q"] = "bshd";
+    const auto built = build(row, sizes(2, 32, 64));
+    EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
+    EXPECT_NE(built.realised.find("k_view_exceeds_owner"), std::string::npos) << built.realised;
+}
+
+TEST(TestCaseGraph, OnlyKAndVCanBeViews)
+{
+    auto row = viewRow("v");
+    row["strides_v"] = "packed";
+    row["dim_order_v"] = "bhsd";
+    row["strides_q"] = "inherited";
+    row["dim_order_q"] = "inherited";
+    EXPECT_THROW(build(row, sizes(2, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, ViewOwnerIsNotAView)
+{
+    auto row = viewRow("v");
+    row["strides_k"] = "inherited";
+    row["dim_order_k"] = "inherited";
+    EXPECT_THROW(build(row, sizes(2, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, ViewNeedsInputsOverlap)
+{
+    auto row = viewRow("v");
+    row["tensor_overlap"] = "separate";
+    EXPECT_THROW(build(row, sizes(2, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, ViewInheritsOrderAndStridesTogether)
+{
+    auto row = viewRow("v");
+    row["dim_order_v"] = "bhsd";
+    EXPECT_THROW(build(row, sizes(2, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, HeadDimStrideDoublesTheHeadDimAndOuterStrides)
+{
+    auto row = baseRow();
+    row["strides_q"] = "head_dim_strided";
+    const auto bhsd = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(stridesOf(bhsd, "q"), (std::vector<int64_t>{2 * 8 * 64 * 128, 2 * 64 * 128, 256, 2}));
+
+    // With the heads innermost, the heads keep stride 1 and D, S and B double.
+    row["dim_order_q"] = "bsdh";
+    const auto bsdh = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(stridesOf(bsdh, "q"),
+              (std::vector<int64_t>{2 * 64 * 128 * 8, 1, 2 * 128 * 8, 2 * 8}));
 }

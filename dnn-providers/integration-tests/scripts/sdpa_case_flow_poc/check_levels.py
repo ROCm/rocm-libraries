@@ -8,12 +8,13 @@ For each level of the `levels` recipe in model.yaml:
             accept (the shared base value is always accepted; a child setting none of whose values
             passes `changes_numbers` is not held to that label); targeted cases, real-world cases
             and cases filled down from a higher level (`filled_from` set) are exempt.
-  changes   with `max_changes: N`, every case of the level except targeted and real-world cases
-            changes at most N settings from the shared base (a setting counts when it is set in
-            both rows with different values). With `max_changes: {start: N, escalate: true}`, a
-            filled case changes at most N settings, and every other case with more than N changes
-            (targeted and real-world cases aside, and rows a lower level already holds) holds a pair
-            of the level whose fewest possible changes equal the case's changes.
+  changes   with `max_changes: N`, every case of the level except targeted, real-world,
+            size-sweep and coverage cases changes at most N settings from the shared base (a
+            setting counts when it is set in both rows with different values). With
+            `max_changes: {start: N, escalate: true}`, a filled case changes at most N settings,
+            and every other case with more than N changes (those four origins aside, and rows a
+            lower level already holds) holds a pair of the level whose fewest possible changes
+            equal the case's changes.
   fill      a filled case runs at one of the level's shapes, is within its per-case ceiling and is
             not UNMEASURED; when the level holds filled cases, its cumulative est_seconds plus
             `level_labels.fill.overhead_s` is within headroom x budget.
@@ -30,7 +31,8 @@ For each level of the `levels` recipe in model.yaml:
   tiers     with `larger_tiers: size_sensitive`, every case of the level at a tier other than S
             changes from the shared base a setting whose `size_sensitive` label is "yes". With
             `tiers_per_row: one`, every settings row with a case at the level has exactly one case
-            there. With `tiers_per_value: [T, ...]`, every value held by a case up to the level has
+            there (size-sweep cases aside: each has its own sizes). With
+            `tiers_per_value: [T, ...]`, every value held by a case up to the level has
             a case at T up to the level, unless no case in the file at T could be one of the level's
             own: within its shapes and ceiling, every value accepted by its labels (and, with
             `answerable`, no answer_key_needs combination), and size-sensitive under `larger_tiers`.
@@ -58,6 +60,8 @@ def level_groups(lv: dict) -> dict:
 
 
 MAX_LISTED = 20
+# Origins whose rows the change limit does not apply to.
+NOT_PAIRWISE = ("targeted", "real_world", "size-sweep", "coverage")
 BASE = "shared"
 
 
@@ -217,10 +221,7 @@ def main(argv=None) -> int:
         limit, escalate = (None, False) if lim is None else lim
         if limit is not None:
             for cid, meta, row in cases:
-                if meta["level"] == lv["name"] and meta["origin"] not in (
-                    "targeted",
-                    "real_world",
-                ):
+                if meta["level"] == lv["name"] and meta["origin"] not in NOT_PAIRWISE:
                     n = change_count(spec, base, row, groups)
                     if n > limit and (not escalate or meta.get("filled_from")):
                         problems.append(
@@ -259,6 +260,8 @@ def main(argv=None) -> int:
         if lv.get("tiers_per_row") == "one":
             per_row = {}
             for cid, meta, row in here:
+                if meta["origin"] == "size-sweep":
+                    continue
                 per_row.setdefault(tuple(row[a] for a in spec.axes), []).append(cid)
             many = [ids for ids in per_row.values() if len(ids) > 1]
             problems += [
@@ -344,7 +347,7 @@ def main(argv=None) -> int:
                 for p in row_pairs(spec, row, groups):
                     if n < covered.get(p, n + 1):
                         covered[p] = n
-            if limit is not None and meta["origin"] not in ("targeted", "real_world"):
+            if limit is not None and meta["origin"] not in NOT_PAIRWISE:
                 most = max(most, n)
         combos = ""
         for gid in groups:
@@ -436,7 +439,7 @@ def main(argv=None) -> int:
                 (cid, meta, row)
                 for cid, meta, row in cases
                 if meta["level"] == lv["name"]
-                and meta["origin"] not in ("targeted", "real_world")
+                and meta["origin"] not in NOT_PAIRWISE
                 and tuple(row[a] for a in spec.axes) not in lower
                 and change_count(spec, base, row, groups) > limit
             ]

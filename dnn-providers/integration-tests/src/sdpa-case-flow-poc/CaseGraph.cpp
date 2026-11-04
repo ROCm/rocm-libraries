@@ -250,12 +250,24 @@ Dims packedStrides(const Dims& dims)
     return strides;
 }
 
-// Logical dims are always [B, H, S, D]; `physical` lists them outermost first.
+// Logical dims are always [B, H, S, D]; `physical` lists them outermost first. A view
+// (`inherited`) takes its owner's strides, one per dim, and has no order of its own.
 Dims stridesFor(const Dims& dims,
                 const std::vector<size_t>& physical,
                 const std::string& strideAxis,
-                const std::string& strideClass)
+                const std::string& strideClass,
+                const Dims* ownerStrides = nullptr)
 {
+    if(strideClass == "inherited")
+    {
+        if(ownerStrides == nullptr || ownerStrides->size() != dims.size())
+        {
+            fail(strideAxis + "=inherited needs an owner tensor with " + std::to_string(dims.size())
+                 + " strides");
+        }
+        return *ownerStrides;
+    }
+
     Dims extents = dims;
     if(strideClass == "non_contiguous_view")
     {
@@ -283,6 +295,19 @@ Dims stridesFor(const Dims& dims,
     if(strideClass == "non_contiguous_view")
     {
         strides[1] *= 2;
+        return strides;
+    }
+    if(strideClass == "head_dim_strided")
+    {
+        // D and every dimension outside it get twice their packed stride.
+        for(const size_t dim : physical)
+        {
+            strides[dim] *= 2;
+            if(dim == 3)
+            {
+                break;
+            }
+        }
         return strides;
     }
     if(strideClass == "zero_broadcast" || strideClass == "negative")
@@ -872,14 +897,59 @@ private:
         }
     }
 
-    Dims layoutStrides(const Dims& dims, const std::string& suffix) const
+    Dims layoutStrides(const Dims& dims, const std::string& suffix)
     {
         const std::string orderAxis = "dim_order_" + suffix;
         const std::string strideAxis = "strides_" + suffix;
-        return stridesFor(dims,
-                          classValue(_values.dimOrder, orderAxis, valueOf(_row, orderAxis)),
-                          strideAxis,
-                          valueOf(_row, strideAxis));
+        const auto& order = valueOf(_row, orderAxis);
+        const auto& strideClass = valueOf(_row, strideAxis);
+        if(order == "inherited" || strideClass == "inherited")
+        {
+            if(order != strideClass)
+            {
+                fail(orderAxis + "=" + order + " with " + strideAxis + "=" + strideClass
+                     + ": a view inherits both its order and its strides");
+            }
+            const Dims owner = viewOwner(suffix, dims)->get_stride();
+            return stridesFor(dims, {}, strideAxis, strideClass, &owner);
+        }
+        return stridesFor(
+            dims, classValue(_values.dimOrder, orderAxis, order), strideAxis, strideClass);
+    }
+
+    // The input a view reads through (class_to_value tensor_overlap.inputs_overlap): V reads
+    // through K, K through Q. A view with a dimension larger than its owner's does not fit inside
+    // the owner; the note `<view>_view_exceeds_owner` marks it.
+    TensorPtr viewOwner(const std::string& suffix, const Dims& dims)
+    {
+        const auto& overlap = valueOf(_row, "tensor_overlap");
+        if(overlap != "inputs_overlap")
+        {
+            fail("strides_" + suffix + "=inherited needs tensor_overlap=inputs_overlap, not "
+                 + overlap);
+        }
+        const std::string ownerSuffix = suffix == "v" ? "k" : (suffix == "k" ? "q" : "");
+        const TensorPtr owner = suffix == "v" ? _k : (suffix == "k" ? _q : nullptr);
+        if(owner == nullptr)
+        {
+            fail("strides_" + suffix + "=inherited: only K and V can be views");
+        }
+        if(valueOf(_row, "strides_" + ownerSuffix) == "inherited")
+        {
+            fail("strides_" + suffix + "=inherited: its owner " + ownerSuffix
+                 + " is a view as well");
+        }
+        _notes.push_back(suffix + "_view_of=" + ownerSuffix);
+        const auto& ownerDims = owner->get_dim();
+        for(size_t i = 0; i < dims.size() && i < ownerDims.size(); ++i)
+        {
+            if(dims[i] > ownerDims[i])
+            {
+                _notes.push_back(suffix + "_view_exceeds_owner");
+                break;
+            }
+        }
+        return owner;
     }
 
     TensorPtr layoutTensor(const std::string& name,
