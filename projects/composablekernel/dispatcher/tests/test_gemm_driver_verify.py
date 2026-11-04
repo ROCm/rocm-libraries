@@ -10,15 +10,19 @@
 * ``GpuBatchedGemmRunner`` shares it, and the GEMM, stream-K and batched
   workers use it.
 * A sweep with failed measurements exits 1.
-* The adaptive search's host cache hands the GEMM worker the inputs and the
-  reference it would compute: the same outcome, computed once per problem,
-  dtype and layout.
+* A search's host data (``_search_host_data``) is made in the kernel's
+  memory order and a block at a time: the same outcome with or without the
+  search's host cache, whose entries hold it once per problem, dtype and
+  layout, byte for byte the same whether a preparation or a call stored them,
+  in about 5-6 bytes per input element.
 
 The ctypes lib is replaced by a host model of an exact kernel.
 """
 
 import ast
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,6 +36,7 @@ sys.path.insert(0, str(GEMM_TE_DIR))
 sys.path.insert(0, str(GEMM_TE_DIR.parent / "common"))
 
 import gemm_full_benchmark as drv  # noqa: E402
+import gemm_search as GS  # noqa: E402
 import host_cache as HC  # noqa: E402
 import run_one_batched_gemm_kernel  # noqa: E402
 import run_one_gemm_kernel  # noqa: E402
@@ -226,10 +231,12 @@ def _dtype_of(runner):
 @pytest.fixture
 def gemm_worker(monkeypatch, capsys):
     """run(runner, problem, **kw): the GEMM worker's JSON line for ``runner``
-    (fresh in-process caches); ``counts`` of inputs and references made."""
+    (fresh in-process caches); ``counts`` of the legacy inputs and references
+    and of the search's host data made."""
     worker = run_one_gemm_kernel
-    counts = {"inputs": 0, "reference": 0}
+    counts = {"inputs": 0, "reference": 0, "search": 0}
     inputs, reference = worker._inputs, GpuGemmRunner.reference
+    search = worker._search_host_data
 
     def count(what, fn):
         def wrapped(*a):
@@ -239,6 +246,7 @@ def gemm_worker(monkeypatch, capsys):
 
     monkeypatch.setattr(worker, "_inputs", count("inputs", inputs))
     monkeypatch.setattr(GpuGemmRunner, "reference", count("reference", reference))
+    monkeypatch.setattr(worker, "_search_host_data", count("search", search))
 
     def run(runner, problem=PROBLEM, **kw):
         monkeypatch.setattr(worker, "GpuGemmRunner", lambda **k: runner)
@@ -256,15 +264,21 @@ def gemm_worker(monkeypatch, capsys):
 @pytest.mark.parametrize("dtype,use_ocp", CASES)
 def test_host_cache_gives_the_uncached_outcome(gemm_worker, tmp_path, dtype, use_ocp,
                                                layout):
+    # A search's call without the cache, its first call with it (a miss) and
+    # a call that reads the entry give the same line; the legacy inputs are
+    # other values, verified as before.
     runner = _runner(dtype, use_ocp, layout)
-    legacy = gemm_worker(runner)
+    legacy = json.loads(gemm_worker(runner))
+    plain = gemm_worker(runner, search_host_data=True)
     with HC.HostCache(tmp_path) as cache:
         miss = gemm_worker(runner, host_cache=cache.spec)
         hit = gemm_worker(runner, host_cache=cache.spec)
         assert HC.usage(cache.dir)[0] == 1
-    assert legacy == miss == hit and json.loads(hit)["verified"], (legacy, hit)
-    # The hit read everything: inputs and reference made by the first two only.
-    assert gemm_worker.counts == {"inputs": 2, "reference": 2}
+    assert plain == miss == hit and json.loads(hit)["verified"], (plain, hit)
+    for out in (legacy, json.loads(hit)):
+        assert out["verified"] and out["max_rel"] < _c_eps(dtype), out
+    # The hit read everything: the search's host data made by the first two.
+    assert gemm_worker.counts == {"inputs": 1, "reference": 1, "search": 2}
 
 
 @pytest.mark.parametrize("layout", ["rcr", "crr", "rrr", "ccr"])
@@ -279,7 +293,7 @@ def test_prepared_entry_gives_the_uncached_outcome(gemm_worker, tmp_path, monkey
 
     monkeypatch.setattr(gemm_utils, "_default_use_ocp", lambda: bool(use_ocp))
     runner = _runner(dtype, None, layout)
-    legacy = gemm_worker(runner)
+    plain = gemm_worker(runner, search_host_data=True)
 
     def no_library(*a, **kw):
         raise AssertionError("a preparation loaded a library")
@@ -290,8 +304,8 @@ def test_prepared_entry_gives_the_uncached_outcome(gemm_worker, tmp_path, monkey
         assert json.loads(capsys.readouterr().out) == {"ok": True, "stored": True}
         hit = gemm_worker(runner, host_cache=cache.spec)
         assert HC.usage(cache.dir)[0] == 1
-    assert hit == legacy and json.loads(hit)["verified"]
-    assert gemm_worker.counts == {"inputs": 2, "reference": 2}  # legacy, preparation
+    assert hit == plain and json.loads(hit)["verified"]
+    assert gemm_worker.counts == {"inputs": 0, "reference": 0, "search": 2}
 
 
 def test_preparation_reports_what_it_could_not_store(capsys, tmp_path):
@@ -322,17 +336,131 @@ def test_host_cache_keeps_dtypes_layouts_and_problems_apart(gemm_worker, tmp_pat
     for line, (runner, _) in zip(first, kernels):
         out = json.loads(line)
         assert out["verified"] and out["max_rel"] < _c_eps(_dtype_of(runner)), out
-    assert gemm_worker.counts["reference"] == len(kernels)
+    assert gemm_worker.counts["search"] == len(kernels)
+
+
+@pytest.mark.parametrize("layout", ["rcr", "crr", "ccr"])
+@pytest.mark.parametrize("dtype,use_ocp", CASES)
+def test_preparation_and_call_store_the_same_entry_bytes(gemm_worker, tmp_path,
+                                                         monkeypatch, dtype, use_ocp,
+                                                         layout):
+    # A preparation and a call that misses compute the entry with the same
+    # function: every file of the two entries is the same, byte for byte.
+    import gemm_utils
+
+    monkeypatch.setattr(gemm_utils, "_default_use_ocp", lambda: bool(use_ocp))
+    runner = _runner(dtype, None, layout)
+    entries = []
+    for name in ("prepared", "called"):
+        (tmp_path / name).mkdir()
+        with HC.HostCache(tmp_path / name) as cache:
+            if name == "prepared":
+                run_one_gemm_kernel._prepare(PROBLEM, runner.kernel_name, cache.spec)
+            else:
+                gemm_worker(runner, host_cache=cache.spec)
+            (entry,) = [p for p in cache.dir.iterdir() if p.is_dir()]
+            entries.append({f.name: f.read_bytes() for f in entry.iterdir()})
+    assert set(entries[0]) == {"a.npy", "b.npy", "ref.npy", "denom.npy", "meta.json"}
+    assert entries[0] == entries[1]
+
+
+def test_search_inputs_do_not_depend_on_the_block_size(monkeypatch):
+    runner = _runner("fp8", False, "crr")
+    problem = GemmProblem.from_dict(PROBLEM)
+    whole = run_one_gemm_kernel._search_host_data(runner, problem)
+    monkeypatch.setattr(run_one_gemm_kernel, "BLOCK", 7)
+    blocks = run_one_gemm_kernel._search_host_data(runner, problem)
+    assert {k: v.tobytes() for k, v in whole.items()} == {
+        k: v.tobytes() for k, v in blocks.items()}
+    assert whole["a"].shape == (PROBLEM["K"], PROBLEM["M"])  # a "c" A, as stored
+
+
+@pytest.mark.parametrize("rows", [1, 5, 64, 1000])
+def test_comparison_in_blocks_of_rows_gives_the_same_values(rows):
+    rng = np.random.RandomState(1)
+    ref = rng.randn(64, 96).astype(np.float32)
+    out = (ref + 1e-3 * rng.randn(64, 96)).astype(np.float16)
+    nan = out.copy()
+    nan[40, 3] = np.nan
+    for output in (out, np.asfortranarray(out), nan):
+        whole, blocks = {}, {}
+        run_one_gemm_kernel._check(whole, output, ref, 2.5, 2e-2)
+        run_one_gemm_kernel._check(blocks, output, ref, 2.5, 2e-2, rows)
+        assert json.dumps(whole) == json.dumps(blocks)
+
+
+def test_search_calls_compare_a_block_of_rows_at_a_time(gemm_worker, monkeypatch):
+    # C and the reference are compared BLOCK elements at a time in a search,
+    # all at once otherwise (the legacy path is unchanged).
+    seen, check = [], run_one_gemm_kernel._check
+    monkeypatch.setattr(run_one_gemm_kernel, "_check",
+                        lambda *a: seen.append(a[5:]) or check(*a))
+    gemm_worker(_runner("bf16", None), search_host_data=True)
+    gemm_worker(_runner("bf16", None))
+    assert seen == [(run_one_gemm_kernel.BLOCK // PROBLEM["N"],), ()]
+
+
+_RSS_JOB = r"""
+import json, sys
+sys.path[:0] = json.loads(sys.argv[1])
+import run_one_gemm_kernel as w
+from gemm_utils import GemmProblem
+
+class Codec:
+    kernel_name, _use_ocp = sys.argv[2], False
+
+def status(field):
+    with open("/proc/self/status") as f:
+        return next(int(ln.split()[1]) * 1024 for ln in f if ln.startswith(field + ":"))
+
+problem = GemmProblem.from_dict(json.loads(sys.argv[3]))
+w._search_host_data(Codec(), GemmProblem.from_dict({"M": 64, "N": 64, "K": 4096}))
+try:
+    with open("/proc/self/clear_refs", "w") as f:
+        f.write("5")  # the peak (VmHWM) restarts at the current RSS
+except OSError:
+    print("skip")
+    sys.exit()
+base = status("VmRSS")
+host = w._search_host_data(Codec(), problem)
+print(status("VmHWM") - base)
+"""
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/clear_refs"), reason="Linux only")
+@pytest.mark.parametrize("dtype", ["fp8", "bf16"])
+def test_search_host_data_needs_its_encoded_inputs_plus_4_bytes_each(dtype):
+    # Peak RSS of _search_host_data at two K (256x768): each more input
+    # element costs its encoded bytes plus its fp32 value, 5 B in fp8 and
+    # 6 B in bf16, against about 58 and 16.5 B for the inputs, encoding and
+    # reference a search made before (float64 normals, the fp8 encoder on
+    # whole arrays, transposed copies, the inputs encoded twice). The guard's
+    # estimate covers the peak.
+    paths = [str(DISPATCHER_DIR / "python"), str(GEMM_TE_DIR), str(GEMM_TE_DIR.parent /
+                                                                   "common")]
+
+    def peak(k):
+        problem = {"M": 256, "N": 768, "K": k}
+        got = subprocess.run([sys.executable, "-c", _RSS_JOB, json.dumps(paths),
+                              f"gemm_{dtype}_rcr_x", json.dumps(problem)],
+                             capture_output=True, text=True, check=True).stdout.split()
+        if got == ["skip"]:
+            pytest.skip("/proc/self/clear_refs is not writable")
+        assert int(got[-1]) <= GS.host_compute_bytes(problem, dtype)
+        return int(got[-1])
+
+    per = (peak(36864) - peak(4096)) / ((256 + 768) * (36864 - 4096))
+    assert 0 < per <= GS.HOST_INPUT_BYTES[dtype] + 4 + 0.25, per
 
 
 def test_host_cache_over_its_cap_computes_as_without_it(gemm_worker, tmp_path):
     runner = _runner("bf16", None, "crr")
-    legacy = gemm_worker(runner)
+    plain = gemm_worker(runner, search_host_data=True)
     with HC.HostCache(tmp_path, max_entry_bytes=1) as cache:
         lines = [gemm_worker(runner, host_cache=cache.spec) for _ in range(2)]
         assert HC.usage(cache.dir) == (0, 0)
-    assert lines == [legacy, legacy]
-    assert gemm_worker.counts == {"inputs": 3, "reference": 3}
+    assert lines == [plain, plain]
+    assert gemm_worker.counts == {"inputs": 0, "reference": 0, "search": 3}
 
 
 # ------------------------------------------------------------- exit code

@@ -19,13 +19,17 @@ No GPU or compiler needed. Run: python3 -m pytest -q tests/test_gemm_search_adap
 import argparse
 import contextlib
 import csv
+import fcntl
+import functools
 import hashlib
 import io
 import json
 import math
+import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -78,7 +82,11 @@ class _Runner:
         return A, B
 
     def run_encoded(self, A_h, B_h, problem):
-        return self.run(A_h, B_h, problem)
+        # The search's host data is in the kernel's memory order (a "c"
+        # operand transposed) and dtype; the legacy path's is logical fp32.
+        la, lb, _ = self.kernel_name.split("_")[2]
+        return self.run((A_h if la == "r" else A_h.T).astype("float32"),
+                        (B_h if lb == "r" else B_h.T).astype("float32"), problem)
 
 
 _WORKER_LOCK = threading.Lock()  # sys.stdin and stdout are the process's
@@ -159,18 +167,39 @@ class Toolchain:
             out.append(lib)
         return out
 
-    def prepare(self, argv, env, payloads, limits, width):
-        """``prepare_host_data`` with each worker run in-process."""
+    def prepare(self, argv, env, payloads, limits, width, needs=None, memory=None):
+        """``prepare_host_data`` with each worker run in-process, one at a
+        time, each within ``memory()`` when ``needs`` are given."""
         self.prepares.append({"payloads": {k: json.loads(p) for k, p in payloads.items()},
-                              "limits": dict(limits), "width": width})
-        return {k: AS._prepared(0, _worker(p.encode()), 0.0, "")
-                for k, p in payloads.items()}
+                              "limits": dict(limits), "width": width, "needs": needs})
+        out = {}
+        for k, p in payloads.items():
+            budget = None if needs is None else memory()
+            if budget is not None and needs[k] > budget:
+                out[k] = AS._prepared(None, "", 0.0, AS.host_memory_error(needs[k], budget))
+            else:
+                out[k] = AS._prepared(0, _worker(p.encode()), 0.0, "")
+        return out
 
     def runner(self, lib_path):
         self.loaded.append(Path(lib_path))
         name = Path(lib_path).read_text()
         return _Runner(name, self.lat.get(name, 1.0),
                        lambda prob: bool({name, (name, prob.M)} & self.wrong))
+
+
+@pytest.fixture(autouse=True)
+def _own_host_lock(tmp_path, monkeypatch):
+    """Each test's search runs take the host lock in its own temp dir."""
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+
+
+def _memory(tmp_path, total_gib, avail_gib):
+    """``adaptive_search.host_memory`` on a /proc/meminfo with these sizes."""
+    path = tmp_path / "meminfo"
+    path.write_text(f"MemTotal: {int(total_gib * 2**20)} kB\n"
+                    f"MemAvailable: {int(avail_gib * 2**20)} kB\n")
+    return functools.partial(AS.host_memory, str(path), str(tmp_path / "no-cgroup"))
 
 
 def _args(**kw):
@@ -411,7 +440,7 @@ def test_failed_build_compacts_indices_and_stale_files_are_never_loaded(
     assert call["built"] == [(A, art / f"{A}.so"), (C, art / f"{C}.so")]
     assert call["pairs"] == [[0], [1]] and call["problems"] == [P1, P1]
     assert (call["verify"], call["batch_size"]) == (True, 1)
-    assert call["extra"] == {"check_identity": True}
+    assert call["extra"] == {"check_identity": True, "search_host_data": True}
     assert tc.loaded == [art / f"{A}.so", art / f"{C}.so"]
     assert all(B not in it["so_path"] for p in tc.payloads for it in p["items"])
     # The round's CSV holds both rows; its JSON maps problem_idx to the request.
@@ -530,8 +559,9 @@ def test_first_calls_find_their_problem_prepared(tmp_path, monkeypatch):
     # call and outside its timeout (one worker per new problem, at most one
     # per device at a time): no measure worker generates inputs, and the
     # call's timeout keeps the per-dtype allowance.
-    made, inputs = [], worker._inputs
-    monkeypatch.setattr(worker, "_inputs", lambda p: made.append(p.M) or inputs(p))
+    made, compute = [], worker._search_host_data
+    monkeypatch.setattr(worker, "_search_host_data",
+                        lambda r, p: made.append(p.M) or compute(r, p))
     tc = Toolchain(tmp_path, monkeypatch)
     seen = []
     with HC.HostCache(tmp_path) as cache:
@@ -577,8 +607,8 @@ def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
     # problem is prepared once, whatever the outcome.
     seen, preps = [], []
     tc = Toolchain(tmp_path, monkeypatch)
-    monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, payloads, limits, w: (
-        preps.append(limits) or {k: dict(record) for k in payloads}))
+    monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, payloads, lim, w, **kw: (
+        preps.append(lim) or {k: dict(record) for k in payloads}))
     with HC.HostCache(tmp_path) as cache:
         ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.append(a[4].kernel_timeout),
                       problems=(P1, SKINNY), dtype="fp8",
@@ -590,6 +620,161 @@ def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
     assert preps == ([] if case == "cache off" else [{"256x768x874159": 3710}])
     out = capsys.readouterr().out
     assert ("not stored" in out) == (case in ("over the caps", "failed"))
+
+
+BIG = {"M": 1024, "N": 1024, "K": 65536}  # fp8: 1.1 GiB of host data to compute
+KBIG = "1024x1024x65536"
+
+
+@pytest.mark.parametrize("case, devices, avail, cached", [
+    ("preparation", 1, 1.5, True),  # 0.7 GiB left: the preparation does not fit
+    ("calls without an entry", 2, 2.6, "refused"),  # 1.8 GiB: 1 call fits, 2 do not
+    ("cache off", 2, 2.6, False),
+    ("cache off, one device", 1, 2.6, False),
+])
+def test_host_memory_guard_skips_a_problem_that_does_not_fit(
+        tmp_path, monkeypatch, capsys, case, devices, avail, cached):
+    # The guard reads MemAvailable less 10% of MemTotal (8 GiB here) when a
+    # problem's first call comes. Its preparation, and then up to one call
+    # per device at once (reading the entry, or computing it all without
+    # one), must fit; a problem that does not is never prepared nor
+    # measured: its requests get host_memory and one console line names it.
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "ext4")
+    tc = Toolchain(tmp_path, monkeypatch)
+    if cached == "refused":
+        monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a, **kw: {
+            k: AS._prepared(0, json.dumps({"ok": True, "stored": False}), 1.0, "")
+            for k in jobs})
+    seen = []
+    with HC.HostCache(tmp_path) as cache:
+        ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.extend(a[0]),
+                      problems=(P1, BIG), dtype="fp8", cache=cache if cached else None,
+                      devices=[str(d) for d in range(devices)])
+        ad.memory = _memory(tmp_path, 8, avail)
+        ad.build_missing([ad.cands[A]])
+        out = ad.measure_pairs([_req(K1, A, 1), _req(KBIG, A, 2), _req(KBIG, A, 3)])
+        out += ad.measure_pairs([_req(KBIG, A, 4)])
+    budget = ad.memory()
+    each = GS.host_compute_bytes(BIG, "fp8")
+    want = {
+        "preparation": AS.host_memory_error(each, budget),
+        "calls without an entry": AS.host_memory_error(2 * each, budget, (
+            "2 calls at once without a cache entry, 1.1 GiB each")),
+        "cache off": AS.host_memory_error(2 * each, budget, (
+            "2 calls at once without a cache entry, 1.1 GiB each")),
+    }.get(case)
+    if want is None:  # it fits
+        assert [o.status for o in out] == ["unattempted"] * 4 and seen == [P1, BIG, BIG, BIG]
+        return
+    assert [(o.status, o.diag) for o in out[1:]] == [("host_memory", want)] * 3
+    assert seen == [P1] and ad.skipped == {KBIG: want}
+    console = capsys.readouterr().out
+    assert console.count(f"    {KBIG}: skipped, {want}\n") == 1
+    calls = [json.loads(p.read_text()) for p in sorted(
+        (tmp_path / "out" / "rounds").glob("*-measure.json"))]
+    assert [c["host_memory"] for c in calls] == [{"d2": want, "d3": want}, {"d4": want}]
+    assert [r["problem"] for c in calls for r in c["requests"]] == [K1]
+    if cached is True:  # the preparation of P1 ran, that of BIG did not start
+        assert tc.prepares[0]["needs"] == {K1: GS.host_compute_bytes(P1, "fp8"),
+                                           KBIG: each}
+        assert [(r["problem"], r["stored"], r["error"]) for r in calls[0]["prepared"]] == [
+            (K1, True, ""), (KBIG, False, want)]
+
+
+@pytest.mark.parametrize("fs", ["tmpfs", "ext4"])
+def test_preparation_on_a_tmpfs_also_needs_its_entry(tmp_path, monkeypatch, fs):
+    # A tmpfs holds the entries in RAM: written while the preparation still
+    # holds its arrays, the entry adds its size to that preparation's need.
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: fs)
+    tc = Toolchain(tmp_path, monkeypatch)
+    with HC.HostCache(tmp_path) as cache:
+        ad = _adapter(tmp_path, tc.build, lambda *a, **kw: None, problems=(P1, BIG),
+                      dtype="bf16", cache=cache)
+        ad.memory = lambda: None  # no guard: only the needs passed are checked
+        ad.build_missing([ad.cands[A]])
+        ad.measure_pairs([_req(K1, A, 1)])
+    entry = GS.host_entry_bytes(P1, "bf16") if fs == "tmpfs" else 0
+    assert tc.prepares[0]["needs"] == {K1: GS.host_compute_bytes(P1, "bf16") + entry}
+    # bf16 BIG: 2 B per input element and 4 B per output element stored, plus
+    # 4 B per input element while the reference is computed and 12 B per
+    # output element for C and its comparison.
+    assert GS.host_entry_bytes(BIG, "bf16") == 2 * 2048 * 65536 + 4 * 2**20
+    assert GS.host_compute_bytes(BIG, "bf16") == (
+        6 * 2048 * 65536 + 16 * 2**20 + GS.HOST_FIXED_BYTES)
+
+
+def test_preparations_never_overlap_builds(tmp_path, monkeypatch):
+    # A run's rounds build, then prepare and measure. Across the search runs
+    # of a host, a round's builds hold the host lock shared and its
+    # preparations exclusive: a preparation of another run waits for them.
+    tc = Toolchain(tmp_path, monkeypatch)
+    spans, build, prepare = [], tc.build, AS.prepare_host_data
+
+    def held_against(mode):
+        """Whether another run is refused the host lock in ``mode`` now."""
+        fd = os.open(str(tmp_path / AS.HOST_LOCK), os.O_RDONLY)
+        try:
+            fcntl.flock(fd, mode | fcntl.LOCK_NB)
+            return False
+        except OSError:
+            return True
+        finally:
+            os.close(fd)
+
+    def timed(kind, fn, mode):
+        def wrapped(*a, **kw):
+            t0, held = time.monotonic(), held_against(mode)
+            got = fn(*a, **kw)
+            spans.append((kind, t0, time.monotonic(), held))
+            return got
+        return wrapped
+
+    monkeypatch.setattr(tc, "build", timed("build", build, fcntl.LOCK_EX))
+    monkeypatch.setattr(AS, "prepare_host_data", timed("prepare", prepare, fcntl.LOCK_SH))
+    out = tmp_path / "out"
+    settings = AS.SearchSettings.from_json({
+        "schema_version": 1, "strategy": "exhaustive", "trials_per_problem": 3,
+        "new_builds_per_run": 4, "batch_per_problem": 1,
+        "host_cache": {"dir": str(tmp_path)}})
+    rc = GS.run_gemm_search(
+        _args(search_output_dir=str(out)), settings, _hooks(tc.build),
+        problems=[P1, P2], configs=CFGS, eligible=[[A, B, C]] * 2, devices=["0"],
+        worker=(Path("w.py"), {}), context={"arch": "gfx950"})
+    assert rc == 0
+    kinds = [s[0] for s in spans]
+    assert kinds.count("build") == 3 and kinds.count("prepare") == 1
+    assert all(held for *_, held in spans)
+    ordered = sorted(spans, key=lambda s: s[1])
+    assert all(a[2] <= b[1] for a, b in zip(ordered, ordered[1:]))
+
+
+def test_search_skips_a_problem_whose_host_data_does_not_fit(tmp_path, monkeypatch,
+                                                           capsys):
+    # End to end: BIG's host data does not fit, so it is never prepared nor
+    # measured, its strategy is told nothing and it ends unresolved with the
+    # reason; P1 gets its winner, and the run is partial.
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "ext4")
+    tc = Toolchain(tmp_path, monkeypatch)
+    monkeypatch.setattr(AS, "host_memory", _memory(tmp_path, 8, 1.5))
+    out = tmp_path / "out"
+    settings = AS.SearchSettings.from_json({
+        "schema_version": 1, "strategy": "exhaustive", "trials_per_problem": 3,
+        "new_builds_per_run": 3, "host_cache": {"dir": str(tmp_path)}})
+    rc = GS.run_gemm_search(
+        _args(search_output_dir=str(out), dtype="fp8"), settings, _hooks(tc.build),
+        problems=[P1, BIG], configs=CFGS, eligible=[[A, B, C]] * 2, devices=["0"],
+        worker=(Path("w.py"), {}), context={"arch": "gfx950"})
+    why = AS.host_memory_error(GS.host_compute_bytes(BIG, "fp8"), AS.host_memory())
+    summary = json.loads((out / "summary.json").read_text())
+    assert (rc, summary["status"], list(summary["winners"])) == (1, "partial", [K1])
+    assert summary["problems"][KBIG]["finished"] == why and why in summary["unresolved"][KBIG]
+    assert summary["counts"]["host_memory"] == 1
+    assert summary["counts"]["failed_by_status"] == {}
+    rows = [json.loads(ln) for ln in (out / "trials.jsonl").read_text().splitlines()]
+    assert not [r for r in rows if r["event"] == "result" and r.get("problem") == KBIG]
+    assert len([r for r in rows if r["event"] == "host_memory"]) == 3
+    assert [p["items"][0]["problem"]["M"] for p in tc.payloads] == [64] * 9  # BIG: never
+    assert capsys.readouterr().out.count(f"{KBIG}: skipped, {why}") == 1
 
 
 def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):

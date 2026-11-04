@@ -364,6 +364,24 @@ def test_unattempted_is_requeued_once(tmp_path):
         "admitted", "admitted", "readmitted", "admitted"]
 
 
+def test_host_memory_stops_the_problem_and_is_never_told(tmp_path):
+    # The adapter could not fit P2's host data in the host's memory: no
+    # kernel failed, so its strategy is told nothing, its trials are refunded
+    # and P2 stops with the adapter's diag, while P1 runs on to its winner.
+    ad = FakeAdapter({"P1": ABCD, "P2": ABCD},
+                     script={("P2", n): ["host_memory"] for n in ABCD})
+    # P2's strategy is done once asked: its stop reason stays the diag.
+    s, made, co = run(tmp_path, ad, {"P1": [["A", "B"], ["C"]], "P2": [["A", "B"]]})
+    assert made["P2"].told == [] and made["P2"].asks == [2]
+    assert co.ledger.trials == {"P1": 3, "P2": 0}
+    assert s.counts["host_memory"] == 1 and s.counts["failed_by_status"] == {}
+    assert len(events(tmp_path / "out", "host_memory")) == 2
+    summary = strict(tmp_path / "out" / "summary.json")
+    assert summary["problems"]["P2"]["finished"] == "fake host_memory"
+    assert "fake host_memory" in s.unresolved["P2"]
+    assert (s.status, s.exit_code, s.winners) == ("partial", 1, {"P1": "A"})
+
+
 def test_unattempted_twice_is_run_error_and_cancel_is_dropped(tmp_path):
     ad = FakeAdapter({"P1": ABCD}, script={("P1", "B"): ["unattempted", "unattempted"],
                                            ("P1", "C"): ["cancelled"]})
@@ -1478,12 +1496,16 @@ def _entries(cache):
 
 
 def test_host_cache_computes_once_per_key(tmp_path):
+    import numpy as np
+
     cache = HC.HostCache(tmp_path)
     a = {"problem": {"M": 8, "N": 4, "K": 2}, "dtype": "bf16", "layout": "rcr"}
     first, ran1 = _cache_calls(cache.spec, a)
     again, ran2 = _cache_calls(cache.spec, dict(reversed(list(a.items()))))
     assert (ran1, ran2, _entries(cache)) == (1, 0, 1)
     assert set(again) == {"x", "s"} and (again["x"] == first["x"]).all()
+    # A reader maps the entry read-only: workers reading it at once share it.
+    assert isinstance(again["x"], np.memmap) and not again["x"].flags.writeable
     assert float(again["s"]) == 1.0
     # Every field is part of the key: another layout, dtype or problem misses.
     for change in ({"layout": "crr"}, {"dtype": "fp16"},
@@ -1806,6 +1828,90 @@ def test_prepare_host_data_runs_at_most_width_workers_at_once(tmp_path):
     spans = [tuple(map(float, (tmp_path / k).read_text().split())) for k in jobs]
     most = max(sum(a <= t < b for a, b in spans) for t, _ in spans)
     assert most == 2
+
+
+def test_prepare_host_data_runs_within_the_memory_it_reads(tmp_path):
+    # With needs, the preparations running at once fit in the memory read
+    # whenever none runs (4 reads here): b waits for a, c does not fit even
+    # alone and is never started (host_memory), d runs.
+    gib, reads = AS.GIB, []
+    jobs = {k: {"out": json.dumps({"ok": True, "stored": True}), "sleep": 0.3,
+                "log": str(tmp_path / k)} for k in "abcd"}
+    got = AS.prepare_host_data(
+        [sys.executable, "-c", _PREP_JOB], None, {k: json.dumps(v) for k, v in jobs.items()},
+        {k: 60 for k in jobs}, 4, poll_s=0.02,
+        needs={"a": 6 * gib, "b": 6 * gib, "c": 20 * gib, "d": 3 * gib},
+        memory=lambda: reads.append(1) or 10 * gib)
+    assert {k: (g["ok"], g["error"]) for k, g in got.items()} == {
+        "a": (True, ""), "b": (True, ""), "d": (True, ""),
+        "c": (False, "host_memory: needs 20.0 GiB, 10.0 GiB available")}
+    assert not (tmp_path / "c").exists() and len(reads) == 4
+    spans = {k: tuple(map(float, (tmp_path / k).read_text().split())) for k in "abd"}
+    assert spans["a"][1] <= spans["b"][0] and spans["b"][1] <= spans["d"][0]
+    # Unknown memory (no /proc/meminfo): no guard.
+    got = AS.prepare_host_data(
+        [sys.executable, "-c", _PREP_JOB], None, {"c": json.dumps(jobs["a"])}, {"c": 60}, 1,
+        poll_s=0.02, needs={"c": 20 * gib}, memory=lambda: None)
+    assert got["c"]["stored"]
+
+
+def _meminfo(tmp_path, total_gib, avail_gib):
+    path = tmp_path / "meminfo"
+    path.write_text(f"MemTotal:       {total_gib << 20} kB\nMemFree:  1 kB\n"
+                    f"MemAvailable:   {avail_gib << 20} kB\n")
+    return str(path)
+
+
+def test_host_memory_reads_meminfo_and_cgroup_limits(tmp_path):
+    gib, none = AS.GIB, str(tmp_path / "none")
+    # MemAvailable less 10% of MemTotal.
+    margin = AS.HOST_MEMORY_MARGIN
+    got = AS.host_memory(_meminfo(tmp_path, 62, 40), none)
+    assert got == int(40 * gib - margin * (62 * gib))
+    assert AS.host_memory(_meminfo(tmp_path, 62, 3), none) == 0
+    assert AS.host_memory(none, none) is None
+    # cgroup v2: the room under a memory.max (its inactive file pages count
+    # as free) and that limit as the total, at any level of the hierarchy.
+    root = tmp_path / "cg"
+    for d, lim in (("job", 8 * gib), ("job/step", "max")):
+        (root / d).mkdir(parents=True)
+        (root / d / "memory.max").write_text(f"{lim}\n")
+        (root / d / "memory.current").write_text(f"{6 * gib}\n")
+        (root / d / "memory.stat").write_text(f"anon 1\ninactive_file {gib}\n")
+    cgroup = tmp_path / "cgroup"
+    cgroup.write_text("0::/job/step\n")
+    got = AS.host_memory(_meminfo(tmp_path, 503, 490), str(cgroup), str(root))
+    assert got == int(3 * gib - margin * (8 * gib))
+
+
+def test_host_lock_keeps_preparations_apart_from_builds_and_each_other(tmp_path,
+                                                                       monkeypatch):
+    # Builds share the lock; a preparation waits for every build and for the
+    # preparation before it (another search run's, here a thread's), and says so.
+    import threading
+
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+    spans, logs = {}, []
+
+    def hold(name, exclusive, start, s):
+        time.sleep(start)
+        with AS.host_lock(exclusive, logs.append, name):
+            t0 = time.monotonic()
+            time.sleep(s)
+            spans[name] = (t0, time.monotonic())
+
+    threads = [threading.Thread(target=hold, args=a) for a in (
+        ("build1", False, 0.0, 0.6), ("build2", False, 0.1, 0.6),
+        ("prep1", True, 0.2, 0.3), ("prep2", True, 0.3, 0.3))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    b1, b2, p1, p2 = (spans[k] for k in ("build1", "build2", "prep1", "prep2"))
+    assert b2[0] < b1[1]  # builds overlap
+    first, second = sorted((p1, p2))
+    assert max(b1[1], b2[1]) <= first[0] and first[1] <= second[0]
+    assert sorted(logs) == ["  [search] waiting for prep1", "  [search] waiting for prep2"]
 
 
 def test_prepare_host_data_kills_its_workers_when_interrupted(tmp_path, monkeypatch):

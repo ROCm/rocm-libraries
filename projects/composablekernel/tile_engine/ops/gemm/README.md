@@ -293,10 +293,13 @@ Option rules:
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
   The host side of verification (random inputs, an fp32 numpy reference
-  GEMM) comes from the run's host cache (see below). Before a problem's
+  GEMM) comes from the run's host cache (see below). A search makes these
+  inputs its own way, with other values than a plain run's (see "Host
+  verification memory"). Before a problem's
   first measure call the search prepares it: a worker that loads no kernel
   stores the problem's host data in the cache, outside every call's timeout,
-  with at most one preparation per device at a time. A host slower than the
+  with at most one preparation per device at a time, within the host's
+  memory and never during a round's builds. A host slower than the
   rates below then makes that round longer instead of timing a kernel out. A
   preparation runs once per problem and is stopped only after 10 times the
   problem's host allowance plus 60 s; the call's JSON file under `rounds/`
@@ -415,13 +418,15 @@ unconfirmed result. A search run asks the worker to check each library's
 identity (`check_identity`): a library whose own name
 (`GpuGemmRunner.kernel_name`, the codegen `KERNEL_NAME` that
 `GemmKernelConfig.name` reproduces) is not the requested kernel is refused
-with an error naming both. Without `check_identity` and `host_cache` (every
-run without `--search-config`) the worker's input and output are unchanged.
+with an error naming both. Without `check_identity`, `search_host_data` and
+`host_cache` (every run without `--search-config`) the worker's input and
+output are unchanged.
 
 Host cache: without it, every verified call regenerates the problem's random
 inputs, encodes them for the kernel and recomputes the fp32 reference in its
 own worker; on a 16-core host that took 15 s per call at bf16 `rcr`
-8192x8192x8192 and 4.7 s at 2048x256x49152 (7.8 s in `crr`). In a search,
+8192x8192x8192 and 4.7 s at 2048x256x49152 (7.8 s in `crr`), with the
+inputs a search made before "Host verification memory". In a search,
 a problem's preparation computes them as a worker would and stores the encoded
 A and B, the reference and its maximum as `.npy` files: one entry per key (the
 problem, dtype, layout, fp8 format and input seed), written under a temp name
@@ -469,6 +474,68 @@ an entry past either cap is not stored, and its problem computes on every call.
 A tmpfs is faster but holds the entries in RAM, so keep `max_total_gib` within
 the memory the build workers leave free.
 
+Host verification memory: a search makes each problem's inputs in the
+kernel's memory order (a column-major operand is never transposed), as
+float32 normals of numpy's seeded PCG64 generator, and encodes, decodes and
+compares them a block of 2^20 elements at a time (`_search_host_data` in
+`run_one_gemm_kernel.py`); a worker that reads a cache entry maps it instead
+of copying it. A worker that computes a problem's host data (its preparation,
+or a call without an entry) then holds the encoded A and B, their fp32 values
+and the fp32 reference at most. Peak RSS per input element, measured through
+the real worker (`256x768xK`, `rcr`, K = 16384 to 131072, the same at `rrr`,
+`crr` and `ccr`; a plain run's worker is unchanged):
+
+| dtype | search, before | search, now | per element, now |
+|---|---|---|---|
+| fp8, bf8 | 58 B | 5.0-5.6 B | its byte and its fp32 value |
+| bf16 | 16.5 B | 6.0-6.1 B | 2 bytes and its fp32 value |
+| fp16 | 11.5 B | 6.0-6.1 B | 2 bytes and its fp32 value |
+
+Before, float64 normals took 10 B per element alone, and the fp8 and bf8
+encoder held about 48 B more per element in whole-array temporaries (and ran
+twice: once for the kernel's buffers, once for the reference). On a 16-core
+host a search's host data now also takes about half the time: 74-79 ns per
+fp8 or bf8 input element and 15 ns per fp16 or bf16 one, against 145-156 and
+29-31 ns. Per output element a worker needs at most 16 B more: the fp32
+reference, C and its comparison. So an fp8 256x768x874159 problem
+(895M input elements), whose preparation was killed at 47.6 GB of RSS on a
+62 GB host, now needs about 4.5 GB.
+
+The host memory guard: before a problem's first call, the search estimates
+the bytes a worker needs for its host data, `(M+N)*K*(e+4) + 16*M*N + 512
+MiB` to compute it (`e` the encoded element size: 1 for fp8 and bf8, 2 for
+fp16 and bf16, 4 otherwise; `host_compute_bytes` in `gemm_search.py`), plus
+the entry itself when the cache is on a tmpfs, and `12*M*N + 512 MiB` to read
+an entry (`host_read_bytes`). It compares that with the memory available:
+`MemAvailable` from `/proc/meminfo` (or the room left under the `memory.max`
+of the run's cgroup, when that is less), less 10% of the total. The problem's
+preparation must fit, and then one call per device at once, reading its
+entry or, when none was stored (the cache off or over its caps), computing it
+all. A problem that does not fit is never prepared nor measured: its
+requests get the status `host_memory`, which is not a kernel failure, so no
+strategy is told anything; the problem stops, the console prints one line
+(`<problem>: skipped, host_memory: needs X GiB, Y GiB available`), the run
+goes on with the other problems and ends `partial`, with the reason under
+`unresolved` in `summary.json` and `host_memory` in its counts. The decision
+is taken once per problem, when it is first measured and after that round's
+builds: memory freed later does not bring it back, so one run never retries
+a problem that may exhaust the host's memory; re-run its problems on a host
+with more memory, with fewer devices, or with a cache that has room for the
+entry. Preparations run under a host-wide lock in the temp directory
+(`ck_search_host.lock`): a round's builds hold it shared and its
+preparations exclusive, so no preparation runs while any search run sharing
+that directory (as the runs of one host do) builds or prepares; a run whose
+builds or preparation wait for another run prints one `waiting for` line. Within one run the preparations running
+at once must fit together. The measure calls of other runs are not counted
+until they show in `MemAvailable`.
+
+Sizing: a preparation never runs during builds, so it shares the memory only
+with the system, other processes and a tmpfs cache's entries: on a 62 GB host
+with a 16 GiB tmpfs cache, the guard admits preparations of about 35 GB, that
+is about 6G input elements (5-6 bytes each). Keep `max_total_gib` plus the
+build workers' memory within RAM, as above; a disk cache costs no RAM beyond
+the page cache.
+
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against
 the cap, measurements, active problems, elapsed time and deadline) and one
@@ -476,13 +543,17 @@ title line per measure call, named like its `rounds/` file, after two lines
 for the preparation of the call's new problems (how many, their limit, then
 how many were stored and the time taken), and one more per problem not stored
 (`<problem>: not stored (<why>); its calls compute their own`, ending with the
-tail of the worker's stderr when the preparation failed). A host cache whose
+tail of the worker's stderr when the preparation failed) or skipped
+(`<problem>: skipped, host_memory: ...`, see "Host verification memory"). A
+build or preparation that waits for another search run on the host prints
+`[search] waiting for ...` first. A host cache whose
 filesystem is already under 10% free (see "Host cache space") prints a
 `Host cache: WARNING` line before the first round, and one on NFS a
 `Host cache: NOTE` line.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
-`summary.json` and the failing calls in `trials.jsonl`. If nearly every
+`summary.json` and the failing calls in `trials.jsonl`; a problem stopped by
+`host_memory` was never measured (see "Host verification memory"). If nearly every
 candidate gets built, the problems are choosing different kernels: lower
 `new_builds_per_run` or keep the default `shared` seed policy.
 

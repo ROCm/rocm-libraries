@@ -23,7 +23,10 @@ driver's own build and measure functions, which the driver passes in as
   requested kernel (``check_identity``) and reads the problem's inputs and
   reference from the run's host cache (``host_cache.py``) instead of computing
   them on every call. A problem's first call is preceded by its preparation:
-  a worker that only stores them in the cache, outside the call's timeout.
+  a worker that only stores them in the cache, outside the call's timeout,
+  and by the host memory guard: a problem whose host data does not fit in
+  the host's memory (``host_compute_bytes``, ``host_read_bytes``) gets
+  ``host_memory`` instead of a worker that the out-of-memory killer ends.
   Each call writes its own CSV under ``<out>/rounds/``, next to a JSON file
   mapping its ``problem_idx`` to the request (call id, trial) and holding its
   failure records and the preparations run before it;
@@ -129,6 +132,39 @@ SEARCH_BUILD_TIMEOUT_S = 180
 # (their encoding dominates). A dtype not listed gets the slowest listed rate.
 HOST_S_PER_INPUT = {"fp16": 75e-9, "bf16": 75e-9, "fp32": 75e-9,
                     "fp8": 400e-9, "bf8": 400e-9}
+
+
+# Host memory of a search worker's host data, measured with
+# run_one_gemm_kernel._search_host_data (see "Host verification memory" in
+# README.md): per input element its encoded bytes (HOST_INPUT_BYTES, by dtype;
+# 4 for a dtype not listed) and its fp32 value while the reference is
+# computed; per output element the fp32 reference, C and its comparison
+# (HOST_OUTPUT_BYTES); plus HOST_FIXED_BYTES for the interpreter, numpy, one
+# block's temporaries and the GPU runtime.
+HOST_INPUT_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "fp8": 1, "bf8": 1}
+HOST_OUTPUT_BYTES = 16
+HOST_FIXED_BYTES = 512 << 20
+
+
+def host_entry_bytes(problem, dtype) -> int:
+    """Bytes of ``problem``'s host cache entry: A and B encoded, the fp32
+    reference."""
+    m, n, k = problem["M"], problem["N"], problem["K"]
+    return (m + n) * k * HOST_INPUT_BYTES.get(dtype, 4) + 4 * m * n
+
+
+def host_read_bytes(problem) -> int:
+    """Peak bytes of a call that reads ``problem``'s entry: it maps the entry
+    (no copy), so C and its comparison, and the fixed part."""
+    return (HOST_OUTPUT_BYTES - 4) * problem["M"] * problem["N"] + HOST_FIXED_BYTES
+
+
+def host_compute_bytes(problem, dtype) -> int:
+    """Peak bytes of a worker that computes ``problem``'s host data (a
+    preparation, or a call without an entry): the entry, the fp32 values of A
+    and B while the reference is computed, and what a reading call needs."""
+    m, n, k = problem["M"], problem["N"], problem["K"]
+    return host_entry_bytes(problem, dtype) + 4 * (m + n) * k + host_read_bytes(problem)
 
 
 def host_input_rate(dtype) -> float:
@@ -244,7 +280,8 @@ class GemmSearchAdapter:
     ``build_timeout`` (seconds) limits each step of every kernel's build, and
     ``None`` means the search default (``_build_timeout_for``); the workers
     share ``cache`` (a ``host_cache.HostCache``; None: each computes its own
-    inputs and reference).
+    inputs and reference). ``memory`` (``adaptive_search.host_memory``) is
+    the host memory guard's reading.
     """
 
     def __init__(self, args, hooks: DriverHooks, problems, configs, eligible,
@@ -259,10 +296,15 @@ class GemmSearchAdapter:
         self._context = dict(context or {})
         self.build_timeout = build_timeout
         self.host_cache = None if cache is None else cache.spec
+        # A tmpfs holds the entries in RAM: a preparation's need counts its entry.
+        self.tmpfs = cache is not None and host_cache.fs_type(cache.dir) == "tmpfs"
+        self.memory = adaptive_search.host_memory
         self.prepared: Dict[str, dict] = {}  # problem key -> its preparation's record
+        self.checked = set()  # problem keys whose host memory was checked
+        self.skipped: Dict[str, str] = {}  # problem key -> its host_memory diag
         # Verified, one kernel per worker: a batch failure names one request.
         self.margs = argparse.Namespace(**{**vars(args), "verify": True, "batch_size": 1})
-        self.extra = {"check_identity": True}
+        self.extra = {"check_identity": True, "search_host_data": True}
         if self.host_cache:
             self.extra["host_cache"] = self.host_cache
         by_name = {}
@@ -309,6 +351,7 @@ class GemmSearchAdapter:
             notes.append(f"repeated problems searched once: {sorted(set(self.repeated))}")
         flops = adaptive_search.HOST_REFERENCE_FLOPS
         rate = host_input_rate(a.dtype)
+        each = HOST_INPUT_BYTES.get(a.dtype, 4)
         return {
             **self._context,
             "dtype": a.dtype,
@@ -323,6 +366,14 @@ class GemmSearchAdapter:
                             "timeout_s": f"kernel_timeout + ceil(2*M*N*K / {flops:g} "
                                          f"+ (M+N)*K * {rate:g}) per call",
                             "check_identity": True, "host_cache": self.host_cache,
+                            "search_host_data": True,
+                            "host_memory": {
+                                "computing_bytes": f"(M+N)*K*{each + 4} + "
+                                f"{HOST_OUTPUT_BYTES}*M*N + {HOST_FIXED_BYTES}",
+                                "reading_bytes": f"{HOST_OUTPUT_BYTES - 4}*M*N + "
+                                f"{HOST_FIXED_BYTES}",
+                                "available": "MemAvailable (or a cgroup's room) less "
+                                f"{adaptive_search.HOST_MEMORY_MARGIN:.0%} of the total"},
                             "prepare": None if not self.host_cache else (
                                 "before a problem's first call, outside its timeout, "
                                 f"limit {adaptive_search.PREPARE_FACTOR} x the host "
@@ -352,10 +403,12 @@ class GemmSearchAdapter:
     def build_missing(self, cands: Sequence[Candidate]) -> Dict[str, BuildResult]:
         errors: Dict[str, str] = {}
         limit = self._build_timeout_for(cands)
-        paths = self.hooks.build(
-            [c.original_config for c in cands], verbose=True,
-            max_workers=self.args.workers, errors=errors, build_timeout=limit,
-        )
+        with adaptive_search.host_lock(False, _log,
+                                       "another search run's host data preparation"):
+            paths = self.hooks.build(
+                [c.original_config for c in cands], verbose=True,
+                max_workers=self.args.workers, errors=errors, build_timeout=limit,
+            )
         if len(paths) != len(cands):
             raise RuntimeError(f"build returned {len(paths)} paths for {len(cands)} kernels")
         log = self.calls.new("build", ".json")
@@ -389,34 +442,67 @@ class GemmSearchAdapter:
             verify_allowance_s(self.problems[key], self.args.dtype), self.prepared.get(key))
 
     def _prepare(self, reqs, name) -> List[dict]:
-        """With the host cache on, prepare each problem of ``reqs`` not
-        prepared yet: store its entry before the call ``name`` and outside its
-        timeout. Returns the new records, for that call's JSON file."""
+        """Before the call ``name``, guard the host memory of each problem of
+        ``reqs`` new to the run and, with the host cache on, prepare it: store
+        its entry outside the call's timeout, under the host lock and within
+        the memory available (``host_compute_bytes``, plus the entry on a
+        tmpfs). Then up to one call per device at once reads the entry, or
+        computes it all when none was stored: a problem that does not fit is
+        skipped (``host_memory``, one console line). Returns the
+        preparations' records, for that call's JSON file."""
         first: Dict[str, str] = {}
         for r in reqs:  # one dtype and layout per run: any kernel of it will do
-            if self.host_cache and r.problem_key not in self.prepared:
+            if r.problem_key not in self.checked:
                 first.setdefault(r.problem_key, r.kernel_name)
         if not first:
             return []
-        limits = {k: adaptive_search.prepare_limit_s(
-            verify_allowance_s(self.problems[k], self.args.dtype)) for k in first}
-        print(f"  [search] {name}: preparing the host data of {len(first)} problem(s) "
-              f"(limit {max(limits.values())} s)", flush=True)
-        got = adaptive_search.prepare_host_data(
-            [sys.executable, str(self.worker_path)], self.base_env,
-            {k: json.dumps({"prepare": True, "host_cache": self.host_cache,
-                            "problem": self.problems[k], "kernel_name": n})
-             for k, n in first.items()}, limits, len(self.devices))
-        self.prepared.update(got)
-        print(f"  [search] {name}: {sum(g['stored'] for g in got.values())} of "
-              f"{len(got)} stored, {max(g['seconds'] for g in got.values()):.0f} s",
-              flush=True)
-        for k, g in got.items():
-            if not g["stored"]:
-                print(f"    {k}: not stored ({g['error'] or 'the cache refused it'}); its "
-                      "calls compute their own", flush=True)
-        return [{"problem": k, "kernel": first[k], "limit_s": limits[k], **got[k]}
-                for k in first]
+        self.checked.update(first)
+        dtype, records = self.args.dtype, []
+        if self.host_cache:
+            limits = {k: adaptive_search.prepare_limit_s(
+                verify_allowance_s(self.problems[k], dtype)) for k in first}
+            needs = {k: host_compute_bytes(self.problems[k], dtype) + (
+                host_entry_bytes(self.problems[k], dtype) if self.tmpfs else 0)
+                for k in first}
+            print(f"  [search] {name}: preparing the host data of {len(first)} "
+                  f"problem(s) (limit {max(limits.values())} s)", flush=True)
+            with adaptive_search.host_lock(True, _log,
+                                           "another search run's builds or preparation"):
+                got = adaptive_search.prepare_host_data(
+                    [sys.executable, str(self.worker_path)], self.base_env,
+                    {k: json.dumps({"prepare": True, "host_cache": self.host_cache,
+                                    "problem": self.problems[k], "kernel_name": n})
+                     for k, n in first.items()}, limits, len(self.devices),
+                    needs=needs, memory=self.memory)
+            self.prepared.update(got)
+            print(f"  [search] {name}: {sum(g['stored'] for g in got.values())} of "
+                  f"{len(got)} stored, {max(g['seconds'] for g in got.values()):.0f} s",
+                  flush=True)
+            for k, g in got.items():
+                if g["error"].startswith(adaptive_search.HOST_MEMORY + ":"):
+                    self._skip(k, g["error"])
+                elif not g["stored"]:
+                    print(f"    {k}: not stored ({g['error'] or 'the cache refused it'}); "
+                          "its calls compute their own", flush=True)
+            records = [{"problem": k, "kernel": first[k], "limit_s": limits[k], **got[k]}
+                       for k in first]
+        budget, n = self.memory(), len(self.devices)
+        for k in first:
+            if k in self.skipped or budget is None:
+                continue
+            stored = self.prepared.get(k, {}).get("stored")
+            each = (host_read_bytes(self.problems[k]) if stored
+                    else host_compute_bytes(self.problems[k], dtype))
+            if n * each > budget:
+                how = "reading its entry" if stored else "without a cache entry"
+                self._skip(k, adaptive_search.host_memory_error(n * each, budget, (
+                    f"{n} calls at once {how}, {each / adaptive_search.GIB:.1f} GiB each"
+                    if n > 1 else f"a call {how}")))
+        return records
+
+    def _skip(self, key, diag) -> None:
+        self.skipped[key] = diag
+        print(f"    {key}: skipped, {diag}", flush=True)
 
     def _run(self, reqs, kind) -> List[PairOutcome]:
         """One measure call over ``reqs`` (all with a usable artifact)."""
@@ -427,45 +513,55 @@ class GemmSearchAdapter:
                 cfg = self.cands[r.candidate_key].original_config
                 built.append((cfg, self.store.path(r.candidate_key)))
         csv_path = self.calls.new(kind, ".csv")
-        keys = list(dict.fromkeys(r.problem_key for r in reqs))
-        title = (f"[search] {csv_path.stem}: {len(reqs)} request(s) on "
-                 + ", ".join(keys[:6]) + (", ..." if len(keys) > 6 else ""))
         rows, fails, pin = [], [], {}
-        if kind == "confirm":  # a problem's finalists are compared on one GPU
-            order = {key: i for i, key in enumerate(self.problems)}
-            pin["device_of"] = [self.devices[order[r.problem_key] % len(self.devices)]
-                                for r in reqs]
-        problems = [self.problems[r.problem_key] for r in reqs]
         prepared = self._prepare(reqs, csv_path.stem)
-        margs = argparse.Namespace(**{**vars(self.margs), "kernel_timeout": (
-            self.margs.kernel_timeout + max(map(self._allowance_s, keys)))})
-        self.hooks.measure(
-            problems, [[index[r.candidate_key]] for r in reqs],
-            built, self.devices, margs, self.worker_path, self.base_env,
-            csv_path, extra=self.extra,
-            record_failures=fails.extend, measured=rows, title=title, **pin,
-        )
+        skipped = {r.call_id: self.skipped[r.problem_key] for r in reqs
+                   if r.problem_key in self.skipped}
+        run = [r for r in reqs if r.call_id not in skipped]
+        if run:
+            keys = list(dict.fromkeys(r.problem_key for r in run))
+            title = (f"[search] {csv_path.stem}: {len(run)} request(s) on "
+                     + ", ".join(keys[:6]) + (", ..." if len(keys) > 6 else ""))
+            if kind == "confirm":  # a problem's finalists are compared on one GPU
+                order = {key: i for i, key in enumerate(self.problems)}
+                pin["device_of"] = [self.devices[order[r.problem_key] % len(self.devices)]
+                                    for r in run]
+            problems = [self.problems[r.problem_key] for r in run]
+            margs = argparse.Namespace(**{**vars(self.margs), "kernel_timeout": (
+                self.margs.kernel_timeout + max(map(self._allowance_s, keys)))})
+            self.hooks.measure(
+                problems, [[index[r.candidate_key]] for r in run],
+                built, self.devices, margs, self.worker_path, self.base_env,
+                csv_path, extra=self.extra,
+                record_failures=fails.extend, measured=rows, title=title, **pin,
+            )
         self.calls.write_json(csv_path, {
             "requests": [
                 {"problem_idx": i, "call_id": r.call_id, "trial_uid": r.trial_uid,
                  "problem": r.problem_key, "kernel": r.kernel_name}
-                for i, r in enumerate(reqs)
+                for i, r in enumerate(run)
             ],
             "failures": fails,
             "prepared": prepared,
+            "host_memory": skipped,
         })
         by_rows, by_fails = defaultdict(list), defaultdict(list)
         for row in rows:
             by_rows[row.get("problem_idx")].append(row)
         for f in fails:
             by_fails[f.get("problem_idx")].append(f)
-        out = []
-        for i, r in enumerate(reqs):
+        out = {cid: PairOutcome(r, adaptive_search.HOST_MEMORY, None, skipped[cid])
+               for r in reqs for cid in [r.call_id] if cid in skipped}
+        for i, r in enumerate(run):
             ran = by_rows[i] + by_fails[i]
-            out.append(PairOutcome(
+            out[r.call_id] = PairOutcome(
                 r, *reconcile(r, self.problems[r.problem_key], by_rows[i], by_fails[i]),
-                device=str(ran[0].get("device", "")) if ran else ""))
-        return out
+                device=str(ran[0].get("device", "")) if ran else "")
+        return [out[r.call_id] for r in reqs]
+
+
+def _log(line) -> None:
+    print(line, flush=True)
 
 
 def run_gemm_search(args, settings: SearchSettings, hooks: DriverHooks, *,

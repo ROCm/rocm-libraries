@@ -54,6 +54,14 @@ LEGACY_CSV = ["kernel", "problem_idx", "M", "N", "K", "device", "latency_ms",
               "tflops", "non_zero", "max_rel", "verified"]
 
 
+@pytest.fixture(autouse=True)
+def _own_host_lock(tmp_path, monkeypatch):
+    """Each test's search runs take the host lock in its own temp dir."""
+    import adaptive_search as AS
+
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+
+
 def _ms(name):
     return 1.0 + (sum(map(ord, name)) % 97) / 100.0
 
@@ -69,7 +77,7 @@ def _main(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
     if "--search-config" in argv and not prepare:
         import adaptive_search as AS  # only for a search: see the no-search test
 
-        monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a: {
+        monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a, **kw: {
             k: AS._prepared(None, "", 0.0, "not run") for k in jobs})
     libs = tmp_path / "libs"
     libs.mkdir(exist_ok=True)
@@ -234,7 +242,8 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     cache = calls[0]["extra"]["host_cache"]
     assert calls and all(
         len(c["names"]) == 1 and c["verify"] and c["batch_size"] == 1
-        and c["extra"] == {"check_identity": True, "host_cache": cache} for c in calls)
+        and c["extra"] == {"check_identity": True, "search_host_data": True,
+                           "host_cache": cache} for c in calls)
     assert Path(cache["dir"]).name.startswith("ck_search_host_cache-")
     assert not Path(cache["dir"]).exists() and "Host cache: 0 entries" in cap.out
     _assert_worker(calls)

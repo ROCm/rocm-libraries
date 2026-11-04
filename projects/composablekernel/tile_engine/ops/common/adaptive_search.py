@@ -24,7 +24,8 @@ is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
 ``CallFiles`` (per-call files under rounds/), ``measure_built``,
 ``host_allowance_s`` (a verified call's host time, at the op's rates),
 ``prepare_host_data`` (a problem's host cache entry, stored before its first
-call and outside its timeout), ``source_info``, ``check_search_options`` and
+call and outside its timeout), the host memory guard (``host_memory``,
+``host_lock``), ``source_info``, ``check_search_options`` and
 ``run_search`` (the driver's search mode, with its exit code). Importing this
 module imports neither ``ck_search`` nor numpy: the search core is loaded when
 a search runs.
@@ -32,6 +33,7 @@ a search runs.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -59,11 +61,14 @@ STATUSES = (
     "invalid_measurement",
     "unattempted",
     "cancelled",
+    "host_memory",
 )
-# Outcome status -> ck_search ``Status`` attribute told to the strategy. The two
-# scheduler events are never told: ``unattempted`` is re-queued once (then it is
-# a run_error) and ``cancelled`` is dropped (it stays pending in its strategy, so
-# a strategy that waits for it ends that problem's search).
+# Outcome status -> ck_search ``Status`` attribute told to the strategy. The
+# three scheduler events are never told: ``unattempted`` is re-queued once
+# (then it is a run_error), ``cancelled`` is dropped (it stays pending in its
+# strategy, so a strategy that waits for it ends that problem's search) and
+# ``host_memory`` (the problem's host data does not fit in this host's memory,
+# see ``host_memory``) stops the problem: no kernel failed.
 TELLABLE = {
     "ok": "OK",
     "compile_error": "COMPILE_ERROR",
@@ -155,7 +160,9 @@ class OperationAdapter(Protocol):
         """canonical_key -> BuildResult, one per candidate."""
 
     def measure_pairs(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
-        """Exactly one outcome per request."""
+        """Exactly one outcome per request; ``host_memory`` (its diag says
+        how much it needs and how much is available) for a request whose
+        problem the host cannot hold, measured or not: the problem stops."""
 
     def confirm(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
         """Fresh verified calls, exactly one outcome per request. The
@@ -736,7 +743,7 @@ class SearchCoordinator:
         self.counts: Dict[str, Any] = dict.fromkeys(
             ("rounds", "proposed", "admitted", "cached", "invalid", "known_failed",
              "past_build_cap", "refilled", "built", "build_failed", "measured", "ok",
-             "requeued", "cancelled", "confirm_calls"), 0
+             "requeued", "cancelled", "confirm_calls", "host_memory"), 0
         )
         self.counts["failed_by_status"] = {}
         self.unresolved: Dict[str, str] = {}
@@ -1142,7 +1149,7 @@ class SearchCoordinator:
             p.deferred = []
             if told[p.key]:
                 p.strategy.tell(told[p.key])
-            if not p.requeue:
+            if not p.requeue and not p.finished:
                 if self.ledger.trials_left(p.key) <= 0:
                     p.finished = "trial budget"
                 elif p.strategy.done:
@@ -1213,6 +1220,13 @@ class SearchCoordinator:
             self.ledger.refund(p.key)
             self.counts["cancelled"] += 1
             self._event("cancel", **base)
+            return False
+        if status == HOST_MEMORY:  # not the kernel's: told nothing, the problem stops
+            self.ledger.refund(p.key)
+            if not p.finished:
+                p.finished = diag or HOST_MEMORY
+                self.counts["host_memory"] += 1
+            self._event("host_memory", **base)
             return False
         if status == "unattempted":
             status, diag = "run_error", f"unattempted twice: {diag}".strip()
@@ -1497,6 +1511,102 @@ PREPARE_FACTOR, PREPARE_START_S, PREPARE_MARGIN = 10, 60, 2
 PREPARE_STDERR_CHARS = 400
 
 
+# The host memory guard. A problem whose host data (a preparation, or the
+# calls that compute or read it) needs more than ``host_memory()`` gets the
+# outcome HOST_MEMORY instead of a worker that the operating system's
+# out-of-memory killer would end. ``host_memory()`` is the memory available
+# now (MemAvailable in /proc/meminfo, or the room left under memory.max of
+# this process's cgroup v2 and its parents when that is less), less
+# HOST_MEMORY_MARGIN of the total (the least of MemTotal and those
+# memory.max), left to the system and to other processes.
+HOST_MEMORY = "host_memory"
+HOST_MEMORY_MARGIN = 0.1
+GIB = 1 << 30
+
+
+def host_memory(meminfo="/proc/meminfo", cgroup="/proc/self/cgroup",
+                cgroup_root="/sys/fs/cgroup") -> Optional[int]:
+    """Bytes of host data the search may plan for now (see above); None
+    where ``meminfo`` is unreadable (not Linux): no guard."""
+    try:
+        with open(meminfo) as f:
+            info = dict(line.split()[:2] for line in f if len(line.split()) >= 2)
+        avail, total = (int(info[k + ":"]) * 1024 for k in ("MemAvailable", "MemTotal"))
+    except (OSError, KeyError, ValueError):
+        return None
+    for room, limit in _cgroup_limits(cgroup, cgroup_root):
+        avail, total = min(avail, room), min(total, limit)
+    return max(0, int(avail - HOST_MEMORY_MARGIN * total))
+
+
+def _cgroup_limits(cgroup, root) -> List[tuple]:
+    """(room, limit) of each cgroup v2 level of this process with a
+    memory.max: the limit less memory.current plus its inactive file pages
+    (page cache it can drop)."""
+    try:
+        with open(cgroup) as f:
+            rel = next(line.strip()[3:] for line in f if line.startswith("0::"))
+    except (OSError, StopIteration):
+        return []
+    out, path = [], Path("/" + rel.lstrip("/"))
+    while True:
+        d = Path(root) / str(path).lstrip("/")
+        try:
+            limit = int((d / "memory.max").read_text())  # "max": no limit
+            stat = dict(line.split()[:2] for line in (d / "memory.stat").read_text()
+                        .splitlines() if len(line.split()) >= 2)
+            used = int((d / "memory.current").read_text())
+            out.append((limit - used + int(stat.get("inactive_file", 0)), limit))
+        except (OSError, ValueError):
+            pass
+        if path == path.parent:
+            return out
+        path = path.parent
+
+
+def host_memory_error(need, avail, detail="") -> str:
+    """The diag of a problem whose host data needs ``need`` bytes while
+    ``host_memory()`` gives ``avail``."""
+    more = f" ({detail})" if detail else ""
+    return (f"{HOST_MEMORY}: needs {need / GIB:.1f} GiB{more}, "
+            f"{avail / GIB:.1f} GiB available")
+
+
+# The search runs of a host coordinate through HOST_LOCK in HOST_LOCK_DIR
+# (None: the system temp dir): a round's builds hold it shared, its
+# preparations exclusive, so no preparation runs while another run's builds
+# or preparations do (a run's own rounds build, then measure).
+HOST_LOCK, HOST_LOCK_DIR = "ck_search_host.lock", None
+
+
+@contextlib.contextmanager
+def host_lock(exclusive: bool, log=None, what: str = ""):
+    """Hold HOST_LOCK: ``exclusive`` for preparations, shared for builds.
+    One ``log`` line when it has to wait for another run (``what`` it waits
+    for). Without fcntl, or a lock file it cannot open, it does not lock."""
+    try:
+        import fcntl
+
+        fd = os.open(os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK),
+                     os.O_RDONLY | os.O_CREAT, 0o666)
+    except (ImportError, OSError):
+        yield
+        return
+    try:
+        with contextlib.suppress(OSError):
+            os.fchmod(fd, 0o666)  # other users' runs lock it too
+        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        try:
+            fcntl.flock(fd, mode | fcntl.LOCK_NB)
+        except OSError:
+            if log is not None:
+                log(f"  [search] waiting for {what or 'another search run on this host'}")
+            fcntl.flock(fd, mode)
+        yield
+    finally:
+        os.close(fd)
+
+
 def prepare_limit_s(allowance_s) -> int:
     """The limit of a preparation whose problem's host allowance is
     ``allowance_s`` seconds."""
@@ -1515,21 +1625,38 @@ def call_allowance_s(allowance_s, prepared: Optional[Mapping] = None) -> int:
 
 def prepare_host_data(argv, env, payloads: Mapping[str, str],
                       limits: Mapping[str, float], width: int,
-                      poll_s: float = 0.1) -> Dict[str, dict]:
+                      poll_s: float = 0.1, needs: Optional[Mapping[str, int]] = None,
+                      memory: Callable[[], Optional[int]] = host_memory
+                      ) -> Dict[str, dict]:
     """Run the op's worker ``argv`` once per problem key of ``payloads`` (its
     JSON payload on stdin) to store that problem's host cache entry, at most
-    ``width`` at a time, each killed after its ``limits`` seconds. The worker
-    prints ``{"ok": true, "stored": <bool>}`` or ``{"ok": false, "error":
-    ...}`` as its last line. Returns ``{key: {"ok", "stored", "seconds",
-    "error"}}`` in the order of ``payloads``; ``ok`` is False for an error, a
-    crash or a kill at the limit, and ``error`` then ends with the tail of the
-    worker's stderr. Workers still running when this raises (an interrupt) are
-    killed."""
-    out, todo, running = {}, list(payloads), {}
+    ``width`` at a time, each killed after its ``limits`` seconds. With
+    ``needs`` (bytes per key), the ones running at once must also fit in
+    ``memory()``, read whenever none is running: one that does not fit
+    alone is not started, and its error is ``host_memory_error``'s. The
+    worker prints ``{"ok": true, "stored": <bool>}`` or ``{"ok": false,
+    "error": ...}`` as its last line. Returns ``{key: {"ok", "stored",
+    "seconds", "error"}}`` in the order of ``payloads``; ``ok`` is False for
+    an error, a crash or a kill at the limit, and ``error`` then ends with the
+    tail of the worker's stderr. Workers still running when this raises (an
+    interrupt) are killed."""
+    out, todo, running, budget = {}, list(payloads), {}, None
     try:
         while todo or running:
             while todo and len(running) < max(1, width):
-                key = todo.pop(0)
+                key = todo[0]
+                if needs is not None:
+                    if not running:
+                        budget = memory()
+                    used = sum(needs[k] for k in running)
+                    if budget is not None and used + needs[key] > budget:
+                        if running:
+                            break  # it waits for the running ones to end
+                        todo.pop(0)
+                        out[key] = _prepared(None, "", 0.0,
+                                             host_memory_error(needs[key], budget))
+                        continue
+                todo.pop(0)
                 files = []  # the worker's stdout and stderr
                 try:
                     while len(files) < 2:

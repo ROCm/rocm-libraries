@@ -23,6 +23,10 @@ its first measure call, in a worker that only does that (``prepare``):
   reservation would take the run's reservations past ``max_total_bytes`` or
   leave the filesystem less than ``MIN_FREE_FRACTION`` free once every
   reserved entry is written. The caps hold with any number of workers;
+- a reader maps an entry's arrays read-only (``np.load`` with
+  ``mmap_mode="r"``) instead of copying them: on a tmpfs its pages are the
+  entry's own, and on a disk they are page cache, so workers reading one
+  entry at once add no copy of it each;
 - an error reading or writing an entry is a miss: the cache never changes a
   result, only how often it is computed. A writer that fails gives its claim
   back; one that is killed keeps it, and its key is computed on every call
@@ -159,9 +163,10 @@ def run_cache(settings, log=print):
 
 def cached(spec: Optional[Mapping], fields: Mapping,
            compute: Callable[[], Dict[str, object]]) -> Dict[str, object]:
-    """``compute()``'s named numpy arrays, read from the entry of ``fields``
-    in the cache ``spec`` (a ``HostCache.spec``) when it has one, else
-    computed and, within the caps, published. ``spec`` None: ``compute()``."""
+    """``compute()``'s named numpy arrays, mapped read-only from the entry of
+    ``fields`` in the cache ``spec`` (a ``HostCache.spec``) when it has one,
+    else computed and, within the caps, published. ``spec`` None:
+    ``compute()``."""
     if not spec:
         return compute()
     import numpy as np
@@ -170,7 +175,7 @@ def cached(spec: Optional[Mapping], fields: Mapping,
     try:
         meta = json.loads((path / "meta.json").read_text())
         if meta["fields"] == fields:
-            return {n: np.load(path / f"{n}.npy", allow_pickle=False)
+            return {n: np.load(path / f"{n}.npy", mmap_mode="r", allow_pickle=False)
                     for n in meta["arrays"]}
     except Exception:  # noqa: BLE001 - no entry, or an unreadable one: compute
         pass

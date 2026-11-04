@@ -17,14 +17,16 @@ Optional top-level keys ``verify`` (bool) and ``verify_tol`` (float) enable an
 fp32 numpy reference check; when set, each OK result also carries ``verified``
 and ``max_rel``. With ``check_identity`` (bool) a library whose own kernel name
 is not the requested ``kernel_name`` is refused (the adaptive search sets it).
-With ``host_cache`` (a ``host_cache.HostCache.spec``, also set by the search
-only) a standard kernel's host inputs and fp32 reference come from the search
-run's cache when the problem has an entry there, else they are computed and
-stored: the same values, computed once per problem instead of once per call.
-With ``prepare`` (the search, before a problem's first measure call) the
-worker loads no library: it stores the host data of ``problem`` for the dtype
-and layout of ``kernel_name`` in ``host_cache`` and prints
-``{"ok": true, "stored": <whether the cache holds it now>}``.
+With ``search_host_data`` (bool, also set by the search only) a standard
+kernel's host inputs and fp32 reference are the search's
+(``_search_host_data``), and with ``host_cache`` (a
+``host_cache.HostCache.spec``, set by the search when its cache is on) they
+come from the search run's cache when the problem has an entry there, else
+they are computed and stored: the same values, computed once per problem
+instead of once per call. With ``prepare`` (the search, before a problem's
+first measure call) the worker loads no library: it stores the host data of
+``problem`` for the dtype and layout of ``kernel_name`` in ``host_cache`` and
+prints ``{"ok": true, "stored": <whether the cache holds it now>}``.
 
 Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, "ms": 0.123, "tflops": 456.7, "non_zero": 1, "kernel": "..."}
@@ -53,12 +55,17 @@ from gemm_utils import (  # noqa: E402
     GpuGemmRunner,
     GpuMultiABDRunner,
     _dtype_from_kernel_name,
+    _input_codec,
     _layout_from_kernel_name,
     _resolve_use_ocp,
 )
 import numpy as np  # noqa: E402
 
 INPUT_SEED, INPUT_SCALE = 42, 0.1  # the random host inputs: randn * scale
+# A search's inputs (``_search_host_data``): float32 normals of numpy's PCG64
+# generator, made, encoded and compared BLOCK elements at a time.
+SEARCH_INPUTS = "PCG64 float32"
+BLOCK = 1 << 20
 _COMMON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
                            "common")
 
@@ -87,22 +94,63 @@ def _inputs(problem):
     )
 
 
+def _search_operand(gen, shape, dtype, use_ocp):
+    """One operand of ``_search_host_data`` in the memory order its kernel
+    reads: the encoded buffer and the fp32 values it decodes to, filled a
+    block at a time with the next normals of ``gen`` times INPUT_SCALE."""
+    encode, decode = _input_codec(dtype)
+    vals = np.empty(shape, np.float32)
+    enc = np.empty(shape, encode(np.zeros(1, np.float32), use_ocp).dtype)
+    flat, flat_enc = vals.reshape(-1), enc.reshape(-1)
+    for i in range(0, flat.size, BLOCK):
+        x = flat[i:i + BLOCK]
+        gen.standard_normal(dtype=np.float32, out=x)
+        x *= np.float32(INPUT_SCALE)
+        flat_enc[i:i + BLOCK] = encode(x, use_ocp)
+        x[...] = decode(flat_enc[i:i + BLOCK], use_ocp)
+    return enc, vals
+
+
+def _search_host_data(runner, problem):
+    """A search's host data for ``runner``'s kernel on ``problem`` (see
+    ``_host_data``). A and B are made in the memory order the kernel reads
+    them and a block at a time, so the worker holds the encoded inputs, their
+    fp32 values and the reference at most: about 5 bytes per input element
+    for fp8 and bf8, 6 for fp16 and bf16, against 12-60 for ``_inputs``
+    and ``GpuGemmRunner.encode_inputs``/``reference``, which make float64
+    normals, transposed copies and the inputs' encoding twice, with the
+    fp8/bf8 encoder's temporaries on whole arrays. The values differ from
+    those of ``_inputs``; a search computes them only here, in its
+    preparations and its calls alike."""
+    dtype = _dtype_from_kernel_name(runner.kernel_name)
+    la, lb, _ = _layout_from_kernel_name(runner.kernel_name)
+    m, n, k = problem.M, problem.N, problem.K
+    gen = np.random.Generator(np.random.PCG64(INPUT_SEED))
+    a, qa = _search_operand(gen, (m, k) if la == "r" else (k, m), dtype, runner._use_ocp)
+    b, qb = _search_operand(gen, (k, n) if lb == "r" else (n, k), dtype, runner._use_ocp)
+    ref = (qa if la == "r" else qa.T) @ (qb if lb == "r" else qb.T)
+    del qa, qb
+    peak = max(float(np.max(ref)), -float(np.min(ref)))
+    return {"a": a, "b": b, "ref": ref, "denom": np.float64(peak or 1.0)}
+
+
 class _HostCodec(GpuGemmRunner):
-    """``GpuGemmRunner``'s host encoding and reference for ``kernel_name``,
-    without its library or a GPU: what preparing a problem needs. The fp8/bf8
-    format is resolved as for the measure worker's runner (no arch given)."""
+    """A ``GpuGemmRunner`` for ``kernel_name`` without its library or a GPU:
+    what preparing a problem needs. The fp8/bf8 format is resolved as for the
+    measure worker's runner (no arch given)."""
 
     def __init__(self, kernel_name):  # the base __init__ loads the library
         self._kernel_name, self._use_ocp = kernel_name, None
 
 
 def _host_data(runner, problem, spec, prepare=False):
-    """A and B as ``runner``'s kernel reads them, the fp32 reference and its
-    max |ref| (``a``, ``b``, ``ref``, ``denom``), from the host cache ``spec``
-    (``prepare``: whether the cache holds them once stored there). The
-    entry's key holds everything they depend on: the problem, the kernel's
-    dtype and layout (its packed strides follow from the layout and the
-    extents), the fp8/bf8 format and the input generator."""
+    """``_search_host_data``: A and B as ``runner``'s kernel reads them, the
+    fp32 reference and its max |ref| (``a``, ``b``, ``ref``, ``denom``), from
+    the host cache ``spec`` (None: computed; ``prepare``: whether the cache
+    holds them once stored there). The entry's key holds everything they
+    depend on: the problem, the kernel's dtype and layout (its packed strides
+    follow from the layout and the extents), the fp8/bf8 format and the input
+    generator."""
     if _COMMON_DIR not in sys.path:
         sys.path.insert(0, _COMMON_DIR)
     import host_cache
@@ -114,17 +162,10 @@ def _host_data(runner, problem, spec, prepare=False):
         "dtype": dtype,
         "layout": _layout_from_kernel_name(runner.kernel_name),
         "fp8_ocp": _resolve_use_ocp(runner._use_ocp) if dtype in ("fp8", "bf8") else None,
-        "inputs": [INPUT_SEED, INPUT_SCALE],
+        "inputs": [SEARCH_INPUTS, INPUT_SEED, INPUT_SCALE],
     }
-
-    def compute():
-        A, B = _inputs(problem)
-        a, b = runner.encode_inputs(A, B)
-        ref = runner.reference(A, B)
-        return {"a": a, "b": b, "ref": ref,
-                "denom": np.float64(float(np.max(np.abs(ref))) or 1.0)}
-
-    return (host_cache.prepare if prepare else host_cache.cached)(spec, fields, compute)
+    return (host_cache.prepare if prepare else host_cache.cached)(
+        spec, fields, lambda: _search_host_data(runner, problem))
 
 
 def _prepare(prob_dict, kernel_name, spec):
@@ -139,10 +180,14 @@ def _prepare(prob_dict, kernel_name, spec):
     print(json.dumps(out), flush=True)
 
 
-def _check(out, output, ref, denom, verify_tol):
-    """Add ``max_rel`` of ``output`` against ``ref`` and ``verified`` to ``out``."""
-    got = output.astype(np.float32)
-    max_rel = float(np.max(np.abs(got - ref)) / denom)
+def _check(out, output, ref, denom, verify_tol, rows=None):
+    """Add ``max_rel`` of ``output`` against ``ref`` and ``verified`` to
+    ``out``, comparing ``rows`` rows at a time (None: all at once): the same
+    values, with the temporaries of one block of rows."""
+    rows = rows or len(ref)
+    diff = np.max([np.max(np.abs(output[i:i + rows].astype(np.float32) - ref[i:i + rows]))
+                   for i in range(0, len(ref), rows)])
+    max_rel = float(diff / denom)
     out["max_rel"] = max_rel
     out["verified"] = bool(max_rel <= verify_tol)
 
@@ -160,6 +205,7 @@ def _run_one(
     cde_op=None,
     check_identity=False,
     host_cache=None,
+    search_host_data=False,
 ):
     """Run a single kernel and emit its result as one JSON line.
 
@@ -198,7 +244,8 @@ def _run_one(
             A = B = host = None
         else:
             A = B = host = None
-            if host_cache is None:
+            search = search_host_data or host_cache is not None
+            if not search:
                 # Cache host matrices per shape so batch mode doesn't regenerate
                 # huge inputs per kernel.
                 cache = getattr(_run_one, "_ab_cache", {})
@@ -212,11 +259,12 @@ def _run_one(
             runner = GpuGemmRunner(lib_path=so_path)
             if check_identity:
                 _check_identity(runner, kernel_name)
-            if host_cache is None:
+            if not search:
                 result = runner.run(A, B, problem)
             else:
                 host = _host_data(runner, problem, host_cache)
                 result = runner.run_encoded(host["a"], host["b"], problem)
+                host = {k: host[k] for k in ("ref", "denom")}  # A and B are done
 
         if result.success:
             non_zero = (
@@ -241,7 +289,8 @@ def _run_one(
                     out["max_rel"] = result.max_rel
                     out["verified"] = bool(result.max_rel <= verify_tol)
             elif verify and host is not None:
-                _check(out, result.output, host["ref"], float(host["denom"]), verify_tol)
+                _check(out, result.output, host["ref"], float(host["denom"]), verify_tol,
+                       max(1, BLOCK // max(1, problem.N)))
             elif verify and A is not None and B is not None:
                 # Reference uses the SAME quantized inputs the device sees, so the
                 # metric isolates compute error from input quantization (fp8/bf8
@@ -301,6 +350,7 @@ def main():
     verify_tol = float(d.get("verify_tol", 2e-2))
     check_identity = bool(d.get("check_identity", False))
     host_cache = d.get("host_cache")
+    search_host_data = bool(d.get("search_host_data", False))
 
     if "items" in d:
         for i, item in enumerate(d["items"]):
@@ -317,6 +367,7 @@ def main():
                 cde_op=item.get("cde_elementwise_op"),
                 check_identity=check_identity,
                 host_cache=host_cache,
+                search_host_data=search_host_data,
             )
     else:
         _run_one(
@@ -332,6 +383,7 @@ def main():
             cde_op=d.get("cde_elementwise_op"),
             check_identity=check_identity,
             host_cache=host_cache,
+            search_host_data=search_host_data,
         )
 
 
