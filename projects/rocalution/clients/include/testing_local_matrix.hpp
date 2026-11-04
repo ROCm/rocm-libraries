@@ -27,10 +27,8 @@
 
 #include "utility.hpp"
 
-#include <cstdlib>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <iostream>
 #include <memory>
 #include <rocalution/rocalution.hpp>
 #include <set>
@@ -1425,28 +1423,44 @@ void testing_local_move_to_host_async_repeated()
     argus.size        = 10;
     argus.matrix_type = "Laplacian2D";
 
-    // Sync() after MoveToHostAsync() releases both copies of the matrix (AISPARSE-933), so the
-    // host copies are counted before Sync() in a child process that exits right after counting.
-    // TODO(AISPARSE-933): count after Sync() in the test process once Sync() keeps the host copy.
-    EXPECT_EXIT(
+    unsigned int formats[] = {CSR, MCSR, BCSR, COO, DIA, ELL, HYB, DENSE};
+
+    for(unsigned int format : formats)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        backend_object_counter objects;
         {
             LocalMatrix<T> matrix;
             getTestMatrix<T>(argus, matrix);
-            matrix.MoveToAccelerator();
 
-            backend_object_counter objects;
+            auto reference = extract_dense_matrix(matrix);
+
+            matrix.ConvertTo(format, format == BCSR ? 2 : 1);
+            matrix.MoveToAccelerator();
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
 
             // Calling MoveToHostAsync() again before Sync() must not add another copy
             matrix.MoveToHostAsync();
             matrix.MoveToHostAsync();
             matrix.MoveToHostAsync();
+            matrix.Sync();
 
-            int live_host = objects.live("HostMatrix");
-            std::cerr << "live host copies: " << live_host << std::endl;
-            std::_Exit(live_host == 1 ? 0 : 1);
-        },
-        testing::ExitedWithCode(0),
-        "");
+            // The matrix owns exactly one object, and it is the host copy
+            EXPECT_EQ(objects.live("HostMatrix"), 1);
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+            EXPECT_EQ(matrix.GetFormat(), format);
+            EXPECT_TRUE(matrix.Check());
+
+            matrix.ConvertToCSR();
+            EXPECT_EQ(extract_dense_matrix(matrix), reference);
+        }
+
+        // Nothing survives the destructor
+        EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+        EXPECT_EQ(objects.live("HostMatrix"), 0);
+    }
 }
 
 template <typename T>
