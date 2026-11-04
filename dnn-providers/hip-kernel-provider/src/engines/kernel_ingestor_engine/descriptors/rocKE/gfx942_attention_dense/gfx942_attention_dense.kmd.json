@@ -98,6 +98,11 @@
       "default_value": "qb_minor"
     },
     {
+      "name": "kv_segments",
+      "type": "int",
+      "default_value": 1
+    },
+    {
       "name": "lds_num_buffers",
       "type": "int",
       "default_value": 1

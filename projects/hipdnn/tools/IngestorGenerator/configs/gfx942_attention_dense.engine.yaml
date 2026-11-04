@@ -128,6 +128,13 @@ kmd_fields:
 - name: nonpersist_decode
   type: string
   default_value: qb_minor
+# Split KV: a build with kv_segments > 1 multiplies the grid's x extent and needs a
+# workspace and a combine launch the native dispatch does not make, so kernel_match
+# serves 1 only. Every variant is built at 1; the field is here so a split-KV record is
+# refused rather than launched on the wrong grid.
+- name: kv_segments
+  type: int
+  default_value: 1
 # Persistent-grid pipeline levers: two K buffers, V register prefetch. Body only.
 - name: lds_num_buffers
   type: int
@@ -178,6 +185,7 @@ specialization:
   - num_persistent
   - persist_decode
   - nonpersist_decode
+  - kv_segments
   - lds_num_buffers
   - v_reg_prefetch
   - causal_diag_split
@@ -230,6 +238,8 @@ specialization:
       field: persist_decode
     nonpersist_decode:
       field: nonpersist_decode
+    kv_segments:
+      field: kv_segments
     lds_num_buffers:
       field: lds_num_buffers
     v_reg_prefetch:
@@ -286,7 +296,11 @@ enumerate:
       values: [bf16, fp16]
     # A causal sliding window is TOP_LEFT_CAUSAL plus sliding_window = W, the number
     # of keys attended including the diagonal (the graph's left_bound). The window is
-    # baked into the kernel and must be a multiple of block_n.
+    # baked into the kernel and must be a multiple of block_n. Sources (D64/D128 models
+    # with sliding-window layers): 128 gpt-oss (its layers carry sinks, so served once
+    # sinks land), 512 Phi-4-mini-flash-reasoning (D64), 1024 Gemma 3 27B (D128), 2048
+    # Arcee Trinity and Phi-3-medium-4k (D128; its config says 2047). 4096 (Mistral-7B
+    # v0.1, StarCoder2, Command R7B, OLMo 3, EXAONE 4.0) is a follow-up.
     - fields: [mask_type, sliding_window]
       values:
         - [TOP_LEFT_CAUSAL, 0]
@@ -354,8 +368,9 @@ launch_surface:
   - name: grid
     python_source: kernels/gfx942/attention_dense.py:attention_dense_grid
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp
-    kmd_fields: [block_m, seqlen_q, num_query_heads, batch]
+    kmd_fields: [block_m, seqlen_q, num_query_heads, batch, kv_segments]
     guard: >
+      kernel_match refuses kv_segments other than 1, so no split-KV grid is launched.
       gfx942AttentionDenseGeometry() throws HipdnnPluginException for a block_m
       that is not a positive multiple of 32 within a 1024-thread CTA, and for
       non-positive seqlen_q, num_query_heads or batch. Grid is

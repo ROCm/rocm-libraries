@@ -57,7 +57,7 @@
  * registers them under its own symbols.
  *
  * Every KMD field read here is one both engine manifests declare, except kv_segments,
- * which a record may omit (KV_SEGMENTS_FIELD).
+ * which only gfx942's declares (KV_SEGMENTS_FIELD).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::attention_dense
 {
@@ -82,8 +82,9 @@ constexpr std::string_view RAGGED_FIELD = "ragged";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
 // A split-KV build multiplies the grid's x extent by kv_segments and takes a workspace and
-// a combine launch this dispatch does not make. Neither KMD declares it yet, so an absent
-// field reads as 1, the one value served.
+// a combine launch this dispatch does not make. The gfx942 KMD declares it; the gfx950 KMD
+// does not and every gfx950 variant is built at 1, so an absent field reads as 1, the one
+// value served.
 constexpr std::string_view KV_SEGMENTS_FIELD = "kv_segments";
 
 // The graph-reading helpers every single-node SDPA-forward pack shares.
