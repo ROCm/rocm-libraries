@@ -5118,3 +5118,25 @@ class TestPartitionZeroIssueOrder:
         assert wait.dscnt == 0
         assert payload_order == [2]
         assert [inst.comment for _, inst in payload] == ["A next"]
+
+    def test_reads_across_a_wait_require_the_mxfp8_exception(self):
+        from rocisa.instruction import SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+
+        placer = _SlotPlacer(intervals=6, numModules=1, pathOrders=[])
+        read = self._read("across")
+        wait = SWaitCnt(dscnt=0)
+
+        legacy = _SchedulingRules(totalSlots=placer.totalSlots)
+        legacy.earliestWaitCntPos = 3
+        legacy.lastDsReadPos = 4
+        assert not legacy.minGapDsReadBeforeWait(placer, 4, read)
+        assert not legacy.minGapDsReadToWait(placer, 3, wait)
+
+        mxfp8 = _SchedulingRules(
+            totalSlots=placer.totalSlots, allowReadsAcrossWait=True)
+        mxfp8.earliestWaitCntPos = 3
+        mxfp8.lastDsReadPos = 4
+        assert mxfp8.minGapDsReadBeforeWait(placer, 4, read)
+        assert mxfp8.minGapDsReadToWait(placer, 3, wait)

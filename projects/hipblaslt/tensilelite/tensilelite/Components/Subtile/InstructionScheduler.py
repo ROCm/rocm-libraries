@@ -306,13 +306,17 @@ class _SchedulingRules:
     Bound methods are passed as callbacks to _SlotPlacer.
     """
 
-    def __init__(self, totalSlots: int, minGapDsReadToWait: int = _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
+    def __init__(
+            self, totalSlots: int,
+            minGapDsReadToWait: int = _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+            allowReadsAcrossWait: bool = False):
         # Cross-path state
         self.lastDsReadPos = -1
         self.earliestWaitCntPos = totalSlots
         self.waitGrBarrierPos: Optional[int] = None
         self.maxDsReadAfterWaitGr = -1
         self.minGap = minGapDsReadToWait
+        self.allowReadsAcrossWait = allowReadsAcrossWait
         self.p0OverwritePrerequisiteIds = set()
         self.youngerP0OverwriteIds = set()
         self.partialP0OverwriteWaitIds = set()
@@ -339,12 +343,18 @@ class _SchedulingRules:
         """Reject ds_read too close to an already-placed waitcnt ahead."""
         if not _isDsRead(inst):
             return True
+        # MXFP8 partition prefetch may issue a read on the far side of a wait.
+        # The default gap still applies to every other schedule.
+        if self.allowReadsAcrossWait and pos >= self.earliestWaitCntPos:
+            return True
         gap = self.minGap * 2
         return self.earliestWaitCntPos - pos >= gap
 
     def minGapDsReadToWait(self, placer, pos, inst):
         """Reject waitcnt too close to the last placed ds_read."""
         if not _isWaitCnt(inst) or self.lastDsReadPos < 0:
+            return True
+        if self.allowReadsAcrossWait and pos <= self.lastDsReadPos:
             return True
         gap = self.minGap * 2
         return pos - self.lastDsReadPos >= gap
@@ -779,7 +789,8 @@ def _schedulePartitionZeroIssueOrder(
 
     rules = _SchedulingRules(
         totalSlots=(len(mfmas) - 1) * 2,
-        minGapDsReadToWait=minGapDsReadToWait)
+        minGapDsReadToWait=minGapDsReadToWait,
+        allowReadsAcrossWait=True)
     placer = _SlotPlacer(
         len(mfmas) - 1, n, placementPathOrders,
         validators=[
