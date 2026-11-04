@@ -29,7 +29,7 @@ namespace
     {
     public:
         explicit RecordingValidator(po::variables_map const& args)
-            : ReferenceValidator(args, {})
+            : ReferenceValidator(args)
         {
         }
 
