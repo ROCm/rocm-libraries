@@ -5176,3 +5176,60 @@ class TestPartitionZeroIssueOrder:
         assert legacy_rules.oneDsReadPerInterval(legacy, 0, read)
         legacy._placed[0].append((0, read))
         assert not legacy_rules.oneDsReadPerInterval(legacy, 1, read)
+
+    def test_direct_to_lds_bundle_uses_the_latest_shadow(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer,
+            _slideVmemBundlesLate)
+
+        def bundle(tag):
+            setup = SMovB32(dst=mgpr(0), src=0, comment=f"m0-{tag}")
+            load = BufferLoadB128(
+                dst=vgpr(8, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+                comment=f"gr-{tag}")
+            return setup, load
+
+        def positions(placer):
+            found = {}
+            for pos, slot in enumerate(placer._placed):
+                for _mid, inst in slot:
+                    found[inst.comment] = pos
+            return found
+
+        width = _MXFP8_FOLLOWER_SLOTS
+        rules = _SchedulingRules(totalSlots=3 * width)
+        placer = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+        setup, load = bundle(0)
+        placer.place(0, (0, setup))
+        placer.place(1, (0, load))
+        _slideVmemBundlesLate(placer)
+        found = positions(placer)
+        assert found["m0-0"] == 2 * width
+        assert found["gr-0"] == 2 * width + 1
+
+        blocked = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+        setup, load = bundle(1)
+        blocked.place(0, (0, setup))
+        blocked.place(1, (0, load))
+        blocked.place(2 * width, (0, SBarrier(comment="stop")))
+        _slideVmemBundlesLate(blocked)
+        found = positions(blocked)
+        assert found["m0-1"] == width
+        assert found["gr-1"] == width + 1
+        assert found["stop"] == 2 * width
