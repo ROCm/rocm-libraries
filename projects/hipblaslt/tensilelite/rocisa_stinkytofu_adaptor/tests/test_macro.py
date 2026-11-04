@@ -17,6 +17,8 @@ import os
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap (mirrors test_functions.py).
 # ---------------------------------------------------------------------------
@@ -37,7 +39,7 @@ MACRO_PUBLIC_EXPORTS: tuple[str, ...] = (
 )
 
 
-class TestMacroModuleExports(unittest.TestCase):
+class TestMacroModuleExports(AdaptorTestCase):
     def test_all_symbols_exported(self):
         for name in MACRO_PUBLIC_EXPORTS:
             with self.subTest(name=name):
@@ -50,7 +52,7 @@ class TestMacroModuleExports(unittest.TestCase):
                 self.assertTrue(callable(getattr(_macro, name)))
 
 
-class TestMacroVMagicDiv(unittest.TestCase):
+class TestMacroVMagicDiv(AdaptorTestCase):
     def test_algo1_returns_macro(self):
         result = _macro.MacroVMagicDiv(1)
         self.assertIsInstance(result, Macro)
@@ -71,7 +73,7 @@ class TestMacroVMagicDiv(unittest.TestCase):
         self.assertIn("v_lshrrev_b32", text)
 
 
-class TestVMagicDiv(unittest.TestCase):
+class TestVMagicDiv(AdaptorTestCase):
     def test_algo1_returns_module(self):
         from rocisa_stinkytofu_adaptor.container import vgpr, sgpr
         result = _macro.VMagicDiv(1, 10, vgpr(5), sgpr(2), sgpr(3), sgpr(4))
@@ -89,7 +91,7 @@ class TestVMagicDiv(unittest.TestCase):
         self.assertIn("v_lshrrev_b32", text)
 
 
-class TestPseudoRandomGenerator(unittest.TestCase):
+class TestPseudoRandomGenerator(AdaptorTestCase):
     def test_returns_macro(self):
         result = _macro.PseudoRandomGenerator()
         self.assertIsInstance(result, Macro)

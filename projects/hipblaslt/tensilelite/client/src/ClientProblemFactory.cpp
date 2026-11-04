@@ -27,6 +27,8 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 
+#include <Tensile/FusedA2AKernArg.hpp>
+
 #include <cstddef>
 #include <stdexcept>
 
@@ -80,6 +82,7 @@ namespace TensileLite
             , m_performanceMetric(args["performance-metric"].as<PerformanceMetric>())
             , m_deterministicMode(args["deterministic-mode"].as<bool>())
             , m_cEqualsD(args["c-equal-d"].as<bool>())
+            , m_uniformSummationOrder(args["uniform-summation-order"].as<int>())
             , m_biasTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_gateTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_factorDimArgs(std::vector<int>(1, 0))
@@ -94,10 +97,17 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
+            , m_mxBlockFreeA(args["mx-a-free-block"].as<int>())
+            , m_mxBlockFreeB(args["mx-b-free-block"].as<int>())
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
+            , m_worlds(args.count("world") ? args["world"].as<std::vector<int>>()
+                                           : std::vector<int>())
+            , m_fusedA2AExtents(args.count("fused-a2a-extent")
+                                    ? args["fused-a2a-extent"].as<std::vector<int>>()
+                                    : std::vector<int>())
             , m_metadataLayout(args["metadata-layout"].as<int>())
             , m_aOps(args["a-ops"].as<TensorOps>())
             , m_bOps(args["b-ops"].as<TensorOps>())
@@ -121,6 +131,31 @@ namespace TensileLite
                 throw std::invalid_argument("batch-mode=1 does not support grouped GEMM");
             if(pointerArrayBatch && m_sparse)
                 throw std::invalid_argument("batch-mode=1 does not support sparse GEMM");
+
+            if(m_fusedGemmA2A)
+            {
+                if(m_worlds.size() != m_problemSizes.size()
+                   || m_fusedA2AExtents.size() != m_problemSizes.size())
+                    throw std::invalid_argument(
+                        concatenate("fused-gemm-a2a needs one world and one fused-a2a-extent per "
+                                    "problem-size; got ",
+                                    m_worlds.size(),
+                                    " and ",
+                                    m_fusedA2AExtents.size(),
+                                    " for ",
+                                    m_problemSizes.size()));
+                for(int world : m_worlds)
+                    if(!fusedA2AWorldSizeValid(world))
+                        throw std::invalid_argument(concatenate(
+                            "world=", world, " is out of range [1, ", FUSED_A2A_MAX_RANKS, "]"));
+                for(int extent : m_fusedA2AExtents)
+                    if(extent < 1)
+                        throw std::invalid_argument(
+                            concatenate("fused-a2a-extent=", extent, " must be >= 1"));
+            }
+            else if(!m_worlds.empty() || !m_fusedA2AExtents.empty())
+                throw std::invalid_argument(
+                    "world and fused-a2a-extent apply only with fused-gemm-a2a");
 
             if(m_mxBlockA || m_mxBlockB)
             {
@@ -443,6 +478,7 @@ namespace TensileLite
                                     static_cast<ContractionProblemGemm::BATCHMODE>(m_batchMode));
                                 rv.back().setHighPrecisionAccumulate(m_highPrecisionAccumulate);
                                 rv.back().setUseGradient(m_useGradient);
+                                rv.back().setParams().setUniformSummationOrder(m_uniformSummationOrder);
                                 rv.back().setUseBias(m_useBias);
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);
@@ -456,6 +492,19 @@ namespace TensileLite
                                 rv.back().setSwizzleTensorA(m_swizzleTensorA);
                                 rv.back().setSwizzleTensorB(m_swizzleTensorB);
                                 rv.back().setFusedGemmA2A(m_fusedGemmA2A);
+                                if(m_fusedGemmA2A)
+                                {
+                                    if(static_cast<size_t>(m_fusedA2AExtents[i])
+                                       > rv.back().freeSizeA(0))
+                                        throw std::invalid_argument(
+                                            concatenate("fused-a2a-extent=",
+                                                        m_fusedA2AExtents[i],
+                                                        " exceeds M=",
+                                                        rv.back().freeSizeA(0)));
+                                    rv.back().setWorld(m_worlds[i]);
+                                    rv.back().setFusedA2AExtent(m_fusedA2AExtents[i]);
+                                    rv.back().setA2ABuf();
+                                }
                                 if(k < m_biasTypeArgs.size())
                                 {
                                     auto length
@@ -555,11 +604,11 @@ namespace TensileLite
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeA);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeB);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD
