@@ -26,6 +26,8 @@ struct BlockFmhaBwdConvertQGrad
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kDetTileSplit    = Problem::kDetTileSplit;
 
+    // vector width of the unpadded path; the kernel picks it at runtime for padded hdim too
+    static constexpr index_t kVecQGrad = Policy::template GetAlignmentPostQGrad<Problem>();
     static constexpr index_t kAlignmentQGradAcc =
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentPostQGradAcc<Problem>();
     static constexpr index_t kAlignmentQGrad =
