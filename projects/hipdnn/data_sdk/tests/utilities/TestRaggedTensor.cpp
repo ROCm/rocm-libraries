@@ -273,8 +273,9 @@ TEST(TestRaggedTensor, ValidationOffsetsOffTheBatchAxisThrows)
 {
     auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{1, 3, 1, 1});
     fillLeading(*aux, K_OFFSETS);
-    EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux),
-                 std::invalid_argument);
+    EXPECT_THAT([&] { const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux); },
+                ::testing::ThrowsMessage<std::invalid_argument>(
+                    ::testing::HasSubstr("ragged_offset must have shape")));
 }
 
 TEST(TestRaggedTensor, ValidationBadElementSizeThrows)
@@ -1210,6 +1211,25 @@ TEST(TestRaggedLayoutRows, RowOffsetsThrowsForGappedBatches)
 TEST(TestRaggedLayoutRows, RowOffsetsThrowsForNonMonotonicOrigins)
 {
     EXPECT_THROW(buildRow("L9").raggedIterationInfo()->rowOffsets(), std::logic_error);
+}
+
+// L15: the empty batch 0 owns no rows, so its stored origin (6) does not break contiguity; its
+// entry is where the first live batch starts. Token stride is 2.
+TEST(TestRaggedLayoutRows, RowOffsetsSkipsZeroLengthBatches)
+{
+    EXPECT_EQ(buildRow("L15").raggedIterationInfo()->rowOffsets(), (std::vector<int64_t>{0, 0, 6}));
+}
+
+// A trailing empty batch takes the running end; an empty batch between live batches does not
+// hide a gap between them.
+TEST(TestRaggedLayoutRows, RowOffsetsZeroLengthBatchesKeepGapDetection)
+{
+    const RaggedIterationInfo trailing{{0, 9}, {2, 0}, SDPA_SEQ_AXIS, 2};
+    EXPECT_EQ(trailing.rowOffsets(), (std::vector<int64_t>{0, 4, 4}));
+
+    const RaggedIterationInfo middleGap{{0, 7, 8}, {2, 0, 1}, SDPA_SEQ_AXIS, 2};
+    EXPECT_THAT([&] { middleGap.rowOffsets(); },
+                ::testing::ThrowsMessage<std::logic_error>(::testing::HasSubstr("batch 0")));
 }
 
 // A zero-batch layout has no batches to end: the table is empty, not {origins.back() + ...}.

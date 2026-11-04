@@ -134,31 +134,51 @@ struct RaggedIterationInfo
     /**
      * @brief The B+1 offset table of a packed, in-order layout with no gaps between batches.
      *
-     * `origins` and `lengths` stay authoritative; the table is derived from them as
-     * `{origins[0], ..., origins[B-1], origins[B-1] + lengths[B-1] * seqStride}` and is not
-     * part of equality.
+     * `origins` and `lengths` stay authoritative; the table is derived from them and is not
+     * part of equality. Zero-length batches own no rows: their entry is the running end of
+     * the preceding batches (for leading empty batches, the origin of the first non-empty
+     * batch), whatever their stored origin. The final entry is the end of the last live row.
      *
      * @return The offset table in element units.
-     * @throws std::logic_error When the batches are not contiguous and in order, i.e.
-     *         `origins[b+1] != origins[b] + lengths[b] * seqStride` for some b; the message
-     *         names the first such b.
+     * @throws std::logic_error When the non-empty batches are not contiguous and in order,
+     *         i.e. a non-empty batch does not start where the previous non-empty batch ends
+     *         (`origins[b] != origins[a] + lengths[a] * seqStride`); the message names the
+     *         batch `a` that precedes the break.
      */
     std::vector<int64_t> rowOffsets() const
     {
-        std::vector<int64_t> offsets(origins);
+        std::vector<int64_t> offsets;
         if(origins.empty())
         {
             return offsets;
         }
-        for(size_t b = 0; b + 1 < origins.size(); ++b)
+        offsets.reserve(origins.size() + 1);
+
+        size_t first = 0;
+        while(first < origins.size() && lengths[first] == 0)
         {
-            if(origins[b + 1] != origins[b] + lengths[b] * seqStride)
+            ++first;
+        }
+        int64_t end = first < origins.size() ? origins[first] : origins[0];
+        size_t previous = first;
+
+        for(size_t b = 0; b < origins.size(); ++b)
+        {
+            if(lengths[b] == 0)
+            {
+                offsets.push_back(end);
+                continue;
+            }
+            if(origins[b] != end)
             {
                 throw std::logic_error("ragged batches are not contiguous and in order at batch "
-                                       + std::to_string(b));
+                                       + std::to_string(previous));
             }
+            offsets.push_back(end);
+            end += lengths[b] * seqStride;
+            previous = b;
         }
-        offsets.push_back(origins.back() + lengths.back() * seqStride);
+        offsets.push_back(end);
         return offsets;
     }
 

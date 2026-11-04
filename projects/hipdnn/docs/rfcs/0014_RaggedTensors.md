@@ -2,8 +2,8 @@
 
 - Contributors: hipDNN maintainers
 - **Status**: In progress
-- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`). Both executors run every other single-node ragged SDPA graph, forward or backward, through a dense padded rewrite; see §4.10.
-- **Last verified**: 2026-11-04 against `develop` (f7d1a530866) plus this change
+- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`). Both executors run every other single-node ragged SDPA graph, forward or backward, through a dense padded rewrite; see §4.10. Per-batch origins, lengths from `seq_len`, strided and head-major layouts, and the exact element-space footprint land with #15080.
+- **Last verified**: 2026-11-04 against #15080 on `develop` (49a01e717d5)
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -89,7 +89,7 @@ This RFC adds end-to-end ragged-tensor support:
 their own node-level attribute APIs (e.g.
 `SdpaAttributes::set_seq_len_q`). A ragged tensor additionally takes
 it as an optional length tensor that bounds the live rows
-([§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)).
+([§4.5](#45-data-sdk-shared-elements) item 4).
 
 The immediate consumer is SDPA on AITER FMHA kernels.
 
@@ -136,8 +136,7 @@ its own `multiplier = H*D = seqStride` so the same stored offsets
 address each buffer correctly.
 
 Where a ragged tensor takes `seq_lens` is given in
-[§4.5](#45-data-sdk-shared-elements) item 4 and
-[§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction).
+[§4.5](#45-data-sdk-shared-elements) item 4.
 
 ### 2.2 hipDNN gap
 
@@ -277,7 +276,7 @@ corresponding CPU reference (e.g.
    `IndexT` template parameter — see
    [§4.5](#45-data-sdk-shared-elements) item 1). `seq_lens` enters
    as an optional length tensor with no SDPA knowledge in the types
-   ([§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)).
+   ([§4.5](#45-data-sdk-shared-elements) item 4).
 3. **`ITensor`** gains two complementary polymorphic hooks: a
    `getIndexImpl` override point behind `getIndex` so ragged
    *addressing* bases each batch at its origin, and a
@@ -480,9 +479,12 @@ These apply to both `RaggedTensor<T>` and
      `strides()[seqAxis]`; `origins` and `lengths` are authoritative.
      The accessor `rowOffsets()` returns `{origins[0], …,
      origins[B-1], origins[B-1] + lengths[B-1] * seqStride}`, the
-     offset table of a packed, in-order layout with no gaps, and
-     throws `std::logic_error` naming the first batch `b` with
-     `origins[b+1] != origins[b] + lengths[b] * seqStride` when the
+     offset table of a packed, in-order layout with no gaps. Batches
+     with `lengths[b] == 0` are skipped by the contiguity check (their
+     entry equals the running end), and the accessor throws
+     `std::logic_error` naming the non-empty batch `a` that precedes
+     the break, when the next non-empty batch's origin is not
+     `origins[a] + lengths[a] * seqStride`, i.e. when the non-empty
      batches are not contiguous and in order. It is not part of
      `operator==`) and a `RaggedCompositeIndex` to the
      `IndexType` variant that walks each batch's live rows. The iterator's
@@ -507,8 +509,7 @@ These apply to both `RaggedTensor<T>` and
    an origin `origin_b` (element units) and a length `len_b` (sequence
    rows):
 
-   - **With a length tensor** (`seq_len`, `[B]`, INT32 or INT64;
-     [§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)):
+   - **With a length tensor** (`seq_len`, `[B]`, INT32 or INT64):
      `origin_b = ragged_offset[b] * multiplier` and
      `len_b = seq_len[b]`. Origins may be in any order.
      `ragged_offset` still holds `B + 1` values and `ragged_offset[B]`
@@ -533,6 +534,33 @@ These apply to both `RaggedTensor<T>` and
    element belongs to the right batch and to the tensor's owned
    memory. An op that masks beyond the lengths queries `seq_lens`
    from the variant pack.
+
+   **The length tensor.** The container takes the optional length
+   tensor (`seq_len`, one value per batch) beside `ragged_offset`, as a
+   `std::shared_ptr<ITensor>` supplied by the caller. It has no SDPA
+   knowledge and exposes lengths only as `RaggedIterationInfo::lengths`.
+
+   **Why the container takes lengths.** Origins plus lengths are the only
+   way to represent the cuDNN layouts where a block is longer than its
+   live rows or origins are not monotonic: padded THD, gap rows between
+   batches, shifted and non-monotonic origins (§4.5.1, L5s, L7d, L9, L14).
+   Without lengths, `len_b` derives from offset differences and none of
+   those is expressible. Footprint and the non-aliasing check depend on
+   the live rows, so iteration, element count and addressing must agree on
+   them.
+
+   **How lengths reach the container.** A `seq_len` belongs to the SDPA
+   node, not to a tensor, and one tensor can have different `seq_len`s in
+   different nodes. The test SDK maps each ragged tensor uid to its node's
+   `seq_len` uid by role (`raggedLengthUids(graph)`):
+
+   | `seq_len` | Forward | Backward |
+   |---|---|---|
+   | `seq_len_q` | Q, O, Stats, Max, Sum_exp | Q, O, dO, dQ, Stats |
+   | `seq_len_kv` | K, V | K, V, dK, dV |
+
+   A tensor whose node has no `seq_len` has no entry. Loaders pass the
+   length tensor next to the offset.
 
    **Identifying the ragged (sequence) axis.** The sequence axis is
    caller-provided at construction (e.g. `SDPA_SEQ_AXIS`), not
@@ -961,7 +989,7 @@ by the caller-supplied buffer being wrapped, not by the wrapper.
 | Ragged I/O at the CPU reference plan layer | `ShallowRaggedTensor<T>` over variant-pack `void*` | Per-batch over origins and lengths |
 | Ragged tensor a user iterates directly (samples) | `RaggedTensor<T>` | Per-batch over origins and lengths |
 | Aux tensor (`ragged_offset`) | Plain `Tensor<int32_t>` or `Tensor<int64_t>`, held as `shared_ptr<ITensor>` | Dense |
-| `seq_lens` (op input; optionally the length tensor of a ragged primary, §6.2) | Plain `Tensor<int32_t>` or `Tensor<int64_t>` | Dense |
+| `seq_lens` (op input; optionally the length tensor of a ragged primary, §4.5 item 4) | Plain `Tensor<int32_t>` or `Tensor<int64_t>` | Dense |
 | Non-ragged tensors | Plain `Tensor<T>` | Dense |
 
 ### 4.9 Wiring sources of truth
@@ -972,7 +1000,7 @@ by the caller-supplied buffer being wrapped, not by the wrapper.
   `seq_lens` UIDs via existing accessors; these are referenced
   like any other tensor input. The test SDK binds the role's
   `seq_len` to each ragged primary as its length tensor
-  ([§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)).
+  ([§4.5](#45-data-sdk-shared-elements) item 4).
 - **Runtime tensorMap (`UID → ITensor`)** carries:
   `RaggedTensor<T>` per ragged primary; ordinary
   `Tensor<int32_t>` or `Tensor<int64_t>` per `ragged_offset` aux
@@ -1274,7 +1302,7 @@ deterministic `seq_lens` values for ops that consume them can put
 them in the pre-supplied bundle as ordinary entries; the harness
 treats them like any other override. When a ragged tensor's SDPA
 node names a `seq_len`, that tensor loads first and binds as the
-ragged tensor's length tensor ([§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)).
+ragged tensor's length tensor ([§4.5](#45-data-sdk-shared-elements) item 4).
 
 **Variant-pack construction.** UIDs resolved from the
 pre-supplied bundle contribute the same `void*` to both bundles'
@@ -1396,7 +1424,7 @@ validation site reports the ragged output as unsupported there
 
 Sentinel-skip is the only validation mechanism in this design. The
 compared rows are the container's live rows (`s < len_b`), which follow
-`seq_len` when it is bound ([§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)).
+`seq_len` when it is bound ([§4.5](#45-data-sdk-shared-elements) item 4).
 
 Even where no value is guaranteed to be unproducible by the reference,
 a random sentinel has a very low likelihood of showing up in
@@ -1464,7 +1492,10 @@ validator would only skip over this one value.
    requires whole-token origins, `0 <= len_b <= S_max` and strides
    `>= 0`. The cuDNN frontend validates ragged graphs by attribute only
    and does not see offset values (`sdpa_support_surface.h:90-92`); see
-   [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md).
+   [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md). Applicability sees
+   only graph attributes, not offset values; layouts that depend on the
+   values are rejected when the tensor is built (bundle load), or with
+   `std::invalid_argument` at execute for callers passing raw pointers.
 9. **Paged K/V and ragged Max/Sum_exp.** The native ragged forward
    gate declines ragged Q over paged K/V and declines `Max` and
    `Sum_exp`. The dense rewrite (`RaggedSdpaDensify.hpp`) serves
@@ -1481,6 +1512,10 @@ validator would only skip over this one value.
     ragged bundles with a Stats output. The container, loader and
     references accept those layouts; the backward generator authors
     them.
+12. **Without `seq_len`, the `S_max` cap can hide offsets written in
+    the wrong units** when no buffer size is known (raw device
+    pointers). Wherever a size is known (`physicalElementCount`, a
+    bundle file) it must equal the element space, which catches them.
 
 ---
 
@@ -1513,7 +1548,7 @@ indirectly at the plan layer.
 
 **Why this RFC does not take it.** The aux that sizes the buffer is
 `ragged_offset` (the optional length tensor of
-[§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction) is
+[§4.5](#45-data-sdk-shared-elements) item 4 is
 the second), which must be available at primary-allocation time.
 The bundle therefore still has to thread `ragged_offset` into a
 primary's ctor — exactly the `shared_ptr` shift that the split
@@ -1541,38 +1576,13 @@ The single-type design (`RaggedTensor<T>` +
 `ShallowRaggedTensor<T>`) avoids all three of these costs while
 incurring the same `shared_ptr`-typed bundle storage either way.
 
-### 6.2 Keeping `seq_lens` in the ragged-tensor SDK abstraction
+### 6.2 Carrying the length tensor on `TensorAttributes`
 
-The ragged container takes an optional length tensor (`seq_len`, one
-value per batch) beside `ragged_offset`. Iteration, element count and
-footprint use it. The container holds it as a
-`std::shared_ptr<ITensor>` supplied by the caller, has no SDPA
-knowledge, and exposes lengths only as `RaggedIterationInfo::lengths`.
-
-**Why the container takes lengths.** Origins plus lengths are the only
-way to represent the cuDNN layouts where a block is longer than its
-live rows or origins are not monotonic: padded THD, gap rows between
-batches, shifted and non-monotonic origins (§4.5.1, L5s, L7d, L9, L14).
-Without lengths, `len_b` derives from offset differences and none of
-those is expressible. Footprint and the non-aliasing check depend on
-the live rows, so iteration, element count and addressing must agree on
-them.
-
-**How lengths reach the container.** A `seq_len` belongs to the SDPA
-node, not to a tensor, and one tensor can have different `seq_len`s in
-different nodes. The test SDK maps each ragged tensor uid to its node's
-`seq_len` uid by role (`raggedLengthUids(graph)`):
-
-| `seq_len` | Forward | Backward |
-|---|---|---|
-| `seq_len_q` | Q, O, Stats, Max, Sum_exp | Q, O, dO, dQ, Stats |
-| `seq_len_kv` | K, V | K, V, dK, dV |
-
-A tensor whose node has no `seq_len` has no entry. Loaders pass the
-length tensor next to the offset. Rejected: a `ragged_seq_len_tensor_uid`
-on `TensorAttributes` (a schema and plugin-API change that duplicates
-the node's `seq_len`). An ordinary `seq_len` input stays a regular tensor
-that references read for masking.
+Rejected: a `ragged_seq_len_tensor_uid` on `TensorAttributes`. It is a
+schema and plugin-API change that duplicates the node's `seq_len`; the
+node-level mapping in [§4.5](#45-data-sdk-shared-elements) item 4 needs
+neither. An ordinary `seq_len` input stays a regular tensor that
+references read for masking.
 
 ### 6.3 Templating the ragged-tensor types on `IndexT`
 

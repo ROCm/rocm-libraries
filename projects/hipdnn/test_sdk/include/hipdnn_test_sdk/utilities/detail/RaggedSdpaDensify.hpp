@@ -242,8 +242,8 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         }
     }
 
-    // A seq_len tensor is [B, 1, 1, 1], with B the batch of Q; its batch stride is only meaningful
-    // on that shape.
+    // A seq_len tensor is INT32 [B, 1, 1, 1], with B the batch of Q; its values are read as INT32
+    // and its batch stride is only meaningful on that shape.
     const auto& qDims = tensors.at(attrs.q_tensor_uid)->dims;
     for(const auto& seqLenUid : {attrs.seq_len_q_tensor_uid, attrs.seq_len_kv_tensor_uid})
     {
@@ -252,7 +252,7 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
             continue;
         }
         const auto it = tensors.find(seqLenUid.value());
-        if(qDims.empty() || it == tensors.end()
+        if(qDims.empty() || it == tensors.end() || it->second->data_type != DataType::INT32
            || it->second->dims != std::vector<int64_t>{qDims[0], 1, 1, 1})
         {
             return std::nullopt;
@@ -261,6 +261,12 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
 
     DenseSdpaFromRagged result;
     std::vector<int64_t> offsetUids;
+    // Every offset table is read with Q's batch, so every ragged role must share it.
+    if(qDims.empty())
+    {
+        return std::nullopt;
+    }
+    const int64_t batch = qDims[0];
     for(const auto& role : roles)
     {
         auto* tensor = tensors.at(role.uid);
@@ -270,7 +276,8 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         }
         const auto offsetUid = tensor->ragged_offset_tensor_uid.value();
         const auto offsetIt = tensors.find(offsetUid);
-        if(tensor->dims.size() != 4 || offsetIt == tensors.end() || tensor->virtual_
+        if(tensor->dims.size() != 4 || tensor->dims[0] != batch || offsetIt == tensors.end()
+           || tensor->virtual_
            || (offsetIt->second->data_type != DataType::INT32
                && offsetIt->second->data_type != DataType::INT64)
            || tensor->ragged_offset_multiplier < 1

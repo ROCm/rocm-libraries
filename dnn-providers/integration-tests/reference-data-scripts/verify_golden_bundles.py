@@ -641,7 +641,8 @@ def extract_sdpa_stats_tensor_uids(nodes: list[object]) -> set[int]:
 
 
 def extract_ragged_length_uids(nodes: list[object]) -> dict[int, int]:
-    """Ragged tensor uid -> the uid of the seq_len tensor that sizes its batches."""
+    """Ragged tensor uid -> the uid of the seq_len tensor that sizes its batches.
+    Raises ValueError when a ragged tensor is bound to two different seq_len tensors."""
     length_uids: dict[int, int] = {}
     for node in nodes:
         if not isinstance(node, dict):
@@ -657,7 +658,12 @@ def extract_ragged_length_uids(nodes: list[object]) -> dict[int, int]:
             for uid_map_name, field_name in tensors:
                 uid_map = node.get(uid_map_name)
                 if isinstance(uid_map, dict) and is_integer(uid_map.get(field_name)):
-                    length_uids[uid_map[field_name]] = length_uid
+                    ragged_uid = uid_map[field_name]
+                    if length_uids.setdefault(ragged_uid, length_uid) != length_uid:
+                        raise ValueError(
+                            f"ragged tensor {ragged_uid} is bound to two seq_len "
+                            f"tensors, {length_uids[ragged_uid]} and {length_uid}"
+                        )
     return length_uids
 
 
@@ -789,9 +795,10 @@ def ragged_element_space(
     offsets must be monotonic and the blocks give the lengths. Raises ValueError
     naming the violated rule."""
     batches, s_max, seq_stride = dims[0], dims[2], strides[2]
-    if seq_stride <= 0 or any(stride < 0 for stride in strides):
+    if seq_stride <= 0 or any(stride < 0 for stride in strides[1:]):
         raise ValueError(
-            "ragged strides must be non-negative with a positive sequence stride "
+            "ragged strides must be non-negative with a positive sequence stride; "
+            "the batch-axis stride is unused "
             f"(negative-stride rule; got {strides})"
         )
     if len(offsets) != batches + 1:
@@ -1318,6 +1325,12 @@ def validate_graph_bundle(
             "ragged_offset_multiplier": ragged_offset_multiplier,
         }
 
+    try:
+        length_uids = extract_ragged_length_uids(nodes)
+    except ValueError as error:
+        result.error(path, f"invalid ragged seq_len binding: {error}")
+        return
+
     bundle_has_manifest = bundle_has_tensor_manifest(path)
     base_path = path.with_suffix("")
     validate_tensor_payloads(
@@ -1329,7 +1342,7 @@ def validate_graph_bundle(
         path,
         result,
         extract_sdpa_stats_tensor_uids(nodes),
-        extract_ragged_length_uids(nodes),
+        length_uids,
     )
 
     for output_tensor_uid in output_tensor_uids:
@@ -1790,7 +1803,11 @@ def validate_sweep_bundle(
 
     output_tensor_uids = extract_output_tensor_uids(nodes, template_path, result)
     stats_tensor_uids = extract_sdpa_stats_tensor_uids(nodes)
-    length_uids = extract_ragged_length_uids(nodes)
+    try:
+        length_uids = extract_ragged_length_uids(nodes)
+    except ValueError as error:
+        result.error(template_path, f"invalid ragged seq_len binding: {error}")
+        return
     tensor_placeholder_fields, literal_tensor_specs = parse_template_tensors(
         tensors, template_path, result
     )

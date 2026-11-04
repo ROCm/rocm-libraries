@@ -840,6 +840,20 @@ TEST(TestRaggedSdpaDensify, OffsetTableOffTheBatchAxisIsDeclined)
     EXPECT_TRUE(densifies(raggedGraph(false, true)));
 }
 
+// Every offset table is read with Q's batch, so a ragged K/V with a smaller batch would be
+// read past its own table; the graph is declined instead.
+TEST(TestRaggedSdpaDensify, RaggedRoleWithAnotherBatchIsDeclined)
+{
+    const auto graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
+        for(const int64_t uid : {static_cast<int64_t>(K), static_cast<int64_t>(V)})
+        {
+            tensorOf(g, uid).dims[0] = B - 1;
+        }
+        tensorOf(g, KV_OFFSETS).dims = {B, 1, 1, 1};
+    });
+    EXPECT_FALSE(densifies(graph));
+}
+
 TEST(TestRaggedSdpaDensify, SeqLenOffTheBatchAxisIsDeclined)
 {
     const auto make = [](std::vector<int64_t> dims, std::vector<int64_t> strides) {
@@ -854,6 +868,22 @@ TEST(TestRaggedSdpaDensify, SeqLenOffTheBatchAxisIsDeclined)
     };
     EXPECT_FALSE(densifies(make({1, B, 1, 1}, {B, 1, 1, 1})));
     EXPECT_TRUE(densifies(make({B, 1, 1, 1}, {1, 1, 1, 1})));
+}
+
+// The rewrite reads seq_len values as INT32, so any other element type is declined.
+TEST(TestRaggedSdpaDensify, NonInt32SeqLenIsDeclined)
+{
+    const auto make = [](DataType type) {
+        return editGraph(raggedGraph(false, true), [&](GraphT& g) {
+            addSeqLens(g);
+            tensorOf(g, SEQ_Q).data_type = type;
+            auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+            attrs->seq_len_q_tensor_uid = SEQ_Q;
+            attrs->seq_len_kv_tensor_uid = SEQ_KV;
+        });
+    };
+    EXPECT_FALSE(densifies(make(DataType::INT64)));
+    EXPECT_TRUE(densifies(make(DataType::INT32)));
 }
 
 // A ragged_offset tensor another attribute still names stays in the dense graph.

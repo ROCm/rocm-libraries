@@ -168,7 +168,7 @@ Design, the full feature table for both references, and how they are tested:
 
 The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims, an `INT32` `ragged_offset`
 aux on every primary, and strides the ragged container accepts: token-major, head-major, a padded token
-stride, and shifted or non-monotonic origins with `seq_len`. The container rejects layouts that alias.
+stride, and shifted or non-monotonic origins with `seq_len`. The container rejects layouts that alias. Applicability sees only graph attributes, not offset values: layouts that depend on the values are rejected when the tensor is built (bundle load), or with `std::invalid_argument` at execute for callers passing raw pointers.
 Per-batch lengths come from `seq_len_q/kv` when bound (both or neither; a `padding_mask` only with
 both), else from the `ragged_offset` blocks clamped to `S_max`. A node is keyed as ragged when any of
 its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense

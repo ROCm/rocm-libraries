@@ -2194,6 +2194,24 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                     {uid for uid, length in expected.items() if length == 100},
                 )
 
+    def test_ragged_tensor_bound_to_two_seq_len_tensors_is_an_error(self) -> None:
+        node = {
+            "type": "SdpaAttributes",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 1,
+                "seq_len_q_tensor_uid": 100,
+                "seq_len_kv_tensor_uid": 101,
+            },
+            "outputs": {},
+        }
+        with self.assertRaisesRegex(ValueError, "two seq_len tensors"):
+            verify_golden_bundles.extract_ragged_length_uids([node])
+        node["inputs"]["seq_len_kv_tensor_uid"] = 100
+        self.assertEqual(
+            verify_golden_bundles.extract_ragged_length_uids([node]), {1: 100}
+        )
+
     def test_ragged_layout_violations_name_the_violated_rule(self) -> None:
         cases = (
             ("overlap rule", {"offsets": (0, 4, 8), "lengths": (3, 3)}),
@@ -2281,6 +2299,12 @@ class TestRaggedElementSpace(unittest.TestCase):
         self.assertEqual(
             self.space([0, 4, 10], [2, 3], dims=[2, 1, 4, 0]),
             0,
+        )
+
+    def test_batch_axis_stride_is_unused_so_negative_is_accepted(self) -> None:
+        self.assertEqual(
+            self.space([0, 4, 10], [2, 3], strides=[-8, 2, 2, 1]),
+            self.space([0, 4, 10], [2, 3]),
         )
 
     def test_zero_sequence_stride_is_rejected(self) -> None:
