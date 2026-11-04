@@ -29,7 +29,7 @@ def _cfg(
 ) -> dict:
     dd = dd or dt
     cd = cd or ("S" if dt not in ("D", "Z") else dt)
-    gt = GemmType.from_tensile(trans_a, trans_b, dt, dd, cd)
+    gt = GemmType.from_tensilelite(trans_a, trans_b, dt, dd, cd)
     gp = GemmConfig(gt, [[16, 16, 1, 16]], mx=mx)
     return {
         "ARCH": arch,
@@ -41,7 +41,7 @@ def _cfg(
 
 @pytest.fixture(autouse=True)
 def _no_tensile_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
 
 
 # ---------------------------------------------------------------------------

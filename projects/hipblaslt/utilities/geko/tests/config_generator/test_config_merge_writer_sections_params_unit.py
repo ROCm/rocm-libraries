@@ -359,7 +359,7 @@ def test_i8_bias_type_is_s_for_float_compute():
 
 def test_i8_bias_type_is_none_for_int_compute():
     cfg = _section_cfg(dtype="I8")
-    gt = GemmType.from_tensile("N", "N", "I8", "I8", "I")
+    gt = GemmType.from_tensilelite("N", "N", "I8", "I8", "I")
     cfg["GemmProblem"] = GemmConfig(gt, [[16, 16, 1, 16]])
     gen = csg.ConfigSectionGenerator(cfg)
     assert gen._resolve_bias_type() is None
@@ -377,14 +377,14 @@ def test_i8_use_bias_enabled_for_float_compute():
 def test_i8_problem_type_has_no_use_scale_ab(compute):
     """Int8 kernels have no UseScaleAB (unlike fp8/bf8), only a naive '8' check would add it."""
     cfg = _section_cfg(dtype="I8")
-    gt = GemmType.from_tensile("N", "N", "I8", "I8", compute)
+    gt = GemmType.from_tensilelite("N", "N", "I8", "I8", compute)
     cfg["GemmProblem"] = GemmConfig(gt, [[16, 16, 1, 16]])
     pt = csg.ConfigSectionGenerator(cfg)._problem_type
     assert not any(key.lstrip("#") == "UseScaleAB" for key in pt)
 
 
 def test_i8_gemm_type_dtype_round_trip():
-    gt = GemmType.from_tensile("N", "N", "I8", "I8", "I")
+    gt = GemmType.from_tensilelite("N", "N", "I8", "I8", "I")
     assert (gt.a_type, gt.c_type, gt.compute_type) == ("i8_r", "i8_r", "i32_r")
 
 

@@ -101,7 +101,7 @@ def test_list_yaml_mx_keys_leave_other_log_types_alone(tmp_path: Path) -> None:
 def test_configure_applies_overrides_below_explicit_args(tmp_path: Path, monkeypatch) -> None:
     seen = {}
     monkeypatch.setattr(optim.cg, "run", lambda config, *a, **k: seen.update(config))
-    gc = GemmConfig(GemmType.from_tensile("T", "N", "F8", "B", "S"), [[512, 512, 1, 32768]])
+    gc = GemmConfig(GemmType.from_tensilelite("T", "N", "F8", "B", "S"), [[512, 512, 1, 32768]])
     optim.configure(
         "/unused",
         gc,
