@@ -661,6 +661,12 @@ exclude_gpu:
       # (PR #13107 run 40983714656, Windows gfx110X, 2 of 2 attempts). Remove when ALMIOPEN-2966 makes the test skip archs
       # without models.
       - "GPU_ConvAIModelLoad_FP32*"
+      # Fails deterministically on Linux and Windows gfx110X and gfx1151 since #13107 added */GPU_LayerNormBwdTest_* to
+      # comprehensive (issue #15056): "Error dw beyond tolerance Error:0.0116, Threshold x 2: 0.00195" at layernorm.hpp:524,
+      # N:1 C:2048 H:4 W:32 dim:3 layout:1, mode 0 (/124) and mode 1 (/127). Develop nightlies 41764975629 (Linux) and
+      # 41793654564 (Windows), every attempt. gfx120X passes. Remove when #15056 closes.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
     labels:
       - "quick"
       - "standard"
@@ -686,6 +692,10 @@ exclude_gpu:
       # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux.
       # Linux gfx1151: PR #13107 run 39358709264. Remove when ALMIOPEN-2966 makes the test skip archs without models.
       - "GPU_ConvAIModelLoad_FP32*"
+      # Same deterministic LayerNorm backward FP16 dw tolerance failure as gfx110X (issue #15056): Linux gfx1151 nightly
+      # 41764975562 (attempts 1-2), Windows gfx1151 nightly 41793655004. Remove when #15056 closes.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
     labels:
       - "quick"
       - "standard"
