@@ -491,14 +491,14 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 1024;
         spec->batched = false;
         break;
-    case 23: /* the dense 16x16x128 f8f6f4 atom */
-        /* The only config on the wide low-bit atom. Its operand carrier is
-         * <16 x i32> rather than <8 x i32> and its intrinsic takes a format
-         * immediate per matrix with NO trailing reuse flags, so neither the
-         * K=64 configs above nor the scaled 16x16x128 atoms (a different
-         * opcode and a different arity) would catch a drift in this call
-         * shape. tile_k is two atom steps so the K loop is emitted, not
-         * peeled to one. */
+    case 23: /* the 16x16x128 fp8 atom (the dedicated fp8 x fp8 instruction) */
+        /* The only non-TDM config on the wide 8-bit atom; the name predates
+         * the dedicated instruction, when the atom was the f8f6f4 opcode with
+         * FP8 formats. Its operand carrier is <16 x i32> rather than
+         * <8 x i32>, so neither the K=64 configs above nor the scaled
+         * 16x16x128 atoms (a different opcode and a different arity) would
+         * catch a drift in this call shape. tile_k is two atom steps so the K
+         * loop is emitted, not peeled to one. */
         spec->name = "test_wmma_f8f6f4_k128";
         spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
                                               .tile_n = 128,

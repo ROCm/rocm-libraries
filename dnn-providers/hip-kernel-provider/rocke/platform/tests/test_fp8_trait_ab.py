@@ -232,6 +232,8 @@ class TestRooflineProbe(unittest.TestCase):
         self.assertIn("T[64]", rand_src)
 
     def test_sets_resolve_and_unknown_names_fail(self):
+        # The fp8 GEMM's instruction, and the f8f6f4 form it is compared with.
+        self.assertIn("f32_16x16x128_fp8_fp8", probe.resolve("@ceiling"))
         self.assertIn("f32_16x16x128_f8f6f4.fp8", probe.resolve("@ceiling"))
         with self.assertRaises(SystemExit):
             probe.resolve("no_such_instruction")

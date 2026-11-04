@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from .arch.target import integer_mma_op_ids
 from .arch.wmma_scale import gfx1250_scaled_wmma
 from .dtypes import dtype_info
 from .ir import (
@@ -371,6 +372,19 @@ _HIP_MEMORY_SCOPE = {
 # emitted source is the byte-identical baseline; callers that don't pass an
 # arch (e.g. the in-tree coverage tests) keep getting exactly that output.
 _DEFAULT_HIP_ARCH = "gfx950"
+
+# The gfx11 integer WMMA builtins, keyed by every op_id of their catalog rows
+# (one per operand signedness, integer_mma_op_ids): the builtin and the number
+# of i32 words in its A and B operands. Each row lowers through the same
+# builtin; only the signedness bools, read from the row, differ.
+_GFX11_INTEGER_WMMA = {
+    row: (builtin, words)
+    for signed, bits, builtin, words in (
+        ("wmma_i32_16x16x16_iu8", 8, "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32", 4),
+        ("wmma_i32_16x16x16_iu4", 4, "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32", 2),
+    )
+    for row in integer_mma_op_ids(signed, bits)
+}
 
 
 class _Lowerer:
@@ -760,6 +774,9 @@ class _Lowerer:
                 f"{atom.emulation.physical_op_id}) has no HIP lowering; lower it "
                 f"through the LLVM path"
             )
+        if op_id in _GFX11_INTEGER_WMMA:
+            self._emit_gfx11_integer_wmma(op, op_id)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -928,28 +945,20 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
-    def _op_tile_wmma_gfx1250_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        # gfx1250 dense K=128 builtin: A/B are <16 x i32> (64 low-bit bytes per
-        # lane), 6-operand form (fmtA, A, fmtB, B, modC, C) -- a format
-        # immediate per matrix (0 = FP8/E4M3) and no reuse flags.
-        self._require_wmma_arch("wmma_gfx1250_f32_16x16x128_f8f6f4")
-        a, b, c = op.operands
-        self._emit(
-            f"f32x8 {_name(op.result)} = "
-            f"__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4("
-            f"0, {_name(a)}, 0, {_name(b)}, (int16_t)0, {_name(c)});"
-        )
+    def _op_tile_wmma_gfx1250_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "fp8_fp8", k=128)
 
-    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
-        # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
-        # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
-        op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
+    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str, k: int = 64) -> None:
+        # gfx1250 K=64 / K=128 FP8/BF8 builtin: A/B are passed as i32x8 / i32x16
+        # (32 / 64 low-bit bytes per lane), 6-operand form
+        # (A, B, modC, C, reuseA, reuseB).
+        op_id = f"wmma_gfx1250_f32_16x16x{k}_{ab}"
         self._require_wmma_arch(op_id)
-        a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
-        b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, k // 8))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, k // 8))
         self._emit(
             f"f32x8 {_name(op.result)} = "
-            f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
+            f"__builtin_amdgcn_wmma_f32_16x16x{k}_{ab}("
             f"{a}, {b}, (int16_t)0, {_name(op.operands[2])}, false, false);"
         )
 
@@ -984,44 +993,46 @@ class _Lowerer:
             f"{_name(c)}, false, false);"
         )
 
-    # ---- WMMA iu8 (RDNA3/3.5, gfx11, wave32) — integer matrix engine ----
+    # ---- WMMA iu8 / iu4 (RDNA3/3.5, gfx11, wave32) -- integer matrix engine ----
     #
     # The integer twin of the f16 WMMA handler. Per-lane A/B operands are
-    # ``i32x4`` (16 int8 packed 4-per-i32) and the accumulator / result are
-    # ``i32x8``; packed bytes of the same width (``i8x16``) are passed through
-    # one ``__builtin_bit_cast`` (``_mma_operand``). The builtin's two leading
-    # bool flags select each operand's *signedness* (``true`` => signed;
-    # verified on gfx11 -- passing ``false`` makes the unit compute the
-    # *unsigned* dot product), and the trailing bool
-    # is the clamp flag (``false`` => exact i32 wrap). This mirrors the verified
-    # LLVM-IR emission in ``core/isa/backend.py`` (``_emit_wmma_int``):
-    # ``llvm.amdgcn.wmma.i32.16x16x16.iu8(i1 1, A, i1 1, B, C, i1 0)``.
+    # ``i32x4`` (iu8: 16 int8 packed 4 per i32) or ``i32x2`` (iu4: 16 int4
+    # packed 8 per i32) and the accumulator / result are ``i32x8``; packed
+    # values of the same width (``i8x16``, ``u8x16``) are passed through one
+    # ``__builtin_bit_cast`` (``_mma_operand``). The builtin's two leading bool
+    # flags select each operand's *signedness* (``true`` => signed), read from
+    # the selected catalog row (``_signedness_flags``), and the trailing bool is
+    # the clamp flag (``false`` => exact i32 wrap). The LLVM-IR lowering emits
+    # the same call from ``MATRIX_CALLS`` (``core/isa/matrix_calls.py``).
 
-    def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
-        op_id = "wmma_i32_16x16x16_iu8"
+    def _emit_gfx11_integer_wmma(self, op: Op, op_id: str) -> None:
+        builtin, words = _GFX11_INTEGER_WMMA[op_id]
         self._require_wmma_arch(op_id)
-        a = self._mma_operand(op, op_id, "a", VectorType(I32, 4))
-        b = self._mma_operand(op, op_id, "b", VectorType(I32, 4))
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, words))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, words))
+        signed_a, signed_b = self._signedness_flags(op_id)
         self._emit(
-            f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32("
-            f"true, {a}, true, {b}, {_name(op.operands[2])}, false);"
+            f"i32x8 {_name(op.result)} = {builtin}("
+            f"{signed_a}, {a}, {signed_b}, {b}, {_name(op.operands[2])}, false);"
         )
 
-    # ---- WMMA iu4 (RDNA3/3.5, gfx11, wave32) — int4 matrix engine ----
-    #
-    # The int4 sibling of the iu8 handler. Per-lane A/B operands are ``i32x2``
-    # (16 signed int4 packed 8-per-i32); accumulator / result are ``i32x8``.
-    # Same flag convention as iu8: leading bools select signed operands, the
-    # trailing bool is the (off) clamp. Mirrors the LLVM emission
-    # ``llvm.amdgcn.wmma.i32.16x16x16.iu4(i1 1, A, i1 1, B, C, i1 0)``.
+    def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
+        self._emit_gfx11_integer_wmma(op, "wmma_i32_16x16x16_iu8")
+
     def _op_tile_wmma_i32_16x16x16_iu4(self, op: Op) -> None:
-        op_id = "wmma_i32_16x16x16_iu4"
-        self._require_wmma_arch(op_id)
-        a = self._mma_operand(op, op_id, "a", VectorType(I32, 2))
-        b = self._mma_operand(op, op_id, "b", VectorType(I32, 2))
-        self._emit(
-            f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32("
-            f"true, {a}, true, {b}, {_name(op.operands[2])}, false);"
+        self._emit_gfx11_integer_wmma(op, "wmma_i32_16x16x16_iu4")
+
+    def _signedness_flags(self, op_id: str) -> tuple[str, str]:
+        """The integer WMMA builtin's signedness bools for A and B: ``true`` for
+        a signed operand, ``false`` for an unsigned one, from the operand dtypes
+        of ``op_id``'s catalog row (the rule the LLVM lowering's
+        :class:`~rocke.core.isa.matrix_calls.Signedness` applies)."""
+        from .isa.matrix_calls import MatrixOperand, Signedness
+
+        row = self.arch.mma.by_op_id(op_id)
+        return tuple(
+            "true" if Signedness(operand).flag(row) else "false"
+            for operand in (MatrixOperand.A, MatrixOperand.B)
         )
 
     def _require_wmma_arch(self, op_id: str) -> None:

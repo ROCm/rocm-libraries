@@ -32,7 +32,7 @@ What this file implements *now*:
   - tile geometries 64..256 x 64..256 x 16..128
   - warp grids 1x1, 2x1, 1x2, 2x2, 4x1, 1x4, 2x4, 4x2, 4x4
   - MFMA atoms 16x16x16, 16x16x32, 32x32x8, 32x32x16 f16; 16x16x4 fp64
-    (gfx942, fp64 accumulation)
+    (gfx90a, gfx942 and gfx950, fp64 accumulation)
   - pipeline `mem` (single buffer, sync), `compv3` (single buffer +
     scheduler hints), `compv4` (double-buffer LDS + sched_group_barrier
     interleave between MFMA/DS_read/DS_write/VMEM)
@@ -727,8 +727,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
 
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and dense 16x16x128
-    # (fp8, via the f8f6f4 opcode) atoms, all
+    # gfx1250-class 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and 16x16x128
+    # (fp8, the dedicated fp8 x fp8 instruction) atoms, all
     # through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
     # (compv3 / compv4 scheduler interleave), DTLA and preshuffle encode
     # MFMA-shaped assumptions and are gated off until ported. CDNA MFMA keeps

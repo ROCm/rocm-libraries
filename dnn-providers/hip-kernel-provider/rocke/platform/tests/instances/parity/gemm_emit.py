@@ -603,12 +603,13 @@ def _spec(idx: int) -> UniversalGemmSpec:
             "gfx1250",
         )
     if idx == 23:
-        # The only config on the dense 16x16x128 f8f6f4 atom. Its operand
-        # carrier is <16 x i32> rather than <8 x i32> and its intrinsic takes a
-        # format immediate per matrix with NO trailing reuse flags, so neither
-        # the K=64 configs above nor the scaled 16x16x128 atoms (a different
-        # opcode and a different arity) would catch a drift in this call shape.
-        # tile_k is two atom steps so the K loop is emitted, not peeled to one.
+        # The only non-TDM config on the 16x16x128 fp8 atom (the dedicated
+        # fp8 x fp8 instruction; the name predates it, when the atom was the
+        # f8f6f4 opcode with FP8 formats). Its operand carrier is <16 x i32>
+        # rather than <8 x i32>, so neither the K=64 configs above nor the
+        # scaled 16x16x128 atoms (a different opcode and a different arity)
+        # would catch a drift in this call shape. tile_k is two atom steps so
+        # the K loop is emitted, not peeled to one.
         return (
             UniversalGemmSpec(
                 name="test_wmma_f8f6f4_k128",

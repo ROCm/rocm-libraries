@@ -39,21 +39,39 @@ from rocke.instances.common.gemm_universal import (
 from rocke.instances import GemmPipelinePolicy
 
 
+def _has_lane_maps(op) -> bool:
+    """Whether ``op`` has A and B lane maps, which the GEMM's operand loads need.
+    The catalog also lists instructions whose maps are not verified yet."""
+    try:
+        op.a_layout()
+        op.b_layout()
+    except NotImplementedError:
+        return False
+    return True
+
+
 def _pick_atom(target: ArchTarget, dtype: str, want):
-    """Resolve the warp-tile atom: explicit (m,n,k) or catalog largest-K for m=n=16.
+    """Resolve the warp-tile atom: explicit (m,n,k) or the largest-K m=n=16
+    catalog atom that has lane maps.
 
     The MMA family follows the target wave size: CDNA (wave64) -> MFMA, RDNA
     wave32 (gfx11xx) -> WMMA, so the same invocation picks the right atom for
-    the arch under test.
+    the arch under test. An atom without A/B maps cannot feed the GEMM, so it
+    is skipped (gfx1250 lists bf8 at K=128 before its maps are verified).
     """
     family = "wmma" if target.wave_size == 32 else "mma"
     if want is not None:
         return want
-    op = target.mma.select_largest_k(
-        family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
-    )
-    if op is None:
+    ops = [
+        op
+        for op in target.mma.enumerate(
+            family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
+        )
+        if _has_lane_maps(op)
+    ]
+    if not ops:
         raise SystemExit(f"no 16x16 {family} atom for {dtype} on {target.gfx}")
+    op = max(ops, key=lambda o: o.k)
     return (op.m, op.n, op.k)
 
 

@@ -136,13 +136,12 @@ static rocke_status_t h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_
     return ROCKE_OK;
 }
 
-/* Python _op_tile_wmma_gfx1250_f32_16x16x128_f8f6f4: the dense K=128 builtin.
- * A/B are <16 x i32> (64 low-bit bytes per lane), 6-operand form
- * (fmtA, A, fmtB, B, modC, C) -- a format immediate per matrix (0 = FP8/E4M3)
- * and no reuse flags. */
-static rocke_status_t
-    h_emit_gfx1250_dense_f8f6f4(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
+/* Python _emit_wmma_gfx1250_fp8(op, "fp8_fp8", k=128): the dedicated K=128
+ * fp8 x fp8 builtin. A/B are passed as i32x16 (64 bytes per lane), 6-operand
+ * form (A, B, modC, C, reuseA, reuseB). */
+static rocke_status_t h_emit_gfx1250_fp8_k128(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    const char* op_id = "wmma_gfx1250_f32_16x16x128_fp8_fp8";
     if(h_require_wmma_arch(lw, op_id) != ROCKE_OK)
     {
         return lw->status;
@@ -151,12 +150,15 @@ static rocke_status_t
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 3 operands and 1 result", op_id);
     }
+    const rocke_type_t* carrier = rocke_vector_type(lw->b, rocke_i32(), 16);
+    const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, carrier);
+    const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, carrier);
     rocke_h_emitf(lw,
-                  "f32x8 %s = __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4("
-                  "0, %s, 0, %s, (int16_t)0, %s);",
+                  "f32x8 %s = __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8("
+                  "%s, %s, (int16_t)0, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
+                  a_arg,
+                  b_arg,
                   rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
@@ -328,9 +330,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
-    if(strcmp(op_id, "wmma_gfx1250_f32_16x16x128_f8f6f4") == 0)
+    if(strcmp(op_id, "wmma_gfx1250_f32_16x16x128_fp8_fp8") == 0)
     {
-        return h_emit_gfx1250_dense_f8f6f4(lw, op, op_id);
+        return h_emit_gfx1250_fp8_k128(lw, op);
     }
     if(rocke_gfx1250_scaled_wmma(op_id))
     {

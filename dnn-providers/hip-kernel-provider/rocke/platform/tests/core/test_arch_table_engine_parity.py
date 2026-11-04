@@ -43,7 +43,15 @@ from rocke.assets import platform_root
 # designated initializer (``.gfx = "gfx1250"``), so each scalar is read by name
 # from inside its target's block rather than by position.
 _TARGET_BLOCK = re.compile(
-    r"static const rocke_arch_target_t k_target_\w+ = \{(?P<body>.*?)\n\};", re.S
+    r"static (?:const|constexpr) rocke_arch_target_t k_target_(?P<sym>\w+) = "
+    r"\{(?P<body>.*?)\n\};",
+    re.S,
+)
+# A row that takes its facts from another (arch_specs.json "facts_of"):
+# ``k_target_gfx1100 = facts_of(k_target_gfx11_generic, "gfx1100");``.
+_FACTS_OF = re.compile(
+    r"static constexpr rocke_arch_target_t k_target_\w+ = "
+    r'facts_of\(k_target_(?P<src>\w+), "(?P<gfx>[\w-]+)"\);'
 )
 
 _INT_FIELDS = ("wave_size", "lds_capacity_bytes", "vmcnt_bits")
@@ -61,12 +69,19 @@ def _field(body: str, name: str) -> str:
 
 
 def _cpp_targets() -> dict[str, dict[str, str]]:
+    """Each arch's scalar facts; a ``facts_of`` row's are its source's, with
+    ``facts_of`` naming the source arch."""
     src = (platform_root() / "cpp" / "core" / "arch" / "data.cpp").read_text()
-    targets = {}
+    targets, by_symbol = {}, {}
     for m in _TARGET_BLOCK.finditer(src):
         body = "\n" + m.group("body")
         fields = {f: _field(body, f) for f in _INT_FIELDS + _STR_FIELDS}
-        targets[_field(body, "gfx")] = fields
+        gfx = _field(body, "gfx")
+        targets[gfx] = fields
+        by_symbol[m.group("sym")] = gfx
+    for m in _FACTS_OF.finditer(src):
+        source = by_symbol[m.group("src")]
+        targets[m.group("gfx")] = {**targets[source], "facts_of": source}
     return targets
 
 
@@ -80,7 +95,15 @@ def _python_targets() -> dict[str, dict]:
         / "data"
         / "arch_specs.json"
     )
-    return json.loads(path.read_text())["arches"]
+    arches = json.loads(path.read_text())["arches"]
+    return {
+        gfx: (
+            {**arches[row["facts_of"]], "facts_of": row["facts_of"]}
+            if "facts_of" in row
+            else row
+        )
+        for gfx, row in arches.items()
+    }
 
 
 class TestArchTableEngineParity(unittest.TestCase):
@@ -116,6 +139,8 @@ class TestArchTableEngineParity(unittest.TestCase):
             for field in _STR_FIELDS:
                 with self.subTest(arch=arch, field=field):
                     self.assertEqual(cpp[field], py[field])
+            with self.subTest(arch=arch, field="facts_of"):
+                self.assertEqual(cpp.get("facts_of"), py.get("facts_of"))
 
     def test_gfx1250_carries_the_raised_lds_capacity(self):
         # Named rather than left to the loop above: this is the value Phase 0

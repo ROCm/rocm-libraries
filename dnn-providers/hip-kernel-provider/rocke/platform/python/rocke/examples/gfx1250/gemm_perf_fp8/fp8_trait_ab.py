@@ -3,7 +3,7 @@
 """Interleaved A/B of the gfx1250 fp8 GEMM K-loop traits on one geometry.
 
 Builds the case study's arms on the champion geometry (256x256x256 tile, 4x4
-warps, dense 16x16x128 f8f6f4 atom, TDM depth 2, ``lds_k_pad`` 48, cshuffle),
+warps, 16x16x128 fp8 atom, TDM depth 2, ``lds_k_pad`` 48, cshuffle),
 verifies every arm on both input sets, then times them round-robin in one
 process so whatever the machine does between samples hits every arm alike:
 

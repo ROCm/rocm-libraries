@@ -225,6 +225,7 @@ CATALOG = _catalog()
 # Named sets, selected with @name. Values are glob patterns over CATALOG.
 SETS: dict[str, list[str]] = {
     "ceiling": [
+        "f32_16x16x128_fp8_fp8",
         "f32_16x16x128_f8f6f4.fp8",
         "f32_16x16x64_fp8_fp8",
         "f32_16x16x32_bf16",
@@ -756,7 +757,7 @@ examples:
   P="-m rocke.examples.gfx1250.gemm_perf_fp8.wmma_roofline_probe"
 
   python3 $P --list                                   # catalog + named sets
-  python3 $P                                          # @ceiling: f8f6f4.fp8, k64 fp8, bf16
+  python3 $P                                          # @ceiling: k128 fp8 (both forms), k64 fp8, bf16
   python3 $P -i f32_16x16x128_f8f6f4.fp8              # one instruction, default chain sweep
   python3 $P -i f32_16x16x128_f8f6f4.fp8 -c 16 --blk 128 --passes 2   # one exact config
   python3 $P -i f32_16x16x64_fp8_fp8,f32_16x16x128_f8f6f4.fp8 --ref f32_16x16x64_fp8_fp8
@@ -771,9 +772,9 @@ examples:
   python3 $P -i @ceiling --blk 128 --lds-kb 300 -c 64   # pin 1 block/CU: 1 wave/SIMD at blk 128
   python3 $P -i @mx --dry-run                         # show configs without building
 
-  # the fp8 GEMM case study's ceiling, on each input set, peak and sustained
-  python3 $P -i f32_16x16x128_f8f6f4.fp8 --data rand
-  python3 $P -i f32_16x16x128_f8f6f4.fp8 --data rand --gap-ms 0 --warmup 20 --iters 50
+  # the fp8 GEMM case study's ceiling (the GEMM's instruction), peak and sustained
+  python3 $P -i f32_16x16x128_fp8_fp8 --data rand
+  python3 $P -i f32_16x16x128_fp8_fp8 --data rand --gap-ms 0 --warmup 20 --iters 50
 """
 
 if __name__ == "__main__":

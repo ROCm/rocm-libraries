@@ -71,11 +71,12 @@ _ARCH_BF16_ATOM = {
 # gfx1250-only and a catalog edit that moved them should be visible here.
 _ARCH_F8_ATOM = {
     "gfx942": ("mfma", (16, 16, 32)),
-    "gfx950": ("mfma", (16, 16, 32)),
+    "gfx950": ("mfma", (16, 16, 128)),
     "gfx1250": ("wmma", (16, 16, 64)),
 }
-# Where the largest-K atom differs by 8-bit dtype: gfx1250 fp8 has the dense
-# 16x16x128 f8f6f4 atom, bf8 only the K=64 one.
+# Where the largest-K mapped atom differs by 8-bit dtype: gfx1250 fp8 has the
+# 16x16x128 atom; bf8's K=128 row has no lane maps yet, so it stays at K=64
+# (and the GEMM rejects bf8 at K=128).
 _ARCH_F8_ATOM_OVERRIDE = {("gfx1250", "fp8e4m3"): (16, 16, 128)}
 
 
@@ -236,8 +237,9 @@ class TestEightBitManifest(unittest.TestCase):
     def test_gfx1250_eight_bit_atom_is_twice_the_k_of_its_bf16_atom(self):
         # Half-width operands, double the K per instruction. This is the whole
         # reason the fp8 path needed its own lane map rather than reusing the
-        # bf16 one, so it is asserted rather than assumed. bf8 has only this
-        # K=64 atom; fp8 additionally has the dense f8f6f4 one at four times.
+        # bf16 one, so it is asserted rather than assumed. bf8 uses this K=64
+        # atom (its K=128 row has no lane maps yet); fp8 additionally has the
+        # mapped 16x16x128 one at four times.
         target = ArchTarget.from_gfx("gfx1250")
         bf16_k = _pick_atom(target, "bf16", None)[2]
         self.assertEqual(_pick_atom(target, "bf8e5m2", None)[2], 2 * bf16_k)
