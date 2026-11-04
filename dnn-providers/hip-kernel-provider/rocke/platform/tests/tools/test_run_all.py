@@ -501,12 +501,19 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     assert len(tests) == 1
     test = tests[0]
     assert test["name"] == "rocke_arch_domain_reproducibility"
-    assert test["command"][:2] == [runner.sys.executable, "-u"]
+    assert test["command"][0] == runner.sys.executable
     assert (
-        Path(test["command"][2]).resolve()
+        Path(test["command"][1]).resolve()
+        == (runner.ROCKE / "tools" / "run_with_comgr.py").resolve()
+    )
+    assert "--needs-llvm-flavor" not in test["command"]
+    command = test["command"][test["command"].index("--") + 1 :]
+    assert command[:2] == [runner.sys.executable, "-u"]
+    assert (
+        Path(command[2]).resolve()
         == (runner.ROCKE / "tools" / "gen_arch_domain.py").resolve()
     )
-    assert test["command"][3:] == [
+    assert command[3:] == [
         "--check",
         "--unvalidated-exit-code",
         "77",

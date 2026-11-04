@@ -33,7 +33,7 @@ if(BUILD_TESTING)
   if(Python3_Interpreter_FOUND)
     add_test(
       NAME rocke_arch_domain_reproducibility
-      COMMAND "${Python3_EXECUTABLE}" -u
+      COMMAND ${_ROCKE_TEST_LAUNCH} "${Python3_EXECUTABLE}" -u
               "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
               --check --unvalidated-exit-code 77)
     set_tests_properties(

@@ -251,6 +251,16 @@ def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
         ).stdout
     )["tests"]
     assert any(test["name"] == "rocke_compiler_discovery_source" for test in inventory)
+    arch_test = next(
+        test
+        for test in inventory
+        if test["name"] == "rocke_arch_domain_reproducibility"
+    )
+    assert "--default-comgr" in arch_test["command"]
+    assert "--needs-llvm-flavor" not in arch_test["command"]
+    assert os.path.samefile(
+        arch_test["command"][arch_test["command"].index("--default-comgr") + 1], library
+    )
     compiled = subprocess.run(
         [
             "cmake",
@@ -282,6 +292,45 @@ def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
     ]
     result = subprocess.run(ctest, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
+
+    # A deliberately different tool profile reaches the generator's existing
+    # UNVALIDATED exit after owner resolution, without running its full sweep.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    clang = tools / ("clang.exe" if os.name == "nt" else "clang")
+    compiler = os.environ.get("CXX") or ("clang" if os.name == "nt" else "cc")
+    subprocess.run(
+        [compiler, "-x", "c", "-", "-o", str(clang)],
+        input='#include <stdio.h>\nint main(void){puts("AMD clang version 20.0.0");return 0;}\n',
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    shutil.copy2(clang, tools / ("opt.exe" if os.name == "nt" else "opt"))
+    env["ROCKE_LLVM_BIN"] = str(tools)
+    result = subprocess.run(
+        arch_test["command"], cwd=PLATFORM, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 77, result.stdout + result.stderr
+    assert "flavor : llvm23" in result.stdout
+    assert "clang reports llvm20 but rocke resolved llvm23" in result.stdout
+
+    override = build_library(
+        tmp_path / "caller",
+        "#include <stddef.h>\nvoid amd_comgr_get_version(size_t*a,size_t*b){*a=3;*b=4;}\nint amd_comgr_do_action(int a,void*b,void*c,void*d){return 0;}\nvoid LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=24;*b=0;*c=0;}\n",
+    )
+    env["ROCKE_COMGR_LIB"] = str(override)
+    result = subprocess.run(
+        arch_test["command"], cwd=PLATFORM, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 77, result.stdout + result.stderr
+    assert "flavor : llvm24" in result.stdout
+
     env["ROCKE_COMGR_LIB"] = str(tmp_path / "missing.so")
     result = subprocess.run(ctest, env=env, capture_output=True, text=True)
     assert result.returncode != 0
+    result = subprocess.run(
+        arch_test["command"], cwd=PLATFORM, env=env, capture_output=True, text=True
+    )
+    assert result.returncode not in (0, 77)
+    assert "missing.so" in result.stderr
