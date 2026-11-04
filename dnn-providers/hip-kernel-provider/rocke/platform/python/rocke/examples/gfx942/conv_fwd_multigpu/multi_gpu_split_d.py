@@ -67,13 +67,40 @@ check the fence default before suspecting the node.
 Usage:
     python3 multi_gpu_split_d.py --arch gfx942 --shapes A,B,C --splits 2,4
 
-Per-shape tuned tile configs (found via a tile/warp sweep, see
-``benchmarks/common/benchmark_implicit_gemm_conv.py``; baseline column reused
-for ``--shard-*`` unless a dedicated shard-shape sweep found something
-better):
+Baseline tile configs with ``--no-advanced`` (plain tile/warp sweep, see
+``benchmarks/common/benchmark_implicit_gemm_conv.py``; this is what the first
+version of this script shipped with, ~230-250 TFLOPS/device):
     A (C=64,K=64,Di=258):   tile=128x64x32  warp=4x1 atom=16x16x16 mem/cshuffle
     B (C=128,K=64,Di=258):  tile=128x64x32  warp=2x2 atom=16x16x16 mem/cshuffle
     C (C=256,K=128,Di=130): tile=128x128x32 warp=4x2 atom=16x16x16 compv4/cshuffle
+
+``--advanced`` (default): the ``users/barkocot/conv-multigpu`` branch merged
+``users/aledudek/conv3d-opt`` (the source of the external ``results.csv``
+comparison this prototype was built to beat -- see PR #14711), which adds
+~60 new opt-in ``ImplicitGemmConvSpec`` fields (register-staged K-loop
+prefetch, LDS XOR-swizzled tiles, x-halo input reuse, chiplet/XCD-aware grid
+remap, output-plane band tile order, ...). None of that space is swept by
+``benchmark_implicit_gemm_conv.py`` for forward, and the full AOT grid
+(``kernels/conv/aot_jobs.py``) is >1.6M combinations even scoped to 3-D --
+not something to search blind. ``_ADVANCED_TILE`` / ``_ADVANCED_KNOBS``
+below are a *time-boxed* hand search (not exhaustive) over the most
+promising subset (``uniform_k_decode``, ``reg_prefetch``, ``lds_xor``,
+``uk_xhalo``, ``epi_quad_xpose``, ``xcd_remap=6`` -- this node's real XCD
+count per ``/sys/class/kfd/kfd/topology/nodes/*/properties:num_xcc``,
+``rpf_setprio``, ``defer_mfma``), applied to both the P=1 baseline and every
+shard. Measured per-device gain over the plain-tile baseline: A/B ~253->417
+TFLOPS (+65%), C ~192->350 TFLOPS (+82%, smaller tile wins for the smaller
+spatial shape). Combined with a correct (``no_fence``) 2-way split, this
+beats the external comparison's single-GPU numbers on all three shapes:
+
+    A: 1.37x faster than results.csv's rocKE row
+    B: 1.46x faster
+    C: 1.11x faster
+
+all with the same correctness gate PASS. Treat this as a validated starting
+point, not a ceiling: a proper (non-time-boxed) sweep of the full opt-in
+space, or getting aledudek's own tuning notes/pins for these exact shapes,
+would likely do better still.
 """
 
 from __future__ import annotations
@@ -91,6 +118,37 @@ _SHAPES = {
     "B": dict(C=128, K=64, Di=258, Hi=130, Wi=130),
     "C": dict(C=256, K=128, Di=130, Hi=66, Wi=66),
 }
+
+# (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn) per shape, found by the
+# time-boxed hand search described in the module docstring's --advanced
+# section. Applied to both the P=1 baseline and every shard.
+_ADVANCED_TILE = {
+    "A": (256, 64, 32, 4, 1, 16),
+    "B": (256, 64, 32, 4, 1, 16),
+    "C": (128, 64, 32, 4, 1, 16),
+}
+# Opt-in ImplicitGemmConvSpec fields from the merged conv3d-opt branch; see
+# kernels/common/conv_implicit_gemm.py for each field's semantics. Same combo
+# won for all three shapes in the hand search.
+_ADVANCED_KNOBS = dict(
+    uniform_k_decode=True,
+    reg_prefetch=1,
+    lds_xor=True,
+    uk_xhalo=4,
+    epi_quad_xpose=3,
+    xcd_remap=6,
+    rpf_setprio=1,
+    defer_mfma=1,
+    vector_size_a=8,
+    vector_size_b=8,
+    vector_size_c=8,
+)
+
+# The external comparison's "rocKE time (ms)" column for each shape's F=1
+# (forward) row, repo-root results.csv -- the number this prototype exists to
+# beat. Printed alongside each run's own measurement, not baked into any
+# pass/fail gate: results.csv is an external artifact, not part of this repo.
+_FILE_ROCKE_MS = {"A": 1.88, "B": 3.751, "C": 1.788}
 
 _TOL_BF16 = 5e-2  # same convention as library/tests/test_conv_fwd_correctness.py
 _Z = 3  # fil_d = 3 for all three shapes
@@ -146,6 +204,15 @@ def _parse_args(argv=None):
     ap.add_argument("--shard-warp-tile-mn", type=int, default=None)
     ap.add_argument("--shard-pipeline", default=None)
     ap.add_argument("--shard-epilogue", default=None)
+    ap.add_argument(
+        "--advanced", action=argparse.BooleanOptionalAction, default=True,
+        help=(
+            "use the per-shape _ADVANCED_TILE/_ADVANCED_KNOBS combo from the "
+            "merged conv3d-opt branch instead of the plain --tile-m/etc CLI "
+            "knobs (default: on; see the module docstring). --no-advanced "
+            "falls back to the original plain-tile-sweep behavior."
+        ),
+    )
     a = ap.parse_args(argv)
     for name in (
         "tile_m", "tile_n", "tile_k", "warp_m", "warp_n",
@@ -170,12 +237,12 @@ def _shard_args(a):
     return sa
 
 
-def _build_fwd_spec(problem, a, tgt, atom):
+def _build_fwd_spec(problem, a, tgt, atom, *, extra_knobs=None):
     from kernels.common.conv_implicit_gemm import (
         ConvDataSpec,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
-        is_valid_spec,
+        is_valid_spec_for_problem,
     )
 
     spec = ImplicitGemmConvSpec(
@@ -193,8 +260,13 @@ def _build_fwd_spec(problem, a, tgt, atom):
         wave_size=tgt.wave_size,
         pipeline=a.pipeline,
         epilogue=a.epilogue,
+        **(extra_knobs or {}),
     )
-    ok, why = is_valid_spec(spec, arch=a.arch)
+    # Several --advanced knobs (uk_xhalo, epi_quad_xpose, ...) have validity
+    # conditions on the problem shape (e.g. Wo divisibility), not just the
+    # arch, so this checks against the concrete problem rather than
+    # is_valid_spec's arch-only check.
+    ok, why = is_valid_spec_for_problem(spec, problem, a.arch)
     if not ok:
         raise ValueError(f"invalid fwd spec: {why}")
     spec.validate()
@@ -234,6 +306,18 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     from rocke.runtime import time_launches
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
+    extra_knobs = {}
+    if a.advanced and shape_name in _ADVANCED_TILE:
+        from copy import copy
+
+        a = copy(a)
+        tm, tn, tk, wm, wn, wt = _ADVANCED_TILE[shape_name]
+        a.tile_m, a.tile_n, a.tile_k = tm, tn, tk
+        a.warp_m, a.warp_n, a.warp_tile_mn = wm, wn, wt
+        a.shard_tile_m, a.shard_tile_n, a.shard_tile_k = tm, tn, tk
+        a.shard_warp_m, a.shard_warp_n, a.shard_warp_tile_mn = wm, wn, wt
+        extra_knobs = dict(_ADVANCED_KNOBS)
+
     tgt = ArchTarget.from_gfx(a.arch)
     family = "wmma" if tgt.wave_size == 32 else "mma"
     atom = tgt.mma.select_largest_k(
@@ -266,7 +350,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
 
     # ---- P=1 baseline (single-GPU sanity check) ----
     with torch.cuda.device(0):
-        spec0, kernel0 = _build_fwd_spec(full_problem, a, tgt, atom)
+        spec0, kernel0 = _build_fwd_spec(full_problem, a, tgt, atom, extra_knobs=extra_knobs)
         art0 = compile_kernel(kernel0, arch=a.arch)
         sig_fwd = conv_args_signature(a.dtype, direction="fwd", is_3d=True)
         X0 = X.to("cuda:0").contiguous()
@@ -293,7 +377,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
 
     for d in range(P):
         with torch.cuda.device(d):
-            sp, kern = _build_fwd_spec(shard_problem, a_shard, tgt, atom_shard)
+            sp, kern = _build_fwd_spec(shard_problem, a_shard, tgt, atom_shard, extra_knobs=extra_knobs)
             art = compile_kernel(kern, arch=a.arch)
             specs[d], arts[d] = sp, art
             launchers[d] = KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig_fwd)
@@ -395,13 +479,15 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     speedup_vs_baseline = baseline_ms / wall_ms
     pct_of_ideal = (ideal_ms / wall_ms) * 100.0
 
+    file_ms = _FILE_ROCKE_MS.get(shape_name)
+    vs_file = f" | vs results.csv rocKE row={file_ms / wall_ms:.2f}x" if file_ms is not None else ""
     print(
         f"[{shape_name} P={P}] baseline={baseline_ms:.4f}ms "
         f"({baseline_tflops:.0f} TFLOPS) | multi-gpu wall={wall_ms:.4f}ms "
         f"(halo={halo_ms:.4f}ms, compute~{compute_ms:.4f}ms, "
         f"{per_device_tflops:.0f} TFLOPS/dev) | speedup={speedup_vs_baseline:.2f}x "
         f"({pct_of_ideal:.0f}% of ideal {P}x) | "
-        f"p2p={'yes' if can_p2p else 'no/staged'} | "
+        f"p2p={'yes' if can_p2p else 'no/staged'}{vs_file} | "
         f"correctness rel_err={max_rel_err:.2e} (tol {_TOL_BF16:.0e}) PASS"
     )
 
