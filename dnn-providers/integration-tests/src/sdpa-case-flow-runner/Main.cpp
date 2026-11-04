@@ -1999,9 +1999,9 @@ constexpr const char* EXPORT_REFERENCE_SOURCE
     = "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in "
       "test-plans/sdpa-fwd/cases.csv";
 
-// The contents a bundle carries for these graphs: a fixed attn_scale, integer sequence lengths and
-// block masks, and real descale lists and dropout masks. Every other content keeps the row out of
-// bundles.
+// The contents a bundle carries for these graphs: a fixed attn_scale, integer sequence lengths,
+// block masks and dense page tables, and real descale lists and dropout masks. Every other content
+// keeps the row out of bundles; a packed page table has a ragged offset, which is such a content.
 bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& contents)
 {
     const auto* reals = std::get_if<std::vector<double>>(&contents.values);
@@ -2009,7 +2009,8 @@ bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& co
     {
         return reals != nullptr && reals->size() == 1;
     }
-    if(name == "seq_len_q" || name == "seq_len_kv" || name == "block_mask")
+    if(name == "seq_len_q" || name == "seq_len_kv" || name == "block_mask" || name == "page_table_k"
+       || name == "page_table_v" || name == "page_table_kv")
     {
         return reals == nullptr;
     }

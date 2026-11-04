@@ -60,6 +60,21 @@ struct AlibiHeads
     int64_t differV = 0;
 };
 
+// How a page table orders each sequence's pages.
+struct PageOrder
+{
+    // Seed of the per-sequence slot permutation; std::nullopt keeps the in_order slots.
+    std::optional<int64_t> seed;
+    // Slot `page` of sequence `sequence` takes the page of the same slot of `reusesSequence`.
+    struct Share
+    {
+        int64_t sequence = 0;
+        int64_t reusesSequence = 0;
+        int64_t page = 0;
+    };
+    std::optional<Share> share;
+};
+
 // One per-sequence length: a constant, or the stored length S changed by one operation.
 struct LengthTerm
 {
@@ -138,6 +153,8 @@ struct ClassValues
     std::map<std::string, int64_t> pageTables;
     // page_table_storage value -> whether the table carries a ragged offset.
     std::map<std::string, bool> packedPageTable;
+    // page_table_order value -> slot order of every page table.
+    std::map<std::string, PageOrder> pageTableOrder;
     // Power-of-two query head count -> the counts that replace it.
     std::map<int64_t, AlibiHeads> alibiHeads;
     // fp8 mma_core_mode when Q is not fp8, and per-arch substitutions.

@@ -1522,10 +1522,12 @@ class_to_value:
       larger: {of: S_kv, multiply: 2}
       smaller: {of: S_kv, add: -1}
     page_table_order:
-      in_order: {slot_of_page: identity, note: "page i at slot i"}
-      shuffled: {slot_of_page: seeded_permutation, note: "a fixed permutation"}
+      in_order: {slot_of_page: identity,
+                 note: "each sequence owns n pages of the pool (n = pool pages / B); slot j of sequence b holds page b x n + (j mod n)"}
+      shuffled: {slot_of_page: seeded_permutation, seed: 2893,
+                 note: "each sequence's in_order slots in an order drawn from the seed (one Mersenne Twister 64 stream per table, row by row); a row of two or more different pages never keeps the in_order order"}
       shared_pages: {slot_of_page: identity, shares: {sequence: 1, reuses_sequence: 0, page: 0},
-                     note: "sequence 1 reuses sequence 0's first page"}
+                     note: "sequence 1 reuses sequence 0's first page; needs B of 2 or more"}
   sinks: {shape: [1, H_q, 1, 1], dtype: fp32, values: data_seed, note: "Shape and FLOAT required by the frontend @ 00d9c566bea SdpaFwdNode.hpp:263-281"}
   descale_and_scale_tensors:
     descale_q: 0.5

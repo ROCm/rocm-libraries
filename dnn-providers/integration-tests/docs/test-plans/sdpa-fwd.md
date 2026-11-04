@@ -499,7 +499,7 @@ yet. It stays in the generated CSV, and the selection step
 
 | Reason | Why a bundle cannot express it | Rows |
 |---|---|---|
-| `page_table_contents` | Page tables are tensor contents. | 1,702 |
+| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 1,702 |
 | `ragged_offsets` | Ragged offsets are tensor contents. | 1,082 |
 | `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 540 |
 | `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 323 |

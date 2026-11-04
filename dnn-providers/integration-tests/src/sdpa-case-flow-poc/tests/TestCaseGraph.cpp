@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <stdexcept>
@@ -26,7 +27,7 @@ namespace
 {
 
 constexpr const char* CLASS_VALUES_JSON = R"json({
-  "schema_version": 2,
+  "schema_version": 3,
   "batch_size": {"one": 1, "many": 2},
   "q_heads": {"one": 1, "many": 8},
   "seq_lengths": [{"seq_q": "many", "seq_kv": "many", "seq_q_vs_seq_kv": "equal",
@@ -59,6 +60,10 @@ constexpr const char* CLASS_VALUES_JSON = R"json({
   "v_page_multiplier": {"equal": 1, "differ": 2},
   "page_tables": {"separate": 2, "shared": 1},
   "packed_page_table": {"dense": false, "packed": true},
+  "page_table_order": {"in_order": {"slot_of_page": "identity"},
+                       "shuffled": {"slot_of_page": "seeded_permutation", "seed": 2893},
+                       "shared_pages": {"slot_of_page": "identity",
+                                        "shares": {"sequence": 1, "reuses_sequence": 0, "page": 0}}},
   "alibi_head_count": {"H_q": {"8": 6}, "heads": {"6": {"mha": 6, "gqa": 2, "mqa": 1,
                        "k_and_v_differ": {"H_k": 2, "H_v": 3}}}},
   "mma_fp8": {"otherwise": "fp8_e4m3", "by_arch": {"gfx942": {"fp8_e4m3": "fp8_e4m3_fnuz"}}}
@@ -147,10 +152,23 @@ Row pagedRow(const std::string& storage)
     return row;
 }
 
+Row pagedRow(const std::string& storage, const std::string& order, const std::string& sharing)
+{
+    auto row = pagedRow(storage);
+    row["page_table_order"] = order;
+    row["page_table_sharing"] = sharing;
+    return row;
+}
+
+BuiltCase build(const Row& row, const SizeOverride& z, const ClassValues& values)
+{
+    const CaseContext context{values, DescaleForm::BY_VALUE, "gfx942", z};
+    return sdpa_case_flow::buildCaseGraph(row, {}, context);
+}
+
 BuiltCase build(const Row& row, const SizeOverride& z)
 {
-    const CaseContext context{classValues(), DescaleForm::BY_VALUE, "gfx942", z};
-    return sdpa_case_flow::buildCaseGraph(row, {}, context);
+    return build(row, z, classValues());
 }
 
 const Contents& contentsOf(const BuiltCase& built, const std::string& name)
@@ -166,6 +184,32 @@ const Contents& contentsOf(const BuiltCase& built, const std::string& name)
 std::vector<int64_t> integersOf(const BuiltCase& built, const std::string& name)
 {
     return std::get<std::vector<int64_t>>(contentsOf(built, name).values);
+}
+
+std::vector<std::string> tablesOf(const std::string& sharing)
+{
+    return sharing == "shared" ? std::vector<std::string>{"page_table_kv"}
+                               : std::vector<std::string>{"page_table_k", "page_table_v"};
+}
+
+// Slot j of sequence b holds page b x owned + (j mod owned).
+std::vector<int64_t> inOrderTable(int64_t sequences, int64_t width, int64_t owned)
+{
+    std::vector<int64_t> table;
+    for(int64_t b = 0; b < sequences; ++b)
+    {
+        for(int64_t j = 0; j < width; ++j)
+        {
+            table.push_back(b * owned + j % owned);
+        }
+    }
+    return table;
+}
+
+std::vector<int64_t> rowOf(const std::vector<int64_t>& table, int64_t width, int64_t b)
+{
+    const auto first = table.begin() + b * width;
+    return {first, first + width};
 }
 
 std::vector<int64_t> stridesOf(const BuiltCase& built, const std::string& name)
@@ -728,4 +772,134 @@ TEST(TestCaseGraph, HeadDimStrideDoublesTheHeadDimAndOuterStrides)
     const auto bsdh = build(row, sizes(2, 64, 64));
     EXPECT_EQ(stridesOf(bsdh, "q"),
               (std::vector<int64_t>{2 * 64 * 128 * 8, 1, 2 * 128 * 8, 2 * 8}));
+}
+
+TEST(TestCaseGraph, InOrderTablesHoldEachSequencesOwnPages)
+{
+    // Four sequences of 64 keys in pages of 16: each sequence owns four pages of the pool.
+    for(const char* sharing : {"separate", "shared"})
+    {
+        SCOPED_TRACE(sharing);
+        const auto built = build(pagedRow("dense", "in_order", sharing), sizes(4, 64, 64));
+        for(const auto& table : tablesOf(sharing))
+        {
+            EXPECT_EQ(integersOf(built, table), inOrderTable(4, 4, 4)) << table;
+            EXPECT_FALSE(contentsOf(built, table).repeat) << table;
+        }
+    }
+}
+
+TEST(TestCaseGraph, SurplusSlotsRepeatTheSequencesOwnPages)
+{
+    auto row = pagedRow("dense", "in_order", "separate");
+    row["page_count"] = "surplus";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(
+        integersOf(built, "page_table_k"),
+        (std::vector<int64_t>{0, 1, 2, 3, 0, 4, 5, 6, 7, 4, 8, 9, 10, 11, 8, 12, 13, 14, 15, 12}));
+}
+
+TEST(TestCaseGraph, ShuffledTablesPermuteEachSequencesOwnPages)
+{
+    // Four sequences of 256 keys in pages of 16: sixteen pages per sequence.
+    for(const char* sharing : {"separate", "shared"})
+    {
+        SCOPED_TRACE(sharing);
+        const auto built = build(pagedRow("dense", "shuffled", sharing), sizes(4, 64, 256));
+        const auto inOrder = inOrderTable(4, 16, 16);
+        for(const auto& table : tablesOf(sharing))
+        {
+            const auto values = integersOf(built, table);
+            ASSERT_EQ(values.size(), 64u) << table;
+            EXPECT_FALSE(contentsOf(built, table).repeat) << table;
+            for(int64_t b = 0; b < 4; ++b)
+            {
+                auto row = rowOf(values, 16, b);
+                EXPECT_NE(row, rowOf(inOrder, 16, b)) << table << " sequence " << b;
+                std::sort(row.begin(), row.end());
+                EXPECT_EQ(row, rowOf(inOrder, 16, b)) << table << " sequence " << b;
+            }
+        }
+    }
+}
+
+TEST(TestCaseGraph, ShuffledRowOfTwoPagesNeverKeepsItsOrder)
+{
+    // Sixteen sequences of 32 keys in pages of 16: every row is a swap of its two pages.
+    const auto values = integersOf(
+        build(pagedRow("dense", "shuffled", "separate"), sizes(16, 64, 32)), "page_table_k");
+    ASSERT_EQ(values.size(), 32u);
+    for(int64_t b = 0; b < 16; ++b)
+    {
+        EXPECT_EQ(rowOf(values, 2, b), (std::vector<int64_t>{2 * b + 1, 2 * b})) << b;
+    }
+}
+
+TEST(TestCaseGraph, ShuffledTableFollowsTheModelSeed)
+{
+    const auto row = pagedRow("dense", "shuffled", "separate");
+    const auto first = integersOf(build(row, sizes(4, 64, 256)), "page_table_k");
+    EXPECT_EQ(integersOf(build(row, sizes(4, 64, 256)), "page_table_k"), first);
+
+    std::string text = CLASS_VALUES_JSON;
+    const std::string seed = "\"seed\": 2893";
+    text.replace(text.find(seed), seed.size(), "\"seed\": 2894");
+    const auto otherSeed = sdpa_case_flow::parseClassValues(text);
+    EXPECT_NE(integersOf(build(row, sizes(4, 64, 256), otherSeed), "page_table_k"), first);
+}
+
+TEST(TestCaseGraph, SharedPagesReuseSequenceZerosFirstPage)
+{
+    for(const char* sharing : {"separate", "shared"})
+    {
+        SCOPED_TRACE(sharing);
+        const auto built = build(pagedRow("dense", "shared_pages", sharing), sizes(4, 64, 64));
+        auto expected = inOrderTable(4, 4, 4);
+        expected[4] = expected[0];
+        for(const auto& table : tablesOf(sharing))
+        {
+            EXPECT_EQ(integersOf(built, table), expected) << table;
+            EXPECT_FALSE(contentsOf(built, table).repeat) << table;
+        }
+    }
+}
+
+TEST(TestCaseGraph, SharedPagesWorkWithTwoSequences)
+{
+    for(const char* sharing : {"separate", "shared"})
+    {
+        SCOPED_TRACE(sharing);
+        const auto built = build(pagedRow("dense", "shared_pages", sharing), sizes(2, 64, 64));
+        for(const auto& table : tablesOf(sharing))
+        {
+            EXPECT_EQ(integersOf(built, table), (std::vector<int64_t>{0, 1, 2, 3, 0, 5, 6, 7}))
+                << table;
+        }
+    }
+}
+
+TEST(TestCaseGraph, SharedPagesNeedTwoSequences)
+{
+    EXPECT_THROW(build(pagedRow("dense", "shared_pages", "separate"), sizes(1, 64, 64)),
+                 CaseRealisationError);
+}
+
+TEST(TestCaseGraph, PackedShuffledTableKeepsItsOffset)
+{
+    const auto built = build(pagedRow("packed", "shuffled", "separate"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "page_table_k_offset"), (std::vector<int64_t>{0, 4, 8, 12, 16}));
+    EXPECT_EQ(integersOf(built, "page_table_k").size(), 16u);
+}
+
+TEST(TestCaseGraph, PageTableOrderIsRealised)
+{
+    EXPECT_TRUE(sdpa_case_flow::isRealisedContentAxis("page_table_order"));
+}
+
+TEST(TestCaseGraph, ClassValuesRejectAnUnknownPageOrder)
+{
+    std::string text = CLASS_VALUES_JSON;
+    const std::string order = "\"seeded_permutation\"";
+    text.replace(text.find(order), order.size(), "\"random\"");
+    EXPECT_THROW(sdpa_case_flow::parseClassValues(text), sdpa_case_flow::ClassValuesError);
 }

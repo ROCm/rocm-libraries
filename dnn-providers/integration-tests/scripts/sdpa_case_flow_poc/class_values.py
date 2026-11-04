@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .model import Model, ModelError, load_yaml
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 FILE_NAME = "class-to-value.json"
 INVERSE_SQRT_HEAD_DIM = "1/sqrt(head_dim_qk)"
 INVERSE_SQRT_HEAD_DIM_TOKEN = "inverse_sqrt_head_dim_qk"
@@ -26,6 +26,7 @@ NOTE = "note"
 STORED_LENGTH = "S"
 LENGTH_OPERATIONS = ("divide", "add", "multiply")
 OFFSET_LAYOUTS = ("prefix_sum_of_lengths", "full_slots", "prefix_sum_after_gap")
+PAGE_SLOT_ORDERS = ("identity", "seeded_permutation")
 
 
 def _without_notes(value):
@@ -425,6 +426,30 @@ def build(model: Model, model_dir: Path) -> dict:
         != "none"
         for k in model.values["page_table_storage"]
     }
+    orders = _entry(paging, "page_table_order", "paging")
+    _covers(orders, model, "page_table_order", "paging.page_table_order")
+    page_table_order = {}
+    for k in model.values["page_table_order"]:
+        where = f"paging.page_table_order.{k}"
+        slots = _entry(orders[k], "slot_of_page", where)
+        if slots not in PAGE_SLOT_ORDERS:
+            raise ModelError(
+                f"class_to_value: {where}.slot_of_page is not one of {PAGE_SLOT_ORDERS}: {slots!r}"
+            )
+        order = {"slot_of_page": slots}
+        if slots == "seeded_permutation":
+            order["seed"] = _integer(_entry(orders[k], "seed", where), f"{where}.seed")
+        if "shares" in orders[k]:
+            shares = orders[k]["shares"]
+            order["shares"] = {
+                key: _integer(
+                    _entry(shares, key, f"{where}.shares"), f"{where}.shares.{key}"
+                )
+                for key in ("sequence", "reuses_sequence", "page")
+            }
+            if any(n < 0 for n in order["shares"].values()):
+                raise ModelError(f"class_to_value: {where}.shares has a negative index")
+        page_table_order[k] = order
 
     ahc = _entry(table, "alibi_head_count", "class_to_value")
     _covers(ahc, model, "alibi_head_count", "alibi_head_count")
@@ -551,6 +576,7 @@ def build(model: Model, model_dir: Path) -> dict:
         "v_page_multiplier": v_page_multiplier,
         "page_tables": page_tables,
         "packed_page_table": packed_table,
+        "page_table_order": page_table_order,
         "alibi_head_count": {"H_q": alibi_hq, "heads": alibi_heads},
         "mma_fp8": mma_fp8,
         "bias_shape": shapes["bias_shape"],

@@ -56,25 +56,25 @@ EXPECTED = {
     "rows": 22372,
     "content_reasons": {
         "ragged_offsets": 2517,
-        "page_table_contents": 1951,
+        "page_table_contents": 126,
         "tensor_overlap": 1206,
         "arch_dtype": 359,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 814,
+        "zero_stride_needs_pr14709": 870,
         "dropout_without_rng_dump": 8,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1612, 1049, 72, 127, 317, 29, 36.0, 27.9),
-        "standard": (9206, 6954, 218, 410, 1826, 17, 392.0, 292.4),
-        "comprehensive": (4377, 3049, 167, 291, 794, 48, 1189.5, 846.2),
-        "full": (7177, 5073, 228, 421, 1273, 48, 2471.9, 1768.6),
+        "quick": (1612, 1257, 93, 156, 317, 35, 43.4, 33.6),
+        "standard": (9206, 7532, 254, 462, 1826, 20, 428.7, 319.6),
+        "comprehensive": (4377, 3449, 203, 343, 794, 58, 1352.3, 962.4),
+        "full": (7177, 5480, 267, 476, 1273, 58, 2659.1, 1902.2),
     },
-    "bundle_rows": 16125,
-    "sweeps": 685,
-    "sweeps_alignment_split": 1249,
+    "bundle_rows": 17718,
+    "sweeps": 817,
+    "sweeps_alignment_split": 1437,
 }
 
 
@@ -214,7 +214,7 @@ def content_reasons(row):
     why = []
     if active(row, "ragged_offsets"):
         why.append("ragged_offsets")
-    if row["paged_kv"] != "absent":
+    if row["paged_kv"] != "absent" and row["page_table_storage"] == "packed":
         why.append("page_table_contents")
     if row["tensor_overlap"] != "separate":
         why.append("tensor_overlap")

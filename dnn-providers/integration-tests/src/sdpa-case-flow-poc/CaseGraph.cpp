@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <limits>
 #include <optional>
+#include <random>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -2054,7 +2055,9 @@ private:
         return offsets;
     }
 
-    // In-order page tables: entry i holds page i modulo the smallest pool the table addresses.
+    // Each sequence owns n pages of the smallest pool the table addresses (n = pool pages / B).
+    // In order, slot j of sequence b holds page b x n + (j mod n); page_table_order then reorders
+    // each sequence's slots or shares a page between two sequences.
     std::vector<int64_t> pageTableContents(const std::string& tableName,
                                            const TensorAttributes& table) const
     {
@@ -2076,13 +2079,66 @@ private:
         {
             pages = std::min(pages, _named.at(pool)->get_dim().at(0));
         }
-        pages = std::max<int64_t>(1, pages);
-        std::vector<int64_t> values(static_cast<size_t>(elementCount(table.get_dim())));
-        for(size_t i = 0; i < values.size(); ++i)
+        const int64_t sequences = table.get_dim().at(0);
+        const int64_t width = table.get_dim().at(2);
+        const int64_t owned = std::max<int64_t>(1, pages / std::max<int64_t>(1, sequences));
+        std::vector<int64_t> values(static_cast<size_t>(sequences * width));
+        for(int64_t b = 0; b < sequences; ++b)
         {
-            values[i] = static_cast<int64_t>(i) % pages;
+            for(int64_t j = 0; j < width; ++j)
+            {
+                values[static_cast<size_t>(b * width + j)] = b * owned + j % owned;
+            }
+        }
+
+        const auto& orderId = valueOf(_row, "page_table_order");
+        const auto& order = classValue(_values.pageTableOrder, "page_table_order", orderId);
+        if(order.seed)
+        {
+            shuffleSlots(values, width, *order.seed);
+        }
+        if(order.share)
+        {
+            const auto& share = *order.share;
+            if(std::max(share.sequence, share.reusesSequence) >= sequences || share.page >= width)
+            {
+                fail("page_table_order=" + orderId + " needs sequence "
+                     + std::to_string(std::max(share.sequence, share.reusesSequence)) + " and slot "
+                     + std::to_string(share.page) + "; " + tableName + " has "
+                     + std::to_string(sequences) + " sequences of " + std::to_string(width)
+                     + " slots");
+            }
+            values[static_cast<size_t>(share.sequence * width + share.page)]
+                = values[static_cast<size_t>(share.reusesSequence * width + share.page)];
         }
         return values;
+    }
+
+    // Fisher-Yates over each row of `width` slots, from one Mersenne Twister 64 stream per table.
+    // A row that comes back in its old order turns by one slot.
+    static void shuffleSlots(std::vector<int64_t>& values, int64_t width, int64_t seed)
+    {
+        if(width <= 0)
+        {
+            return;
+        }
+        std::mt19937_64 engine(static_cast<std::mt19937_64::result_type>(seed));
+        for(size_t first = 0; first + static_cast<size_t>(width) <= values.size();
+            first += static_cast<size_t>(width))
+        {
+            const auto begin = values.begin() + static_cast<std::ptrdiff_t>(first);
+            const auto end = begin + width;
+            const std::vector<int64_t> before(begin, end);
+            for(int64_t i = width - 1; i > 0; --i)
+            {
+                const auto j = static_cast<int64_t>(engine() % static_cast<uint64_t>(i + 1));
+                std::iter_swap(begin + i, begin + j);
+            }
+            if(std::equal(begin, end, before.begin()))
+            {
+                std::rotate(begin, begin + 1, end);
+            }
+        }
     }
 
     // Contents decided by the final graph: sequence lengths, ragged offsets, page tables, and a
@@ -2397,6 +2453,35 @@ OffsetLayout offsetLayoutAt(const Json& value, const std::string& where)
     return it->second;
 }
 
+PageOrder pageOrderAt(const Json& value, const std::string& where)
+{
+    PageOrder order;
+    const auto slots = stringAt(member(value, "slot_of_page", where), where + ".slot_of_page");
+    if(slots == "seeded_permutation")
+    {
+        order.seed = integerAt(member(value, "seed", where), where + ".seed");
+    }
+    else if(slots != "identity")
+    {
+        badFile(where + ".slot_of_page has an unknown order '" + slots + "'");
+    }
+    if(value.contains("shares"))
+    {
+        const auto& shares = value.at("shares");
+        const auto index = [&](const char* key) {
+            const auto n
+                = integerAt(member(shares, key, where + ".shares"), where + ".shares." + key);
+            if(n < 0)
+            {
+                badFile(where + ".shares." + key + " is negative");
+            }
+            return n;
+        };
+        order.share = PageOrder::Share{index("sequence"), index("reuses_sequence"), index("page")};
+    }
+    return order;
+}
+
 bool raggedStatsAt(const Json& value, const std::string& where)
 {
     if(!value.is_array() || value.size() > 1
@@ -2409,7 +2494,7 @@ bool raggedStatsAt(const Json& value, const std::string& where)
 
 ClassValues parseClassValuesJson(const Json& root)
 {
-    constexpr int64_t SCHEMA_VERSION = 2;
+    constexpr int64_t SCHEMA_VERSION = 3;
     if(integerAt(member(root, "schema_version", "the file"), "schema_version") != SCHEMA_VERSION)
     {
         badFile("schema_version is not " + std::to_string(SCHEMA_VERSION));
@@ -2509,6 +2594,7 @@ ClassValues parseClassValuesJson(const Json& root)
               }
               return value.get<bool>();
           });
+    values.pageTableOrder = tableAt(root, "page_table_order", pageOrderAt);
 
     const auto& alibi = member(root, "alibi_head_count", "the file");
     const auto& replaced = member(alibi, "H_q", "alibi_head_count");
@@ -2680,6 +2766,7 @@ bool isRealisedContentAxis(const std::string& axis)
         "stats_packing",
         "block_mask_pattern",
         "dropout_mask_pattern",
+        "page_table_order",
     };
     return REALISED.count(axis) != 0;
 }
