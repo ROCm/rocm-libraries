@@ -493,6 +493,29 @@ TEST(PermutationCpp, NamedOrdersInverseAndApply) {
     EXPECT_NE(permutation, inverse);
 }
 
+TEST(PermutationCpp, ApplyArraysSpansAndBracedLists) {
+    const Permutation order{2, 0, 1};
+    std::array<int, 3> values{10, 20, 30};
+    const std::vector<int> expected{30, 10, 20};
+    EXPECT_EQ(order.apply(values), expected);
+    EXPECT_EQ(order.apply((std::array<int, 3>{10, 20, 30})), expected);
+    EXPECT_EQ(order.apply(std::span<int>(values)), expected);
+    EXPECT_EQ(order.apply(std::span<const int>(values)), expected);
+    EXPECT_EQ(order.apply(std::span(values)), expected);
+    EXPECT_EQ(order.apply(std::span<const int, 3>(values)), expected);
+    EXPECT_EQ(order.apply({10, 20, 30}), expected);
+    const int array[]{10, 20, 30};
+    EXPECT_EQ(order.apply(array), expected);
+
+    const Permutation empty = Permutation::identity(0);
+    EXPECT_TRUE(empty.apply(std::array<int, 0>{}).empty());
+    EXPECT_TRUE(empty.apply(std::span<const int>{}).empty());
+    EXPECT_TRUE(empty.apply(std::initializer_list<int>{}).empty());
+    EXPECT_THROW(order.apply(std::array<int, 0>{}), std::runtime_error);
+    EXPECT_THROW(order.apply(std::span(values).first(2)), std::runtime_error);
+    EXPECT_THROW(order.apply({10, 20}), std::runtime_error);
+}
+
 TEST(PermutationCpp, ApplyBooleanVector) {
     const Permutation order{2, 0, 1};
     const std::vector<bool> values{true, false, false};
