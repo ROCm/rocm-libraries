@@ -25,6 +25,30 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
+// near_check treats only NaN/Inf in its first argument as special. A non-finite
+// solution makes A*x non-finite, both tolerance comparisons are false, and the
+// test passes. Fail once, with the count and the first bad index.
+template <typename T>
+bool solution_is_finite(int64_t n, const T* x)
+{
+    int64_t count = 0;
+    int64_t first = -1;
+    for(int64_t i = 0; i < n; ++i)
+    {
+        if(rocsparse_isnan(x[i]) || rocsparse_isinf(x[i]))
+        {
+            if(first < 0)
+                first = i;
+            ++count;
+        }
+    }
+    if(count == 0)
+        return true;
+    std::cerr << "solution is not finite: " << count << " entries, first at index " << first
+              << std::endl;
+    return false;
+}
+
 template <typename T>
 void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
 {
@@ -90,7 +114,8 @@ void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
 // dominant zero-off-diagonal systems: diagonal, upper bidiagonal, and lower
 // bidiagonal. Modes 4-7 use unit diagonals and off-diagonals of +/-1 with a
 // non-constant solution, so a repair that drops a fill term cannot hide inside
-// a tiny coupling. The right-hand side matches that solution exactly.
+// a tiny coupling. The right-hand side matches that solution exactly. Mode 8 is
+// the identity with a random right-hand side.
 template <typename T>
 static void gtsv_no_pivot_strided_batch_init_system(int             mode,
                                                     rocsparse_int   m,
@@ -122,6 +147,25 @@ static void gtsv_no_pivot_strided_batch_init_system(int             mode,
             {
                 hx[j * batch_stride + i] = random_cached_generator<T>(-10, 10);
             }
+        }
+        return;
+    }
+
+    if(mode == 8)
+    {
+        for(rocsparse_int j = 0; j < batch_count; ++j)
+        {
+            const rocsparse_int offset = batch_stride * j;
+            for(rocsparse_int i = 0; i < m; ++i)
+            {
+                hdl[offset + i] = static_cast<T>(0);
+                hd[offset + i]  = static_cast<T>(1);
+                hdu[offset + i] = static_cast<T>(0);
+                hx[offset + i]  = random_cached_generator<T>(-10, 10);
+            }
+
+            hdl[offset]         = std::numeric_limits<T>::infinity();
+            hdu[offset + m - 1] = std::numeric_limits<T>::infinity();
         }
         return;
     }
@@ -206,7 +250,7 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     // rocsparse_matrix_zero selects the zero-off-diagonal systems above, not an
     // all-zero matrix.
     const int mode_begin = (arg.matrix == rocsparse_matrix_zero) ? 1 : 0;
-    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 7 : 0;
+    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 8 : 0;
 
     // Host tri-diagonal matrix. Entries past m stay at 7 and are not referenced.
     host_vector<T> hdl(batch_stride * batch_count, static_cast<T>(7));
@@ -267,6 +311,15 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
                                           + hd[offset + i] * hx[offset + i]
                                           + hdu[offset + i] * hx[offset + i + 1];
                 }
+            }
+
+            if(!solution_is_finite<T>(batch_stride * batch_count, hx.data()))
+            {
+#ifdef GOOGLE_TEST
+                FAIL();
+#else
+                exit(EXIT_FAILURE);
+#endif
             }
 
             near_check_segments<T>(batch_stride * batch_count, hx_original.data(), hresult.data());

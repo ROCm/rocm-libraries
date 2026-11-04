@@ -210,6 +210,8 @@ namespace TensileLite
     enum class TuningAttempt : uint32_t
     {
         Tuned = 0,
+        /** Budget stopped the search, but a winner was measured and recorded. */
+        TunedPartial,
         SkippedInPlaceBeta,
         SkippedExtentUnknown,
         SkippedScratchCap,
@@ -278,13 +280,14 @@ namespace TensileLite
     bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry);
 
     /**
-     * Note that this process spent a search on this problem, and ask whether it
-     * has.
+     * Note that this process will not search this problem again, and ask
+     * whether it has.
      *
-     * Set for the outcomes that spent the search and left the shape wanting
-     * another, so the next matmul does not start the same search again. Per
-     * process, not per file: a later run with a higher
-     * HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE is what lets such a shape finish.
+     * Set once a search has been spent on the shape, whatever its outcome, and
+     * when the shape's cached search turns out final for this run, so a later
+     * matmul neither starts the same search again nor asks again. Per process,
+     * not per file: a later run with a higher HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE
+     * is what lets a shape the ceiling stopped finish.
      */
     void recordTuningAttempt(const ProblemOverride& key);
     bool tuningAlreadyAttempted(const ProblemOverride& key);

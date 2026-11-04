@@ -25,6 +25,30 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
+// near_check treats only NaN/Inf in its first argument as special. A non-finite
+// solution makes A*x non-finite, both tolerance comparisons are false, and the
+// test passes. Fail once, with the count and the first bad index.
+template <typename T>
+bool solution_is_finite(int64_t n, const T* x)
+{
+    int64_t count = 0;
+    int64_t first = -1;
+    for(int64_t i = 0; i < n; ++i)
+    {
+        if(rocsparse_isnan(x[i]) || rocsparse_isinf(x[i]))
+        {
+            if(first < 0)
+                first = i;
+            ++count;
+        }
+    }
+    if(count == 0)
+        return true;
+    std::cerr << "solution is not finite: " << count << " entries, first at index " << first
+              << std::endl;
+    return false;
+}
+
 template <typename T>
 void testing_gtsv_no_pivot_bad_arg(const Arguments& arg)
 {
@@ -86,7 +110,8 @@ void testing_gtsv_no_pivot_bad_arg(const Arguments& arg)
 // dominant zero-off-diagonal systems: diagonal, upper bidiagonal, and lower
 // bidiagonal. Modes 4-7 use unit diagonals and off-diagonals of +/-1 with a
 // non-constant solution, so a repair that drops a fill term cannot hide inside
-// a tiny coupling. The right-hand side matches that solution exactly.
+// a tiny coupling. The right-hand side matches that solution exactly. Mode 8 is
+// the identity with a random right-hand side.
 template <typename T>
 static void gtsv_no_pivot_init_system(int             mode,
                                       rocsparse_int   m,
@@ -104,6 +129,28 @@ static void gtsv_no_pivot_init_system(int             mode,
             hdl[i] = random_cached_generator<T>(1, 8);
             hd[i]  = random_cached_generator<T>(17, 32);
             hdu[i] = random_cached_generator<T>(1, 8);
+        }
+
+        hdl[0]     = std::numeric_limits<T>::infinity();
+        hdu[m - 1] = std::numeric_limits<T>::infinity();
+
+        for(rocsparse_int j = 0; j < n; ++j)
+        {
+            for(rocsparse_int i = 0; i < m; ++i)
+            {
+                hB[j * ldb + i] = random_cached_generator<T>(-10, 10);
+            }
+        }
+        return;
+    }
+
+    if(mode == 8)
+    {
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            hdl[i] = static_cast<T>(0);
+            hd[i]  = static_cast<T>(1);
+            hdu[i] = static_cast<T>(0);
         }
 
         hdl[0]     = std::numeric_limits<T>::infinity();
@@ -198,7 +245,7 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     // rocsparse_matrix_zero selects the zero-off-diagonal systems above, not an
     // all-zero matrix.
     const int mode_begin = (arg.matrix == rocsparse_matrix_zero) ? 1 : 0;
-    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 7 : 0;
+    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 8 : 0;
 
     // Host tri-diagonal matrix
     host_vector<T> hdl(m);
@@ -256,6 +303,15 @@ void testing_gtsv_no_pivot(const Arguments& arg)
                     hresult[ldb * j + i] = hdl[i] * hB[ldb * j + i - 1] + hd[i] * hB[ldb * j + i]
                                            + hdu[i] * hB[ldb * j + i + 1];
                 }
+            }
+
+            if(!solution_is_finite<T>(ldb * n, hB.data()))
+            {
+#ifdef GOOGLE_TEST
+                FAIL();
+#else
+                exit(EXIT_FAILURE);
+#endif
             }
 
             near_check_segments<T>(ldb * n, hB_original.data(), hresult.data());

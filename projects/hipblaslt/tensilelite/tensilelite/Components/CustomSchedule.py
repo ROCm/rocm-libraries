@@ -71,7 +71,7 @@ class CMSKernelInfo:
     Metadata about registered CMS kernels 
     Contains the minimum combination of parameters needed to use the CMS kernel.
     Important Note:
-    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match Tensile names.
+    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match TensileLite names.
     These names will be used by caller/tuning codes to set correct parameter/values.
     """
     name: str
@@ -3351,6 +3351,11 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
         if not valid:
             return False, None
         optSchedule = switch_A_B_schedule(opt.optSchedule)
+        # The 224x128 schedule issues B first via SwapGlobalReadOrder, and the
+        # GRA/GRB keys name the first/second load stream rather than a tensor.
+        # Mirrored, A is issued first, so the prologue must not swap either.
+        kernel["SwapGlobalReadOrder"] = 0
+        optSchedule["GRA"], optSchedule["GRB"] = optSchedule["GRB"], optSchedule["GRA"]
         return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
     else:
         return False, None

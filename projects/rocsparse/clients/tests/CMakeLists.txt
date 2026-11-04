@@ -226,11 +226,9 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     )
 endif()
 
-if(BUILD_WITH_ELL_TRSV)
-  list(APPEND ROCSPARSE_TEST_SOURCES
-    test_spsv_ell.cpp
-    test_sptrsv_ell.cpp)
-endif()
+list(APPEND ROCSPARSE_TEST_SOURCES
+  test_spsv_ell.cpp
+  test_sptrsv_ell.cpp)
 
 if(BUILD_WITH_TRSM_REFACTORING)
   list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_copy_data.cpp)
@@ -238,9 +236,7 @@ if(BUILD_WITH_TRSM_REFACTORING)
   list(APPEND ROCSPARSE_TEST_SOURCES test_sptrsm.cpp)
 endif()
 
-if(ROCSPARSE_ENABLE_SPMAT_SCALE)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
-endif()
+list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 
 if(BUILD_WITH_SPSORT)
   list(APPEND ROCSPARSE_TEST_SOURCES
@@ -249,14 +245,12 @@ if(BUILD_WITH_SPSORT)
     test_spsort_csc.cpp)
 endif()
 
-if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
-  list(APPEND ROCSPARSE_TEST_SOURCES
-    test_sddmm_batched_ell.cpp
-    test_sddmm_batched_coo.cpp
-    test_sddmm_batched_coo_aos.cpp
-    test_sddmm_batched_csr.cpp
-    test_sddmm_batched_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_TEST_SOURCES
+  test_sddmm_batched_ell.cpp
+  test_sddmm_batched_coo.cpp
+  test_sddmm_batched_coo_aos.cpp
+  test_sddmm_batched_csr.cpp
+  test_sddmm_batched_csc.cpp)
 
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
@@ -421,15 +415,11 @@ if(BUILD_WITH_TRSM_REFACTORING)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_sptrsm.cpp)
 endif()
 
-if(BUILD_WITH_ELL_TRSV)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
-    ../testings/testing_spsv_ell.cpp
-    ../testings/testing_sptrsv_ell.cpp)
-endif()
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+  ../testings/testing_spsv_ell.cpp
+  ../testings/testing_sptrsv_ell.cpp)
 
-if(ROCSPARSE_ENABLE_SPMAT_SCALE)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
-endif()
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
 
 if(BUILD_WITH_SPSORT)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS
@@ -438,14 +428,12 @@ if(BUILD_WITH_SPSORT)
     ../testings/testing_spsort_csc.cpp)
 endif()
 
-if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
-    ../testings/testing_sddmm_batched_ell.cpp
-    ../testings/testing_sddmm_batched_coo.cpp
-    ../testings/testing_sddmm_batched_coo_aos.cpp
-    ../testings/testing_sddmm_batched_csr.cpp
-    ../testings/testing_sddmm_batched_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+  ../testings/testing_sddmm_batched_ell.cpp
+  ../testings/testing_sddmm_batched_coo.cpp
+  ../testings/testing_sddmm_batched_coo_aos.cpp
+  ../testings/testing_sddmm_batched_csr.cpp
+  ../testings/testing_sddmm_batched_csc.cpp)
 
 
 

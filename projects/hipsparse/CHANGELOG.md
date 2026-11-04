@@ -15,6 +15,9 @@ Documentation for hipSPARSE is available at
 ### Removed
 * Removed the no-op `deps` CMake project and the unused `deps/external-gtest.cmake`.
 
+### Resolved issues
+* Fixed an integer overflow in `hipsparseXcsr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion.
+
 ## hipSPARSE 4.8.0 for ROCm 10.1
 
 ### Added

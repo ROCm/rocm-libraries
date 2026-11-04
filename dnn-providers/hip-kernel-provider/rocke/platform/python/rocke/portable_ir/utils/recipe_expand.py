@@ -16,7 +16,8 @@
 # alpha-renaming) lower to identical HSACO.
 #
 # Supported instrs (same set as recipe_vm.c): param, const_i32, const_f32,
-# thread_id_x, alias, ret, static_for, static_if, scf_for, scf_if, emit.
+# thread_id_x, alias, ret, static_for, static_if, scf_for, scf_if, scf_if_else,
+# emit.
 # intexpr: number | {spec} | {var} | {spec_str_eq:[n,lit]} | {OP:[a,b]} for
 # OP in add/sub/mul/div/mod/eq/ne/lt/le/gt/ge.
 
@@ -451,6 +452,20 @@ class _Expander:
             self._n = body_expander._n
             self.out.append({"op": "scf_if", "cond": cond, "then": body_expander.out})
             return
+        if op == "scf_if_else":
+            cond = self._resolve(instr["cond"])
+            node = {"op": "scf_if_else", "cond": cond}
+            for key in ("then", "else"):
+                arm_expander = _Expander(self.spec_int, self.spec_str)
+                arm_expander.env = self.env
+                arm_expander.ivars = self.ivars
+                arm_expander._n = self._n
+                arm_expander.out = []
+                arm_expander.run(instr.get(key, []))
+                self._n = arm_expander._n
+                node[key] = arm_expander.out
+            self.out.append(node)
+            return
         if op == "emit":
             # Operands may be a rolled list (e.g. scf.yield carrying a fan of
             # loop-carries) and/or format names.
@@ -637,6 +652,12 @@ class _Equiv:
             if not self._use(a["cond"], b["cond"]):
                 return False
             return self.lists(a.get("then", []), b.get("then", []))
+        if op == "scf_if_else":
+            if not self._use(a["cond"], b["cond"]):
+                return False
+            return self.lists(a.get("then", []), b.get("then", [])) and self.lists(
+                a.get("else", []), b.get("else", [])
+            )
         self.why = f"unhandled op {op}"
         return False
 

@@ -479,7 +479,7 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
-TEST(aux_handle_test, set_uniform_summation_order_default_is_zero)
+TEST(aux_handle_test, set_uniform_summation_order_default_is_one)
 {
     hipblasLtHandle_t handle = nullptr;
     ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
@@ -487,7 +487,7 @@ TEST(aux_handle_test, set_uniform_summation_order_default_is_zero)
 
     int32_t value = -42;
     ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(value, 0);
+    ASSERT_EQ(value, 1);
 
     ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
@@ -571,7 +571,7 @@ TEST(aux_handle_test, set_uniform_summation_order_does_not_mutate_desc)
                                               sizeof(desc_value),
                                               &sizeWritten),
               HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(desc_value, 0);
+    ASSERT_EQ(desc_value, -1);
 
     ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
     ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
@@ -597,32 +597,32 @@ TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_round_trip)
     ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
 }
 
-TEST(aux_ext_test, gemm_preference_uniform_summation_order_default_is_off)
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_default_is_handle_default)
 {
     hipblaslt_ext::GemmPreference pref;
-    ASSERT_FALSE(pref.getUniformSummationOrder());
+    ASSERT_EQ(pref.getUniformSummationOrder(), -1);
 }
 
 TEST(aux_ext_test, gemm_preference_uniform_summation_order_round_trip)
 {
     hipblaslt_ext::GemmPreference pref;
 
-    pref.setUniformSummationOrder(true);
-    ASSERT_TRUE(pref.getUniformSummationOrder());
+    pref.setUniformSummationOrder(1);
+    ASSERT_EQ(pref.getUniformSummationOrder(), 1);
 
     // GemmPreferenceImpl is copied member-wise by the hand-rolled copy
     // constructor and copy assignment, so both have to carry the new member.
     hipblaslt_ext::GemmPreference copy_constructed(pref);
-    ASSERT_TRUE(copy_constructed.getUniformSummationOrder());
+    ASSERT_EQ(copy_constructed.getUniformSummationOrder(), 1);
 
     hipblaslt_ext::GemmPreference copy_assigned;
     copy_assigned = pref;
-    ASSERT_TRUE(copy_assigned.getUniformSummationOrder());
+    ASSERT_EQ(copy_assigned.getUniformSummationOrder(), 1);
 
-    pref.setUniformSummationOrder(false);
-    ASSERT_FALSE(pref.getUniformSummationOrder());
-    ASSERT_TRUE(copy_constructed.getUniformSummationOrder());
-    ASSERT_TRUE(copy_assigned.getUniformSummationOrder());
+    pref.setUniformSummationOrder(0);
+    ASSERT_EQ(pref.getUniformSummationOrder(), 0);
+    ASSERT_EQ(copy_constructed.getUniformSummationOrder(), 1);
+    ASSERT_EQ(copy_assigned.getUniformSummationOrder(), 1);
 }
 
 TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_out_of_range)

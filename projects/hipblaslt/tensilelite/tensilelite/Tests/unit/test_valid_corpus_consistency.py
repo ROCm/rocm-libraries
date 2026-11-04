@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic unit tests for ``Tensile.TensileLogic.ValidCorpusConsistency``.
+"""Hermetic unit tests for ``tensilelite.TensileLogic.ValidCorpusConsistency``.
 
 Everything here builds its own tiny corpus under ``tmp_path`` -- no dependency
 on the real ``Logic/asm_full`` checkout, unlike ``test_PlaceholderMerge.py`` /

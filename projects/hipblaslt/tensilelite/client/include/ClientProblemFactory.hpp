@@ -76,6 +76,7 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
+            int         m_uniformSummationOrder;
             int         m_useBias;
             int         m_biasSrc;
             std::string m_useScaleAB;
@@ -114,9 +115,13 @@ namespace TensileLite
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
             bool                             m_fusedGemmA2A;
+            std::vector<int>                 m_worlds;
+            std::vector<int>                 m_fusedA2AExtents;
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
+            int                              m_mxBlockFreeA;
+            int                              m_mxBlockFreeB;
             bool                             m_padMXScaleTensorFreeDim;
 
             TensorOps m_aOps;

@@ -1058,6 +1058,16 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx);
 void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx);
 
+/* Channel-packed (cpl > 1) depthwise forward kernels
+ * (conv_direct_grouped_build_depthwise_packed.cpp). The row-streaming one
+ * validates its spec; the tiled one expects a spec its caller validated. */
+bool rocke_dconv_depthwise_cpl_reason(int cpl, int groups, char* reason, size_t reason_cap);
+rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
+                                                       const rocke_direct_depthwise_spec_t* spec,
+                                                       const char* arch);
+rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_tiled_spec_t* spec, const char* arch);
+
 /* ===================================================================== *
  *  Depthwise-column PHASE FUNCTIONS
  *

@@ -152,17 +152,21 @@ namespace rocalution
                     bool sparse_created
                         = blas_created
                           && (rocsparse_create_handle(sparse_handle) == rocsparse_status_success);
+                    bool streams_created = sparse_created;
 
-                    if(sparse_created
 #ifdef SUPPORT_MULTINODE
-                       && (hipStreamCreate(static_cast<hipStream_t*>(
-                               _get_backend_descriptor()->HIP_stream_interior))
-                           == hipSuccess)
-                       && (hipStreamCreate(static_cast<hipStream_t*>(
-                               _get_backend_descriptor()->HIP_stream_ghost))
-                           == hipSuccess)
+                    hipStream_t* interior_stream
+                        = static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_interior);
+                    hipStream_t* ghost_stream
+                        = static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_ghost);
+
+                    bool interior_created
+                        = sparse_created && (hipStreamCreate(interior_stream) == hipSuccess);
+                    streams_created
+                        = interior_created && (hipStreamCreate(ghost_stream) == hipSuccess);
 #endif
-                    )
+
+                    if(streams_created)
                     {
                         _get_backend_descriptor()->HIP_dev = dev;
                         handles_created                    = true;
@@ -170,6 +174,13 @@ namespace rocalution
                     }
                     else
                     {
+#ifdef SUPPORT_MULTINODE
+                        if(interior_created)
+                        {
+                            DISCARD_HIP_ERROR(hipStreamDestroy(*interior_stream));
+                        }
+#endif
+
                         if(sparse_created)
                         {
                             rocsparse_destroy_handle(*sparse_handle);
@@ -271,6 +282,8 @@ namespace rocalution
         _get_backend_descriptor()->HIP_stream_current  = NULL;
 
         _get_backend_descriptor()->HIP_dev = -1;
+
+        _get_backend_descriptor()->accelerator = false;
 
         log_debug(0, "rocalution_stop_hip()", "* end");
     }

@@ -183,6 +183,9 @@ struct Arguments
     int32_t fast_check_repeat;
     int32_t fast_check_inject;
     int8_t  requires_streamk;
+    // Self-test of the checks of D across solutions: the position in the solution list of a
+    // solution that is never launched, which the allclose check must report (-1 = none)
+    int32_t skip_launch_solution;
     // integer_exact value pattern: '' (standard), ternary or sparse_k (hipblaslt_init.hpp)
     char    integer_exact_pattern[16];
     // skip, rather than fail, when the library offers no solution (size-threshold sweeps)
@@ -226,11 +229,13 @@ struct Arguments
     bool    use_ext;
     bool    use_ext_setproblem;
     int     algo_method; // 0 for getheuristic, 1 for get all algos, 2 for algo index
-    int     api_method; // 0 for c, 1 for mix, 2 for cpp
+    int     api_method; // 0 for c, 1 for mix, 2 for cpp, 3 for the grouped C API
     bool    use_user_args;
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
+    // -1 inherits the handle. 0/1 set HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
+    int32_t uniform_summation_order;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -326,6 +331,7 @@ struct Arguments
     OPER(fast_check_repeat) SEP      \
     OPER(fast_check_inject) SEP      \
     OPER(requires_streamk) SEP       \
+    OPER(skip_launch_solution) SEP   \
     OPER(integer_exact_pattern) SEP  \
     OPER(allow_no_solution) SEP      \
     OPER(timing) SEP                 \
@@ -365,6 +371,7 @@ struct Arguments
     OPER(rotating) SEP               \
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\
+    OPER(uniform_summation_order) SEP\
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \

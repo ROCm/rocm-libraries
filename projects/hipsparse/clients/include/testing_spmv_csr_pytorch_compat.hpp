@@ -40,6 +40,8 @@
  * 4. Compares against dense matmul: expected = csr.to_dense().matmul(vec)
  */
 
+#include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -414,8 +416,7 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     CHECK_HIP_ERROR(hipMemset(d_y, 0, sizeof(T) * m));
 
     // Setup hipSPARSE
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     // Create sparse matrix descriptor
     hipsparseSpMatDescr_t matA;
@@ -432,9 +433,8 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
                                              hip_datatype<T>::value));
 
     // Create dense vector descriptors
-    hipsparseDnVecDescr_t vecX, vecY;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&vecX, n, d_x, hip_datatype<T>::value));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&vecY, m, d_y, hip_datatype<T>::value));
+    hipsparseLocalDnVec vecX(n, d_x, hip_datatype<T>::value);
+    hipsparseLocalDnVec vecY(m, d_y, hip_datatype<T>::value);
 
     // Set alpha = 1.0, beta = 0.0 (y = A * x)
     // Use the correct scalar type for the compute type
@@ -508,8 +508,6 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
 
     // Cleanup
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(vecX));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(vecY));
 }
 
 // ============================================================================
