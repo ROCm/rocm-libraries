@@ -1938,10 +1938,10 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
         return lw->status;
     }
     {
-        char descriptor_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        char loop_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
         {
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", descriptor_error);
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", loop_error);
         }
     }
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);

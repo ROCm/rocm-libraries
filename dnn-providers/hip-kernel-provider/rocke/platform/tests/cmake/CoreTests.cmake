@@ -472,8 +472,9 @@ if(BUILD_TESTING)
                  rocke_global_load_index_width)
   endif()
 
-  # The C++ verifier and if/else rule refuse a yield in an if/else without
-  # results and check a result's type packed-only first.
+  # The C++ verifier, if/else rule and both lowerings refuse a misplaced
+  # scf.yield and a malformed if/else, and check a result's type packed-only
+  # first.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_if_else_yield_rule.cpp")
     add_executable(rocke_if_else_yield_rule core/test_if_else_yield_rule.cpp)
     target_link_libraries(rocke_if_else_yield_rule PRIVATE rocke_core)

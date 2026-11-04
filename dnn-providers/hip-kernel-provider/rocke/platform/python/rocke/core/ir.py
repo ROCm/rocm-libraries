@@ -1108,8 +1108,8 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
     and step) and each value an ``scf.yield`` directly in the loop body yields.
     It only slices the operand and region lists, so it accepts any counts:
     serialized IR reaches the verifier and the lowerings without passing the
-    builder. The verifier and every lowering of ``scf.for`` use it, and the C++
-    engine reports the same text (``rocke_i_scf_for_carried_descriptor_error``).
+    builder. :func:`_scf_for_error` applies it, and the C++ engine reports the
+    same text (``rocke_i_scf_for_carried_descriptor_error``).
     """
     for index, init in enumerate(op.operands[3:]):
         if _is_buffer_descriptor(init):
@@ -1364,10 +1364,95 @@ def _gpu_check_failed_op_error(op: Op) -> str | None:
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
-# The refusal for an scf.yield that no scf.for or scf.if_else with results
-# encloses. Both lowerings report it, in both engines (the C++ engine's
+# The refusal for an scf.yield that is not directly in a region that takes
+# yields: an scf.for body or a branch of an scf.if_else with results. The
+# verifier and both lowerings report it, in both engines (the C++ engine's
 # ROCKE_ORPHAN_YIELD_ERROR has the same text).
-_ORPHAN_YIELD_ERROR = "scf.yield outside an scf.for or an scf.if_else with results"
+_ORPHAN_YIELD_ERROR = (
+    "scf.yield must be directly in an scf.for body or in a branch of an "
+    "scf.if_else with results"
+)
+
+# The ops whose regions take the scf.yield ops directly in them: an scf.for
+# carries its body's yield into the next trip, and an scf.if_else applies its own
+# rule (_if_else_yields) to its branches. Every other region, the kernel body
+# and an scf.if branch among them, passes a yield on to nothing.
+_YIELD_OWNING_OPS = ("scf.for", "scf.if_else")
+
+
+def _nested_orphan_yield(op: Op) -> Op | None:
+    """The first ``scf.yield`` in a region of ``op`` that takes no yields,
+    searched through every such region nested in it; None when there is none
+    or ``op`` owns its regions' yields (:data:`_YIELD_OWNING_OPS`).
+
+    The search stops at an owning op, whose own rule covers its regions.
+    """
+    if op.name in _YIELD_OWNING_OPS:
+        return None
+    for region in op.regions:
+        found = _orphan_yield(region.ops)
+        if found is not None:
+            return found
+    return None
+
+
+def _orphan_yield(ops: Sequence[Op]) -> Op | None:
+    """The first ``scf.yield`` among ``ops``, or in a region nested in them that
+    takes no yields (:func:`_nested_orphan_yield`); None when there is none.
+
+    Called on the ops of a region that takes no yields (the kernel body), it
+    tells whether the region holds an orphan yield, and returns the first; the
+    if/else rule calls it on a branch's ops.
+    """
+    for op in ops:
+        if op.name == "scf.yield":
+            return op
+        found = _nested_orphan_yield(op)
+        if found is not None:
+            return found
+    return None
+
+
+def _scf_for_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
+
+    A loop cannot carry a buffer descriptor
+    (:func:`_scf_for_carried_descriptor_error`), and it takes only the yields
+    directly in its body, so its body nests none in a region that takes no
+    yields (an ``scf.if`` in the body, say; :data:`_ORPHAN_YIELD_ERROR`). It
+    accepts any region count, as serialized IR reaches the verifier and the
+    lowerings without passing the builder. The verifier and every lowering of
+    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``).
+    """
+    descriptor_error = _scf_for_carried_descriptor_error(op)
+    if descriptor_error is not None:
+        return descriptor_error
+    if not op.regions:
+        return None
+    body = op.regions[0]
+    if any(_nested_orphan_yield(body_op) is not None for body_op in body.ops):
+        return _ORPHAN_YIELD_ERROR
+    return None
+
+
+def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
+    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`) and every
+    ``scf.if_else`` (:func:`_if_else_yields`) among ``ops`` and nested in them.
+
+    A lowering calls it on a loop body it does not lower (an unrolled loop of
+    zero trips), so that body's malformed loop or if/else is refused as it is
+    wherever the body is lowered; the C++ engine's
+    ``rocke_i_check_control_flow`` is its twin.
+    """
+    for op in ops:
+        if op.name == "scf.for":
+            error = _scf_for_error(op)
+            if error is not None:
+                raise ValueError(error)
+        elif op.name == "scf.if_else":
+            _if_else_yields(op)
+        for region in op.regions:
+            _refuse_malformed_control_flow(region.ops)
 
 
 def _refuse_if_else_result_type(index: int, result_type: Type) -> None:
@@ -1391,19 +1476,16 @@ def _refuse_if_else_result_type(index: int, result_type: Type) -> None:
         )
 
 
-def _holds_scf_yield(ops: Sequence[Op]) -> bool:
-    """True when one of ``ops`` is an ``scf.yield``."""
-    return any(op.name == "scf.yield" for op in ops)
-
-
 def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     """The ``scf.yield`` that ends branch ``branch`` (0 then, 1 else) of the
     ``scf.if_else`` ``op``, whose condition and branch counts
     :func:`_if_else_yields` has checked; None when ``op`` has no results.
 
     Only the ``scf.yield`` that ends a branch of an if/else with results has
-    its values taken, so a branch holds no other ``scf.yield``; the rule reads
-    only the ops directly in a branch. That closing ``scf.yield`` gives
+    its values taken, so a branch holds no other ``scf.yield``, directly or in
+    a region nested in it that does not take yields (an ``scf.if``,
+    :func:`_orphan_yield`); a nested ``scf.for`` or ``scf.if_else`` owns the
+    yields in its regions. That closing ``scf.yield`` gives
     one value per result, of the result's type, and never a buffer descriptor
     (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
     (HIP) that holds a result can hold the lowered descriptor.
@@ -1412,7 +1494,7 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     count = len(op.results)
     region = op.regions[branch]
     if not count:
-        if _holds_scf_yield(region.ops):
+        if _orphan_yield(region.ops) is not None:
             raise ValueError(
                 f"scf.if_else has no results, so its {name} branch cannot "
                 "contain scf.yield"
@@ -1423,7 +1505,7 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
             f"scf.if_else has {count} results, so its {name} branch must end in "
             f"scf.yield of {count} values"
         )
-    if _holds_scf_yield(region.ops[:-1]):
+    if _orphan_yield(region.ops[:-1]) is not None:
         raise ValueError(
             f"scf.if_else has {count} results, so its {name} branch must yield "
             "only at its end"
@@ -7277,9 +7359,12 @@ class IRBuilder:
     def scf_yield(self, *values: Value) -> None:
         """End the current region by yielding ``values`` to its owner.
 
-        In an ``scf.for`` body they become the next iteration's iter_args, so
-        none may be a buffer descriptor (see
-        :func:`_loop_carried_descriptor_message`).
+        The owner is an ``scf.for`` whose body the yield is directly in, or an
+        ``scf.if_else`` with results whose branch it ends; the verifier and the
+        lowerings refuse a yield anywhere else (the kernel body, an ``scf.if``,
+        an ``scf.if_else`` without results). In an ``scf.for`` body the values
+        become the next iteration's iter_args, so none may be a buffer
+        descriptor (see :func:`_loop_carried_descriptor_message`).
         """
         if self._current_region_is_loop_body():
             for index, value in enumerate(values):

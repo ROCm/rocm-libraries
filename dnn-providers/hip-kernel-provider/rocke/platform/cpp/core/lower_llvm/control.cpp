@@ -2199,7 +2199,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
  * constant bounds. See the Python source for the full strategy comment; the
  * mechanics ported here are:
  *
- *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step
+ *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step;
+ *     with no trip, apply the body's loop and if/else rules
+ *     (rocke_i_check_control_flow)
  *   - current_iter_values[meta.name] = operand(init)
  *   - find the IV + iter-arg Value objects by scanning the operands of every
  *     body op, nested regions included (ll_loop_block_values)
@@ -2256,6 +2258,17 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "unrolled_for: zero step");
     }
     int64_t trip_count = (upper_val - lower_val) / step_val;
+    if(trip_count <= 0)
+    {
+        /* No trip lowers the body, so apply the loop and if/else rules it
+         * would meet. */
+        char err[ROCKE_ERR_MSG_CAP];
+        const rocke_status_t status = rocke_i_check_control_flow(body, err, sizeof err);
+        if(status != ROCKE_OK)
+        {
+            rocke_ll_fail(L, status, "%s", err);
+        }
+    }
 
     /* The IV + iter-arg Value objects the body reads, nested regions included. */
     rocke_value_t* iv_value_obj = NULL;
@@ -2379,18 +2392,18 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
-/* Python _op_scf_for: refuse a loop-carried buffer descriptor, then pick
- * unrolled vs normal lowering. */
+/* Python _op_scf_for: refuse a loop-carried buffer descriptor or a yield the
+ * body nests where nothing takes it, then pick unrolled vs normal lowering. */
 static void _op_scf_for(rocke_lower_t* L, const rocke_op_t* op)
 {
     if(!rocke_ll_live(L))
     {
         return;
     }
-    char descriptor_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+    char loop_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", descriptor_error);
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", loop_error);
     }
     if(op->num_operands < 3)
     {

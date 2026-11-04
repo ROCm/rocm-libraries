@@ -48,7 +48,7 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
     _int_add_wrap_error,
-    _scf_for_carried_descriptor_error,
+    _scf_for_error,
     BF16,
     F32,
     F16,
@@ -72,6 +72,7 @@ from .ir import (
     _gpu_check_failed_op_error,
     _if_else_yields,
     _is_unsigned,
+    _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -7117,11 +7118,12 @@ class _Lowerer:
 
         Checks for 'unroll' hint and constant bounds to decide between
         unrolled (straight-line) or normal (loop) lowering. Both refuse a
-        loop that carries a buffer descriptor.
+        loop that carries a buffer descriptor or nests a yield its body does
+        not take.
         """
-        descriptor_error = _scf_for_carried_descriptor_error(op)
-        if descriptor_error is not None:
-            raise ValueError(descriptor_error)
+        error = _scf_for_error(op)
+        if error is not None:
+            raise ValueError(error)
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 
@@ -7292,6 +7294,10 @@ class _Lowerer:
 
         # Calculate trip count
         trip_count = (upper_val - lower_val) // step_val
+        if trip_count <= 0:
+            # No trip lowers the body, so apply the loop and if/else rules it
+            # would meet.
+            _refuse_malformed_control_flow(op.regions[0].ops)
 
         # Track current LLVM values of iteration variables
         # Start with init values (these are the LLVM operand strings)

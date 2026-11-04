@@ -2888,8 +2888,89 @@ rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
     return out;
 }
 
-const char* const ROCKE_ORPHAN_YIELD_ERROR
-    = "scf.yield outside an scf.for or an scf.if_else with results";
+const char* const ROCKE_ORPHAN_YIELD_ERROR = "scf.yield must be directly in an scf.for body or in "
+                                             "a branch of an scf.if_else with results";
+
+static const rocke_op_t* nested_orphan_yield(const rocke_op_t* op);
+
+const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops)
+{
+    for(int i = 0; i < num_ops; i++)
+    {
+        if(ops[i]->opcode == ROCKE_OP_SCF_YIELD)
+            return ops[i];
+        const rocke_op_t* found = nested_orphan_yield(ops[i]);
+        if(found)
+            return found;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_nested_orphan_yield: the first scf.yield in a region of
+ * `op` that takes no yields, searched through every such region nested in it;
+ * NULL when there is none or `op` (an scf.for or scf.if_else, whose own rule
+ * covers its regions) takes its regions' yields. A NULL region holds no op. */
+static const rocke_op_t* nested_orphan_yield(const rocke_op_t* op)
+{
+    if(op->opcode == ROCKE_OP_SCF_FOR || op->opcode == ROCKE_OP_SCF_IF_ELSE)
+        return NULL;
+    for(int r = 0; r < op->num_regions; r++)
+    {
+        const rocke_region_t* region = op->regions[r];
+        const rocke_op_t* found
+            = region ? rocke_i_orphan_yield(region->ops, region->num_ops) : NULL;
+        if(found)
+            return found;
+    }
+    return NULL;
+}
+
+const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(rocke_i_scf_for_carried_descriptor_error(op, buf, cap))
+        return buf;
+    if(op->num_regions < 1 || !op->regions[0])
+        return NULL;
+    const rocke_region_t* body = op->regions[0];
+    for(int i = 0; i < body->num_ops; i++)
+    {
+        if(nested_orphan_yield(body->ops[i]))
+        {
+            snprintf(buf, cap, "%s", ROCKE_ORPHAN_YIELD_ERROR);
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* err, size_t err_cap)
+{
+    if(!region)
+        return ROCKE_OK;
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(op->opcode == ROCKE_OP_SCF_FOR)
+        {
+            if(rocke_i_scf_for_error(op, err, err_cap))
+                return ROCKE_ERR_VALUE;
+        }
+        else if(op->opcode == ROCKE_OP_SCF_IF_ELSE)
+        {
+            const rocke_op_t* yields[2];
+            const rocke_status_t status = rocke_i_if_else_yields(op, yields, err, err_cap);
+            if(status != ROCKE_OK)
+                return status;
+        }
+        for(int r = 0; r < op->num_regions; r++)
+        {
+            const rocke_status_t status = rocke_i_check_control_flow(op->regions[r], err, err_cap);
+            if(status != ROCKE_OK)
+                return status;
+        }
+    }
+    return ROCKE_OK;
+}
 
 /* Python core/ir.py::_refuse_if_else_result_type; the types and texts are the
  * Python engine's. A packed-only type has no value form; an LDS allocation is a
@@ -2916,23 +2997,13 @@ rocke_status_t rocke_i_check_if_else_result_type(int index,
     return ROCKE_OK;
 }
 
-/* Whether one of the first `num_ops` ops directly in `region` is an scf.yield. */
-static bool holds_yield(const rocke_region_t* region, int num_ops)
-{
-    for(int i = 0; i < num_ops; i++)
-    {
-        if(region->ops[i]->opcode == ROCKE_OP_SCF_YIELD)
-            return true;
-    }
-    return false;
-}
-
 /* Python core/ir.py::_if_else_branch_yield: the scf.yield that ends branch
  * `branch` (0 then, 1 else) of the scf.if_else `op`, whose condition and branch
  * counts rocke_i_if_else_yields has checked, in `*out_yield` (NULL when `op` has
  * no results). Only that closing scf.yield has its values taken, so a branch
- * holds no other; the rule reads only the ops directly in a branch. Every
- * refusal is a ValueError; returns false and writes it into `err`. */
+ * holds no other, directly or in a region nested in it that takes no yields
+ * (rocke_i_orphan_yield). Every refusal is a ValueError; returns false and
+ * writes it into `err`. */
 static bool if_else_branch_yield(
     const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap)
 {
@@ -2946,7 +3017,7 @@ static bool if_else_branch_yield(
     *out_yield = NULL;
     if(count == 0)
     {
-        if(holds_yield(region, region->num_ops))
+        if(rocke_i_orphan_yield(region->ops, region->num_ops))
         {
             snprintf(err,
                      err_cap,
@@ -2966,7 +3037,7 @@ static bool if_else_branch_yield(
                  count);
         return false;
     }
-    if(holds_yield(region, region->num_ops - 1))
+    if(rocke_i_orphan_yield(region->ops, region->num_ops - 1))
     {
         snprintf(err,
                  err_cap,
@@ -3028,14 +3099,22 @@ rocke_status_t rocke_i_if_else_yields(const rocke_op_t* op,
     out_yields[0] = NULL;
     out_yields[1] = NULL;
     /* The counts first: serialized IR reaches the verifier and the lowerings
-     * without passing the builder. */
-    if(op->num_operands != 1 || op->num_regions != 2)
+     * without passing the builder. A NULL branch, which rocke_i_op leaves when
+     * given no regions array, is not counted, so it is refused before it is
+     * read. */
+    int num_branches = 0;
+    for(int r = 0; r < op->num_regions; r++)
+    {
+        if(op->regions[r])
+            num_branches++;
+    }
+    if(op->num_operands != 1 || op->num_regions != 2 || num_branches != 2)
     {
         snprintf(err,
                  err_cap,
                  "scf.if_else: expected 1 condition / 2 branches, got %d / %d",
                  op->num_operands,
-                 op->num_regions);
+                 num_branches);
         return ROCKE_ERR_VALUE;
     }
     for(int i = 0; i < op->num_results; i++)

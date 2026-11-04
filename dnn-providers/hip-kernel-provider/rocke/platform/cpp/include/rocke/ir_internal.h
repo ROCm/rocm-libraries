@@ -320,19 +320,46 @@ rocke_status_t rocke_i_check_if_else_result_type(int index,
  * branches, checked first; each result passes rocke_i_check_if_else_result_type;
  * a branch of an if/else without results holds no scf.yield, and a branch of
  * one with results holds one, at its end, of one value per result, of the
- * result's type, and never a buffer descriptor. The rule reads only the ops
- * directly in a branch. Returns ROCKE_OK, or the status of the Python engine's
- * exception with its refusal written to `err`. The verifier and both lowerings
- * use it. */
+ * result's type, and never a buffer descriptor. A branch holds no other
+ * scf.yield, directly or in a nested region that takes no yields
+ * (rocke_i_orphan_yield); a NULL branch counts as missing. Returns ROCKE_OK, or the
+ * status of the Python engine's exception with its refusal written to `err`.
+ * The verifier and both lowerings use it. */
 rocke_status_t rocke_i_if_else_yields(const rocke_op_t* op,
                                       const rocke_op_t* out_yields[2],
                                       char* err,
                                       size_t err_cap);
 
-/* The refusal for an scf.yield that no scf.for or scf.if_else with results
- * encloses (Python core/ir.py::_ORPHAN_YIELD_ERROR, same text). Both lowerings
+/* The refusal for an scf.yield that is not directly in a region that takes
+ * yields: an scf.for body or a branch of an scf.if_else with results (Python
+ * core/ir.py::_ORPHAN_YIELD_ERROR, same text). The verifier and both lowerings
  * report it. */
 extern const char* const ROCKE_ORPHAN_YIELD_ERROR;
+
+/* The first scf.yield among `ops`, or in a region nested in them that takes no
+ * yields: every region but an scf.for body or an scf.if_else branch, whose
+ * owners' rules cover them (Python core/ir.py::_orphan_yield). NULL when there
+ * is none; a NULL nested region holds no op. Called on the ops of a region that
+ * takes no yields (the kernel body), it tells whether the region holds an
+ * orphan yield, and returns the first; rocke_i_if_else_yields calls it on a
+ * branch's ops. */
+const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops);
+
+/* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
+ * is sound (Python core/ir.py::_scf_for_error, same text): a loop carries no
+ * buffer descriptor (rocke_i_scf_for_carried_descriptor_error), and takes only
+ * the yields directly in its body, so the body nests none in a region that
+ * takes no yields (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand / region
+ * counts. The verifier and both lowerings use it. */
+const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
+ * (rocke_i_if_else_yields) in `region` and nested in it (Python
+ * core/ir.py::_refuse_malformed_control_flow). Returns ROCKE_OK, or the status
+ * of the Python engine's exception with its refusal written to `err`. The LLVM
+ * lowering calls it on a loop body it does not lower (an unrolled loop of zero
+ * trips). NULL-safe. */
+rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* err, size_t err_cap);
 
 /* Refuse a bitcast of a `source` value to `target` unless both are values of
  * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
@@ -389,8 +416,7 @@ int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out);
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.
- * Accepts any operand / region counts. The builder, the verifier and both
- * lowerings use it. */
+ * Accepts any operand / region counts. rocke_i_scf_for_error applies it. */
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* ------------------------------------------------------------- attr helpers */
