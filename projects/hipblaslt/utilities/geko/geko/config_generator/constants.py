@@ -7,9 +7,9 @@ VERSION = "2.01"
 # apply value with N_dim <=step
 stepValue_EnqueuesPerSync = [[64*64*8192,200], [256*256*8192,30], [1024*1024*8192,20], [1000000000000000,10]]
 
-dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1, 'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4, 'F4': 1}
+dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1, 'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'B8': 1, 'X1': 4, 'F4': 1}
 
-LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7, 'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4, 'F4': 7}
+LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7, 'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'B8': 7, 'X1': 4, 'F4': 7}
 
 depthURange = {}  # [for small/mid MT], [for large  MT]
 depthURange['H'] = [[64,128,256,512], [32,64,128,256], [32,64,128], [32,64]]
@@ -25,10 +25,11 @@ depthURange['F8'] = depthURange['I8']
 depthURange['F8N'] = depthURange['I8']
 depthURange['F8B8'] = depthURange['F8']
 depthURange['B8F8'] = depthURange['F8']
+depthURange['B8'] = depthURange['F8']
 # fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
 depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'B8': 4, 'X1': 4, 'F4': 4}
 
 
 # TODO update for every new arch, or import from tensilelite commons
@@ -76,6 +77,7 @@ def _build_mt_max_size(large: int, regular: int):
         'F8N': large,
         'F8B8': large,
         'B8F8': large,
+        'B8': large,
         'F4': large,
     }
 
@@ -242,6 +244,7 @@ ONLY_INCLUDE_MIs_MI45X = {
     'F8': [[16, 16, 128, 1]],
     'F8B8': [[16, 16, 128, 1]],
     'B8F8': [[16, 16, 128, 1]],
+    'B8': [[16, 16, 128, 1]],  # E5M2 x E5M2; same WMMA as F8 (validMFMA aliases B8->F8)
     'F4': [[16, 16, 128, 1], [32, 16, 128, 1]],
     # 'X': [[16, 16, 32, 1]],
     # 'X1': [[16, 16, 32, 1]],

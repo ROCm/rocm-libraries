@@ -857,7 +857,7 @@ def _install_system_deps(
         lib_sles += ["rocm-llvm-devel", "zstd"]
 
     if not legacy_hipblas_direct:
-        lib_ubuntu.append("hipblas-common-dev")
+        lib_ubuntu.append("libhipblas-common-dev")
         lib_centos8.append("hipblas-common-devel")
 
     if distro in ("centos", "rhel", "almalinux"):
@@ -923,6 +923,11 @@ def _install_system_deps(
     deps_dir.mkdir(parents=True, exist_ok=True)
     deps_prefix.mkdir(parents=True, exist_ok=True)
     print(f"\033[32mBuilding \033[33mgoogletest\033[32m from source into {deps_prefix}\033[0m")
+    # The netlib LAPACK 3.9.1 tree (and its nested try_compile sub-projects) declare
+    # cmake_minimum_required below 3.5, which CMake 4+ rejects. Exporting this as an
+    # environment variable makes every child cmake process (including try_compile)
+    # inherit the compatibility floor, which a -D cache arg alone does not do.
+    os.environ["CMAKE_POLICY_VERSION_MINIMUM"] = "3.5"
     with c.cd(str(deps_dir)):
         fortran_opt = ""
         if fortran_compiler:
@@ -935,4 +940,4 @@ def _install_system_deps(
             f" {ROOT_PATH}/deps"
         )
         c.run(f"make -j{os.cpu_count()}")
-        c.run("make install")
+        c.run("make install_deps")

@@ -172,6 +172,10 @@ def print2(message):
 
 
 def printWarning(message):
+    # Allow suppressing the (often very noisy) Tensile::WARNING output, e.g. during
+    # tuning. Set TENSILE_SILENCE_WARNINGS=1 in the environment to silence them.
+    if os.environ.get("TENSILE_SILENCE_WARNINGS", "0") == "1":
+        return
     print("Tensile::WARNING: %s" % message)
     sys.stdout.flush()
 

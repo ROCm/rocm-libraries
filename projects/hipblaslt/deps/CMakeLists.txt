@@ -65,12 +65,10 @@ if( BUILD_LAPACK )
 endif( )
 
 # POLICY CMP0037 - "Target names should not be reserved and should match a validity pattern"
-# Familiar target names like 'install' should be OK at the super-build level
-if( POLICY CMP0037 )
-  cmake_policy( SET CMP0037 OLD )
-endif( )
-
-add_custom_target( install
+# CMake 4+ no longer supports CMP0037 OLD, and the reserved name 'install' can no
+# longer be used for a custom target, so this target is named 'install_deps' instead.
+# (tasks.py invokes it via `make install_deps`.)
+add_custom_target( install_deps
   ${gtest_custom_target}
   ${lapack_custom_target}
   DEPENDS ${rocblaslt_dependencies}

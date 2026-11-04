@@ -183,14 +183,18 @@ def removeScratch(outputPath: Union[str, Path], buildTmpPath: Path) -> bool:
     """
     if not buildTmpPath.is_dir():
         return False
+    # ignore_errors: this is temp-scratch cleanup, and a concurrent fan-out
+    # sibling may still be writing into the shared tree. On Python 3.14 the
+    # hardened shutil.rmtree raises "Directory not empty" on that race instead
+    # of clearing what it can, which must not fail the (successful) build.
     if os.environ.get(_GROUP_BUILD_ENV):
-        shutil.rmtree(buildTmpPath)
+        shutil.rmtree(buildTmpPath, ignore_errors=True)
         try:
             buildTmpRoot(outputPath).rmdir()
         except OSError:
             pass
     else:
-        shutil.rmtree(buildTmpRoot(outputPath))
+        shutil.rmtree(buildTmpRoot(outputPath), ignore_errors=True)
     return True
 
 
