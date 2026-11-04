@@ -33,7 +33,11 @@ from ...core.ir import (
     PtrType,
     Value,
 )
-from ...helpers.compile import EXPERT_SCHEDULING_ATTR, SOURCE_ORDER_ATTR
+from ...helpers.compile import (
+    EXPERT_SCHEDULING_ATTR,
+    REGCLASS_PRIORITY_ATTR,
+    SOURCE_ORDER_ATTR,
+)
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from .mxfp4_tdm_gemm import IntOps, _IrOps, tdm_pad_fields
 
@@ -1845,6 +1849,9 @@ def build_mxfp4_gemm(spec: MxFp4GemmSpec, *, arch: str = "gfx1250") -> KernelDef
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     b.kernel.attrs[EXPERT_SCHEDULING_ATTR] = True
     b.kernel.attrs[SOURCE_ORDER_ATTR] = True
+    # Without it the 256x256x512 tile spills the read-ahead scales (8 VGPRs at
+    # the Step 6.14 problem).
+    b.kernel.attrs[REGCLASS_PRIORITY_ATTR] = True
     if spec.has_cluster:
         b.set_cluster_dims(*spec.cluster_dim)
     ops = _IrOps(b)

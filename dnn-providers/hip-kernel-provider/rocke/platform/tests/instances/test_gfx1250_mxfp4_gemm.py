@@ -332,8 +332,9 @@ class MxFp4GemmLayoutTest(unittest.TestCase):
 
 class MxFp4GemmIrTest(unittest.TestCase):
     def test_benchmark_config_matches_step6_14(self):
-        """Gate 1: byte-identical LLVM IR (kernel name aside) and the same
-        compile options as Step 6.14 at the benchmark problem."""
+        """Gate 1: byte-identical LLVM IR (kernel name aside) at the benchmark
+        problem, and Step 6.14's compile options plus the regclass-priority
+        allocator option."""
         old = variant_spec("step6_14_mxfp4_gemm", *_BENCH, **YAML_TILE)
         new = _spec(*_BENCH, cluster_order="aid")
         old_kernel = build_mxfp4_tdm_gemm(old, arch="gfx1250")
@@ -349,7 +350,9 @@ class MxFp4GemmIrTest(unittest.TestCase):
             old_llvm.replace(old.kernel_name(), "KERNEL"),
         )
         self.assertEqual(
-            _comgr_options_for_kernel(new_kernel), _comgr_options_for_kernel(old_kernel)
+            _comgr_options_for_kernel(new_kernel),
+            _comgr_options_for_kernel(old_kernel)
+            + ["-mllvm", "-greedy-regclass-priority-trumps-globalness"],
         )
 
     def test_partial_n_tile_walks_only_the_rows_left(self):
@@ -647,7 +650,7 @@ class MxFp4GemmSparseCheckTest(unittest.TestCase):
 @unittest.skipIf(shutil.which("llvm-objdump") is None, "needs llvm-objdump")
 class MxFp4GemmHostBuildTest(unittest.TestCase):
     def test_resources(self):
-        """Host compiles: VGPR file and LDS limits, no scratch in the loop."""
+        """Host compiles: VGPR file and LDS limits, no spills."""
         import tempfile
         from pathlib import Path
 
@@ -674,6 +677,7 @@ class MxFp4GemmHostBuildTest(unittest.TestCase):
                     info = analyze_hsaco(Path(handle.name), keep_text=True)
                 self.assertLessEqual(info.resources.vgpr_count, 1024)
                 self.assertEqual(info.resources.lds_bytes, spec.lds_bytes)
+                self.assertEqual(info.resources.scratch_bytes, 0)
                 self.assertEqual(loop_scratch_ops(info.objdump_text), 0)
 
 
