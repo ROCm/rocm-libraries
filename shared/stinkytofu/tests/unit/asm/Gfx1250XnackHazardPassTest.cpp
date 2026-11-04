@@ -30,8 +30,8 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/support/Casting.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 
 using namespace stinkytofu;
 

@@ -15,8 +15,8 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
-/// gfx1250 XNACK-replay group model shared by Gfx1250XnackHazardPass and the SW instruction prefetch
-/// passes.
+/// gfx1250 XNACK-replay group model shared by Gfx1250XnackHazardPass and the SW instruction
+/// prefetch passes.
 namespace stinkytofu::gfx1250 {
 
 enum class ReplayGroupKind {
