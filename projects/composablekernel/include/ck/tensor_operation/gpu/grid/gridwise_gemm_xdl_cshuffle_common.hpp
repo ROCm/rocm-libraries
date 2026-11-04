@@ -2349,6 +2349,7 @@ struct GridwiseGemm_xdl_cshuffle_base
               bool TransposeC,
               bool IsInputGemm,
               typename IndexType,
+              bool PreloadUniformScatterOffsets = false,
               typename BlockwiseGemmPipe,
               typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
               typename DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
@@ -2504,22 +2505,53 @@ struct GridwiseGemm_xdl_cshuffle_base
         constexpr auto EMRepeats = CShuffleMXdlPerWavePerShuffle * MWave * MPerXdl / EMThreads;
         constexpr auto ENThreads =
             CDEBlockTransferCluster{}.At(I2) * CDEBlockTransferCluster{}.At(I3);
-        static_for<0, num_access, 1>{}([&](auto access_id) {
-            // make sure it's safe to write to LDS
-            StaticallyIndexedArray<IndexType, EMRepeats> scatter_offsets;
-
-            auto dstidx = sfc_cde_block.GetIndex(access_id);
-            const index_t c_token_pos =
-                block_m_id * MPerBlock + threadIdx.x / ENThreads * EMRepeats + dstidx(I1);
+        // When a wave's lanes cover whole rows, its token ids are wave-uniform and are all loaded
+        // before the first store, as scalar loads that do not wait for earlier stores to complete.
+        constexpr bool WaveUniformRows =
+            PreloadUniformScatterOffsets && ENThreads % (BlockSize / (MWave * NWave)) == 0;
+        const index_t c_row_begin =
+            block_m_id * MPerBlock + (WaveUniformRows
+                                          ? __builtin_amdgcn_readfirstlane(threadIdx.x / ENThreads)
+                                          : threadIdx.x / ENThreads) *
+                                         EMRepeats;
+        auto load_scatter_offsets = [&](auto access_id) {
+            StaticallyIndexedArray<IndexType, EMRepeats> offsets;
+            auto dstidx               = sfc_cde_block.GetIndex(access_id);
+            const index_t c_token_pos = c_row_begin + dstidx(I1);
             static_for<0, EMRepeats, 1>{}([&](auto m0) {
-                const index_t fused_token = p_sorted_token_ids[c_token_pos + m0];
+                const index_t fused_token = WaveUniformRows
+                                                ? cast_pointer_to_constant_address_space(
+                                                      p_sorted_token_ids)[c_token_pos + m0]
+                                                : p_sorted_token_ids[c_token_pos + m0];
                 index_t token_offset      = fused_token & 0xffffff;
                 if constexpr(IsInputGemm)
                 {
                     token_offset = token_offset * problemTopK + (fused_token >> 24);
                 }
-                scatter_offsets(m0) = token_offset * problemN;
+                offsets(m0) = token_offset * problemN;
             });
+            return offsets;
+        };
+        StaticallyIndexedArray<StaticallyIndexedArray<IndexType, EMRepeats>,
+                               WaveUniformRows ? num_access : 1>
+            preloaded_scatter_offsets;
+        if constexpr(WaveUniformRows)
+        {
+            static_for<0, num_access, 1>{}([&](auto access_id) {
+                preloaded_scatter_offsets(access_id) = load_scatter_offsets(access_id);
+            });
+        }
+        static_for<0, num_access, 1>{}([&](auto access_id) {
+            // make sure it's safe to write to LDS
+            StaticallyIndexedArray<IndexType, EMRepeats> scatter_offsets;
+            if constexpr(WaveUniformRows)
+            {
+                scatter_offsets = preloaded_scatter_offsets[access_id];
+            }
+            else
+            {
+                scatter_offsets = load_scatter_offsets(access_id);
+            }
 
             block_sync_lds();
 
