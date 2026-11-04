@@ -185,9 +185,7 @@ class TestStemEngines(unittest.TestCase):
                 why = reason(spec, arch)
                 self.assertEqual(ok, why is None, (arch, spec, why, why_c))
                 if why is not None:
-                    # The C++ text of an unknown scheduler strategy is the
-                    # first clause of Python's; every other reason is equal.
-                    self.assertTrue(why.startswith(why_c), (why, why_c))
+                    self.assertEqual(why_c, why)
                 self.assertEqual(name, spec.kernel_name())
                 self.assertEqual(lds, spec.lds_bytes())
                 if why is None:

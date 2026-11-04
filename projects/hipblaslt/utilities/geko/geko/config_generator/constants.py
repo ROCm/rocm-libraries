@@ -28,8 +28,7 @@ depthURange['B8F8'] = depthURange['F8']
 # fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
 depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
-
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'I': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
 
 # TODO update for every new arch, or import from tensilelite commons
 validMFMA = {}
@@ -48,9 +47,17 @@ validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8N"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
 validMFMA["B8F8"] = validMFMA["F8"]
+# Int8 MFMAs per generation (not looked up by ARCH; documentation of what each
+# generation provides, as TensileLite's validMFMA["I8I8"] is their union):
+#   I8_908: gfx908/gfx90a legacy set.
+#   I8_940: gfx94x. TensileLite rejects [32,32,8,1] and [16,16,16,1] there
+#           ("deprecated in gfx94x") and adds the K=16/32 instructions.
+#   gfx950 adds the native [32,32,32,1] and [16,16,64,1] (listed below).
 validMFMA["I8_908"] = [[32,32,4,2], [32,32,8,1], [16,16,4,4], [16,16,16,1], [4,4,4,16]]
 validMFMA["I8_940"] = [[32,32,4,2], [32,32,16,1], [16,16,4,4], [16,16,32,1], [4,4,4,16]]
-validMFMA["I8"] = validMFMA["H"] + validMFMA["F8"]
+validMFMA["I8_950"] = [[32,32,16,1], [16,16,32,1], [32,32,32,1], [16,16,64,1]]
+# Same set as TensileLite's validMFMA["I8I8"] (ValidParameters.makeValidMFMA).
+validMFMA["I8"] = validMFMA["I8_908"] + [[32,32,16,1], [16,16,32,1], [32,32,32,1], [16,16,64,1]]
 
 MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024
 
@@ -140,6 +147,9 @@ ONLY_INCLUDE_MIs_GFX950 = {
     [
         [32, 32, 16, 1],
         [16, 16, 32, 1],
+        # gfx950 native int8 MFMAs (the only ones in the shipped gfx950 I8II logic)
+        [32, 32, 32, 1],
+        [16, 16, 64, 1],
         [4, 4, 4, 16],
     ],
     'F8':  # similar to I8
@@ -253,13 +263,13 @@ from typing import Any, Optional, Tuple
 
 from geko.constants import MX_SCALING_FORMAT, MX_SCALING_FORMAT_PRESWIZZLED, SUPPORTED_ARCH
 
-# Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
+# TensileLite LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX1250 = '["Device 73f0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX1250_MC = '["Device 75c7"]'
 
-# Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
+# Shared TensileLite LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
     "ScheduleName": '"gfx950"',
     "ArchitectureName": '"gfx950"',
@@ -319,7 +329,7 @@ ONLY_INCLUDE_MIs_MI45X_STRICT = {
     'F4': [[16, 16, 128, 1]],
 }
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value,
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, TensileLite LibraryLogic fields, MX scale value,
 # MX block size (keys align with geko.constants.SUPPORTED_ARCH).
 # mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
 # mx_block_size: MXBlockA/MXBlockB size (None = MX not supported on this arch).

@@ -33,8 +33,7 @@ import pytest
 
 from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Toolchain.Validators import validateToolchain
 import tensilelite.LibraryIO as LibraryIO
 
 _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_HSS_BH.yaml"
@@ -48,12 +47,6 @@ def cxx_compiler():
 @pytest.fixture(scope="session")
 def isa_info_map(cxx_compiler):
     return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
-
-
-@pytest.fixture(scope="session")
-def assembler(cxx_compiler):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx_compiler, bundler, "default").assembler
 
 
 @pytest.fixture(scope="session")
