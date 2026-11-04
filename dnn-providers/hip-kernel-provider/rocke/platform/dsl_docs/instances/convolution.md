@@ -508,7 +508,8 @@ Note this layout is different from `ConvProblem`:
 - `KH`/`KW` not `R`/`S`;
 - single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`);
 - dilation is `dil_h`/`dil_w` (default 1; `Ho`/`Wo` use the dilated extent
-  `(KH-1)*dil_h + 1`). Only the non-grouped forward kernel computes a dilated
+  `(KH-1)*dil_h + 1`). `direct_nongrouped`, `direct_fwd_wmma`,
+  `direct_fwd_tapouter_wmma` and `direct_dgrad_wmma` compute a dilated
   convolution; every other variant rejects one (`dilation_reason`).
 
 ### 16c Kernel
@@ -888,11 +889,12 @@ tiles `H x W` (`out_hw`), and the kernel name gains the `dg` flag (and a
 `p{PAD}x{PAD_W}` part when the two paddings differ). Only one
 filter row is register-resident, so the mode takes filters up to
 `_DW_TILED_DGRAD_MAX_K = 64` on a side, including non-square ones such as
-51x5 / 5x51, and it is the one direct kernel that accepts a per-axis padding
+51x5 / 5x51, and it accepts a per-axis padding
 (`DirectConvProblem.pad_w`, -1 meaning `PAD`; `PAD_W` is the effective column
 padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1,
 one channel per lane (`cpl = 1`), `PAD <= KH-1` and `PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
-`direct_spec_for_problem` refuses such a problem for every other variant. AOT
+`direct_spec_for_problem` refuses such a problem for every variant outside
+`PER_AXIS_PAD_VARIANTS` (`kernels/conv/direct_variants.py`). AOT
 variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
 31x31 and 51x5 / 5x51 at "same" padding, `DW_TILED_DGRAD_BLOCK_W` x
 `DW_TILED_DGRAD_BLOCK_H`. Like `conv_direct_dgrad_wmma` it is served by the
@@ -1335,10 +1337,34 @@ Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
 - `tap_reuse` reuses B fragments across filter rows (whole output rows per
   wave); `tap_shift` builds the next filter column's fragments with an
   in-wave lane rotation (`v_permlane16`).
+- `strided_view` runs a stride-2 filter without overlap (1x1 s2, 2x2 s2, no
+  padding) as a strided GEMM: the 1x1 stride-1 tile loop over a view of X
+  whose rows and columns step by the stride, reducing over the
+  `KH * KW * cpg` patch (a 2x2 patch is two runs of `2 * cpg` contiguous
+  channels one input row apart; a channel chunk lies within one run).
+  `fold_n` (with `strided_view`, `H == stride * Ho`) folds the batch into the
+  view rows, so a tile can span images of small maps.
+- `poly_view` runs a 1-D strided filter whose width is a multiple of the
+  stride (1 x m*S, stride S, column padding below S, H = 1) as a 1 x m
+  stride-1 conv over a polyphase view of X: view pixel j is input pixels
+  `S*j - pw .. S*j - pw + S - 1` (`S * cpg` contiguous channels). A channel
+  chunk lies in one input pixel and reads at its own bounds, so the chunks
+  of the leading pad skip (and zero) the view's first pixel.
+
+Besides square filters it serves rectangular filters with a column padding
+of their own (`pad_w`, in 0..(KW-1)*dil): the halo's column origin, the
+left-edge shift and its wrap slack follow `PAD_W`. Non-square filters are
+served unpacked, without `phase_split` or `tap_reuse`, and dilated only as
+1 x R at stride 1. The AOT grid has 1 x R rows on 1-D signals
+(`FWD_WMMA_1D_FILTERS`, `FWD_WMMA_1D_KNOBS`: one output row per block, the
+tile as wide as the block), the 7x1 / 1x7 / 3x1 / 1x3 "same" rows of
+`FWD_WMMA_RECT_LAYERS` and the 3x3 stride-2 "valid" rows of
+`FWD_WMMA_S2V_KNOBS` (two images of 4x20 or 8x8 output pixels per block, for
+odd 17x17 / 8x8 maps).
 
 Runtime (kernargs): batch, extents, the group count and both channel counts
-(unless packed). Build-time: filter (square), stride 1 or 2, per-axis
-dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
+(unless packed). Build-time: filter, stride 1 or 2,
+per-axis dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
 `cpg` and `kpg` (after packing) multiples of 8, `ck` a multiple of 32, every
 tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
 within the LDS. The AOT grid is `FWD_WMMA_*_KNOBS` (variant
@@ -1357,19 +1383,99 @@ layers where implicit GEMM leaves most of every WMMA tile empty:
   weights stay in registers for the `tiles_per_block` tiles a block walks
   (double-buffered window). `tdm_store` stores the output tile through LDS
   with one TDM transfer. `K` must be a multiple of 8.
-- `build_fwd_smallk_wmma` -- `K` in (1, 2, 4, 8) output channels. A 1x1 GEMM
+- `build_fwd_smallk_wmma` -- `K` <= 8 output channels. A 1x1 GEMM
   over the window's input pixels with the taps and output channels as its M
   dimension (`Z[q, (r, s, k)]`), then the overlap-add into `Y` in fp32 LDS;
   input channel chunks of `ck` stream through a TDM ring of `stages` slots.
-  `C` must be a multiple of 8.
+  `C` must be a multiple of 8. A power-of-two `K` reads `Z` and writes `Y`
+  as one vector per pixel; `K` = 3 reads one 96-bit vector per tap and
+  writes channel by channel; any other `K` reads and writes channel by
+  channel. Filters may be rectangular, with a column padding of their own
+  (`pad_w`, in 0..KW-1; the 1x7 HiFi-GAN `conv_post`).
 
-Both: square filters, `PAD` in 0..K-1, every tensor below 2 GiB. Batch,
+Both: `PAD` in 0..KH-1, every tensor below 2 GiB; small C takes square
+filters with one padding only. Batch,
 extents and the other channel count are kernargs; the filter, stride,
 padding, the small channel count and the tile geometry are baked. The AOT
-grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3, 7x7 / stride 2 and
-the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` over
-`FWD_SMALLK_LAYERS` (variants `direct_fwd_smallc_wmma` /
+grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3 "same" and "valid",
+7x7 / stride 2 and
+the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` (or
+the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
+3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
+
+### Large dilations (`DirectFwdTapOuterSpec`)
+
+`library/kernels/common/conv_direct_fwd_tapouter_wmma.py` (C++ twin
+`instance_conv_direct_fwd_tapouter_wmma.h`) serves dilated convolutions whose
+`direct_fwd_wmma` halo (`(K - 1) * dilation` extra rows and columns) outgrows
+the LDS, e.g. atrous / ASPP layers at dilation 12..36. It runs the `KH * KW`
+taps as shifted 1x1 GEMMs accumulating into one output tile: each (channel
+chunk, tap) step moves the tap's input window (a plain rectangle, zero-filled
+past the image by the TDM transfer, leading cells zeroed by LDS stores at the
+top / left edges) and the tap's weights into an LDS ring of `stages` slots.
+The taps whose window lies wholly in the padding are skipped per block, and
+channel chunks are the outer loop so the blocks in flight share their input
+slices. The Y tile is staged in LDS and stored with one TDM transfer clipped
+to the image and the group's channels.
+
+Knobs: the tile (`waves_k`, `waves_p`, `tiles_k`, `tiles_p`, `tile_w`), `ck`,
+`stages`, `prefetch`, `sched` and `tdm_split` (window and weight rows cut into
+slabs issued by separate waves). Runtime: batch, extents, the group count and
+both channel counts; baked: filter, padding and dilation (stride 1). The AOT
+grid is `FWD_TAPOUTER_KNOBS` over the "same"-padded dilated 3x3 rows of
+`FWD_TAPOUTER_DILATIONS` (variant `direct_fwd_tapouter_wmma`), filtered per
+problem by tile efficiency.
+
+### Small groups (`FwdGstreamWmmaSpec`)
+
+`library/kernels/common/conv_direct_fwd_gstream_wmma.py` (C++ twin
+`instance_conv_direct_fwd_gstream_wmma.h`) serves grouped 3x3 layers with 8 to
+64 channels per group (`cpg == kpg`, stride 1 or 2), where
+`direct_fwd_wmma` has a single input-channel chunk per block and nothing to
+prefetch. A block keeps one output-channel slice and one column strip and
+walks `walk` row bands (flattened (image, band) order) through a ring of
+`stages` TDM halo slots, so the next band's transfer is in flight while the
+current one is multiplied. The weights stay in VGPRs for the whole walk.
+
+- 8 or 16 channels per group: an M tile reads 16 input channels (one group of
+  16 or two of 8) and each half of the WMMA K takes a different filter tap
+  (lanes 0-15 tap `2j`, lanes 16-31 tap `2j + 1`).
+- 32 or more: plain 32-channel k-steps per tap; a block covers whole groups
+  or part of one. A group that is not whole 16-row M tiles / 32-channel
+  k-steps (56) is padded with zero weights, and its padding rows are not
+  stored.
+
+Knobs: the tile (`waves_k`, `waves_p`, `tiles_k`, `tiles_p`, `tile_w`), `walk`,
+`stages`, `phase_split` (stride 2), `prefetch` / `pf_depth` (B fragments read
+k-steps ahead) and `sched`. The output is stored straight from the
+accumulators through a bounds-checked buffer descriptor. Runtime: batch,
+extents and the group count; baked: filter, stride, padding and the channels
+per group. The AOT grid is `FWD_GSTREAM_KNOBS` over cpg 8 / 16 / 32 / 64 and
+`FWD_GSTREAM_PADG_KNOBS` over cpg 56, stride 1 and 2 (variant
+`direct_fwd_gstream_wmma`), filtered per problem by tile efficiency.
+
+### Depthwise (`DwFwdWmmaSpec`)
+
+`library/kernels/common/conv_direct_dw_fwd_wmma.py` (C++ twin
+`instance_conv_direct_dw_fwd_wmma.h`) is the Toeplitz WMMA depthwise forward,
+the forward twin of the windowed depthwise dgrad's matrix form (stride 1,
+`cpg = kpg = 1`, `groups` a multiple of 8). Each wave owns 8 channels; one
+16x16x32 WMMA multiplies one-hot weights (A) by 4 window columns x 8 channels
+of an input row (B) into 32 output columns x 8 channels (D), so a filter row
+of `KW` taps takes `ceil((KW + 1) / 4)` passes. Input rows stream through the
+block (staged in LDS, double buffered, `prefetch_rows` loads ahead) into `KH`
+circular accumulator tiles; each finished output row drains through LDS as
+16-byte stores. Rows and columns outside the tensors read zero or drop their
+store through sentinel buffer offsets.
+
+Knobs: `block_waves` (8 channels each, up to 16), `block_h` output rows per
+block, `w_fold` images folded into the 32 tile columns (1, 2 or 4) and
+`prefetch_rows` (1..4). The validator bounds the register-resident fragments
+(tighter for 16-wave blocks), the unrolled WMMA count and the LDS staging.
+Runtime: N, H, W, Ho, Wo, groups and the strides; baked: KH, KW, PAD and the
+knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
+7x7 (variant `direct_dw_fwd_wmma`).
 
 ## Winograd Forward (gfx1250)
 

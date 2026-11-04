@@ -240,6 +240,15 @@ def _io_type(dtype: str):
     )
 
 
+def _buf_load_half(
+    b: IRBuilder, dtype: str, rsrc: Value, voff: Value, soff: Value
+) -> Value:
+    """Dtype-dispatch for a scalar 16-bit buffer load."""
+    if dtype == "bf16":
+        return b.buffer_load_bf16(rsrc, voff, soff)
+    return b.buffer_load_f16(rsrc, voff, soff)
+
+
 def _buf_load_vN(
     b: IRBuilder, dtype: str, rsrc: Value, voff: Value, soff: Value, dwords: int
 ) -> Value:
@@ -280,6 +289,13 @@ def _trunc_f32(b: IRBuilder, dtype: str, val: Value) -> Value:
     if dtype == "bf16":
         return b.vec_trunc_f32_to_bf16(val)
     return b.vec_trunc_f32_to_f16(val)
+
+
+def _trunc_f32_elem(b: IRBuilder, dtype: str, val: Value) -> Value:
+    """Truncate one f32 value to the output dtype."""
+    if dtype == "bf16":
+        return b.trunc_f32_to_bf16(val)
+    return b.trunc_f32_to_f16(val)
 
 
 def _mfma(
@@ -323,15 +339,16 @@ class DirectConvProblem:
     PAD: int = 1
     stride: int = 1
     dtype: str = "fp16"  # "fp16" or "bf16"
-    # Filter dilation per axis. Only the non-grouped forward kernel computes a
-    # dilated convolution; every other variant refuses one (see
-    # forward_padding_reason and dilation_reason).
+    # Filter dilation per axis. The variants that compute a dilated
+    # convolution take it (direct_nongrouped, direct_fwd_wmma,
+    # direct_fwd_tapouter_wmma and direct_dgrad_wmma); every other refuses one
+    # (see forward_padding_reason and dilation_reason).
     dil_h: int = 1
     dil_w: int = 1
     # Column padding when it differs from the row padding (-1: PAD). Only the
-    # rotated-filter depthwise dgrad kernel takes such a problem; every other
-    # variant is refused one in direct_spec_for_problem. Values below -1 are
-    # no padding (pad_w_reason).
+    # variants of PER_AXIS_PAD_VARIANTS (kernels.conv.direct_variants) take
+    # such a problem; every other variant is refused one in
+    # direct_spec_for_problem. Values below -1 are no padding (pad_w_reason).
     pad_w: int = -1
 
     @property
@@ -449,13 +466,43 @@ class DirectConv16cSpec:
             )
 
 
+# The largest i32: byte offsets, block ids and the channel totals the kernels
+# (and their C++ builders) keep in 32 bits must not exceed it.
+I32_MAX = (1 << 31) - 1
+
+
+def channel_totals_reason(p: "DirectConvProblem") -> Optional[str]:
+    """Why ``p``'s channel totals (``groups * cpg``, ``groups * kpg``) do not
+    fit the i32 the direct-conv kernels keep them in. Every validator whose
+    C++ builder stores a total in an ``int`` checks this first."""
+    if p.total_c > I32_MAX or p.total_k > I32_MAX:
+        return (
+            f"groups * cpg = {p.total_c} and groups * kpg = {p.total_k} "
+            f"must fit in i32"
+        )
+    return None
+
+
+PROBLEM_DIMS = ("N", "H", "W", "groups", "cpg", "kpg", "KH", "KW")
+
+
+def problem_dims_reason(p: "DirectConvProblem") -> Optional[str]:
+    """Why ``p`` is not a convolution the forward WMMA kernels can launch:
+    every extent of :data:`PROBLEM_DIMS` must be at least 1. A zero or
+    negative one passes the divisibility and tensor-size checks (zero bytes)
+    but gives an empty or negative grid, so those validators check this
+    before any of them."""
+    for name in PROBLEM_DIMS:
+        value = getattr(p, name)
+        if value < 1:
+            return f"{name} must be >= 1 (got {value})"
+    return None
+
+
 def dilation_reason(p: "DirectConvProblem") -> Optional[str]:
     """Why a direct-conv kernel without dilation support cannot compute ``p``."""
     if p.is_dilated:
-        return (
-            f"this direct conv kernel has no dilation (got {p.dil_h}x{p.dil_w}); "
-            f"only the non-grouped forward kernel computes a dilated convolution"
-        )
+        return f"this direct conv kernel has no dilation (got {p.dil_h}x{p.dil_w})"
     return None
 
 
@@ -526,6 +573,9 @@ def is_valid_spec_16c(
     The atom legality is sourced from
     :class:`rocke.core.arch.ArchTarget`.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -1330,6 +1380,9 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     because the catalog lists only the warp-tile (16x16 / 32x32) shapes,
     while comgr selects the 4x4x4 intrinsic directly on both targets.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -2052,6 +2105,9 @@ def is_valid_spec_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Tuple[bool
     ``mfma_f32_16x16x16_f16`` (or the bf16 counterpart), which is present on
     both gfx942 and gfx950.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -2534,6 +2590,9 @@ def is_valid_spec_32c(
     The 32c kernel uses ``mfma_f32_32x32x8_f16`` or ``mfma_f32_32x32x8_bf16``,
     which are present in the rocke MMA catalog for both gfx942 and gfx950.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -3337,6 +3396,9 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
     cpg_new = kpg_orig and kpg_new = cpg_orig, which differ for non-square
     channel counts).
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -5021,6 +5083,9 @@ def is_valid_wgrad_spec(
     spec: DirectConvWgradSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a wgrad spec on ``arch``."""
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -6487,6 +6552,9 @@ def is_valid_dgrad_spec(
     The dgrad kernel uses scalar FMA (no MFMA), so there are no MFMA-atom
     constraints on cpg or kpg alignment.  stride > 1 is supported.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -7761,6 +7829,34 @@ def _dw_mfma_passes(KW: int) -> int:
     return (KW + 4) // 4
 
 
+def _dw_mfma_tile_w(w_fold: int) -> int:
+    """Output columns per image of a Toeplitz tile: its 32 columns split over
+    ``w_fold`` images."""
+    return 32 // w_fold
+
+
+def _dw_mfma_in_passes(
+    tile_w: int, KW: int, w_fold: int, block_ch: int, threads: int
+) -> int:
+    """16-byte loads per thread and window row of the Toeplitz form: a window
+    of ``tile_w + 4 * passes - 2`` columns per image, ``block_ch / 8`` loads
+    per column, ``w_fold`` images."""
+    win = tile_w + 4 * _dw_mfma_passes(KW) - 2
+    per_px = block_ch // DW_DGRAD_MFMA_CH
+    return ceil_div(w_fold * win * per_px, threads)
+
+
+def _dw_mfma_lds_bytes(
+    in_passes: int, threads: int, block_ch: int, w_fold: int, tile_w: int
+) -> int:
+    """LDS bytes of the Toeplitz form: double-buffered input window rows and
+    output rows, ``block_ch + 8`` channels per pixel (16-byte bank skew)."""
+    per_px = block_ch // DW_DGRAD_MFMA_CH
+    in_px = ceil_div(in_passes * threads, per_px)
+    out_px = w_fold * tile_w
+    return 2 * (in_px + out_px) * (block_ch + DW_DGRAD_MFMA_CH) * 2
+
+
 @dataclass(frozen=True)
 class DirectDepthwiseDgradWindowedSpec:
     """Windowed depthwise dgrad kernel (stride 1, cpg = kpg = 1).
@@ -7835,7 +7931,7 @@ class DirectDepthwiseDgradWindowedSpec:
     @property
     def tile_w(self) -> int:
         """dX columns per block along W (per image)."""
-        return 32 // self.w_fold if self.mfma else self.block_w
+        return _dw_mfma_tile_w(self.w_fold) if self.mfma else self.block_w
 
     @property
     def n_tiles(self) -> int:
@@ -7876,9 +7972,13 @@ class DirectDepthwiseDgradWindowedSpec:
 
     def _mfma_in_passes(self) -> int:
         """16-byte dY loads per thread and window row (MFMA form)."""
-        win = self.tile_w + 4 * _dw_mfma_passes(self.problem.KW) - 2
-        per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        return -(-self.w_fold * win * per_px // self.threads_per_block)
+        return _dw_mfma_in_passes(
+            self.tile_w,
+            self.problem.KW,
+            self.w_fold,
+            self.block_ch,
+            self.threads_per_block,
+        )
 
     def mfma_frag_vgprs(self) -> int:
         """VGPRs of the register-resident fragments (MFMA form): the one-hot
@@ -7894,10 +7994,13 @@ class DirectDepthwiseDgradWindowedSpec:
     def mfma_lds_bytes(self) -> int:
         """LDS bytes of the MFMA form: double-buffered dY window rows and dX
         rows, ``block_ch + 8`` channels per pixel (16-byte bank skew)."""
-        per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        in_px = -(-self._mfma_in_passes() * self.threads_per_block // per_px)
-        out_px = self.w_fold * self.tile_w
-        return 2 * (in_px + out_px) * (self.block_ch + DW_DGRAD_MFMA_CH) * 2
+        return _dw_mfma_lds_bytes(
+            self._mfma_in_passes(),
+            self.threads_per_block,
+            self.block_ch,
+            self.w_fold,
+            self.tile_w,
+        )
 
     def kernel_name(self) -> str:
         """Every baked fact: the filter and padding, the dtype and each knob.
@@ -8134,11 +8237,18 @@ def is_valid_depthwise_dgrad_win_spec(
     return _depthwise_dgrad_win_check(spec)
 
 
-def _dw_win_byte_strides(b: IRBuilder, params: Dict[str, Value], fwd: bool = False):
+def _dw_win_byte_strides(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    fwd: bool = False,
+    c2: Optional[Value] = None,
+):
     """Byte strides of the dgrad tensors from the element-stride kernargs:
     ``(dy_img, dy_row, dy_px, dx_img, dx_row, dx_px)``. Under the forward
-    ABI (``fwd``) dY is the forward input A and dX the forward output D."""
-    c2 = b.const_i32(2)
+    ABI (``fwd``) dY is the forward input A and dX the forward output D.
+    ``c2`` is the caller's i32 constant 2 (made here when ``None``)."""
+    if c2 is None:
+        c2 = b.const_i32(2)
     names = (
         (
             "p_A_stride_n",
@@ -8241,9 +8351,7 @@ def build_direct_depthwise_dgrad_windowed(
     d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
 
     def load_half(rsrc: Value, off: Value) -> Value:
-        if p.dtype == "bf16":
-            return b.buffer_load_bf16(rsrc, off, c0)
-        return b.buffer_load_f16(rsrc, off, c0)
+        return _buf_load_half(b, p.dtype, rsrc, off, c0)
 
     # Preload W[ch + i, r, s]: f32 per tap (CPL-wide), or 16-bit tap pairs
     # (s, s + 1) for dot2 with a zero partner for an odd KW.
@@ -8258,10 +8366,7 @@ def build_direct_depthwise_dgrad_windowed(
         ]
         zero_half = None
         if KW % 2:
-            if p.dtype == "bf16":
-                zero_half = b.trunc_f32_to_bf16(zero_f32)
-            else:
-                zero_half = b.trunc_f32_to_f16(zero_f32)
+            zero_half = _trunc_f32_elem(b, p.dtype, zero_f32)
         for r in range(KH):
             weights.append(
                 [
@@ -8622,10 +8727,7 @@ def _build_dw_dgrad_win_toeplitz(
     J = atom.k_chunks
     zero_acc = b.zero_vec_f32(atom.acc_len)
     zero_f32 = b.const_f32(0.0)
-    if p.dtype == "bf16":
-        zero_half = b.trunc_f32_to_bf16(zero_f32)
-    else:
-        zero_half = b.trunc_f32_to_f16(zero_f32)
+    zero_half = _trunc_f32_elem(b, p.dtype, zero_f32)
 
     tid = b.thread_id_x()
     bx = b.block_id_x()
@@ -8687,10 +8789,7 @@ def _build_dw_dgrad_win_toeplitz(
                         for h in range(H8)
                     ]
                     continue
-                if p.dtype == "bf16":
-                    w = b.buffer_load_bf16(b_rsrc, off, c0)
-                else:
-                    w = b.buffer_load_f16(b_rsrc, off, c0)
+                w = _buf_load_half(b, p.dtype, b_rsrc, off, c0)
                 comps += [
                     b.select(is_k[i], w, zero_half) for i in range(DW_DGRAD_MFMA_CH)
                 ]
@@ -9033,6 +9132,9 @@ def is_valid_depthwise_spec(
     Geometry and register pressure only; no MFMA atom check is needed because
     the kernel uses only scalar ``fma`` operations.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -10466,6 +10568,9 @@ def is_valid_depthwise_col_spec(
     ``p.Ho`` / ``p.Wo``, since those divide by ``stride`` and would raise
     rather than return a reason.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -10835,6 +10940,9 @@ def is_valid_depthwise_spatial_spec(
     spec: "DirectDepthwiseSpatialSpec", arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a :class:`DirectDepthwiseSpatialSpec`."""
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -11565,4 +11673,6 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
             p.groups * p.KH * p.KW * ceil_div(p.kpg, k_atom) * ceil_div(p.cpg, 16)
         )
         return (n_blocks, 1, 1), (64, 1, 1)
+    if hasattr(spec, "launch_geometry"):
+        return spec.launch_geometry()
     raise TypeError(f"no launch geometry for {type(spec).__name__}")

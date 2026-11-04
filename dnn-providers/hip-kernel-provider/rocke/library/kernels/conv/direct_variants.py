@@ -30,11 +30,15 @@ __all__ = [
     "DIRECT_FWD_SMALLC_WMMA",
     "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
+    "DIRECT_DW_FWD_WMMA",
+    "DIRECT_FWD_GSTREAM_WMMA",
+    "DIRECT_FWD_TAPOUTER_WMMA",
     "DIRECT_GROUPED_HALO",
     "DIRECT_HALO_VARIANTS",
     "DIRECT_MFMA_DGRAD",
     "DIRECT_MFMA_HELPERS",
     "DIRECT_SPLIT_REDUCE",
+    "PER_AXIS_PAD_VARIANTS",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
@@ -77,6 +81,16 @@ DIRECT_FWD_WMMA = "direct_fwd_wmma"
 # output channels as a GEMM over (r, s, k) followed by an overlap-add in LDS.
 DIRECT_FWD_SMALLC_WMMA = "direct_fwd_smallc_wmma"
 DIRECT_FWD_SMALLK_WMMA = "direct_fwd_smallk_wmma"
+# Wave32 WMMA depthwise forward (stride 1): one-hot weights times 8 channels
+# per 16x16x32 WMMA (the Toeplitz form of the windowed depthwise dgrad).
+DIRECT_DW_FWD_WMMA = "direct_dw_fwd_wmma"
+# Wave32 WMMA grouped forward for small groups (8-64 channels per group): a
+# block walks row bands through a ring of halo slots, weights in registers,
+# filter taps paired in the WMMA K below 32 channels per group.
+DIRECT_FWD_GSTREAM_WMMA = "direct_fwd_gstream_wmma"
+# Wave32 WMMA forward of large dilations: the taps as shifted 1x1 GEMMs over
+# TDM windows, the taps whose window lies in the padding skipped.
+DIRECT_FWD_TAPOUTER_WMMA = "direct_fwd_tapouter_wmma"
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
 DIRECT_GROUPED_HALO = "direct_grouped_halo"
@@ -89,6 +103,17 @@ DIRECT_SPLIT_REDUCE = "direct_split_reduce"
 # Stride-1 depthwise dgrad through the output-stationary forward kernel with
 # the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
+# The variants that offset columns by a column padding of their own
+# (problem.PAD_W != problem.PAD) and the only ones with a non-square filter:
+# the rotated-filter depthwise dgrad and the direct (1 x R, rectangular,
+# poly_view) and small-K WMMA forwards. Every other variant takes one padding
+# for both axes. The cache selection (direct_spec_for_problem) and the AOT
+# identity lookup (direct_aot_jobs.direct_job_for_identity) both read it.
+PER_AXIS_PAD_VARIANTS = (
+    DIRECT_DEPTHWISE_TILED_DGRAD,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_WMMA,
+)
 # variant -> (transpose helper, reorganize helper)
 DIRECT_MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE),
@@ -211,6 +236,22 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_fwd_small_wmma import FwdSmallkWmmaSpec
 
         return FwdSmallkWmmaSpec(problem=problem, name="rocke_fwd_smallk_wmma", **knobs)
+    if variant == DIRECT_DW_FWD_WMMA:
+        from kernels.common.conv_direct_dw_fwd_wmma import DwFwdWmmaSpec
+
+        return DwFwdWmmaSpec(problem=problem, name="rocke_direct_dw_fwd_wmma", **knobs)
+    if variant == DIRECT_FWD_GSTREAM_WMMA:
+        from kernels.common.conv_direct_fwd_gstream_wmma import FwdGstreamWmmaSpec
+
+        return FwdGstreamWmmaSpec(
+            problem=problem, name="rocke_direct_fwd_gstream_wmma", **knobs
+        )
+    if variant == DIRECT_FWD_TAPOUTER_WMMA:
+        from kernels.common.conv_direct_fwd_tapouter_wmma import DirectFwdTapOuterSpec
+
+        return DirectFwdTapOuterSpec(
+            problem=problem, name="rocke_direct_fwd_tapouter_wmma", **knobs
+        )
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
             problem=problem, name="rocke_direct_conv_nongrouped", **knobs
@@ -511,6 +552,22 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             from kernels.common.conv_fwd_small_wmma import is_valid_fwd_smallk_spec
 
             return is_valid_fwd_smallk_spec(spec, arch=arch)
+        if variant == DIRECT_DW_FWD_WMMA:
+            from kernels.common.conv_direct_dw_fwd_wmma import is_valid_dw_fwd_wmma_spec
+
+            return is_valid_dw_fwd_wmma_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_GSTREAM_WMMA:
+            from kernels.common.conv_direct_fwd_gstream_wmma import (
+                is_valid_fwd_gstream_spec,
+            )
+
+            return is_valid_fwd_gstream_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_TAPOUTER_WMMA:
+            from kernels.common.conv_direct_fwd_tapouter_wmma import (
+                is_valid_tapouter_spec,
+            )
+
+            return is_valid_tapouter_spec(spec, arch=arch)
         if variant == "direct_depthwise_spatial":
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
         if variant in ("direct_depthwise_tiled", DIRECT_DEPTHWISE_TILED_DGRAD):
@@ -600,6 +657,9 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_dgrad_patch_wmma as dpw
     from kernels.common import conv_dgrad_smallc_wmma as dsw
     from kernels.common import conv_direct_dgrad_wmma as dwm
+    from kernels.common import conv_direct_dw_fwd_wmma as dfw
+    from kernels.common import conv_direct_fwd_gstream_wmma as fgs
+    from kernels.common import conv_direct_fwd_tapouter_wmma as ft
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
     from kernels.common import conv_direct_fwd_wmma as fw
@@ -617,6 +677,9 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_FWD_WMMA: fw.build_direct_fwd_wmma,
         DIRECT_FWD_SMALLC_WMMA: fs.build_fwd_smallc_wmma,
         DIRECT_FWD_SMALLK_WMMA: fs.build_fwd_smallk_wmma,
+        DIRECT_DW_FWD_WMMA: dfw.build_dw_fwd_wmma,
+        DIRECT_FWD_GSTREAM_WMMA: fgs.build_fwd_gstream_wmma,
+        DIRECT_FWD_TAPOUTER_WMMA: ft.build_direct_fwd_tapouter_wmma,
         "direct_wgrad_tiled": wt.build_direct_wgrad_tiled,
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,
@@ -699,10 +762,14 @@ def direct_spec_for_problem(
         )
     if getattr(problem, "pad_w", -1) < -1:
         return None, f"pad_w must be -1 (PAD) or at least 0 (got {problem.pad_w})"
-    if getattr(problem, "PAD_W", problem.PAD) != problem.PAD and (
-        variant != DIRECT_DEPTHWISE_TILED_DGRAD
+    if (
+        getattr(problem, "PAD_W", problem.PAD) != problem.PAD
+        and variant not in PER_AXIS_PAD_VARIANTS
     ):
-        return None, "one padding for both axes (only the rotated-filter dgrad differs)"
+        return None, (
+            f"one padding for both axes (only {', '.join(PER_AXIS_PAD_VARIANTS)} "
+            "take a column padding of their own)"
+        )
     spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
@@ -754,6 +821,23 @@ def direct_spec_for_problem(
         from kernels.common.conv_direct_fwd_wmma import fwd_wmma_tile_efficiency
 
         eff = fwd_wmma_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_FWD_GSTREAM_WMMA:
+        # As direct_fwd_wmma: only where half of the padded pixel grid is real.
+        from kernels.common.conv_direct_fwd_gstream_wmma import (
+            fwd_gstream_tile_efficiency,
+        )
+
+        eff = fwd_gstream_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_FWD_TAPOUTER_WMMA:
+        from kernels.common.conv_direct_fwd_tapouter_wmma import (
+            tapouter_tile_efficiency,
+        )
+
+        eff = tapouter_tile_efficiency(spec)
         if eff < 0.5:
             return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
     if variant == DIRECT_GROUPED_HALO and spec.tile_k > spec.merged_k:
