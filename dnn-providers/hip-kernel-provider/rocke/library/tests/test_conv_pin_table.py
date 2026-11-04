@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 
 import pytest
 
@@ -150,10 +151,21 @@ def test_step_replay_resolves_a_table_through_dispatch():
     path = TABLES["gfx942_unet3d_bf16"]
     doc = json.loads(path.read_text())
     for mode, body in doc["modes"].items():
-        plain = {k: v["kernel"] for k, v in body["cases"].items() if not k.endswith("_pad1")}
-        cases = load_pins_cases(f"{path}#{mode}", doc["arch"])
-        assert {k: v["kernel"] for k, v in cases.items()} == plain
-        pad1 = {k[: -len("_pad1")]: v["kernel"] for k, v in body["cases"].items() if k.endswith("_pad1")}
-        cases = load_pins_cases(f"{path}#{mode}@pad1", doc["arch"])
-        assert {k: v["kernel"] for k, v in cases.items()} == pad1
-        assert all(" -p 1 " in v["cmd"] for v in cases.values())
+        forms = {}
+        for k, v in body["cases"].items():
+            base, _, suffix = k.rpartition("_")
+            if re.fullmatch(r"s\d+", suffix):
+                forms.setdefault("", {})[k] = v["kernel"]
+            else:
+                forms.setdefault(suffix, {})[base] = v["kernel"]
+        assert "" in forms and "pad1" in forms
+        for form, want in forms.items():
+            cases = load_pins_cases(f"{path}#{mode}" + (f"@{form}" if form else ""), doc["arch"])
+            assert {k: v["kernel"] for k, v in cases.items()} == want
+            # Padded forms: pad 1 on H and W; the pad1 form also pads D.
+            if form:
+                assert all(" -p 1 -q 1 " in v["cmd"] for v in cases.values())
+            if form == "pad1":
+                assert all(" --pad_d 1 " in v["cmd"] for v in cases.values())
+            if form == "pad011":
+                assert all(" --pad_d 0 " in v["cmd"] for v in cases.values())

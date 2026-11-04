@@ -284,7 +284,7 @@ def load_pins_cases(path: str, arch: str) -> dict:
     out = {}
     for k, row in doc["modes"][table.mode]["cases"].items():
         # ``@FORM`` replays the cases named <case>_<FORM> (e.g. the padded
-        # "adapter" form, @pad1) under their plain names; without it, the
+        # forms, @pad1 or @pad011) under their plain names; without it, the
         # cases without a form suffix.
         base, _, suffix = k.rpartition("_")
         if form:

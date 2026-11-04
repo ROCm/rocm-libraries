@@ -6,7 +6,7 @@ candidate: requests with `algorithm="auto"` never select it.
 
 | file | arch | problems | modes |
 |---|---|---|---|
-| `gfx942_unet3d_bf16.json` | gfx942 | 3-D UNet convolutions: bf16, NDHWC, 3x3x3 filter, stride 1; 10 shapes x fwd / dgrad / wgrad, each in the halo form (no padding, cases `<dir>_s<N>`) and the adapter form (padding 1, cases `<dir>_s<N>_pad1`) | `deterministic`, `fastest` |
+| `gfx942_unet3d_bf16.json` | gfx942 | 3-D UNet convolutions: bf16, NDHWC, 3x3x3 filter, stride 1; 10 shapes x fwd / dgrad / wgrad, each in three forms: the halo form (no padding, cases `<dir>_s<N>`), the padded form (padding 1 on every axis, cases `<dir>_s<N>_pad1`) and the depth-split form (padding 0 on depth, whose input carries a halo, and 1 on height and width, cases `<dir>_s<N>_pad011`) | `deterministic`, `fastest` |
 
 ## Format
 
@@ -41,11 +41,11 @@ res.spec.launch_params() # {"split_k": ..., "tail_full": ...}
 
 `register_conv_pin_table(pins)` adds the fwd and dgrad candidates to the grouped-convolution registries, which makes
 `dispatch_conv_grouped(replace(req, algorithm="pinned"))` return the pinned instance. The step replay
-(`benchmarks/common/conv_step_replay.py --pins <table>#<mode>`, or `<table>#<mode>@pad1` for the `_pad1` cases) resolves
-every case through `dispatch_conv_pinned`.
+(`benchmarks/common/conv_step_replay.py --pins <table>#<mode>`, or `<table>#<mode>@<form>` for the `_<form>` cases, e.g.
+`@pad1`, `@pad011`) resolves every case through `dispatch_conv_pinned`.
 
 A pinned binary admits only problems its identity serves: halo-form kernels (`uk_nopad`, `tapk_xhalo`) do not admit
-padded problems, which is why the padded form has cases of its own. A request the table does not pin misses it and
+padded problems, which is why each padded form has cases of its own. A request the table does not pin misses it and
 falls back to the default selection.
 
 ## Regenerating a table
