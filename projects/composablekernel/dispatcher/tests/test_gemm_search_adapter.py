@@ -158,11 +158,12 @@ def _hooks(build, measure=drv.benchmark_on_devices):
 
 
 def _adapter(tmp_path, build, measure=drv.benchmark_on_devices, problems=(P1, P2),
-             eligible=None, devices=("0",), **args):
+             eligible=None, devices=("0",), timeout=None, **args):
     eligible = eligible or [[A, B, C, D]] * len(problems)
     return GS.GemmSearchAdapter(
         _args(**args), _hooks(build, measure), list(problems), CFGS, eligible,
         list(devices), (Path("worker.py"), {}), tmp_path / "out", {"arch": "gfx950"},
+        **({} if timeout is None else {"build_timeout": timeout}),
     )
 
 
@@ -305,15 +306,18 @@ def test_candidates_are_the_eligible_kernels_with_scalar_records(tmp_path, monke
     json.dumps(ctx, allow_nan=False)
 
 
-@pytest.mark.parametrize("build_timeout", [None, 900])
+@pytest.mark.parametrize("timeout, used", [(None, 180), (900, 900)])
 def test_build_gets_the_driver_options_and_reports_one_line(
-    tmp_path, monkeypatch, build_timeout
+    tmp_path, monkeypatch, timeout, used
 ):
+    # The search's build timeout, not the driver's --build-timeout (rejected
+    # with --search-config): its own default, or build_timeout_s.
     tc = Toolchain(tmp_path, monkeypatch, fail={B})
-    ad = _adapter(tmp_path, tc.build, build_timeout=build_timeout, workers=5)
+    ad = _adapter(tmp_path, tc.build, timeout=timeout, workers=5, build_timeout=7)
     res = ad.build_missing([ad.cands[n] for n in (A, B)])
     assert tc.builds == [{"names": [A, B], "verbose": True, "max_workers": 5,
-                          "build_timeout": build_timeout}]
+                          "build_timeout": used}]
+    assert ad.context()["build"] == {"workers": 5, "build_timeout": used}
     assert res[B] == AS.BuildResult(None, "Compile failed: k.cpp:1:2: error: boom")
     # The one-line reason goes to the events; the full error is kept on disk.
     log = json.loads((tmp_path / "out" / "rounds" / "0001-build.json").read_text())

@@ -1123,6 +1123,8 @@ BASE = {"schema_version": 1, "strategy": "tpe", "trials_per_problem": 4,
     ({"measurement_policy": "quick"}, "one of"),
     ({"batch_per_problem": 0}, ">= 1"),
     ({"max_stall_rounds": 0}, ">= 1"),
+    ({"build_timeout_s": 0}, ">= 1"),
+    ({"build_timeout_s": 90.5}, "expected type int"),
     ({"verbose": True}, "unknown key"),
     ({"confirm": {"finalists": 2, "calls": 3}}, "unknown key"),
     ({"confirm": {"fresh_calls": 0}}, ">= 1"),
@@ -1171,10 +1173,13 @@ def test_settings_defaults_paths_and_round_trip(tmp_path):
     assert s.warm_start.pairs_file == str(tmp_path / "picks.json")
     assert (s.seed, s.seed_policy, s.deadline_s, s.batch_per_problem) == (
         0, "shared", None, 4)
-    assert "deadline_s" not in s.to_json()
+    assert "deadline_s" not in s.to_json() and "build_timeout_s" not in s.to_json()
     assert (s.max_stall_rounds, s.confirm.finalists, s.confirm.fresh_calls) == (8, 2, 3)
     assert s.warm_start.top_k == 5 and not s.warm_start.use_prior
+    assert s.build_timeout_s is None  # the op's search default
     assert AS.SearchSettings.from_json(s.to_json()) == s
+    timed = AS.SearchSettings.from_json({**BASE, "build_timeout_s": 240})
+    assert AS.SearchSettings.from_json(timed.to_json()).build_timeout_s == 240
     assert AS.SearchSettings.from_json(BASE).to_json()["confirm"] == {
         "finalists": 2, "fresh_calls": 3}
 
@@ -1192,6 +1197,8 @@ def test_option_check_reads_only_the_options_the_op_names(tmp_path):
                               search_output_dir=str(tmp_path / "out"), csv=None)
     assert AS.check_search_options(args).strategy == "tpe"
     assert AS.check_search_options(args, [("--csv", "csv")]).trials_per_problem == 2
+    with pytest.raises(AS.SettingsError, match=r"does not take --batch-count \(why\)$"):
+        AS.check_search_options(args, [("--batch-count", "batch_count", "why")])
     with pytest.raises(AS.SettingsError, match="supports --batch-count 4 only, got 8"):
         AS.check_search_options(args, required=[("--batch-count", "batch_count", 4)])
 

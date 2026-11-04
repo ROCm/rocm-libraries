@@ -194,6 +194,7 @@ python gemm_full_benchmark.py configs/default_config.json --variant gemm_univers
 | `deadline_s` | none | seconds after which no trial is admitted; the round in flight and the confirmation still finish. Without it the trial and build budgets bound the run |
 | `batch_per_problem` | `4` | trials a problem may propose per round |
 | `max_stall_rounds` | `8` | rounds in a row without a new result before the run stops |
+| `build_timeout_s` | `180` | limit for each kernel's codegen, compile and link step in the search (a full run's `--build-timeout` default is 300 s); a kernel whose step times out is a `compile_error`. See "Build timeout" below |
 | `warm_start.pairs_file`, `top_k` | none, `5` | a `--pairs` file (e.g. from `select_kernels.py --out_pairs`): the first `top_k` listed kernels of a problem are tried first |
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
@@ -226,17 +227,18 @@ Option rules:
 
 - `--search-config` and `--search-output-dir` go together, for `gemm_universal`
   only. `--list-pairs`, `--repeat-top` and `--failures-csv` are rejected; the
-  search writes its own records and `--csv` is not written.
+  search writes its own records and `--csv` is not written. `--build-timeout`
+  is rejected too: the search's limit is `build_timeout_s`.
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
   Each call therefore also pays the host side of verification (random inputs
   and an fp32 numpy reference GEMM: about 1 s at 4096^3 and 4 s at 8192^3 on
   a 16-core host), which a batched `--verify` run pays once per batch; its
   timeout is `--kernel-timeout` plus `ceil(2*M*N*K / 5e10)` s for it.
-  `--verify-tol`, `--kernel-timeout`, `--workers`, `--build-timeout` and
-  `--devices` apply as usual. Discovery measurements spread over the devices;
-  each problem's confirmation calls run on one device (problem `i` on device
-  `i mod n`), so its finalists are compared on the same GPU.
+  `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
+  usual. Discovery measurements spread over the devices; each problem's
+  confirmation calls run on one device (problem `i` on device `i mod n`), so
+  its finalists are compared on the same GPU.
 - The candidates of a problem are exactly the kernels a full run measures with
   it when every kernel builds (its `--list-pairs` pairs). `--pairs` and
   `--max-kernels` narrow them (recorded in `run.json`); `--pairs` also limits
@@ -245,6 +247,21 @@ Option rules:
   problem with fewer candidates than `trials_per_problem` is measured
   exhaustively. The fixed-vector-width kernels a full run falls back to when a
   native kernel fails to build are not candidates.
+
+Build timeout: a round measures its kernels once all its builds have ended,
+so one kernel that never builds holds the whole round for the full limit.
+Per-kernel compile times of the 5520 gfx950 fp16 `rcr` kernels of
+`default_config.json`, measured with 64 compiling at once (an upper bound for
+a search round, which builds fewer at a time): the median was 30 s, and every
+kernel outside warp tile `4x64x16` built in at most 111 s. That one class holds
+every slower build and all 118 kernels (2.1%) that did not build in 300 s. The
+search's default of 180 s per step keeps 1.6x headroom over 111 s and shortens
+each wait for a kernel that never builds by 120 s; the price is the 2.2% of
+kernels (all `4x64x16`) that build in 180-300 s, which become
+`compile_error`. Raise `build_timeout_s` when those kernels matter, or on a
+host that compiles much slower. A timed-out step leaves its compiler running
+until it ends (the build function stops only `hipcc`), so a run with many
+timeouts loads the host for a while longer.
 
 Outputs, in a directory that must not hold an earlier run (a path that is, or
 lies under, an existing file, or whose nearest existing directory is not

@@ -55,15 +55,18 @@ def _ms(name):
 
 
 def _main(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
-          devices=("0",)):
+          devices=("0",), build_kw=None):
     """Run the driver with a stub build (real files, so the search can copy
-    them) and a stub GPU runner; ``bad`` names fail verification ("*": all).
+    them) and a stub GPU runner; ``bad`` names fail verification ("*": all),
+    ``build_kw`` gets each build call's keyword arguments.
     Returns (rc, out, built names, calls)."""
     libs = tmp_path / "libs"
     libs.mkdir(exist_ok=True)
     built, calls = [], []
 
     def build(cfgs, **kw):
+        if build_kw is not None:
+            build_kw.append(kw)
         built.extend(c.name for c in cfgs)
         for c in cfgs:
             (libs / f"lib{c.name}.so").write_text(c.name)
@@ -113,11 +116,11 @@ def _settings(tmp_path, **kw):
 
 
 def _search(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
-            devices=("0",), **settings):
+            devices=("0",), build_kw=None, **settings):
     out = tmp_path / "run"
     got = _main(monkeypatch, capsys, tmp_path, "--search-config",
                 _settings(tmp_path, **settings), "--search-output-dir", str(out),
-                *argv, bad=bad, problems=problems, devices=devices)
+                *argv, bad=bad, problems=problems, devices=devices, build_kw=build_kw)
     return (*got, out)
 
 
@@ -158,6 +161,8 @@ def test_run_without_search_is_unchanged_and_loads_no_search_module(
      "does not take --repeat-top"),
     (["--search-config", "{S}", "--search-output-dir", "{O}", "--failures-csv", "f.csv"],
      "does not take --failures-csv"),
+    (["--search-config", "{S}", "--search-output-dir", "{O}", "--build-timeout", "600"],
+     "does not take --build-timeout (set build_timeout_s in the search settings)"),
     (["--search-config", "{S}", "--search-output-dir", "{O}", "--variant",
       "gemm_multi_d"], "gemm_universal only"),
     (["--search-config", "{BAD}", "--search-output-dir", "{O}"], "unknown key"),
@@ -243,6 +248,22 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     assert {(c["prob"]["M"], c["prob"]["N"], c["prob"]["K"], n)
             for c in recalls for n in c["names"]} == {
         (p["M"], p["N"], p["K"], winners[k][0]) for k, p in zip(KEYS, PROBLEMS)}
+
+
+@pytest.mark.parametrize("extra, want", [({}, 180), ({"build_timeout_s": 600}, 600)])
+def test_search_has_its_own_build_timeout(monkeypatch, capsys, tmp_path, extra, want):
+    # A round measures once all its builds end: the search limits each build
+    # step itself (180 s by default, or build_timeout_s); a full run's build
+    # call is unchanged (the 300 s limits of the build function).
+    kws = []
+    rc, cap, built, _, out = _search(monkeypatch, capsys, tmp_path, build_kw=kws,
+                                     **extra)
+    assert rc == 0 and built and kws, cap.out
+    assert all(k["build_timeout"] == want for k in kws)
+    assert _read(out, "run.json")["context"]["build"]["build_timeout"] == want
+    kws.clear()
+    rc, _, built, _ = _main(monkeypatch, capsys, tmp_path, build_kw=kws)
+    assert rc == 0 and built and kws and all("build_timeout" not in k for k in kws)
 
 
 def test_confirmation_keeps_each_problem_on_one_device(monkeypatch, capsys, tmp_path):

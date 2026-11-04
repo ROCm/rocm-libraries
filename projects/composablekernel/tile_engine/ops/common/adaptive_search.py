@@ -250,7 +250,9 @@ class SearchSettings:
     Relative warm-start paths are resolved against the settings file's directory
     (against the working directory when the settings come as a dict). There is
     no deadline unless ``deadline_s`` is given: the trial and build budgets
-    bound a run.
+    bound a run. ``build_timeout_s`` limits each step of a kernel's build in
+    the search; None leaves it to the op's search default (the coordinator
+    does not read it: the op binding passes it to its build).
     """
 
     strategy: str
@@ -262,6 +264,7 @@ class SearchSettings:
     deadline_s: Optional[float] = None
     batch_per_problem: int = 4
     max_stall_rounds: int = 8
+    build_timeout_s: Optional[int] = None
     warm_start: Optional[WarmStartSettings] = None
     confirm: ConfirmSettings = field(default_factory=ConfirmSettings)
     measurement_policy: str = "full"
@@ -328,6 +331,7 @@ class SearchSettings:
             deadline_s=_get(data, w, "deadline_s", float, None, lambda v: v > 0, "> 0"),
             batch_per_problem=_get(data, w, "batch_per_problem", int, 4, _positive, ">= 1"),
             max_stall_rounds=_get(data, w, "max_stall_rounds", int, 8, _positive, ">= 1"),
+            build_timeout_s=_get(data, w, "build_timeout_s", int, None, _positive, ">= 1"),
             warm_start=warm,
             confirm=ConfirmSettings(
                 finalists=_get(cd, cw, "finalists", int, 2, _positive, ">= 1"),
@@ -343,8 +347,9 @@ class SearchSettings:
         """The settings as accepted by ``from_json`` (paths resolved)."""
         d = {f: getattr(self, f) for f in self.__dataclass_fields__}
         d["confirm"] = vars(self.confirm).copy()
-        if self.deadline_s is None:
-            del d["deadline_s"]
+        for name in ("deadline_s", "build_timeout_s"):
+            if d[name] is None:
+                del d[name]
         if self.warm_start is None:
             del d["warm_start"]
         else:
@@ -1453,17 +1458,18 @@ class CallFiles:
 
 def check_search_options(args, conflicts=(), required=()) -> SearchSettings:
     """The validated ``--search-config`` of a driver run. The op passes its
-    driver's options: ``conflicts`` the (option, args attribute) pairs a
-    search run does not take, ``required`` the (option, args attribute,
-    value) triples it needs; no other driver option is read. Raises
+    driver's options: ``conflicts`` the (option, args attribute[, hint])
+    entries a search run does not take, ``required`` the (option, args
+    attribute, value) triples it needs; no other driver option is read. Raises
     SettingsError for a missing or conflicting option, another required
     value, invalid settings or an output dir holding an earlier run."""
     if not (args.search_config and args.search_output_dir):
         raise SettingsError(
             "--search-config and --search-output-dir go together, each with a path")
-    for opt, attr in conflicts:
+    for opt, attr, *hint in conflicts:
         if getattr(args, attr):
-            raise SettingsError(f"--search-config does not take {opt}")
+            raise SettingsError(f"--search-config does not take {opt}"
+                                + "".join(f" ({h})" for h in hint))
     for opt, attr, value in required:
         if getattr(args, attr) != value:
             raise SettingsError(f"--search-config supports {opt} {value} only, "

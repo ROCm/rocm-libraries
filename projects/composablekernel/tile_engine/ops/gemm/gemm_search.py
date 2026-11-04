@@ -11,9 +11,10 @@ driver's own build and measure functions, which the driver passes in as
   per kernel name (with ``--pairs``: only its problems, and the listed kernels
   among those);
 - builds: ``setup_multiple_gemm_dispatchers`` on the round's missing kernels,
-  verbose like a full run's; each built .so goes into the run's
-  ``ArtifactStore`` as ``<out>/artifacts/<name>.so``, and each call's full
-  build errors go to ``<out>/rounds/NNNN-build.json``;
+  verbose like a full run's, with the search's limit per build step
+  (``build_timeout_s``, else ``SEARCH_BUILD_TIMEOUT_S``); each built .so goes
+  into the run's ``ArtifactStore`` as ``<out>/artifacts/<name>.so``, and each
+  call's full build errors go to ``<out>/rounds/NNNN-build.json``;
 - measurements: ``benchmark_on_devices`` with --verify on, one kernel per worker
   and one problem entry per request, so every row and failure record belongs to
   exactly one request; the worker also checks that the library reports the
@@ -61,12 +62,13 @@ from adaptive_search import (  # noqa: E402
     valid_latency,
 )
 
-# Driver options a search run does not take: it writes its own outputs and
-# confirms its finalists itself.
+# Driver options a search run does not take: it writes its own outputs,
+# confirms its finalists itself and has its own build timeout.
 CONFLICTS = (
     ("--list-pairs", "list_pairs"),
     ("--repeat-top", "repeat_top"),
     ("--failures-csv", "failures_csv"),
+    ("--build-timeout", "build_timeout", "set build_timeout_s in the search settings"),
 )
 REQUIRED = (("--variant", "variant", "gemm_universal"),)  # the one searched
 # Driver failure kind (--failures-csv) -> outcome status. The first kind in
@@ -94,6 +96,12 @@ RUN_STATUS = {
 # keeps with several device workers sharing its cores.
 VERIFY_HOST_FLOPS = 5e10
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
+# A search round measures once all its builds end, so a kernel that never
+# builds holds the round for the whole limit (a full run keeps 300 s per
+# step). 180 s per step: 1.6x the slowest gfx950 fp16 build outside the one
+# slow-compiling class (warp tile 4x64x16), see "Build timeout" in README.md;
+# ``build_timeout_s`` overrides it.
+SEARCH_BUILD_TIMEOUT_S = 180
 
 
 def verify_allowance_s(problem) -> int:
@@ -197,11 +205,13 @@ class GemmSearchAdapter:
 
     ``eligible[i]`` lists the kernel names ``problems[i]`` may run, in order;
     ``worker`` is the driver's ``(worker_path, base_env)``; ``context`` adds
-    the driver's build context (arch, layout, variant, configs) to run.json.
+    the driver's build context (arch, layout, variant, configs) to run.json;
+    ``build_timeout`` (seconds) limits each step of a kernel's build.
     """
 
     def __init__(self, args, hooks: DriverHooks, problems, configs, eligible,
-                 devices, worker, out_dir, context=None):
+                 devices, worker, out_dir, context=None,
+                 build_timeout=SEARCH_BUILD_TIMEOUT_S):
         if len(problems) != len(eligible):
             raise ValueError(f"{len(problems)} problems, {len(eligible)} pair lists")
         self.args = args
@@ -209,6 +219,7 @@ class GemmSearchAdapter:
         self.devices = list(devices)
         self.worker_path, self.base_env = worker
         self._context = dict(context or {})
+        self.build_timeout = build_timeout
         # Verified, one kernel per worker: a batch failure names one request.
         self.margs = argparse.Namespace(**{**vars(args), "verify": True, "batch_size": 1})
         by_name = {}
@@ -266,7 +277,7 @@ class GemmSearchAdapter:
                             "timeout_s": "kernel_timeout + ceil(2*M*N*K / "
                                          f"{VERIFY_HOST_FLOPS:g}) per call",
                             "check_identity": True},
-            "build": {"workers": a.workers, "build_timeout": a.build_timeout},
+            "build": {"workers": a.workers, "build_timeout": self.build_timeout},
             **source_info(files, domain),
             "domain_notes": notes,
         }
@@ -279,7 +290,7 @@ class GemmSearchAdapter:
         paths = self.hooks.build(
             [c.original_config for c in cands], verbose=True,
             max_workers=self.args.workers, errors=errors,
-            build_timeout=self.args.build_timeout,
+            build_timeout=self.build_timeout,
         )
         if len(paths) != len(cands):
             raise RuntimeError(f"build returned {len(paths)} paths for {len(cands)} kernels")
@@ -360,7 +371,8 @@ def run_gemm_search(args, settings: SearchSettings, hooks: DriverHooks, *,
                     context=None) -> int:
     """The driver's search mode (``adaptive_search.run_search``): its exit code."""
     adapter = GemmSearchAdapter(args, hooks, problems, configs, eligible, devices,
-                                worker, args.search_output_dir, context)
+                                worker, args.search_output_dir, context,
+                                settings.build_timeout_s or SEARCH_BUILD_TIMEOUT_S)
     return adaptive_search.run_search(adapter, settings, args.search_output_dir,
                                       devices, pair_loader=hooks.load_pairs,
                                       prior_loader=read_ranked_csv)
