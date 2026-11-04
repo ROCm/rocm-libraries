@@ -218,8 +218,10 @@ public:
 
         CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
 
-        // Native HEURISTICS_CHOICE only checks the active plan; cuDNN narrows the candidates,
-        // so retarget onto the top-ranked plan this shim's filters did not bar.
+        // Native HEURISTICS_CHOICE moves off a failing active plan for any failure, but never
+        // off a barred active plan; cuDNN narrows the candidates, so retarget onto the
+        // top-ranked plan this shim's filters did not bar. build_plan_at_index does not walk
+        // that fallback, so a failing retarget target returns its error.
         int64_t activeEngineId = -1;
         if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE && !_shimBarredEngineIds.empty()
            && _graph->get_execution_plan_engine_id(activeEngineId).is_good()

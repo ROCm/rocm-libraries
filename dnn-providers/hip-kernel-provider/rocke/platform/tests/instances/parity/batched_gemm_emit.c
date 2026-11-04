@@ -106,6 +106,22 @@ static int make_spec(int idx, rocke_batched_gemm_spec_t* spec)
         spec->dtype = "fp16";
         spec->wave_size = 64;
         break;
+    case 5: /* bgm_f64_64x64x16_2x2: fp64 compv3 / cshuffle on gfx942 */
+        spec->name = "bgm_f64_64x64x16_2x2";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 64,
+                                              .tile_n = 64,
+                                              .tile_k = 16,
+                                              .warp_m = 2,
+                                              .warp_n = 2,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 4};
+        spec->trait.pipeline = "compv3";
+        spec->trait.epilogue = "cshuffle";
+        spec->dtype = "fp64";
+        spec->wave_size = 64;
+        break;
     default:
         return -1;
     }
@@ -113,15 +129,22 @@ static int make_spec(int idx, rocke_batched_gemm_spec_t* spec)
     return 0;
 }
 
+/* Config 5 exercises gfx942; all others use the gfx950 baseline. */
+static const char* arch_for(int idx)
+{
+    return idx == 5 ? "gfx942" : "gfx950";
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..4> [ll|ir|verify]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..5> [ll|ir|verify]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
+    const char* arch = arch_for(idx);
 
     if(strcmp(mode, "ll") != 0 && strcmp(mode, "ir") != 0 && strcmp(mode, "verify") != 0)
     {
@@ -142,7 +165,7 @@ int main(int argc, char** argv)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
         rocke_status_t st = rocke_batched_gemm_lower_to_llvm(
-            &spec, "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+            &spec, arch, ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
@@ -155,7 +178,7 @@ int main(int argc, char** argv)
 
     /* ir / verify modes: need the kernel object. */
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = rocke_build_batched_gemm_new(&b, &spec, "gfx950");
+    rocke_kernel_def_t* kernel = rocke_build_batched_gemm_new(&b, &spec, arch);
     if(!kernel)
     {
         fprintf(stderr, "build failed: %s\n", rocke_ir_builder_error(&b));
