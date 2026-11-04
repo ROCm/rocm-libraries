@@ -1125,6 +1125,14 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->defer_mfma = idx == 125 ? 2 : 0;
         spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
         return 0;
+    case 148:
+    case 149:
+    case 150:
+        /* 115 / 119 / 114 + xh_pad (the padded-input x-halo DMA loop) */
+        if(make_cfg_3d(idx == 148 ? 115 : idx == 149 ? 119 : 114, spec, arch) != 0)
+            return -1;
+        spec->xh_pad = true;
+        return 0;
     case 146:
     case 147:
         /* 55 / 54 + split_addr_k_decode */

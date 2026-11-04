@@ -1026,6 +1026,7 @@ _GFX942_3D_OFFSET = 32
 #  142-143: 55 + split_tail_compact (+ split_zero_first)
 #  144-145: 84 / 87 + pp_end_guard
 #  146-147: 55 / 54 + split_addr_k_decode
+#  148-150: 115 / 119 / 114 + xh_pad (the x-halo DMA loop on padded inputs)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1448,6 +1449,9 @@ def _gfx942_3d_spec(idx: int):
     # origin) on the plain 3-D split-addressing loop, grouped and not.
     knobs[146] = (55, dict(split_addr_k_decode=True))
     knobs[147] = (54, dict(split_addr_k_decode=True))
+    knobs[148] = (55, dict(knobs[115][1], xh_pad=True))
+    knobs[149] = (55, dict(knobs[119][1], xh_pad=True))
+    knobs[150] = (55, dict(_s4, xh_pad=True))
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}

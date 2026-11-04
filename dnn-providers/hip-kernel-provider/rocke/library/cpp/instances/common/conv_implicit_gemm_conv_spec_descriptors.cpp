@@ -506,6 +506,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->xh_stride_m, "xsm");
     ROCKE_FLAG(s->fxh_dma > 0, "fxd%d", s->fxh_dma);
     ROCKE_FLAG(s->xh_yring > 0, "xyr%d", s->xh_yring);
+    ROCKE_FLAG(s->xh_pad, "xpd");
     ROCKE_FLAG(s->epi_quad_xpose > 0, "eqx%d", s->epi_quad_xpose);
     ROCKE_FLAG(s->uk_nopad, "nopad");
     ROCKE_FLAG(s->defer_mfma_per_write > 0, "dpw%d", s->defer_mfma_per_write);
@@ -1537,6 +1538,10 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
             reason_cap,
             "xh_yring (2 or 4 rows, + 10: early reload, + 20: also early ring rows) "
             "needs fxh_dma >= 1000, uk_tap_fast without chunk groups, warp_m %% rows == 0");
+    if(s->xh_pad && !(s->uk_xhalo && s->fxh_dma >= 1000))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "xh_pad masks the wave-private x-halo DMA loop (fxh_dma >= 1000) only");
     if(s->lds_xor_rowkey && !(s->lds_xor && s->lds_kpack_read && s->tile_k == 32))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,

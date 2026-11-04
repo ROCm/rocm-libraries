@@ -358,6 +358,7 @@ typedef struct rocke_implicit_gemm_conv_spec
     bool xh_stride_m; /* x-halo A rows M-strided across a wave's MFMAs */
     int fxh_dma; /* x-halo DMA staging schedule (>= 1000: wave-private A) */
     int xh_yring; /* x-halo input-row ring across the y taps (Python-only) */
+    bool xh_pad; /* fxh_dma >= 1000 loop on padded inputs (zero halo from masked DMA) */
 
     /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
      * (bf16 wave64 MFMA cshuffle). Default 1 (0 reads as 1). */

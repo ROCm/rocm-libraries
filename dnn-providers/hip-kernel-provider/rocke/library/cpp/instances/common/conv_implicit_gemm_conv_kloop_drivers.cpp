@@ -1852,6 +1852,91 @@ static void conv_xh_adv(conv_xh_t* x, rocke_value_t* const* st, rocke_value_t** 
     out[2] = nz;
 }
 
+/* xh_pad (Python _emit_xhalo_dma _xp helpers): the padded-input masking of
+ * the wave-private DMA loop. */
+typedef struct
+{
+    bool on;
+    rocke_value_t* a_ptr_b; /* A moved down by the pad offset */
+    rocke_value_t* a_nb; /* A_bytes + the pad offset */
+} conv_xpd_t;
+
+/* bit t set <=> 0 <= org + t < extent (t < 31; dilation 1) */
+static rocke_value_t*
+    conv_xpd_tap_mask(rocke_conv_build_ctx_t* ctx, rocke_value_t* org, rocke_value_t* extent)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* c1 = ctx->uk_c1;
+    rocke_value_t* c31 = rocke_b_const_i32(b, 31);
+    rocke_value_t* l0 = rocke_b_sub(b, c0, org);
+    rocke_value_t* l1 = rocke_b_smax(b, l0, c0);
+    rocke_value_t* lo = rocke_b_smin(b, l1, c31);
+    rocke_value_t* h0 = rocke_b_sub(b, extent, org);
+    rocke_value_t* h1 = rocke_b_smax(b, h0, c0);
+    rocke_value_t* hi = rocke_b_smin(b, h1, c31);
+    rocke_value_t* sh = rocke_b_shl(b, c1, hi);
+    rocke_value_t* mh = rocke_b_sub(b, sh, c1);
+    rocke_value_t* sl = rocke_b_shl(b, c1, lo);
+    rocke_value_t* ml = rocke_b_sub(b, sl, c1);
+    rocke_value_t* neg = rocke_b_const_i32(b, -1);
+    rocke_value_t* nl = rocke_b_xor(b, ml, neg);
+    return rocke_b_to_sgpr_u32(b, rocke_b_land(b, mh, nl));
+}
+
+/* (z tap mask, y tap mask, input w) of the input row of output pixel m_val. */
+static void conv_xpd_pcoords(rocke_conv_build_ctx_t* ctx, rocke_value_t* m_val, rocke_value_t** pc)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *q_ho, *ho, *n_, *do_;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &q_ho, &ho);
+    rocke_conv_magic_divmod(
+        b, q_ho, ctx->p_magic_m_Do_mult, ctx->p_magic_m_Do_shift, ctx->p_Do, false, &n_, &do_);
+    rocke_value_t* ds = rocke_b_mul(b, do_, ctx->p_sD);
+    rocke_value_t* dd = rocke_b_sub(b, ds, ctx->p_pD);
+    pc[0] = conv_xpd_tap_mask(ctx, dd, ctx->p_Di);
+    rocke_value_t* hs = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* hh = rocke_b_sub(b, hs, ctx->p_pH);
+    pc[1] = conv_xpd_tap_mask(ctx, hh, ctx->p_Hi);
+    pc[2] = rocke_b_to_sgpr_u32(b, rocke_b_sub(b, wo, ctx->p_pW));
+}
+
+/* A rsrc of a DMA list whose rows have tap masks (zm, ym) at step st:
+ * zero-size when that tap's input plane / row is outside. */
+static rocke_value_t* conv_xpd_rsrc(rocke_conv_build_ctx_t* ctx,
+                                    const conv_xpd_t* xp,
+                                    rocke_value_t* zm,
+                                    rocke_value_t* ym,
+                                    rocke_value_t* const* st)
+{
+    if(!xp->on)
+        return ctx->a_rsrc;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* zs = rocke_b_lshr(b, zm, st[2]);
+    rocke_value_t* ys = rocke_b_lshr(b, ym, st[1]);
+    rocke_value_t* a = rocke_b_land(b, zs, ys);
+    rocke_value_t* a1 = rocke_b_land(b, a, ctx->uk_c1);
+    rocke_value_t* ok = rocke_b_cmp_ne(b, a1, c0);
+    rocke_value_t* nb = rocke_b_to_sgpr_u32(b, rocke_b_select(b, ok, xp->a_nb, c0));
+    return rocke_b_buffer_rsrc(b, xp->a_ptr_b, nb);
+}
+
+/* lane of range row rel: input column w + rel outside -> out of range */
+static rocke_value_t* conv_xpd_wmask(rocke_conv_build_ctx_t* ctx,
+                                     rocke_value_t* w,
+                                     rocke_value_t* rel,
+                                     rocke_value_t* voff,
+                                     rocke_value_t* c_oob)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* wr = rocke_b_add(b, w, rel);
+    return rocke_b_select(b, rocke_b_cmp_ult(b, wr, ctx->p_Wi), voff, c_oob);
+}
+
 static void conv_xh_hint_interleave(
     rocke_ir_builder_t* b, int n_first, int n_other, int other, int n_mf, int per)
 {
@@ -1896,6 +1981,7 @@ typedef struct
     int n_bdma;
     bool bcheap;
     rocke_value_t** base_rows;
+    conv_xpd_t xp;
 } conv_xy_t;
 
 /* An x-halo DMA destination: a fixed LDS address, or (kind, constant segment,
@@ -1948,15 +2034,28 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
     int nc = 0;
     conds[nc++] = uk_ok_;
     conds[nc++] = rocke_b_cmp_le(b, span, c_R);
-    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pD, c0);
-    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pH, c0);
-    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pW, c0);
+    if(!spec->xh_pad)
+    {
+        /* xh_pad: the DMA loop masks the padding itself */
+        conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pD, c0);
+        conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pH, c0);
+        conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pW, c0);
+    }
     conds[nc++] = rocke_b_cmp_eq(b, ctx->p_sW, c1);
     conds[nc++] = rocke_b_cmp_eq(b, ctx->p_dW, c1);
     conds[nc++] = rocke_b_cmp_eq(b, ctx->p_X, c_XT);
     conds[nc++] = rocke_b_cmp_eq(b, s_hi, rocke_b_mul(b, ctx->p_Wi, s_wi));
     conds[nc++] = rocke_b_cmp_eq(b, s_di, rocke_b_mul(b, ctx->p_Hi, s_hi));
     conds[nc++] = rocke_b_cmp_eq(b, s_n, rocke_b_mul(b, ctx->p_Di, s_di));
+    if(spec->xh_pad)
+    {
+        /* the DMA loop's tap masks: dilation 1 on D / H, < 32 taps */
+        rocke_value_t* c32 = rocke_b_const_i32(b, 32);
+        conds[nc++] = rocke_b_cmp_eq(b, ctx->p_dH, c1);
+        conds[nc++] = rocke_b_cmp_eq(b, ctx->p_dD, c1);
+        conds[nc++] = rocke_b_cmp_lt(b, ctx->p_Y, c32);
+        conds[nc++] = rocke_b_cmp_lt(b, ctx->p_Z, c32);
+    }
     if(spec->xh_stride_m)
     {
         rocke_value_t* md = rocke_b_mod(b, ctx->p_Wo, rocke_b_const_i32(b, mfmas_m));
@@ -2312,13 +2411,30 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
     rocke_value_t* A_addr = rocke_b_smem_addr_of(b, ctx->A_smem);
     rocke_value_t* B_addr = rocke_b_smem_addr_of(b, ctx->B_smem);
     const rocke_type_t* i64 = rocke_i64();
+    conv_xpd_t xp = {spec->xh_pad, NULL, NULL};
+    if(xp.on)
+    {
+        /* A buffer base moved down by the pad offset, so the wave ranges' lane
+         * offsets (from lin_of, no pad term) and the tap offsets stay >= 0. */
+        rocke_value_t* bd = rocke_b_mul(b, ctx->p_pD, s_di);
+        rocke_value_t* bh = rocke_b_mul(b, ctx->p_pH, s_hi);
+        rocke_value_t* bdh = rocke_b_add(b, bd, bh);
+        rocke_value_t* bw = rocke_b_mul(b, ctx->p_pW, s_wi);
+        rocke_value_t* bias = rocke_b_mul(b, rocke_b_add(b, bdh, bw), c_eb);
+        rocke_value_t* nbias = rocke_b_sext(b, rocke_b_sub(b, c0, bias), i64);
+        xp.a_ptr_b = rocke_b_global_ptr_offset(b, ctx->A, nbias);
+        xp.a_nb = rocke_b_add(b, ctx->A_bytes, bias);
+    }
 
     conv_dma_t a_dma[64];
     int n_adma = 0;
+    rocke_value_t* pc_w[3] = {NULL, NULL, NULL};
     {
         rocke_value_t* wq
             = rocke_b_mul(b, wave_, rocke_b_const_i32(b, spec->tile_m / spec->warp_m));
         rocke_value_t* w_m0 = rocke_b_add(b, m0, wq);
+        if(xp.on)
+            conv_xpd_pcoords(ctx, w_m0, pc_w);
         rocke_value_t* a_base_w = rocke_b_mul(b, conv_xh_lin_of(ctx, w_m0), s_wi);
         if(u->a_gbase != NULL)
             a_base_w = rocke_b_add(b, a_base_w, u->a_gbase);
@@ -2352,6 +2468,11 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
                 rocke_value_t* rr = rocke_b_add(b, rel0, rocke_b_const_i32(b, 4 * j));
                 rocke_value_t* okr = rocke_b_cmp_lt(b, rr, rocke_b_const_i32(b, hp));
                 voff = rocke_b_select(b, okr, voff, c_oob);
+            }
+            if(xp.on)
+            {
+                rocke_value_t* rr = rocke_b_add(b, rel0, rocke_b_const_i32(b, 4 * j));
+                voff = conv_xpd_wmask(ctx, pc_w[2], rr, voff, c_oob);
             }
             rocke_value_t* sb = rocke_b_mul(b, sg, rocke_b_const_i32(b, 4 * row_bytes));
             rocke_value_t* lds = rocke_b_smem_ptr_add(b, A_addr, rocke_b_zext(b, sb, i64));
@@ -2450,6 +2571,7 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         y.n_bdma = n_bdma;
         y.bcheap = bcheap;
         y.base_rows = base_rows;
+        y.xp = xp;
         return conv_xh_yring(&y, accs_in, out_accs);
     }
     /* prologue: dma(st0) under xh_ok */
@@ -2460,9 +2582,9 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         conv_xh_uniforms(x, st0, &ao, &bo, &to);
         rocke_value_t* sa = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ao, c_eb));
         rocke_value_t* sb = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, bo, c_eb));
+        rocke_value_t* a_rs = xp.on ? conv_xpd_rsrc(ctx, &xp, pc_w[0], pc_w[1], st0) : ctx->a_rsrc;
         for(int i = 0; i < n_adma; ++i)
-            rocke_b_async_buffer_load_lds_addr(
-                b, ctx->a_rsrc, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
+            rocke_b_async_buffer_load_lds_addr(b, a_rs, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
         for(int i = 0; i < n_bdma; ++i)
             rocke_b_async_buffer_load_lds_addr(
                 b, ctx->b_rsrc, b_dma[i].lds, b_dma[i].voff, sb, 1, 0);
@@ -2572,9 +2694,9 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         conv_xh_uniforms(x, sel, &ao, &bo, &to);
         rocke_value_t* sa = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ao, c_eb));
         rocke_value_t* sb = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, bo, c_eb));
+        rocke_value_t* a_rs = conv_xpd_rsrc(ctx, &xp, pc_w[0], pc_w[1], sel);
         for(int i = 0; i < na_pre; ++i)
-            rocke_b_async_buffer_load_lds_addr(
-                b, ctx->a_rsrc, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
+            rocke_b_async_buffer_load_lds_addr(b, a_rs, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
         rocke_value_t* acc[ROCKE_CONV_MAX_ACCS];
         for(int i = 0; i < n_acc; ++i)
             acc[i] = iv[i];
@@ -2604,8 +2726,7 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         }
         rocke_b_sync_lds_only_fence(b, "compiler");
         for(int i = na_pre; i < n_adma; ++i)
-            rocke_b_async_buffer_load_lds_addr(
-                b, ctx->a_rsrc, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
+            rocke_b_async_buffer_load_lds_addr(b, a_rs, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
         for(int i = 0; i < n_bdma; ++i)
             rocke_b_async_buffer_load_lds_addr(
                 b, ctx->b_rsrc, b_dma[i].lds, b_dma[i].voff, sb, 1, 0);
@@ -2690,6 +2811,19 @@ static rocke_value_t*
         return rocke_b_smem_ptr_add(b, y->A_addr, rocke_b_zext(b, rocke_b_mul(b, seg, c_seg), i64));
     };
     rocke_value_t* a_base_w = a_base_of(rocke_b_mul(b, wave_, rocke_b_const_i32(b, WEXT)));
+    /* xh_pad: tap masks / input w of each list's rows (own, ring row R - 1); the
+     * z mask is the tile's (whole tiles per plane), shared by every list. */
+    const conv_xpd_t* xp = &y->xp;
+    rocke_value_t* pc_own[3] = {NULL, NULL, NULL};
+    rocke_value_t* pc_ring[8][3];
+    if(xp->on)
+    {
+        rocke_value_t* wo_ = rocke_b_mul(b, wave_, rocke_b_const_i32(b, WEXT));
+        conv_xpd_pcoords(ctx, rocke_b_add(b, m0, wo_), pc_own);
+        for(int cw = 0; cw < QQ; ++cw)
+            conv_xpd_pcoords(
+                ctx, rocke_b_add(b, m0, rocke_b_const_i32(b, ((RR - 1) * QQ + cw) * WEXT)), pc_ring[cw]);
+    }
     conv_xdst_t own[64];
     int n_own = 0;
     for(int j = 0; j < NSEG; ++j)
@@ -2702,6 +2836,11 @@ static rocke_value_t*
         {
             rocke_value_t* rr = rocke_b_add(b, lp_rel[j % 4], rocke_b_const_i32(b, 4 * j));
             voff = rocke_b_select(b, rocke_b_cmp_lt(b, rr, c_hp), voff, y->c_oob);
+        }
+        if(xp->on)
+        {
+            rocke_value_t* rr = rocke_b_add(b, lp_rel[j % 4], rocke_b_const_i32(b, 4 * j));
+            voff = conv_xpd_wmask(ctx, pc_own[2], rr, voff, y->c_oob);
         }
         own[n_own++] = {'o', j, NULL, NULL, voff};
     }
@@ -2739,6 +2878,12 @@ static rocke_value_t*
                 rocke_value_t* ok = rocke_b_land(b, l1, rocke_b_cmp_lt(b, rj, c_hp));
                 voff = rocke_b_select(b, ok, voff, y->c_oob);
             }
+            if(xp->on)
+            {
+                rocke_value_t* j4b = rocke_b_mul(b, j_s, rocke_b_const_i32(b, 4));
+                rocke_value_t* rj = rocke_b_add(b, rel_v, j4b);
+                voff = conv_xpd_wmask(ctx, pc_ring[cw][2], rj, voff, y->c_oob);
+            }
             ring_v[n_ring] = voff;
             ring_cw[n_ring] = cw;
             ring_i[n_ring] = i;
@@ -2774,6 +2919,7 @@ static rocke_value_t*
     conv_xdst_t own2[64];
     int n_own2 = 0;
     rocke_value_t* uu = NULL;
+    rocke_value_t* pc_u[3] = {NULL, NULL, NULL};
     if(early)
     {
         int lg0 = 0;
@@ -2786,6 +2932,11 @@ static rocke_value_t*
         rocke_value_t* wq = rocke_b_land(b, wave_, rocke_b_const_i32(b, QQ - 1));
         uu = rocke_b_to_sgpr_u32(b, rocke_b_add(b, mq, wq));
         rocke_value_t* a_base_u = a_base_of(rocke_b_mul(b, uu, rocke_b_const_i32(b, WEXT)));
+        if(xp->on)
+        {
+            rocke_value_t* uo = rocke_b_mul(b, uu, rocke_b_const_i32(b, WEXT));
+            conv_xpd_pcoords(ctx, rocke_b_add(b, m0, uo), pc_u);
+        }
         for(int j = 0; j < NSEG; ++j)
         {
             rocke_value_t* r4 = rocke_b_mul(b, rocke_b_const_i32(b, 4 * j), s_wi);
@@ -2796,6 +2947,11 @@ static rocke_value_t*
             {
                 rocke_value_t* rr = rocke_b_add(b, lp_rel[j % 4], rocke_b_const_i32(b, 4 * j));
                 voff = rocke_b_select(b, rocke_b_cmp_lt(b, rr, c_hp), voff, y->c_oob);
+            }
+            if(xp->on)
+            {
+                rocke_value_t* rr = rocke_b_add(b, lp_rel[j % 4], rocke_b_const_i32(b, 4 * j));
+                voff = conv_xpd_wmask(ctx, pc_u[2], rr, voff, y->c_oob);
             }
             own2[n_own2++] = {'u', j, NULL, NULL, voff};
         }
@@ -2868,7 +3024,12 @@ static rocke_value_t*
         conv_xh_uniforms(x, st0, &ao, &bo, &to);
         rocke_value_t* sa0 = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ao, c_eb));
         rocke_value_t* sb0 = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, bo, c_eb));
-        issue(own, n_own, ctx->a_rsrc, NULL, sa0, c0);
+        issue(own,
+              n_own,
+              conv_xpd_rsrc(ctx, xp, xp->on ? pc_ring[0][0] : NULL, pc_own[1], st0),
+              NULL,
+              sa0,
+              c0);
         issue(b_lazy, n_blazy, ctx->b_rsrc, y->B_addr, sb0, c0);
         rocke_b_region_leave(b);
     }
@@ -2960,6 +3121,7 @@ static rocke_value_t*
                     d->nb = sb_->nb;
                 }
             rocke_value_t* sel[3];
+            rocke_value_t* a_rs;
             conv_xdst_t* a_list;
             int n_alist;
             if(yy == XT - 1)
@@ -2970,6 +3132,7 @@ static rocke_value_t*
                     sel[i] = rocke_b_select(b, hn, st1[i], st[i]);
                 a_list = own;
                 n_alist = n_own;
+                a_rs = conv_xpd_rsrc(ctx, xp, xp->on ? pc_ring[0][0] : NULL, pc_own[1], sel);
             }
             else
             {
@@ -2977,6 +3140,8 @@ static rocke_value_t*
                     sel[i] = st1[i];
                 a_list = ring[yy];
                 n_alist = n_rl[yy];
+                a_rs = conv_xpd_rsrc(
+                    ctx, xp, xp->on ? pc_ring[0][0] : NULL, xp->on ? pc_ring[0][1] : NULL, sel);
             }
             rocke_value_t *ao, *bo, *to;
             conv_xh_uniforms(x, sel, &ao, &bo, &to);
@@ -2990,7 +3155,12 @@ static rocke_value_t*
                 rocke_b_s_waitcnt(b, -1, XT * mfmas_n, -1);
                 n_pre = n_own2;
                 n_alist = 0;
-                issue(own2, n_own2, ctx->a_rsrc, NULL, sa, z0);
+                issue(own2,
+                      n_own2,
+                      conv_xpd_rsrc(ctx, xp, xp->on ? pc_ring[0][0] : NULL, pc_u[1], sel),
+                      NULL,
+                      sa,
+                      z0);
             }
             rocke_value_t* acc[ROCKE_CONV_MAX_ACCS];
             for(int i = 0; i < n_acc; ++i)
@@ -3020,7 +3190,7 @@ static rocke_value_t*
                     b, 0, n_pre, ROCKE_SCHED_VMEM_READ, n_pre_mf, per > 1 ? per : 1);
             }
             rocke_b_sync_lds_only_fence(b, "compiler");
-            issue(a_list, n_alist, ctx->a_rsrc, NULL, sa, z0);
+            issue(a_list, n_alist, a_rs, NULL, sa, z0);
             issue(b_lazy, n_blazy, ctx->b_rsrc, y->B_addr, sb, z0);
             run_mf(n_pre_mf, XT * n_mf);
             {
