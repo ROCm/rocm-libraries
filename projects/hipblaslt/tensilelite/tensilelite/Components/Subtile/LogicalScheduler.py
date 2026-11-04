@@ -287,8 +287,8 @@ class SchedulerConfig:
     # epoch so the first steady-state wrap has a producer.
     uniformPgrEpoch: bool = False
     # Maximum number of atomic A/B VMEM requests in each non-frontier uniform
-    # epoch cohort, and in the partition-zero overwrite cohort.  The chunk is
-    # not reduced to a partition's MFMA count.
+    # epoch cohort, and in the partition-zero overwrite cohort.  A non-frontier
+    # chunk is also limited to the smallest non-frontier partition's MFMA count.
     uniformEpochVmemCohortSize: int = 5
     # Physical traversal of the 2-D partition grid.  "m-major" preserves the
     # legacy order (M varies fastest).  "n-major" visits the 2x2 grid as
@@ -2021,11 +2021,15 @@ class LogicalScheduler:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
                 rel = 0
             elif cfg.uniformPgrEpoch:
-                # Bound each non-frontier cohort by the configured size.  The
-                # frontier receives the remainder immediately before its epoch
-                # wait.  Do not shrink the chunk to a small partition's MFMA
-                # count; that moves the scale request across the wait.
-                nonfrontier_chunk = cfg.uniformEpochVmemCohortSize
+                # Bound each non-frontier cohort by the configured size, and
+                # further by the smallest non-frontier partition.  The frontier
+                # receives the remainder immediately before its epoch wait.
+                nonfrontier_chunk = max(
+                    1,
+                    min(cfg.uniformEpochVmemCohortSize, min(
+                        mfma_per_partition[s // numK]
+                        for s in dist_slots[:-1]
+                    ))) if len(dist_slots) > 1 else nAtoms
                 rel = min(i // nonfrontier_chunk, len(dist_slots) - 1)
             else:
                 rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
