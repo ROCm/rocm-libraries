@@ -752,20 +752,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         iter_meta_count = 0;
     }
 
-    if(have_iter_meta)
+    /* result types must match init types */
     {
-        if(iter_meta_count != num_iter_inits)
-        {
-            v_errf(v,
-                   op,
-                   "scf.for: %d iter_args declared but %d init operands",
-                   iter_meta_count,
-                   num_iter_inits);
-        }
-        if(op->num_results != num_iter_inits)
-        {
-            v_errf(v, op, "scf.for: %d results but %d iter-args", op->num_results, num_iter_inits);
-        }
         int lim = op->num_results < num_iter_inits ? op->num_results : num_iter_inits;
         for(int i = 0; i < lim; ++i)
         {
@@ -777,6 +765,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             }
         }
     }
+    /* The counts of carried values and the body's yields: one rule for the
+     * verifier and every lowering. */
     {
         char loop_error[ROCKE_ERR_MSG_CAP];
         if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
@@ -791,12 +781,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
-        /* iv type comes from the operands' lower type per Python only for the
-         * yield check; for scope we register iv with its declared iv_type. The
-         * Python body scope uses Type(iv_type); type identity does not feed
-         * further checks beyond presence, so use lower's type as a stand-in is
-         * NOT done -- register with lower (operands share type). Use iv_type if
-         * resolvable to a scalar singleton, else lower. */
+        /* Register iv with its iv_type when that is a scalar, else with the
+         * loop bound type. */
         const char* ivt = rocke_attr_get_str(&op->attrs, "iv_type");
         const rocke_type_t* t = ivt ? rocke_scalar_by_name(ivt) : NULL;
         if(!t)
@@ -838,41 +824,6 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     const rocke_region_t* body = op->regions[0];
     check_region(v, body, 0);
     v->loop_name_count = enclosing_loop_names;
-
-    /* body should end in scf.yield matching iter-arg types (if any iter-args) */
-    if(num_iter_inits > 0)
-    {
-        if(body->num_ops == 0 || body->ops[body->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
-        {
-            v_errf(v, op, "scf.for with iter-args: body must end in scf.yield");
-        }
-        else
-        {
-            const rocke_op_t* yld = body->ops[body->num_ops - 1];
-            if(yld->num_operands != num_iter_inits)
-            {
-                v_errf(v,
-                       yld,
-                       "scf.yield yields %d values but loop carries %d iter-args",
-                       yld->num_operands,
-                       num_iter_inits);
-            }
-            else
-            {
-                for(int i = 0; i < num_iter_inits; ++i)
-                {
-                    if(!rocke_type_eq(yld->operands[i]->type, op->operands[3 + i]->type))
-                    {
-                        v_errf(v,
-                               yld,
-                               "scf.yield type %s != iter-arg type %s",
-                               tn(yld->operands[i]->type),
-                               tn(op->operands[3 + i]->type));
-                    }
-                }
-            }
-        }
-    }
 
     v->scope_count = saved; /* drop body scope */
 }
