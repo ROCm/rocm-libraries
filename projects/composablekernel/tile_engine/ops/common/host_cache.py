@@ -106,7 +106,8 @@ class HostCache:
 def run_cache(settings, log=print):
     """A ``HostCache`` for the run's workers, from ``settings`` (the search's
     ``HostCacheSettings``), removed on exit with one ``log`` line; None when
-    ``max_total_gib`` is 0."""
+    ``max_total_gib`` is 0. A filesystem already under ``MIN_FREE_FRACTION``
+    free can store no entry: the run then starts with a warning line."""
     if settings.max_total_gib == 0:
         yield None
         return
@@ -114,6 +115,12 @@ def run_cache(settings, log=print):
     cache = HostCache(settings.dir, int(settings.max_entry_gib * GIB),
                       None if total is None else int(total * GIB))
     try:
+        disk = shutil.disk_usage(cache.dir)
+        if disk.free <= MIN_FREE_FRACTION * disk.total:
+            log(f"  Host cache: WARNING: stores nothing: {disk.free / GIB:.1f} of "
+                f"{disk.total / GIB:.1f} GiB free under {cache.dir.parent}, and a write "
+                f"must leave {MIN_FREE_FRACTION:.0%} free; set host_cache.dir to a tmpfs "
+                "or another filesystem")
         yield cache
     finally:
         entries, size = cache.close()

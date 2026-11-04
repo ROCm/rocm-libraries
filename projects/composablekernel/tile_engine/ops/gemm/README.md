@@ -246,7 +246,7 @@ number of problems (the warm-started runs built about 45 kernels per problem).
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
 | `measurement_policy` | `full` | the only value |
-| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" below |
+| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache: on a filesystem already over 90% full nothing is stored, and the run warns. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" and "Host cache space" below |
 
 Unknown keys are an error; relative warm-start and `host_cache.dir` paths are
 read from the settings file's directory.
@@ -388,31 +388,48 @@ and B, the reference and its maximum as `.npy` files: one entry per key (the
 problem, dtype, layout, fp8 format and input seed), written under a temp name
 and renamed into place, so concurrent workers on any device read a complete
 entry or none. Later calls only load them and compare: 0.37 s and 0.06 s for
-the two shapes above. Measured end to end on MI350X (gfx950), a search's
-measurement call (worker start, host side and kernel) took 0.34 s instead of
-0.62 s on the replay's 8 fp16 `rcr` shapes (1.8x) and 5.75 s instead of 17.2 s
-on 4 large bf16 `crr` shapes (3.0x), with the same verify outcomes and
-latencies. Each entry is the fp32 reference (4*M*N bytes) plus the encoded A
-and B: those 4 shapes took 10.8 GiB, the two 98304x9600 ones about 3.7 GiB
-each, close to the 4 GiB `max_entry_gib` default, so size `max_entry_gib`,
-`max_total_gib` and the free space of `dir` for a run's largest problems. A
-key has one writer: workers that miss it while another writes it (a problem's
-first round on several devices) compute their own copy and do not store it,
-and each writer reserves its entry's size under a lock before writing, so the
-caps and the 10%-free guard hold however many workers miss at once. A worker
-killed while it writes (its call timed out) keeps its reservation, and that
-problem computes on every call for the rest of the run. An entry holds what
-each worker would compute itself, so verification results are the same with or
-without it. The directory goes when the run ends (the run prints its entries
-and size), also on an error, Ctrl-C or SIGTERM; a run killed with SIGKILL
-leaves its `ck_search_host_cache-*` directory behind. A tmpfs such as
-`/dev/shm` is faster but holds the entries in RAM. Storing needs POSIX file
-locks (`fcntl`); without them every call computes.
+the two shapes above. Measured end to end on a full MI350X (gfx950), with
+`dir` on `/dev/shm` (a tmpfs) and `max_total_gib` 12, a search's measurement
+call (worker start, host side and kernel) took 0.34 s instead of 0.62 s on the
+replay's 8 fp16 `rcr` shapes (1.8x) and 5.75 s instead of 17.2 s on 4 large
+bf16 `crr` shapes (3.0x), with the same verify outcomes and latencies. Both
+are averages over the calls, each problem's first (uncached) call included:
+8 of 62 calls for the fp16 shapes, 4 of 8 for the large ones. The default
+`dir` was not measured: on that host its filesystem was too full to store
+anything (see "Host cache space" below). A key has one writer: workers that
+miss it while another writes it (a problem's first round on several devices)
+compute their own copy and do not store it, and each writer reserves its
+entry's size under a lock before writing, so the caps and the 10%-free guard
+hold however many workers miss at once. A worker killed while it writes (its
+call timed out) keeps its reservation, and that problem computes on every call
+for the rest of the run. An entry holds what each worker would compute itself,
+so verification results are the same with or without it. The directory goes
+when the run ends (the run prints its entries and size), also on an error,
+Ctrl-C or SIGTERM; a run killed with SIGKILL leaves its
+`ck_search_host_cache-*` directory behind. Storing needs POSIX file locks
+(`fcntl`); without them every call computes.
+
+Host cache space: an entry is the fp32 reference (4*M*N bytes) plus the
+encoded A and B ((M+N)*K elements), so a large-K problem needs GiB per entry:
+in bf16, 1.7 GiB for 256x768x874159 and 3.7 GiB for 98304x9600x1024, close to
+the 4 GiB `max_entry_gib` default. A write must also leave 10% of the whole
+filesystem of `dir` free, counting the entries still being written. On a large
+disk that is already over 90% full, that guard never passes (a 1.8 TB disk at
+93% has 134 GB free and would need 180 GB): nothing is stored, every call pays
+the full host cost, and the run starts with a `Host cache: WARNING: stores
+nothing` line (its closing `Host cache:` line then counts 0 entries). Point
+`host_cache.dir` at a tmpfs such as `/dev/shm` or at another filesystem with
+room, and size `max_total_gib` and `max_entry_gib` to the run's problems; an
+entry past either cap is not stored, and its problem computes on every call. A
+tmpfs is faster but holds the entries in RAM, so keep `max_total_gib` within
+the memory the build workers leave free.
 
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against
 the cap, measurements, active problems, elapsed time and deadline) and one
-title line per measure call, named like its `rounds/` file.
+title line per measure call, named like its `rounds/` file. A host cache that
+can store nothing (see "Host cache space") prints a `Host cache: WARNING` line
+before the first round.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`. If nearly every

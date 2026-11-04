@@ -1658,6 +1658,22 @@ def test_host_cache_concurrent_misses_hold_the_caps(tmp_path):
         assert race(cache, keys, free)[:2] == (2, 2)
 
 
+def test_host_cache_warns_when_its_filesystem_is_too_full(tmp_path, monkeypatch):
+    # Every write leaves 10% of the filesystem free, so on one already under
+    # that (a large, nearly full root disk) nothing is stored: the run says so.
+    disk = HC.shutil.disk_usage(tmp_path)
+    floor = math.ceil(disk.total * HC.MIN_FREE_FRACTION)
+    settings = AS.HostCacheSettings(str(tmp_path), 1.0, 1.0)
+    for free, full in ((floor - 1, True), (floor + 2**20, False)):
+        monkeypatch.setattr(HC.shutil, "disk_usage", lambda p, f=free: disk._replace(free=f))
+        lines = []
+        with HC.run_cache(settings, lines.append) as cache:
+            assert [_cache_calls(cache.spec, {"k": 1})[1] for _ in range(2)] == [1, int(full)]
+        assert len(lines) == 1 + full and lines[-1].startswith("  Host cache: ")
+        assert lines[0].startswith("  Host cache: WARNING: stores nothing: ") == full
+        assert not full or f"under {tmp_path}, and a write must leave 10% free;" in lines[0]
+
+
 def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path):
     lines = []
     settings = AS.HostCacheSettings(str(tmp_path), 1.0, 1.0)
