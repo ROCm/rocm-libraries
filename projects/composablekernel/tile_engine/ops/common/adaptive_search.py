@@ -34,9 +34,11 @@ import json
 import math
 import os
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -70,7 +72,7 @@ SEED_POLICIES = ("shared", "per_problem")
 MEASUREMENT_POLICIES = ("full",)
 PRIOR_STRATEGIES = ("tpe", "gp", "portfolio")  # the strategies that read a prior
 NO_WARM_STRATEGIES = ("random", "exhaustive")  # the strategies that ignore warm starts
-EXIT_OK, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
+EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_INTERRUPTED = 0, 1, 2, 130
 OUTPUT_FILES = ("run.json", "trials.jsonl", "winners.json", "summary.json")
 _DISPATCHER_PY = Path(__file__).resolve().parents[3] / "dispatcher" / "python"
 
@@ -460,20 +462,28 @@ def _dumps(obj, indent=None) -> str:
 
 class RunWriter:
     """The run's output directory: trials.jsonl is appended and flushed event by
-    event; the JSON files are written atomically (temp file + rename)."""
+    event; the JSON files are written atomically (temp file + rename). The
+    first write that fails raises its OSError and is kept in ``failed``; every
+    later write is skipped, so the error path cannot fail the same way again."""
 
     def __init__(self, out_dir):
         self.out_dir = Path(out_dir)
         self._fh = None
         self._seq = 0
+        self.failed = ""
 
     def check_fresh(self) -> None:
-        # The directory, or else its nearest existing parent, must be a directory.
+        # The directory, or else its nearest existing parent, must be a
+        # directory the run can write in.
         near = next((p for p in (self.out_dir, *self.out_dir.parents) if p.exists()),
                     None)
         if near is not None and not near.is_dir():
             raise SettingsError(
                 f"search output dir {self.out_dir}: {near} is not a directory"
+            )
+        if near is not None and not os.access(near, os.W_OK | os.X_OK):
+            raise SettingsError(
+                f"search output dir {self.out_dir}: {near} is not writable"
             )
         old = [n for n in OUTPUT_FILES if (self.out_dir / n).exists()]
         if old:
@@ -482,7 +492,19 @@ class RunWriter:
                 "use a new directory"
             )
 
+    def _guard(self, fn, *args):
+        if self.failed:
+            return None
+        try:
+            return fn(*args)
+        except OSError as e:
+            self.failed = f"cannot write {self.out_dir}: {e}"
+            raise
+
     def event(self, kind: str, **fields) -> None:
+        self._guard(self._event, kind, fields)
+
+    def _event(self, kind, fields) -> None:
         if self._fh is None:
             self.out_dir.mkdir(parents=True, exist_ok=True)
             self._fh = open(self.out_dir / "trials.jsonl", "a")
@@ -490,7 +512,10 @@ class RunWriter:
         self._fh.write(_dumps({"seq": self._seq, "event": kind, **fields}) + "\n")
         self._fh.flush()
 
-    def write_json(self, name: str, data) -> Path:
+    def write_json(self, name: str, data) -> Optional[Path]:
+        return self._guard(self._write_json, name, data)
+
+    def _write_json(self, name, data) -> Path:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / name
         tmp = path.with_name(f".{name}.tmp")
@@ -503,8 +528,11 @@ class RunWriter:
 
     def close(self) -> None:
         if self._fh is not None:
-            self._fh.close()
-            self._fh = None
+            fh, self._fh = self._fh, None
+            try:
+                fh.close()
+            except OSError:
+                pass
 
 
 # -------------------------------------------------------------- coordinator
@@ -513,7 +541,9 @@ class RunWriter:
 @dataclass(frozen=True)
 class RunSummary:
     status: str  # complete | partial | no_winner
-    exit_code: int  # 0 only when complete: every problem has a winner, no error
+    # 0 only when complete (every problem has a winner, no error); 130 when
+    # interrupted
+    exit_code: int
     stop_reason: str
     winners: Dict[str, str]
     unresolved: Dict[str, str]
@@ -539,6 +569,10 @@ def _checked(outcome: PairOutcome):
     if not valid_latency(lat):
         return "invalid_measurement", None, f"ok with latency {lat!r} {diag}".strip()
     return status, float(lat), diag
+
+
+def _join(error: str, more: str) -> str:
+    return f"{error}; {more}" if error else more
 
 
 def _load_warm(path, loader, what: str, loader_name: str):
@@ -681,29 +715,50 @@ class SearchCoordinator:
             try:
                 self._setup()
                 stop = self._search() if self.problems else "no_problems"
+            except KeyboardInterrupt:  # SIGINT, or SIGTERM through run_search
+                stop, error = "interrupted", self._interrupted("search")
             except Exception as e:  # noqa: BLE001 - recorded, the run exits 1
                 error, broken = self._error(e), isinstance(e, ContractError)
             for p in self.problems:  # re-queued trials that never ran again
                 for t in p.requeue:
                     self.counts["cancelled"] += 1
-                    self._event("cancel", problem=p.key, trial_uid=t.uid,
-                                diag="search stopped before re-admission")
-            if not broken:  # what was measured before an error is still confirmed
+                    self._note("cancel", problem=p.key, trial_uid=t.uid,
+                               diag="search stopped before re-admission")
+            # What was measured before an error is still confirmed, unless the
+            # adapter broke its contract, the run was interrupted or its output
+            # dir failed (nothing could be exported).
+            if not (broken or stop == "interrupted" or self.writer.failed):
                 try:
                     winners = self._confirm(stop)
+                except KeyboardInterrupt:
+                    stop, winners = "interrupted", {}
+                    error = _join(error, self._interrupted("confirmation"))
                 except Exception as e:  # noqa: BLE001 - recorded, the run exits 1
                     why = "confirmation: " + self._error(e)
-                    error = f"{error}; {why}" if error else why
+                    error = _join(error, why)
                     for p in self.problems:
                         self.unresolved.setdefault(p.key, why)
             return self._finish(winners, stop, error)
         finally:
             self.writer.close()
 
+    def _note(self, kind: str, **fields) -> None:
+        """``_event`` on the stop and error paths: a failed write is already
+        kept in ``writer.failed``, so it does not raise again here."""
+        try:
+            self._event(kind, **fields)
+        except OSError:
+            pass
+
     def _error(self, e: Exception) -> str:
         """Record ``e`` (an error event with its traceback); its message."""
         msg = str(e) if isinstance(e, AdapterError) else f"{type(e).__name__}: {e}"
-        self._event("error", message=msg, traceback=traceback.format_exc())
+        self._note("error", message=msg, traceback=traceback.format_exc())
+        return msg
+
+    def _interrupted(self, during: str) -> str:
+        msg = f"interrupted during the {during}: nothing confirmed"
+        self._note("error", message=msg, traceback=traceback.format_exc())
         return msg
 
     # ------------------------------------------------------------- setup
@@ -1076,6 +1131,54 @@ class SearchCoordinator:
 
     # ------------------------------------------------------- confirmation
 
+    def _status(self, winners, stop: str, error: str):
+        """(status, exit code, error); the error includes an output failure."""
+        if self.writer.failed and self.writer.failed not in error:
+            error = _join(error, self.writer.failed)
+        # A run that hit an error is never complete, even when its finalists
+        # were confirmed: the search did not run to its stop.
+        if self.problems and len(winners) == len(self.problems) and not error:
+            status = "complete"
+        else:
+            status = "partial" if winners else "no_winner"
+        exit_code = (EXIT_INTERRUPTED if stop == "interrupted"
+                     else EXIT_OK if status == "complete" else EXIT_FAIL)
+        return status, exit_code, error
+
+    def _write_outputs(self, winners, stop, error, status, exit_code, wall) -> None:
+        self._note("stop", stop_reason=stop, status=status)
+        if self._run_json is None:  # setup failed: still say what was asked
+            self.writer.write_json("run.json", {
+                "schema_version": SCHEMA_VERSION, "sampling_policy": "adaptive",
+                "exhaustive": False, "settings": self.settings.to_json(),
+                "error": error,
+            })
+        self.writer.write_json("winners.json", {k: [w["kernel"]] for k, w in winners.items()})
+        problems = {}
+        for p in self.problems:
+            best = min(p.best.items(), key=lambda kv: (kv[1][0], kv[0]), default=None)
+            problems[p.key] = {
+                "strategy": p.strategy_name or None,
+                "trials": self.ledger.trials.get(p.key, 0),
+                "ok": len(p.best), "finished": p.finished or stop,
+                # Unconfirmed: what discovery measured, e.g. before an interrupt.
+                "discovery_best": None if best is None else {
+                    "kernel": p.by_key[best[0]].kernel_name, "latency_ms": best[1][0]},
+            }
+        self.writer.write_json("summary.json", {
+            "status": status,
+            "exit_code": exit_code,
+            "stop_reason": stop,
+            "error": error,
+            "winners": winners,
+            "unresolved": self.unresolved,
+            "counts": self.counts,
+            "budget": self.ledger.to_json(),
+            "artifacts": self.registry.to_json(),
+            "problems": problems,
+            "wall_s": wall,
+        })
+
     def _confirm(self, stop: str) -> Dict[str, dict]:
         """Re-measure each problem's finalists with ``fresh_calls`` fresh verified
         calls. Call j of every surviving finalist goes into one adapter call, so
@@ -1141,40 +1244,14 @@ class SearchCoordinator:
         for p in self.problems:
             if p.key not in winners and p.key not in self.unresolved:
                 self.unresolved[p.key] = f"search ended: {stop}"
-        # A run that hit an error is never complete, even when its finalists
-        # were confirmed: the search did not run to its stop.
-        if self.problems and len(winners) == len(self.problems) and not error:
-            status = "complete"
-        else:
-            status = "partial" if winners else "no_winner"
-        exit_code = EXIT_OK if status == "complete" else EXIT_FAIL
         wall = self.ledger.elapsed()
-        self._event("stop", stop_reason=stop, status=status)
-        if self._run_json is None:  # setup failed: still say what was asked
-            self.writer.write_json("run.json", {
-                "schema_version": SCHEMA_VERSION, "sampling_policy": "adaptive",
-                "exhaustive": False, "settings": self.settings.to_json(),
-                "error": error,
-            })
-        self.writer.write_json("winners.json", {k: [w["kernel"]] for k, w in winners.items()})
-        self.writer.write_json("summary.json", {
-            "status": status,
-            "exit_code": exit_code,
-            "stop_reason": stop,
-            "error": error,
-            "winners": winners,
-            "unresolved": self.unresolved,
-            "counts": self.counts,
-            "budget": self.ledger.to_json(),
-            "artifacts": self.registry.to_json(),
-            "problems": {
-                p.key: {"strategy": p.strategy_name or None,
-                        "trials": self.ledger.trials.get(p.key, 0),
-                        "ok": len(p.best), "finished": p.finished or stop}
-                for p in self.problems
-            },
-            "wall_s": wall,
-        })
+        status, exit_code, error = self._status(winners, stop, error)
+        try:
+            self._write_outputs(winners, stop, error, status, exit_code, wall)
+        except OSError:  # kept in writer.failed: the outputs are incomplete
+            status, exit_code, error = self._status(winners, stop, error)
+        if self.writer.failed:
+            print(f"adaptive search: {self.writer.failed}", file=sys.stderr)
         return RunSummary(
             status=status, exit_code=exit_code, stop_reason=stop,
             winners={k: w["kernel"] for k, w in winners.items()},
@@ -1315,12 +1392,29 @@ def check_search_options(args, variant: str, conflicts=()) -> SearchSettings:
     return settings
 
 
+def _raise_interrupt(signum, frame):
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
+def _run_terminable(coordinator: SearchCoordinator) -> RunSummary:
+    """``coordinator.run()`` with SIGTERM (a batch system's time limit) raised
+    as KeyboardInterrupt, like Ctrl-C: the run still writes its summary."""
+    if threading.current_thread() is not threading.main_thread():
+        return coordinator.run()
+    old = signal.signal(signal.SIGTERM, _raise_interrupt)
+    try:
+        return coordinator.run()
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL if old is None else old)
+
+
 def run_search(adapter: OperationAdapter, settings: SearchSettings, out_dir,
                devices: Sequence[str], **loaders) -> int:
     """A driver's search mode: runs ``adapter``'s search into ``out_dir`` and
     prints its outcome. ``loaders`` are the coordinator's ``pair_loader`` and
     ``prior_loader``. Returns the exit code: 0 when every problem has a
-    confirmed winner, 1 otherwise, 2 for invalid options."""
+    confirmed winner, 1 otherwise, 2 for invalid options, 130 when interrupted
+    (SIGINT or SIGTERM)."""
     bar = "=" * 80
     print(f"\n{bar}\nAdaptive search: {settings.strategy}, "
           f"{settings.trials_per_problem} trials per problem, at most "
@@ -1333,7 +1427,7 @@ def run_search(adapter: OperationAdapter, settings: SearchSettings, out_dir,
     except SettingsError as e:
         print(f"  ERROR: {e}")
         return EXIT_USAGE
-    s = coordinator.run()
+    s = _run_terminable(coordinator)
     n = len(s.winners) + len(s.unresolved)
     print(f"\n{bar}\nSEARCH {s.status.upper()}: {len(s.winners)}/{n} problems with a "
           f"confirmed winner (stopped: {s.stop_reason})\n{bar}")

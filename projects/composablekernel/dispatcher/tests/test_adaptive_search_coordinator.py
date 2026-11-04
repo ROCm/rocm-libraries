@@ -18,6 +18,8 @@ import hashlib
 import itertools
 import json
 import math
+import os
+import signal
 import subprocess
 import sys
 from dataclasses import replace
@@ -704,6 +706,97 @@ def test_output_dir_that_is_a_file_is_refused(tmp_path, out):
     (tmp_path / "out").write_text("")
     with pytest.raises(AS.SettingsError, match="not a directory"):
         AS.RunWriter(tmp_path / out).check_fresh()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes anywhere")
+@pytest.mark.parametrize("out", ["ro", "ro/run", "ro/run/sub"])
+def test_output_dir_without_write_access_is_refused(tmp_path, out):
+    (tmp_path / "ro").mkdir(mode=0o555)
+    with pytest.raises(AS.SettingsError, match="ro is not writable"):
+        AS.RunWriter(tmp_path / out).check_fresh()
+
+
+class _FullDisk:
+    """A trials.jsonl handle on a full disk."""
+
+    def write(self, text):
+        raise OSError(28, "No space left on device")
+
+    def flush(self):
+        pass
+
+    def close(self):
+        raise OSError(28, "No space left on device")
+
+
+def test_output_dir_failing_mid_run_ends_with_a_summary_not_a_traceback(
+        tmp_path, capsys):
+    # The first failed write ends the search as an error; recording that error,
+    # the confirmation and the final files are skipped instead of failing again.
+    ad = FakeAdapter({"P1": ABCD})
+    co = AS.SearchCoordinator(ad, settings(), tmp_path / "out", clock=FakeClock(),
+                              strategy_factory=scripted({"P1": [["A"], ["B"]]})[0])
+    real = ad.measure_pairs
+
+    def measure(requests):
+        co.writer._fh = _FullDisk()
+        return real(requests)
+
+    ad.measure_pairs = measure
+    s = co.run()
+    assert (s.stop_reason, s.status, s.exit_code) == ("error", "no_winner", 1)
+    assert "No space left on device" in s.error and "cannot write" in s.error
+    assert ad.confirmed == [] and len(ad.measured) == 1
+    assert not (tmp_path / "out" / "summary.json").exists()
+    assert "cannot write" in capsys.readouterr().err
+
+
+class Interrupting(FakeAdapter):
+    """Ctrl-C during round 2's build, or during the first confirmation call."""
+
+    def __init__(self, problems, when):
+        super().__init__(problems)
+        self.when = when
+
+    def build_missing(self, cands):
+        if self.when == "search" and self.builds:
+            raise KeyboardInterrupt
+        return super().build_missing(cands)
+
+    def confirm(self, requests):
+        if self.when == "confirmation":
+            raise KeyboardInterrupt
+        return super().confirm(requests)
+
+
+@pytest.mark.parametrize("when", ["search", "confirmation"])
+def test_interrupt_writes_the_summary_and_exits_130(tmp_path, when):
+    ad = Interrupting({"P1": ABCD, "P2": ABCD}, when)
+    s, _, _ = run(tmp_path, ad, {"P1": [["A"], ["B"]], "P2": [["C"], ["D"]]})
+    assert (s.stop_reason, s.exit_code, s.winners) == ("interrupted", 130, {})
+    assert f"interrupted during the {when}" in s.error
+    out = tmp_path / "out"
+    summary = strict(out / "summary.json")
+    assert (summary["status"], summary["exit_code"]) == ("no_winner", 130)
+    assert strict(out / "winners.json") == {}
+    # The discovery results are kept, unconfirmed, for a rerun or a --pairs list.
+    assert {k: p["discovery_best"]["kernel"] for k, p in summary["problems"].items()
+            } == {"P1": "A", "P2": "C"}
+    assert events(out, "stop")[-1]["stop_reason"] == "interrupted"
+    assert ad.confirmed == [] or when == "confirmation"
+
+
+def test_run_search_turns_sigterm_into_an_interrupt(tmp_path, capsys):
+    class Terminated(FakeAdapter):
+        def measure_pairs(self, requests):
+            os.kill(os.getpid(), signal.SIGTERM)  # a batch system's time limit
+            return super().measure_pairs(requests)
+
+    before = signal.getsignal(signal.SIGTERM)
+    rc = AS.run_search(Terminated({"P1": ABCD}), settings(), tmp_path / "out", ["0"])
+    assert rc == 130 and signal.getsignal(signal.SIGTERM) is before
+    assert strict(tmp_path / "out" / "summary.json")["stop_reason"] == "interrupted"
+    assert "SEARCH NO_WINNER" in capsys.readouterr().out
 
 
 def _ended_by_error(tmp_path, s, message):

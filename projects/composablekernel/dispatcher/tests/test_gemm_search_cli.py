@@ -163,8 +163,11 @@ def test_run_without_search_is_unchanged_and_loads_no_search_module(
     (["--search-config", "{BAD}", "--search-output-dir", "{O}"], "unknown key"),
     (["--search-config", "{S}", "--search-output-dir", "{OLD}"], "already holds a run"),
     (["--search-config", "{S}", "--search-output-dir", "{FILE}"], "not a directory"),
+    (["--search-config", "{S}", "--search-output-dir", "{RO}"], "not writable"),
 ])
 def test_invalid_search_options_exit_2(monkeypatch, capsys, tmp_path, argv, message):
+    if "{RO}" in argv and os.geteuid() == 0:
+        pytest.skip("root writes anywhere")
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"schema_version": 1, "strategy": "tpe",
                                "trials_per_problem": 2, "new_builds_per_run": 4,
@@ -173,8 +176,10 @@ def test_invalid_search_options_exit_2(monkeypatch, capsys, tmp_path, argv, mess
     old.mkdir()
     (old / "run.json").write_text("{}")
     (tmp_path / "file").write_text("")
+    (tmp_path / "ro").mkdir(mode=0o555)
     subs = {"{S}": _settings(tmp_path), "{O}": str(tmp_path / "new"),
-            "{BAD}": str(bad), "{OLD}": str(old), "{FILE}": str(tmp_path / "file")}
+            "{BAD}": str(bad), "{OLD}": str(old), "{FILE}": str(tmp_path / "file"),
+            "{RO}": str(tmp_path / "ro" / "run")}
     argv = [subs.get(a, a) for a in argv]
     with pytest.raises(SystemExit) as e:
         _main(monkeypatch, capsys, tmp_path, *argv)

@@ -240,12 +240,13 @@ Option rules:
   native kernel fails to build are not candidates.
 
 Outputs, in a directory that must not hold an earlier run (a path that is, or
-lies under, an existing file is refused up front with exit status `2`):
+lies under, an existing file, or whose nearest existing directory is not
+writable, is refused up front with exit status `2`):
 
 | File | Content |
 |---|---|
 | `winners.json` | `{"MxNxK": [kernel]}` for the confirmed winners only (a `--pairs` file) |
-| `summary.json` | status (`complete`, `partial`, `no_winner`), stop reason, each winner's confirmed median, each unresolved problem with its reason, counts and budget |
+| `summary.json` | status (`complete`, `partial`, `no_winner`), stop reason, each winner's confirmed median, each unresolved problem with its reason, each problem's best (unconfirmed) discovery result, counts and budget |
 | `run.json` | settings, build context, sources (commit, sha256 of the config and problem files), per-problem candidates, strategy and seed |
 | `trials.jsonl` | one event per trial, build, result, confirmation call, re-queue, cancel and error (with its traceback) |
 | `rounds/NNNN-measure.csv`, `rounds/NNNN-confirm.csv` | the usual results CSV of each measure call; the `.json` next to it maps `problem_idx` to the request and holds the call's failure records |
@@ -257,6 +258,11 @@ error (a build or worker pool that dies, a strategy failure) ends the search,
 but the finalists measured before it are still confirmed and exported; the
 status is then at best `partial` and `summary.json` holds the error. When the
 adapter breaks its contract (a lost or repeated outcome), nothing is confirmed.
+When a write to the output directory fails (a full disk, say), the search
+ends with that error and nothing is confirmed or written after it. `130`: the
+run was interrupted (Ctrl-C, or SIGTERM such as a batch system's time limit);
+nothing is confirmed and `winners.json` is empty, but `summary.json` is
+written, with each problem's best discovery result.
 
 Only a verified row of the requested kernel and problem with a finite positive
 latency counts as a result. A verification failure is `numeric_fail`; a blank
