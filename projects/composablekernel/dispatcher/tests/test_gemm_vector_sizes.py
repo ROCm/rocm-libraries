@@ -776,17 +776,23 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
 
     def test_bridge_checks_c_layout_at_native_widths(self):
         # A hand-built config skips expand_sweep, so with_vector_sizes reports the
-        # Stream-K row-major C rule for native widths too (other variants do not).
-        for variant in ("stream_k", "standard"):
-            cfg = replace(_bridge_config((0, 0, 0), variant)[0], layout_c="col")
-            for vec in ((0, 0, 0), (8, 1, 2)):
-                with self.subTest(variant=variant, vec=vec):
-                    reason = cfg.with_vector_sizes(vec)[1]
+        # Stream-K row-major C rule for native widths too: unset, or requested
+        # widths that resolve to native. Other variants do not.
+        cases = [("standard", "atomic")]
+        cases += [("stream_k", s) for s in self.ALL_STRATEGIES]
+        for variant, strategy in cases:
+            row = _bridge_config((0, 0, 0), variant)[0]
+            row = replace(row, reduction_strategy=strategy)
+            col = replace(row, layout_c="col")
+            for vec in ((0, 0, 0), col.effective_vector_sizes, (8, 1, 2)):
+                with self.subTest(variant=variant, strategy=strategy, vec=vec):
+                    cfg, reason = col.with_vector_sizes(vec)
+                    self.assertEqual(any(cfg.vector_sizes), vec == (8, 1, 2))
                     if variant == "stream_k":
-                        self.assertIn("row-major C", reason)
+                        self.assertIn("row-major C", reason or "")
                     else:
                         self.assertIsNone(reason)
-        self.assertIsNone(_bridge_config((0, 0, 0), "stream_k")[1])
+                    self.assertIsNone(row.with_vector_sizes(vec)[1])
 
     def test_invalid_stream_k_sweeps_raise(self):
         # No strategy has a kernel for a column-major C (the CShuffle epilogue

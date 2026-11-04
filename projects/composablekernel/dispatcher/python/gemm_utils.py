@@ -469,6 +469,7 @@ class GemmKernelConfig:
         Returns ``(config, reject_reason)``; the reason is None when legal.
         """
         cc = _codegen_common()
+        vec, reason = (0, 0, 0), None
         if any(requested):
             vec, reason = cc.resolve_gemm_vector_sizes(
                 **self._vector_args(),
@@ -478,13 +479,12 @@ class GemmKernelConfig:
                 variant=self.variant,
                 reduction_strategy=self.reduction_strategy,
             )
-        else:
-            # Native widths skip resolution; Stream-K's C check still applies.
-            vec, reason = (0, 0, 0), None
-            if self.variant == "stream_k":
-                reason = cc.streamk_c_reject_reason(
-                    self.reduction_strategy, 0, self.dtype_c, self.layout[2]
-                )
+        if not reason and not any(vec) and self.variant == "stream_k":
+            # Native widths (unset, or requested ones that resolve to native) skip
+            # resolution's checks; Stream-K's C check still applies.
+            reason = cc.streamk_c_reject_reason(
+                self.reduction_strategy, 0, self.dtype_c, self.layout[2]
+            )
         if reason:
             reason = (
                 f"{self.tile_str} {self.pipeline}/{self.epilogue} "
