@@ -86,6 +86,7 @@ from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
 from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
 from rocke.tests.built_programs import assert_refuses_arguments, built_program
+from rocke.tests.gpu import probe_device_arch
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 INT64_MAX = (1 << 63) - 1
@@ -956,17 +957,6 @@ def _two_wave_kernel(name: str, wave: int, *, per_lane: bool):
     return b.kernel
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _cluster_kernel(name: str):
     """A cluster of two one-lane workgroups: workgroup ``g`` checks
     ``0 <= cu[g] <= T``, then every workgroup of the cluster meets at the
@@ -1219,12 +1209,12 @@ _PREBUILT: dict[tuple[str, str], bytes | Exception] = {}
 def _gpu_case_target(route: str) -> tuple[str, int] | str:
     """``(arch, wave size)`` of the GPU the cases run on with ``route``, or why
     they are skipped here."""
-    arch = _gpu_arch()
-    if not arch:
-        return "no GPU"
-    from rocke.runtime.hip_module import get_device_target_id
+    arch, absence = probe_device_arch()
+    if arch is None:
+        return absence
+    from rocke.runtime.hip_module import current_device, get_device_target_id
 
-    processor = (get_device_target_id() or arch).split(":")[0]
+    processor = (get_device_target_id(current_device()) or arch).split(":")[0]
     if processor not in _RUN_ON:
         return f"has not run on {processor} hardware yet; enable once it has"
     if route == "hipcc" and shutil.which("hipcc") is None:
@@ -1475,7 +1465,7 @@ def test_gpu_one_workgroup_breaking_its_facts_does_not_hold_its_cluster(
     """gfx1250, cu = [11, 7] in a cluster of two workgroups: the first returns
     at its check, the second passes the cluster barrier and stores 7, and the
     launch ends with GpuCheckFailed."""
-    if not (_gpu_arch() or "").startswith("gfx1250"):
+    if not (probe_device_arch()[0] or "").startswith("gfx1250"):
         pytest.skip("needs a gfx1250 GPU (workgroup clusters)")
     lines = run_gpu_case(route, case)
     assert len(lines) == 2 and lines[0].startswith("launch: GpuCheckFailed: "), lines
