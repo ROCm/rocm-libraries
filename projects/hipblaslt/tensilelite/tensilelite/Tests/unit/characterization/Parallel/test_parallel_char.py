@@ -7,7 +7,10 @@
 global-parameter overwrite, the pcall wrappers, ``apply_print_exception``, and
 the single-threaded / n_jobs=1 (in-process) paths of ``ParallelMap`` /
 ``ParallelMap2``. The real fork/spawn process-pool paths are not unit-driven
-(flaky/slow) — see the suite's target.md."""
+(flaky/slow) — see the suite's target.md — apart from one small tripwire test
+(``test_parallel_maps_use_worker_processes_with_two_threads``). The unit
+conftest pins ``CpuThreads`` to 1, so nothing else in the unit lane sends work
+to a worker process."""
 
 import contextlib
 import importlib
@@ -43,6 +46,13 @@ def _add(a, b):
     return a + b
 
 
+def _where_am_i(_):
+    """Which process ran this, and the ``CpuThreads`` that process sees."""
+    import os
+
+    return os.getpid(), globalParameters["CpuThreads"]
+
+
 # ---------------------------------------------------------------------------
 
 def test_joblib_supports_generator_returns_bool():
@@ -61,6 +71,22 @@ def test_cpu_thread_count_all_cores():
 def test_cpu_thread_count_capped():
     with _gp(CpuThreads=1):
         assert P.CPUThreadCount(enable=True) == 1
+
+
+def test_parallel_maps_use_worker_processes_with_two_threads():
+    # Tripwire: the unit conftest runs every other ParallelMap call in-process,
+    # so an unpicklable payload or a worker that misses parent state would no
+    # longer fail anywhere in the unit lane. With CpuThreads=2 both helpers
+    # must hand the work to other processes, with the parent's global
+    # parameters visible there.
+    import os
+
+    with _gp(CpuThreads=2, ShowProgressBar=False):
+        pool_rv = P.ParallelMap(_where_am_i, [0, 1])
+        joblib_rv = P.ParallelMap2(_where_am_i, [0, 1], multiArg=False)
+    for pid, cpu_threads in pool_rv + list(joblib_rv):
+        assert pid != os.getpid()
+        assert cpu_threads == 2
 
 
 def test_overwrite_global_parameters():
