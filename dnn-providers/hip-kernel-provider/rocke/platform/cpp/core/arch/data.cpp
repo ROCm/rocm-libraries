@@ -109,7 +109,7 @@ static void _mfma_row_col_32x32(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 16x16x4 fp32 / f64 A operand (#8348): one scalar per lane.
+/* MFMA 16x16x4 fp32 / f64 A operand: one scalar per lane.
  * (lane % 16, lane // 16); slot is always 0 (a_frag_len == 1). */
 static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
                             rocke_value_t* lane,
@@ -129,7 +129,7 @@ static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
         *out1 = k;
 }
 
-/* MFMA 16x16x4 fp32 / f64 B operand (#8348): one scalar per lane.
+/* MFMA 16x16x4 fp32 / f64 B operand: one scalar per lane.
  * (lane // 16, lane % 16); slot is always 0 (b_frag_len == 1). */
 static void _mfma_b_16x16x4(rocke_ir_builder_t* b,
                             rocke_value_t* lane,
@@ -149,7 +149,7 @@ static void _mfma_b_16x16x4(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 32x32x2 fp32 A operand (#8348): scalar float per lane.
+/* MFMA 32x32x2 fp32 A operand: scalar float per lane.
  * (lane % 32, lane // 32); slot is always 0 (a_frag_len == 1). */
 static void _mfma_a_32x32x2_f32(rocke_ir_builder_t* b,
                                 rocke_value_t* lane,
@@ -169,7 +169,7 @@ static void _mfma_a_32x32x2_f32(rocke_ir_builder_t* b,
         *out1 = k;
 }
 
-/* MFMA 32x32x2 fp32 B operand (#8348): scalar float per lane.
+/* MFMA 32x32x2 fp32 B operand: scalar float per lane.
  * (lane // 32, lane % 32); slot is always 0 (b_frag_len == 1). */
 static void _mfma_b_32x32x2_f32(rocke_ir_builder_t* b,
                                 rocke_value_t* lane,
@@ -698,7 +698,7 @@ static constexpr rocke_layout_map_t lm_mfma_16x16x4_f32_src2
 static constexpr rocke_layout_map_t lm_mfma_16x16x4_f32_dst
     = {ROCKE_MMA_ROLE_DST, 4, 64, _mfma_row_col_16x16};
 
-/* --- mfma_f32_32x32x2_f32: a/b/c present (frag 1/1/16, wave64) (#8348) --- */
+/* --- mfma_f32_32x32x2_f32: scalar A/B, 16 accumulator/result slots per lane, wave64 --- */
 static constexpr rocke_layout_map_t lm_mfma_32x32x2_f32_a
     = {ROCKE_MMA_ROLE_SRC0, 1, 64, _mfma_a_32x32x2_f32};
 static constexpr rocke_layout_map_t lm_mfma_32x32x2_f32_b
