@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 #include "ck_tile/core.hpp"
@@ -288,7 +288,7 @@ struct TDMCopyKernel
             auto output_block_window       = make_output_block_window(output_tensor_view, oM, oN);
 
             TDMConfig tdm_config;
-            tdm_config.workgroup_mask = 3;
+            tdm_config.workgroup_mask = TDMWorkgroupMask::checked(3);
 
             load_tile_tdm(tdm_config, lds_block_window, input_block_window);
             s_wait_tensorcnt();

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <type_traits>
 
 #include "ck_tile/core/arch/amd_wave_read_first_lane.hpp"
 #include "ck_tile/core/container/sequence.hpp"
@@ -33,7 +34,41 @@ struct TDMIterationConfig
     uint16_t iterate_count{0};
 };
 
-// context switch is not supported in MI450
+// Workgroups of the cluster that receive a TDM transfer. Multicast needs a cluster dispatch, so
+// checked() traps on a non-zero mask when the calling wave is not in one: its cluster id,
+// IB_STS2[9:6], is 0 outside a cluster dispatch.
+class TDMWorkgroupMask
+{
+    public:
+    CK_TILE_HOST_DEVICE constexpr TDMWorkgroupMask() = default;
+
+    CK_TILE_DEVICE static TDMWorkgroupMask checked(uint16_t mask)
+    {
+#if CK_TILE_ENABLE_TDM_FEATURE
+        // s_getreg operand: hwreg id [5:0] | bit offset [10:6] | (bit count - 1) [15:11].
+        // IB_STS2 is hwreg 28; this reads bits [9:6] and disassembles as
+        // hwreg(HW_REG_IB_STS2, 6, 4).
+        constexpr uint32_t hwreg_ib_sts2_cluster_id = 28 | (6 << 6) | ((4 - 1) << 11);
+        if(mask != 0 && __builtin_amdgcn_s_getreg(hwreg_ib_sts2_cluster_id) == 0)
+            __builtin_trap();
+#endif
+        return TDMWorkgroupMask{mask};
+    }
+
+    CK_TILE_HOST_DEVICE constexpr uint16_t value() const { return m_mask; }
+
+    private:
+    CK_TILE_DEVICE explicit TDMWorkgroupMask(uint16_t mask) : m_mask(mask) {}
+
+    uint16_t m_mask{0};
+};
+
+// Protects the check in checked(): a public constructor or conversion from an integer would let a
+// non-zero mask skip it.
+static_assert(!std::is_constructible_v<TDMWorkgroupMask, uint16_t>,
+              "Only TDMWorkgroupMask::checked may make a TDMWorkgroupMask from an integer");
+
+// context switch is not supported on gfx1250
 struct TDMConfig
 {
     // 0 - not a context-restore descriptor. 1 - from a context-restore
@@ -46,8 +81,8 @@ struct TDMConfig
     TDMIterationConfig iter_config;
     // 0 - padding disabled. 1 - add padding to lds destination address.
     bool pad_enable{false};
-    TDMLdsPaddingConfig pad_config; // padding config
-    uint16_t workgroup_mask{0};     // mask of workgroups in the cluster that will execute this TDM
+    TDMLdsPaddingConfig pad_config;  // padding config
+    TDMWorkgroupMask workgroup_mask; // cluster multicast, see TDMWorkgroupMask
 };
 
 union TDM_GROUP0
@@ -625,7 +660,7 @@ class TDMDescriptor
     // Helper functions for configuring TDM groups
     CK_TILE_DEVICE void configureGroup1(TDM_GROUP1& group1) const
     {
-        group1.workgroup_mask = m_tdmCfg.workgroup_mask;
+        group1.workgroup_mask = m_tdmCfg.workgroup_mask.value();
 
         group1.data_size              = ElementTraits::data_size_code;
         group1.atomic_barrier_enable  = m_tdmCfg.atomic_barrier_enable;

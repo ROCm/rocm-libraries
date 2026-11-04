@@ -13,6 +13,8 @@
 #include "ck_tile/host/flush_icache.hpp"
 #include "ck_tile/host/rotating_buffers.hpp"
 #include <cstddef>
+#include <stdexcept>
+#include <type_traits>
 #include <hip/hip_runtime.h>
 
 #if __clang_major__ >= 23
@@ -28,6 +30,44 @@ template <typename T>
 inline constexpr bool
     kattr_no_packed_fp32_ops_v<T, std::void_t<decltype(T::kattr_no_packed_fp32_ops)>> =
         T::kattr_no_packed_fp32_ops;
+
+// A kernel whose TDM loads multicast across a workgroup cluster puts a non-zero workgroup mask in
+// its TDM descriptors. It must be launched as a cluster of more than one workgroup: a wave outside
+// a real cluster must never issue such a load. GEMM and FlatMM kernels report this through their
+// pipeline's UseClusterLaunch, TDMCopyKernel through ClusterEnable, and make_kernel rejects a
+// launch without such a cluster for them. On the device, TDMWorkgroupMask::checked
+// (ck_tile/core/arch/amd_tdm_descriptor.hpp) traps when a wave outside a cluster builds a non-zero
+// mask, which also covers kernels that this trait cannot see.
+namespace detail {
+template <typename Kernel, typename = void>
+inline constexpr bool gemm_pipeline_uses_cluster_launch_v = false;
+template <typename Kernel>
+inline constexpr bool gemm_pipeline_uses_cluster_launch_v<
+    Kernel,
+    std::void_t<decltype(Kernel::GemmPipeline::UseClusterLaunch)>> =
+    Kernel::GemmPipeline::UseClusterLaunch;
+
+// MXFlatmmKernel and GroupedMXFlatmmKernel derive from FlatmmKernel and inherit FlatmmPipeline.
+template <typename Kernel, typename = void>
+inline constexpr bool flatmm_pipeline_uses_cluster_launch_v = false;
+template <typename Kernel>
+inline constexpr bool flatmm_pipeline_uses_cluster_launch_v<
+    Kernel,
+    std::void_t<decltype(Kernel::FlatmmPipeline::UseClusterLaunch)>> =
+    Kernel::FlatmmPipeline::UseClusterLaunch;
+
+template <typename Kernel, typename = void>
+inline constexpr bool cluster_enable_v = false;
+template <typename Kernel>
+inline constexpr bool cluster_enable_v<Kernel, std::void_t<decltype(Kernel::ClusterEnable)>> =
+    Kernel::ClusterEnable;
+} // namespace detail
+
+template <typename KernelImpl>
+inline constexpr bool kernel_requires_cluster_launch_v =
+    detail::gemm_pipeline_uses_cluster_launch_v<KernelImpl> ||
+    detail::flatmm_pipeline_uses_cluster_launch_v<KernelImpl> ||
+    detail::cluster_enable_v<KernelImpl>;
 
 // TODO: rename to something more specific (e.g. kernel_attr_no_packed_fp32) since
 // kernel_attr<bool> only controls the no-packed-fp32-ops flag, not a general attribute bag.
@@ -126,6 +166,15 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
                               std::size_t lds_byte,
                               [[clang::lifetimebound]] Args... args)
 {
+    // This overload always launches without a cluster, so a kernel that multicasts TDM loads
+    // would issue them with a non-zero workgroup mask from a wave outside any cluster.
+    static_assert(!kernel_requires_cluster_launch_v<KernelImpl>,
+                  "This kernel multicasts TDM loads across a workgroup cluster, so it must run as "
+                  "a cluster of more than one workgroup: launch it with the cluster overload of "
+                  "make_kernel, or build it without cluster multicast (no cluster tile shape, or "
+                  "ClusterEnable = false). If a template parameter of the caller selects the "
+                  "overload, branch on it with if constexpr so that this overload is not "
+                  "instantiated for the kernel.");
     const auto kernel = []() {
         if constexpr(std::is_void_v<Attr>)
             return kentry<MinBlockPerCu, KernelImpl, Args...>;
@@ -149,6 +198,13 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
                               std::size_t lds_byte,
                               Args... args)
 {
+    // A 1x1x1 cluster is dispatched as a plain launch, so it does not count as a cluster.
+    if constexpr(kernel_requires_cluster_launch_v<KernelImpl>)
+    {
+        if(cluster_dim.x * cluster_dim.y * cluster_dim.z <= 1)
+            throw std::runtime_error("make_kernel: this kernel multicasts TDM loads and needs a "
+                                     "cluster of more than one workgroup");
+    }
     const auto kernel = kentry<MinBlockPerCu, KernelImpl, Args...>;
     return [=](const stream_config& s) {
         // Set cluster dimensions as launch attributes
