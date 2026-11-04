@@ -351,6 +351,35 @@ def test_validator_contract_without_gpu():
         )
 
 
+_NO_TENSORS = dict(
+    q=None,
+    k=None,
+    v=None,
+    out=None,
+    cu_seqlens_q=None,
+    seqused_k=None,
+    block_table=None,
+)
+
+
+def test_validator_rejects_an_unknown_lse_layout():
+    with pytest.raises(ValueError, match="lse_layout must be one of"):
+        au.validate_unified_lse(
+            _problem(emit_lse=True), None, lse_layout="bhsd", **_NO_TENSORS
+        )
+
+
+def test_head_major_validator_refuses_a_non_contiguous_buffer_without_gpu():
+    """Head-major reads the buffer flat, so a strided view would be misread."""
+    torch = pytest.importorskip("torch")
+    problem = _problem(emit_lse=True)
+    lse = torch.empty(problem.num_query_heads, problem.total_q, dtype=torch.float32)
+    with pytest.raises(ValueError, match="contiguous"):
+        au.validate_unified_lse(
+            problem, lse.t(), lse_layout="head_major", **_NO_TENSORS
+        )
+
+
 # ---------------------------------------------------------------------------
 # Public runner (run_unified_attention_torch) with the launch mocked out: what
 # reaches the reduce launch, and which requests are refused before any launch.

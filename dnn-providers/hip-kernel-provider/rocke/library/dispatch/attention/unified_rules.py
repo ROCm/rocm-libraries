@@ -153,6 +153,9 @@ def _variant_axes(variant: AttentionGeometryVariant):
     return tuning_axes(variant.arch, variant.path)
 
 
+_LSE_OUTPUT_FIELDS = frozenset({"emit_lse", "lse_layout"})
+
+
 @lru_cache(maxsize=None)
 def _field_defaults(spec_type: type) -> Mapping[str, object]:
     """Declared field defaults (``MISSING`` for required fields)."""
@@ -389,14 +392,14 @@ class UnifiedSpace(WavesPerEuSpace):
         recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
-            # ``emit_lse`` is an output the problem selects, not a default that
-            # knobs are a delta against: keeping it out of both the 2D kernel
-            # and the split-KV reduce defaults leaves every config_key, and so
-            # every stored pin, as before the field existed.
+            # The LSE output fields are outputs the caller selects, not defaults
+            # that knobs are a delta against: keeping them out of the kernel and
+            # the split-KV reduce defaults leaves every config_key, and so every
+            # stored pin, as before the fields existed.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name != "emit_lse"
+                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
             },
             "reduce": (
                 None
@@ -404,7 +407,7 @@ class UnifiedSpace(WavesPerEuSpace):
                 else {
                     name: value
                     for name, value in _declared_defaults(type(reduce))
-                    if name != "emit_lse"
+                    if name not in _LSE_OUTPUT_FIELDS
                 }
             ),
         }

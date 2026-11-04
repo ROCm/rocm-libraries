@@ -47,7 +47,12 @@ from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import (
+    UNIFIED_LSE_LAYOUTS,
+    lse_row_has_mass,
+    lse_store,
+    unified_lse_offset,
+)
 from kernels.common.attention_mask_type import band_mask_type
 
 from rocke.core.ir import (
@@ -525,12 +530,24 @@ class UnifiedAttention2DTiledSpec:
     #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
     #   Off by default; off emits no new IR, so shipped kernels are unchanged.
     emit_lse: bool = field(default=False, kw_only=True)
+    # lse_layout: "token_major" is the [total_q, num_query_heads, 1] order above.
+    #   "head_major" stores each sequence as [num_query_heads, q_len] from element
+    #   cu_q_start * num_query_heads, i.e. [B, Hq, S, 1] for equal-length
+    #   sequences (the hipDNN SDPA stats tensor). Needs emit_lse.
+    lse_layout: str = field(default="token_major", kw_only=True)
 
     def __post_init__(self):
         if type(self.emit_lse) is not bool:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
+        if self.lse_layout not in UNIFIED_LSE_LAYOUTS:
+            raise ValueError(
+                f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, "
+                f"got {self.lse_layout!r}"
+            )
+        if self.lse_layout != "token_major" and not self.emit_lse:
+            raise ValueError(f"lse_layout={self.lse_layout!r} requires emit_lse")
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
@@ -1008,7 +1025,11 @@ class UnifiedAttention2DTiledSpec:
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
             "qrev" if self.use_qblock_reverse else "",
-            "lse" if self.emit_lse else "",
+            (
+                ("lsehm" if self.lse_layout == "head_major" else "lse")
+                if self.emit_lse
+                else ""
+            ),
         )
 
 
@@ -4792,9 +4813,14 @@ def build_unified_attention_2d_tiled(
                     lse_store(
                         b,
                         lse,
-                        b.add(
-                            b.mul(b.add(cu_q_start, op_pos_t), num_qh_p),
-                            op_qh_t,
+                        unified_lse_offset(
+                            b,
+                            spec.lse_layout,
+                            cu_q_start=cu_q_start,
+                            q_len=cur_batch_q_len,
+                            pos=op_pos_t,
+                            head=op_qh_t,
+                            num_heads=num_qh_p,
                         ),
                         m_final[0],
                         l_final[0],
@@ -4861,12 +4887,14 @@ def build_unified_attention_2d_tiled(
                     lse_store(
                         b,
                         lse,
-                        b.add(
-                            b.mul(
-                                b.add(cu_q_start, hoist_qp_r[reg]),
-                                num_qh_p,
-                            ),
-                            hoist_qh_r[reg],
+                        unified_lse_offset(
+                            b,
+                            spec.lse_layout,
+                            cu_q_start=cu_q_start,
+                            q_len=cur_batch_q_len,
+                            pos=hoist_qp_r[reg],
+                            head=hoist_qh_r[reg],
+                            num_heads=num_qh_p,
                         ),
                         m_final[reg],
                         l_final[reg],
@@ -5021,12 +5049,14 @@ def build_unified_attention_2d_tiled(
                 lse_store(
                     b,
                     lse,
-                    b.add(
-                        b.mul(
-                            b.add(cu_q_start, hoist_qp_r[reg]),
-                            num_qh_p,
-                        ),
-                        hoist_qh_r[reg],
+                    unified_lse_offset(
+                        b,
+                        spec.lse_layout,
+                        cu_q_start=cu_q_start,
+                        q_len=cur_batch_q_len,
+                        pos=hoist_qp_r[reg],
+                        head=hoist_qh_r[reg],
+                        num_heads=num_qh_p,
                     ),
                     m_final[reg],
                     l_final[reg],

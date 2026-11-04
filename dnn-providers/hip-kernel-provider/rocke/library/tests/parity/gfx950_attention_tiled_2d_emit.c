@@ -1204,6 +1204,13 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         break;
 
+    /* --- idx71-73: lse_layout="head_major" at each store site (64-66 + head-major). */
+    case 71:
+    case 72:
+    case 73:
+        make_spec(idx - 7, s);
+        s->lse_head_major = true;
+        break;
     default:
         return -1;
     }

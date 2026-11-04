@@ -782,6 +782,16 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-2d ======================== */
 
+/* gfx950 lse_layout: absent or "token_major" keeps the default. */
+static bool t2d_lse_head_major(const py::dict& d)
+{
+    std::string layout = "token_major";
+    a_str(d, "lse_layout", layout);
+    if(layout != "token_major" && layout != "head_major")
+        throw py::value_error("lse_layout must be 'token_major' or 'head_major'");
+    return layout == "head_major";
+}
+
 rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 {
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
@@ -824,6 +834,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
     s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.lse_head_major = t2d_lse_head_major(d);
     /* Every other field the C struct shares with the Python spec. A field left
      * out here silently keeps its C default, so the native builder would build
      * a different kernel (e.g. gfx942 x8 transposed specs fail validation
@@ -1030,6 +1041,7 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.lse_head_major = t2d_lse_head_major(d);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1455,6 +1467,8 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["use_k_single_buffer"] = s.use_k_single_buffer;
     d["use_fp8_mfma_qk"] = s.use_fp8_mfma_qk;
     d["emit_lse"] = s.emit_lse;
+    if(s.lse_head_major)
+        d["lse_layout"] = "head_major";
     return d;
 }
 

@@ -169,9 +169,67 @@ def test_reduce_spec_follows_every_segment_field_it_reads():
         assert getattr(changed, field) == value and changed != base, field
 
 
-def test_reduce_spec_takes_emit_lse_from_the_caller_not_the_segment():
-    """``emit_lse`` is a problem field: off unless asked for, and the only difference."""
+def test_reduce_spec_takes_an_explicit_emit_lse_from_the_caller():
+    """The dispatcher's explicit value wins over the segment's, both ways, and is the
+    only difference."""
     spec = _segment(waves_per_eu=2)
     assert reduce_spec_for(spec).emit_lse is False
     with_lse = reduce_spec_for(spec, emit_lse=True)
     assert with_lse == dataclasses.replace(reduce_spec_for(spec), emit_lse=True)
+    on = _segment(waves_per_eu=2, emit_lse=True)
+    assert reduce_spec_for(on, emit_lse=False) == reduce_spec_for(spec)
+
+
+def test_reduce_spec_defaults_to_the_segment_emit_lse():
+    """A packaged module is built from the segment spec alone."""
+    assert reduce_spec_for(_segment(emit_lse=True)).emit_lse is True
+    assert reduce_spec_for(_segment()).emit_lse is False
+
+
+@pytest.mark.parametrize("bad", ["false", 0, 1, None])
+def test_segment_spec_rejects_non_boolean_emit_lse(bad):
+    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+        _segment(emit_lse=bad)
+
+
+def test_segment_name_gains_lse_suffix_only_when_on():
+    off = _segment()
+    assert _segment(emit_lse=False).kernel_name() == off.kernel_name()
+    assert not off.kernel_name().endswith("_lse")
+    assert _segment(emit_lse=True).kernel_name() == off.kernel_name() + "_lse"
+
+
+def _ir(kernel, name=None):
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+    if name is not None:
+        kernel.name = name
+    return lower_kernel_to_llvm(kernel, arch="gfx950")
+
+
+@pytest.mark.parametrize("num_segments", [16, 64])
+def test_lse_module_keeps_the_segment_ir_and_packs_the_lse_reduce(num_segments):
+    """Only the reduce changes: the segment IR is the LSE-off IR (bar its name), and
+    the reduce is the LSE reduce the dispatcher launches for an LSE request."""
+    from kernels.gfx950.attention_tiled_3d import build_unified_attention_reduce_tiled
+
+    off_spec = _segment(num_segments=num_segments)
+    on_spec = _segment(num_segments=num_segments, emit_lse=True)
+    off = build_unified_attention_3d_tiled_module(off_spec, arch="gfx950")
+    on = build_unified_attention_3d_tiled_module(on_spec, arch="gfx950")
+    assert on.primary.name == on_spec.kernel_name()
+    assert _ir(on.primary, off.primary.name) == _ir(off.primary)
+    reduce = on.companions["reduce"]
+    assert reduce.name == reduce_spec_for(off_spec, emit_lse=True).kernel_name()
+    assert reduce.params[-1].name == "lse_ptr"
+    expected = build_unified_attention_reduce_tiled(
+        reduce_spec_for(off_spec, emit_lse=True), arch="gfx950"
+    )
+    assert _ir(reduce) == _ir(expected)
+    assert "lse_ptr" not in _ir(off.companions["reduce"])
+
+
+def test_module_predicate_admits_the_lse_module():
+    assert supports_unified_attention_3d_tiled_module(
+        _segment(emit_lse=True), arch="gfx950"
+    ) == (True, "supported")

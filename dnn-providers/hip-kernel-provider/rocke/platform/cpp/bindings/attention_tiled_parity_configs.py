@@ -1347,6 +1347,10 @@ GFX950_ATTENTION_TILED_2D = [
         "tile_size": 32,
     },
 ]
+# idx68-70: lse_layout="head_major" at each store site (idx64-66 + head-major).
+GFX950_ATTENTION_TILED_2D += [
+    {**GFX950_ATTENTION_TILED_2D[i], "lse_layout": "head_major"} for i in (64, 65, 66)
+]
 
 GFX942_ATTENTION_TILED_3D = [
     {

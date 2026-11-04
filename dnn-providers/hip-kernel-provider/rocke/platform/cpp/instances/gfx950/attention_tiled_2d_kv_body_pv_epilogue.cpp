@@ -842,10 +842,13 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 rocke_if_t lse_if = rocke_b_scf_if(b, writer);
                 rocke_b_region_enter(b, lse_if.then_region);
                 {
-                    rocke_value_t* tok = rocke_b_add(b, ctx->cu_q_start, op_pos_t);
-                    rocke_value_t* nqh = ctx->num_qh_p;
-                    rocke_value_t* tok_qh = rocke_b_mul(b, tok, nqh);
-                    rocke_value_t* off = rocke_b_add(b, tok_qh, op_qh_t);
+                    rocke_value_t* off = rocke_unified_lse_offset(b,
+                                                                  ctx->spec->lse_head_major,
+                                                                  ctx->cu_q_start,
+                                                                  ctx->cur_batch_q_len,
+                                                                  op_pos_t,
+                                                                  op_qh_t,
+                                                                  ctx->num_qh_p);
                     rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->l_final[0]);
                     rocke_lse_store(b, ctx->lse, off, ctx->m_final[0], ctx->l_final[0], has_mass);
                 }
@@ -950,10 +953,13 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                     rocke_if_t lse_if = rocke_b_scf_if(b, guard);
                     rocke_b_region_enter(b, lse_if.then_region);
                     {
-                        rocke_value_t* tok = rocke_b_add(b, ctx->cu_q_start, ctx->hoist_q_pos[r]);
-                        rocke_value_t* nqh = ctx->num_qh_p;
-                        rocke_value_t* tok_qh = rocke_b_mul(b, tok, nqh);
-                        rocke_value_t* off = rocke_b_add(b, tok_qh, ctx->hoist_qh_r[r]);
+                        rocke_value_t* off = rocke_unified_lse_offset(b,
+                                                                      ctx->spec->lse_head_major,
+                                                                      ctx->cu_q_start,
+                                                                      ctx->cur_batch_q_len,
+                                                                      ctx->hoist_q_pos[r],
+                                                                      ctx->hoist_qh_r[r],
+                                                                      ctx->num_qh_p);
                         rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->l_final[r]);
                         rocke_lse_store(
                             b, ctx->lse, off, ctx->m_final[r], ctx->l_final[r], has_mass);
@@ -1152,10 +1158,13 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 rocke_if_t lse_if = rocke_b_scf_if(b, guard);
                 rocke_b_region_enter(b, lse_if.then_region);
                 {
-                    rocke_value_t* tok = rocke_b_add(b, ctx->cu_q_start, ctx->hoist_q_pos[r]);
-                    rocke_value_t* nqh = ctx->num_qh_p;
-                    rocke_value_t* tok_qh = rocke_b_mul(b, tok, nqh);
-                    rocke_value_t* off = rocke_b_add(b, tok_qh, ctx->hoist_qh_r[r]);
+                    rocke_value_t* off = rocke_unified_lse_offset(b,
+                                                                  ctx->spec->lse_head_major,
+                                                                  ctx->cu_q_start,
+                                                                  ctx->cur_batch_q_len,
+                                                                  ctx->hoist_q_pos[r],
+                                                                  ctx->hoist_qh_r[r],
+                                                                  ctx->num_qh_p);
                     rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->l_final[r]);
                     rocke_lse_store(b, ctx->lse, off, ctx->m_final[r], ctx->l_final[r], has_mass);
                 }
