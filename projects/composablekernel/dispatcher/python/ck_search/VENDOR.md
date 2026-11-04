@@ -102,6 +102,14 @@ is listed here.
    0.0 instead of dividing by its zero level span. `from_configs` fixes
    constant fields, but a hand-built `SearchSpace` may hold such an axis, and
    GP (alone or in a portfolio) raised `ZeroDivisionError` once it fitted.
+5. `surrogate.py`: TPE reads the batch's pending keys (`taken`) in sorted
+   order when it fits its "bad" density, as GP already does. Upstream
+   iterates the set, whose order follows the per-process str hash
+   (`PYTHONHASHSEED`): the float sums of the density then differ between
+   processes, a near tie between candidates can flip, and the same seed gave
+   different searches (in a replay of the GEMM search, 8-10 of 100 seeds,
+   by up to 12.5 points of the best kernel's speed). The parity check gives
+   upstream's TPE the same keys in sorted order.
 
 ## Notes for drivers
 

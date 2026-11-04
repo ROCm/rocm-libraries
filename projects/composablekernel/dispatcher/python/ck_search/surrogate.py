@@ -517,7 +517,7 @@ class TPE(_ModelStrategy):
         good = [self.genomes[k] for _v, k in ranked[:n_good]]
         bad = [self.genomes[k] for _v, k in ranked[n_good:]]
         bad += list(self.failed.values())
-        bad += [self.genomes.get(k) or self._genome_of(k) for k in taken]
+        bad += [self.genomes.get(k) or self._genome_of(k) for k in sorted(taken)]  # ck_search patch 5
         bad = [g for g in bad if g is not None]
         lden, gden = self._density(good), self._density(bad)
         cands: list[Genome] = []

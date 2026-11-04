@@ -7,8 +7,9 @@
 Vendored search core (dispatcher/python/ck_search): it imports without ROCKE,
 the GPU stack or the ML stack, parses as Python 3.8 without runtime PEP 585 /
 604 aliases, every strategy improves on a synthetic listed space, warm starts
-are honoured, exhaustive visits every config, and an empty ask after telling
-every trial means done.
+are honoured, exhaustive visits every config, an empty ask after telling
+every trial means done, and a seed asks the same trials whatever the
+interpreter's PYTHONHASHSEED.
 
 With ROCKE_PY set to the ROCKE platform/python root of the pinned checkout
 (ck_search.ORIGIN_SHA) three more checks run: each vendored file differs from
@@ -381,6 +382,44 @@ def test_attached_noise_model_raises_the_gain_threshold(name, floor):
     assert all(m.noise is noise for m in getattr(st, "members", ()))
 
 
+def _hash_seed_run(hash_seed):
+    """Every strategy's trace (batched, seed 5) and the exact float bits of
+    each density TPE fits, from a fresh interpreter run with
+    ``PYTHONHASHSEED=hash_seed``: str hashes, and so the iteration order of a
+    set of config keys, change with it."""
+    run = subprocess.run(
+        [sys.executable, "-B", str(Path(__file__).resolve()), "--hash-seed-run"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONHASHSEED=str(hash_seed)),
+        timeout=300,
+    )
+    assert run.returncode == 0, run.stderr[-4000:]
+    return json.loads(run.stdout.strip().splitlines()[-1])
+
+
+def _hash_seed_trace():
+    densities = []
+    fit = cs.surrogate.TPE._density
+
+    def spy(self, genomes):
+        d = fit(self, genomes)
+        densities.append([[x.hex() for x in row] for row in d])
+        return d
+
+    cs.surrogate.TPE._density = spy
+    traces = {n: _drive(VENDORED_NS, n, 5, batch=8)[0] for n in cs.STRATEGY_NAMES}
+    return {"traces": traces, "tpe_densities": densities}
+
+
+def test_proposals_do_not_depend_on_the_hash_seed():
+    # TPE once read the batch's pending keys in set order (patch 5): the same
+    # seed then fitted different float densities per process, which can flip
+    # a near tie between candidates and so the whole search.
+    first, second = _hash_seed_run(0), _hash_seed_run(1)
+    assert first["tpe_densities"] and first == second
+
+
 def test_failed_observation_is_strict_json():
     space = cs.SearchSpace.from_configs(RECORDS[:6])
     t = cs.make_strategy("random", space).ask(1)[0]
@@ -482,6 +521,17 @@ def _upstream_namespace(root):
         sys.modules[name] = mod
     sys.modules["rocke.runtime"] = ModuleType("rocke.runtime")
     from rocke.dispatch.tuning import search as up
+    from rocke.dispatch.tuning.search import surrogate
+
+    # Patch 5: upstream TPE reads the pending keys in set (hash) order; give it
+    # them sorted, as the vendored copy reads them, so the batched TPE cases
+    # still compare every trial.
+    class SortedSet(set):
+        def __iter__(self):
+            return iter(sorted(set.__iter__(self)))
+
+    propose = surrogate.TPE._propose
+    surrogate.TPE._propose = lambda self, taken, pos: propose(self, SortedSet(taken), pos)
 
     def make(name, space, seed, warm, prior):
         ws = [up.WarmStart(dict(r), f"record:{i}") for i, r in enumerate(warm)]
@@ -513,6 +563,9 @@ def test_trials_match_upstream_for_identical_seeds():
 
 
 if __name__ == "__main__":
+    if sys.argv[1] == "--hash-seed-run":  # test_proposals_do_not_depend_on_the_hash_seed
+        print(json.dumps(_hash_seed_trace()))
+        sys.exit(0)
     # The upstream side of test_trials_match_upstream_for_identical_seeds, in
     # its own interpreter so ROCKE modules never enter the test process.
     ns = _upstream_namespace(sys.argv[1])
