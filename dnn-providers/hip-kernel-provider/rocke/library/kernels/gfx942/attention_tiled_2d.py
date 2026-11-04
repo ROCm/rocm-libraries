@@ -5859,6 +5859,12 @@ _4WGQA_LOG2E = 1.4426950408889634
 _4WGQA_LEAN_HEAD_SIZES = (192, 256)
 
 
+def _clamp_to_last(b, idx, last):
+    """``min(idx, last)``: bound a Q row or K/V key of the 4-warp bodies to the last
+    valid one of its sequence, so tiles that run past the sequence stay in bounds."""
+    return b.select(b.cmp_lt(idx, last), idx, last)
+
+
 def _online_softmax_rescale(
     b, Sm, m_old, l_old, *, NKEYT, CPL, NKpv, BPL, sc, ninf, zf, bperm, dtype, exp
 ):
@@ -6008,7 +6014,7 @@ def _build_gfx942_4warp_gqa_lean(
 
     def phys_key(kv, keytile):
         key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
-        key = b.select(b.cmp_lt(key, k_last), key, k_last)
+        key = _clamp_to_last(b, key, k_last)
         lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
@@ -6058,7 +6064,7 @@ def _build_gfx942_4warp_gqa_lean(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
+            q_tok = _clamp_to_last(b, q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6192,7 +6198,9 @@ def build_gfx942_4warp_gqa(
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
     if BS & (BS - 1):
-        raise NotImplementedError("4-warp GQA kernel needs a power-of-two block_size")
+        raise NotImplementedError(
+            f"4-warp GQA kernel needs a power-of-two block_size, got {BS}"
+        )
     BS_LOG2 = BS.bit_length() - 1
     HD128 = HD == 128
     # Double-buffer prefetch pipeline (BN=32 LDS-staged K/V + swizzle) is D128 AND bs<=32.
@@ -6200,6 +6208,11 @@ def build_gfx942_4warp_gqa(
     # bs64-D128 runs the single-buffer (D256-style) path at BN=64 (bs64 extension).
     HD128_PIPE = HD128 and BS <= 32
     BN = 32 if HD128_PIPE else 64
+    if BN % BS:
+        # A page wider than the KV tile would make BPT 0 and misplace every page.
+        raise NotImplementedError(
+            f"4-warp GQA kernel needs block_size to divide the {BN}-key tile, got {BS}"
+        )
     BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8() if spec.dtype == "bf16" else MfmaAtom.f16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
@@ -6362,13 +6375,13 @@ def build_gfx942_4warp_gqa(
         # geometry); head BASE strides by GQAG (the GQA group).
         _m = b.add(wq, ld.n_in_atom)
         q_row = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
-        q_row = b.select(b.cmp_lt(q_row, q_last), q_row, q_last)
+        q_row = _clamp_to_last(b, q_row, q_last)
         q_row_head = b.add(
             b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
         )
     else:
         q_row = b.add(b.add(qstart, wq), ld.n_in_atom)
-        q_row = b.select(b.cmp_lt(q_row, q_last), q_row, q_last)
+        q_row = _clamp_to_last(b, q_row, q_last)
         q_row_head = qhead
 
     def phys_key(kv, keytile):

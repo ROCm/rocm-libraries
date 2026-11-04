@@ -261,19 +261,25 @@ def _is_last_index_of(value, param):
     )
 
 
-def _is_last_page_of(value, param):
-    """``value`` is ``(load(param, ...) - 1) >> k`` (the last valid page)."""
+def _is_last_page_of(value, param, block_size):
+    """``value`` is ``(load(param, ...) - 1) >> log2(block_size)`` (the last valid
+    page). The shift is pinned: one short would bound to a page past the last."""
     op = value.op
+    if op is None or op.name != "arith.lshr":
+        return False
+    shift = op.operands[1].op
     return (
-        op is not None
-        and op.name == "arith.lshr"
-        and _is_last_index_of(op.operands[0], param)
+        _is_last_index_of(op.operands[0], param)
+        and shift is not None
+        and shift.name == "arith.constant"
+        and shift.attrs.get("value") == block_size.bit_length() - 1
     )
 
 
-def _clamped_to_last_of(value, param):
+def _clamped_to_last_of(value, param, block_size=None):
     """The index DAG of ``value`` passes through ``select(cmp, x, load(param)-1)``
-    (last key / token) or ``smin(x, (load(param)-1) >> k)`` (last page)."""
+    (last key / token) or, given ``block_size``, through
+    ``smin(x, (load(param)-1) >> log2(block_size))`` (last page)."""
     seen, stack = set(), [value]
     while stack:
         v = stack.pop()
@@ -283,8 +289,10 @@ def _clamped_to_last_of(value, param):
         op = v.op
         if op.name == "arith.select" and _is_last_index_of(op.operands[2], param):
             return True
-        if op.name == "arith.smin" and any(
-            _is_last_page_of(x, param) for x in op.operands
+        if (
+            block_size is not None
+            and op.name == "arith.smin"
+            and any(_is_last_page_of(x, param, block_size) for x in op.operands)
         ):
             return True
         stack.extend(op.operands)
@@ -368,37 +376,42 @@ class TestD128BodyBoundsReads(unittest.TestCase):
             with _PinArch("gfx942"):
                 spec = au._tiled_spec_from_problem(problem, "gfx942")
                 kernel = t2d.build_gfx942_4warp_gqa(spec, arch="gfx942")
-            yield f"{dt} {hq}/{hkv} bs{bs}", kernel
+            yield f"{dt} {hq}/{hkv} bs{bs}", kernel, bs
 
-    def test_rejects_non_power_of_two_block_size(self):
-        # Dispatch admits only 16/32/64; this guards the builder's lshr page split
-        # if that admission set is ever widened.
+    def test_rejects_unsupported_block_sizes(self):
+        # Dispatch admits only 16/32/64; these guard the builder's page split (a
+        # power-of-two shift, BN // BS pages per tile) if admission is ever widened.
         with _PinArch("gfx942"):
             spec = au._tiled_spec_from_problem(
                 _d256_problem(head_size=128, block_size=16, sliding_window=512),
                 "gfx942",
             )
-            bad = dataclasses.replace(spec, block_size=48, tile_size=48)
-            with self.assertRaises(NotImplementedError):
-                t2d.build_gfx942_4warp_gqa(bad, arch="gfx942")
+            for bs, message in (
+                (48, "power-of-two block_size, got 48"),
+                (128, "divide the 64-key tile, got 128"),
+            ):
+                with self.subTest(block_size=bs):
+                    bad = dataclasses.replace(spec, block_size=bs, tile_size=bs)
+                    with self.assertRaisesRegex(NotImplementedError, message):
+                        t2d.build_gfx942_4warp_gqa(bad, arch="gfx942")
 
     def test_variants_cover_fold_and_plain(self):
-        names = [k.name for _, k in self._kernels()]
+        names = [k.name for _, k, _ in self._kernels()]
         self.assertTrue(names[0].endswith("_4wgqa_fold"), names[0])
         self.assertTrue(all(n.endswith("_4wgqa") for n in names[1:]), names)
 
     def test_block_table_reads_clamped_to_last_page(self):
-        for tag, k in self._kernels():
+        for tag, k, bs in self._kernels():
             loads = _global_loads(k, "block_tables_ptr")
             self.assertTrue(loads)
             for op in loads:
                 self.assertTrue(
-                    _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
+                    _clamped_to_last_of(op.operands[1], "seq_lens_ptr", bs),
                     f"{tag}: block-table read not bounded by the last page",
                 )
 
     def test_query_reads_clamped_to_last_token(self):
-        for tag, k in self._kernels():
+        for tag, k, _ in self._kernels():
             loads = _global_loads(k, "query_ptr")
             self.assertTrue(loads)
             for op in loads:
@@ -408,13 +421,13 @@ class TestD128BodyBoundsReads(unittest.TestCase):
                 )
 
     def test_kv_reads_go_through_the_block_table(self):
-        for tag, k in self._kernels():
+        for tag, k, bs in self._kernels():
             for param in ("key_cache_ptr", "value_cache_ptr"):
                 loads = _global_loads(k, param)
                 self.assertTrue(loads)
                 for op in loads:
                     self.assertTrue(
-                        _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
+                        _clamped_to_last_of(op.operands[1], "seq_lens_ptr", bs),
                         f"{tag}: {param} read not bounded by the last page",
                     )
 
