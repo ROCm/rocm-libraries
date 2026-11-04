@@ -102,7 +102,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/f26a03945fe45174f7f59f76285f3b24f4080dbd8e6e191f6c3e46d5831fb9b3",
+    "selector_revision": "generic-untuned-v1/397610d81f27d5292a7e9a0b659186c624801d34b77b5374ab7b55843e114f22",
     "feature_semantics_revision": 1
   },
   "objective": "max",

@@ -104,7 +104,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/1160b1a2ee42fb4ffb86908a7249712c4d4ec6ac8ccccc6e70168c593446cb00",
+    "selector_revision": "generic-untuned-v1/31c5ea945767fb04d017f7c4b6d4f93b55ecdd915e14216935e88c4e9c86c023",
     "feature_semantics_revision": 1
   },
   "objective": "max",
