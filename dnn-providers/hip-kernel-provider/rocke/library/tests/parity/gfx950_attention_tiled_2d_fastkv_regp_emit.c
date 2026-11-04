@@ -80,6 +80,12 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
          * wrapper's kernel name). */
         s->emit_lse = true;
         break;
+    case 7:
+        /* Additive bias with mask-once off, so the fastKV builder's own
+         * reject fires (the .py's _EXPECTED_REJECTIONS pins the reason). */
+        s->use_transposed_mask_once = false;
+        s->use_additive_bias = true;
+        break;
     default:
         return -1;
     }

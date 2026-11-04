@@ -3016,6 +3016,31 @@ def test_pinned_correctness_failures_show_the_reported_values(
     assert expected in str(error.value)
 
 
+def _reports(*keywords):
+    from types import SimpleNamespace
+
+    return [SimpleNamespace(keywords=dict.fromkeys(k)) for k in keywords]
+
+
+@pytest.mark.parametrize(
+    ("stats", "exitstatus", "expected"),
+    [
+        # host tests passed, every gpu test skipped: the GPU lane did not run
+        ({"passed": _reports(()), "skipped": _reports(("gpu",), ("gpu",))}, 0, 77),
+        ({"skipped": _reports(("gpu",))}, 0, 77),
+        ({"passed": _reports(("gpu",)), "skipped": _reports(("gpu",))}, 0, 0),
+        ({"xfailed": _reports(("gpu",)), "skipped": _reports(("gpu",))}, 0, 0),
+        ({"skipped": _reports(())}, 0, 0),
+        ({"failed": _reports(()), "skipped": _reports(("gpu",))}, 1, 1),
+        ({}, 5, 5),
+    ],
+)
+def test_gpu_skipped_exit_status(stats, exitstatus, expected):
+    from reference_common.pytest_support import gpu_skipped_exit_status
+
+    assert gpu_skipped_exit_status(stats, exitstatus) == expected
+
+
 @pytest.mark.parametrize(
     ("target_id", "processor"),
     [

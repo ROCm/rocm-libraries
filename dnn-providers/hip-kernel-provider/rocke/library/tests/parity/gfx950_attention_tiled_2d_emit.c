@@ -1123,6 +1123,200 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_alibi = true;
         s->emit_lse = true;
         break;
+    case 68:
+        /* Additive bias on the 16x16 path with two M atoms per warp (GQA). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_seqs = 3;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
+    case 69:
+        /* Additive bias on the 16x16 path composed with ALiBi, QQ bias, softcap,
+         * sinks and a sliding window (the ALiBi slope replaces the hoisted
+         * query head). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 512;
+        s->has_softcap = true;
+        s->use_alibi = true;
+        s->use_qq_bias = true;
+        s->use_additive_bias = true;
+        break;
+    case 70:
+        /* Additive bias on the transposed 32x32 combo the selector builds for a
+         * biased d64/b32/GQA-8 problem (mask-once and mask-limit off). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_fast_paged_kv_desc = true;
+        break;
+    case 71:
+        /* Additive bias on the bare transposed 32x32 path with QQ bias. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_qq_bias = true;
+        s->use_additive_bias = true;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        break;
+
+    /* idx72, 73: additive bias with paths that do not emit it; both engines
+     * reject these (BOTH_REJECTED). */
+    case 72:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        break;
+    case 73:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->use_register_pv = true;
+        break;
+    /* idx74-77: more additive-bias paths that do not emit it (BOTH_REJECTED).
+     * 72/73 cover mask-once and register-PV; these four cover the remaining
+     * rejections, see the Python emitter for why each one matters. */
+    case 74:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_invariant_hoist = true;
+        break;
+    case 75:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = false;
+        break;
+    case 76:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_grouped_kv2_softmax = true;
+        break;
+    case 77:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        break;
+
+    case 78: /* idx68 + emit_lse: bias params precede lse_ptr. */
+        make_spec(68, s);
+        s->emit_lse = true;
+        break;
     default:
         return -1;
     }

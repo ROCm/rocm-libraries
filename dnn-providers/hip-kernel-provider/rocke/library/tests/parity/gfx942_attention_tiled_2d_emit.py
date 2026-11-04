@@ -294,6 +294,32 @@ _CONFIGS = {
         use_q_major_grid=True,
         emit_lse=True,
     ),
+    # idx18: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field at all, so this
+    # raises TypeError at construction. The C twin's spec_validate() rejects
+    # it too, but nothing in the provider tree calls that function on the
+    # real build path (rocke_build_unified_attention_2d_tiled_scalar ->
+    # rocke_gfx942_attn2d_build_ctx_init); the reject this config pins lives
+    # in the ctx-init itself.
+    18: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=2048,
+        has_softcap=False,
+        use_additive_bias=True,
+    ),
+}
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
+    18: r"unexpected keyword argument 'use_additive_bias'|does not emit additive bias",
 }
 
 

@@ -50,6 +50,18 @@ _CONFIGS = {
     # LSE output through the wrapper: trailing lse_ptr and the wrapper's own
     # kernel name ("..._lse_fastkv_regp").
     6: dict(_BASE, emit_lse=True),
+    # idx7: additive bias; both engines' fastKV builders reject it (see
+    # _EXPECTED_REJECTIONS). Mask-once is off: the spec refuses bias with
+    # mask-once, which would otherwise reject first and leave the fastKV
+    # reject untested.
+    7: dict(_BASE, use_transposed_mask_once=False, use_additive_bias=True),
+}
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    7: r"fastKV register-P experiment does not support additive bias",
 }
 
 

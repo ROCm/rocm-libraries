@@ -183,6 +183,10 @@ typedef struct rocke_attention_tiled_2d_spec
      * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
      * no new IR; on appends the "lse" kernel-name token. */
     bool emit_lse; /* False (Python kw_only) */
+    /* gfx950 only (on gfx942, rocke_gfx942_attn2d_build_ctx_init rejects it).
+     * Adds four kernel params, before lse_ptr. Kept last: inserting a field
+     * moves every later one (abi.h). */
+    bool use_additive_bias; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

@@ -94,3 +94,22 @@ def select_reference_items(config, items) -> None:
         (selected if case_arch in (None, architecture) else deselected).append(item)
     items[:] = selected
     config.hook.pytest_deselected(items=deselected)
+
+
+def gpu_skipped_exit_status(stats, exitstatus):
+    """``exitstatus``, or 77 (CTest's SKIP_RETURN_CODE) when the session passed
+    but no ``gpu``-marked test ran: at least one was skipped and none reached a
+    pass, failure, error or xfail/xpass outcome. ``stats`` is the terminal
+    reporter's outcome -> reports map."""
+
+    def gpu(reports):
+        return any("gpu" in getattr(r, "keywords", {}) for r in reports)
+
+    ran = ("passed", "failed", "error", "xfailed", "xpassed")
+    if (
+        exitstatus == 0
+        and gpu(stats.get("skipped", ()))
+        and not any(gpu(stats.get(k, ())) for k in ran)
+    ):
+        return 77
+    return exitstatus

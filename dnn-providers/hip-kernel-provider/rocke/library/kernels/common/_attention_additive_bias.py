@@ -6,7 +6,8 @@ The fp32 bias is read at element
 ``seq*batch_stride + q_head*head_stride + q_row*sq_stride + col`` (Sk stride 1;
 a stride of 0 broadcasts that dimension), where ``q_head`` is the query head.
 It is added to the log2-domain score after any softcap, so the score is
-``softcap(QK * scale) + bias``. Python engine only for now.
+``softcap(QK * scale) + bias``. Mirrored by
+instance_attention_additive_bias_internal.h in the C++ engine.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rocke.core.ir import F32, I32, IRBuilder, PtrType, Value
-
 
 # Stride params in ABI order, after the pointer. Shared by the kernel params and
 # the host launcher signature, which packs kernargs by position.

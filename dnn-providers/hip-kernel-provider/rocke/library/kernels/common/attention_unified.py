@@ -642,7 +642,10 @@ def supports_native_unified_attention(
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
     if problem.use_additive_bias:
-        return False, "Additive bias is not enabled in CK DSL attention yet"
+        return (
+            False,
+            "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
+        )
     rejected = _reject_mask_semantics(problem)
     if rejected is not None:
         return rejected
@@ -664,6 +667,9 @@ def supports_native_unified_attention_tiled(
         or _reject_mask_semantics(problem)
         or _reject_mask_on_arch(problem, arch)
     )
+    if rejected is not None:
+        return rejected
+    rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:

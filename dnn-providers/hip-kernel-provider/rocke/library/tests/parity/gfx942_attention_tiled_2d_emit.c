@@ -299,6 +299,18 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_major_grid = true;
         s->emit_lse = true;
         break;
+    case 18:
+        /* Additive bias on gfx942; both engines reject it (BOTH_REJECTED). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 2048;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        break;
     default:
         return -1;
     }
