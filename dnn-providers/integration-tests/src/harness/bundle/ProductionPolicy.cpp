@@ -21,6 +21,7 @@ HarnessPolicy productionPolicy(TensorPlacement placement)
     policy.validator = TestConfig::get().getValidatorDevice();
     policy.claims = claimMode();
     policy.skipGraphValidation = TestConfig::get().skipGraphValidation();
+    policy.writeSupportClaims = TestConfig::get().writeSupportClaims();
     policy.placement = placement;
     policy.arch = TestConfig::get().getCurrentArch();
     policy.platform = currentPlatform();

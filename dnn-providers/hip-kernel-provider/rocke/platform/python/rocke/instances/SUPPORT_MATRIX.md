@@ -86,11 +86,12 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
 | `mx_gemm` | ✅ | ✅ | ❌ | MFMA microscaling GEMM |
 
-`universal_gemm`, `batched_gemm` and `grouped_gemm` also accept fp64 on gfx942
-(A/B/C fp64, fp64 accumulation, warp tile 16x16x4): pipelines `mem`, `compv3`
-and `compv4`, `default` and `cshuffle` epilogues, and `pad_m`/`pad_n`/`pad_k`.
-`split_k > 1`, fused epilogues and `direct_to_lds` with `pad_k` are rejected for
-fp64. With `direct_to_lds`, global byte offsets are 32-bit, so A and B must each
+`universal_gemm`, `batched_gemm` and `grouped_gemm` also accept fp64 on gfx90a,
+gfx942 and gfx950 (A/B/C fp64, fp64 accumulation, warp tile 16x16x4): pipelines
+`mem`, `compv3` and `compv4`, `default` and `cshuffle` epilogues, and
+`pad_m`/`pad_n`/`pad_k`. `split_k > 1`, fused epilogues and `direct_to_lds` with
+`pad_k` are rejected for fp64, and so is `direct_to_lds` on gfx90a, which has no
+DRAM->LDS DMA. With `direct_to_lds`, global byte offsets are 32-bit, so A and B must each
 be smaller than 2 GiB.
 
 ---
@@ -114,7 +115,7 @@ be smaller than 2 GiB.
 | `conv_implicit_gemm` split-K forward (`split_k > 1`) | ❌ | ❌ | ❌ | gfx1250 only: WMMA, `mem` or `wavelet` pipeline, 2-D, not pointwise, identity `acc_epilogue`; no `async_dma`, `unroll_k`, `chiplet_swizzle` or `group_merge`. Each slice stores an fp32 partial tile into its slab of a `[ks_count][M][K]` workspace and `conv_fwd_split_k_reduce` folds the slabs into D; the degree is the `ks_count` kernarg, and `split_k = -1` resolves it (`resolve_conv_split_k`; 1 where splitting does not pay). Built into the AOT kernel cache; the dispatcher does not select it |
 | `conv_implicit_gemm` cluster split-K (`split_k_cluster`) | ❌ | ❌ | ❌ | gfx1250 only (llvm23, workgroup-cluster launch): `mem` pipeline, `split_k_cluster` in 2..15, `tile_n % 4 == 0`, K and kpg multiples of 4 (checked at build and on every launched problem). The slices of one output tile form a (1, 1, S) workgroup cluster and fold through a cluster barrier, so there is no Stage 2 launch; one binary per S. Built into the AOT kernel cache; the dispatcher does not select it |
 | `conv_fwd_split_k_reduce` | ❌ | ❌ | ❌ | Stage 2 of the gfx1250 split-K forward: sums the fp32 slabs in a fixed order and casts to fp16/bf16 (deterministic); `degree > 0` unrolls the fold for that many slabs. Plain global loads/stores, no arch-specific ops |
-| `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
+| `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation on gfx942 / gfx950 (on gfx1250 `conv_direct_fwd_wmma`, `conv_direct_fwd_tapouter_wmma` and `conv_direct_dgrad_wmma` compute one). Built from `library/kernels`; not yet wired into dispatch |
 | `direct_wgrad_tiled` | ❌ | ✅ | ❌ | dense and grouped wgrad, stride 1; needs `ds_read_b64_tr_b16` and `mfma_f32_16x16x32`. Built from `library/kernels`; AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_mfma` / `grouped_wgrad_mfma` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0`, any filter) and 4/8-channel grouped wgrad, stride 1, on `mfma_f32_4x4x4`; partial slots + `dw_wgrad_fold`; need `ds_read_b64_tr_b16`. AOT sweep only, not yet wired into dispatch |
@@ -122,8 +123,11 @@ be smaller than 2 GiB.
 | `conv_dgrad_smallc_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM dgrad of an ungrouped stem with `C <= 4` (not a patch embedding), `PAD` in 0..K-1, `kpg` a multiple of 8; GEMM over the flattened filter plus an LDS overlap-add. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 | `conv_direct_dgrad_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM, dgrad with stride 1 or 2 (phase decomposition) or per-axis dilation, dense and grouped (`cpg`, `kpg` multiples of 8, or 2/4/8/16 packed into block-diagonal super-groups with `pack_groups`), `PAD` in 0..(K-1)*dil. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
-| `conv_direct_fwd_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward, dense and grouped (`cpg`, `kpg` multiples of 8, or small groups packed block-diagonally), square filters, stride 1 or 2, per-axis dilation. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
-| `conv_direct_fwd_smallc_wmma` / `conv_direct_fwd_smallk_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward of tiny channel counts, ungrouped and undilated, square filters: `C <= 4` stems (`K` a multiple of 8) and `K` in (1, 2, 4, 8) layers (`C` a multiple of 8). Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_fwd_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward, dense and grouped (`cpg`, `kpg` multiples of 8, or small groups packed block-diagonally), square filters and rectangular filters with their own column padding (unpacked; dilated only as 1 x R at stride 1), stride 1 or 2 (1x1 / 2x2 stride 2 also as a strided GEMM; 1-D 1 x m*S stride S over a polyphase view), per-axis dilation. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_fwd_smallc_wmma` / `conv_direct_fwd_smallk_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward of tiny channel counts, ungrouped and undilated: `C <= 4` stems (square filters, `K` a multiple of 8) and `K <= 8` layers (`C` a multiple of 8; rectangular filters with per-axis padding). Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_dw_fwd_wmma` | ❌ | ❌ | ❌ | gfx1250 only: Toeplitz wave32 WMMA 16x16x32 depthwise forward (one-hot weights x 8 channels), stride 1, undilated, one padding for both axes, `groups` a multiple of 8. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_fwd_gstream_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM grouped forward for 8 / 16 / 32 / 56 / 64 channels per group (`cpg == kpg`), square filters, stride 1 or 2, undilated, one padding for both axes. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_fwd_tapouter_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward of large per-axis dilations (taps as shifted 1x1 GEMMs, taps in the padding skipped), dense and grouped (`cpg`, `kpg` multiples of 8), stride 1, one padding for both axes. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 | Winograd forward (`conv_winograd_fwd`, `conv_winograd_fwd_rt`, `conv_winograd_gemm_wmma`, `conv_winograd_gen`, `conv_winograd_fused_1d_wmma`) | ❌ | ❌ | ❌ | gfx1250 only: fp16 / bf16 I/O, stride 1, 2-D, `C/g` and `K/g` >= 32, dilation up to 35; 3x3 as F(m x n, 3x3) with tiles 2..6 (not 6x6), 1-D / 7x1 / 5x5 and segmented long filters through the generalized pipeline, fused 1-D kernel for `1 x r` with `C` in {32, 64, 128} (fp16). Kernels built per problem, except the 3x3 pipeline's shape-generic transforms (`conv_winograd_fwd_rt`, compiled ahead of time; opt-in route `algorithm="winograd_aot"`, candidate `conv_winograd_fwd_aot`); explicit K2 specs with long register-path runs (`tiles_per_thread`) of tiles >= 4 spill to scratch (see `dsl_docs/instances/convolution.md`); plan from `conv_winograd_select`; opt-in dispatcher route `algorithm="winograd"` (candidate `conv_winograd_fwd`), never picked by `auto` |
 
 ---
@@ -283,3 +287,8 @@ parity runs on the matching device and is not implied by the ✅ here.
   `library/dispatch/gdn/` plus a tuning run. This instance is GPU-numeric-verified on
   gfx950 against an fp32 reference, covering both the output and the in-place
   recurrent-state update.
+
+The gfx1250 `NvFp4GemmSpec` builder consumes packed E2M1 with K=16 E4M3
+block scales and runtime FP32 tensor factors, producing BF16 or FP16 output.
+It is a packed-input example; numerical validation uses bounded exact fixtures.
+See [the NVFP4 input contract](../examples/gfx1250/gemm/NVFP4.md).

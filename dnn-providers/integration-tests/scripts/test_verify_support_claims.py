@@ -356,6 +356,125 @@ class TestEnforcementLevel(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# expected_rejection
+# ---------------------------------------------------------------------------
+
+_CLAIM = {"gfx942": ["linux"]}
+
+
+class TestExpectedRejection(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bundle_root = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.bundle_root, ignore_errors=True)
+
+    def _single(self, meta: object, claims: object) -> None:
+        _write_json(self.bundle_root / "A" / "Small.json", {})
+        _write_json(self.bundle_root / "A" / "Small.meta.json", meta)
+        _write_json(
+            self.bundle_root / "A" / "Small.support.json",
+            {"version": 1, "claims": claims},
+        )
+
+    def _sweep(self, cases: list, groups: list) -> None:
+        sweep_dir = self.bundle_root / "B" / "Default"
+        _write_sweep(sweep_dir, {"version": 1, "cases": cases})
+        _write_json(
+            sweep_dir / "support.json",
+            {"version": 1, "claims": {"ENGINE": groups}},
+        )
+
+    def test_claim_on_flagged_single_graph_fails(self) -> None:
+        self._single({"expected_rejection": True}, {"ENGINE": _CLAIM})
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Small.json", errors[0])
+        self.assertIn("expected_rejection bundles carry no support claim", errors[0])
+
+    def test_claim_by_any_engine_on_flagged_single_graph_fails(self) -> None:
+        self._single({"expected_rejection": True}, {"A": _CLAIM, "B": _CLAIM})
+        self.assertEqual(len(verify_all(self.bundle_root)), 1)
+
+    def test_flagged_single_graph_with_empty_claims_passes(self) -> None:
+        self._single({"expected_rejection": True}, {})
+        self.assertEqual(verify_all(self.bundle_root), [])
+
+    def test_flagged_single_graph_without_sidecar_passes(self) -> None:
+        _write_json(self.bundle_root / "A" / "Small.json", {})
+        _write_json(
+            self.bundle_root / "A" / "Small.meta.json", {"expected_rejection": True}
+        )
+        self.assertEqual(verify_all(self.bundle_root), [])
+
+    def test_only_a_boolean_true_flags_a_single_graph(self) -> None:
+        for value in (False, "true", 1, None):
+            with self.subTest(value=value):
+                self._single({"expected_rejection": value}, {"ENGINE": _CLAIM})
+                self.assertEqual(verify_all(self.bundle_root), [])
+
+    def test_claim_naming_flagged_sweep_case_fails(self) -> None:
+        self._sweep(
+            [
+                {"id": "ok", "values": {}},
+                {"id": "bad", "values": {}, "metadata": {"expected_rejection": True}},
+            ],
+            [{"cases": ["ok", "bad"], "support": _CLAIM}],
+        )
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("case 'bad'", errors[0])
+        self.assertIn("expected_rejection bundles carry no support claim", errors[0])
+
+    def test_each_engines_claim_on_flagged_sweep_case_is_reported(self) -> None:
+        sweep_dir = self.bundle_root / "B" / "Default"
+        _write_sweep(
+            sweep_dir,
+            {
+                "version": 1,
+                "cases": [
+                    {
+                        "id": "bad",
+                        "values": {},
+                        "metadata": {"expected_rejection": True},
+                    }
+                ],
+            },
+        )
+        group = [{"cases": ["bad"], "support": _CLAIM}]
+        _write_json(
+            sweep_dir / "support.json",
+            {"version": 1, "claims": {"E1": group, "E2": group}},
+        )
+        self.assertEqual(len(verify_all(self.bundle_root)), 2)
+
+    def test_unclaimed_flagged_case_in_a_claimed_sweep_passes(self) -> None:
+        self._sweep(
+            [
+                {"id": "ok", "values": {}},
+                {"id": "bad", "values": {}, "metadata": {"expected_rejection": True}},
+            ],
+            [{"cases": ["ok"], "support": _CLAIM}],
+        )
+        self.assertEqual(verify_all(self.bundle_root), [])
+
+    def test_only_a_boolean_true_flags_a_sweep_case(self) -> None:
+        for value in (False, "true", 1, None):
+            with self.subTest(value=value):
+                self._sweep(
+                    [
+                        {
+                            "id": "c1",
+                            "values": {},
+                            "metadata": {"expected_rejection": value},
+                        }
+                    ],
+                    [{"cases": ["c1"], "support": _CLAIM}],
+                )
+                self.assertEqual(verify_all(self.bundle_root), [])
+
+
+# ---------------------------------------------------------------------------
 # Sweep case id cross-check
 # ---------------------------------------------------------------------------
 

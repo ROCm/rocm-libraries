@@ -52,8 +52,7 @@ namespace TensileLite
         class SynchronizerValidator : public RunListener
         {
         public:
-            SynchronizerValidator(po::variables_map const&                    args,
-                                  std::vector<std::shared_ptr<DeviceContext>> devices);
+            SynchronizerValidator(po::variables_map const& args);
             virtual ~SynchronizerValidator();
 
             virtual bool needMoreBenchmarkRuns() const override
@@ -114,13 +113,11 @@ namespace TensileLite
                                       TimingEvents const& stopEvents) override
             {
             }
-            // Deliberately unchecked: the readback synchronizes the stream,
-            // perturbing the back-to-back cadence these enqueues exercise.
+            // Opt-in readback after the group, never between its launches.
+            // Disabled by default to avoid perturbing benchmark timing.
             virtual void validateEnqueues(std::vector<size_t> const& slots,
                                           TimingEvents const&        startEvents,
-                                          TimingEvents const&        stopEvents) override
-            {
-            }
+                                          TimingEvents const&        stopEvents) override;
 
             virtual void finalizeReport() override {}
 
@@ -130,6 +127,11 @@ namespace TensileLite
             }
 
         private:
+            /// Runs checkInputs on every device for each of `slots`, for `stage`.
+            /// Any exception, including a failed readback or clear, marks the
+            /// solution as failed before rethrowing.
+            void validateInputs(std::vector<size_t> const& slots, char const* stage);
+
             /// Checks every Synchronizer buffer reachable from *inputs*.
             /// `stage` names the launch phase, for the diagnostic.
             void
@@ -152,7 +154,7 @@ namespace TensileLite
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
+            bool                m_validateAfterEnqueues = false;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;

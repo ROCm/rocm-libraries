@@ -18,10 +18,17 @@ the run selects.
 - ``lower_hip_with_both_engines`` and ``assert_both_engines_reject_hip`` are
   the same two checks for the HIP-source lowering.
 
-Both skip, naming the reason, when the ``rocke_engine`` binding is not built.
+All four skip, naming the reason, when the ``rocke_engine`` binding is not built.
+``available_engines`` names the engines a test that drives each engine itself can
+use: the installed wheel has no ``rocke_engine`` binding, so such a test runs the
+Python engine alone there and both engines wherever the binding is supplied.
+``all_engines_backend`` is the ``backend`` argument that runs those same engines
+through ``compile_kernel`` and similar entry points.
 """
 
 from __future__ import annotations
+
+import importlib.util
 
 import pytest
 
@@ -32,11 +39,27 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
 __all__ = [
+    "all_engines_backend",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
+    "available_engines",
     "lower_hip_with_both_engines",
     "lower_with_both_engines",
 ]
+
+
+def available_engines() -> tuple[str, ...]:
+    """``("python", "cpp")`` when the ``rocke_engine`` binding is importable, else
+    ``("python",)``."""
+    if importlib.util.find_spec("rocke_engine") is None:
+        return ("python",)
+    return ("python", "cpp")
+
+
+def all_engines_backend() -> str:
+    """The ``backend`` that lowers with every engine in ``available_engines()``:
+    ``"both"`` when the ``rocke_engine`` binding is importable, else ``"python"``."""
+    return "both" if "cpp" in available_engines() else "python"
 
 
 def lower_with_both_engines(
