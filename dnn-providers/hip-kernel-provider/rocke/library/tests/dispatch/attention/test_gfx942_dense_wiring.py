@@ -35,6 +35,7 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
+from dispatch.attention.gfx942_dense import _base_spec
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     attention_dense_cache_key,
@@ -205,32 +206,63 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             ok, why = _candidate().admits(_req(sliding_window=128, use_sinks=True))
             self.assertTrue(ok, why)
 
-    def test_rejects_ragged_sequence_length(self):
-        """The default spec sets ragged=True for any non-256-multiple
-        self-attention length. The kernel must decline, not select-then-fail.
+    def test_rejects_a_partial_tile_and_names_the_length(self):
+        """The default spec sets ragged=True for any self-attention length that is
+        not a tile multiple. The kernel must decline, not select-then-fail.
         Capability cannot see this one: it is a property of the BUILT spec, so
-        it stays in the predicate."""
+        it stays in the predicate. The graph is not ragged, so the reason names
+        the length and the tile instead of saying "ragged"."""
+        # The default tile depends on the shape (128 rows when the 256-row grid
+        # would leave CUs idle), so the expected tile is read from the default spec
+        # the factory builds (dispatch refuses it, so it cannot come from dispatch).
+        # 1152 is a block_n multiple, so only the query length is named there.
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(seqlen_q=1000, seqlen_k=1000))
-            self.assertFalse(ok)
-            self.assertNotIn("capability", why)
-            self.assertIn("ragged", why)
+            for seqlen in (1152, 1000):
+                with self.subTest(seqlen=seqlen):
+                    req = _req(seqlen_q=seqlen, seqlen_k=seqlen)
+                    spec = _base_spec(req)
+                    self.assertNotEqual(seqlen % spec.block_m, 0)
+                    ok, why = _candidate().admits(req)
+                    self.assertFalse(ok)
+                    self.assertNotIn("capability", why)
+                    self.assertNotIn("ragged", why)
+                    self.assertIn(
+                        f"seqlen_q {seqlen} is not a multiple of block_m "
+                        f"{spec.block_m}",
+                        why,
+                    )
+                    kv_part = (
+                        f"seqlen_kv {seqlen} is not a multiple of block_n "
+                        f"{spec.block_n}"
+                    )
+                    if seqlen % spec.block_n:
+                        self.assertIn(kv_part, why)
+                    else:
+                        self.assertNotIn("seqlen_kv", why)
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):
-    def test_moving_bottom_right_declines_at_capability(self):
+    def test_moving_bottom_right_is_admitted_with_a_shifted_diagonal(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
             with self.subTest(mask_type=mask_type), _Gfx942Arch():
-                ok, why = _candidate().admits(
-                    _req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type)
-                )
-                self.assertFalse(ok)
-                self.assertIn("capability", why)
-                self.assertIn("causal_bottom_right", why)
-                with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-                    _spec(_req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type))
+                req = _req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type)
+                ok, why = _candidate().admits(req)
+                self.assertTrue(ok, why)
+                spec = _spec(req)
+                self.assertTrue(spec.causal)
+                self.assertTrue(spec.causal_bottom_right)
 
-    def test_concrete_support_rejects_shared_bottom_right_spec(self):
+    def test_cross_length_no_mask_still_declines(self):
+        """The band normalizer reads a cross-length NO_MASK request on this arch as
+        the bottom-right causal band; the dense body does not serve it."""
+        with _Gfx942Arch():
+            req = _req(seqlen_q=2048, seqlen_k=4096, mask_type=0)
+            ok, _ = _candidate().admits(req)
+            self.assertFalse(ok)
+            with self.assertRaisesRegex(ValueError, "NO_MASK"):
+                _spec(req)
+
+    def test_concrete_support_rejects_bottom_right_window(self):
         common = dict(
             batch=1,
             seqlen_q=2048,
@@ -242,12 +274,13 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
             causal_bottom_right=True,
             dtype="bf16",
         )
-        spec = AttentionDenseSpec(**common)
-        ok, why = supports_attention_dense(spec, arch="gfx942")
+        ok, why = supports_attention_dense(AttentionDenseSpec(**common), arch="gfx942")
+        self.assertTrue(ok, why)
+        ok, why = supports_attention_dense(
+            AttentionDenseSpec(**common, sliding_window=128), arch="gfx942"
+        )
         self.assertFalse(ok)
         self.assertIn("causal_bottom_right", why)
-        with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-            Gfx942AttentionDenseSpec(**common)
 
     def test_equal_length_bottom_right_preserves_persistent_policy(self):
         common = dict(batch=16, seqlen_q=2048, seqlen_k=2048)
@@ -392,12 +425,16 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                     specs = [_spec(_req(**kw), persistent=persistent) for kw in shapes]
                     self.assertTrue(all(s.persistent == persistent for s in specs))
                     self.assertTrue(all(s.runtime_shape for s in specs))
-                    self.assertEqual(len({s.kernel_name() for s in specs}), 1)
+                    # One binary per query tile: the default tile is a function of
+                    # the work count (_default_block_m), the rest of the shape is not.
+                    n_tiles = len({s.block_m for s in specs})
+                    self.assertEqual(n_tiles, 2)
+                    self.assertEqual(len({s.kernel_name() for s in specs}), n_tiles)
                     self.assertEqual(
                         len(
                             {attention_dense_cache_key(s, arch="gfx942") for s in specs}
                         ),
-                        1,
+                        n_tiles,
                     )
                     name = specs[0].kernel_name()
                     self.assertNotRegex(name, r"_b\d+")
@@ -416,8 +453,9 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                         list(specs[0].runtime_kernarg_fields),
                     )
 
-        # Baked control on gfx950: the persistent body there declares no shape
-        # params, so heads and seqlens stay in the symbol and split identity.
+        # Baked control on gfx950: the ragged persistent body there declares no shape
+        # params, so heads and seqlens stay in the symbol and split identity. (The
+        # dispatched gfx950 persistent spec is on the runtime path like gfx942's.)
         from kernels.gfx950.attention_dense import (
             Gfx950AttentionDenseSpec,
         )
@@ -425,14 +463,28 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             attention_dense_signature as gfx950_signature,
         )
 
+        dispatched = attention_tuning_spec(
+            _req(arch="gfx950", algorithm="auto", spec_id="auto"),
+            "gfx950_dense_persist",
+        ).kernel_spec
+        self.assertTrue(dispatched.persistent and dispatched.runtime_shape)
         baked = [
-            attention_tuning_spec(
-                _req(arch="gfx950", algorithm="auto", spec_id="auto", **kw),
-                "gfx950_dense_persist",
-            ).kernel_spec
+            Gfx950AttentionDenseSpec(
+                batch=kw["batch"],
+                seqlen_q=2048,
+                seqlen_kv=2048,
+                num_query_heads=kw["nhead_q"],
+                num_kv_heads=kw["nhead_k"],
+                head_size=128,
+                causal=True,
+                dtype="bf16",
+                persistent=True,
+                ragged=True,
+                num_persistent=256,
+                persist_decode="qb_major",
+            )
             for kw in shapes
         ]
-        self.assertTrue(all(isinstance(s, Gfx950AttentionDenseSpec) for s in baked))
         self.assertTrue(all(s.persistent and not s.runtime_shape for s in baked))
         by_heads: dict[tuple[int, int], set[str]] = {}
         for kw, s in zip(shapes, baked):
@@ -637,6 +689,66 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
             attention_dense_runtime_args(at)
         default_grid = Gfx942AttentionDenseSpec(batch=2**30, persistent=False, **common)
         self.assertEqual(attention_dense_runtime_args(default_grid)["batch"], 2**30)
+
+    def test_under_filled_default_tile_covers_d64_and_sinks(self):
+        """The 128-row tile applies to every head size and to sinks (non-causal
+        sinks on the D128 persistent grid excepted): below the CU count it halves
+        block_m, at or above it the shared tile stays. A sliding window keeps its
+        own geometry."""
+        cases = (
+            # (kwargs, expected block_m): 256-row work = Sq/256 * Hq * B vs 304.
+            (dict(hdim_q=64, hdim_v=64, nhead_q=64, seqlen_q=512, seqlen_k=512), 128),
+            (dict(hdim_q=64, hdim_v=64, nhead_q=64, seqlen_q=2048, seqlen_k=2048), 256),
+            (dict(nhead_q=128, seqlen_q=512, seqlen_k=512, use_sinks=True), 128),
+            (
+                dict(
+                    hdim_q=64,
+                    hdim_v=64,
+                    nhead_q=64,
+                    seqlen_q=512,
+                    seqlen_k=512,
+                    use_sinks=True,
+                ),
+                128,
+            ),
+            (dict(nhead_q=128, seqlen_q=2048, seqlen_k=2048, use_sinks=True), 256),
+            (
+                dict(nhead_q=128, seqlen_q=512, seqlen_k=512, batch=4, use_sinks=True),
+                256,
+            ),
+            (
+                dict(nhead_q=128, seqlen_q=512, seqlen_k=512, batch=4, use_sinks=True),
+                256,
+            ),
+            # Non-causal sinks: D128 (persistent grid) keeps the shared tile, D64
+            # (one CTA per block) takes the 128-row one.
+            (
+                dict(
+                    nhead_q=128, seqlen_q=512, seqlen_k=512, mask_type=0, use_sinks=True
+                ),
+                256,
+            ),
+            (
+                dict(
+                    hdim_q=64,
+                    hdim_v=64,
+                    nhead_q=64,
+                    seqlen_q=512,
+                    seqlen_k=512,
+                    mask_type=0,
+                    use_sinks=True,
+                ),
+                128,
+            ),
+        )
+        with _Gfx942Arch():
+            for kw, block_m in cases:
+                with self.subTest(**kw):
+                    self.assertEqual(_spec(_req(**kw)).block_m, block_m)
+            wide_window = _spec(
+                _req(nhead_q=32, seqlen_q=2048, seqlen_k=2048, sliding_window=4096)
+            )
+            self.assertEqual(wide_window.block_m, 256)
 
 
 class TestGfx942SlidingWindow(unittest.TestCase):
