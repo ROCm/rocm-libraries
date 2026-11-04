@@ -552,8 +552,8 @@ inline Problem implicitLaunchProblem(const Problem& p)
 /// multi-GiB images otherwise. Production code never touches this; it stays at I32_MAX.
 inline int64_t& batchChunkByteLimitForTesting()
 {
-    static int64_t limit = I32_MAX;
-    return limit;
+    static int64_t s_limit = I32_MAX;
+    return s_limit;
 }
 
 /// gfx950_conv_dgrad_aot_batch_chunks: the (n0, n) batch slices one implicit-GEMM launch
@@ -1507,7 +1507,7 @@ inline std::vector<int32_t> directDgradValues(const Problem& p, const Geometry& 
                                          p.hi * p.wi * p.c,
                                          p.wi * p.c,
                                          p.c};
-    return std::vector<int32_t>(values.begin(), values.end());
+    return {values.begin(), values.end()};
 }
 
 /// The forward problem the fused, 4c and MFMA compute passes run
@@ -1565,7 +1565,7 @@ inline std::vector<int32_t> transposedValues(const TransposedProblem& t)
                                          t.ho * t.wo * totalK,
                                          t.wo * totalK,
                                          totalK};
-    return std::vector<int32_t>(values.begin(), values.end());
+    return {values.begin(), values.end()};
 }
 
 // ---- implicit GEMM -------------------------------------------------------------------
