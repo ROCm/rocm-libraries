@@ -315,11 +315,12 @@ together:
 
 ## The shipped catalog
 
-`hipkernel:Gfx950ConvFwdAot` ships a curated list of rocKE kernels,
-`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt`: one
-`KernelIdentity.label()` per line, the same kernels in fp16 and bf16.
-`tools/enumerate_conv_aot_instances.py` turns it into the per-dtype lists,
-`configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
+`hipkernel:Gfx950ConvFwdAot` ships exactly what rocKE's own forward dispatcher
+lists, `dnn-providers/hip-kernel-provider/rocke/library/dispatch/grouped_convolution_instances/gfx950_fwd.json`:
+the same kernels in fp16 and bf16. `tools/enumerate_conv_aot_instances.py` turns it
+into the per-dtype lists, `configs/gfx950_conv_fwd_aot_<dtype>.instances.json`.
+Pass `--labels` (one `KernelIdentity.label()` per line) to build from a curated
+subset instead, a one-off override, not the normal path:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
@@ -455,13 +456,15 @@ How the converter treats the lists:
   across regenerations. Another engine name (`--engine-name`) derives its ids under a
   namespace of its own name.
 
-To change the catalog, edit `configs/gfx950_conv_fwd_aot.labels.txt` and rerun the
-flow. Commit the labels and the instance lists. The generator config is not committed: the converter
-regenerates it from the lists on every run. The tests hold the pieces together:
+To change the catalog, edit rocKE's own forward dispatcher list
+(`gfx950_fwd.json`, via `instance_list.py add`/`format`) and rerun the flow. Commit
+the dispatcher list and the instance lists. The generator config is not committed:
+the converter regenerates it from the lists on every run. The tests hold the pieces
+together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
-  tool builds from the committed labels and the rocKE tree beside them, when a label is
-  not a sweep identity or does not convert, or when the catalog is not 207 kernels per
+  tool builds from the committed dispatcher list and the rocKE tree beside them, when
+  an entry is not a sweep identity or does not convert, or when the catalog is not 207 kernels per
   dtype, the same in both.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is

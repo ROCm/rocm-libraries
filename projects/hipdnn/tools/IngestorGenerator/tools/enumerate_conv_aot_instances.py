@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: MIT
 """Build the rocKE gfx950 forward-conv AOT instance lists the hipkernel pack ships.
 
-The catalog is a curated list of rocKE kernels (:data:`CATALOG_LABELS`): one
-``KernelIdentity.label()`` per line, which :meth:`KernelIdentity.from_label` turns
-back into the identity. Implicit-GEMM entries must be identities of the AOT sweep
-grid (``kernels/conv/aot_jobs.py``, enumerated by
-``benchmarks/common/kernel_sweep.py``) and direct entries identities of the direct
-sweep grid (``kernels/conv/direct_aot_jobs.py``, enumerated by
+The catalog is exactly what rocKE's own forward dispatcher lists
+(:data:`DISPATCHER_INSTANCE_LIST`, ``dispatch/grouped_convolution_instances/
+gfx950_fwd.json``): the dispatcher is the single source of truth for which gfx950
+forward instances exist, and this engine ships every one of them as AOT. Pass
+``--labels`` (one ``KernelIdentity.label()`` per line) to build from a curated
+subset instead -- a one-off override, not the normal path. Implicit-GEMM entries
+must be identities of the AOT sweep grid (``kernels/conv/aot_jobs.py``, enumerated
+by ``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
+direct sweep grid (``kernels/conv/direct_aot_jobs.py``, enumerated by
 ``benchmarks/common/direct_kernel_sweep.py``), for gfx950, forward, fp16 or bf16.
 Every entry must also convert: an identity ``make_conv_aot_config.py`` refuses,
 because the packaged launch does not run it, fails the run. Nothing is dropped
@@ -49,9 +52,11 @@ INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
 
-#: The curated catalog: one ``KernelIdentity.label()`` per line; blank lines and
-#: lines starting with ``#`` are ignored.
-CATALOG_LABELS = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.labels.txt"
+#: rocKE's own forward dispatcher instance list, relative to --rocke-root: the
+#: default source of the catalog (every instance it lists, none it doesn't).
+DISPATCHER_INSTANCE_LIST = Path(
+    "library/dispatch/grouped_convolution_instances/gfx950_fwd.json"
+)
 
 
 def _bind_rocke(rocke_root: Path) -> None:
@@ -94,6 +99,15 @@ def read_labels(path: Path) -> list:
         seen.add(identity.stable_hash())
         identities.append(identity.to_dict())
     return identities
+
+
+def read_dispatcher_instances(rocke_root: Path) -> list:
+    """Every identity rocKE's own forward dispatcher lists (:data:`DISPATCHER_INSTANCE_LIST`),
+    as dicts, in the dispatcher's canonical (label-sorted) order."""
+    from dispatch.grouped_convolution import load_instance_list
+
+    lst = load_instance_list(rocke_root / DISPATCHER_INSTANCE_LIST)
+    return [identity.to_dict() for identity in lst.identities]
 
 
 def sweep_hashes(dtype: str, jobs: int) -> set:
@@ -172,9 +186,10 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--labels",
         type=Path,
-        default=CATALOG_LABELS,
-        help="The curated catalog, one KernelIdentity label per line "
-        "(default: %(default)s).",
+        default=None,
+        help="A curated subset override, one KernelIdentity label per line "
+        "(default: every instance rocKE's forward dispatcher, "
+        f"{DISPATCHER_INSTANCE_LIST}, lists).",
     )
     parser.add_argument(
         "--output-dir",
@@ -193,13 +208,18 @@ def main(argv=None) -> int:
     _bind_rocke(args.rocke_root)
 
     try:
-        listed = read_labels(args.labels)
+        listed = (
+            read_labels(args.labels)
+            if args.labels is not None
+            else read_dispatcher_instances(args.rocke_root)
+        )
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
-        print(f"{args.labels}: dtype(s) {others} are not packaged", file=sys.stderr)
+        source = args.labels if args.labels is not None else DISPATCHER_INSTANCE_LIST
+        print(f"{source}: dtype(s) {others} are not packaged", file=sys.stderr)
         return 1
 
     lists, failed = {}, False

@@ -98,8 +98,9 @@ def _label(identity):
 
 @pytest.fixture(scope="module")
 def catalog():
-    """The committed catalog's identities, in file order."""
-    return tool.read_labels(tool.CATALOG_LABELS)
+    """The committed catalog's identities: every one rocKE's forward dispatcher
+    lists."""
+    return tool.read_dispatcher_instances(_ROCKE)
 
 
 def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(catalog):
