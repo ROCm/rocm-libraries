@@ -64,10 +64,6 @@ jobs:
         id: matrix
         run: |
           architectures='{
-            "gfx90a": {
-              "runs_on": "linux-gfx90a-gpu-rocm",
-              "components": ["hipBLASLt"]
-            },
             "gfx942": {
               "runs_on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
               "components": ["hipBLASLt", "hipSPARSELt"]
@@ -78,12 +74,6 @@ jobs:
             }
           }'
           timeouts='{
-            "gfx90a": {
-              "hipblaslt": {
-                "quick":    {"command_timeout": "10m",  "step_timeout_minutes": 20,  "job_timeout_minutes": 50},
-                "standard": {"command_timeout": "30m",  "step_timeout_minutes": 40,  "job_timeout_minutes": 70}
-              }
-            },
             "gfx942": {
               "hipblaslt": {
                 "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 65},

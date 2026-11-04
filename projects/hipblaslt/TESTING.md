@@ -854,7 +854,7 @@ the set of architectures the library supports or builds for.
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed, and the second stage needs the first to pass. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
-| Linux, gfx90a | Partial | PR (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check; TheRock nightly | Existing hipBLASLt ASAN coverage |
+| Linux, gfx90a | Partial | TheRock nightly | Per-PR client testing remains in Math CI |
 | Linux, gfx942 / gfx950 | Partial | PR (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
 | Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
@@ -912,7 +912,7 @@ on pull requests touching either library, either test driver, the suppression fi
 nightly at 07:00 UTC, and on manual dispatch.
 It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
 `linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
-nightly on all three architectures. gfx90a tests hipBLASLt; gfx942/gfx950 test both libraries.
+nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
 Manual dispatch accepts the test type as a workflow input.
 The selected type is passed to the test runners for every architecture.
 Each architecture has one build and each library has a separate
@@ -922,7 +922,7 @@ manually dispatched runs.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
-| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI`: quick tests on relevant PRs; standard tests nightly on all three architectures; manually selected test type on every architecture | No. `hipBLASLt ASAN CI Summary` is not a required check |
+| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI` on gfx942/gfx950: quick tests on relevant PRs; standard tests nightly; manually selected test type | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
 | **TSAN** | Data races | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
@@ -943,8 +943,9 @@ sanitizer options intentionally stand down when the superbuild is driving.
 XNACK-capable configurations and is substantially slower, which is why it runs only nightly and on
 manual dispatch.
 
-There is currently no gfx90a device-ASAN runtime test lane. Before enabling one, runner capacity
-and stability with full ASAN and `HSA_XNACK=1` must be reviewed with DevOps. A dedicated pool,
+The ASAN workflows described here do not run gfx90a tests. Its per-PR client testing
+remains in Math CI. Before adding sanitizer coverage, runner capacity and stability must be
+reviewed with DevOps; full device ASAN also requires `HSA_XNACK=1`. A dedicated pool,
 potentially for nightly testing, is a separate follow-up; the hang investigation remains tracked
 in [rocm-libraries #12727](https://github.com/ROCm/rocm-libraries/issues/12727) and
 [TheRock-Infra #978](https://github.com/ROCm/TheRock-Infra/issues/978).
@@ -1140,7 +1141,7 @@ real unit tests, which is the migration described in
 [tensilelite/TESTING.md#unit-testing-strategy](tensilelite/TESTING.md#unit-testing-strategy).
 
 **4. Memory safety.** Wrong-sized workspaces, out-of-bounds host buffers, and leaks in long-running
-inference processes. Checked by the per-PR ASAN lanes (host-only ASAN on gfx90a, gfx94X and gfx950)
+inference processes. Checked by the per-PR ASAN lanes (host-only ASAN on gfx94X and gfx950)
 and by nightly full ASAN, none of which blocks a merge today.
 Device-side memory errors are covered only nightly.
 
