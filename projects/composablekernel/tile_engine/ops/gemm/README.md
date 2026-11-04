@@ -291,10 +291,11 @@ writable, is refused up front with exit status `2`):
 | `artifacts/<kernel>.so` | the run's copy of each built kernel; only these copies are loaded, and one that changed since its build is refused |
 
 Exit status: `0` when every problem has a confirmed winner, `1` when any has
-none or the run stopped on an error, `2` for invalid options or settings. An
-error (a build or worker pool that dies, a strategy failure) ends the search,
-but the finalists measured before it are still confirmed and exported; the
-status is then at best `partial` and `summary.json` holds the error. When the
+none or the run stopped on an error, `2` for invalid options, settings or
+output directory. An error (a build or worker pool that dies, a strategy
+failure) ends the search, but the finalists measured before it are still
+confirmed and exported; the status is then at best `partial` and
+`summary.json` holds the error. When the
 adapter breaks its contract (a lost or repeated outcome), nothing is confirmed.
 When a write to the output directory fails (a full disk, say), the search
 ends with that error and exit status `1`, also when it is one of the last
