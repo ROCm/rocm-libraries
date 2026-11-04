@@ -339,6 +339,10 @@ def supports_tiled_3d(
 # cannot split evenly falls back to the async copies.
 _WIDE_KV_ELEMS = 8
 
+# The fp8 loader issues a tile's loads before dequantizing them; the C++ twin keeps them in
+# arrays of this size (ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS).
+FP8_MAX_CHUNKS_PER_THREAD = 64
+
 
 def wide_kv_load_fits(tile_size: int, head_size: int) -> bool:
     """True when ``use_wide_kv_load`` takes effect for this tile."""
@@ -1003,6 +1007,11 @@ def build_unified_attention_3d_tiled(
             f"THREADS={THREADS} (T={T}, HD={HD})"
         )
     fp8_chunks_per_thread = fp8_total_chunks // THREADS
+    if KV_FP8:
+        assert fp8_chunks_per_thread <= FP8_MAX_CHUNKS_PER_THREAD, (
+            f"fp8 loader: {fp8_chunks_per_thread} chunks per thread, at most "
+            f"{FP8_MAX_CHUNKS_PER_THREAD} (T={T}, HD={HD})"
+        )
 
     def _issue_fp8_dequant_loads(
         kv_tile_idx: Value, buf_idx: Value, lds_token: str
@@ -1020,6 +1029,9 @@ def build_unified_attention_3d_tiled(
         assert fp8_elems_per_chunk == 8
         if lds_token == "V":  # V rows past the sequence read its last row instead
             v_last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
+        # All of the tile's loads first, then the dequant: issued in that order, they stay in
+        # flight together (the V row clamp made the compiler drain each load before its dequant).
+        loaded = []
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
@@ -1039,6 +1051,8 @@ def build_unified_attention_3d_tiled(
             fp8_vec = b.global_load_vN(
                 src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
             )
+            loaded.append((fp8_vec, row, col))
+        for fp8_vec, row, col in loaded:
             packed = dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
 

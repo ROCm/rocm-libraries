@@ -1163,6 +1163,10 @@ void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
     /* V rows past the sequence read its last row instead. */
     rocke_value_t* v_last_row
         = is_value ? rocke_kv_last_row_in_sequence(B, ctx->seq_len, kv_tile_idx, CFG.T) : NULL;
+    /* All of the tile's loads first, then the dequant (Python: the `loaded` list). */
+    rocke_value_t* loaded_vec[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+    rocke_value_t* loaded_row[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+    rocke_value_t* loaded_col[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
     for(call = 0; call < fp8_chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(B, call);
@@ -1180,8 +1184,16 @@ void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
         rocke_value_t* linear_half_first = rocke_b_add(B, lhf_mul, col);
         rocke_value_t* voff
             = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
-        rocke_value_t* fp8_vec = rocke_b_global_load_vN(
+        loaded_vec[call] = rocke_b_global_load_vN(
             B, src, voff, rocke_fp8e4m3(), fp8_elems_per_chunk, fp8_elems_per_chunk);
+        loaded_row[call] = row;
+        loaded_col[call] = col;
+    }
+    for(call = 0; call < fp8_chunks_per_thread; ++call)
+    {
+        rocke_value_t* fp8_vec = loaded_vec[call];
+        rocke_value_t* row = loaded_row[call];
+        rocke_value_t* col = loaded_col[call];
 
         /* dequant_fp8x8_to_dtype inline (attention.py:748-757) */
         rocke_value_t* lo_comps[4];

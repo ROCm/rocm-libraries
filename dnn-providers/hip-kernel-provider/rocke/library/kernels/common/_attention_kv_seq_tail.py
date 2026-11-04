@@ -41,11 +41,15 @@ def buffer_offset_in_rows_left(
 ) -> Value:
     """``voff`` while a copy's tile-local ``row`` (an immediate) is below ``rows_left``, the
     lane's rows left in the sequence; out of range past it. ``uniform``: ``rows_left`` is
-    wave-uniform, so the bound is a scalar bit 31 or-ed into the offset (offsets stay below
-    2**31, so the result is past every resource's num_records)."""
+    wave-uniform, so the bound is a scalar 2**31 added to the offset (offsets stay below 2**31,
+    so the sum neither wraps nor stays below any resource's num_records). An ``or`` of bit 31
+    computes the same, but made the compiler spill scalar registers in kernels that copy one
+    row per call."""
     inside = b.cmp_lt(b.const_i32(row), rows_left)
     if uniform:
-        return b.lor(voff, b.select(inside, b.const_i32(0), b.const_i32(-(1 << 31))))
+        return b.add_nuw(
+            voff, b.select(inside, b.const_i32(0), b.const_i32(-(1 << 31)))
+        )
     return b.select(inside, voff, b.const_i32(OUT_OF_RANGE_OFFSET))
 
 

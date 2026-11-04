@@ -58,6 +58,9 @@
 #ifndef ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_INTERNAL_H
 #define ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_INTERNAL_H
 
+/* Bound of fp8_chunks_per_thread: the fp8 loader keeps a tile's loads in arrays of this size. */
+#define ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS 64
+
 #include <stdbool.h>
 #include <stddef.h>
 

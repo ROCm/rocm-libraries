@@ -37,7 +37,7 @@ static inline rocke_value_t* rocke_kv_buffer_offset_in_sequence(rocke_ir_builder
 }
 
 /* buffer_offset_in_rows_left: voff while the immediate row is below rows_left; past it, an
- * out-of-range offset (select), or bit 31 or-ed in when rows_left is wave-uniform. */
+ * out-of-range offset (select), or 2**31 added (add nuw) when rows_left is wave-uniform. */
 static inline rocke_value_t* rocke_kv_buffer_offset_in_rows_left(
     rocke_ir_builder_t* b, rocke_value_t* voff, rocke_value_t* rows_left, int row, bool uniform)
 {
@@ -48,7 +48,7 @@ static inline rocke_value_t* rocke_kv_buffer_offset_in_rows_left(
         rocke_value_t* zero = rocke_b_const_i32(b, 0);
         rocke_value_t* bit31 = rocke_b_const_i32(b, INT32_MIN);
         rocke_value_t* penalty = rocke_b_select(b, inside, zero, bit31);
-        return rocke_b_lor(b, voff, penalty);
+        return rocke_b_add_nuw(b, voff, penalty);
     }
     rocke_value_t* past = rocke_b_const_i32(b, ROCKE_KV_SEQ_TAIL_OUT_OF_RANGE);
     return rocke_b_select(b, inside, voff, past);
