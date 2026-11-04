@@ -6,13 +6,16 @@
 Imported (never collected: its name has no ``test_`` prefix) by the adaptive
 search tests. CK supports Python 3.8 while CI may run a newer one, so a module
 must be checked statically: parsing with ``feature_version=(3, 8)`` alone
-accepts runtime PEP 585 aliases such as ``X = dict[str, int]``, which fail at
-import on 3.8.
+accepts runtime PEP 585 aliases such as ``X = dict[str, int]`` and PEP 604
+unions such as ``isinstance(x, int | float)``, which fail on 3.8.
 """
 
 import ast
+import builtins
 
 _PEP585 = {"tuple", "list", "dict", "set", "frozenset", "type"}
+# ``A | B`` with a builtin class on either side is a PEP 604 union (3.10+).
+_BUILTIN_TYPES = {n for n, v in vars(builtins).items() if isinstance(v, type)}
 _NEW_APIS = {"removeprefix", "removesuffix", "bit_count", "randbytes", "pairwise"}
 
 
@@ -51,7 +54,7 @@ def py38_problems(source, filename="<src>"):
             sides = (n.left, n.right)
             if any(
                 (isinstance(s, ast.Constant) and s.value is None)
-                or getattr(s, "id", None) in _PEP585
+                or getattr(s, "id", None) in _BUILTIN_TYPES
                 for s in sides
             ):
                 out.append(f"{filename}:{n.lineno} runtime X | Y type union")

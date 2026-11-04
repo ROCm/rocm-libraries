@@ -196,11 +196,15 @@ def test_package_files_are_the_vendored_list_plus_ck_files():
         ("X = dict[str, int]\n", True),  # ast.parse(feature_version=(3, 8)) accepts it
         ("from collections.abc import Mapping\nM = Mapping[str, int]\n", True),
         ("y: int | None = None\n", True),
+        ("X = int | str\n", True),
+        ("ok = isinstance(1, int | float)\n", True),
+        ("def f(x: bytes | bool): pass\n", True),
+        ("flags = 1 | 2\n", False),
         ("s = 'ab'.removeprefix('a')\n", True),
         ("from typing import Tuple\nX = Tuple[int, ...]\n", False),
         (
             "from __future__ import annotations\n"
-            "def f(x: list[int] | None) -> dict[str, int]:\n"
+            "def f(x: list[int] | None, z: int | str) -> dict[str, int]:\n"
             "    y: tuple[int, ...] = ()\n",
             False,
         ),
