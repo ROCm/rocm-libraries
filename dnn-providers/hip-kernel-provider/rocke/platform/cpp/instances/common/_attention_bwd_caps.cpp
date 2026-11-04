@@ -12,6 +12,7 @@
 #include "rocke/helper_rocke.instances.common._attention_bwd_caps.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <algorithm>
@@ -663,3 +664,48 @@ rocke_status_t rocke_attn_bwd_emit_lds_dma(rocke_ir_builder_t* b,
 }
 
 } /* extern "C" */
+
+/* ====================================================================== *
+ * Small helpers the bwd kernel files share (one copy each)
+ * ====================================================================== */
+
+namespace rocke_attn_bwd
+{
+
+int arch_wave_size(const char* arch)
+{
+    /* Through the C entry point, so the raised error is the one the kernel
+     * files raised before they shared this. */
+    rocke_attn_bwd_caps_t c;
+    rocke_attn_bwd_err_t e;
+    rocke_status_t st = rocke_attn_bwd_arch_caps(arch, &c, &e);
+    if(st != ROCKE_OK)
+        ckc::raise_status(e.code, e.msg);
+    return c.wave_size;
+}
+
+int atom_k_of(const char* atom)
+{
+    std::string s = atom ? std::string(atom) : std::string("None"); /* str(atom) */
+    size_t x = s.rfind('x');
+    if(x == std::string::npos)
+        throw ckc::ValueError("list index out of range");
+    std::string tail = s.substr(x + 1);
+    char* end = NULL;
+    long v = strtol(tail.c_str(), &end, 10);
+    if(tail.empty() || end == NULL || *end != '\0')
+    {
+        /* repr(tail) as the body spelled it: single quotes, \ and ' escaped */
+        std::string r = "'";
+        for(char ch : tail)
+        {
+            if(ch == '\\' || ch == '\'')
+                r += '\\';
+            r += ch;
+        }
+        throw ckc::ValueError("invalid literal for int() with base 10: " + r + "'");
+    }
+    return (int)v;
+}
+
+} // namespace rocke_attn_bwd

@@ -427,13 +427,6 @@ void geometry_check(B* b, Geom* g)
     }
 }
 
-int atom_k(const char* atom)
-{
-    std::string a = atom ? atom : "";
-    size_t x = a.rfind('x');
-    return std::stoi(a.substr(x + 1));
-}
-
 void from_spec(B* b, const rocke_attn_bwd_dq_spec_t* s, const char* arch, Geom* out)
 {
     const int NONE = ROCKE_ATTN_BWD_NONE;
@@ -446,8 +439,8 @@ void from_spec(B* b, const rocke_attn_bwd_dq_spec_t* s, const char* arch, Geom* 
     out->k_m0 = s->block_m;
     out->k_n0 = s->block_n;
     out->head_size = s->head_size;
-    out->atom_g02 = atom_k(s->atom_g02);
-    out->atom_g4 = atom_k(s->atom_g4);
+    out->atom_g02 = rocke_attn_bwd::atom_k_of(s->atom_g02);
+    out->atom_g4 = rocke_attn_bwd::atom_k_of(s->atom_g4);
     out->transpose_source = s->transpose_source;
     out->sched = s->sched;
     out->kv_pad = s->kv_pad;
@@ -456,17 +449,9 @@ void from_spec(B* b, const rocke_attn_bwd_dq_spec_t* s, const char* arch, Geom* 
     geometry_check(b, out);
 }
 
-int wave_size_of(const Geom* g)
-{
-    rocke_attn_bwd_caps_t c;
-    rocke_attn_bwd_err_t e;
-    need_st(rocke_attn_bwd_arch_caps(g->arch, &c, &e), e);
-    return c.wave_size;
-}
-
 int threads_of(const Geom* g)
 {
-    return g->waves * wave_size_of(g);
+    return g->waves * rocke_attn_bwd::arch_wave_size(g->arch);
 }
 
 void stage_table(const Geom* g, rocke_attn_bwd_dq_stage_table_t* out)

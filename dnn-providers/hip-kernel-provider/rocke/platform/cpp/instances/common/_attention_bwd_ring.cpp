@@ -236,20 +236,12 @@ void need_st(rocke_status_t st, const rocke_attn_bwd_err_t& e)
         ckc::raise_status(e.code, e.msg);
 }
 
-/* BwdTileGeometry.wave_size / threads inside a guarded body: an unknown arch
- * raises bwd_arch_caps' ValueError (the C entry points return 0 instead). */
-int wave_size_of(const rocke_attn_bwd_tile_geometry_t* g)
-{
-    rocke_attn_bwd_caps_t c;
-    rocke_attn_bwd_err_t e;
-    need_st(rocke_attn_bwd_arch_caps(g->arch, &c, &e), e);
-    return c.wave_size;
-}
-
+/* BwdTileGeometry.threads inside a guarded body: an unknown arch raises
+ * bwd_arch_caps' ValueError (the C entry points return 0 instead). */
 int threads_of(const rocke_attn_bwd_tile_geometry_t* g)
 {
     int waves = g->waves;
-    return waves * wave_size_of(g);
+    return waves * arch_wave_size(g->arch);
 }
 
 template <class Fn>
@@ -662,7 +654,8 @@ bool packed_ring(const Ring* r)
 bool joint(const Ring* r, int total)
 {
     /* Python's `and` order: threads / wave_size only after the packed test */
-    return !packed_ring(r) && total < threads_of(r->geom) && total % wave_size_of(r->geom) == 0;
+    return !packed_ring(r) && total < threads_of(r->geom)
+           && total % arch_wave_size(r->geom->arch) == 0;
 }
 
 int n_reg_chunks(const Ring* r)
@@ -920,7 +913,7 @@ void ring_init(B* b,
     r->n_atomics = n_atomics;
     const rocke_attn_bwd_lds_plan_t* plan = lds->plan;
     int d = geom->head_size, m0 = geom->k_m0;
-    int wave_size = wave_size_of(geom);
+    int wave_size = arch_wave_size(geom->arch);
     if(m0 > wave_size)
         throw ckc::ValueError("a ring stats slot holds one row per lane of wave 0");
     const char* names[4] = {"q", "do", "lse2", "dsum"};

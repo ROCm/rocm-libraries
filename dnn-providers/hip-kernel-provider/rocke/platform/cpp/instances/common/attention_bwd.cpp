@@ -209,14 +209,6 @@ static void check_in(const std::string& name, int value, const Ints& allowed)
         throw ckc::ValueError(name + "=" + std::to_string(value) + " not in " + py_tuple(allowed));
 }
 
-/* _atom_k(atom): int(atom.rsplit("x", 1)[1]) */
-static int atom_k(const char* atom)
-{
-    std::string a = s_(atom);
-    size_t x = a.rfind('x');
-    return std::stoi(a.substr(x + 1));
-}
-
 static Grid grid_of(const rocke_attn_bwd_opt_grid_t& g)
 {
     return Grid{g.rows, g.cols};
@@ -881,7 +873,7 @@ static int ds_slice_regs(const rocke_attn_bwd_spec_t& s, int wave)
 {
     int km = s.block_m;
     if(eq(s.g4_slicing, DEFAULT_G4_SLICING))
-        return floordiv(2 * km * atom_k(s.atom_g4), 2 * wave);
+        return floordiv(2 * km * atom_k_of(s.atom_g4), 2 * wave);
     int kk = s.block_k4;
     int regs = floordiv(2 * km * kk, 2 * wave);
     if(eq(s.kt_source, "lds"))
@@ -1013,9 +1005,9 @@ static rocke_attn_bwd_spec_t canonical_asm_knobs(const rocke_attn_bwd_spec_t& sp
 {
     if(!eq(spec.agpr_route, "asm_g13") || spec.atom_g13 == NULL)
         return spec;
-    std::vector<std::pair<int, int>> asm_ks = {{atom_k(spec.atom_g13), spec.block_m}};
+    std::vector<std::pair<int, int>> asm_ks = {{atom_k_of(spec.atom_g13), spec.block_m}};
     if(truthy(spec.s_in_agpr) && spec.atom_g02 != NULL)
-        asm_ks.emplace_back(atom_k(spec.atom_g02), spec.head_size);
+        asm_ks.emplace_back(atom_k_of(spec.atom_g02), spec.head_size);
     bool upd_nop = false, upd_cluster = false;
     /* shipped = {AGPR_ASM_TAIL_NOP.get(k)}; equal to {asm_tail_nop} */
     if(spec.asm_tail_nop != NONE)
@@ -1051,7 +1043,7 @@ static rocke_attn_bwd_spec_t canonical_g4_slicing(const rocke_attn_bwd_spec_t& s
         return spec;
     if(v == "slice_db" && spec.block_k4 == spec.block_n)
         v = "slice";
-    if(v == "slice" && spec.block_k4 == atom_k(spec.atom_g4))
+    if(v == "slice" && spec.block_k4 == atom_k_of(spec.atom_g4))
         v = DEFAULT_G4_SLICING;
     if(v == s_(spec.g4_slicing))
         return spec;
@@ -1304,8 +1296,8 @@ rocke_attn_bwd_lds_request_t lds_request(const rocke_attn_bwd_spec_t& s, const s
     r.dkv_epilogue = planned_epilogue(s);
     r.lds_order = s.lds_order;
     r.ds_slots = eq(s.barrier_merge, "on") ? 2 : 1;
-    r.atom_k_g13 = atom_k(s.atom_g13);
-    r.atom_k_g4 = atom_k(s.atom_g4);
+    r.atom_k_g13 = atom_k_of(s.atom_g13);
+    r.atom_k_g4 = atom_k_of(s.atom_g4);
     lds_request_check(r); /* BwdLdsRequest.__post_init__ */
     return r;
 }
@@ -1592,11 +1584,11 @@ static Geom geometry_check(const rocke_attn_bwd_spec_t& s, const std::string& ar
                                   + " must hold W=" + std::to_string(w) + " waves");
     /* BlockGemm constructions (atom_facts holds for every backward atom) */
     BlockGemm g0
-        = block_gemm(arch, s.dtype, s.block_m, s.block_n, s.head_size, g0g, atom_k(s.atom_g02));
+        = block_gemm(arch, s.dtype, s.block_m, s.block_n, s.head_size, g0g, atom_k_of(s.atom_g02));
     BlockGemm g1
-        = block_gemm(arch, s.dtype, s.block_n, s.head_size, s.block_m, g1g, atom_k(s.atom_g13));
+        = block_gemm(arch, s.dtype, s.block_n, s.head_size, s.block_m, g1g, atom_k_of(s.atom_g13));
     BlockGemm g4
-        = block_gemm(arch, s.dtype, s.block_m, s.head_size, s.block_n, g4g, atom_k(s.atom_g4));
+        = block_gemm(arch, s.dtype, s.block_m, s.head_size, s.block_n, g4g, atom_k_of(s.atom_g4));
     /* relabel plan / K permutation: proved for the natural grids (not ported) */
     std::string reader = eq(s.transpose_source, "tr_read")  ? "tr16"
                          : eq(s.transpose_source, "xt_lds") ? "xt"
@@ -1676,7 +1668,7 @@ static Geom geometry_check(const rocke_attn_bwd_spec_t& s, const std::string& ar
     if(!eq(s.g4_slicing, DEFAULT_G4_SLICING))
     {
         std::string why;
-        int k4 = atom_k(s.atom_g4);
+        int k4 = atom_k_of(s.atom_g4);
         if(truthy(s.acc_in_lds) || !arch_caps(arch).has_agprs)
             why = "MFMA register accumulators (acc_in_lds=False)";
         else if(!eq(s.dq_issue, "block"))
@@ -1945,7 +1937,7 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
                               + grid_repr(g02));
     if(w == 1 && !(km == 16 && kn == 16))
         throw ckc::ValueError("waves=1 is legal only for the 16 x 16 debug / fallback tile");
-    int k4a = atom_k(s.atom_g4);
+    int k4a = atom_k_of(s.atom_g4);
     if(kk % k4a != 0)
         throw ckc::ValueError("block_k4=" + std::to_string(kk)
                               + " must be a multiple of the G4 atom K (" + std::to_string(k4a)
@@ -1953,7 +1945,7 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
     if(kn % kk != 0)
         throw ckc::ValueError("block_n=" + std::to_string(kn)
                               + " must be a multiple of block_k4=" + std::to_string(kk));
-    if(d % atom_k(s.atom_g02) != 0)
+    if(d % atom_k_of(s.atom_g02) != 0)
         throw ckc::ValueError("head_size=" + std::to_string(d)
                               + " must be a multiple of the G0/G2 atom K");
     if(eq(s.atom_g13, "16x16x32") && km < 32)
@@ -2137,9 +2129,9 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
             throw ckc::ValueError("s_in_agpr=True requires agpr_alloc != (0, 0)");
         if(eq(s.agpr_route, "asm_g13") && s.asm_tail_nop != NONE)
         {
-            check_asm_tail_nop(arch, s_(s.dtype), atom_k(s.atom_g13), s.asm_tail_nop);
+            check_asm_tail_nop(arch, s_(s.dtype), atom_k_of(s.atom_g13), s.asm_tail_nop);
             if(truthy(s.s_in_agpr))
-                check_asm_tail_nop(arch, s_(s.dtype), atom_k(s.atom_g02), s.asm_tail_nop);
+                check_asm_tail_nop(arch, s_(s.dtype), atom_k_of(s.atom_g02), s.asm_tail_nop);
         }
     }
     if(!eq(spec.g4_slicing, DEFAULT_G4_SLICING) || !eq(s.g4_slicing, DEFAULT_G4_SLICING))

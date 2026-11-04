@@ -257,6 +257,13 @@ void check_asm_tail_nop(const std::string& arch, const std::string& dtype, int a
 /* repr() of an agpr_alloc value. */
 std::string agpr_alloc_repr(const rocke_attn_bwd_agpr_alloc_t& a);
 void check_agpr_alloc(const std::string& arch, const rocke_attn_bwd_agpr_alloc_t& a);
+/* BwdTileGeometry.wave_size: bwd_arch_caps(arch).wave_size; an unknown arch
+ * raises bwd_arch_caps' ValueError. */
+int arch_wave_size(const char* arch);
+/* _atom_k(atom): int(str(atom).rsplit("x", 1)[1]) for a "16x16x16"-style
+ * atom string; a malformed one raises ValueError with Python's IndexError /
+ * int() text. (_attention_bwd_sched's _atom_k maps an int atom instead.) */
+int atom_k_of(const char* atom);
 } // namespace rocke_attn_bwd
 #endif
 
