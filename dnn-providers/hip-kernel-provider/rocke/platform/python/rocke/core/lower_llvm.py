@@ -3539,7 +3539,9 @@ class _Lowerer:
         spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
         spin.terminated = True
 
-    def _lower_pk_atomic_add(self, op: Op, elem_llvm_type: str) -> None:
+    def _lower_pk_atomic_add(
+        self, op: Op, elem_llvm_type: str, scope: str | None = None
+    ) -> None:
         """Lower a packed (bf16 or fp16) atomic add via a generic
         ``atomicrmw fadd`` on a ``<2 x elem_llvm_type>``.
 
@@ -3554,6 +3556,15 @@ class _Lowerer:
         device-local HBM), honouring the op's ``ordering`` attribute. GEP
         uses the idx operand's own width (idx may be i64 after the wide
         C-scatter address fix).
+
+        ``scope`` picks the LLVM ``syncscope``: ``None`` emits no clause
+        (LLVM's default, system scope); ``"agent"`` pins the GPU-agent scope
+        the HIP engine's ``__builtin_amdgcn_global_atomic_fadd_v2*`` builtins
+        already compile to, so both engines agree on ISA. The split-K
+        reduction buffer these atomics write into is device-local HBM, so
+        agent scope -- not system -- is the right one for a single-GPU
+        kernel; it is pinned explicitly rather than left to default so a
+        future change to the default can't silently widen it again.
         """
         ptr, idx, val = op.operands
         idx_ty = _llvm_type(idx.type)
@@ -3569,16 +3580,17 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
+        sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
-            f"<2 x {elem_llvm_type}> {self._operand(val)} {ordering}{md}"
+            f"<2 x {elem_llvm_type}> {self._operand(val)}{sync} {ordering}{md}"
         )
 
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
         self._lower_pk_atomic_add(op, "bfloat")
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
-        self._lower_pk_atomic_add(op, "half")
+        self._lower_pk_atomic_add(op, "half", scope="agent")
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         """Vectorised <vec x 16-bit> load: a single naturally-aligned

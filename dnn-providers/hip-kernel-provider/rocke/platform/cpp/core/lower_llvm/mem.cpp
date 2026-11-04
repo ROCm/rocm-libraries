@@ -369,8 +369,19 @@ static void op_memref_global_atomic_add_f32(rocke_lower_t* L, const rocke_op_t* 
  * global_atomic_pk_add_* HW instruction from a generic atomicrmw under the
  * fine/remote-memory model metadata, honouring the op's ordering attribute.
  * GEP uses the idx operand's own width (idx may be i64 after the wide
- * C-scatter address fix). */
-static void lower_pk_atomic_add(rocke_lower_t* L, const rocke_op_t* op, const char* elem_llvm_type)
+ * C-scatter address fix).
+ *
+ * scope is NULL for no syncscope clause (LLVM's default, system scope) or
+ * "agent" to pin the GPU-agent scope the HIP engine's
+ * __builtin_amdgcn_global_atomic_fadd_v2* builtins already compile to, so
+ * both engines agree on ISA. The split-K reduction buffer is device-local
+ * HBM, so agent -- not system -- is the right scope for a single-GPU
+ * kernel; it is pinned explicitly so a future default change can't widen
+ * it again. */
+static void lower_pk_atomic_add(rocke_lower_t* L,
+                                const rocke_op_t* op,
+                                const char* elem_llvm_type,
+                                const char* scope)
 {
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
@@ -386,8 +397,10 @@ static void lower_pk_atomic_add(rocke_lower_t* L, const rocke_op_t* op, const ch
                    idx_ty,
                    rocke_ll_operand(L, idx));
     L->needs_fp_atomic_md = true;
+    const char* sync
+        = (scope != NULL && strcmp(scope, "agent") == 0) ? " syncscope(\"agent\")" : "";
     rocke_ll_emitf(L,
-                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x %s> %s %s"
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x %s> %s%s %s"
                    ", !amdgpu.no.fine.grained.memory !1"
                    ", !amdgpu.no.remote.memory !1"
                    ", !amdgpu.ignore.denormal.mode !1",
@@ -395,17 +408,18 @@ static void lower_pk_atomic_add(rocke_lower_t* L, const rocke_op_t* op, const ch
                    gep,
                    elem_llvm_type,
                    rocke_ll_operand(L, val),
+                   sync,
                    ordering);
 }
 
 static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
 {
-    lower_pk_atomic_add(L, op, "bfloat");
+    lower_pk_atomic_add(L, op, "bfloat", NULL);
 }
 
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
 {
-    lower_pk_atomic_add(L, op, "half");
+    lower_pk_atomic_add(L, op, "half", "agent");
 }
 
 /* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
