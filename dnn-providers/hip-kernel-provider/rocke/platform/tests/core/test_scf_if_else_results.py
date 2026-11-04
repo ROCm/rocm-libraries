@@ -44,11 +44,9 @@ from rocke.core.ir import (
 )
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-from rocke.core.verify import verify
 from rocke.tests.engines import (
-    assert_both_engines_reject,
-    assert_both_engines_reject_hip,
-    available_engines,
+    assert_accepted_everywhere,
+    assert_refused_everywhere,
     lower_hip_with_both_engines,
     lower_with_both_engines,
 )
@@ -214,36 +212,13 @@ def _open_if_else(result_types):
 
 
 def _assert_refused(kernel, error_type, message):
-    """The verifier reports ``message``, and both lowerings of every available
-    engine refuse ``kernel`` with it.
-
-    The verifier and the Python lowerings run everywhere; the C++ engine's
-    lowerings only where the ``rocke_engine`` binding is built
-    (``available_engines``), so a run without the binding, such as installed
-    CI, still checks the Python engine instead of skipping.
-    """
-    assert message in [d.message for d in verify(kernel)]
-    if "cpp" in available_engines():
-        assert_both_engines_reject(kernel, "gfx942", error_type, message, HOST_FLAVOR)
-        assert_both_engines_reject_hip(kernel, "gfx942", error_type, message)
-        return
-    with pytest.raises(error_type) as llvm_error:
-        _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=HOST_FLAVOR)
-    assert str(llvm_error.value) == message
-    with pytest.raises(error_type) as hip_error:
-        lower_kernel_to_hip(kernel, arch="gfx942")
-    assert str(hip_error.value) == message
+    """``assert_refused_everywhere`` for gfx942 at the host flavor."""
+    assert_refused_everywhere(kernel, "gfx942", error_type, message, HOST_FLAVOR)
 
 
 def _assert_lowered(kernel):
-    """Both lowerings of every available engine accept ``kernel``, each
-    engine pair emitting the same text where the C++ binding is built."""
-    if "cpp" in available_engines():
-        lower_with_both_engines(kernel, "gfx942", llvm_flavor=HOST_FLAVOR)
-        lower_hip_with_both_engines(kernel, "gfx942")
-    else:
-        _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=HOST_FLAVOR)
-        lower_kernel_to_hip(kernel, arch="gfx942")
+    """``assert_accepted_everywhere`` for gfx942 at the host flavor."""
+    assert_accepted_everywhere(kernel, "gfx942", HOST_FLAVOR)
 
 
 @pytest.mark.parametrize(
@@ -570,7 +545,6 @@ def test_an_if_else_in_an_scf_if_in_a_loop_keeps_its_own_yields():
                 b.scf_yield(b.const_i32(2))
 
     kernel = _carrying_loop_kernel("if_else_in_scf_if_loop", LOOP_TRIPS, fill)
-    assert verify(kernel) == []
     _assert_lowered(kernel)
 
 
@@ -590,7 +564,6 @@ def test_a_loop_in_a_branch_keeps_its_own_yield():
         with else_ctx:
             pass
     b.ret()
-    assert verify(b.kernel) == []
     _assert_lowered(b.kernel)
 
 
@@ -634,7 +607,6 @@ def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_nested_loop():
 
 def test_an_unrolled_loop_of_zero_trips_accepts_a_well_formed_body():
     kernel = _zero_trip_if_else_kernel(False)
-    assert verify(kernel) == []
     _assert_lowered(kernel)
 
 

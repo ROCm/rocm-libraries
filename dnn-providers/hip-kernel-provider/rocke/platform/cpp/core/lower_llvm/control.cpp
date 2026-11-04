@@ -1593,34 +1593,13 @@ static void _op_tile_gpu_check_failed(rocke_lower_t* L, const rocke_op_t* op)
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
 
-/* Validate counts before either lowering path emits or unrolls the body. */
-static int64_t ll_validate_iter_counts(rocke_lower_t* L, const rocke_op_t* op)
+/* The loop's num_iter_args, which rocke_i_scf_for_error (run by _op_scf_for
+ * before either lowering path) has checked against the init operands, the
+ * iter_args metadata list and the results. */
+static int64_t ll_num_iter_args(const rocke_op_t* op)
 {
     int64_t num_iter = 0;
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
-    if(num_iter < 0 || op->num_operands - 3 != num_iter || op->num_results != num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for declares %lld iter_args but has %d init operands and %d results",
-                      (long long)num_iter,
-                      op->num_operands - 3,
-                      op->num_results);
-    }
-    const rocke_attr_value_t* meta = rocke_attr_get(&op->attrs, "iter_args");
-    if(meta && meta->kind != ROCKE_ATTR_LIST)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_args metadata must be a list");
-    }
-    const int num_meta = meta ? meta->u.list.count : 0;
-    if(num_meta != num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for declares %lld iter_args but has %d metadata entries",
-                      (long long)num_iter,
-                      num_meta);
-    }
     return num_iter;
 }
 
@@ -2012,7 +1991,7 @@ static int ll_loop_block_values(rocke_lower_t* L,
  *     self._yield_stack.append([]); self.lower_region(op.regions[0])
  *     last_body = self._current(); latch = self._new_block("for.latch")
  *     last_body.emit(f"  br label %{latch.label}"); last_body.terminated = True
- *     yielded = self._yield_stack.pop()  # len must == num_iter
+ *     yielded = self._yield_stack.pop()
  *     iv_next = f"%iv.next.{header.label}"
  *     latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {step}")
  *     for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
@@ -2033,7 +2012,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    const int64_t num_iter = ll_validate_iter_counts(L, op);
+    const int64_t num_iter = ll_num_iter_args(op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -2135,17 +2114,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         last_body->terminated = true;
     }
 
+    /* The body yields num_iter values, once: rocke_i_scf_for_error checked it. */
     const char* const* yielded = NULL;
-    int n_yield = 0;
-    rocke_ll_yield_pop(L, &yielded, &n_yield);
-    if(n_yield != (int)num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for expected %d yielded values, got %d",
-                      (int)num_iter,
-                      n_yield);
-    }
+    rocke_ll_yield_pop(L, &yielded, NULL);
 
     rocke_ll_block_emitf(L,
                          latch,
@@ -2222,7 +2193,7 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    const int64_t num_iter = ll_validate_iter_counts(L, op);
+    const int64_t num_iter = ll_num_iter_args(op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -2361,21 +2332,12 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_yield_push(L);
         rocke_ll_lower_region(L, body);
         const char* const* yielded = NULL;
-        int n_yield = 0;
-        rocke_ll_yield_pop(L, &yielded, &n_yield);
+        rocke_ll_yield_pop(L, &yielded, NULL);
 
         L->unroll_elide_sync_op = NULL;
 
         trip_renames.restore();
 
-        if(n_yield != (int)num_iter)
-        {
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "scf.for expected %d yielded values, got %d",
-                          (int)num_iter,
-                          n_yield);
-        }
         for(int i = 0; i < (int)num_iter; i++)
         {
             current_iter_values[i] = rocke_arena_strdup(&L->arena, yielded ? yielded[i] : "");

@@ -1,10 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * tests/core/test_if_else_yield_rule.cpp -- the C++ verifier, the if/else rule
- * (rocke_i_if_else_yields) and both lowerings refuse what an scf.if_else
- * cannot hold, and an scf.yield where nothing takes it, with the Python
- * engine's types and texts.
+ * tests/core/test_yield_rules.cpp -- the C++ verifier, the if/else rule
+ * (rocke_i_if_else_yields), the loop rule (rocke_i_scf_for_error) and both
+ * lowerings refuse what an scf.if_else or an scf.for body cannot hold, and an
+ * scf.yield where nothing takes it, with the Python engine's types and texts.
+ *
+ * An scf.for's carried-value counts agree, and its body yields only at its
+ * end, one value per carried value, of its type, ending in that yield whenever
+ * the loop carries any.
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
@@ -15,9 +19,9 @@
  * builder has no point where both branches are done, so it does not check the
  * branches: the verifier and the lowerings do, the LLVM lowering also in the
  * body of an unrolled loop of zero trips, which it does not lower.
- * tests/core/test_scf_if_else_results.py covers the Python engine and both
- * engines' lowering texts; tests/core/test_packed_only.py covers both
- * builders' result-type order.
+ * tests/core/test_scf_if_else_results.py and tests/core/test_scf_for_yields.py
+ * cover the Python engine and both engines' lowering texts;
+ * tests/core/test_packed_only.py covers both builders' result-type order.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -48,6 +52,9 @@ const std::string k_stray_yield_message
     = "scf.if_else has no results, so its then branch cannot contain scf.yield";
 const std::string k_early_yield_message
     = "scf.if_else has 1 results, so its then branch must yield only at its end";
+const std::string k_loop_early_yield_message
+    = "scf.for body yields before its last op; a loop takes its values only from the scf.yield "
+      "that ends its body";
 const std::string k_orphan_yield_message = "scf.yield must be directly in an scf.for body or in "
                                            "a branch of an scf.if_else with results";
 
@@ -136,9 +143,10 @@ struct Kernel
     }
 
     /* A loop of `trips` trips (unrolled when `unroll`) that carries `lane`;
-     * its body holds what `fill` emits, then yields the carried value. */
+     * its body holds what `fill` emits, then, when `close` (the default),
+     * yields the carried value. */
     template <typename Fill>
-    void build_carrying_loop(int trips, bool unroll, Fill fill)
+    void build_carrying_loop(int trips, bool unroll, Fill fill, bool close = true)
     {
         rocke_iter_arg_t carry = {"acc", lane};
         rocke_for_t loop = rocke_b_scf_for_iter(&b,
@@ -152,7 +160,8 @@ struct Kernel
                                                 true);
         rocke_b_region_enter(&b, loop.body);
         fill(loop);
-        rocke_b_scf_yield(&b, loop.iter_vars, 1);
+        if(close)
+            rocke_b_scf_yield(&b, loop.iter_vars, 1);
         rocke_b_region_leave(&b);
     }
 
@@ -347,6 +356,202 @@ void an_unrolled_loop_of_zero_trips_accepts_a_well_formed_body()
     check_accepted(k, "zero-trip loop, well-formed body");
 }
 
+/* A loop body yields only at its end: a yield, an op and the closing yield; two
+ * yields in a row; and a yield followed by an op and no closing yield are each
+ * refused, in a loop that carries a value, in one that carries none, and in an
+ * unrolled loop of zero trips. */
+void a_loop_yield_before_the_end_of_the_body_is_refused()
+{
+    const auto yield_carried
+        = [](Kernel& k, const rocke_for_t& loop) { rocke_b_scf_yield(&k.b, loop.iter_vars, 1); };
+    {
+        Kernel k("loop_early_yield");
+        k.build_carrying_loop(4, false, [&k, &yield_carried](const rocke_for_t& loop) {
+            yield_carried(k, loop);
+            rocke_b_const_i32(&k.b, 3);
+        });
+        rocke_b_ret(&k.b);
+        check_refused(
+            k, ROCKE_ERR_VALUE, k_loop_early_yield_message, "loop yield before the last op");
+    }
+    {
+        Kernel k("loop_two_yields");
+        k.build_carrying_loop(
+            4, false, [&k, &yield_carried](const rocke_for_t& loop) { yield_carried(k, loop); });
+        rocke_b_ret(&k.b);
+        check_refused(k, ROCKE_ERR_VALUE, k_loop_early_yield_message, "loop with two yields");
+    }
+    {
+        Kernel k("loop_yield_not_last");
+        k.build_carrying_loop(
+            4,
+            false,
+            [&k, &yield_carried](const rocke_for_t& loop) {
+                yield_carried(k, loop);
+                rocke_b_const_i32(&k.b, 3);
+            },
+            false);
+        rocke_b_ret(&k.b);
+        check_refused(k, ROCKE_ERR_VALUE, k_loop_early_yield_message, "loop yield not the last op");
+    }
+    {
+        Kernel k("zero_trip_two_yields");
+        k.build_carrying_loop(
+            0, true, [&k, &yield_carried](const rocke_for_t& loop) { yield_carried(k, loop); });
+        rocke_b_ret(&k.b);
+        check_refused(
+            k, ROCKE_ERR_VALUE, k_loop_early_yield_message, "zero-trip loop with two yields");
+    }
+    {
+        Kernel k("plain_loop_two_yields");
+        rocke_for_t loop = rocke_b_scf_for(&k.b,
+                                           rocke_b_const_i32(&k.b, 0),
+                                           rocke_b_const_i32(&k.b, 4),
+                                           rocke_b_const_i32(&k.b, 1),
+                                           "k");
+        rocke_b_region_enter(&k.b, loop.body);
+        rocke_b_scf_yield(&k.b, nullptr, 0);
+        rocke_b_scf_yield(&k.b, nullptr, 0);
+        rocke_b_region_leave(&k.b);
+        rocke_b_ret(&k.b);
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      k_loop_early_yield_message,
+                      "loop without carried values, two yields");
+    }
+}
+
+/* A loop that carries a value ends in a yield of one value per carried value,
+ * of its type. */
+void a_loop_yield_that_does_not_match_the_carried_values_is_refused()
+{
+    {
+        Kernel k("loop_missing_yield");
+        k.build_carrying_loop(4, false, [](const rocke_for_t&) {}, false);
+        rocke_b_ret(&k.b);
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      "scf.for carries 1 values, so its body must end in scf.yield of 1 values",
+                      "loop without its yield");
+    }
+    {
+        Kernel k("loop_yield_count");
+        k.build_carrying_loop(
+            4,
+            false,
+            [&k](const rocke_for_t& loop) {
+                rocke_value_t* values[2] = {loop.iter_vars[0], loop.iter_vars[0]};
+                rocke_b_scf_yield(&k.b, values, 2);
+            },
+            false);
+        rocke_b_ret(&k.b);
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      "scf.for carries 1 values, but its body yields 2 values",
+                      "loop yield count");
+    }
+    {
+        Kernel k("loop_yield_type");
+        k.build_carrying_loop(
+            4,
+            false,
+            [&k](const rocke_for_t&) {
+                rocke_value_t* value = rocke_b_const_f32(&k.b, 1.0f);
+                rocke_b_scf_yield(&k.b, &value, 1);
+            },
+            false);
+        rocke_b_ret(&k.b);
+        check_refused(k,
+                      ROCKE_ERR_VALUE,
+                      "scf.for iter_arg 0 is i32, but its body yields f32",
+                      "loop yield type");
+    }
+}
+
+/* A well-formed outer loop does not hide an inner loop that carries two values
+ * and yields one: the inner loop's own counts are refused. */
+void each_loop_is_held_to_its_own_carried_values()
+{
+    Kernel k("inner_loop_yield_count");
+    k.build_carrying_loop(4, false, [&k](const rocke_for_t& outer) {
+        rocke_iter_arg_t carries[2] = {{"x", outer.iv}, {"y", outer.iter_vars[0]}};
+        rocke_for_t inner = rocke_b_scf_for_iter(&k.b,
+                                                 rocke_b_const_i32(&k.b, 0),
+                                                 rocke_b_const_i32(&k.b, 2),
+                                                 rocke_b_const_i32(&k.b, 1),
+                                                 carries,
+                                                 2,
+                                                 "inner",
+                                                 false,
+                                                 true);
+        rocke_b_region_enter(&k.b, inner.body);
+        rocke_b_scf_yield(&k.b, inner.iter_vars, 1);
+        rocke_b_region_leave(&k.b);
+    });
+    rocke_b_ret(&k.b);
+    check_refused(k,
+                  ROCKE_ERR_VALUE,
+                  "scf.for carries 2 values, but its body yields 1 values",
+                  "inner loop yield count");
+}
+
+/* Serialized IR can give a loop a num_iter_args or a result count that
+ * disagrees with its init operands; the verifier and both lowerings refuse it,
+ * the HIP lowering included, instead of reading the disagreeing count. */
+void a_loop_whose_carried_counts_disagree_is_refused()
+{
+    Kernel k("loop_counts");
+    rocke_op_t* loop_op = nullptr;
+    k.build_carrying_loop(4, false, [&loop_op](const rocke_for_t& loop) { loop_op = loop.op; });
+    rocke_b_ret(&k.b);
+    rocke_attr_set_int(&k.b, &loop_op->attrs, "num_iter_args", 0);
+    check_refused(k,
+                  ROCKE_ERR_VALUE,
+                  "scf.for declares 0 iter_args but has 1 init operands",
+                  "loop with a disagreeing num_iter_args");
+
+    Kernel no_result("loop_counts_results");
+    rocke_op_t* result_loop_op = nullptr;
+    no_result.build_carrying_loop(
+        4, false, [&result_loop_op](const rocke_for_t& loop) { result_loop_op = loop.op; });
+    rocke_b_ret(&no_result.b);
+    result_loop_op->num_results = 0;
+    check_refused(no_result,
+                  ROCKE_ERR_VALUE,
+                  "scf.for declares 1 iter_args but has 0 results",
+                  "loop with a disagreeing result count");
+}
+
+/* Well-formed loops lower: one that carries a value, one that carries none
+ * with and without an empty closing yield, and one whose body holds a loop and
+ * an if/else with results, whose own yields are theirs. */
+void well_formed_loops_are_accepted()
+{
+    Kernel k("loops_well_formed");
+    /* A loop that carries nothing, its body ending in an empty yield when
+     * `closing_yield`. */
+    const auto build_plain_loop = [&k](const char* iv_name, bool closing_yield) {
+        rocke_for_t loop = rocke_b_scf_for(&k.b,
+                                           rocke_b_const_i32(&k.b, 0),
+                                           rocke_b_const_i32(&k.b, 4),
+                                           rocke_b_const_i32(&k.b, 1),
+                                           iv_name);
+        rocke_b_region_enter(&k.b, loop.body);
+        rocke_b_const_i32(&k.b, 7);
+        if(closing_yield)
+            rocke_b_scf_yield(&k.b, nullptr, 0);
+        rocke_b_region_leave(&k.b);
+    };
+    k.build_carrying_loop(4, false, [&k, &build_plain_loop](const rocke_for_t&) {
+        build_plain_loop("inner", true);
+        k.build_if_else_with_a_result(Kernel::extra_yield::none);
+    });
+    build_plain_loop("i", false);
+    build_plain_loop("j", true);
+    rocke_b_ret(&k.b);
+    check_accepted(k, "well-formed loops");
+}
+
 /* An if/else made raw with no regions array has two NULL branches; the rule,
  * the verifier and both lowerings count them as missing instead of reading
  * them. */
@@ -401,6 +606,11 @@ int main()
     an_orphan_yield_is_refused();
     an_unrolled_loop_of_zero_trips_refuses_a_malformed_if_else();
     an_unrolled_loop_of_zero_trips_accepts_a_well_formed_body();
+    a_loop_yield_before_the_end_of_the_body_is_refused();
+    a_loop_yield_that_does_not_match_the_carried_values_is_refused();
+    each_loop_is_held_to_its_own_carried_values();
+    a_loop_whose_carried_counts_disagree_is_refused();
+    well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
     if(g_failures)
@@ -408,6 +618,6 @@ int main()
         fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;
     }
-    printf("if/else yield rule: all checks passed\n");
+    printf("yield rules: all checks passed\n");
     return 0;
 }
