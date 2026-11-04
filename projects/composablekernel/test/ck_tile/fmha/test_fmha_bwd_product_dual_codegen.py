@@ -20,7 +20,7 @@ _ELIGIBLE_GLOB = (
     "fmha_bwd_d128_bf16_batch_"
     "b32x32x128x32x128x32x16x128x128_*_"
     "maxq0_npad_nbias_ndbias_nmask_ndropout_"
-    "ndeterministic_ntrload_gfx12.cpp"
+    "ndeterministic_ntl_gfx12.cpp"
 )
 
 
@@ -96,15 +96,15 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
             # Check actual emitted guards, not just the generator template.
             for suffix, guard in (
                 (
-                    "fp16_batch_*_npad_nbias_ndbias_nmask_ndropout_ndeterministic_ntrload_gfx12.cpp",
+                    "fp16_batch_*_npad_nbias_ndbias_nmask_ndropout_ndeterministic_ntl_gfx12.cpp",
                     "FmhaBwdBf16>",
                 ),
                 (
-                    "bf16_batch_*_npad_nbias_ndbias_nmask_ndropout_deterministic_ntrload_gfx12.cpp",
+                    "bf16_batch_*_npad_nbias_ndbias_nmask_ndropout_deterministic_ntl_gfx12.cpp",
                     "!(true)",
                 ),
                 (
-                    "bf16_group_*_npad_nbias_ndbias_nmask_ndropout_ndeterministic_ntrload_gfx12.cpp",
+                    "bf16_group_*_npad_nbias_ndbias_nmask_ndropout_ndeterministic_ntl_gfx12.cpp",
                     "!(true)",
                 ),
             ):
