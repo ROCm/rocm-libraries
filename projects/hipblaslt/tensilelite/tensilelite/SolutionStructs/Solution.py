@@ -83,7 +83,8 @@ from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
   b_rotate_reason as segBRotateReason, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
-  paired_buffer_layout_reason as segPairedLayoutReason
+  paired_buffer_layout_reason as segPairedLayoutReason, \
+  persistent_keeps_unpaired as segPersistentKeepsUnpaired
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -6991,9 +6992,12 @@ class Solution(collections.abc.Mapping):
       if _bRotReason is not None:
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
-    # Persistent kernels retain their existing interleave offsets and buffer swaps.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned and not isPersistent(state):
-      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
+    # Tight layouts pair each component's ping/pong buffers when supported. Persistent
+    # kernels retain their existing unpaired interleave if pairing is unavailable;
+    # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
+        and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
+      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)
         _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)
@@ -7003,14 +7007,14 @@ class Solution(collections.abc.Mapping):
         state["LDSSegInterleaveOffsets"] = _pairedOffsets
         state["StoreSwapAddr"] = True
         ldsNumBytesAB = _pairedOffsets["pairedUsedBytes"]
-      elif state["LDSSegmentBRotate"] or _segRequested == 1:
-        # Explicit tight interleave and tight B rotation require a valid paired layout.
+      elif state["LDSSegmentBRotate"] or (_segRequested == 1 and not isPersistent(state)):
+        # Non-persistent explicit tight interleave and tight B rotation require pairing.
         _parameter = "LDSSegmentBRotate" if state["LDSSegmentBRotate"] else "LDSSegmentInterleave=1"
         reject(state, printRejectionReason, "%s requires paired LDS placement: %s" % (_parameter, _pairedReason))
         return
-      else:
-        # Pairing failed in auto mode. Keep the ordinary LDS offsets, buffer
-        # swap policy and byte count calculated above.
+      elif not isPersistent(state):
+        # Non-persistent auto mode disables interleave when pairing fails. Persistent
+        # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
     if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
       state["LDSSegInterleaveOffsets"] = {}
