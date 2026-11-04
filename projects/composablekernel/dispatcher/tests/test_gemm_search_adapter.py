@@ -432,6 +432,24 @@ def test_attribution_holds_across_devices(tmp_path, monkeypatch):
                    else ("ok", ms(n, prob[k])) for n in (A, B, C) for k in (K1, K2)}
 
 
+def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):
+    # --kernel-timeout covers the kernel; a verified one-kernel call also builds
+    # the inputs and the fp32 reference on the host: 8192^3 gets 22 s more.
+    big = {"M": 8192, "N": 8192, "K": 8192}
+    seen = []
+
+    def measure(problems, pairs, built, devices, args, *rest, **kw):
+        seen.append(args.kernel_timeout)
+
+    tc = Toolchain(tmp_path, monkeypatch)
+    ad = _adapter(tmp_path, tc.build, measure, problems=(P1, big), kernel_timeout=30)
+    ad.build_missing([ad.cands[A]])
+    ad.measure_pairs([_req(K1, A, 1)])
+    ad.measure_pairs([_req(K1, A, 2), _req("8192x8192x8192", A, 3)])
+    assert seen == [31, 52] and ad.args.kernel_timeout == 30
+    assert [GS.verify_allowance_s(p) for p in (P1, big)] == [1, 22]
+
+
 def test_confirmation_runs_each_problem_on_one_device(tmp_path, monkeypatch):
     # Two devices, two problems with two finalists each: every confirmation
     # unit of a problem runs on that problem's device (K1 on 0, K2 on 1), and

@@ -222,6 +222,10 @@ Option rules:
   search writes its own records and `--csv` is not written.
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
+  Each call therefore also pays the host side of verification (random inputs
+  and an fp32 numpy reference GEMM: about 1 s at 4096^3 and 4 s at 8192^3 on
+  a 16-core host), which a batched `--verify` run pays once per batch; its
+  timeout is `--kernel-timeout` plus `ceil(2*M*N*K / 5e10)` s for it.
   `--verify-tol`, `--kernel-timeout`, `--workers`, `--build-timeout` and
   `--devices` apply as usual. Discovery measurements spread over the devices;
   each problem's confirmation calls run on one device (problem `i` on device

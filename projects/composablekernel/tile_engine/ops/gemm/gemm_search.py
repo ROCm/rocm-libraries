@@ -86,6 +86,17 @@ RUN_STATUS = {
     "-2": "no kernel selected for the problem",
     "-3": "the kernel does not support the problem",
 }
+# A verified one-kernel worker also pays the host side of verification (random
+# inputs, the fp32 numpy reference GEMM, the comparison), which a batched
+# --verify run pays once per batch. Each call's timeout is --kernel-timeout
+# plus that time, budgeted at 50 GFLOP/s for the reference: a rate the host
+# keeps with several device workers sharing its cores.
+VERIFY_HOST_FLOPS = 5e10
+
+
+def verify_allowance_s(problem) -> int:
+    """Seconds added to ``--kernel-timeout`` for a verified call on ``problem``."""
+    return math.ceil(2 * problem["M"] * problem["N"] * problem["K"] / VERIFY_HOST_FLOPS)
 
 
 @dataclass(frozen=True)
@@ -250,6 +261,8 @@ class GemmSearchAdapter:
             "devices": self.devices,
             "measurement": {"verify": True, "verify_tol": a.verify_tol,
                             "batch_size": 1, "kernel_timeout": a.kernel_timeout,
+                            "timeout_s": "kernel_timeout + ceil(2*M*N*K / "
+                                         f"{VERIFY_HOST_FLOPS:g}) per call",
                             "check_identity": True},
             "build": {"workers": a.workers, "build_timeout": a.build_timeout},
             **source_info(files, domain),
@@ -300,10 +313,12 @@ class GemmSearchAdapter:
             order = {key: i for i, key in enumerate(self.problems)}
             pin["device_of"] = [self.devices[order[r.problem_key] % len(self.devices)]
                                 for r in reqs]
+        problems = [self.problems[r.problem_key] for r in reqs]
+        margs = argparse.Namespace(**{**vars(self.margs), "kernel_timeout": (
+            self.margs.kernel_timeout + max(map(verify_allowance_s, problems)))})
         self.hooks.measure(
-            [self.problems[r.problem_key] for r in reqs],
-            [[index[r.candidate_key]] for r in reqs],
-            built, self.devices, self.margs, self.worker_path, self.base_env,
+            problems, [[index[r.candidate_key]] for r in reqs],
+            built, self.devices, margs, self.worker_path, self.base_env,
             csv_path, extra={"check_identity": True},
             record_failures=fails.extend, measured=rows, **pin,
         )
