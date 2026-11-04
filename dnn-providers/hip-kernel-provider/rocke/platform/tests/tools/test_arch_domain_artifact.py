@@ -17,10 +17,11 @@ Two gates fail for different reasons and run under different schedulers:
   removed while the artifact still looks authoritative.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
-  It re-probes the toolchain and asserts the committed measurements for *this
-  host's* flavor reproduce cell-for-cell; compiler-build provenance may differ.
-  It is the only check that can catch a wrong measurement rather than a missing
-  one. Its external compiler processes,
+  When the host has the exact compiler build recorded in the column, it
+  re-probes the toolchain and asserts the committed measurements reproduce
+  cell-for-cell. A different compiler build is explicitly unvalidated: an LLVM
+  major is not a stable intrinsic-availability contract. It is the only check
+  that can catch a wrong measurement rather than a missing one. Its external compiler processes,
   timeout, resource policy, and skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
@@ -38,11 +39,18 @@ registrations and the packaged helper list in step if either path is renamed.
 
 from __future__ import annotations
 
+import ast
+import contextlib
+import io
 import json
 import os
+import re
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from importlib.resources import files as resource_files
 from pathlib import Path
@@ -67,6 +75,7 @@ _DATA = Path(str(resource_files("rocke.core.arch") / "data"))
 # callers.
 if str(_ROCKE / "tools") not in sys.path:
     sys.path.insert(0, str(_ROCKE / "tools"))
+import _bounded_run as B
 import gen_arch_domain as G
 from _hostcaps import available_cpus
 
@@ -116,6 +125,22 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                     self.assertEqual(clang_flavor, flavor, tc.get("clang"))
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
+
+    def test_llvm24_changes_only_the_named_barrier_declarations(self):
+        llvm23 = G._decl_table("llvm23")
+        llvm24 = G._decl_table("llvm24")
+        self.assertEqual(llvm23.keys(), llvm24.keys())
+        changed = {key for key in llvm23 if llvm23[key] != llvm24[key]}
+        self.assertEqual(
+            changed,
+            {
+                "s.barrier.init",
+                "s.barrier.signal.var",
+                "s.barrier.join",
+                "s.wakeup.barrier",
+            },
+        )
+        self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
 
     def test_every_decl_key_is_covered_on_every_wired_arch(self):
         """The drift this file exists to catch: a decl key the artifact has no
@@ -199,6 +224,33 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                     "the probed call, so its `ok` cells prove nothing",
                 )
                 self.assertGreater(tc.get("probe_timeout_s", 0), 0)
+
+
+class ArchDomainProcessorSupportTest(unittest.TestCase):
+    """Each column says, per target, whether its compiler accepts the name."""
+
+    def test_every_column_records_which_processor_names_its_compiler_accepts(self):
+        for flavor, path in _columns():
+            with self.subTest(flavor=flavor):
+                doc = json.loads(path.read_text())
+                processors = doc.get("processors", {})
+                self.assertEqual(sorted(processors), sorted(doc["toolchain"]["arches"]))
+                for arch, entry in processors.items():
+                    self.assertIsInstance(entry.get("accepted"), bool, arch)
+                    if not entry["accepted"]:
+                        self.assertTrue(entry.get("evidence"), arch)
+
+    def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
+        """The two answers agree: a name the compiler rejects was never probed
+        successfully for any declaration."""
+        for flavor, path in _columns():
+            doc = json.loads(path.read_text())
+            for arch, entry in doc.get("processors", {}).items():
+                if entry["accepted"]:
+                    continue
+                for key, row in doc["keys"].items():
+                    with self.subTest(flavor=flavor, arch=arch, key=key):
+                        self.assertNotEqual(row[arch]["status"], G.STATUS_OK)
 
 
 class AvailableCpusTest(unittest.TestCase):
@@ -297,12 +349,10 @@ class AvailableCpusTest(unittest.TestCase):
 
 
 class DriftTest(unittest.TestCase):
-    """What `--check` forgives, and what it must not.
+    """What an applicable ``--check`` treats as drift.
 
-    The column embeds the exact ROCm build that measured it, so a byte
-    comparison fails on any host at a different patch level -- not something
-    anyone can act on. But the fields saying *how* the probe was posed are
-    ours, not the host's, and forgiving those forgives real defects.
+    The caller rejects a compiler-provenance mismatch before probing. Once the
+    exact recorded compiler is present, every artifact field is load-bearing.
     """
 
     def _doc(self, **toolchain) -> str:
@@ -324,9 +374,11 @@ class DriftTest(unittest.TestCase):
             }
         )
 
-    def test_a_different_compiler_build_is_not_drift(self):
+    def test_a_different_compiler_build_is_drift_when_compared(self):
         other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
-        self.assertIsNone(G._drift(self._doc(), self._doc(clang=other)))
+        why = G._drift(self._doc(), self._doc(clang=other))
+        self.assertIsNotNone(why)
+        self.assertIn("toolchain", why)
 
     def test_a_changed_measurement_is_drift_and_says_which(self):
         fresh = json.loads(self._doc())
@@ -364,7 +416,7 @@ class NameDiscoveryBatchTest(unittest.TestCase):
         )
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
         with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G.subprocess, "run", return_value=completed
+            G, "run_bounded", return_value=completed
         ) as run:
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
@@ -379,7 +431,7 @@ class NameDiscoveryBatchTest(unittest.TestCase):
         output = "declare float @llvm.fabs.f32(float) #0\n"
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
         with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G.subprocess, "run", return_value=completed
+            G, "run_bounded", return_value=completed
         ) as run:
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("fabs-alias", self._A)], Path(td)
@@ -394,7 +446,7 @@ class NameDiscoveryBatchTest(unittest.TestCase):
         a = mock.Mock(returncode=0, stdout=self._A + " #0\n", stderr="")
         b = mock.Mock(returncode=0, stdout=self._B + " #0\n", stderr="")
         with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G.subprocess, "run", side_effect=(failed, a, b)
+            G, "run_bounded", side_effect=(failed, a, b)
         ) as run:
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
@@ -709,6 +761,15 @@ class ClassifyTest(unittest.TestCase):
         )
         self.assertEqual(status, G.STATUS_ARCH_ABSENT)
         self.assertTrue(evidence)
+
+    def test_llvm24_missing_target_feature_is_arch_absent(self):
+        status, evidence = G._classify(
+            1,
+            "error: <unknown>:0:0: in function @probe void (ptr, i32): "
+            "llvm.amdgcn.mov.dpp8 requires target feature 'dpp8'",
+        )
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT)
+        self.assertIn("requires target feature 'dpp8'", evidence)
 
     def test_selection_dag_addresses_are_not_persisted(self):
         """Allocator-dependent node addresses must not make --check flaky."""
@@ -1260,6 +1321,35 @@ for line in open(src):
         self.assertEqual(rc, 77)
         self.assertFalse(out.exists())
 
+    def test_ctest_skips_a_column_from_a_different_compiler_build(self):
+        """One LLVM major does not make development builds interchangeable."""
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        blessed = "AMD clang version 22.0.0git (blessed-build)"
+        host = "AMD clang version 22.0.0git"
+        out.write_text(json.dumps({"toolchain": {"clang": blessed}}))
+        tools = {
+            "clang": self._clang_with_accepting_assembler(self._CLANG_ACCEPTS),
+            "opt": self._stub("opt", self._OPT_RESOLVES_AND_IDENTIFIES),
+        }
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+
+        self.assertEqual(rc, 77)
+        self.assertIn("UNVALIDATED", stdout.getvalue())
+        self.assertIn(blessed, stdout.getvalue())
+        self.assertIn(host, stdout.getvalue())
+
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
         out = Path(tempfile.mkdtemp()) / "missing-column.json"
@@ -1290,6 +1380,271 @@ for line in open(src):
         ):
             with self.subTest(banner=banner):
                 self.assertEqual(G.flavor_of_clang(banner), flavor)
+
+
+@unittest.skipUnless(
+    hasattr(os, "killpg"), "needs POSIX process groups to tell what survived"
+)
+class ProbeTimeoutTest(unittest.TestCase):
+    """A probe that runs out of time leaves nothing running behind it.
+
+    The clang driver compiles in a child process, and a compile that never
+    finishes (llvm20 on `raw.ptr.buffer.load.async.lds` at -O0) used to outlive
+    its timeout: only the driver was killed, and the orphaned child spun at
+    full CPU until the host was rebooted, one per hanging probe per sweep.
+
+    The stub stands in for that driver: it starts a child that never exits,
+    records both pids, and never exits itself.
+    """
+
+    _HANGS_WITH_A_CHILD = """
+import os, subprocess, sys, time
+{prelude}
+child = subprocess.Popen([sys.executable, "-c", "import time\\nwhile True: time.sleep(1)"])
+with open({pids!r}, "a") as f:
+    f.write(f"{{os.getpid()}} {{child.pid}}\\n")
+while True:
+    time.sleep(1)
+"""
+
+    def _stub(self, name: str, prelude: str = "") -> tuple[str, Path]:
+        """A stub tool `name` that runs `prelude`, then hangs with a child."""
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        pids = root / "pids"
+        path = root / name
+        path.write_text(
+            "#!/usr/bin/env python3\n"
+            + self._HANGS_WITH_A_CHILD.format(pids=str(pids), prelude=prelude)
+        )
+        path.chmod(0o755)
+        self.addCleanup(self._kill_survivors, pids)
+        return str(path), pids
+
+    @staticmethod
+    def _started(pids: Path) -> list[int]:
+        return [int(p) for line in pids.read_text().split("\n") for p in line.split()]
+
+    @staticmethod
+    def _alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        stat = Path(f"/proc/{pid}/stat")
+        try:
+            # A zombie has exited and only waits to be reaped by its parent.
+            return stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except (OSError, IndexError):
+            return True
+
+    @contextlib.contextmanager
+    def _short_timeout_after_ready(self, pids: Path):
+        """Start each timeout only after its stub recorded both processes.
+
+        The production timeout remains part of the call under test. This patch
+        shortens only ``Popen.communicate`` after a deterministic readiness
+        handshake, avoiding a race between interpreter startup and a tiny test
+        timeout while retaining a real process group and descendant.
+        """
+        original = subprocess.Popen.communicate
+        expected_pids = 0
+
+        def communicate(proc, *args, **kwargs):
+            nonlocal expected_pids
+            if kwargs.get("timeout") is not None:
+                expected_pids += 2
+                deadline = time.monotonic() + 5
+                while True:
+                    started = len(self._started(pids)) if pids.exists() else 0
+                    if started >= expected_pids:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("stub process tree did not become ready")
+                    time.sleep(0.01)
+                kwargs["timeout"] = 0.05
+            return original(proc, *args, **kwargs)
+
+        with mock.patch.object(subprocess.Popen, "communicate", communicate):
+            yield
+
+    def _survivors(self, pids: Path) -> list[int]:
+        # Killing is asynchronous: give the kernel a moment to deliver it.
+        deadline = time.monotonic() + 5
+        while True:
+            alive = [pid for pid in self._started(pids) if self._alive(pid)]
+            if not alive or time.monotonic() > deadline:
+                return alive
+            time.sleep(0.1)
+
+    def _kill_survivors(self, pids: Path) -> None:
+        """Keep a failing run of this test from leaking the processes it
+        started. Only the pids the stub recorded are touched."""
+        if not pids.exists():
+            return
+        for pid in self._started(pids):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def test_a_link_probe_timeout_ends_the_whole_compile(self):
+        clang, pids = self._stub("clang")
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        with self._short_timeout_after_ready(pids):
+            status, _ = G._probe(
+                clang,
+                scratch / "probe.ll",
+                "gfx942",
+                scratch / "probe.hsaco",
+                timeout=60,
+            )
+        self.assertEqual(status, G.STATUS_TOOLCHAIN_TIMEOUT)
+        self.assertEqual(len(self._started(pids)), 2, "stub did not start its child")
+        self.assertEqual(self._survivors(pids), [], "outlived the probe's timeout")
+
+    def test_a_name_check_timeout_ends_the_whole_opt_run(self):
+        opt, pids = self._stub("opt")
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        with self._short_timeout_after_ready(pids):
+            verdict = G._name_exists(opt, "declare void @llvm.nope()", scratch)
+        self.assertIsNone(verdict.exists)
+        self.assertEqual(verdict.status, G.STATUS_TOOLCHAIN_TIMEOUT)
+        # Two attempts, each a stub and its child.
+        self.assertEqual(len(self._started(pids)), 4, "stub did not start its child")
+        self.assertEqual(self._survivors(pids), [], "outlived the name check's timeout")
+
+    def test_undecodable_output_still_reports_the_timeout(self):
+        """A tool killed partway through its output can leave bytes that are not
+        text. The probes catch only `TimeoutExpired`, so a decode error raised
+        while cleaning up would abort the whole sweep instead of recording a
+        timeout."""
+        tool, pids = self._stub(
+            "clang", prelude='sys.stdout.buffer.write(b"\\xff"); sys.stdout.flush()'
+        )
+        with self._short_timeout_after_ready(pids):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                B.run_bounded([tool], timeout=60)
+        self.assertEqual(self._survivors(pids), [], "outlived the timeout")
+
+    def test_a_batched_name_check_timeout_ends_the_whole_opt_run(self):
+        opt, pids = self._stub("opt")
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        items = [
+            ("a", "declare void @llvm.nope.a()"),
+            ("b", "declare void @llvm.nope.b()"),
+        ]
+        with self._short_timeout_after_ready(pids):
+            verdicts = G._name_exists_many(opt, items, scratch)
+        self.assertEqual(
+            {key: v.status for key, v in verdicts.items()},
+            {"a": G.STATUS_TOOLCHAIN_TIMEOUT, "b": G.STATUS_TOOLCHAIN_TIMEOUT},
+        )
+        # The batch, then two attempts for each of the two halves.
+        self.assertEqual(len(self._started(pids)), 10, "stub did not start its child")
+        self.assertEqual(self._survivors(pids), [], "outlived the name check's timeout")
+
+    def test_an_assembly_timeout_ends_the_whole_compile(self):
+        clang, pids = self._stub("clang")
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        with self._short_timeout_after_ready(pids):
+            status, _ = G._assemble(
+                clang,
+                scratch / "probe.ll",
+                "gfx942",
+                scratch / "probe.hsaco",
+                timeout=60,
+            )
+        self.assertEqual(status, G.STATUS_TOOLCHAIN_TIMEOUT)
+        self.assertEqual(len(self._started(pids)), 2, "stub did not start its child")
+        self.assertEqual(self._survivors(pids), [], "outlived the assembly's timeout")
+
+    _INTERRUPTS_PARALLEL_PROBES = """
+import sys, time
+sys.path.insert(0, {tools!r})
+import gen_arch_domain as G
+from _bounded_run import run_bounded
+try:
+    with G._probe_pool(2) as ex:
+        for _ in range(2):
+            ex.submit(run_bounded, [{tool!r}], timeout=120)
+        while len(open({pids!r}).read().split()) < 4:
+            time.sleep(0.1)
+        start = time.monotonic()
+        raise KeyboardInterrupt
+except KeyboardInterrupt:
+    pass
+print("STOPPED-IN", round(time.monotonic() - start, 1))
+try:
+    run_bounded([{tool!r}], timeout=120)
+    print("STARTED-AFTER-STOP")
+except KeyboardInterrupt:
+    pass
+"""
+
+    def test_ctrl_c_ends_probes_running_in_worker_threads(self):
+        """Ctrl-C reaches only the main thread, and each probe runs in its own
+        session, so a sweep whose probes run in worker threads would wait out
+        every probe's timeout before it stopped. The generator's probe pool
+        ends them instead, and no probe starts after that. Run in a child
+        process: after an interrupt, every later `run_bounded` call there is
+        refused."""
+        tool, pids = self._stub("clang")
+        pids.touch()
+        script = self._INTERRUPTS_PARALLEL_PROBES.format(
+            tools=str(_ROCKE / "tools"), tool=tool, pids=str(pids)
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("STARTED-AFTER-STOP", proc.stdout)
+        seconds = float(proc.stdout.split("STOPPED-IN")[1])
+        self.assertLess(seconds, 10, "waited for the probes' timeout")
+        self.assertEqual(len(self._started(pids)), 4, "stubs did not start")
+        self.assertEqual(self._survivors(pids), [], "outlived the interrupt")
+
+
+class InstalledGeneratorTest(unittest.TestCase):
+    """The installed reproduction CTest runs a staged copy of the generator.
+
+    `CMakeLists.txt` copies the generator and the private helpers it imports
+    into the installed test tree. A helper missing from that list passes every
+    source-tree test and then fails the installed CTest on import.
+    """
+
+    def test_every_helper_a_staged_tool_imports_is_staged_with_it(self):
+        cmake = (_ROCKE / "CMakeLists.txt").read_text()
+        block = re.search(
+            r"install\(FILES((?:\s+\"[^\"]+\")+)\s+"
+            r'DESTINATION "\$\{ROCKE_TEST_INSTALL_DIR\}/tests/arch_domain"\)',
+            cmake,
+        )
+        self.assertIsNotNone(block, "no install() of the arch-domain generator")
+        staged = {Path(f).name for f in re.findall(r'"([^"]+)"', block.group(1))}
+        self.assertIn("gen_arch_domain.py", staged)
+        for name in sorted(staged):
+            tree = ast.parse((_ROCKE / "tools" / name).read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                    modules = [node.module or ""]
+                else:
+                    continue
+                for module in modules:
+                    helper = module.split(".")[0] + ".py"
+                    if (_ROCKE / "tools" / helper).is_file():
+                        with self.subTest(tool=name, helper=helper):
+                            self.assertIn(helper, staged)
 
 
 class PartialSweepTest(unittest.TestCase):

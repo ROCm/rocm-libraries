@@ -160,6 +160,18 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
                                                 int64_t                  ld);
 
 /*! \ingroup aux_module
+ *  \brief Create a grouped matrix descriptor (HIPBLASLT_BATCH_MODE_GROUPED).
+ *  The arrays are device pointers with groupCount elements, or null to use the
+ *  ROWS, COLS, or LD attribute for every group.
+ */
+rocblaslt_status rocblaslt_grouped_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
+                                                        hipDataType              valueType,
+                                                        int                      groupCount,
+                                                        const void*              rowsArray,
+                                                        const void*              colsArray,
+                                                        const void*              ldArray);
+
+/*! \ingroup aux_module
  *  \brief Destroy a matrix descriptor
  *
  *  \details
@@ -450,7 +462,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
 
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
@@ -458,7 +470,7 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
-                                     const bool             uniformSummationOrder,
+                                     const int32_t          uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 

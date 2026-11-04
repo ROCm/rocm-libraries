@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 
 #include <ostream>
+#include <stdexcept>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
