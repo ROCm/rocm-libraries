@@ -598,6 +598,18 @@ def test_deadline_stops_admission_then_confirms(tmp_path, deadline, measured, wa
     assert s.wall_s == wall
 
 
+def test_no_deadline_unless_one_is_set(tmp_path):
+    # Each measurement takes 1000 s: without deadline_s the run still spends
+    # its whole trial budget.
+    clock = FakeClock()
+    ad = FakeAdapter({"P1": list("ABCDEF")}, clock=clock, advance=1000.0)
+    s, _, co = run(tmp_path, ad, {"P1": [[n] for n in "ABCDEF"]}, clock=clock,
+                   trials_per_problem=6, batch_per_problem=1)
+    assert len(ad.measured) == 6 and s.stop_reason == "searched"
+    assert co.ledger.deadline_s is None and s.wall_s == 6000.0
+    assert strict(tmp_path / "out" / "summary.json")["budget"]["deadline_s"] is None
+
+
 def test_deadline_is_checked_before_every_ask(tmp_path):
     clock = FakeClock()
 
@@ -902,7 +914,8 @@ def test_settings_defaults_paths_and_round_trip(tmp_path):
     s = AS.SearchSettings.from_json(tmp_path / "search.json")
     assert s.warm_start.pairs_file == str(tmp_path / "picks.json")
     assert (s.seed, s.seed_policy, s.deadline_s, s.batch_per_problem) == (
-        0, "shared", 3600.0, 4)
+        0, "shared", None, 4)
+    assert "deadline_s" not in s.to_json()
     assert (s.max_stall_rounds, s.confirm.finalists, s.confirm.fresh_calls) == (8, 2, 3)
     assert s.warm_start.top_k == 5 and not s.warm_start.use_prior
     assert AS.SearchSettings.from_json(s.to_json()) == s

@@ -191,7 +191,7 @@ python gemm_full_benchmark.py configs/default_config.json --variant gemm_univers
 | `trials_per_problem` | required | measured trials per problem, failures and warm starts included |
 | `new_builds_per_run` | required | distinct kernels the run may build (failed builds count); at least `trials_per_problem` |
 | `seed`, `seed_policy` | `0`, `shared` | `per_problem` gives problem `i` the seed `seed + i` |
-| `deadline_s` | `3600` | stops admitting trials; running work and the confirmation still finish |
+| `deadline_s` | none | seconds after which no trial is admitted; the round in flight and the confirmation still finish. Without it the trial and build budgets bound the run |
 | `batch_per_problem` | `4` | trials a problem may propose per round |
 | `max_stall_rounds` | `8` | rounds in a row without a new result before the run stops |
 | `warm_start.pairs_file`, `top_k` | none, `5` | a `--pairs` file (e.g. from `select_kernels.py --out_pairs`): the first `top_k` listed kernels of a problem are tried first |

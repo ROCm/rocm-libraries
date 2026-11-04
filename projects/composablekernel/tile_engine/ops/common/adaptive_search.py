@@ -246,7 +246,9 @@ class SearchSettings:
     """A validated ``--search-config`` (schema_version 1).
 
     Relative warm-start paths are resolved against the settings file's directory
-    (against the working directory when the settings come as a dict).
+    (against the working directory when the settings come as a dict). There is
+    no deadline unless ``deadline_s`` is given: the trial and build budgets
+    bound a run.
     """
 
     strategy: str
@@ -255,7 +257,7 @@ class SearchSettings:
     schema_version: int = SCHEMA_VERSION
     seed: int = 0
     seed_policy: str = "shared"
-    deadline_s: float = 3600.0
+    deadline_s: Optional[float] = None
     batch_per_problem: int = 4
     max_stall_rounds: int = 8
     warm_start: Optional[WarmStartSettings] = None
@@ -321,7 +323,7 @@ class SearchSettings:
             seed=_get(data, w, "seed", int, 0),
             seed_policy=_get(data, w, "seed_policy", str, "shared",
                              lambda v: v in SEED_POLICIES, f"one of {SEED_POLICIES}"),
-            deadline_s=_get(data, w, "deadline_s", float, 3600.0, lambda v: v > 0, "> 0"),
+            deadline_s=_get(data, w, "deadline_s", float, None, lambda v: v > 0, "> 0"),
             batch_per_problem=_get(data, w, "batch_per_problem", int, 4, _positive, ">= 1"),
             max_stall_rounds=_get(data, w, "max_stall_rounds", int, 8, _positive, ">= 1"),
             warm_start=warm,
@@ -339,6 +341,8 @@ class SearchSettings:
         """The settings as accepted by ``from_json`` (paths resolved)."""
         d = {f: getattr(self, f) for f in self.__dataclass_fields__}
         d["confirm"] = vars(self.confirm).copy()
+        if self.deadline_s is None:
+            del d["deadline_s"]
         if self.warm_start is None:
             del d["warm_start"]
         else:
@@ -363,7 +367,7 @@ class BudgetLedger:
     def __init__(self, trials_per_problem, new_builds_per_run, deadline_s, clock):
         self.trials_per_problem = int(trials_per_problem)
         self.new_builds_per_run = int(new_builds_per_run)
-        self.deadline_s = float(deadline_s)
+        self.deadline_s = None if deadline_s is None else float(deadline_s)
         self.clock = clock
         self.start = clock()
         self.trials: Dict[str, int] = {}
@@ -393,7 +397,7 @@ class BudgetLedger:
         return self.clock() - self.start
 
     def deadline_passed(self) -> bool:
-        return self.elapsed() >= self.deadline_s
+        return self.deadline_s is not None and self.elapsed() >= self.deadline_s
 
     def to_json(self) -> dict:
         return {
