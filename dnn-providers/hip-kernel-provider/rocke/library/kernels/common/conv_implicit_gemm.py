@@ -6338,6 +6338,11 @@ def _build_implicit_gemm_conv_impl(
                 c32 = b.const_i32(32)
                 conds += [b.cmp_eq(p_dH, c1), b.cmp_eq(p_dD, c1),
                           b.cmp_lt(p_Y, c32), b.cmp_lt(p_Z, c32)]
+                # the pad-offset A buffer (A_bytes + pad bytes) stays below the
+                # out-of-range lane offset
+                _pb = b.mul(b.add(b.add(b.mul(p_pD, s_di), b.mul(p_pH, s_hi)),
+                                  b.mul(p_pW, s_wi)), b.const_i32(2))
+                conds.append(b.cmp_le(A_bytes, b.sub(b.const_i32(0x7FFFFFFE), _pb)))
             if spec.xh_dpp:
                 # Output row boundaries only at a wave's M extent.
                 conds.append(b.cmp_eq(

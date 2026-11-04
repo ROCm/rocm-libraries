@@ -2055,6 +2055,16 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         conds[nc++] = rocke_b_cmp_eq(b, ctx->p_dD, c1);
         conds[nc++] = rocke_b_cmp_lt(b, ctx->p_Y, c32);
         conds[nc++] = rocke_b_cmp_lt(b, ctx->p_Z, c32);
+        /* the pad-offset A buffer (A_bytes + pad bytes) stays below the
+         * out-of-range lane offset */
+        rocke_value_t* pd = rocke_b_mul(b, ctx->p_pD, s_di);
+        rocke_value_t* ph = rocke_b_mul(b, ctx->p_pH, s_hi);
+        rocke_value_t* pdh = rocke_b_add(b, pd, ph);
+        rocke_value_t* pw = rocke_b_mul(b, ctx->p_pW, s_wi);
+        rocke_value_t* pdhw = rocke_b_add(b, pdh, pw);
+        rocke_value_t* pb = rocke_b_mul(b, pdhw, rocke_b_const_i32(b, 2));
+        rocke_value_t* lim = rocke_b_sub(b, rocke_b_const_i32(b, 0x7FFFFFFE), pb);
+        conds[nc++] = rocke_b_cmp_le(b, ctx->A_bytes, lim);
     }
     if(spec->xh_stride_m)
     {
