@@ -4,7 +4,7 @@
 #pragma once
 
 // Host side of the fused GEMM.A2A kernarg segment ABI. Must stay
-// byte-identical with the kernel side (Tensile/Components/Signature.py
+// byte-identical with the kernel side (tensilelite/Components/Signature.py
 // fusedA2AKernArgLayout + addArg).
 
 #include <array>
@@ -16,7 +16,7 @@
 namespace TensileLite
 {
     // Compile-time slot count for the fused-A2A kernarg segment; must match
-    // FUSED_A2A_MAX_RANKS in Tensile/Components/Signature.py. The host
+    // FUSED_A2A_MAX_RANKS in tensilelite/Components/Signature.py. The host
     // always appends 8 peer groups (unused groups j>=W filled with
     // nullptr), regardless of the runtime world size. 8 is the world size
     // this ABI is built for, not a placeholder: raising it grows the segment
@@ -24,7 +24,7 @@ namespace TensileLite
     constexpr int FUSED_A2A_MAX_RANKS = 8;
 
     // FUSED_A2A_MAX_RANKS must fit within what the DRAIN barrier's EXEC
-    // mask (Tensile/Components/GlobalWriteBatch.py _emitFusedA2AHandshake)
+    // mask (tensilelite/Components/GlobalWriteBatch.py _emitFusedA2AHandshake)
     // can encode; twin-checked at Signature.py's FUSED_A2A_MAX_RANKS.
     static_assert(FUSED_A2A_MAX_RANKS <= 31,
                   "FUSED_A2A_MAX_RANKS exceeds the 31 the DRAIN EXEC mask can encode: "
@@ -43,7 +43,7 @@ namespace TensileLite
                * FUSED_A2A_LINE_BYTES;
     }
 
-    // Twinned with their namesakes in Tensile/Components/Signature.py.
+    // Twinned with their namesakes in tensilelite/Components/Signature.py.
     constexpr size_t FUSED_A2A_OUTBOUND_OFFSET
         = fusedA2AAlignLine((size_t)FUSED_A2A_MAX_RANKS * sizeof(uint32_t));
     constexpr size_t FUSED_A2A_FLAG_BLOCK_BYTES

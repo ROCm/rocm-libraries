@@ -18,7 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green. They fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature that *is* reachable from a valid config — see that
+section for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -197,6 +199,129 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 | `gemm_epilogue.cpp` | Heterogeneous-dtype `_storage_dtype` `ValueError` text. | No public `_storage_dtype` validator exists in a shared header. Emit-path call sites only need the resolved IR type (dtypes already validated upstream by `ck_gemm_storage_dtype` in `gemm_spec.cpp`), so IR is byte-identical; only the heterogeneous-reject *message* is deferred until a shared validator lands. |
 | `deep_fused_conv_pool_value_types_and_spec.cpp` | Leading underlying-conv gate (`conv_spec=spec.conv_spec()`; `is_valid_conv_spec`) in `is_valid_spec`. | The per-family gate `rocke_implicit_gemm_conv_is_valid_spec` is public, but `spec.conv_spec()`'s only C port requires an `ir_builder_t*` for `kernel_name_join`; this validator is pure-compute with no builder. Needs a builder-free `conv_spec()` / validate path. |
 | `deep_fused_conv_pool_conv1_gemm_and_lds_staging.cpp` | `rocke_conv_apply_accumulator_epilogue` peer (called via a local extern-C forward decl). | The peer's `ConvAccumulatorEpilogue` struct in its private header collides with this TU's struct of the same name; needs the peer epilogue type exposed through a non-conflicting shared header. Currently **link-resolved (correct at runtime)**; forward-decl retained. |
+
+---
+
+## 5. Library attention — additive bias (Python engine only)
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp`, gfx950 tiled 2D / 3D split-KV instances
+
+The gfx950 unified tiled 2D and 3D split-KV kernels accept `use_additive_bias`
+in the Python engine only (`library/kernels/common/_attention_additive_bias.py`).
+With the flag off (the default) nothing is emitted, so every bias-off kernel is
+byte-identical and the gate is unaffected. With it on, the C++ engine has no
+equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
+cannot request bias either, so Python and C++ selection agree on every problem
+the provider can express.
+
+| Area | What's missing | Why blocked / what unblocks it |
+|---|---|---|
+| Problem and spec structs | `use_additive_bias` on the unified problem and the gfx950 tiled 2D / 3D spec structs, with the spec validator's rejections (mask-limit, invariant hoist, mask-once, non-transposed 32x32, grouped-kv2, register-PV, strided KV). | Scoped out of the Python feature change. Unblocked by adding the field to the public instance headers and mirroring the validators. |
+| Selectors / spec builder | The score-bias exclusion (`_has_score_bias`) in the fast-path gates, and the gfx950-only spec-builder threading of the flag. | Same; needs the struct field first. |
+| Kernel emission | The four trailing params (`additive_bias_ptr`, `additive_bias_batch_stride`, `additive_bias_head_stride`, `additive_bias_sq_stride`), the masked load and add on the 2D 16x16, 2D transposed 32x32 and 3D score paths, and the `addb` name token. | A port of `_attention_additive_bias.py` and its three call sites. |
+| Parity coverage | Bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
+
+---
+
+## 6. gfx942 MLA prefill — Python-only kernel builder
+
+**Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
+
+The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
+spec, or dispatch selector; it is built and selected in Python only. This
+follows the gfx942/gfx950 `attention_dense` family, which also ships without a
+C++ builder mirror (§8).
+
+**What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
+against the Python lowerer is checked on every MLA golden case at every
+`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1`
+(`library/tests/test_attention_ir_cpp_parity.py::test_mla_prefill_ir_cpp_python_byte_identity`).
+The Python IR itself is pinned by the MLA IR golden through `check_golden`
+(`library/tests/test_mla_prefill_gfx942_golden.py`).
+
+**What unblocks a C++ twin:** a decision to restore per-family C++ builder
+mirrors; until then, keep emission changes gated by the two tests above.
+
+---
+
+## 7. Unified attention LSE output (`emit_lse`) — not requestable from C
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp` (and its
+header), `rocke_unified_attn_problem_t`
+
+The C engine builds every LSE-on unified attention kernel byte-identically to
+Python: the split-KV reduce (gfx942, gfx950) and the default tiled 2D builders
+(gfx942, gfx950, including the gfx950 `fastkv_regp` wrapper). They share
+`include/rocke/instance_lse_store_internal.h`, the C twin of
+`kernels/common/_lse_store.py`. The parity emitters build LSE-on configs for
+each store site (`gfx9{42,50}_attention_tiled_2d_emit`, the gfx950
+`_fastkv_regp_emit`, `gfx9{42,50}_attention_tiled_3d_emit`), so
+`check_byte_identity` gates them.
+
+What is still Python-only is *asking* for LSE: the request side.
+
+| What's missing | Where |
+|---|---|
+| `emit_lse` on the unified problem, the `_reject_lse` support gate, and the gfx942 4-warp cohort exclusion (`library/kernels/common/attention_unified.py`: `_gfx942_4warp_eligible` is false under LSE, so the D256 bf16 and D128 sliding-window cohorts take the default 2D builder) | `rocke_unified_attn_problem_t`; the C selectors have no support gates yet, and `d256_gfx942_fast` (`attention_unified_selectors.cpp`) has no LSE clause. No C selector sets `emit_lse`, so a C-selected spec is always LSE-off and C output is unaffected |
+
+Out of scope here: the gfx950 tiled 2D C twin has no additive-bias params at
+all (the Python builder's `use_additive_bias` has no field on the C spec), so
+additive bias + LSE is built by Python only. That belongs to the additive-bias
+gap (5).
+
+**Why deferred:** the C entry points take selector output, and no C caller
+requests LSE today; the Python host and dispatcher are the only request path.
+
+**What closes it:** an `emit_lse` field on `rocke_unified_attn_problem_t`, the
+support-gate refusals mirrored into the C selectors, `!emit_lse` mirrored into
+`d256_gfx942_fast` (without it the C selector would keep the 4-warp cohort's
+tile size for an LSE request while Python picks the default builder's spec),
+and selector parity cases with LSE on.
+
+**Sign-off:** avirgoel (owner), 2026-10-20 (reduce, Python-only); 2026-10-28
+(reduce and tiled 2D kernels mirrored in C; request side remains).
+
+---
+
+## 8. Dense attention prefill (`attention_dense`) — Python-only kernel builder
+
+**Subsystem:** `library/kernels/common/attention_dense_spec.py`,
+`library/kernels/common/attention_dense_decode.py`,
+`library/kernels/gfx9{42,50}/attention_dense.py`,
+`library/dispatch/attention/`
+
+The gfx942 / gfx950 dense prefill family has **no C++ twin** of its kernel
+builder, spec, or dispatch selector; it is built and selected in Python only.
+`grep -r attention_dense platform/cpp/` returns nothing. §6 already mentions
+this family in passing as precedent for the MLA prefill gap; this entry records
+it in its own right so the family is named debt rather than a subordinate clause.
+
+| What's missing | Where |
+|---|---|
+| A C builder for `build_attention_dense` | `cpp/instances/gfx9{42,50}/`; only `attention_tiled_2d` and `attention_tiled_3d` are ported |
+| A C twin of `AttentionDenseSpec` / `Gfx9{42,50}AttentionDenseSpec`, including the `runtime_shape`, `fastdiv_divisors` and `runtime_kernarg_fields` properties | no `rocke_attention_dense_spec_t` exists |
+| A C selector / spec builder | `cpp/instances/common/attention_unified_selectors.cpp` covers the unified tiled path only; dense has no selector to mirror into |
+| The runtime-shape kernarg ABI (`attention_dense_signature`, `attention_dense_runtime_args`) | Python only; the hipDNN provider packs these kernargs from its own C++ pack, not from a rocke C++ spec |
+
+**What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
+against the Python lowerer is checked on every dense case at every
+`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1` —  `attention_dense` is a
+member of `_FAMILIES` in
+`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`.
+The Python IR itself is pinned by
+`platform/tests/golden/rocke_representative_ir_sha256/attention_dense.json`. So a change to the
+dense kernel body cannot silently diverge the two engines even without a builder
+twin.
+
+**Why deferred:** the same owner decision as §6 — per-family C++ builder mirrors
+are not currently maintained for the attention families that post-date the port,
+and the C engine is under an open deprecation proposal.
+
+**What closes it:** a decision to restore per-family C++ builder mirrors, or
+retiring the C engine. Until then, keep dense emission changes gated by the
+cross-engine parity test and the representative golden above.
+
+**Sign-off:** rocKE attention maintainer, 2026-10-30.
 
 ---
 

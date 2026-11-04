@@ -8,10 +8,12 @@ default-on step needs its ``--no-...`` flag added to the argv lists below.
 """
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 
 import pytest
 
@@ -27,6 +29,10 @@ def runner(monkeypatch):
     for var, _, _ in module.NATIVE_PARITY_TESTS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("ROCKE_BACKEND", raising=False)
+    monkeypatch.delenv("ROCKE_TEST_ENGINE_ARCHIVE", raising=False)
+    monkeypatch.delenv("ROCKE_ONLINE_LIB", raising=False)
+    monkeypatch.delenv("ROCKE_REPLAY_CLI", raising=False)
+    monkeypatch.delenv("ROCKE_PROVENANCE_MANIFEST", raising=False)
     return module
 
 
@@ -42,12 +48,27 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
+    ir_types = tmp_path / "Debug" / "rocke_ir_types"
+    ir_types.touch()
     nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
     nontemporal.touch()
+    unsigned_int_ops = tmp_path / "Debug" / "rocke_unsigned_int_ops"
+    unsigned_int_ops.touch()
+    target_identity = tmp_path / "Debug" / "rocke_arch_target_identity"
+    target_identity.touch()
+    shared = tmp_path / "librocke.so"
+    replay = tmp_path / "tests" / "rocke_portable_ir_replay_cli"
+    replay.parent.mkdir(exist_ok=True)
+    shared.touch()
+    replay.touch()
+    buffer_rsrc = tmp_path / "Debug" / "rocke_buffer_rsrc_hip"
+    buffer_rsrc.touch()
     selected = tmp_path / "override" if override else executable
     if override:
         selected.touch()
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(selected))
+    archive = tmp_path / "Debug" / "librocke_core.a"
+    archive.touch()
     calls = []
 
     def run(command, **kwargs):
@@ -55,12 +76,23 @@ def test_runner_passes_registered_fixture_to_both_backends(
         listing = {
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
+                {"name": "rocke_ir_types", "command": [str(ir_types)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
+                {
+                    "name": "rocke_unsigned_int_ops",
+                    "command": [str(unsigned_int_ops)],
+                },
+                {
+                    "name": "rocke_arch_target_identity",
+                    "command": [str(target_identity)],
+                },
+                {"name": "rocke_buffer_rsrc_hip", "command": [str(buffer_rsrc)]},
             ]
         }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "available_cpus", lambda: 3)
     monkeypatch.setattr(
         runner.sys,
         "argv",
@@ -82,8 +114,22 @@ def test_runner_passes_registered_fixture_to_both_backends(
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
+    assert all(env["ROCKE_IR_TYPES_TEST"] == str(ir_types) for _, env in children)
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
+    )
+    assert all(env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive) for _, env in children)
+    assert all(
+        env["ROCKE_UNSIGNED_INT_OPS_CLI"] == str(unsigned_int_ops)
+        for _, env in children
+    )
+    assert all(
+        env["ROCKE_ARCH_TARGET_TEST_EXE"] == str(target_identity) for _, env in children
+    )
+    assert all(env["ROCKE_ONLINE_LIB"] == str(shared) for _, env in children)
+    assert all(env["ROCKE_REPLAY_CLI"] == str(replay) for _, env in children)
+    assert all(
+        env["ROCKE_BUFFER_RSRC_HIP_TEST"] == str(buffer_rsrc) for _, env in children
     )
     assert "ROCKE_BACKEND" not in children[0][1]
     assert children[-1][1]["ROCKE_BACKEND"] == "both"
@@ -93,6 +139,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
         str(tmp_path),
         "--config",
         "Debug",
+        "--parallel",
+        "3",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
     # An explicit override skips the storage lookup; other binaries still resolve.
@@ -149,6 +197,178 @@ def test_ctest_readiness_and_failure_propagation(
         assert "ctest: SKIPPED" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("gate_rc", "only_ir", "expect_complete"),
+    [(0, "", True), (0, "gemm/gfx950/base", False), (1, "", False)],
+)
+def test_only_a_successful_unfiltered_arch_domain_gate_suppresses_pytest_delegation(
+    runner, monkeypatch, tmp_path, gate_rc, only_ir, expect_complete
+):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        rc = gate_rc if Path(command[1]).name == "check_arch_domain.py" else 0
+        return subprocess.CompletedProcess(command, rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+    monkeypatch.setattr(
+        runner,
+        "native_pytest_env",
+        lambda *_args: {},
+    )
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    argv = [
+        "run_all.py",
+        "--no-guard",
+        "--no-gate",
+        "--no-ir-validity",
+        "--no-both",
+        "--build-root",
+        str(tmp_path),
+    ]
+    if only_ir:
+        argv += ["--only-ir", only_ir]
+    monkeypatch.setattr(runner.sys, "argv", argv)
+
+    assert runner.main() == gate_rc
+    pytest_env = next(
+        kwargs["env"]
+        for command, kwargs in calls
+        if command[:3] == [runner.sys.executable, "-m", "pytest"]
+    )
+    if expect_complete:
+        assert pytest_env[runner._ARCH_DOMAIN_COMPLETE_ENV] == "1"
+    else:
+        assert runner._ARCH_DOMAIN_COMPLETE_ENV not in pytest_env
+
+
+def test_native_pytest_env_discards_ambient_arch_domain_completion(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setenv(runner._ARCH_DOMAIN_COMPLETE_ENV, "1")
+    assert runner._ARCH_DOMAIN_COMPLETE_ENV not in runner.native_pytest_env(
+        tmp_path, "Release"
+    )
+
+
+def test_pytest_targets_accept_paths_and_node_ids_but_reject_escapes(runner, tmp_path):
+    module = runner.TESTS / "tools" / "test_run_all.py"
+    selected = runner.pytest_targets(
+        [
+            "tools/test_run_all.py",
+            "tests/tools/test_run_all.py::test_ctest_discovery_failure_is_an_error",
+            str(module),
+        ]
+    )
+    assert selected == [
+        str(module),
+        f"{module}::test_ctest_discovery_failure_is_an_error",
+    ]
+    assert runner.pytest_targets([]) == [str(runner.TESTS)]
+
+    with pytest.raises(ValueError, match="escapes"):
+        runner.pytest_targets(["../run_all.py"])
+    with pytest.raises(ValueError, match="does not exist"):
+        runner.pytest_targets(["tools/not_a_test.py"])
+
+
+def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
+    runner, monkeypatch, tmp_path, capsys
+):
+    selected = "tools/test_run_all.py::test_ctest_discovery_failure_is_an_error"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        # Make the extension probe succeed so both pytest passes execute.
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+    monkeypatch.setattr(runner, "native_pytest_env", lambda *_args: {})
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--pytest-target",
+            selected,
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert runner.main() == 0
+    expected = (
+        str(runner.TESTS / selected.split("::", 1)[0])
+        + "::"
+        + selected.split("::", 1)[1]
+    )
+    pytest_calls = [command for command in calls if command[1:3] == ["-m", "pytest"]]
+    assert len(pytest_calls) == 2
+    assert all(expected in command for command in pytest_calls)
+    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        ["--only", "gemm"],
+        ["--only-ir", "gemm/gfx950/base"],
+    ],
+)
+def test_corpus_selectors_label_the_overall_result_focused(
+    runner, monkeypatch, tmp_path, capsys, selector
+):
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            *selector,
+        ],
+    )
+
+    assert runner.main() == 0
+    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
+    runner, monkeypatch, tmp_path, capsys
+):
+    (tmp_path / "CTestTestfile.cmake").touch()
+
+    def run(command, **kwargs):
+        listing = {
+            "tests": [
+                {
+                    "name": "rocke_arch_domain_reproducibility",
+                    "command": [runner.sys.executable, "generator.py", "--check"],
+                }
+            ]
+        }
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    assert not runner.ctest_ready(tmp_path, "Release")
+    assert "no built registered tests" in capsys.readouterr().out
+
+
 def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
     (tmp_path / "CTestTestfile.cmake").touch()
 
@@ -184,16 +404,159 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
     assert env["ROCKE_STORAGE_TEST"] == str(executable)
 
 
+def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
+    installed_tests = tmp_path / "installed" / "tests"
+    arch_domain = installed_tests / "arch_domain"
+    arch_domain.mkdir(parents=True)
+    shutil.copy2(runner.TESTS / "run_all.py", installed_tests / "run_all.py")
+    shutil.copy2(
+        Path(inspect.getfile(runner.available_cpus)), arch_domain / "_hostcaps.py"
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-I", str(installed_tests / "run_all.py"), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "rocKE test/validation runner" in proc.stdout
+
+
+def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_path):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    runner.configure_pytest_build(tmp_path, "Debug")
+
+    assert calls == [
+        [
+            "cmake",
+            "-S",
+            str(runner.ROCKE),
+            "-B",
+            str(tmp_path),
+            "-DCMAKE_BUILD_TYPE=Debug",
+            f"-DPython3_EXECUTABLE={runner.sys.executable}",
+            "-DROCKE_BUILD_SHARED_ENGINE=ON",
+            "-DBUILD_TESTING=ON",
+        ]
+    ]
+
+
+def test_arch_domain_ctest_registration_contract(runner, tmp_path):
+    if not (runner.ROCKE / "CMakeLists.txt").is_file():
+        pytest.skip("source CMake project is absent from the installed test artifact")
+    if not all(shutil.which(tool) for tool in ("cmake", "ctest")):
+        pytest.skip("CMake and CTest required for registration regression")
+
+    build = tmp_path / "build"
+    runner.configure_pytest_build(build, "Release")
+    tests = runner.ctest_tests(build, "Release", "^rocke_arch_domain_reproducibility$")
+    assert len(tests) == 1
+    test = tests[0]
+    assert test["name"] == "rocke_arch_domain_reproducibility"
+    assert test["command"][:2] == [runner.sys.executable, "-u"]
+    assert (
+        Path(test["command"][2]).resolve()
+        == (runner.ROCKE / "tools" / "gen_arch_domain.py").resolve()
+    )
+    assert test["command"][3:] == [
+        "--check",
+        "--unvalidated-exit-code",
+        "77",
+    ]
+    properties = {item["name"]: item["value"] for item in test["properties"]}
+    assert properties["SKIP_RETURN_CODE"] == 77
+    assert properties["RUN_SERIAL"] is True
+    assert properties["TIMEOUT"] == 1800.0
+    assert "integration" in properties["LABELS"]
+    assert "standard" in properties["LABELS"]
+
+    # Provider CI runs the generated installed manifest, not this build-tree
+    # registration. Pin both halves of the contract so a local run cannot be
+    # green while packaging silently drops the gate.
+    installed_manifest = (build / "CTestTestfile.cmake.install").read_text()
+    assert "add_test(rocke_arch_domain_reproducibility" in installed_manifest
+    assert "tests/arch_domain/gen_arch_domain.py" in installed_manifest
+    assert "--check --unvalidated-exit-code 77" in installed_manifest
+    assert "SKIP_RETURN_CODE 77" in installed_manifest
+    assert "RUN_SERIAL TRUE" in installed_manifest
+    assert "TIMEOUT 1800" in installed_manifest
+    assert (
+        'LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"'
+        in installed_manifest
+    )
+
+
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
     assert "ROCKE_STORAGE_TEST" not in runner.native_pytest_env(tmp_path, "Release")
     assert "native storage parity: SKIPPED" in capsys.readouterr().out
 
 
-def test_existing_engine_archive_is_reused_by_pytest(runner, tmp_path):
-    archive = tmp_path / "librocke_core.a"
+@pytest.mark.parametrize("subdir", ["", "Release"])
+def test_existing_engine_archive_is_reused_by_pytest(runner, tmp_path, subdir):
+    archive = tmp_path / subdir / "librocke_core.a"
+    archive.parent.mkdir(exist_ok=True)
     archive.touch()
     env = runner.native_pytest_env(tmp_path, "Release")
     assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive.resolve())
+
+
+def test_configured_archive_wins_over_another_root_archive(runner, tmp_path):
+    (tmp_path / "librocke_core.a").touch()
+    archive = tmp_path / "Debug" / "librocke_core.a"
+    archive.parent.mkdir()
+    archive.touch()
+    assert runner.native_pytest_env(tmp_path, "Debug")[
+        "ROCKE_TEST_ENGINE_ARCHIVE"
+    ] == str(archive)
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory"])
+def test_invalid_engine_archive_override_is_an_error(
+    runner, monkeypatch, tmp_path, kind
+):
+    archive = tmp_path / "invalid.a"
+    if kind == "directory":
+        archive.mkdir()
+    monkeypatch.setenv("ROCKE_TEST_ENGINE_ARCHIVE", str(archive))
+    with pytest.raises(ValueError, match="native detector archive does not exist"):
+        runner.native_pytest_env(tmp_path, "Release")
+
+
+def test_configured_portable_ir_artifacts_replace_external_cache(
+    runner, monkeypatch, tmp_path
+):
+    shared = tmp_path / "librocke.so"
+    replay = tmp_path / "tests" / "rocke_portable_ir_replay_cli"
+    replay.parent.mkdir()
+    shared.touch()
+    replay.touch()
+    monkeypatch.setenv("ROCKE_ONLINE_LIB", str(tmp_path / "stale.so"))
+    monkeypatch.setenv("ROCKE_REPLAY_CLI", str(tmp_path / "stale-cli"))
+
+    env = runner.native_pytest_env(tmp_path, "Release")
+
+    assert env["ROCKE_ONLINE_LIB"] == str(shared.resolve())
+    assert env["ROCKE_REPLAY_CLI"] == str(replay.resolve())
+
+
+def test_missing_owned_portable_artifacts_clear_external_values(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("ROCKE_ONLINE_LIB", str(tmp_path / "stale.so"))
+    monkeypatch.setenv("ROCKE_REPLAY_CLI", str(tmp_path / "stale-cli"))
+    monkeypatch.setenv("ROCKE_PROVENANCE_MANIFEST", str(tmp_path / "stale-manifest"))
+
+    env = runner.native_pytest_env(tmp_path, "Release")
+
+    assert "ROCKE_ONLINE_LIB" not in env
+    assert "ROCKE_REPLAY_CLI" not in env
+    assert "ROCKE_PROVENANCE_MANIFEST" not in env
 
 
 def test_explicit_engine_archive_override_wins(runner, monkeypatch, tmp_path):
@@ -268,7 +631,9 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_nontemporal_hip rocke_dtypes)\n"
+        "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip\n"
+        "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_buffer_rsrc_hip\n"
+        "             rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
         '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
@@ -293,7 +658,11 @@ def test_fresh_build_prepares_entire_ctest_suite(
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
+    assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
+    assert Path(env["ROCKE_ARCH_TARGET_TEST_EXE"]).is_file()
+    assert Path(env["ROCKE_BUFFER_RSRC_HIP_TEST"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
     assert runner.ctest_ready(build, "Release")
@@ -301,3 +670,29 @@ def test_fresh_build_prepares_entire_ctest_suite(
         ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],
         check=True,
     )
+
+
+def test_multi_config_build_supplies_its_archive(runner, monkeypatch, tmp_path):
+    if runner.sys.platform != "linux" or not all(
+        shutil.which(tool) for tool in ("cmake", "ninja", "c++")
+    ):
+        pytest.skip("Linux, CMake, Ninja, and C++ compiler required")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "core.cpp").write_text("int fixture() { return 0; }\n")
+    (source / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(archive_fixture LANGUAGES CXX)\n"
+        "add_library(rocke_core STATIC core.cpp)\n"
+    )
+    build = tmp_path / "build"
+    subprocess.run(
+        ["cmake", "-G", "Ninja Multi-Config", "-S", str(source), "-B", str(build)],
+        check=True,
+    )
+    # Native executable discovery is independent of the archive being tested.
+    monkeypatch.setattr(runner, "NATIVE_PARITY_TESTS", ())
+    env = runner.native_pytest_env(build, "Release")
+    archive = build / "Release" / "librocke_core.a"
+    assert archive.is_file()
+    assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive.resolve())

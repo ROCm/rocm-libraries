@@ -400,6 +400,8 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+_INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
+
 ################################################################################
 # ProblemType
 # name of solution should begin with name of problemType, and arguments can be listed out explicitly
@@ -429,6 +431,13 @@ _defaultProblemType = {
     "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
+    # W4A16 group scales: dense [M][ceil(K/G)] of DataTypeB.
+    # Int4 A only: [g] = fixed group g, several = runtime group (32, 64 or 128).
+    "ScaleBlockSizesA": [],
+    # Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
+    "ScaleZeroPointA": False,
+    # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
+    "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
     "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
@@ -505,9 +514,16 @@ _defaultProblemType = {
     "SwizzleTensorB": False,
     "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
     "MetadataLayout": 0,
-    # MX Block
+    # MX Block: extent of one MX scaling block along the bound (K) dimension.
+    # A config may also write it as a [free, k] list, which normalizeMXBlockTile
+    # splits into these keys.
     "MXBlockA": 0,
     "MXBlockB": 0,
+    # Extent of the same block along the *free* dimension (M for A, N for B),
+    # so the pair describes a MXBlockFree x MXBlock scaling tile. The 1 default
+    # is the 1xMXBlock shape: one scale per (row, K-block).
+    "MXBlockFreeA": 1,
+    "MXBlockFreeB": 1,
     "DataTypeMXSA": "E8",
     "DataTypeMXSB": "E8",
 }
@@ -767,6 +783,27 @@ _expectedProblemTypeParamTypes = {
 }
 
 
+def normalizeMXBlockTile(state, ab: str, srcFile: str = ""):
+  """Split the optional list form of ``MXBlock<ab>`` into its two int keys.
+
+  The scaling tile is written innermost (bound) extent last, so ``[k]`` -- or a
+  bare ``k`` -- is one scale per (row, k K-elements) and ``[free, k]`` shares
+  that scale across ``free`` free-dimension elements. Everything downstream
+  reads ``MXBlock<ab>`` as an int, so normalize before the type gate runs.
+  """
+  from ..Common.TypeValidationErrors import ConfigTypeError
+
+  key = "MXBlock" + ab
+  tile = state[key]
+  if not isinstance(tile, (list, tuple)):
+    return
+  if len(tile) not in (1, 2):
+    raise ConfigTypeError(
+        f"{srcFile}: ProblemType.{key} = {list(tile)}: expected [k] or [free, k]")
+  state[key] = tile[-1]
+  state["MXBlockFree" + ab] = tile[0] if len(tile) == 2 else 1
+
+
 def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: bool = True,
                                        keyPathPrefix: str = "ProblemType"):
   """Validate that every ProblemType parameter has the correct Python type.
@@ -844,6 +881,10 @@ class ProblemType(Mapping):
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
+
+    # Must precede the type gate, which only accepts the int form.
+    normalizeMXBlockTile(self.state, "A", srcFile)
+    normalizeMXBlockTile(self.state, "B", srcFile)
 
     # Validate parameter types against the _defaultProblemType registry
     validateProblemTypeParameterTypes(
@@ -967,7 +1008,7 @@ class ProblemType(Mapping):
               raise Exception("SetConstStride%s=%s anchorDim=%u is not in IndexAssignments%s"%(tc, sc, anchorDim, tc))
 
     # Bias
-    # If compute data type is not equal to dest data type, tensile will run conversion kernel.
+    # If compute data type is not equal to dest data type, TensileLite will run conversion kernel.
     # In this case we don't need to apply bias in beta only kernel.
     if "UseBias" in config:
       if self["ComputeDataType"] != self["DestDataType"]:
@@ -1186,7 +1227,7 @@ class ProblemType(Mapping):
     state["NumIndicesBatch"] = len(state["IndicesBatch"])
     state["NumIndicesSummation"] = len(state["IndicesSummation"])
     if not state["AllowNoFreeDims"] and state["NumIndicesFree"] < 2 :
-      raise Exception("Tensile requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
+      raise Exception("TensileLite requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
 
     # by default, unroll index will be the last/inner summation index
     state["IndexUnroll"] = state["IndicesSummation"][len(state["IndicesSummation"])-1]
@@ -1313,11 +1354,19 @@ class ProblemType(Mapping):
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
 
+    # "<free>x" is prefixed only for a 2D scaling tile, so every kernel name
+    # generated before MXBlockFree* existed is unchanged.
     if self["MXBlockA"]:
-      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+      tile = str(self["MXBlockA"])
+      if self["MXBlockFreeA"] != 1:
+        tile = str(self["MXBlockFreeA"]) + "x" + tile
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + tile)
 
     if self["MXBlockB"]:
-      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
+      tile = str(self["MXBlockB"])
+      if self["MXBlockFreeB"] != 1:
+        tile = str(self["MXBlockFreeB"]) + "x" + tile
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + tile)
 
     if self["SwizzleTensorA"]:
       name.append("STA")
@@ -1383,6 +1432,12 @@ class ProblemType(Mapping):
       name.append("SAB")
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
+    groups = self["ScaleBlockSizesA"]
+    if groups:
+      # Runtime-group types take the group at launch, so they get G, not a size.
+      name.append("SABB%s%s%s" % ("G" if len(groups) > 1 else groups[0],
+                                  "ZP" if self["ScaleZeroPointA"] else "",
+                                  _INT4_ENCODING_CHAR[self["Int4EncodingA"]]))
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
     if self["UseGateResidual"]:

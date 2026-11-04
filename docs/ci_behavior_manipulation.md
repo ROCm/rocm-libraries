@@ -1,76 +1,33 @@
 # CI Behavior Manipulation
 
-TheRock CI is controlled by the workflows in [`.github/workflows`](../.github/workflows).
-rocm-libraries uses
-[`therock-multi-arch-ci.yml`](../.github/workflows/therock-multi-arch-ci.yml)
-as the default TheRock CI path. The classic single-arch workflow,
-[`therock-ci.yml`](../.github/workflows/therock-ci.yml), remains available as
-an explicit fallback.
+rocm-libraries runs TheRock CI through
+[`therock-multi-arch-ci.yml`](../.github/workflows/therock-multi-arch-ci.yml),
+which calls TheRock's reusable multi-arch workflows. The labels and
+`workflow_dispatch` inputs that control a run are therefore interpreted by
+TheRock, and are documented there:
 
-## Default behavior for push and pull request
+**[TheRock: CI Behavior Manipulation](https://github.com/ROCm/TheRock/blob/main/docs/development/ci_behavior_manipulation.md)**
 
-TheRock Multi-Arch CI runs by default for pull requests and pushes to
-`develop` and `release/therock-*`.
+That page is the authority for `ci:skip`, `ci:run-all-archs`, `ci:asan`,
+`ci:gfx...`, `test:<project>`, `test_filter:<level>` and the rest. Keep it as
+the single source of truth rather than restating the list here, which is how
+this page went stale before.
 
-The multi-arch workflow uses
-[`configure_external_repo_ci.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/configure_external_repo_ci.py)
-with [`repos-config.json`](../.github/repos-config.json) to determine file
-changes, changed projects, and tests to run.
+## rocm-libraries specifics
 
-Example: a change made to `projects/rocfft` will run the tests selected for
-that project.
-
-For CI changes or changes that otherwise require broader coverage, TheRock
-Multi-Arch CI runs all tests.
-
-The classic single-arch TheRock CI workflow is skipped by default for pull
-requests and pushes.
-
-## Pull request behavior
-
-Here are additional labels that manipulate CI behavior. The labels we provide
-are:
-
-- `ci:skip`: skip TheRock Multi-Arch CI builds and tests.
-- `ci:run-all-archs`: run TheRock Multi-Arch CI for all known GPU families.
-- `ci:single-arch`: run the classic single-arch TheRock CI fallback workflow.
-- `ci:asan` or `ci:host-asan`: enable the TheRock Multi-Arch CI ASAN
-  workflow for the pull request.
-- `gfx...`: add a GPU family to the TheRock Multi-Arch CI run, such as
-  `gfx950`.
-- `test:<project>`: request tests for a specific project, such as
-  `test:rocprim` or `test:hipblaslt`.
-- `test_filter:<level>`: override the multi-arch test level. Valid values are
-  `quick`, `standard`, `comprehensive`, and `full`.
-- `test_runner:<kernel>`: use a custom test runner where the selected GPU
-  family supports one.
-
-- `skip-therockci`: skip the classic single-arch TheRock CI fallback workflow.
-- `test_type:<level>`: override the classic single-arch test level. Valid
-  values are `quick`, `standard`, `comprehensive`, and `full`.
-
-The classic single-arch labels affect only
-[`therock-ci.yml`](../.github/workflows/therock-ci.yml) when that fallback
-workflow is enabled.
-
-## Workflow dispatch behavior
-
-For `workflow_dispatch`, you are able to trigger CI from GitHub Actions:
-
-- [TheRock Multi-Arch CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci.yml)
-- [TheRock CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml)
-
-Use workflow dispatch for one-off runs that need custom GPU families, test
-labels, package build options, or the classic single-arch fallback without
-adding a pull request label.
-
-Python package, PyTorch, JAX, and native Linux package builds are not enabled
-by default in the pull request and push multi-arch workflow. They can be
-enabled through workflow dispatch inputs when needed.
-
-## Schedule behavior
-
-The scheduled nightly TheRock workflow is
-[TheRock Multi-Arch Nightly CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci-nightly.yml).
-The classic single-arch nightly workflow is available for workflow dispatch
-only.
+- `ci:native-linux-packages` opts a pull request into native Linux package
+  builds. This label is read by `therock-multi-arch-ci.yml` in this repo, not
+  by TheRock, and is spelled differently from TheRock's own
+  `ci:build-native-linux`.
+- Changed projects and the resulting test set are resolved by TheRock's
+  [`configure_external_repo_ci.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/configure_external_repo_ci.py)
+  against this repo's [`repos-config.json`](../.github/repos-config.json).
+  Paths listed in [`skip-ci-config.toml`](../.github/skip-ci-config.toml) do
+  not trigger a build.
+- The scheduled nightly run is
+  [TheRock Multi-Arch Nightly CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci-nightly.yml);
+  ASAN coverage runs in `therock-multi-arch-ci-asan*.yml`.
+- Python package, PyTorch, JAX and native Linux package builds are off by
+  default on pull requests and pushes, and are enabled through
+  [workflow dispatch](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci.yml)
+  inputs.

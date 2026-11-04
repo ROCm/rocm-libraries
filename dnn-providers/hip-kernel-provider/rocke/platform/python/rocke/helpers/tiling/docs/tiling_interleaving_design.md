@@ -157,7 +157,9 @@ consumer wants — wide loads either way, and the switch is nearly free.
 Two clarifications carried by later sections:
 - **Row/col-major is operand-relative.** K-contiguous is row-major for A but col-major for B (and
   free-dim-contiguous is the reverse). The register-order names here are the operand-neutral truth;
-  row/col-major is only how each maps onto a given operand's memory.
+  row/col-major is only how each maps onto a given operand's memory. That is why every rocKE doc names an
+  operand's layout by its contiguous axis (K-, N- or M-contiguous) and writes the operands A `(M, K)`,
+  B `(N, K)`, C `(M, N)`: see `tiling_api_surface.md` sec 3, "One axis convention".
 - **A register spans the wave.** The tile above is one lane's share; read a register *across* the lanes
   and it is a structured **slice** of an axis (§6, "Across the wave"). §1 stays single-lane for clarity.
 
@@ -327,9 +329,9 @@ once**, in that conversion — not zero times (capping an element count directly
 > *(Measured on one kernel: two operand styles against one tensor's stride set give 1 vs 8 elements per lane —
 > a factor the sweep could never surface, because no config in it differed on that axis.)*
 
-### Worked example — a logical↔physical contradiction (A, row-major)
+### Worked example — a logical↔physical contradiction (A, K-contiguous)
 
-A stored row-major, shape (M,K): `addr(m,k) = m·lda + k` → **K is stride-1, M is strided (stride = lda)**.
+A stored K-contiguous, shape (M,K): `addr(m,k) = m·lda + k` → **K is stride-1, M is strided (stride = lda)**.
 A thread owns the logical patch M{0-3} × K{0-3}.
 
 - **Vectorize along K (the stride-1 axis) — VALID.** Fix M=0, take K0-3. Their addresses are `0, 1, 2, 3`
@@ -342,14 +344,14 @@ A thread owns the logical patch M{0-3} × K{0-3}.
   the M-vector is **`VW=1`** (four separate loads at `0, lda, 2·lda, 3·lda`).
 
 The logical request ("vector along M") contradicts the physical layout (M strided) → wide vectorization is
-invalid → forced `VW=1`. (Mirror case: A col-major makes M stride-1 → vectorizing M is valid/wide, and
+invalid → forced `VW=1`. (Mirror case: an M-contiguous A makes M stride-1 → vectorizing M is valid/wide, and
 vectorizing K becomes the contradiction → `VW=1`.)
 
 ### Corollary — the cooperative-load split axis follows the same rule
 
 The macro tile is loaded cooperatively (`cooperative_load_desc`, `memory.py`): the waves split it along
 the **strided** (contraction) axis, so every wave keeps the full **stride-1** free extent and each lane's
-run stays on the contiguous axis — the wide, coalesced direction. This kernel stores A **col-major**
+run stays on the contiguous axis — the wide, coalesced direction. This kernel stores A **M-contiguous**
 (M stride-1, K strided), so the waves split **K** and vectorize **M**. Verified in the emitted ISA: at
 `vw_gl=8` the A/B macro load is `global_load_dwordx4` (b128); at the shipped `vw_gl=4` default it is
 `dwordx2` (b64) — the achieved width tracks `vw` on the contiguous run (f16, ISA-verified). The **axis
@@ -364,7 +366,7 @@ a served group (32 on gfx90a). Splitting M across the waves as well would starve
 **contract consequence, not a buildable toggle or a measurement**: `cooperative_load_desc` hardcodes
 `wave_dist=[1, n_waves]`, so the free-split alternative is reasoning from the served-group constraint, not
 something emitted. The staged LDS copy is K-width regardless, so the MMA
-read is unaffected; only the global-load width is at stake. (Mirror: a row-major operand makes K stride-1
+read is unaffected; only the global-load width is at stake. (Mirror: a K-contiguous operand makes K stride-1
 → K is the coalesced axis, and the free axis becomes the one the waves split.)
 
 ## 3. Fragments vs MMA-acceptability
@@ -421,7 +423,7 @@ What falls out of the table:
 ## 4. The end-to-end flow
 
 ```
-   GLOBAL MEMORY            A: (M×K)                    B: (K×N)
+   GLOBAL MEMORY            A: (M×K)                    B: (N×K)
         │  wide / coalesced load (read whichever memory order is contiguous)
         ▼                                                    ▼
   ┌───────────────────┐                            ┌───────────────────┐
@@ -451,12 +453,12 @@ Read it as: **load → (maybe) reorder A/B so the pair agrees on K → MMA → C
 reorder C for its consumer.** The two reorders are the only transform sites; everything else is data
 flowing through. As five steps:
 
-1. **Load A/B** from global memory (row/col-major) → wide loads, identical lane ownership.
+1. **Load A/B** from global memory (K- or free-dim-contiguous) → wide loads, identical lane ownership.
 2. **A/B → MMA form.** If the pair's K-rows already match, nothing happens; otherwise reorder one (or
    both) so `A.K-dist == B.K-dist`.
 3. **MMA** over the M×N×K grid of atoms. The accumulator emerges in one fixed register order, set by
    the MMA issue order (§7).
-4. **C-shuffle.** Re-order the native accumulator to a storable/consumable order (row/col-major, or an
+4. **C-shuffle.** Re-order the native accumulator to a storable/consumable order (M- or N-contiguous, or an
    interleaved layout to feed a downstream MMA).
 5. **Store C** in the chosen order (wide store).
 
@@ -548,7 +550,7 @@ direction; the general stride is `DPT` for K→free (table/rows above)**:
 
 The view above is one lane. Across the whole wave, an axis is **distributed over lanes × registers as
 structured slices** — that is what "compress the free/K dims" means. free-dim-contiguous load
-(A col-major, VW=4): lane `L` reads the 4 memory-contiguous elements `M{4L..4L+3}` at one K. So read
+(an M-contiguous A, VW=4): lane `L` reads the 4 memory-contiguous elements `M{4L..4L+3}` at one K. So read
 **one register across the 16 lanes of a K-group** and you get a stride-4 slice of the M=64 axis
 (`M = 4·lane + reg`):
 
@@ -568,8 +570,8 @@ and labeled `M0/M1/M2/M3, K4-7` (etc.) — there the `M0..M3` name the four regi
 literal M indices. This lane×register slicing is the "M-dist" the K/M-distributions encode (§2/§3);
 the single-lane reorder above is just how one lane's share of these slices sits in its registers.
 
-**B is identical with N in place of M** (a lane owns an `N × K` tile); only the row/col-major sense of
-each order flips (K-contiguous is col-major for B, row-major for A).
+**B is identical with N in place of M** (a lane owns an `N × K` tile): K-contiguous and
+free-dim-contiguous mean the same for B as for A (only a row/col-major name would flip, section 1).
 
 **DPT = 1 (16×16 tile) → NOP.** The lane owns a `1 × 4` tile — a single row — so "walk each row" and
 "walk each column" read out identically; there is nothing to transpose:
@@ -637,17 +639,17 @@ order (the starting register grouping) and the target store order. For a **singl
 
 | store order | `store_VW` | C-shuffle |
 |---|---|---|
-| row-major | `ACC_VW`      | `interleave_idx<1, ACC_VW, ACC_VW·MmaA·MmaB>` |
-| col-major | `ACC_VW·MmaB` | `interleave_idx<1, ACC_VW·MmaB, ACC_VW·MmaA·MmaB>` |
+| N-contiguous | `ACC_VW`      | `interleave_idx<1, ACC_VW, ACC_VW·MmaA·MmaB>` |
+| M-contiguous | `ACC_VW·MmaB` | `interleave_idx<1, ACC_VW·MmaB, ACC_VW·MmaA·MmaB>` |
 
 Verified across the reference ACC rows (16×16, 32×16, 64×16, 32×32, 64×64, … — all **16×16-atom** wave
 tiles, so `P=1`; a multi-patch *atom* like the 32×32 atom is built via §9's construction, not this closed
 form). Worked instance — 64×64
-C, 4×4 atom grid (`MmaA=MmaB=4`, `ACC_VW=4` → 64 registers): row-major = `interleave_idx<1, 4, 64>`;
-col-major = `interleave_idx<1, 16, 64>`.
+C, 4×4 atom grid (`MmaA=MmaB=4`, `ACC_VW=4` → 64 registers): N-contiguous = `interleave_idx<1, 4, 64>`;
+M-contiguous = `interleave_idx<1, 16, 64>`.
 
 **N-outer issue order** transposes the native grouping: swap `MmaA ↔ MmaB` (equivalently swap the
-row/col roles). *Derived by M↔N symmetry — confirm against the ACC reference table's rows before
+table's N- and M-contiguous rows). *Derived by M↔N symmetry — confirm against the ACC reference table's rows before
 relying on it.*
 
 **Accumulators are built the same way, cross-lane-free**, by the §9 construction — every dense **square**
@@ -674,21 +676,21 @@ atom / wave64 example; the factor generalizes below):
 
 | C output major | vectorized store axis (§2b) | lanes spanning the 64-run | store transactions / 128 B line |
 |---|---|---|---|
-| **row-major (N stride-1)** | N — valid, wide | **16** (lanes 0-15) | **1** — the wave fills each line in one instruction |
-| **col-major (M stride-1)** | M — valid, wide | **4** (lanes 0,16,32,48) | **~4** — each line written by 4 partial `dwordx4` stores |
+| **N-contiguous (N stride-1)** | N — valid, wide | **16** (lanes 0-15) | **1** — the wave fills each line in one instruction |
+| **M-contiguous (M stride-1)** | M — valid, wide | **4** (lanes 0,16,32,48) | **~4** — each line written by 4 partial `dwordx4` stores |
 
 Both stores are per-lane wide and §2b-valid (each vectorizes its own stride-1 axis) — the difference is
-purely **cross-lane fusion**. The col-major store touches the **same total footprint** (128 lines for the
+purely **cross-lane fusion**. The M-contiguous store touches the **same total footprint** (128 lines for the
 64×64 f32 tile, identical DRAM bytes) but issues **~4× the store transactions**: each cache line is
 written by ~4× as many partial stores (the `16/4` lane ratio), because only 4 lanes — not 16 — are inline along M. The factor
 is `lanes_along_N / lanes_along_M` (here 16/4 = 4); it generalizes to any wave/atom via the ownership
 split.
 
-The MMA fixes this lane split, so the **output major decides the cost**: row-major C is *with* the grain,
-col-major C is *against* it. To make a col-major C wave-coalesced, move M onto the lane-major axis — the
+The MMA fixes this lane split, so the **output major decides the cost**: an N-contiguous C is *with* the grain,
+an M-contiguous C is *against* it. To make an M-contiguous C wave-coalesced, move M onto the lane-major axis — the
 **crossed A↔B swap + `c_transpose`** (§8, free-symmetry tier): **route** A into the B-slot so the machine
 emits `Cᵀ` (source-swap, labels invariant), then **reposition** the C coordinates `(N,M)→(M,N)`; M becomes
-lane-consecutive and the col-major store fuses. Register-identity (reposition + routing), not cross-lane —
+lane-consecutive and the M-contiguous store fuses. Register-identity (reposition + routing), not cross-lane —
 NOT a label change.
 
 **Cost reality (empirical seam).** The ~4× *ratio* is *exact address arithmetic* (verified), but it is a
@@ -713,11 +715,11 @@ silently wrong for the next).
 - **Inputs (A, B)** — two orthogonal states: **coalescing** (which thread-tile axis is stride-1 — matches the
   tensor's stride-1, so the load is wide) and **MMA-readiness** (K-contiguous **and** `A.K-dist == B.K-dist`,
   §2 — the pairing is the second half). Bridge coalescing→MMA is the in-thread `reorder` (§6), or `identity`
-  if the load is already K-contiguous. Row/col is operand-relative (§1): A row-major = K-contiguous (ready);
-  A col-major = free-dim-contiguous (reorder). B is the mirror: B col-major = K-contiguous; B row-major = free.
+  if the load is already K-contiguous. Named by the contiguous axis (section 1): a K-contiguous A or B is ready; a
+  free-dim-contiguous one (M-contiguous A, N-contiguous B) takes the reorder.
 - **Accumulator (C native)** — MMA-friendly by construction; each lane owns a set of congruent, evenly-spaced
   M×N patches (one patch is the common case, not the requirement — §9 → *Accumulators*); register
-  order set by the **issue order** (§7), generally neither row- nor col-major. Label **derived** (§7).
+  order set by the **issue order** (§7), generally neither M- nor N-contiguous. Label **derived** (§7).
 - **Output (C)** — reorder the native accumulator to the store major (§7). Two properties: the *shuffle*
   (a register reorder within the lane's C registers) and the *ownership-derived* coalescing + vectorizable
   width (below). A↔B symmetry is `free` when both operands share a contiguity mode (§8): RCR, RCC, CRR, CRC.
@@ -797,10 +799,10 @@ rejects/defers — is **`cross_lane`** (inter-lane movement). Move the reject se
   cost tier used in the ladders throughout. Both are **LABEL-INVARIANT** — ✗ NOT a "relabel" (it moves a
   *position/wiring*, never a label; a true relabel changes a label and is reserved for a FINISHED tile
   reused as input). Label semantics SOT: `label_flow_and_transforms.md`. Two structural symmetries:
-  1. **Coordinate transpose = col-major ↔ row-major (a REPOSITION).** `col_major(X) == row_major(Xᵀ)`: the
-     *identical* registers, **coordinates** transposed for free via addressing (`_transpose_desc` swaps
-     which X-dim is stride-1). The **label rides invariant** — ✗ never phrase it as `(M,K)→(K,M)` on the
-     datum (that is the memref's positional axis order, not a relabel). This is how M-innermost LDS is
+  1. **Coordinate transpose (a REPOSITION).** `X` and `X^T` are the same bytes with the axis order swapped
+     (`permute([1, 0])`; the stride-1 axis stays the same named axis): the *identical* registers,
+     **coordinates** transposed for free via addressing (`_transpose_desc` swaps which X-dim is stride-1). The **label rides invariant** — ✗ never phrase it as `(M,K)→(K,M)` on the
+     datum (that is the descriptor's positional axis order, not a relabel). This is how M-innermost LDS is
      indexed for free.
   2. **Source-swap = A/B routing (M-data→B-slot, N-data→A-slot).** A(M,K) and B(N,K) are structurally
      identical fragments; feeding an A-shaped fragment into the B-slot (and vice versa) is a **machine-input
@@ -966,8 +968,8 @@ This recipe answers: **given the memory layouts + dtypes of A, B, and C, choose 
 to move the data through the MMA.** It is what §10's cost model optimizes over; its runnable form is
 `layout_optimizer.py`. It rests on two facts (derived in §1/§6 and §2):
 - **The thread-tile is a rectangle** (A `M×K`, B `N×K`, C `M×N`) → its elements lay into registers two ways
-  (row/col-major), and **row↔col-major is a pure in-register reorder** (a transpose; §1/§6) — no re-load, no
-  cross-lane. (row/col is operand-relative: K-contiguous = row-major for A, col-major for B.)
+  (K-contiguous or free-dim-contiguous), and **switching between them is a pure in-register reorder** (a
+  transpose; §1/§6) — no re-load, no cross-lane.
 - **MMA-ready = K-vectorize both operands** → an A run is *fixed M, K running*, a B run *fixed N, K running*;
   pairing slot-for-slot is the sound MAC (§2, `mma_is_machinery.md`).
 
@@ -976,8 +978,8 @@ to move the data through the MMA.** It is what §10's cost model optimizes over;
 It is exactly §4's end-to-end flow — **coalesced load → transpose to MMA-ready (if needed) → issue →
 interleaved C → transpose to store order → wide coalesced store** (see §4 for the steps). Two things this
 recipe adds on top of §4:
-- **Step 2 has a happy case and a mismatch case.** *Happy:* A row-major `M×K` × B col-major `K×N` loads
-  coalesced **and** is already MMA-ready → zero reorder. *Mismatch* (e.g. A col-major, M contiguous): load
+- **Step 2 has a happy case and a mismatch case.** *Happy:* a K-contiguous A `(M, K)` × a K-contiguous B
+  `(N, K)` loads coalesced **and** is already MMA-ready → zero reorder. *Mismatch* (e.g. an M-contiguous A): load
   coalesced in the memory-native order, then **one cheap in-register transpose** to K-contiguous — never a
   strided load.
 - **C is also a rectangle (`M×N`),** so making it store-compatible is the **same in-register transpose** as
@@ -998,53 +1000,46 @@ C's rectangle **derives** from A's and B's, so the whole A/B→C flow is *calcul
 
 ## 10. Picker logic — choosing the optimal layout chain (cost model, SOT)
 
-The author states logical intent (**per-axis roles + strides, dtype, wanted output layout**) + a bound
-**arch**; the SELECTOR picks the cheapest **chain** = `prefetch-LDS-layout × mma-operand-layout ×
-share-region × C-epilogue`. Score every *valid* chain and take the min:
+The author states logical intent (**tensors in the axis convention + strides, dtype, wanted output
+layout**) + a bound **arch**; the SELECTOR picks the cheapest **chain** = `prefetch-LDS-layout ×
+mma-operand-layout × share-region × C-epilogue`. Score every *valid* chain and take the min:
 
-    cost(chain | roles+strides, dtype, arch) = global_load + transform + lds_read + c_epilogue
+    cost(chain | axes+strides, dtype, arch) = global_load + transform + lds_read + c_epilogue
 
-### Operand description — the picker's inputs (axis ROLES + strides; row/col is DERIVED) — LOCKED
+### Operand description -- the picker's inputs (axis POSITION + strides; row/col is DERIVED)
 The picker consumes exactly two things per operand, and NEITHER is "row/col-major":
-1. **Per-axis role** — a tag on each tensor axis: `contract` (the K axis), `free` (M for A, N for B),
-   `batch`. This is the N-D-general form of "which axis is the contraction" (einsum shared-label /
-   linalg `iterator_types` + `indexing_maps`). The picker reads roles to find K -> the coalescing
-   direction and which axis LDS must serve. (For >=2 contraction axes this role becomes a *shared label*,
-   not just a category -- see "Multi-axis contraction" below.)
-2. **Strides** — the memory order (which axis is stride-1), already carried by `TensorDesc`. The picker
+1. **Axis position, by the one convention** (`tiling_api_surface.md` sec 3, "One axis convention"): batch
+   axes first, the reduction axis last -- A `(batch..., M, K)`, B `(batch..., N, K)`, C `(batch..., M, N)`.
+   The picker finds K (the last axis) and the free axis (the one before it) by position -> the coalescing
+   direction and which axis LDS must serve. There are no axis labels; nothing else is read.
+2. **Strides** -- the memory order (which axis is stride-1), already carried by `TensorDesc`. The picker
    reads strides for the `global_load` / `lds_read` cost terms.
 
-**Row/col-major is NOT the primitive; it is a lossy 2D PROJECTION of (role, stride) and is DERIVED.**
-Reasons (locked): (a) row/col names which of *two* axes is contiguous -> only 2 orderings, but an N-D
-operand has N! -> it cannot express batched / conv / attention layouts = exactly rocWMMA limitation #3
-that this layer exists to escape; (b) strides already give the memory order, so row/col adds nothing
-there -- its only real content is the role convention, which is the part that doesn't generalize.
-Therefore: **roles + strides are the internal source of truth; row/col-major is exposed ONLY at the 2D
-edge** -- an ergonomic `make_gemm_operand(a_row_major=...)` constructor and for rocWMMA/BLAS interop --
-computed from (role, stride), never stored. The free symmetries (§8) stay general in this
-framing: transpose = swap two axes' (role, stride); A<->B = swap the `free`-role axis (M<->N). Under
-row/col those look like 2D special cases; under roles+strides they are the general operation. A canonical
-logical order (M,K)/(K,N)/(M,N) can still be *fixed* for the MMA because repositioning any physical layout
-into it is free (coordinate/stride reasoning, label invariant) -- the caller hands over arbitrary strides, the picker reasons canonically.
+**Row/col-major is NOT the primitive; it is a lossy 2D PROJECTION of (position, stride) and is DERIVED.**
+Reasons: (a) row/col names which of *two* axes is contiguous -> only 2 orderings, but an N-D operand has
+N! -> it cannot express batched / conv / attention layouts = exactly rocWMMA limitation #3 that this layer
+exists to escape; (b) strides already give the memory order, so row/col adds nothing there. Therefore:
+**axis position + strides are the source of truth**, and a layout is named by its contiguous axis
+(K-, N- or M-contiguous), never stored as row/col. The free symmetries (section 8) stay general in this framing:
+transpose = `permute` (swap two axes' position, strides travel with them); A<->B = route the M-data into
+the B-slot (M<->N). Under row/col those look like 2D special cases; under position+strides they are the
+general operation. The logical order (M,K)/(N,K)/(M,N) is *fixed* for the MMA because repositioning any
+physical layout into it is free (coordinate/stride reasoning, label invariant) -- the caller hands over
+arbitrary strides, the picker reasons in the convention.
 
-**Multi-axis contraction — labels, not ordered roles (generalizes the above) — LOCKED.** A general
+**Multi-axis contraction -- through a transform graph, not axis labels (generalizes the above).** A general
 contraction has *many* free and *many* contraction axes (e.g. A = `[a b c d e | f g]` = 5 free + 2
-contract). Two consequences:
-- A plain `contract/free/batch` *category* is INSUFFICIENT once there are >=2 contraction axes: it
-  cannot express the **pairing** (which of A's contract axes contracts with which of B's). The primitive
-  is therefore an **einsum-style shared axis id**: a shared id between A and B *is* the contraction and
-  encodes its pairing; an id surviving to the output is `free`; an id on A, B AND C is `batch`.
-  Rank-agnostic and ORDER-FREE (== linalg `indexing_maps` + `iterator_types`; NumPy `einsum`). Example:
-  A `[a b c d e f g]`, B `[f g h i j]`, C `[a b c d e h i j]` -> `f,g` pair by label, no positional convention.
-- The ONLY place an order enters is lowering the N-D contraction onto the **2D MMA atom** (M×N×K): the
-  free ids **merge -> logical M / N**, the contract ids **merge -> logical K**, via a place-value
-  unmerge/merge. That merge ORDER is a **layout decision** (choose the innermost merge for coalescing),
-  **derived from strides** -- NOT a semantic label the author writes. This is exactly CK's **compact
-  unmerge-merge descriptor** (the master plan's chosen formalism: a layout is fully specified by the
-  K-unmerge + M-unmerge sizes). row/col-major is the degenerate **1-free / 1-contract** projection of it.
+contract). The tiling layer carries no axis labels, so the pairing (which of A's contract axes contracts
+with which of B's) is stated where the operand is built: a transform graph maps the tensor's axes onto the
+2D MMA atom (M x N x K) -- the free axes **merge -> logical M / N**, the contract axes **merge -> logical K**,
+via a place-value unmerge/merge. That merge ORDER is a **layout decision** (choose the innermost merge for
+coalescing), **derived from strides**. This is exactly CK's **compact unmerge-merge descriptor** (a layout
+is fully specified by the K-unmerge + M-unmerge sizes). row/col-major is the degenerate **1-free /
+1-contract** projection of it.
 
-So the split holds at any rank: **labels carry semantics (unordered, N-D); strides + merge-order carry
-layout (derived)**; the picker merges N-D -> 2D-logical (M, N, K) and scores the cost model there.
+So the split holds at any rank: **the transform graph carries the semantics (which axes merge into M, N, K);
+strides + merge-order carry the layout (derived)**; the picker scores the cost model on the merged 2D-logical
+(M, N, K).
 
 ### Cost terms
 | term | free (0) | cheap | expensive |

@@ -19,6 +19,10 @@ from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
     _wave_descs_interleaved,
     _transpose_desc,
 )
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # The winner CRC A local store: macro tile_m=256, tile_k=32, 16 waves; wave read m_sub=4,n_sub=4,k_sub=2.
 TILE_FREE, WTAG, DEPTH16 = 256, "b128", 16
@@ -394,7 +398,8 @@ def test_simulate_mode_needs_no_hardware_and_labels_itself(tmp_path):
     ), "a simulated row must never look like counters"
 
 
-def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model(arch):
     """The headline rule: an arch we have not validated is a STOP, never an extrapolation from
     gfx90a's constants."""
     with pytest.raises(ValueError, match="no validated LDS model"):
@@ -403,7 +408,7 @@ def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model():
             mode="simulate",
             tile_free=TILE_FREE,
             wtag=WTAG,
-            arch="gfx942",
+            arch=arch,
             kernel_label="CRC",
             operand_label="A",
             dims_label="M",
@@ -504,9 +509,9 @@ def test_render_simulated_is_watermarked_and_needs_no_hardware(tmp_path):
 # the arch has a validated read model and the access is in envelope, and GEOMETRY-with-a-refusal
 # otherwise -- the honesty gate, not just a feature.
 # --------------------------------------------------------------------------------------------------
-def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
-    """The MMA-operand read is vw=1 f16 -- HALF a dword. store_datum's `vw // per_dword` floors to 0
-    and yields an EMPTY map (a silent no-analysis). read_datum must map it."""
+def test_a_sub_dword_access_is_mapped_by_both_datum_builders():
+    """The MMA-operand read is vw=1 f16 -- HALF a dword. Each access still touches one dword, so
+    neither map may come back empty (a silent no-analysis)."""
     descs = _a_descs()
     _acc, vw, store_shaped = lc.store_datum(
         descs.wave_read,
@@ -517,9 +522,9 @@ def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
         origin=(0, 0),
         lds_swizzle=False,
     )
-    assert (
-        vw == 1 and store_shaped == {}
-    ), "guard: this IS the sub-dword case store_datum drops"
+    assert vw == 1, "guard: this IS the sub-dword case"
+    assert store_shaped, "store_datum must not silently return an empty map"
+    assert all(0 <= bank < lc.GFX90A.NB for (_k, _f, _d, bank) in store_shaped.values())
 
     _acc, vw, datum = lc.read_datum(
         descs.wave_read,
@@ -532,6 +537,29 @@ def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
     )
     assert datum, "read_datum must not silently return an empty map"
     assert all(0 <= bank < lc.GFX90A.NB for (_k, _f, _d, bank) in datum.values())
+
+
+def test_an_odd_stride_f16_store_is_one_dword_per_element():
+    """An f16 buffer padded by one element per row ((K, free) strides (TILE_FREE + 1, 1)) narrows the store to one
+    element per access; every access still writes one dword, so every lane appears in the map with
+    one dword per register."""
+    descs = _a_descs()
+    acc, vw, datum = lc.store_datum(
+        descs.coop_store,
+        TILE_FREE,
+        lc.GFX90A,
+        (TILE_FREE + 1, 1),
+        "f16",
+        origin=(0, 0),
+        lds_swizzle=False,
+    )
+    assert vw == 1
+    assert len(datum) == len(acc)
+    assert {lane for lane, _phase in datum} == {a["lane"] for a in acc}
+    for a in acc:
+        assert a["base"] // 2 in {
+            d for (lane, _p), (_r, _c, d, _b) in datum.items() if lane == a["lane"]
+        }
 
 
 def test_analyze_read_refuses_a_cost_for_an_arch_with_no_read_model():
@@ -592,12 +620,13 @@ def test_analyze_read_origin_is_load_bearing_not_defaulted():
         )
 
 
-def test_analyze_read_full_stops_on_an_arch_with_no_model():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_analyze_read_full_stops_on_an_arch_with_no_model(arch):
     with pytest.raises(ValueError, match="no validated LDS model"):
         lc.analyze_read(
             _a_descs(),
             tile_free=TILE_FREE,
-            arch="gfx942",
+            arch=arch,
             operand_label="A",
             strides=(TILE_FREE, 1),
             dtype_name="f16",
@@ -791,9 +820,7 @@ def test_gfx90a_read_model_is_registered_at_import():
     sibling tests call `register_read_model` themselves -- so the state under test is repaired by
     whoever ran first, and deleting the module-scope registration leaves the suite green.
     """
-    import os
     import subprocess
-    import sys
 
     probe = (
         "from rocke.helpers.tiling import lds_conflict as lc;"
@@ -801,14 +828,11 @@ def test_gfx90a_read_model_is_registered_at_import():
         "assert 'gfx90a' in lc._READ_MODELS, 'read model NOT registered at import';"
         "print('ok')"
     )
-    # Propagate this interpreter's sys.path: a bare subprocess gets neither the test runner's
-    # rootdir insertion nor an exported PYTHONPATH, so `rocke` is unimportable from any cwd but
-    # platform/python -- which surfaces as a FALSE "not registered at import" rather than an
-    # ImportError. The test would be red on any CI runner and green only on a shell that happens
-    # to export PYTHONPATH.
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     r = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, env=env
+        rocke_python_command("-c", probe),
+        capture_output=True,
+        text=True,
+        env=rocke_subprocess_env(),
     )
     assert (
         r.returncode == 0
@@ -837,12 +861,14 @@ def test_a_corpus_regression_does_not_break_the_module_import():
         importlib.reload(lc)  # restore module state for later tests
 
 
-def test_register_read_model_refuses_an_arch_with_no_corpus():
-    """gfx942 has no LDS model at all, so `arch_lds` refuses first with ValueError -- an earlier and
-    stricter stop than the read-corpus check. Either way registration must not stick."""
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_register_read_model_refuses_an_arch_with_no_corpus(arch):
+    """gfx942 and gfx950 have no LDS model at all, so `arch_lds` refuses first with ValueError -- an
+    earlier and stricter stop than the read-corpus check. Either way registration must not stick.
+    """
     with pytest.raises(ValueError, match="no validated LDS model"):
-        lc.register_read_model("gfx942")
-    assert "gfx942" not in lc._READ_MODELS
+        lc.register_read_model(arch)
+    assert arch not in lc._READ_MODELS
 
 
 # --------------------------------------------------------------------------------------------------

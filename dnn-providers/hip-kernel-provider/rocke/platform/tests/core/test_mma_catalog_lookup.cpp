@@ -25,8 +25,13 @@
  * rocke/abi.h and update both numbers in the same change. 64-bit only, where
  * the pointer width that is part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_mma_op_t) == 160 && ROCKE_ABI_VERSION >= 3,
+static_assert(sizeof(rocke_mma_op_t) == 168 && ROCKE_ABI_VERSION >= 7,
               "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
+/* Same canary for rocke_memory_caps_t, which sits inside rocke_arch_target_t
+ * ahead of its limits. */
+static_assert(sizeof(rocke_memory_caps_t) == 20 && ROCKE_ABI_VERSION >= 4,
+              "rocke_memory_caps_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
 #endif
 
@@ -329,8 +334,10 @@ static int test_scale_contracts()
             ++scaled_rows;
         }
     }
-    // Ordered identity fingerprint from the independently filtered 72c28a69 catalog.
-    // Also exercises all generated static ID pointers after repeated queries.
+    // Ordered identity fingerprint from the independently filtered 72c28a69 catalog,
+    // plus the bf16-result row, the 16-bit-output, fp8-to-f16 and i8 rows, the
+    // f8f6f4 and f4 32x16x128 rows, and the fp8 / bf8 -> f32 K 128 rows. Also
+    // exercises all generated static ID pointers after repeated queries.
     uint64_t fingerprint = UINT64_C(14695981039346656037);
     for(int i = 0; i < arch->mma.num_ops; ++i)
     {
@@ -341,8 +348,8 @@ static int test_scale_contracts()
             fingerprint *= UINT64_C(1099511628211);
         } while(*text++);
     }
-    CHECK(arch->mma.num_ops == 93);
-    CHECK(fingerprint == UINT64_C(8996553530891217874));
+    CHECK(arch->mma.num_ops == 134);
+    CHECK(fingerprint == UINT64_C(7565811404630989321));
     CHECK(packed_rows == 4 && scaled_rows == 86);
     return 0;
 }
@@ -351,6 +358,8 @@ static int test_scale_layouts_and_families()
 {
     CHECK(!rocke_arch_mma_op_id_family(NULL));
     CHECK(!rocke_arch_mma_op_id_family("unknown"));
+    CHECK(!rocke_arch_mma_op_by_id(NULL));
+    CHECK(!rocke_arch_mma_op_by_id("unknown"));
     int num_arches = 0;
     const char* const* arches = rocke_known_arches(&num_arches);
     int scaled = 0;
@@ -361,6 +370,10 @@ static int test_scale_layouts_and_families()
         {
             const auto* op = &arch->mma.ops[j];
             CHECK(strcmp(rocke_arch_mma_op_id_family(op->op_id), op->family) == 0);
+            /* The target-free lookup finds the same atom from its op_id alone. */
+            const auto* found = rocke_arch_mma_op_by_id(op->op_id);
+            CHECK(found && strcmp(found->op_id, op->op_id) == 0
+                  && strcmp(found->family, op->family) == 0);
             if(!op->a_scale_dtype)
             {
                 CHECK(op->a_scale_frag_len == 0 && op->b_scale_frag_len == 0);
@@ -585,6 +598,7 @@ static int test_pre_existing_selection_is_native_only()
                 continue; /* an xf32 query is allowed to reach an emulated atom */
             const rocke_mma_scale_filter_t scales
                 = {op->a_scale_dtype, op->b_scale_dtype, op->scale_block_k};
+            const char* dst = rocke_mma_op_dst_dtype(op);
 
             /* enumerate: same atoms, same order, as filtering natives by hand. */
             const rocke_mma_op_t* got[64];
@@ -597,7 +611,8 @@ static int test_pre_existing_selection_is_native_only()
                                                 -1,
                                                 got,
                                                 (int)(sizeof(got) / sizeof(got[0])),
-                                                &scales);
+                                                &scales,
+                                                dst);
             CHECK(n >= 1 && n <= (int)(sizeof(got) / sizeof(got[0])));
             int seen = 0;
             for(int j = 0; j < arch->mma.num_ops; ++j)
@@ -605,7 +620,8 @@ static int test_pre_existing_selection_is_native_only()
                 const rocke_mma_op_t* cand = &arch->mma.ops[j];
                 if(strcmp(cand->family, op->family) != 0 || strcmp(cand->a_dtype, op->a_dtype) != 0
                    || strcmp(cand->b_dtype, op->b_dtype) != 0
-                   || strcmp(cand->c_dtype, op->c_dtype) != 0)
+                   || strcmp(cand->c_dtype, op->c_dtype) != 0
+                   || strcmp(rocke_mma_op_dst_dtype(cand), dst) != 0)
                     continue;
                 if(cand->a_scale_dtype != op->a_scale_dtype
                    || cand->b_scale_dtype != op->b_scale_dtype
@@ -626,7 +642,8 @@ static int test_pre_existing_selection_is_native_only()
                                               op->m,
                                               op->n,
                                               op->k,
-                                              &scales));
+                                              &scales,
+                                              dst));
             const rocke_mma_op_t* exact = rocke_mma_catalog_op_for_shape(&arch->mma,
                                                                          op->family,
                                                                          op->a_dtype,
@@ -635,7 +652,8 @@ static int test_pre_existing_selection_is_native_only()
                                                                          op->m,
                                                                          op->n,
                                                                          op->k,
-                                                                         &scales);
+                                                                         &scales,
+                                                                         dst);
             CHECK(exact == op);
             const rocke_mma_op_t* largest = rocke_mma_catalog_select_largest_k(&arch->mma,
                                                                                op->family,
@@ -645,7 +663,8 @@ static int test_pre_existing_selection_is_native_only()
                                                                                op->m,
                                                                                op->n,
                                                                                -1,
-                                                                               &scales);
+                                                                               &scales,
+                                                                               dst);
             CHECK(largest != NULL && rocke_arch_mma_op_is_native(largest));
 
             /* Lookup by handle is order-sensitive; the new rows must not shadow. */
@@ -690,13 +709,40 @@ static int test_fp32_never_reaches_an_xf32_atom()
     return 0;
 }
 
+/* Mirrors test_rdna_integer_wmma_rows_name_i8_and_i4: the instruction names keep
+ * "iu8"/"iu4", the operand dtypes are i8/i4, and only i8/i4 select the op. */
+static int test_rdna_integer_wmma_rows_name_i8_and_i4()
+{
+    const char* rows[][3]
+        = {{"wmma_i32_16x16x16_iu8", "i8", "iu8"}, {"wmma_i32_16x16x16_iu4", "i4", "iu4"}};
+    for(const char* gfx : {"gfx1151", "gfx11-generic"})
+    {
+        const auto* arch = rocke_arch_target_from_gfx(gfx);
+        CHECK(arch);
+        for(const auto& row : rows)
+        {
+            const auto* op = rocke_mma_catalog_by_op_id(&arch->mma, row[0]);
+            CHECK(op && strcmp(op->a_dtype, row[1]) == 0 && strcmp(op->b_dtype, row[1]) == 0
+                  && strcmp(op->c_dtype, "i32") == 0);
+            CHECK(rocke_mma_catalog_op_for_shape(
+                      &arch->mma, "wmma", row[1], row[1], "i32", 16, 16, 16)
+                  == op);
+            CHECK(rocke_mma_catalog_op_for_shape(
+                      &arch->mma, "wmma", row[2], row[2], "i32", 16, 16, 16)
+                  == NULL);
+        }
+    }
+    return 0;
+}
+
 int main()
 {
     // Keep this first: no previous query may prime the shared family index.
     if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
        || test_scale_contracts() || test_scale_layouts_and_families()
        || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
-       || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom())
+       || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom()
+       || test_rdna_integer_wmma_rows_name_i8_and_i4())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})
@@ -718,12 +764,24 @@ int main()
             }
             const rocke_mma_scale_filter_t scales
                 = {op->a_scale_dtype, op->b_scale_dtype, op->scale_block_k};
+            /* The target helper selects atoms whose result is their accumulator;
+             * the catalog queries name the op's own result dtype. */
+            const char* dst = rocke_mma_op_dst_dtype(op);
+            const bool result_is_accumulator = strcmp(dst, op->c_dtype) == 0;
             for(const char* a : {op->a_dtype, short_dtype(op->a_dtype)})
             {
                 for(const char* b : {op->b_dtype, short_dtype(op->b_dtype)})
                 {
-                    if(!rocke_mma_catalog_has_shape(
-                           &arch->mma, op->family, a, b, op->c_dtype, op->m, op->n, op->k, &scales)
+                    if(!rocke_mma_catalog_has_shape(&arch->mma,
+                                                    op->family,
+                                                    a,
+                                                    b,
+                                                    op->c_dtype,
+                                                    op->m,
+                                                    op->n,
+                                                    op->k,
+                                                    &scales,
+                                                    dst)
                        || rocke_mma_catalog_op_for_shape(&arch->mma,
                                                          op->family,
                                                          a,
@@ -732,11 +790,13 @@ int main()
                                                          op->m,
                                                          op->n,
                                                          op->k,
-                                                         &scales)
+                                                         &scales,
+                                                         dst)
                               != op
-                       || rocke_archtarget_op_for_shape(
-                              arch, op->family, a, b, op->c_dtype, op->m, op->n, op->k, &scales)
-                              != op
+                       || (result_is_accumulator
+                           && rocke_archtarget_op_for_shape(
+                                  arch, op->family, a, b, op->c_dtype, op->m, op->n, op->k, &scales)
+                                  != op)
                        || rocke_mma_catalog_select_largest_k(&arch->mma,
                                                              op->family,
                                                              a,
@@ -745,7 +805,8 @@ int main()
                                                              op->m,
                                                              op->n,
                                                              op->k,
-                                                             &scales)
+                                                             &scales,
+                                                             dst)
                               != op
                        || rocke_mma_catalog_enumerate(&arch->mma,
                                                       op->family,
@@ -756,7 +817,8 @@ int main()
                                                       op->n,
                                                       NULL,
                                                       0,
-                                                      &scales)
+                                                      &scales,
+                                                      dst)
                               < 1)
                     {
                         fprintf(stderr, "%s: catalog query missed %s/%s\n", op->op_id, a, b);

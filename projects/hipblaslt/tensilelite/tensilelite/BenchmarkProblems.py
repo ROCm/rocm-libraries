@@ -46,7 +46,8 @@ from .SolutionStructs.Solution import Solution
 from .Common.TypeValidationErrors import ConfigTypeError
 from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
-from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Naming import RegisterAllocationMerges, getSolutionNameMin, \
+    getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
@@ -61,7 +62,8 @@ from .Toolchain.Source import SourceToolchain
 from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from .Common.Architectures import archNamesByIsa, isaToGfx, gfxToVariants
+from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, capOverrideKeyOf,
+                                   isaToGfx, gfxToVariants, xnackQualifierOf)
 from .Common.GlobalParameters import globalParameters, startTime
 from .Common.TimingInstrumentation import timing_context
 
@@ -145,7 +147,7 @@ def cmdLineArchsFor(archNames, isaInfoMap) -> List[str]:
     ]
 
 
-def _computeCacheKey(benchmarkStep, cmdLineArchs):
+def _computeCacheKey(benchmarkStep, cmdLineArchs, archNames=None):
     """Compute a deterministic hash from the cache-relevant parameter fields.
 
     The compiler targets belong in the key because they decide what the cached
@@ -153,10 +155,38 @@ def _computeCacheKey(benchmarkStep, cmdLineArchs):
     architectures sharing an ISA are tuned by two runs that agree on every field
     here, and without the targets the second would load the first's objects and
     hand the wrong machine code to silicon that cannot run it.
+
+    A qualified request is in the key for the same reason one step further on.
+    ``cmdLineArchs`` has been through ``archNamesByIsa``, which drops the xnack
+    qualifier, so gfx1250 and gfx1250:xnack- arrive here spelled alike -- yet
+    their objects differ, because the qualifier selects ARCH_CAP_OVERRIDES and
+    an xnack- build omits the replay drains. Without this the two runs share one
+    entry, and whichever ran first decides what the other executes: an
+    unqualified run reusing an xnack- run's objects gets kernels missing drains
+    it needs.
+
+    The field holds only what selects an override, and is left out entirely when
+    nothing does. Both halves of that are about not splitting entries that
+    should be shared: a build whose qualifier the table does not speak to --
+    gfx942:xnack+ has no entry -- produces the same objects either way, so
+    keying on it would retire that configuration's caches for nothing, and a
+    build that never mentions xnack hashes exactly as it did before this field
+    existed. Predicates go for the same reason, as does the order two qualifiers
+    were written in, since ``capOverrideKeyOf`` reduces all of those to the one
+    thing that does change the objects.
     """
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
     cacheFields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheFields["_Architectures"] = ",".join(sorted(cmdLineArchs))
+    # An xnack qualifier specifically: a bare stepping name is in the table too
+    # (gfx1250-strict carries deltas of its own), but it is an architecture, and
+    # _Architectures already tells those apart. Only the qualifier is invisible
+    # there, so only the qualifier belongs here.
+    overriding = sorted({k for a in (archNames or [])
+                         if xnackQualifierOf(a)
+                         and (k := capOverrideKeyOf(a)) in ARCH_CAP_OVERRIDES})
+    if overriding:
+        cacheFields["_RequestedArchitectures"] = ",".join(overriding)
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
@@ -292,13 +322,21 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
     )
     raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
 
-    # Filter out None and duplicates
-    solutionSet = set()
+    # Filter out None and duplicates. Solutions compare by name, and that name
+    # records only the register-allocation mode, so two configs with one mode
+    # are one solution: the first stays, and the others are reported.
+    firstByName = {}
     solutions = []
+    merges = RegisterAllocationMerges()
     for sol in tqdm(raw_solutions, "Remove duplicate solutions"):
-        if sol is not None and sol not in solutionSet:
-            solutionSet.add(sol)
+        if sol is None:
+            continue
+        first = firstByName.setdefault(sol, sol)
+        if first is sol:
             solutions.append(sol)
+        else:
+            merges.add(first, sol, str(sol))
+    merges.warn("Benchmark it in a separate run.")
 
     return solutions
 
@@ -620,7 +658,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                          solutionPoolIndex: dict = None,
                          archNames: Optional[List[str]] = None,
     ):
-    """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
+    """Run the benchmarking for a single entry in the BenchmarkProblems of a TensileLite config
 
     Args:
         buildOnly: If True, generate and build kernels but skip benchmarking.
@@ -645,7 +683,11 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]
-    groupName = "{}_{:02d}".format(str(benchmarkProcess.problemType), problemSizeGroupIdx)
+    # outerBenchmarkIdx keeps two BenchmarkProblems that share a problem type
+    # from writing the same directory. The second used to skip or overwrite
+    # the first, so exact-size custom kernels never reached library logic.
+    groupName = "{}_{:02d}_{:02d}".format(
+        str(benchmarkProcess.problemType), outerBenchmarkIdx, problemSizeGroupIdx)
     groupNamePath = benchmarkProblemsPath / groupName
     ensurePath(groupNamePath / "Data")
 
@@ -694,7 +736,9 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         backend_name = str(backendConfig.get("Name", "tensile")).lower()
 
         # check if a solution cache exists and if it matches our solution parameters
-        cacheKey = _computeCacheKey(benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap))
+        cacheKey = _computeCacheKey(
+            benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap), archNames
+        )
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
         
@@ -911,7 +955,7 @@ def main(
     solutionPoolFiles: list = None,
     archNames: Optional[List[str]] = None,
 ):
-    """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
+    """Entry point for the "BenchmarkProblems" section of a TensileLite config yaml
 
     Args:
         backend: Backend configuration from config["Backend"] (defaults to {})
@@ -960,13 +1004,15 @@ def main(
 
             # using a suffix to check the csv version (for later addFromCSV())
             csvSuffix = "_CSVWinner" if globalParameters["CSVExportWinner"] else ""
-            # results files will be named
-            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.csv" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.yaml" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.gsp" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
+            # results files will be named. outerIdx is part of the name so a
+            # later BenchmarkProblem with the same type does not skip the file
+            # written for an earlier exact-size custom kernel.
+            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.csv" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
+            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.yaml" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
+            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.gsp" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
 
             # skip if possible
             if globalParameters["ForceRedoBenchmarkProblems"] \
@@ -1016,8 +1062,8 @@ def main(
                     if os.path.isfile(granularityFileName):
                         shutil.copy(granularityFileName, newGranularityFileName)
             else:
-                print1("# {}_{:02d} already benchmarked; skipping." \
-                        .format(str(problemTypeObj), idx) )
+                print1("# {}_{:02d}_{:02d} already benchmarked; skipping." \
+                        .format(str(problemTypeObj), outerIdx, idx) )
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

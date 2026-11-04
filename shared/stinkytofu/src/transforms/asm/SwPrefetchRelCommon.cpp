@@ -4,7 +4,10 @@
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <unordered_map>
@@ -20,6 +23,7 @@
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -97,18 +101,19 @@ int64_t insertSwPrefetchInstPcRelBefore(
     BasicBlock& bb, IRList::iterator anchorIt, GfxArchID archId, AsmIRBuilder& builder,
     std::unordered_map<std::string, int64_t>* labelOff, int64_t blockGlobalByteOffset,
     int64_t blockLocalByteOffsetWherePrefetchStarts, int64_t& walkTotalBytes,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait) {
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return 0;
 
     // XNACK safety: drain outstanding address translations before the prefetch. Relative hints are
     // scattered (one per grid point, separated by real code), so a single upstream drain would be
-    // stale by the next hint — hence one s_wait_xcnt 0 per prefetch. Gated by the toggle + opcode
-    // availability (no-op off gfx1250). Its bytes MUST join the walk so downstream P(k) placement
+    // stale by the next hint — hence one s_wait_xcnt 0 per prefetch. Gated by the caller's
+    // emitXnackWait (XNACK replay enabled?) and opcode availability (no-op off gfx1250). Its bytes
+    // MUST join the walk so downstream P(k) placement
     // and PC-relative literal/label offsets stay aligned with the emitted layout.
     StinkyInstruction* xcntInst = nullptr;
     int xcntB = 0;
-    if (kSwPrefetchEmitXnackWait) {
+    if (emitXnackWait) {
         if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
             xcntInst = builder.create(xcntMc);
             xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
@@ -141,11 +146,11 @@ void insertPrefetchBeforeGetpcAndRewalkWindow(
     int64_t totalBytesAtGetpcStart, int64_t& nextPrefetchLocal, int64_t blockGlobalByteOffset,
     GfxArchID archId, AsmIRBuilder& builder, std::unordered_map<std::string, int64_t>& labelOff,
     int64_t& totalBytes, std::ostream* dbgOut, const char* debugPassTag,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait) {
     int64_t dummyWalk = 0;
     const int64_t d = insertSwPrefetchInstPcRelBefore(bb, anchorIt, archId, builder, &labelOff,
                                                       blockGlobalByteOffset, nextPrefetchLocal,
-                                                      dummyWalk, asmSetSymbols);
+                                                      dummyWalk, asmSetSymbols, emitXnackWait);
     nextPrefetchLocal += d;
     // Block-local offset at start of s_getpc_b64 after stacked prefetches.
     totalBytes = nextPrefetchLocal;
@@ -411,7 +416,8 @@ void debugPrintInsertSiteInsnContext(std::ostream& os, int64_t /*layoutBefore*/,
 void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& builder,
                                std::unordered_map<std::string, int64_t>* labelOff,
                                int64_t blockGlobalByteOffset, int64_t& totalBytes,
-                               const std::unordered_map<std::string, int64_t>* asmSetSymbols);
+                               const std::unordered_map<std::string, int64_t>* asmSetSymbols,
+                               bool emitXnackWait);
 
 struct SwPrefetchGridWalkResult {
     int64_t kNext = 0;
@@ -425,7 +431,7 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlock(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t kNextIn,
     std::unordered_map<std::string, int64_t>& labelOff,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols, GfxArchID archId,
-    bool allowMutate, bool allowSwPrefetchInsertion, std::ostream* planOs,
+    bool emitXnackWait, bool allowMutate, bool allowSwPrefetchInsertion, std::ostream* planOs,
     std::ostream* insertDbgOut, const char* debugPassTag) {
     SwPrefetchGridWalkResult result;
     result.kNext = kNextIn;
@@ -551,12 +557,12 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlock(
                                 bb, getpcWindowIters.front(), getpcWindowIters,
                                 totalBytesAtGetpcStart, nextPrefetchBlockOffsetBeforeGetpc,
                                 blockGlobalByteOffset, archId, *builder, labelOff, totalBytes,
-                                insertDbgOut, debugPassTag, asmSetSymbols);
+                                insertDbgOut, debugPassTag, asmSetSymbols, emitXnackWait);
                             redirectRewalkAbsorbedCurrentInstSizes = true;
                         } else {
                             (void)insertSwPrefetchInstPcRelBefore(
                                 bb, it, archId, *builder, &labelOff, blockGlobalByteOffset,
-                                walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                                walkOffsetAtInstStart, totalBytes, asmSetSymbols, emitXnackWait);
                         }
                         ++result.insertCount;
                     }
@@ -616,7 +622,8 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlock(
                 if (!swPrefetchLabelNameExists(bb, name)) {
                     labelOff[name] = blockEndGlobal;
                     appendSwPrefetchInstPcRel(bb, archId, *builder, &labelOff,
-                                              blockGlobalByteOffset, totalBytes, asmSetSymbols);
+                                              blockGlobalByteOffset, totalBytes, asmSetSymbols,
+                                              emitXnackWait);
                     ++result.insertCount;
                 }
             }
@@ -659,7 +666,7 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlockPerBbAnchor(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
     int64_t kLocalNextIn, std::unordered_map<std::string, int64_t>& labelOff,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols, GfxArchID archId,
-    bool allowMutate, bool allowSwPrefetchInsertion, std::ostream* planOs,
+    bool emitXnackWait, bool allowMutate, bool allowSwPrefetchInsertion, std::ostream* planOs,
     std::ostream* insertDbgOut, const char* debugPassTag) {
     SwPrefetchGridWalkResult result;
     result.kNext = kLocalNextIn;
@@ -789,12 +796,12 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlockPerBbAnchor(
                                 bb, getpcWindowIters.front(), getpcWindowIters,
                                 totalBytesAtGetpcStart, nextPrefetchBlockOffsetBeforeGetpc,
                                 blockGlobalByteOffset, archId, *builder, labelOff, totalBytes,
-                                insertDbgOut, debugPassTag, asmSetSymbols);
+                                insertDbgOut, debugPassTag, asmSetSymbols, emitXnackWait);
                             redirectRewalkAbsorbedCurrentInstSizes = true;
                         } else {
                             (void)insertSwPrefetchInstPcRelBefore(
                                 bb, it, archId, *builder, &labelOff, blockGlobalByteOffset,
-                                walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                                walkOffsetAtInstStart, totalBytes, asmSetSymbols, emitXnackWait);
                         }
                         ++result.insertCount;
                     }
@@ -857,7 +864,8 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlockPerBbAnchor(
                 if (!swPrefetchLabelNameExists(bb, name)) {
                     labelOff[name] = blockEndGlobal;
                     appendSwPrefetchInstPcRel(bb, archId, *builder, &labelOff,
-                                              blockGlobalByteOffset, totalBytes, asmSetSymbols);
+                                              blockGlobalByteOffset, totalBytes, asmSetSymbols,
+                                              emitXnackWait);
                     ++result.insertCount;
                 }
             }
@@ -902,7 +910,7 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
     std::unordered_map<std::string, int64_t> localLabelOff = labelOff;
     const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlock(
         bb, blockGlobalByteOffset, bbEntryAccum, kNextIn, localLabelOff, asmSetSymbols,
-        gfxArchFromBasicBlock(bb), false, true, &os, nullptr, nullptr);
+        gfxArchFromBasicBlock(bb), /*emitXnackWait=*/false, false, true, &os, nullptr, nullptr);
     outPlanInsert += result.planInsert;
     outSkip += result.skipCount;
     return result.kNext;
@@ -917,7 +925,8 @@ int64_t debugPlanInsertSitesInBlockPerBbAnchor(
     std::unordered_map<std::string, int64_t> localLabelOff = labelOff;
     const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlockPerBbAnchor(
         bb, blockGlobalByteOffset, bbEntryAccum, bbGridAnchorGlobal, 0, localLabelOff,
-        asmSetSymbols, gfxArchFromBasicBlock(bb), false, true, &os, nullptr, nullptr);
+        asmSetSymbols, gfxArchFromBasicBlock(bb), /*emitXnackWait=*/false, false, true, &os,
+        nullptr, nullptr);
     outPlanInsert += result.planInsert;
     outSkip += result.skipCount;
     return result.kNext;
@@ -968,12 +977,13 @@ void debugPrintPhase1PlannedInsertSites(
 void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& builder,
                                std::unordered_map<std::string, int64_t>* labelOff,
                                int64_t blockGlobalByteOffset, int64_t& totalBytes,
-                               const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+                               const std::unordered_map<std::string, int64_t>* asmSetSymbols,
+                               bool emitXnackWait) {
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return;
 
     // XNACK safety: one s_wait_xcnt 0 before the tail-flush prefetch (see insert-before variant).
-    if (kSwPrefetchEmitXnackWait) {
+    if (emitXnackWait) {
         if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
             StinkyInstruction* xcntInst = builder.create(xcntMc);
             xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
@@ -998,6 +1008,18 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& b
 }  // namespace
 
 namespace stinkytofu {
+
+uint32_t absPrefetchEntrySgprBase(const Function& function) {
+    // Width of the burst's block (even-aligned pair s[base:base+1] + scratch
+    // s[base+2]) and of the prologue's SADDR pair, which sits above it.
+    constexpr uint32_t kBurstWidth = 3;
+    constexpr uint32_t kProloguePairWidth = 2;
+
+    const std::optional<uint32_t> prologuePair = reusableEvenSgprBase(function, kProloguePairWidth);
+    const std::optional<uint32_t> block = reusableEvenSgprBase(
+        function, kBurstWidth, prologuePair.value_or(std::numeric_limits<uint32_t>::max()));
+    return block.value_or(nextEvenRegisterBase(function, RegType::S));
+}
 
 /// \brief Place software prefetch (`s_prefetch_inst_pc_rel`) at
 /// fixed **global**
@@ -1056,7 +1078,8 @@ namespace stinkytofu {
 void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxArchID archId,
                             std::ostream* dbgOut,
                             const std::unordered_map<std::string, int64_t>* asmSetSymbols,
-                            bool allowSwPrefetchInsertion, const char* debugPassTag) {
+                            bool emitXnackWait, bool allowSwPrefetchInsertion,
+                            const char* debugPassTag) {
     std::unordered_map<std::string, int64_t> labelOff;
     int64_t totalBytes = 0;
     int64_t kNext = 0;
@@ -1146,12 +1169,13 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
                     if (getpcPcRelChainGuardRemaining == 0u) {
                         (void)insertSwPrefetchInstPcRelBefore(
                             bb, it, archId, builder, &labelOff, blockGlobalByteOffset,
-                            walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                            walkOffsetAtInstStart, totalBytes, asmSetSymbols, emitXnackWait);
                     } else if (!getpcWindowIters.empty()) {
                         insertPrefetchBeforeGetpcAndRewalkWindow(
                             bb, getpcWindowIters.front(), getpcWindowIters, totalBytesAtGetpcStart,
                             nextPrefetchBlockOffsetBeforeGetpc, blockGlobalByteOffset, archId,
-                            builder, labelOff, totalBytes, dbgOut, debugPassTag, asmSetSymbols);
+                            builder, labelOff, totalBytes, dbgOut, debugPassTag, asmSetSymbols,
+                            emitXnackWait);
                         redirectRewalkAbsorbedCurrentInstSizes = true;
                     }
                 }
@@ -1192,7 +1216,7 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
                 // bb.appendIR(lbl);
                 labelOff[name] = blockEndGlobal;
                 appendSwPrefetchInstPcRel(bb, archId, builder, &labelOff, blockGlobalByteOffset,
-                                          totalBytes, asmSetSymbols);
+                                          totalBytes, asmSetSymbols, emitXnackWait);
                 ++kNext;
                 while (swPrefetchGridOffset(kNext) <= blockEndGlobal) ++kNext;
                 break;
@@ -1238,25 +1262,27 @@ int insertSwPrefetchLabelsDynamic(BasicBlock& bb, int64_t blockGlobalByteOffset,
                                   int64_t bbEntryAccum, int64_t kNextIn, GfxArchID archId,
                                   std::ostream* dbgOut,
                                   const std::unordered_map<std::string, int64_t>* asmSetSymbols,
-                                  bool allowSwPrefetchInsertion, const char* debugPassTag) {
+                                  bool emitXnackWait, bool allowSwPrefetchInsertion,
+                                  const char* debugPassTag) {
     std::unordered_map<std::string, int64_t> labelOff;
-    const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlock(
-        bb, blockGlobalByteOffset, bbEntryAccum, kNextIn, labelOff, asmSetSymbols, archId,
-        allowSwPrefetchInsertion, allowSwPrefetchInsertion, nullptr, dbgOut, debugPassTag);
+    const SwPrefetchGridWalkResult result =
+        walkSwPrefetchRelGridInBlock(bb, blockGlobalByteOffset, bbEntryAccum, kNextIn, labelOff,
+                                     asmSetSymbols, archId, emitXnackWait, allowSwPrefetchInsertion,
+                                     allowSwPrefetchInsertion, nullptr, dbgOut, debugPassTag);
     return result.insertCount;
 }
 
 int insertSwPrefetchLabelsDynamicPerBbAnchor(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
     int64_t kLocalNextIn, GfxArchID archId, std::ostream* dbgOut,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool allowSwPrefetchInsertion,
-    const char* debugPassTag) {
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
+    bool allowSwPrefetchInsertion, const char* debugPassTag) {
     std::unordered_map<std::string, int64_t> labelOff;
     if (bbGridAnchorGlobal == kSwPrefetchNoPerBbGridAnchor) return 0;
     const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlockPerBbAnchor(
         bb, blockGlobalByteOffset, bbEntryAccum, bbGridAnchorGlobal, kLocalNextIn, labelOff,
-        asmSetSymbols, archId, allowSwPrefetchInsertion, allowSwPrefetchInsertion, nullptr, dbgOut,
-        debugPassTag);
+        asmSetSymbols, archId, emitXnackWait, allowSwPrefetchInsertion, allowSwPrefetchInsertion,
+        nullptr, dbgOut, debugPassTag);
     return result.insertCount;
 }
 

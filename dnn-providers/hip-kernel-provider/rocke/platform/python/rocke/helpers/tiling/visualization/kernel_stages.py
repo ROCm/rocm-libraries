@@ -155,7 +155,7 @@ def _reg_file(enc_or_fm, dims, font_size, dtype_bits, shade_map=None):
 def _free_contig_addr(fwd_map):
     """A memory-order ``addr_fn`` for a FREE-DIM-CONTIGUOUS load: dim0 (the free axis, e.g. M for A, N for B)
     is stride-1, dim1 (K) strides past it. A thread's contiguous free run then reads as ONE address run ->
-    ONE vectorization shade (the column-major reality), instead of one shade per register.
+    ONE vectorization shade (the free-contiguous reality), instead of one shade per register.
     """
     ext0 = max((c[0] for c in fwd_map.values()), default=0) + 1
     return lambda c0, c1: c0 + c1 * ext0
@@ -207,8 +207,9 @@ def flow_load_phase(
     real emit): the global + register + LDS stages show the band loaded by WAVE ``wave`` (default 0),
     re-keyed lane-local so it renders as a clean 64-lane wave. ``scope='macro'`` instead makes the register stage
     a per-wave :class:`WaveStrip` (all waves). ``cooperative=False`` = a per-wave load (single-wave
-    descriptors; ``wave`` ignored). ``row_coord`` orients the global logical tile (0 -> dim0 rows; 1 -> dim1
-    rows, the conventional B=K×N view). ``macro_note`` labels macro-tile membership. Returns a
+    descriptors; ``wave`` ignored). ``row_coord`` orients the DRAWING of the global logical tile (0 -> axis 0 as
+    rows; 1 -> axis 1 as rows, e.g. B drawn with K as rows). It is a drawing orientation only: B's tile
+    axes stay (N, K). ``macro_note`` labels macro-tile membership. Returns a
     :class:`Pipeline`."""
     tag = f"  [{macro_note}]" if macro_note else ""
     dtype_bits = elem_bytes * 8  # element width -> the register file packs by it

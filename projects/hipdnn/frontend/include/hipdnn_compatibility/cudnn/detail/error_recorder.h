@@ -14,13 +14,9 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 
 class Graph; // reads the recorded error at node-build time; see Graph::sdpa
 
-// Deferred-error latch shared by the shim Graph and the SDPA attribute wrappers:
-// a setter the shim cannot honor calls recordError() instead of failing at the
-// call site, and the error surfaces later (at validate()/build, or when the
-// attributes become a graph node). CRTP so recordError() returns the derived
-// type for fluent setter chaining. First error wins; later recordError() calls
-// are no-ops. Only a bad error is recorded, so a good error_t passes through
-// harmlessly.
+// Deferred-error latch: a setter or node the shim cannot honor records the error,
+// which surfaces at validate()/build. First bad error wins; good errors are ignored.
+// CRTP so recordError() returns the derived type for chaining.
 template <typename Derived>
 class ErrorRecorder
 {

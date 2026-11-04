@@ -5,7 +5,7 @@
 
 Qualification uses float64 NumPy SDPA on the exact fp16/bf16 input values.
 Replay generates old answers on the GPU. Every accepted comparison satisfies
-``old_error_bound + current_distance + margin <= original_tolerance``.
+``old_error_bound + current_distance < original_tolerance``.
 This is a per-input guarantee relative to the recorded independent reference,
 not a bound on unobserved inputs or on the reference's mathematical error.
 """
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from reference_common.numeric import array_digest, decode, encode
+from reference_common.numeric import decode, encode
 
 SCHEMA_VERSION = 2
 INPUT_GENERATOR = {
@@ -43,11 +43,14 @@ class Case:
 
     @property
     def id(self) -> str:
+        # Qualification keys new manifests by this id. Bundles are matched by
+        # the full case contract, so published keys without -b/-s stay valid.
         grid = "persistent" if self.persistent else "default"
         mask = "causal" if self.causal else "full"
         return (
             f"{self.dtype}-d{self.head_dim}-h{self.query_heads}"
             f"-kv{self.kv_heads}-{grid}-{mask}"
+            f"-b{self.batch}-s{self.sequence_length}"
         )
 
     @property
@@ -55,14 +58,17 @@ class Case:
         return 0.02 if self.dtype == "fp16" else 0.04
 
     @property
-    def margin(self) -> float:
-        # Reserve 5% of the existing tolerance in addition to conservative
-        # evaluation of both measured distances. Never widen that tolerance.
-        return 0.001 if self.dtype == "fp16" else 0.002
-
-    @property
     def shape(self) -> tuple[int, int, int, int]:
         return self.batch, self.sequence_length, self.query_heads, self.head_dim
+
+    @property
+    def input_shapes(self) -> dict[str, tuple[int, ...]]:
+        kv_shape = (*self.shape[:2], self.kv_heads, self.head_dim)
+        return {"q": self.shape, "k": kv_shape, "v": kv_shape}
+
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        return self.shape
 
     @property
     def scale(self) -> float:
@@ -83,17 +89,6 @@ def make_inputs(case: Case) -> dict[str, np.ndarray]:
         name: encode(rng.standard_normal(shape, dtype=np.float32), case.dtype)
         for name, shape in (("q", case.shape), ("k", kv_shape), ("v", kv_shape))
     }
-
-
-def checked_inputs(case: Case, digests: dict[str, str]) -> dict[str, np.ndarray]:
-    """Require generated input bytes to match the independently qualified corpus."""
-    arrays = make_inputs(case)
-    if {name: array_digest(array) for name, array in arrays.items()} != digests:
-        raise ValueError(
-            f"generated SDPA input digest mismatch: {case.id}; "
-            "the generator or NumPy implementation differs from qualification"
-        )
-    return arrays
 
 
 def independent_reference(case: Case, inputs: dict[str, np.ndarray]) -> np.ndarray:

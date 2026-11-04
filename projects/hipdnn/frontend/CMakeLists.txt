@@ -170,9 +170,10 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn/cudnn_samples
 )
 
-# Install generated version header
+# Install generated version headers
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_frontend/version.h"
+          "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_frontend/version_number.h"
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/hipdnn_frontend
     COMPONENT Development
 )

@@ -7,10 +7,10 @@
 import copy
 import importlib
 
-from Tensile.SolutionStructs.Solution import Solution
-from Tensile.SolutionStructs.Utilities import reject as real_reject
+from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.SolutionStructs.Utilities import reject as real_reject
 
-solution_module = importlib.import_module("Tensile.SolutionStructs.Solution")
+solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
 
 
 def apply_overrides(state, overrides):

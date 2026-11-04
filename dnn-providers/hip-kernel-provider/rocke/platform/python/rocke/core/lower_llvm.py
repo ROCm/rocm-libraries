@@ -36,7 +36,7 @@ import enum
 import os
 import warnings
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 from .arch import MmaEmulationRecipe
 from .codegen_policy import codegen_policy_for_kernel
@@ -44,9 +44,12 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     BF16,
     F32,
     F16,
+    F64,
     I1,
     I16,
     I32,
@@ -60,132 +63,53 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
+    _if_else_branch_yield,
+    _is_unsigned,
+    _refuse_non_u8_source,
+    _refuse_unsigned_operands,
     _sync_attr,
+    _trap_op_error,
     check_cluster_dims,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     require_streaming_arch,
     split_loc,
 )
-
-
-# Datalayout / triple. Copied verbatim from clang's output for the same
-# target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
-# -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
-# wired arch shares one datalayout, but two fields drift across LLVM 20
-# (ROCm 7.0/7.1), LLVM 22 (ROCm 7.2), and LLVM 23 (ROCm 7.13+):
-#
-#   * the ELF symbol-mangling spec ``m:e``: absent in LLVM 20 and LLVM 22,
-#     present in LLVM 23 (AMD clang 23.0.0git, ROCm 7.13). (It also appeared
-#     in early LLVM 22 builds but was dropped; ROCm 7.2's LLVM 22 omits it.)
-#         LLVM 20:  e-p:64:64-...
-#         LLVM 22:  e-p:64:64-...
-#         LLVM 23:  e-m:e-p:64:64-...
-#   * the buffer-resource address space (``p8``, the 128-bit buffer
-#     descriptor -- NOT the buffer fat pointer, which is ``p7``) gained an
-#     index-width field in LLVM 22:
-#         LLVM 20:       ...-p8:128:128-...
-#         LLVM 22 / 23:  ...-p8:128:128:128:48-...
-#
-# Each constant reflects what the installed hipcc actually produces for that
-# LLVM vintage; the drift guard re-derives them from the toolchain.
-#
-# (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
-# textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
-# module datalayout with the target's canonical one, so a stale-but-well-
-# formed string compiles to byte-identical HSACO and the drift is
-# invisible at runtime. That leniency is not a contract -- bitcode input
-# or a stricter verifier can reject a mismatch, so we emit the correct
-# string up front. Pick by :data:`LLVM_FLAVOR_*` via
-# :func:`_datalayout_for_flavor`. A drift guard
-# (``test_datalayout_matches_hipcc_emitted_ir``) re-derives both from the
-# installed toolchain; if it fails, regenerate with the clang command above.
-_DATALAYOUT_LLVM20 = (
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-    "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9"
+from .mma_operand import (
+    MmaOperandRole,
+    mma_operand_needs_reinterpret,
+    mma_operand_value,
 )
-_DATALAYOUT_LLVM22 = (
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9"
-)
-# Layout emitted for rocKE's ``llvm23`` flavor. Relative to our ``llvm22``
-# constant it adds two independent things:
-#
-#   1. the ELF symbol-mangling spec ``m:e``, which LLVM 20 and LLVM 22 omit;
-#   2. address spaces ``p10``-``p15``, introduced upstream by ``5bf967cb132b``.
-#
-# Both were re-derived from the clang on an amd-staging host and confirmed
-# gfx-invariant there across every wired arch
-# (gfx90a/942/950/1100/1151/1201/1250).
-#
-# This is rocKE's flavor constant, NOT a claim about what every LLVM 23+ /
-# ROCm 7.13+ build emits: compiler builds vary, and older ones -- including some
-# builds numbered LLVM 23 or later -- omit ``p10``-``p15``. The drift guard
-# ``test_datalayout_matches_hipcc_emitted_ir`` accommodates exactly that
-# variation.
-#
-# Why we carry the longer form. LLVM's backend has long rejected a module whose
-# DataLayout is incompatible with the target's ("Can't create a MachineFunction
-# using a Module with a Target-incompatible DataLayout attached" -- the check is
-# already in LLVM 22's MachineFunction.cpp, so it predates ``fc6829a3``). What
-# changed in ``fc6829a3`` ("clang: Do not overwrite a module's DataLayout in the
-# backend") is that clang stopped replacing an explicitly supplied layout, which
-# exposes that pre-existing check to the layout rocKE hands it. On the clang
-# builds we tested, the consequence is concrete:
-#
-#   * against staging clang (post-``fc6829a3``), a module carrying the short
-#     form fails codegen outright, and the long form builds and links;
-#   * against the older ``/opt/rocm`` clang we tested, whose own layout omits
-#     ``p10``-``p15``, the long form is still accepted (rc=0) because that clang
-#     overwrites the supplied layout before codegen.
-#
-# That is an observation about the builds we exercised, not a proof about every
-# toolchain. It is still the right trade: do NOT "fix" a mismatch against an
-# older hipcc by deleting ``p10``-``p15``, since that re-breaks every kernel on a
-# current toolchain. Regenerate via ``test_datalayout_matches_hipcc_emitted_ir``
-# if a future build drifts further.
-_DATALAYOUT_LLVM23 = (
-    "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
-    "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
-    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9"
-)
-_TRIPLE = "amdgcn-amd-amdhsa"
+from .tf32 import tf32_mma_target_error, tf32_op_error
 
-
-# A small set of AMDGPU intrinsic signatures changed between LLVM 20
-# (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
-#
-#   * ``make.buffer.rsrc.p1`` -> ``make.buffer.rsrc.p8.p1`` and the
-#     ``num_records`` arg widened from ``i32`` to ``i64`` (LLVM PR
-#     #126828).
-#   * fp8 / bf8 MFMA A/B operands collapsed from ``<2 x i32>`` to a
-#     scalar ``i64`` (same 64 bits, different LLVM type).
-#
-# comgr verifies the toplevel ``declare`` lines BEFORE running the
-# auto-upgrade pass, so we have to emit the right signature up front.
-# Resolve from the loaded compiler when lowering; ``lower_kernel_to_llvm``
-# also accepts an explicit ``llvm_flavor=`` for offline emission.
-LLVM_FLAVOR_LLVM20 = "llvm20"
-LLVM_FLAVOR_LLVM22 = "llvm22"
-LLVM_FLAVOR_LLVM23 = "llvm23"
-
-# Every flavor rocke can emit, oldest first. This is the SSOT every flavor
-# membership test must go through -- validating against a hand-rolled tuple is
-# how ``llvm23`` was silently rejected by the C++ backend path while the Python
-# path accepted it. ``test_no_hand_rolled_flavor_membership_lists`` pins that no
-# such private list reappears, and
-# ``test_cpp_engine_accepts_exactly_the_python_flavor_set`` pins that the C++
-# engine's ladder still matches this tuple.
-LLVM_FLAVORS: Tuple[str, ...] = (
+from .llvm_profile import (
+    LLVM_EMISSION_ALIASES,
+    LLVM_EMISSION_FLAVORS,
     LLVM_FLAVOR_LLVM20,
     LLVM_FLAVOR_LLVM22,
     LLVM_FLAVOR_LLVM23,
+    LLVM_FLAVOR_LLVM24,
+    LLVM_FLAVORS,
+    LlvmDatalayoutKind,
+    _DATALAYOUT_KIND_FLAVORS,
+    _DATALAYOUT_LLVM20,
+    _DATALAYOUT_LLVM22,
+    _DATALAYOUT_LLVM23,
+    _LLVM_EMISSION_PROFILES,
+    _LlvmDeclarationAbi,
+    _LlvmEmissionCapability,
+    _TRIPLE,
+    _datalayout_for_flavor,
+    _datalayout_kind_for_flavor,
+    _datalayout_kind_from_ir,
+    _emission_profile,
+    _flavor_at_least,
+    _flavor_for_llvm,
+    _is_modern_flavor,
+    _supports_llvm23_target_ops,
 )
 
 
@@ -194,165 +118,75 @@ class ArchDomainWarning(UserWarning):
 
     The measured cell is exposed as attributes as well as in the message, so a
     gate can key on ``(key, arch, flavor)`` instead of parsing prose.
-    ``evidence`` is the toolchain diagnostic the artifact recorded.
+    ``evidence`` is the toolchain diagnostic the artifact recorded. ``waived``
+    is true when a committed waiver is why this is a warning and not an
+    :class:`ArchDomainError`.
     """
 
     def __init__(
-        self, key: str, arch: str, flavor: str, status: str, evidence: str
+        self,
+        key: str,
+        arch: str,
+        flavor: str,
+        status: str,
+        evidence: str,
+        *,
+        waived: bool = False,
     ) -> None:
+        from .arch import domain as arch_domain
+
         self.key = key
         self.arch = arch
         self.flavor = flavor
         self.status = status
         self.evidence = evidence
-        detail = f": {evidence}" if evidence else ""
-        super().__init__(
-            f"intrinsic {key!r} is not available on {arch} at {flavor} "
-            f"({status}){detail}"
-        )
+        self.waived = waived
+        super().__init__(arch_domain.message(key, arch, flavor, status, evidence))
 
 
-# ``warn`` (the default) reports an unavailable intrinsic and keeps going;
-# ``off`` disables the lookup entirely. A mode rather than a boolean so the lane
-# can later be promoted to a hard error without a second variable.
-_ARCH_DOMAIN_ENV = "ROCKE_ARCH_DOMAIN"
-_ARCH_DOMAIN_WARN = "warn"
-_ARCH_DOMAIN_OFF = "off"
-_ARCH_DOMAIN_MODES = (_ARCH_DOMAIN_WARN, _ARCH_DOMAIN_OFF)
-
-
-def _arch_domain_mode() -> str:
-    """The configured lane mode; raises on a value outside the vocabulary.
-
-    Refusing rather than defaulting to ``warn``: every misspelling (``0``,
-    ``false``, ``ofF``) is an attempt to switch the lane *off*, and falling
-    back to the default would leave it on without saying so. Unset and empty
-    mean ``warn``.
-    """
-    raw = os.environ.get(_ARCH_DOMAIN_ENV, "").strip()
-    if not raw:
-        return _ARCH_DOMAIN_WARN
-    mode = raw.lower()
-    if mode not in _ARCH_DOMAIN_MODES:
-        raise ValueError(
-            f"{_ARCH_DOMAIN_ENV}={raw!r} is not a mode; expected one of "
-            f"{', '.join(_ARCH_DOMAIN_MODES)} (unset means "
-            f"{_ARCH_DOMAIN_WARN})."
-        )
-    return mode
-
-
-class LlvmDatalayoutKind(enum.Enum):
-    """Datalayout generation, i.e. what an IR module's ``p8`` field reveals.
-
-    Two datalayout fields drift between flavors -- the buffer-resource address
-    space ``p8`` shape and the ELF mangling spec ``m:e`` -- but only ``p8``
-    partitions the flavors into the *generation* that gates intrinsic-declare
-    compatibility (``make.buffer.rsrc.p8.p1``, fp8/bf8 MFMA operand widths). So
-    this kind groups flavors by p8 shape, NOT by full datalayout identity:
-    llvm22 and llvm23 share a generation yet differ in ``m:e`` (llvm23 has it),
-    so the datalayout alone still cannot narrow to a single flavor.
-
-    Members are named after the datalayout shape, deliberately not after its
-    recency: a "modern" label stops being true the moment a newer generation
-    lands, whereas ``P8_INDEXED`` keeps describing exactly what it matches.
-    """
-
-    #: LLVM 20 and older: ``p8:128:128`` (no index-width field).
-    P8_PLAIN = "p8_plain"
-    #: LLVM 21+: ``p8:128:128:128:48`` (index width appended).
-    P8_INDEXED = "p8_indexed"
-
-    @property
-    def flavors(self) -> FrozenSet[str]:
-        """Flavors that emit this datalayout generation."""
-        return _DATALAYOUT_KIND_FLAVORS[self]
-
-    def describe(self) -> str:
-        """Human-readable form for diagnostics, e.g. ``p8_indexed (llvm22/llvm23)``."""
-        return f"{self.value} ({'/'.join(sorted(self.flavors))})"
-
-
-# Partition of :data:`LLVM_FLAVORS` by datalayout generation. Every flavor must
-# appear in exactly one entry, and every enum member must have an entry;
-# ``test_datalayout_kinds_partition_every_flavor`` is the exhaustiveness check a
-# language-level ``match`` would give for free.
-_DATALAYOUT_KIND_FLAVORS: Dict[LlvmDatalayoutKind, FrozenSet[str]] = {
-    LlvmDatalayoutKind.P8_PLAIN: frozenset({LLVM_FLAVOR_LLVM20}),
-    LlvmDatalayoutKind.P8_INDEXED: frozenset({LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23}),
-}
-
-# Substrings that identify each generation in a module's ``target datalayout``.
-# Kept consistent with the ``_DATALAYOUT_*`` constants by
-# ``test_datalayout_kind_markers_match_datalayouts``.
-_P8_MARKERS: Dict[LlvmDatalayoutKind, str] = {
-    LlvmDatalayoutKind.P8_INDEXED: "p8:128:128:128:48",
-    LlvmDatalayoutKind.P8_PLAIN: "p8:128:128-",
-}
-
-
-def _datalayout_kind_for_flavor(flavor: str) -> Optional[LlvmDatalayoutKind]:
-    """Datalayout generation a flavor emits, or ``None`` if unrecognised."""
-    for kind, flavors in _DATALAYOUT_KIND_FLAVORS.items():
-        if flavor in flavors:
-            return kind
-    return None
-
-
-def _datalayout_kind_from_ir(ir_text: str) -> Optional[LlvmDatalayoutKind]:
-    """Datalayout generation of an IR module, read from its ``p8`` field.
-
-    ``None`` when the module has no recognisable ``target datalayout``. This
-    cannot narrow to a single flavor -- see :class:`LlvmDatalayoutKind`.
-    """
-    # P8_INDEXED first: its marker has the plain form as a prefix.
-    for kind in (LlvmDatalayoutKind.P8_INDEXED, LlvmDatalayoutKind.P8_PLAIN):
-        if _P8_MARKERS[kind] in ir_text:
-            return kind
-    return None
-
-
-def _is_modern_flavor(flavor: str) -> bool:
-    """True for flavors emitting the LLVM 21+ ``p8`` shape (llvm22 / llvm23)."""
-    return flavor in _DATALAYOUT_KIND_FLAVORS[LlvmDatalayoutKind.P8_INDEXED]
-
-
-def _datalayout_for_flavor(flavor: str) -> str:
-    """Module ``target datalayout`` string for an LLVM flavor.
-
-    Two fields drift between flavors: the buffer-resource address space ``p8``
-    (the 128-bit buffer descriptor, not the ``p7`` fat pointer) gained an
-    index-width field in LLVM 22, and the ELF symbol-mangling spec ``m:e``
-    (absent in LLVM 20 and LLVM 22) is present in LLVM 23
-    (see :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22` /
-    :data:`_DATALAYOUT_LLVM23`).  LLVM22 is the default for unknown values so a
-    typo'd override degrades to the modern layout rather than the legacy one.
-    """
-    if flavor == LLVM_FLAVOR_LLVM20:
-        return _DATALAYOUT_LLVM20
-    if flavor == LLVM_FLAVOR_LLVM23:
-        return _DATALAYOUT_LLVM23
-    return _DATALAYOUT_LLVM22
-
-
-def _flavor_for_llvm(major: int) -> str:
-    """Map the loaded compiler's LLVM major to an existing emission flavor.
-
-    LLVM 21 introduced the indexed-p8 generation represented by llvm22.
-    Newer compilers use the latest known flavor; this mapping does not claim
-    that every build of an LLVM major has an identical DataLayout.
-    """
-    for minimum, flavor in reversed(_LLVM_FLAVOR_LADDER):
-        if major >= minimum:
-            return flavor
-    return LLVM_FLAVORS[0]
-
-
-_LLVM_FLAVOR_LADDER: tuple[tuple[int, str], ...] = (
-    (0, LLVM_FLAVOR_LLVM20),
-    (21, LLVM_FLAVOR_LLVM22),
-    (23, LLVM_FLAVOR_LLVM23),
+_ARCH_DOMAIN_HELP = (
+    "The target cannot lower this intrinsic, so this kernel cannot be built for "
+    "it: take a code path the target supports. If the measurement is wrong, "
+    "waive the cell in rocke/core/arch/data/arch_domain_waivers.json and fix "
+    "the column. ROCKE_ARCH_DOMAIN=warn reports every such demand instead of "
+    "stopping at the first. See the arch-domain section of rocke/TESTING.md."
 )
+
+
+class ArchDomainError(NotImplementedError):
+    """The lane refused a lowering: the target provably cannot lower an
+    intrinsic the kernel demands.
+
+    Raised in ``error`` mode, by either engine, for a measured negative that
+    no waiver covers. A NotImplementedError like any other kernel the lowerer
+    declines for its target. It carries the attributes of
+    :class:`ArchDomainWarning`, and its message is the same bytes whichever
+    engine refused; the guidance goes in a note so that stays true.
+    """
+
+    def __init__(
+        self, key: str, arch: str, flavor: str, status: str, evidence: str
+    ) -> None:
+        from .arch import domain as arch_domain
+
+        self.key = key
+        self.arch = arch
+        self.flavor = flavor
+        self.status = status
+        self.evidence = evidence
+        super().__init__(arch_domain.message(key, arch, flavor, status, evidence))
+        if hasattr(self, "add_note"):  # Python 3.11+
+            self.add_note(_ARCH_DOMAIN_HELP)
+
+    def __reduce__(self):
+        # The base class keeps only the message, but the constructor takes the
+        # measured cell, so the default would rebuild this as
+        # ``ArchDomainError(message)`` and raise TypeError. A refusal raised in
+        # a worker process could then not reach its parent as itself.
+        return (
+            type(self),
+            (self.key, self.arch, self.flavor, self.status, self.evidence),
+        )
 
 
 def _detect_llvm_flavor() -> str:
@@ -363,9 +197,18 @@ def _detect_llvm_flavor() -> str:
     PATH are not evidence about that compiler. If COMGR cannot be loaded or
     queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
     or the lowering API's llvm_flavor argument.
+
+    A set-but-unrecognized ROCKE_LLVM_FLAVOR raises immediately rather than
+    silently falling back to auto-detection -- a typo'd override otherwise
+    looks like it pinned a flavor while actually asking COMGR to guess.
     """
-    env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in LLVM_FLAVORS:
+    env = os.environ.get("ROCKE_LLVM_FLAVOR", "")
+    if env:
+        if env not in LLVM_FLAVORS:
+            raise ValueError(
+                f"ROCKE_LLVM_FLAVOR={env!r} is not a recognized flavor; "
+                f"expected one of {LLVM_FLAVORS}"
+            )
         return env
     from ..runtime.comgr import _require_compiler_info
 
@@ -483,9 +326,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
+    "fabs.f64": "declare double @llvm.fabs.f64(double)",
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
+    "amdgcn.fdot2.f16": (
+        "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"
+    ),
+    "amdgcn.fdot2.bf16": (
+        "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"
+    ),
     "fmuladd.f32": "declare float @llvm.fmuladd.f32(float, float, float)",
     "fmuladd.f16": "declare half @llvm.fmuladd.f16(half, half, half)",
     "fmuladd.bf16": "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)",
@@ -542,9 +392,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu8. Operands are
     # <4 x i32> (16 int8 packed 4-per-i32), accumulator/result <8 x i32>. The
-    # signature carries i1 signedness flags (unsignedA/unsignedB) before each
-    # matrix operand and a trailing i1 clamp. Emission goes through
-    # Gfx11RdnaBackend.emit_wmma. LLVM-lowered to v_wmma_i32_16x16x16_iu8.
+    # signature carries an i1 signedness flag (1 = signed) before each matrix
+    # operand and a trailing i1 clamp. Emitted from its MATRIX_CALLS entries
+    # (core/isa/matrix_calls.py). LLVM-lowered to v_wmma_i32_16x16x16_iu8.
     "wmma.i32.16x16x16.iu8": (
         "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32("
         "i1, <4 x i32>, i1, <4 x i32>, <8 x i32>, i1)"
@@ -658,6 +508,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "mfma.f32.16x16x8.xf32": "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8.xf32(<2 x float>, <2 x float>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)",
     "mfma.f32.32x32x4.xf32": "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4.xf32(<2 x float>, <2 x float>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)",
+    "mfma.f64.16x16x4f64": (
+        "declare <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
+        "double, double, <4 x double>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f64.4x4x4f64": (
+        "declare double @llvm.amdgcn.mfma.f64.4x4x4f64("
+        "double, double, double, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "mfma.f32.16x16x4f32": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
         "float, float, <4 x float>, "
@@ -671,6 +531,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "mfma.f32.4x4x4f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
         "<4 x half>, <4 x half>, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.4x4x4bf16.1k": (
+        # bf16 4x4x4 goes through the `_1k` variant like 16x16x16 / 32x32x8
+        # bf16: operands are `<4 x i16>` (bitcast of `<4 x bfloat>`).
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+        "<4 x i16>, <4 x i16>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     # FP8 / BF8 MFMA (gfx940+). Operands are packed as <2 x i32>
@@ -724,16 +591,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "ds.read.tr16.b64": (
         "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"
     ),
-    # gfx950 ``ds_read_b128_tr_b16`` — wide transposed-LDS read returning
-    # ``<8 x i16>`` per lane (the K-packed MFMA B-operand layout for the
-    # 16x16x32 / 32x32x16 atoms; one LDS op vs two paired b64 reads).
-    "ds.read.tr16.b128": (
-        "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"
-    ),
     # gfx1250 (gfx1250) wave32 transpose-LDS read: ``ds_load_tr16_b128`` returns
-    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). This is the
-    # gfx1250 counterpart of gfx950's ``ds_read_tr16_b128`` (different opcode +
-    # wave32 lane distribution).
+    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). gfx950 has
+    # no wide transpose read; LLVM has no ``ds.read.tr16.b128``.
     "ds.load.tr16.b128.v8bf16": (
         "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"
     ),
@@ -750,6 +610,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "s.setprio": ("declare void @llvm.amdgcn.s.setprio(i16 immarg)"),
+    "trap": "declare void @llvm.trap()",
     "s.waitcnt": ("declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"),
     "make.buffer.rsrc.p1": (
         "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
@@ -794,6 +655,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "raw.ptr.buffer.load.f16": (
         "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    # 1-byte buffer load and store: the narrowest access, range-checked whole,
+    # for 1-byte elements (i8, u8, fp8, bf8) one at a time.
+    "raw.ptr.buffer.load.i8": (
+        "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.store.i8": (
+        "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8("
+        "i8, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
@@ -841,6 +712,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rint.f32": "declare float @llvm.rint.f32(float)",
     "smax.i32": "declare i32 @llvm.smax.i32(i32, i32)",
     "smin.i32": "declare i32 @llvm.smin.i32(i32, i32)",
+    # Unsigned u8 maximum / minimum (u8 renders as i8).
+    "umax.i8": "declare i8 @llvm.umax.i8(i8, i8)",
+    "umin.i8": "declare i8 @llvm.umin.i8(i8, i8)",
     # AMDGPU ``v_perm_b32`` byte-select. Used by P09's packed i8 quant
     # to fuse four clamped i32s into one i32 in 2 perm calls (lo half +
     # hi half) followed by one perm to interleave.
@@ -898,39 +772,14 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
         "<8 x bfloat>, <8 x bfloat>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"
     ),
-    # P15: gfx950 MX MFMA scaled intrinsic. Per-warp E8M0 scales apply
-    # in-instruction (vs the post-hoc scale-apply chain). Operands are
-    # 16-byte packed mantissa vectors; the scale broadcast inside the
-    # instruction is per-output-row (fixes the B_MX1 row-aware
-    # correctness gap that the historical post-hoc chain had).
-    "mfma.scale.f32.16x16x128.f8f6f4": (
-        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
-        "i32 immarg, i32 immarg, i32, i32 immarg, i32, i32 immarg)"
-    ),
-    # P52: fp4 / fp6 MX MFMA atoms (gfx950+). Operand widths follow the
-    # OCP MX spec: ``16 x fp4`` packs into i64 per lane, ``16 x fp6``
-    # is a 96-bit value modelled here as `<3 x i32>`.
-    "mfma.f32.16x16x128.fp4": (
-        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x128.fp4("
-        "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
-    ),
-    "mfma.f32.16x16x96.fp6": (
-        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6("
-        "<3 x i32>, <3 x i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
-    ),
-    # L6: UNSCALED fp8 16x16x128 hero atom. gfx950 has no dense plain
-    # ``mfma.f32.16x16x128.fp8.fp8``; the dense wide-K f8 MFMA is the
-    # ``f8f6f4`` scale-MFMA, which on LLVM22 (ROCm 7.2) takes the 9-arg
-    # signature below: A/B as ``<8 x i32>`` (32 f8 bytes per lane), then
-    # ``cbsz`` / ``blgp`` (format selectors, 0 = fp8e4m3), then the
-    # ``op_sel`` + scale-byte pairs for A and B. We declare it under a
-    # dedicated additive key so the existing 11-arg
-    # ``mfma.scale.f32.16x16x128.f8f6f4`` decl (used by the MX-scaled
-    # path) is untouched; the lowering pins both scale bytes to 0
-    # (E8M0 exponent 0 => factor 1.0) for a true unscaled MFMA.
-    "mfma.f32.16x16x128.fp8.hero": (
-        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+    # gfx950 f8f6f4 MFMA, K=128. One static declaration serves two ops: the
+    # MX op (real E8M0 scales, ``v_mfma_scale_...``) and the unscaled fp8 hero
+    # atom (both scales literal 0, which the backend selects as the unscaled
+    # ``v_mfma_f32_16x16x128_f8f6f4``). LLVM 20, 22, 23 and 24 all take the
+    # nine-argument form with the mangled name; the same text works at every
+    # flavor, so no per-flavor override exists.
+    "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32("
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
         "i32 immarg, i32, i32 immarg, i32)"
     ),
@@ -1117,9 +966,16 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
 }
 
 
-# Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
+# Declaration overrides, one table per declaration ABI generation
+# (:class:`_LlvmDeclarationAbi`, which a compiler lane reaches through its
+# emission profile). Each table holds only the entries whose text changed AT
+# that generation; a generation inherits every older generation's overrides in
+# :class:`_LlvmDeclarationAbi` order (see :func:`_decls_for_flavor`), so an
+# entry is written once, at the generation where its ABI changed. Keys MUST
 # already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
 # differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
+#
+# LLVM 21+ hosts (ROCm 7.2+).
 _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     "mfma.f32.16x16x32.fp8.fp8": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -1143,74 +999,175 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
-# intrinsic's ABI changed again.
-_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
-    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
-    "mfma.scale.f32.16x16x128.f8f6f4": (
-        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
-        "i32 immarg, i32, i32 immarg, i32)"
+# LLVM 23 (ROCm 7.13+): only the intrinsics whose ABI changed again; the
+# LLVM 22 overrides reach this generation through inheritance, never by
+# copying. No intrinsic has an LLVM 23 text of its own today.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {}
+
+# LLVM 24 changes the named-barrier pointer ABI from LDS addrspace(3) to
+# addrspace(15). Lowering inserts the matching addrspacecast at each call.
+# The LLVM 22 overrides reach this generation through inheritance.
+_INTRINSIC_DECLS_LLVM24_OVERRIDES: Dict[str, str] = {
+    "s.barrier.init": (
+        "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(15) nocapture, i32)"
     ),
+    "s.barrier.signal.var": (
+        "declare void @llvm.amdgcn.s.barrier.signal.var("
+        "ptr addrspace(15) nocapture, i32)"
+    ),
+    "s.barrier.join": (
+        "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(15) nocapture)"
+    ),
+    "s.wakeup.barrier": (
+        "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15) nocapture)"
+    ),
+}
+
+
+# Each declaration ABI generation's own overrides, one entry per member of
+# :class:`_LlvmDeclarationAbi` (LLVM20 is the base table itself, so it
+# overrides nothing). A dict, not a list: the order of inheritance comes from
+# the enum's member order alone.
+_INTRINSIC_DECL_OVERRIDES_BY_ABI: Dict[_LlvmDeclarationAbi, Dict[str, str]] = {
+    _LlvmDeclarationAbi.LLVM20: {},
+    _LlvmDeclarationAbi.LLVM22: _INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    _LlvmDeclarationAbi.LLVM23: _INTRINSIC_DECLS_LLVM23_OVERRIDES,
+    _LlvmDeclarationAbi.LLVM24: _INTRINSIC_DECLS_LLVM24_OVERRIDES,
 }
 
 
 def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     """The declaration table a lowering at ``flavor`` resolves against.
 
+    The rule, in one place: the base table, then the overrides of every
+    declaration ABI generation up to and including the one ``flavor``'s
+    emission profile selects, oldest first in :class:`_LlvmDeclarationAbi`
+    order, then the declaration of every
+    :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` entry whose key is not
+    already present (``MatrixCall.declaration`` derives it for ``flavor``). A
+    newer generation's entry replaces an older one's text; a key keeps the
+    position it first appeared at. An unknown flavor is refused by
+    :func:`_emission_profile`.
+
     Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
     order in ``finalize``, so the result is byte-significant.
 
     Kept as one copy because there are two readers -- ``_Lowerer.__init__``
     and :func:`check_arch_domain_in_ir`, which needs the table without a
-    lowerer to ask.
+    lowerer to ask. The C++ engine resolves the same chain in
+    ``rocke_ll_decl_text`` / ``rocke_ll_decl_at`` (``cpp/core/lower_llvm/data.cpp``).
     """
+    from .isa.matrix_calls import MATRIX_CALLS
+
+    abi = _emission_profile(flavor).declaration_abi
+    generations = list(_LlvmDeclarationAbi)
     decls = dict(_INTRINSIC_DECLS)
-    if flavor == LLVM_FLAVOR_LLVM22:
-        decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == LLVM_FLAVOR_LLVM23:
-        decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    for inherited in generations[: generations.index(abi) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_ABI[inherited])
+    for call in MATRIX_CALLS.values():
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 
 
 def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> None:
     """Run the arch-domain lane over already-emitted IR.
 
-    The lane proper lives in ``_Lowerer._need``, which reaches only the Python
-    backend. The default is the C++ engine, which returns finished IR without
-    the Python lowerer ever running, so the lane was dead for most users. A
-    requirement enforced on one of two backends is not a requirement.
-
-    Checking emitted text beats mirroring the lane into C++: ``_need`` vets
-    what the emitter *intended* to declare, this vets what came out.
+    The C++ engine checks the table at its own demand chokepoint, but it has no
+    warning channel: it can refuse a kernel, not report one. So after a
+    successful C++ lowering this pass does the reporting, from what came out,
+    and doubles as a check that the engine refused what it had to.
 
     The declare -> key mapping is exact, not heuristic -- ``finalize`` emits
     declares verbatim from the flavor's table and the C++ engine is held to
     byte-identity with it. A line that is not a table value belongs to
     something never measured (the dynamic ``llvm.smax.v<N>i<W>`` declares),
     which is silence by the same rule as the rest of the lane.
+
+    It need not be one-to-one, though: nothing stops two keys of a flavor's
+    table from resolving to the same declare line (no committed table has such
+    a pair today). Identical declare text means the same LLVM intrinsic, so
+    such keys would be aliases for one declaration and the IR could not say
+    which of them the kernel demanded. Picking one would name the
+    wrong table row half the time, so every negative alias is reported, each
+    against its own cell -- which is also what keeps a waiver on one alias from
+    silencing the other.
+
+    Refusing is judged more carefully than reporting, because refusing wrongly
+    blocks a kernel. The engine lowered this one, so whichever alias it demanded
+    was acceptable to it: if any alias sharing the declare is not an unwaived
+    negative, that one may be the demanded key and the engine was right, and
+    refusing over its sibling would overrule a waiver on a key the kernel never
+    asked for. Only when every alias is an unwaived negative could none of them
+    account for the engine having lowered it, and only then is this pass's
+    refusal evidence that the extension was built from a different table.
     """
-    if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
-        return
     from .arch import domain as arch_domain
 
+    mode = arch_domain.mode()
+    if mode == arch_domain.MODE_OFF:
+        return
     table = arch_domain.load(flavor if flavor is not None else _resolve_llvm_flavor())
     if table is None:
         return
-    by_decl = {decl: key for key, decl in _decls_for_flavor(table.flavor).items()}
+    by_decl: Dict[str, List[str]] = {}
+    for key, decl in _decls_for_flavor(table.flavor).items():
+        by_decl.setdefault(decl, []).append(key)
     for line in ir_text.splitlines():
         if not line.startswith("declare "):
             continue
-        key = by_decl.get(line.strip())
-        if key is None:
-            continue
-        cell = table.lookup(key, arch)
-        if cell is None or not arch_domain.is_negative(cell.status):
-            continue
-        warnings.warn(
-            ArchDomainWarning(key, arch, table.flavor, cell.status, cell.evidence),
-            stacklevel=4,
-        )
+        aliases = sorted(by_decl.get(line.strip(), ()))
+        negative = []
+        for key in aliases:
+            cell = table.lookup(key, arch)
+            if cell is not None and arch_domain.is_negative(cell.status):
+                negative.append((key, cell))
+        waived_keys = {
+            key for key, _ in negative if arch_domain.is_waived(key, arch, table.flavor)
+        }
+        # Some alias could account for the engine having lowered this declare.
+        accounted_for = len(negative) < len(aliases) or bool(waived_keys)
+        for key, cell in negative:
+            waived = key in waived_keys
+            if mode == arch_domain.MODE_ERROR and not waived and not accounted_for:
+                refusal = ArchDomainError(
+                    key, arch, table.flavor, cell.status, cell.evidence
+                )
+                if hasattr(refusal, "add_note"):
+                    refusal.add_note(
+                        "The C++ engine emitted this declare instead of refusing "
+                        "it, so the rocke_engine extension was built from a "
+                        "different table than this checkout's: rebuild it."
+                    )
+                raise refusal
+            warnings.warn(
+                ArchDomainWarning(
+                    key, arch, table.flavor, cell.status, cell.evidence, waived=waived
+                ),
+                stacklevel=4,
+            )
+
+
+# Declaration key of the K=128 f8f6f4 MFMA (A and B as ``<8 x i32>``). The key is
+# the intrinsic name without the ``llvm.amdgcn.`` prefix, as for the 32x32x64 key.
+_F8F6F4_16X16X128_KEY = "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+
+
+class _BufferAccessForm(NamedTuple):
+    """The raw buffer intrinsic form that moves one access of a given width."""
+
+    suffix: str  # the intrinsic's type suffix: raw.ptr.buffer.load.<suffix>
+    llvm_type: str  # the integer type the access is loaded or stored as
+    load_hint: str  # the name hint of the loaded integer
+
+
+# One form per buffer access width in bytes (core/ir.py _BUFFER_ACCESS_BYTES).
+_BUFFER_ACCESS_FORMS: dict[int, _BufferAccessForm] = {
+    1: _BufferAccessForm("i8", "i8", "bli8"),
+    2: _BufferAccessForm("i16", "i16", "bli16"),
+    4: _BufferAccessForm("i32", "i32", "bli32"),
+    8: _BufferAccessForm("v2i32", "<2 x i32>", "blv2"),
+    16: _BufferAccessForm("v4i32", "<4 x i32>", "blv4"),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -1229,9 +1186,12 @@ def _llvm_type(t: Type) -> str:
         # The value-level type of a smem allocation token is "the pointer
         # to its base", since uses GEP into it.
         return "ptr addrspace(3)"
+    # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+    # keeps its values out of the IR.
     if t.name == "i1":
         return "i1"
-    if t.name == "i8":
+    if t.name in ("i8", "u8"):
+        # LLVM integers carry no sign; signedness lives in the operations.
         return "i8"
     if t.name == "i16":
         return "i16"
@@ -1682,6 +1642,44 @@ _BF16_MAX_FINITE = 0x7F7F
 _BF16_SIGN_BIT = -0x8000
 
 
+def _mma_op_id(op: Op) -> str:
+    """The op_id of an MMA op; MMA ops reach their handlers as ``tile.<op_id>``."""
+    if not op.name.startswith("tile."):
+        raise ValueError(f"{op.name!r} is not an MMA op named 'tile.<op_id>'")
+    return op.name.removeprefix("tile.")
+
+
+class _OpTargetFact(enum.Enum):
+    """The recorded target fact that admits an LLVM-23-only operation.
+
+    Each value is the ``arch_specs.json`` field as error messages name it.
+    ``memory.*`` flags name one hardware feature each. ``target_family
+    gfx12_cdna`` covers the instructions no flag records: the split and named
+    barriers, ``s_setreg`` (hardware-register field layouts differ between
+    families), ``global_load_tr16_b128`` and ``global_store_async_from_lds``.
+    Mirrored by ``rocke_ll_target_fact_t`` in the C++ engine.
+    """
+
+    TDM = "memory.has_tdm"
+    CLUSTER_LAUNCH = "memory.has_cluster_launch"
+    MULTICAST_LOAD = "memory.has_multicast_load"
+    SCALAR_DATA_PREFETCH = "memory.has_scalar_data_prefetch"
+    GLOBAL_PREFETCH = "memory.has_global_prefetch"
+    GFX12_CDNA_FAMILY = "target_family gfx12_cdna"
+
+    def holds_for(self, arch) -> bool:
+        """Whether ``arch`` (an :class:`ArchTarget`) records this fact."""
+        memory = arch.memory
+        return {
+            _OpTargetFact.TDM: memory.has_tdm,
+            _OpTargetFact.CLUSTER_LAUNCH: memory.has_cluster_launch,
+            _OpTargetFact.MULTICAST_LOAD: memory.has_multicast_load,
+            _OpTargetFact.SCALAR_DATA_PREFETCH: memory.has_scalar_data_prefetch,
+            _OpTargetFact.GLOBAL_PREFETCH: memory.has_global_prefetch,
+            _OpTargetFact.GFX12_CDNA_FAMILY: arch.target_family == "gfx12_cdna",
+        }[self]
+
+
 class _Lowerer:
     def __init__(
         self,
@@ -1728,10 +1726,22 @@ class _Lowerer:
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
+        # Byte size of each allocation placed in the pool.
+        self._smem_sizes: Dict[str, int] = {}
         # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
         self._smem_offsets: Dict[str, int] = {}
         self._smem_pool_size: int = 0
         self._smem_pool_name: Optional[str] = None
+        # LDS alias scopes (kernel attr ``lds_alias_scopes``): one scope per
+        # smem allocation, noalias against allocations whose pooled byte
+        # ranges are disjoint. Without them SIInsertWaitcnts must assume any
+        # LDS read can alias an in-flight LDS DMA (buffer_load ... lds) and
+        # waits vmcnt(0) first; with them it waits only for DMA into the
+        # read's own allocation.
+        self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
+        # i64 LDS address value name -> the allocation it points into.
+        self._lds_prov: Dict[str, str] = {}
+        self._lds_aa_used = False
         # Cache of per-allocation base pointers already emitted, keyed by
         # (block label, global name). Lets a non-zero-offset allocation that is
         # accessed several times in the same block reuse a single byte-level
@@ -1767,6 +1777,9 @@ class _Lowerer:
         op = v.op
         if op is None:
             return v.name
+        if op.name == "arith.assume_range":
+            # A range marker is its first operand: it emits no instruction.
+            return self._operand(op.operands[0])
         if op.name == "arith.constant":
             ity = op.attrs.get("ity", "i32")
             val = op.attrs["value"]
@@ -1781,6 +1794,33 @@ class _Lowerer:
 
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
+
+    def _reinterpret(self, v: Value, register_type: Type) -> str:
+        """Emit one ``bitcast`` of ``v`` to ``register_type``; return its name.
+
+        Only renders: the caller has established that the bit widths match
+        (:func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret`).
+        """
+        reinterpreted = self._fresh("reg")
+        self._current().emit(
+            f"  {reinterpreted} = bitcast {self._operand_with_type(v)} "
+            f"to {_llvm_type(register_type)}"
+        )
+        return reinterpreted
+
+    def _mma_operand(self, op: Op, role: MmaOperandRole, register_type: Type) -> str:
+        """Return MMA operand ``role`` of ``op`` as the instruction's register type.
+
+        The operand passes through unchanged, or is reinterpreted with one
+        ``bitcast``, as :func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret`
+        decides; that rule also raises for an operand it refuses.
+        """
+        value = mma_operand_value(op, role)
+        if mma_operand_needs_reinterpret(
+            _mma_op_id(op), role, value.type, register_type, self._backend.arch
+        ):
+            return self._reinterpret(value, register_type)
+        return self._operand(value)
 
     @staticmethod
     def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
@@ -1880,6 +1920,23 @@ class _Lowerer:
                 return _param_llvm_type(p)
         return _llvm_type(v.type)
 
+    def _require_global_header_ptr(self, op_name: str, ptr: Value) -> None:
+        """Refuse ``op_name`` when the module types its ``ptr`` operand other
+        than ``ptr addrspace(1)``.
+
+        The global-pointer ops emit against ``ptr addrspace(1)``. The IR rules
+        check the IR type, but a parameter's ``addr_space`` override (such as
+        ``"constant"``) moves its header type away from it, and the emitted
+        instruction would then not match the header. The C++ engine
+        (``ll_require_global_header_ptr``) refuses with the same text.
+        """
+        header = self._ptr_llvm_type(ptr)
+        if header != "ptr addrspace(1)":
+            raise TypeError(
+                f"{op_name} ptr must be a global pointer, got {header} "
+                "(its parameter's addr_space)"
+            )
+
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
 
@@ -1895,26 +1952,34 @@ class _Lowerer:
         self._check_arch_domain(key)
 
     def _check_arch_domain(self, key: str) -> None:
-        """Warn if the arch-domain table says this target cannot lower ``key``.
+        """Act on what the arch-domain table says about ``key`` on this target.
 
         Only a measured, definite negative speaks. A missing column, an
         unswept target, a key absent from the table, and every no-data status
         are all silent -- a spurious warning trains people to ignore the lane,
-        and 14% of the llvm20 column is no-data.
+        and 14% of the llvm20 column is no-data. A negative is refused in
+        ``error`` mode unless waived, and reported otherwise. The C++ engine
+        makes the same decision in ``rocke_ll_need``.
         """
-        if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
-            return
         from .arch import domain as arch_domain
 
+        mode = arch_domain.mode()
+        if mode == arch_domain.MODE_OFF:
+            return
         table = arch_domain.load(self._flavor)
         if table is None:
             return
-        cell = table.lookup(key, self._backend.arch.gfx)
+        flavor = table.flavor
+        arch = self._backend.arch.gfx
+        cell = table.lookup(key, arch)
         if cell is None or not arch_domain.is_negative(cell.status):
             return
+        waived = arch_domain.is_waived(key, arch, flavor)
+        if mode == arch_domain.MODE_ERROR and not waived:
+            raise ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
         warnings.warn(
             ArchDomainWarning(
-                key, self._backend.arch.gfx, self._flavor, cell.status, cell.evidence
+                key, arch, flavor, cell.status, cell.evidence, waived=waived
             ),
             stacklevel=3,
         )
@@ -1933,11 +1998,36 @@ class _Lowerer:
             )
         return v
 
-    def _require_gfx1250_llvm23(self, op: str) -> None:
-        """Reject use of an LLVM-23 gfx1250-only operation on another backend."""
-        if self._backend.arch.gfx != "gfx1250":
-            raise ValueError(f"{op} requires gfx1250, got {self._backend.arch.gfx}")
-        if self._flavor != LLVM_FLAVOR_LLVM23:
+    def _require_fp8_scale_conversion(
+        self, op: Op, instruction: str, fallback: str
+    ) -> None:
+        """Reject a fused scale-and-convert op on a target without the instruction.
+
+        LLVM does not always refuse the intrinsic on such a target: it can
+        select it and write an encoding the GPU does not have. So the check is
+        made here, from the backend's capability, before anything is emitted.
+        """
+        gfx = self._backend.arch.gfx
+        if not self._backend.has_fp8_scale_conversion:
+            raise ValueError(
+                f"{op.name} needs {instruction}, which {gfx} does not have "
+                f"(gfx950 does); convert with {fallback} and multiply by the "
+                "scale instead"
+            )
+
+    def _require_llvm23_target_fact(self, op: str, fact: _OpTargetFact) -> None:
+        """Require the LLVM23-generation target-op profile and target fact.
+
+        The profile capability is shared by the qualified LLVM23 and LLVM24
+        lanes. The target rule reads facts, never a target name, so a new target
+        whose row records the fact needs no lowering change.
+        """
+        arch = self._backend.arch
+        if not fact.holds_for(arch):
+            raise ValueError(
+                f"{op} requires a target with {fact.value}, got {arch.gfx}"
+            )
+        if not _supports_llvm23_target_ops(self._flavor):
             raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
@@ -2083,14 +2173,18 @@ class _Lowerer:
         is before the current start and whose size is large enough), or open
         a new slot at the end of the pool.
 
-        Alignment is preserved: 16 bytes for byte-element types, 4 bytes
-        otherwise.  The pool itself is rounded up to 16-byte alignment.
+        Each allocation's offset is aligned to 16 bytes for byte-element
+        types (i8, fp8e4m3, bf8e5m2), 8 bytes for f64, and 4 bytes otherwise.
+        The pool itself is rounded up to 16-byte alignment.
 
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
         """
+        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+        # refuses its LDS tiles.
         _elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -2118,9 +2212,11 @@ class _Lowerer:
             return seg
 
         def _align(stype: "SmemType") -> int:
+            # A packed-only type never reaches here: core/ir.py
+            # _refuse_packed_only_value refuses its LDS tiles.
             if stype.elem.name == "f64":
                 return 8
-            return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
+            return 16 if stype.elem.name in ("i8", "u8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
         live, used = self._collect_smem_liveness(self.kernel.body)
@@ -2175,6 +2271,7 @@ class _Lowerer:
 
         for gname, stype in sorted_allocs:
             seg = _seg_size(stype)
+            self._smem_sizes[gname] = seg
             aln = _align(stype)
             first_seq, last_seq = live.get(gname, (0, 0))
             # Exclusive (cshuffle no-alias) allocations must not reuse another
@@ -2250,6 +2347,45 @@ class _Lowerer:
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
         self._smem_pool_size = (pool_size + 15) & ~15
 
+    _LDS_AA_BASE = 900000
+
+    def _lds_aa_names(self) -> List[str]:
+        return sorted(self._smem_sizes)
+
+    def _lds_aa_suffix(self, gname: Optional[str]) -> str:
+        """``, !alias.scope !A, !noalias !N`` for an access to ``gname``."""
+        if not self._lds_aa or gname is None or gname not in self._smem_sizes:
+            return ""
+        self._lds_aa_used = True
+        names = self._lds_aa_names()
+        n = len(names)
+        i = names.index(gname)
+        b = self._LDS_AA_BASE
+        return f", !alias.scope !{b + 1 + n + i}, !noalias !{b + 1 + 2 * n + i}"
+
+    def _lds_aa_render(self) -> List[str]:
+        names = self._lds_aa_names()
+        n = len(names)
+        b = self._LDS_AA_BASE
+        out = [f'!{b} = distinct !{{!{b}, !"rocke.lds"}}']
+        for i, g in enumerate(names):
+            out.append(f'!{b + 1 + i} = distinct !{{!{b + 1 + i}, !{b}, !"{g}"}}')
+        for i, g in enumerate(names):
+            out.append(f"!{b + 1 + n + i} = !{{!{b + 1 + i}}}")
+        for i, g in enumerate(names):
+            lo, hi = self._smem_offsets[g], self._smem_offsets[g] + self._smem_sizes[g]
+            dis = [
+                f"!{b + 1 + j}"
+                for j, h in enumerate(names)
+                if h != g
+                and (
+                    self._smem_offsets[h] >= hi
+                    or self._smem_offsets[h] + self._smem_sizes[h] <= lo
+                )
+            ]
+            out.append(f"!{b + 1 + 2 * n + i} = !{{{', '.join(dis)}}}")
+        return out
+
     def _emit_smem_base_ptr(self, gname: str, stype: SmemType) -> str:
         """Return an addrspace(3) pointer to the start of the smem segment.
 
@@ -2281,8 +2417,6 @@ class _Lowerer:
     # ----- per-op lowerings -----
 
     def lower_op(self, op: Op) -> None:
-        from .tf32 import tf32_op_error
-
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
@@ -2336,20 +2470,38 @@ class _Lowerer:
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
+    def _wrapping_binop(self, op: Op, llvm_op: str) -> None:
+        # ``nsw`` makes a signed overflow poison, as C does for signed types;
+        # unsigned values wrap modulo 2**N, so they get no flag.
+        flag = "" if _is_unsigned(op.result.type) else " nsw"
+        self._binop(op, llvm_op + flag)
+
     def _op_arith_add(self, op: Op) -> None:
-        self._binop(op, "add nsw")
+        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        if wrap_error:
+            raise ValueError(wrap_error)
+        # An explicit no-unsigned-wrap add; otherwise the type's default
+        # (nsw for signed values, no flag for unsigned ones).
+        if op.attrs.get("wrap") == "nuw":
+            self._binop(op, "add nuw")
+        else:
+            self._wrapping_binop(op, "add")
+
+    def _op_arith_assume_range(self, op: Op) -> None:
+        # Emits nothing: _operand prints the marked value at every use.
+        return
 
     def _op_arith_sub(self, op: Op) -> None:
-        self._binop(op, "sub nsw")
+        self._wrapping_binop(op, "sub")
 
     def _op_arith_mul(self, op: Op) -> None:
-        self._binop(op, "mul nsw")
+        self._wrapping_binop(op, "mul")
 
     def _op_arith_div(self, op: Op) -> None:
-        self._binop(op, "sdiv")
+        self._binop(op, "udiv" if _is_unsigned(op.result.type) else "sdiv")
 
     def _op_arith_mod(self, op: Op) -> None:
-        self._binop(op, "srem")
+        self._binop(op, "urem" if _is_unsigned(op.result.type) else "srem")
 
     def _op_arith_fadd(self, op: Op) -> None:
         self._binop(op, "fadd")
@@ -2373,11 +2525,17 @@ class _Lowerer:
         """Lower ``arith.fabs`` to ``llvm.fabs.<ty>`` so the AMDGPU
         backend can fold the absolute-value modifier into the
         consumer (free) instead of materialising ``-a`` and a
-        ``v_max_f32(a, -a)`` pair (the historical idiom).
+        ``v_max_f32(a, -a)`` pair (the historical idiom). For f64 it is a
+        sign-bit clear on the high dword.
         """
         (v,) = op.operands
         ty_name = v.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         if llvm_ty is None:
             raise NotImplementedError(f"fabs: unsupported FP type {ty_name!r}")
         self._need(f"fabs.{ty_name}")
@@ -2404,6 +2562,22 @@ class _Lowerer:
             f"  {op.result.name} = call {llvm_ty} @llvm.fmuladd.{ty_name}("
             f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)}, "
             f"{llvm_ty} {self._operand(c)})"
+        )
+
+    def _op_arith_fdot2(self, op: Op) -> None:
+        """Lower ``arith.fdot2`` to ``llvm.amdgcn.fdot2[.f32.bf16]`` (clamp off)."""
+        a, b, c = op.operands
+        elem = a.type.elem.name
+        if elem == "bf16":
+            vty, fn = "<2 x bfloat>", "llvm.amdgcn.fdot2.f32.bf16"
+        elif elem == "f16":
+            vty, fn = "<2 x half>", "llvm.amdgcn.fdot2"
+        else:
+            raise NotImplementedError(f"fdot2: unsupported element type {elem!r}")
+        self._need(f"amdgcn.fdot2.{elem}")
+        self._current().emit(
+            f"  {op.result.name} = call float @{fn}({vty} {self._operand(a)}, "
+            f"{vty} {self._operand(b)}, float {self._operand(c)}, i1 false)"
         )
 
     def _op_arith_fmax3(self, op: Op) -> None:
@@ -2459,18 +2633,10 @@ class _Lowerer:
         )
 
     def _op_arith_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
-        pmap = {
-            "lt": "slt",
-            "le": "sle",
-            "gt": "sgt",
-            "ge": "sge",
-            "eq": "eq",
-            "ne": "ne",
-        }
         a, b = op.operands
+        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
-            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
@@ -2565,6 +2731,7 @@ class _Lowerer:
         )
 
     def _op_arith_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umax")
         a, b = op.operands
         self._need("smax.i32")
         self._current().emit(
@@ -2573,12 +2740,28 @@ class _Lowerer:
         )
 
     def _op_arith_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umin")
         a, b = op.operands
         self._need("smin.i32")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.smin.i32(i32 {self._operand(a)}, "
             f"i32 {self._operand(b)})"
         )
+
+    def _unsigned_min_max(self, op: Op, which: str) -> None:
+        a, b = op.operands
+        ty = _llvm_type(a.type)
+        self._need(f"{which}.{ty}")
+        self._current().emit(
+            f"  {op.result.name} = call {ty} @llvm.{which}.{ty}({ty} {self._operand(a)}, "
+            f"{ty} {self._operand(b)})"
+        )
+
+    def _op_arith_umax(self, op: Op) -> None:
+        self._unsigned_min_max(op, "umax")
+
+    def _op_arith_umin(self, op: Op) -> None:
+        self._unsigned_min_max(op, "umin")
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
@@ -2588,6 +2771,7 @@ class _Lowerer:
         )
 
     def _op_arith_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.zext")
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
@@ -2625,6 +2809,19 @@ class _Lowerer:
             f"  {op.result.name} = fptrunc float {self._operand(v)} to {_llvm_type(op.result.type)}"
         )
 
+    def _op_arith_cvt_f32_to_f64(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fpext float {self._operand(v)} to double"
+        )
+
+    def _op_arith_cvt_f64_to_f32(self, op: Op) -> None:
+        # LLVM's fptrunc rounds to nearest even under the default FP environment.
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fptrunc double {self._operand(v)} to float"
+        )
+
     def _op_arith_sitofp_f32(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "i32":
@@ -2633,6 +2830,13 @@ class _Lowerer:
             )
         self._current().emit(
             f"  {op.result.name} = sitofp i32 {self._operand(v)} to float"
+        )
+
+    def _op_arith_uitofp_f32(self, op: Op) -> None:
+        _refuse_non_u8_source(op)
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = uitofp {_llvm_type(v.type)} {self._operand(v)} to float"
         )
 
     def _op_arith_cvt_fp8_to_f32(self, op: Op) -> None:
@@ -2743,6 +2947,9 @@ class _Lowerer:
         showed FP8 long-prefill inner loop drop ``v_pk_mul`` count
         from 64 → 16.
         """
+        self._require_fp8_scale_conversion(
+            op, "v_cvt_scalef32_pk_f32_fp8", "cvt_pk_f32_fp8x4"
+        )
         v, scale = op.operands
         self._need("amdgcn.cvt.scalef32.pk.f32.fp8")
         packed_i32 = f"{op.result.name}p"
@@ -2766,6 +2973,9 @@ class _Lowerer:
 
     def _op_arith_cvt_scalef32_pk_f32_bf8(self, op: Op) -> None:
         """e5m2 sibling of :meth:`_op_arith_cvt_scalef32_pk_f32_fp8`."""
+        self._require_fp8_scale_conversion(
+            op, "v_cvt_scalef32_pk_f32_bf8", "cvt_pk_f32_bf8x4"
+        )
         v, scale = op.operands
         self._need("amdgcn.cvt.scalef32.pk.f32.bf8")
         packed_i32 = f"{op.result.name}p"
@@ -2945,8 +3155,8 @@ class _Lowerer:
         %r_i8 = trunc i32 %clamped to i8
 
         The clamp uses ``llvm.smin`` / ``llvm.smax`` so the backend can
-        fold the whole sequence into a ``v_med3_i32`` followed by a
-        single ``v_cvt_pk_i16_i32`` byte select.
+        fold it into a single ``v_med3_i32``; the low byte of the result
+        is the i8.
         """
         (v,) = op.operands
         self._need("rint.f32")
@@ -2970,6 +3180,37 @@ class _Lowerer:
             f"  {smin_v} = call i32 @llvm.smin.i32(i32 127, i32 {smax_v})"
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {smin_v} to i8")
+
+    def _op_arith_cvt_f32_to_u8_sat(self, op: Op) -> None:
+        """Lower saturating f32->u8 (round-to-nearest-even).
+
+        .. code-block:: text
+
+        %r = call float @llvm.rint.f32(float %v)
+        %lo = call float @llvm.maxnum.f32(float %r, float 0.0)
+        %hi = call float @llvm.minnum.f32(float %lo, float 255.0)
+        %q = fptoui float %hi to i8
+
+        Clamping in f32 keeps ``fptoui`` in range; ``maxnum`` turns a NaN
+        into 0.
+        """
+        (v,) = op.operands
+        self._need("rint.f32")
+        self._need("maxnum.f32")
+        self._need("minnum.f32")
+        rounded = f"{op.result.name}r"
+        low = f"{op.result.name}lo"
+        high = f"{op.result.name}hi"
+        self._current().emit(
+            f"  {rounded} = call float @llvm.rint.f32(float {self._operand(v)})"
+        )
+        self._current().emit(
+            f"  {low} = call float @llvm.maxnum.f32(float {rounded}, float 0.000000e+00)"
+        )
+        self._current().emit(
+            f"  {high} = call float @llvm.minnum.f32(float {low}, float 2.550000e+02)"
+        )
+        self._current().emit(f"  {op.result.name} = fptoui float {high} to i8")
 
     def _op_arith_rint_f32(self, op: Op) -> None:
         """Round an f32 to nearest integer (still f32), round-to-nearest-even."""
@@ -3054,8 +3295,12 @@ class _Lowerer:
         # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
         # Coefficients are in Horner power-basis order, not Taylor coefficients.
         # Source: amd/device-libs/ocml/src/tanhF.cl.
-        f32 = lambda value: self._composed_constant(value, F32, "f32")
-        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        def f32(value):
+            return self._composed_constant(value, F32, "f32")
+
+        def i32(value):
+            return self._composed_constant(value, I32, "i32")
+
         lower = self._lower_composed_op
 
         one = f32(1.0)
@@ -3121,7 +3366,7 @@ class _Lowerer:
     # gfx1250 workgroup clusters
 
     def _lower_cluster_read(self, op: Op, short_name: str, intrinsic: str) -> None:
-        self._require_gfx1250_llvm23(short_name)
+        self._require_llvm23_target_fact(short_name, _OpTargetFact.CLUSTER_LAUNCH)
         if op.operands:
             raise ValueError(f"{short_name} takes no operands")
         if "{axis}" in intrinsic:
@@ -3163,7 +3408,9 @@ class _Lowerer:
         # Release/acquire at cluster scope around the LLVM cluster barrier. The
         # intrinsic expands to a workgroup barrier followed by one signal per
         # workgroup on the cluster barrier; waves never signal it directly.
-        self._require_gfx1250_llvm23("cluster_barrier")
+        self._require_llvm23_target_fact(
+            "cluster_barrier", _OpTargetFact.CLUSTER_LAUNCH
+        )
         self._need("s.cluster.barrier")
         cur = self._current()
         cur.emit('  fence syncscope("cluster") release')
@@ -3427,11 +3674,12 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
+        # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
         # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
         align = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -3498,6 +3746,7 @@ class _Lowerer:
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -3513,7 +3762,7 @@ class _Lowerer:
         align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
-            f"align {align}"
+            f"align {align}{self._lds_aa_suffix(gname)}"
         )
 
     def _op_tile_smem_load_v4(self, op: Op) -> None:
@@ -3585,6 +3834,7 @@ class _Lowerer:
         # (i64 / f64): 8 bytes.
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "f16": 2,
             "bf16": 2,
             "i32": 4,
@@ -3614,6 +3864,7 @@ class _Lowerer:
             scalar = self._fresh("smem.s")
             self._current().emit(
                 f"  {scalar} = load {volatile}{elem_ty}, ptr addrspace(3) {base}, align {align}"
+                f"{self._lds_aa_suffix(gname)}"
             )
             self._current().emit(
                 f"  {op.result.name} = insertelement <1 x {elem_ty}> undef, {elem_ty} {scalar}, i32 0"
@@ -3621,7 +3872,7 @@ class _Lowerer:
         else:
             self._current().emit(
                 f"  {op.result.name} = load {volatile}<{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
-                f"align {align}"
+                f"align {align}{self._lds_aa_suffix(gname)}"
             )
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
@@ -3635,10 +3886,9 @@ class _Lowerer:
         self._backend.emit_wmma(self, op)
 
     def _op_tile_mma(self, op: Op) -> None:
-        from .tf32 import TF32_MMA
-
-        if op.attrs.get("op_id") in TF32_MMA and self._backend.arch.gfx != "gfx942":
-            raise ValueError("XF32 MMA requires gfx942")
+        error = tf32_mma_target_error(op.attrs.get("op_id"), self._backend.arch)
+        if error:
+            raise ValueError(error)
         # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
@@ -3872,8 +4122,9 @@ class _Lowerer:
         self._emit_xf32(op, "mfma.f32.32x32x4.xf32", 16)
 
     def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
-        if self._backend.arch.gfx != "gfx942":
-            raise ValueError("XF32 MMA requires gfx942")
+        error = tf32_mma_target_error(_mma_op_id(op), self._backend.arch)
+        if error:
+            raise ValueError(error)
         a, b, c = op.operands
         self._need(intrinsic)
         a_cast = self._fresh("mfma_a_i16")
@@ -3890,24 +4141,63 @@ class _Lowerer:
             f"<{count} x float> {self._operand(c)}, i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        c = op.operands[2]
+        self._need("mfma.f64.16x16x4f64")
+        a_arg = self._mma_operand(op, "a", F64)
+        b_arg = self._mma_operand(op, "b", F64)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
+            f"double {a_arg}, "
+            f"double {b_arg}, "
+            f"<4 x double> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        c = op.operands[2]
+        self._need("mfma.f64.4x4x4f64")
+        a_arg = self._mma_operand(op, "a", F64)
+        b_arg = self._mma_operand(op, "b", F64)
+        # The intrinsic takes and returns a scalar; the IR accumulator is <1 x double>.
+        c_elem = self._fresh("mfma_c")
+        d_elem = self._fresh("mfma_d")
+        self._current().emit(
+            f"  {c_elem} = extractelement <1 x double> {self._operand(c)}, i32 0"
+        )
+        self._current().emit(
+            f"  {d_elem} = call double @llvm.amdgcn.mfma.f64.4x4x4f64("
+            f"double {a_arg}, "
+            f"double {b_arg}, "
+            f"double {c_elem}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = insertelement <1 x double> undef, double {d_elem}, i32 0"
+        )
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.32x32x2f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -3949,17 +4239,6 @@ class _Lowerer:
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
             f"<8 x bfloat> {self._operand(a)}, "
             f"<8 x bfloat> {self._operand(b)}, "
-            f"<16 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
-        )
-
-    def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.32x32x16.f16")
-        self._current().emit(
-            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
-            f"<8 x half> {self._operand(a)}, "
-            f"<8 x half> {self._operand(b)}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -4007,163 +4286,136 @@ class _Lowerer:
             f"i32 0, i32 {self._operand(sa)}, i32 0, i32 {self._operand(sb)})"
         )
 
-    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """Lower P15 MX MFMA scaled intrinsic.
+    def _emit_f8f6f4_16x16x128(
+        self,
+        op: Op,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: str,
+        b_scale: str,
+        a_name: str,
+        b_name: str,
+        cbsz: int = 0,
+        blgp: int = 0,
+    ) -> None:
+        """Emit the K=128 f8f6f4 MFMA call shared by the MX op and the hero atom.
 
-        Operands ``a``, ``b`` are 32-byte mantissa vectors; the scaled
-        intrinsic packs them as ``<8 x i32>``. Scales are i32 E8M0
-        bytes broadcast in-instruction; we emit them as ``i32`` to
-        match the LLVM intrinsic signature (the AMDGPU backend
-        broadcasts the byte across all 16 output rows).
+        A and B are bit-cast to ``<8 x i32>`` (256 bits per lane). The call
+        passes the format selectors ``cbsz`` and ``blgp`` (0 = fp8e4m3) and the
+        opsel operands 0. ``a_scale`` and ``b_scale`` are the scale operand
+        texts: the MX op passes its scale values, the hero atom passes ``"0"``.
+        The backend selects the unscaled instruction only when both scale
+        operands are literal 0.
+        """
+        self._need(_F8F6F4_16X16X128_KEY)
+        a_packed = self._fresh(a_name)
+        b_packed = self._fresh(b_name)
+        a_ty = _llvm_type(a.type)
+        b_ty = _llvm_type(b.type)
+        if a_ty != "<8 x i32>":
+            self._current().emit(
+                f"  {a_packed} = bitcast {a_ty} {self._operand(a)} to <8 x i32>"
+            )
+        else:
+            a_packed = self._operand(a)
+        if b_ty != "<8 x i32>":
+            self._current().emit(
+                f"  {b_packed} = bitcast {b_ty} {self._operand(b)} to <8 x i32>"
+            )
+        else:
+            b_packed = self._operand(b)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> "
+            f"@llvm.amdgcn.{_F8F6F4_16X16X128_KEY}("
+            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 {cbsz}, i32 {blgp}, i32 0, i32 {a_scale}, i32 0, i32 {b_scale})"
+        )
+
+    def _f8f6f4_16x16x128_selectors(self, op: Op, a: Value, b: Value):
+        """Check the formats and operand widths of ``op``; return ``(cbsz, blgp)``.
+
+        The checks run in the lowerer as well as in the builder, because
+        serialized IR reaches the lowerer without passing through the builder.
+        """
+        from .arch.mfma_scale import (
+            DEFAULT_MATRIX_FORMAT,
+            f8f6f4_16x16x128_operand_error,
+            f8f6f4_16x16x128_selectors,
+        )
+
+        selectors = f8f6f4_16x16x128_selectors(
+            op.attrs.get("a_format", DEFAULT_MATRIX_FORMAT),
+            op.attrs.get("b_format", DEFAULT_MATRIX_FORMAT),
+        )
+        error = f8f6f4_16x16x128_operand_error(a, b)
+        if error:
+            raise ValueError(error)
+        return selectors
+
+    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
+        """Lower the MX op: the f8f6f4 MFMA with in-instruction E8M0 scales.
+
+        ``a`` and ``b`` hold 256 bits per lane and arrive as any type of that
+        width. The optional attributes ``a_format`` and ``b_format`` name the
+        data type (default ``fp8e4m3``); they must be equal in this version.
+        ``a_scale`` and ``b_scale`` are i32 values; the instruction reads one
+        E8M0 byte from each and multiplies by ``2^(e - 127)``. The value
+        ``e = 0`` gives ``2^-127``, not 1.0. If both scale operands are literal
+        0, the backend drops the scales and selects the unscaled instruction.
 
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
         a, b, c, a_scale, b_scale = op.operands
-        self._need("mfma.scale.f32.16x16x128.f8f6f4")
-        # Bitcast a / b to <8 x i32>; they arrive as <16 x byte>-style
-        # vectors — we accept both <16 x i8>/<16 x fp8e4m3> and
-        # <8 x i32> at the IR-level and normalise here.
-        a_packed = self._fresh("mxa")
-        b_packed = self._fresh("mxb")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "<8 x i32>":
-            self._current().emit(
-                f"  {a_packed} = bitcast {a_ty} {self._operand(a)} to <8 x i32>"
-            )
-        else:
-            a_packed = self._operand(a)
-        if b_ty != "<8 x i32>":
-            self._current().emit(
-                f"  {b_packed} = bitcast {b_ty} {self._operand(b)} to <8 x i32>"
-            )
-        else:
-            b_packed = self._operand(b)
-        if self._flavor == LLVM_FLAVOR_LLVM23:
-            self._current().emit(
-                f"  {op.result.name} = call <4 x float> "
-                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-                f"<4 x float> {self._operand(c)}, "
-                f"i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-                f"i32 0, i32 {self._operand(b_scale)})"
-            )
-        else:
-            self._current().emit(
-                f"  {op.result.name} = call <4 x float> "
-                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-                f"<4 x float> {self._operand(c)}, "
-                f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-                f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
-            )
-
-    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.16x16x128.fp4")
-        # fp4 mantissa packs 16 nibbles into i64 per lane; arrive at
-        # this op in `<8 x i8>` form (caller's :meth:`unpack_fp4_byte`
-        # produces the right shape).
-        a_cast = self._fresh("a_fp4")
-        b_cast = self._fresh("b_fp4")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "i64":
-            self._current().emit(
-                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to i64"
-            )
-        else:
-            a_cast = self._operand(a)
-        if b_ty != "i64":
-            self._current().emit(
-                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to i64"
-            )
-        else:
-            b_cast = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.f32.16x16x128.fp4(i64 {a_cast}, "
-            f"i64 {b_cast}, <4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
+        cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
+        self._emit_f8f6f4_16x16x128(
+            op,
+            a,
+            b,
+            c,
+            self._operand(a_scale),
+            self._operand(b_scale),
+            "mxa",
+            "mxb",
+            cbsz,
+            blgp,
         )
 
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
+    def _op_tile_mfma_f32_16x16x128_fp4fp6fp8(self, op: Op) -> None:
+        """Lower the unscaled K=128 MFMA for fp8, bf8, fp6 and fp4.
+
+        gfx950 has no unscaled intrinsic for this instruction. The op calls the
+        scaled intrinsic with both scale operands at literal 0, and the backend
+        then selects ``v_mfma_f32_16x16x128_f8f6f4``. The literal 0 marks "no
+        scale". As an E8M0 value, 0 would mean ``2^-127``, so a loaded or
+        computed 0 must never replace the literal here. The attributes
+        ``a_format`` and ``b_format`` work as for the MX op.
+        """
         a, b, c = op.operands
-        self._need("mfma.f32.16x16x96.fp6")
-        a_cast = self._fresh("a_fp6")
-        b_cast = self._fresh("b_fp6")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "<3 x i32>":
-            self._current().emit(
-                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to <3 x i32>"
-            )
-        else:
-            a_cast = self._operand(a)
-        if b_ty != "<3 x i32>":
-            self._current().emit(
-                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to <3 x i32>"
-            )
-        else:
-            b_cast = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32> {a_cast}, "
-            f"<3 x i32> {b_cast}, <4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
+        cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
+        self._emit_f8f6f4_16x16x128(
+            op, a, b, c, "0", "0", "a_f8f6f4", "b_f8f6f4", cbsz, blgp
         )
 
     def _op_tile_mfma_f32_16x16x128_fp8(self, op: Op) -> None:
-        """Lower the UNSCALED fp8 16x16x128 hero atom (L6).
+        """Lower the unscaled fp8 16x16x128 hero atom.
 
-        gfx950 has no dense plain ``mfma.f32.16x16x128.fp8.fp8`` intrinsic;
-        the only dense wide-K f8 MFMA is the ``f8f6f4`` instruction exposed
-        as ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``. We reuse that
-        intrinsic with the in-instruction scale pinned to the neutral E8M0
-        value 0 (exponent 0 => 2^0 == 1.0), making it numerically a plain
-        unscaled fp8 MFMA. ``cbsz=0`` / ``blgp=0`` select fp8e4m3 for A and
-        B; ``op_sel`` scale-byte selectors are 0. This is ADDITIVE — it
-        uses a dedicated declaration key for the nine-argument form and pins
-        both scale operands to zero (so no scale registers are loaded).
+        gfx950 has no unscaled intrinsic for the K=128 f8f6f4 MFMA. The atom
+        calls the scaled intrinsic with both scale operands at literal 0. The
+        backend then selects the unscaled instruction
+        ``v_mfma_f32_16x16x128_f8f6f4`` (LLVM TableGen pattern
+        ``UnscaledMFMAOptimizationPat``; Composable Kernel relies on the same
+        rule). The literal 0 is a marker for "no scale". As an E8M0 value, 0
+        would mean ``2^-127``, so a loaded or computed 0 must never replace the
+        literal here.
 
-        A / B arrive as ``<32 x fp8e4m3>`` (== ``<32 x i8>``, 32 f8 bytes
-        per lane) and are bitcast to the intrinsic's ``<8 x i32>``.
-        Output is ``<4 x float>``.
+        A and B arrive as ``<32 x fp8e4m3>`` (== ``<32 x i8>``, 32 fp8 bytes
+        per lane) and are bit-cast to ``<8 x i32>``. The result is
+        ``<4 x float>``.
         """
         a, b, c = op.operands
-        # ADDITIVE: a dedicated decl key for the unscaled hero atom (the
-        # 9-arg f8f6f4 scale-MFMA signature). The separate key preserves the
-        # LLVM20/22 MX-scaled declaration, which remains the 11-arg form.
-        self._need("mfma.f32.16x16x128.fp8.hero")
-        a_packed = self._fresh("a_fp8_128")
-        b_packed = self._fresh("b_fp8_128")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "<8 x i32>":
-            self._current().emit(
-                f"  {a_packed} = bitcast {a_ty} {self._operand(a)} to <8 x i32>"
-            )
-        else:
-            a_packed = self._operand(a)
-        if b_ty != "<8 x i32>":
-            self._current().emit(
-                f"  {b_packed} = bitcast {b_ty} {self._operand(b)} to <8 x i32>"
-            )
-        else:
-            b_packed = self._operand(b)
-        # f8f6f4 scale-MFMA, LLVM22 signature:
-        #   (A<8xi32>, B<8xi32>, C<4xf32>,
-        #    cbsz immarg, blgp immarg,      ; A/B format selectors (0 = fp8e4m3)
-        #    opsel_a immarg, scale_a,        ; A scale (E8M0 byte; 0 => 2^0 == 1.0)
-        #    opsel_b immarg, scale_b)        ; B scale (0 => 1.0)
-        # Pinning both scales to 0 makes this a plain unscaled fp8 MFMA.
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-            f"<4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)"
-        )
+        self._emit_f8f6f4_16x16x128(op, a, b, c, "0", "0", "a_fp8_128", "b_fp8_128")
 
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
         """Lower P13 register-tile permutation.
@@ -4340,6 +4592,26 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.4x4x4bf16.1k")
+        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
     def _op_vector_bitcast(self, op: Op) -> None:
         (v,) = op.operands
         target = op.result.type
@@ -4399,20 +4671,20 @@ class _Lowerer:
         self._emit_wave_ballot(pred, op.result.name)
 
     def _op_tile_wave_all(self, op: Op) -> None:
-        # wave_all(p) = (ballot(p) == -1).
-        # On wave64 with all lanes active, ``ballot.i64`` returns
-        # ``-1 == 0xffffffffffffffff`` iff every lane voted true.
-        # Matches HIP's ``__all(p)`` which uses the same shorthand.
-        # This form is robust under wave64 with full EXEC (our standard
-        # workgroup launch profile); under a partially-predicated EXEC
-        # mask the result counts only the active lanes (still the
-        # semantics we want for "did every *active* lane vote true").
+        # wave_all(p) = (ballot(p) == full-wave mask). ``ballot.i64`` sets
+        # only the low ``wave_size`` bits, so the full mask is -1 on wave64
+        # but 0xffffffff on wave32 (comparing against -1 there is never
+        # true). Unlike HIP's ``__all(p)``, which counts only active lanes,
+        # this requires full EXEC: under partial EXEC (a divergent region or
+        # a sub-wave workgroup) it returns 0. Every rocKE kernel launches
+        # with full EXEC.
         (pred,) = op.operands
         self._need("ballot.i64")
         b_name = self._fresh("ballot")
         self._emit_wave_ballot(pred, b_name)
+        full = -1 if self._backend.arch.wave_size == 64 else (1 << 32) - 1
         eq_name = self._fresh("all_eq")
-        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, -1")
+        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, {full}")
         self._current().emit(f"  {op.result.name} = zext i1 {eq_name} to i32")
 
     def _op_tile_wave_any(self, op: Op) -> None:
@@ -4750,7 +5022,7 @@ class _Lowerer:
         return v
 
     def _op_tile_s_setreg(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_setreg")
+        self._require_llvm23_target_fact("s_setreg", _OpTargetFact.GFX12_CDNA_FAMILY)
         (value,) = op.operands
         simm16 = self._check_u16("s_setreg", "simm16", op.attrs.get("simm16", 0))
         self._need("s.setreg")
@@ -4759,7 +5031,9 @@ class _Lowerer:
         )
 
     def _op_tile_s_prefetch_data(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_prefetch_data")
+        self._require_llvm23_target_fact(
+            "s_prefetch_data", _OpTargetFact.SCALAR_DATA_PREFETCH
+        )
         ptr, length = op.operands
         space, ptr_ty = self._anyptr_space(
             "s_prefetch_data", ptr, _S_PREFETCH_DATA_PTR_TYPES
@@ -4771,7 +5045,9 @@ class _Lowerer:
         )
 
     def _op_tile_s_buffer_prefetch_data(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_buffer_prefetch_data")
+        self._require_llvm23_target_fact(
+            "s_buffer_prefetch_data", _OpTargetFact.SCALAR_DATA_PREFETCH
+        )
         rsrc, length = op.operands
         offset = int(op.attrs.get("offset", 0))
         if not -(2**31) <= offset <= 2**31 - 1:
@@ -4786,7 +5062,9 @@ class _Lowerer:
         )
 
     def _op_tile_global_prefetch(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("global_prefetch")
+        self._require_llvm23_target_fact(
+            "global_prefetch", _OpTargetFact.GLOBAL_PREFETCH
+        )
         (ptr,) = op.operands
         if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
             raise TypeError(
@@ -4801,7 +5079,7 @@ class _Lowerer:
         )
 
     def _op_tile_flat_prefetch(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("flat_prefetch")
+        self._require_llvm23_target_fact("flat_prefetch", _OpTargetFact.GLOBAL_PREFETCH)
         (ptr,) = op.operands
         if self._ptr_llvm_type(ptr) != "ptr":
             raise TypeError(
@@ -4885,7 +5163,7 @@ class _Lowerer:
         raw = self._fresh("tr.raw")
         self._current().emit(
             f"  {raw} = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64("
-            f"ptr addrspace(3) {base})"
+            f"ptr addrspace(3) {base}){self._lds_aa_suffix(gname)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         self._current().emit(
@@ -4893,12 +5171,10 @@ class _Lowerer:
         )
 
     def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        """``ds_read_b128_tr_b16`` -- gfx950 wide transpose-read.
+        """``ds_load_tr16_b128`` -- gfx1250 wide transpose-read.
 
-        Reads twice the bytes per lane vs the b64 sibling. The
-        intrinsic returns ``<8 x i16>`` (= 16 bytes per lane), which
-        we bitcast to ``<8 x half>`` / ``<8 x bfloat>`` to match the
-        IR result type.
+        The backend selects an element-typed intrinsic that returns
+        ``<8 x half>`` or ``<8 x bfloat>``. Other targets raise.
         """
         smem = op.operands[0]
         indices = list(op.operands[1:])
@@ -4914,24 +5190,9 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         need_key, intrinsic, ret_ty = self._backend.ds_tr16_b128_spec(elem_name)
         self._need(need_key)
-        elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        want_ty = f"<8 x {elem_ty}>"
-        if ret_ty == want_ty:
-            # Element-type-specific intrinsic (gfx1250 selects ``.v8f16`` /
-            # ``.v8bf16`` to match the op): no reinterpret needed.
-            self._current().emit(
-                f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-            )
-        else:
-            # gfx950 returns a type-agnostic ``<8 x i16>``; reinterpret the raw
-            # 16-bit lanes as the requested half/bfloat element.
-            raw = self._fresh("trw.raw")
-            self._current().emit(
-                f"  {raw} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast {ret_ty} {raw} to {want_ty}"
-            )
+        self._current().emit(
+            f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+        )
 
     def _op_tile_inline_asm(self, op: Op) -> None:
         """General AMDGPU inline-asm lowering (ADDITIVE).
@@ -4949,6 +5210,12 @@ class _Lowerer:
         """
         required_arch = op.attrs.get("required_arch")
         required_flavor = op.attrs.get("required_llvm_flavor")
+        minimum_flavor = op.attrs.get("minimum_llvm_flavor")
+        if minimum_flavor is not None and not isinstance(minimum_flavor, str):
+            raise TypeError(
+                "tile.inline_asm failed - minimum_llvm_flavor has a non-string "
+                "value, expected a string"
+            )
         if required_arch is not None and self._backend.arch.gfx != required_arch:
             raise ValueError(
                 f"tile.inline_asm requires {required_arch}, got {self._backend.arch.gfx}"
@@ -4956,6 +5223,13 @@ class _Lowerer:
         if required_flavor is not None and self._flavor != required_flavor:
             raise ValueError(
                 f"tile.inline_asm requires LLVM flavor {required_flavor}, "
+                f"got {self._flavor}"
+            )
+        if minimum_flavor is not None and not _flavor_at_least(
+            self._flavor, minimum_flavor
+        ):
+            raise ValueError(
+                f"tile.inline_asm requires LLVM flavor {minimum_flavor}, "
                 f"got {self._flavor}"
             )
         template = _escape_llvm_asm_string(op.attrs["template"])
@@ -5088,6 +5362,7 @@ class _Lowerer:
         gname = self._smem_storage_name[smem.name]
         stype = smem.type
         base_ptr = self._emit_smem_base_ptr(gname, stype)
+        self._lds_prov[op.result.name] = gname
         # The global is ptr addrspace(3); cast to i64 for arithmetic.
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
@@ -5095,6 +5370,8 @@ class _Lowerer:
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
+        if base.name in self._lds_prov:
+            self._lds_prov[op.result.name] = self._lds_prov[base.name]
         self._current().emit(
             f"  {op.result.name} = add i64 {self._operand(base)}, {self._operand(off)}"
         )
@@ -5103,6 +5380,7 @@ class _Lowerer:
         # ptr + byte_off as a new global pointer (getelementptr i8). The
         # offset must be i64 so block bases beyond 2 GiB do not overflow.
         ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_add", ptr)
         off_ty = _llvm_type(off.type)
         if off_ty == "i32":
             off64 = self._fresh("goff64")
@@ -5118,12 +5396,25 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off without ``inbounds``: the result may point outside
+        # the allocation, so the compiler must not assume it does not.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_offset", ptr)
+        self._current().emit(
+            f"  {op.result.name} = getelementptr i8, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i64 {self._operand(off)}"
+        )
+
     def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
-        if len(op.operands) != 1 or len(op.results) != 1:
-            raise ValueError("global_ptr_to_i64 expects one operand and one result")
+        error = _global_ptr_to_i64_op_error(op)
+        if error:
+            raise ValueError(error)
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError("global_ptr_to_i64 ptr must be a global pointer")
+        self._require_global_header_ptr("global_ptr_to_i64", ptr)
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(1) {self._operand(ptr)} to i64"
         )
@@ -5147,6 +5438,7 @@ class _Lowerer:
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
             f"i32 0, i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 
     def _op_tile_s_wait_asynccnt(self, op: Op) -> None:
@@ -5159,13 +5451,15 @@ class _Lowerer:
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.asynccnt(i16 {n})")
 
     def _op_tile_s_wait_tensorcnt(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_wait_tensorcnt")
+        self._require_llvm23_target_fact("s_wait_tensorcnt", _OpTargetFact.TDM)
         n = self._check_u16("s_wait_tensorcnt", "n", op.attrs.get("n", 0))
         self._need("s.wait.tensorcnt")
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.tensorcnt(i16 {n})")
 
     def _op_tile_s_barrier_signal(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_barrier_signal")
+        self._require_llvm23_target_fact(
+            "s_barrier_signal", _OpTargetFact.GFX12_CDNA_FAMILY
+        )
         barrier_type = int(op.attrs.get("barrier_type", 0))
         if not 0 <= barrier_type <= 0xFFFFFFFF:
             raise ValueError(
@@ -5178,7 +5472,9 @@ class _Lowerer:
         )
 
     def _op_tile_s_barrier_wait(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_barrier_wait")
+        self._require_llvm23_target_fact(
+            "s_barrier_wait", _OpTargetFact.GFX12_CDNA_FAMILY
+        )
         barrier_type = self._check_u16(
             "s_barrier_wait", "barrier_type", op.attrs.get("barrier_type", 0)
         )
@@ -5195,18 +5491,30 @@ class _Lowerer:
 
     def _lower_named_barrier_count(self, op: Op, intrinsic: str) -> None:
         short_name = intrinsic.replace(".", "_")
-        self._require_gfx1250_llvm23(short_name)
+        self._require_llvm23_target_fact(short_name, _OpTargetFact.GFX12_CDNA_FAMILY)
         if len(op.operands) != 2:
             raise ValueError(f"{short_name} expects barrier and member_count")
         barrier, member_count = op.operands
         if member_count.type != I32:
             raise TypeError(f"{short_name} member_count must be i32")
         local = self._lds_ptr_operand(short_name, barrier)
+        addrspace, local = self._named_barrier_pointer(local)
         self._need(intrinsic)
         self._current().emit(
             f"  call void @llvm.amdgcn.{intrinsic}("
-            f"ptr addrspace(3) {local}, i32 {self._operand(member_count)})"
+            f"ptr addrspace({addrspace}) {local}, i32 {self._operand(member_count)})"
         )
+
+    def _named_barrier_pointer(self, local: str) -> tuple[int, str]:
+        if not _emission_profile(self._flavor).has(
+            _LlvmEmissionCapability.NAMED_BARRIER_AS15
+        ):
+            return 3, local
+        cast = self._fresh("barrier.as15")
+        self._current().emit(
+            f"  {cast} = addrspacecast ptr addrspace(3) {local} " "to ptr addrspace(15)"
+        )
+        return 15, cast
 
     def _op_tile_s_barrier_join(self, op: Op) -> None:
         self._lower_named_barrier_one(op, "s.barrier.join")
@@ -5216,17 +5524,21 @@ class _Lowerer:
 
     def _lower_named_barrier_one(self, op: Op, intrinsic: str) -> None:
         short_name = intrinsic.replace(".", "_")
-        self._require_gfx1250_llvm23(short_name)
+        self._require_llvm23_target_fact(short_name, _OpTargetFact.GFX12_CDNA_FAMILY)
         if len(op.operands) != 1:
             raise ValueError(f"{short_name} expects one barrier pointer")
         local = self._lds_ptr_operand(short_name, op.operands[0])
+        addrspace, local = self._named_barrier_pointer(local)
         self._need(intrinsic)
         self._current().emit(
-            f"  call void @llvm.amdgcn.{intrinsic}(ptr addrspace(3) {local})"
+            f"  call void @llvm.amdgcn.{intrinsic}("
+            f"ptr addrspace({addrspace}) {local})"
         )
 
     def _op_tile_s_barrier_leave(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("s_barrier_leave")
+        self._require_llvm23_target_fact(
+            "s_barrier_leave", _OpTargetFact.GFX12_CDNA_FAMILY
+        )
         barrier_type = self._check_u16(
             "s_barrier_leave", "barrier_type", op.attrs.get("barrier_type", 0)
         )
@@ -5270,7 +5582,9 @@ class _Lowerer:
         )
 
     def _op_tile_global_store_async_from_lds(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("global_store_async_from_lds")
+        self._require_llvm23_target_fact(
+            "global_store_async_from_lds", _OpTargetFact.GFX12_CDNA_FAMILY
+        )
         if len(op.operands) != 2:
             raise ValueError("global_store_async_from_lds expects two operands")
         dst_ptr, lds_ptr = op.operands
@@ -5304,7 +5618,9 @@ class _Lowerer:
         )
 
     def _op_tile_global_load_tr16_b128(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("global_load_tr16_b128")
+        self._require_llvm23_target_fact(
+            "global_load_tr16_b128", _OpTargetFact.GFX12_CDNA_FAMILY
+        )
         if len(op.operands) != 1:
             raise ValueError("global_load_tr16_b128 expects one operand")
         src_ptr = op.operands[0]
@@ -5340,7 +5656,7 @@ class _Lowerer:
         return cachepolicy
 
     def _op_tile_cluster_load(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("cluster_load")
+        self._require_llvm23_target_fact("cluster_load", _OpTargetFact.MULTICAST_LOAD)
         if len(op.operands) != 2 or len(op.results) != 1:
             raise ValueError("cluster_load expects two operands and one result")
         ptr, mask = op.operands
@@ -5375,7 +5691,9 @@ class _Lowerer:
         )
 
     def _op_tile_cluster_load_async_to_lds(self, op: Op) -> None:
-        self._require_gfx1250_llvm23("cluster_load_async_to_lds")
+        self._require_llvm23_target_fact(
+            "cluster_load_async_to_lds", _OpTargetFact.MULTICAST_LOAD
+        )
         if len(op.operands) != 3:
             raise ValueError("cluster_load_async_to_lds expects three operands")
         src_ptr, lds_ptr, mask = op.operands
@@ -5413,7 +5731,7 @@ class _Lowerer:
 
     def _lower_tensor_lds_transfer(self, op: Op, intrinsic: str) -> None:
         short_name = intrinsic.replace(".", "_")
-        self._require_gfx1250_llvm23(short_name)
+        self._require_llvm23_target_fact(short_name, _OpTargetFact.TDM)
         expected = (
             VectorType(I32, 4),
             VectorType(I32, 8),
@@ -5463,8 +5781,28 @@ class _Lowerer:
         # the raw s_barrier does NOT auto-drain LDS, so an explicit wait is
         # required or the same-wave LDS write->read races -> stale LDS / NaN).
         self._backend.emit_lds_barrier_drain(self, drain_vmem=True)
+        self._emit_s_barrier(op)
+
+    def _emit_s_barrier(self, op: Op) -> None:
+        # ``fence`` attr (IRBuilder.sync): the barrier orders memory accesses
+        # across waves. The barrier intrinsic itself does not access memory,
+        # so LLVM may move an LDS load or store across it; machine-level
+        # sinking moves a load above the barrier into a successor block. A
+        # compiler memory barrier after it (inline asm with a memory clobber,
+        # CK Tile's ``block_sync_lds``) prevents that and emits nothing.
+        # "workgroup" adds the ``__syncthreads`` release / acquire fences
+        # (which on their own do not stop the sinking).
+        fence = op.attrs.get("fence")
+        if fence not in (None, "compiler", "workgroup"):
+            raise ValueError(f"{op.name}: unknown fence {fence!r}")
+        if fence == "workgroup":
+            self._current().emit('  fence syncscope("workgroup") release')
         self._need("s.barrier")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        if fence == "workgroup":
+            self._current().emit('  fence syncscope("workgroup") acquire')
+        if fence is not None:
+            self._current().emit('  call void asm sideeffect "", "~{memory}"()')
 
     def _op_tile_s_barrier_bare(self, op: Op) -> None:
         # Bare full-CTA barrier: emit ONLY s_barrier, no implicit s_waitcnt.
@@ -5472,8 +5810,7 @@ class _Lowerer:
         # producer/consumer loop issues s_waitcnt(vmcnt=0) explicitly so
         # the producers' async LDS writes are drained but NOT serialized
         # against the next iteration's in-flight loads).
-        self._need("s.barrier")
-        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        self._emit_s_barrier(op)
 
     # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
 
@@ -5549,8 +5886,7 @@ class _Lowerer:
         # overlap. Matches CK Tile's ``block_sync_lds``.
         # LDS-only drain (keep VMEM in flight for the async-DMA ping-pong).
         self._backend.emit_lds_barrier_drain(self, drain_vmem=False)
-        self._need("s.barrier")
-        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        self._emit_s_barrier(op)
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
@@ -5616,6 +5952,13 @@ class _Lowerer:
         level = int(op.attrs["level"])
         self._current().emit(f"  call void @llvm.amdgcn.s.setprio(i16 {level})")
 
+    def _op_tile_trap(self, op: Op) -> None:
+        error = _trap_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._need("trap")
+        self._current().emit("  call void @llvm.trap()")
+
     # ----- buffer-rsrc + async DRAM->LDS -----
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
@@ -5634,9 +5977,10 @@ class _Lowerer:
         callers reach the full 64-bit range needed for >4 GiB KV
         caches that would otherwise OOB-zero at the tail.
 
-        Flags = 0x00027000 -- the rsrc DWORD3 word that gives
-        "32-bit-uint, structured buffer, bounds-checked"; matches CK
-        Tile's hardcoded value.
+        Flags = the target ISA backend's ``buffer_rsrc_word3`` -- the rsrc
+        DWORD3 that makes the descriptor bounds-checked. Its encoding is
+        ISA-specific (``0x00027000`` on gfx9, ``0x31014000`` on gfx11 /
+        gfx12); the HIP lowering takes the same word from the same backend.
         """
         self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
@@ -5745,43 +6089,49 @@ class _Lowerer:
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
-        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
-        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
-        (4-byte) elements.
+        One raw buffer load of the result's width (``_BUFFER_ACCESS_FORMS``),
+        bitcast to the ``<n x elem>`` result.
         """
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count  # elements in the result vector
-        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
-        llvm_elem = _LLVM_ELEM[elem_type]
-        if dwords == 1:
-            self._need("raw.ptr.buffer.load.i32")
-            tmp = self._fresh("bli32")
-            self._current().emit(
-                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
-            )
-        else:
-            intr = f"raw.ptr.buffer.load.v{dwords}i32"
-            self._need(intr)
-            tmp = self._fresh(f"blv{dwords}")
-            self._current().emit(
-                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
-            )
+        result_type = op.result.type
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.load.{form.suffix}")
+        tmp = self._fresh(form.load_hint)
+        self._current().emit(
+            f"  {tmp} = call {form.llvm_type} "
+            f"@llvm.amdgcn.raw.ptr.buffer.load.{form.suffix}("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
+            f"{_llvm_type(result_type)}"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer store: the value bitcast to one
+        integer of its width (``_BUFFER_ACCESS_FORMS``) and stored with the
+        matching raw buffer store."""
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.store.{form.suffix}")
+        bc = self._fresh("bsbc")
+        self._current().emit(
+            f"  {bc} = bitcast {_llvm_type(val.type)} {self._operand(val)} to "
+            f"{form.llvm_type}"
+        )
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.{form.suffix}("
+            f"{form.llvm_type} {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
 
     def _op_tile_buffer_load(self, op: Op) -> None:
         """Dtype-generic scalar buffer load (single element, OOB-clamped).
@@ -5792,6 +6142,8 @@ class _Lowerer:
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
         _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        if elem_type not in _LLVM_ELEM:
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         llvm_elem = _LLVM_ELEM[elem_type]
         if elem_type in ("f16", "bf16"):
             self._need("raw.ptr.buffer.load.i16")
@@ -5839,7 +6191,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
         else:
             intr = f"raw.ptr.buffer.store.v{dwords}i32"
@@ -5854,7 +6206,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
 
     def _op_tile_buffer_store_f16(self, op: Op) -> None:
@@ -5869,7 +6221,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('cachepolicy', 0))})"
         )
 
     def _op_tile_buffer_load_bf16(self, op: Op) -> None:
@@ -5933,7 +6285,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('cachepolicy', 0))})"
         )
 
     def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
@@ -5955,7 +6307,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
         else:
             intr = f"raw.ptr.buffer.store.v{dwords}i32"
@@ -5970,7 +6322,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
 
     def _op_tile_buffer_store_f32(self, op: Op) -> None:
@@ -6038,6 +6390,7 @@ class _Lowerer:
             f"i32 {self._operand(soffset)}, "
             f"i32 0, "
             f"i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_ptr.name))}"
         )
 
     def _op_tile_buffer_load_lds_async(self, op: Op) -> None:
@@ -6184,6 +6537,7 @@ class _Lowerer:
         )
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "i16": 2,
@@ -6351,22 +6705,15 @@ class _Lowerer:
         self._vector_binop(op, "lshr")
 
     def _op_vector_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
-        pmap = {
-            "lt": "slt",
-            "le": "sle",
-            "gt": "sgt",
-            "ge": "sge",
-            "eq": "eq",
-            "ne": "ne",
-        }
         a, b = op.operands
+        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
-            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
     def _op_vector_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, b = op.operands
         # Prefer the ``llvm.smax.v<N>i<W>`` intrinsic over icmp+select: the
         # AMDGPU backend reliably lowers the i16 vector form to packed
@@ -6391,6 +6738,7 @@ class _Lowerer:
         )
 
     def _op_vector_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, b = op.operands
         cmp = self._fresh("vsmin.cmp")
         self._current().emit(
@@ -6409,6 +6757,7 @@ class _Lowerer:
         )
 
     def _op_vector_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
@@ -6538,8 +6887,12 @@ class _Lowerer:
         """Lower scf.for to LLVM IR.
 
         Checks for 'unroll' hint and constant bounds to decide between
-        unrolled (straight-line) or normal (loop) lowering.
+        unrolled (straight-line) or normal (loop) lowering. Both refuse a
+        loop that carries a buffer descriptor.
         """
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 
@@ -6818,7 +7171,18 @@ class _Lowerer:
             br label %if.end
           if.end:
             [continuation]
+
+        An if/else with results takes each result from the ``scf.yield``
+        that ends each branch, through one ``phi`` per result at the head of
+        ``if.end``::
+
+          if.end:
+            %if7 = phi float [ %a, %if.then ], [ %b, %if.else ]
         """
+        # Refuse a malformed if/else, or a branch that does not yield the
+        # results, before reading the op or emitting.
+        for branch in range(2):
+            _if_else_branch_yield(op, branch)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -6835,7 +7199,7 @@ class _Lowerer:
         cur.terminated = True
 
         # Lower then branch (then_blk is now _current).
-        self.lower_region(then_region)
+        then_values = self._lower_if_else_branch(op, then_region)
         then_last = self._current()
         # then falls through to join; use another placeholder.
         if not then_last.terminated:
@@ -6846,7 +7210,7 @@ class _Lowerer:
         else_blk = self._new_block("if.else")
 
         # Lower else branch.
-        self.lower_region(else_region)
+        else_values = self._lower_if_else_branch(op, else_region)
         else_last = self._current()
 
         # Create join block (becomes _current for subsequent ops).
@@ -6854,6 +7218,12 @@ class _Lowerer:
         if not else_last.terminated:
             else_last.emit(f"  br label %{end_blk.label}")
             else_last.terminated = True
+        for result, then_value, else_value in zip(op.results, then_values, else_values):
+            end_blk.emit(
+                f"  {result.name} = phi {_llvm_type(result.type)} "
+                f"[ {then_value}, %{then_last.label} ], "
+                f"[ {else_value}, %{else_last.label} ]"
+            )
 
         # Backpatch placeholders in the predecessor and then blocks.
         for blk in (cur, then_last):
@@ -6861,6 +7231,16 @@ class _Lowerer:
                 line = line.replace("%IF_ELSE", f"%{else_blk.label}")
                 line = line.replace("%IF_END", f"%{end_blk.label}")
                 blk.lines[i] = line
+
+    def _lower_if_else_branch(self, op: Op, region: Region) -> List[str]:
+        """Lower one branch of the scf.if_else ``op``; return the operands its
+        closing ``scf.yield`` gives the results (none when ``op`` has none)."""
+        if not op.results:
+            self.lower_region(region)
+            return []
+        self._yield_stack.append([])
+        self.lower_region(region)
+        return self._yield_stack.pop()
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
@@ -6963,7 +7343,9 @@ class _Lowerer:
         # is validated here; the launch must pass the same shape.
         cluster_dims = self.kernel.attrs.get("cluster_dims")
         if cluster_dims is not None:
-            self._require_gfx1250_llvm23("cluster_dims")
+            self._require_llvm23_target_fact(
+                "cluster_dims", _OpTargetFact.CLUSTER_LAUNCH
+            )
             cx, cy, cz = check_cluster_dims(cluster_dims)
             attr_parts.append(f'"amdgpu-cluster-dims"="{cx},{cy},{cz}"')
         out.append(
@@ -6981,6 +7363,9 @@ class _Lowerer:
             out.append("")
         if self._needs_nontemporal_md:
             out.append("!5 = !{i32 1}")
+            out.append("")
+        if self._lds_aa_used:
+            out.extend(self._lds_aa_render())
             out.append("")
         if self._debug is not None:
             out.extend(self._debug.render())
@@ -7098,6 +7483,26 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
 
 
+# arith.cmp / vector.cmp predicate -> (signed icmp predicate, unsigned one).
+_ICMP_PREDICATES = {
+    # "ult" is the explicit unsigned compare: unsigned whatever the type.
+    "ult": ("ult", "ult"),
+    "lt": ("slt", "ult"),
+    "le": ("sle", "ule"),
+    "gt": ("sgt", "ugt"),
+    "ge": ("sge", "uge"),
+    "eq": ("eq", "eq"),
+    "ne": ("ne", "ne"),
+}
+
+
+def _icmp_predicate(pred: str, t: Type) -> str:
+    """The icmp predicate for ``pred`` on operands of type ``t``: ordered
+    compares of unsigned integers are unsigned."""
+    signed, unsigned = _ICMP_PREDICATES[pred]
+    return unsigned if _is_unsigned(t) else signed
+
+
 def _fp64_hex(x: float) -> str:
     # LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits.
     import struct
@@ -7157,7 +7562,8 @@ def lower_kernel_to_llvm(
 
     ``llvm_flavor`` overrides the autodetected default (one of
     :data:`LLVM_FLAVOR_LLVM20` / :data:`LLVM_FLAVOR_LLVM22` /
-    :data:`LLVM_FLAVOR_LLVM23`). Useful for tests that want to pin a
+    :data:`LLVM_FLAVOR_LLVM23` / :data:`LLVM_FLAVOR_LLVM24`). Useful for tests
+    that want to pin a
     specific flavor regardless of the host ROCm install.
 
     ``arch`` selects the ISA backend (e.g. ``"gfx942"``, ``"gfx950"``) that

@@ -145,8 +145,9 @@ Sweep 2-5 need the GPU. No GPU => stop after step 1, ship a pruned unranked set.
 **Round 1 — REQUIRED, never invented. `AskUserQuestion` takes at most FOUR questions per call, so this is
 TWO calls, not one** — do not re-merge them into an instruction that cannot execute:
 - **1a:** goal (correctness / peak throughput / a target / learning) · algorithm · **ordered tensor
-  descriptors** (`A=(M×K) strides=(sM,sK)`, `B=(K×N) strides=(sK,sN)`, `C=(M×N) strides=(sM,sN)`, + dtype and
-  memory space) · **target arch**.
+  descriptors** in the one axis convention (`A=(M, K) strides=(sM, sK)`, `B=(N, K) strides=(sN, sK)`,
+  `C=(M, N) strides=(sM, sN)`, batch axes first, + dtype and memory space; the convention is
+  `docs/tiling_api_surface.md` sec 3, "One axis convention") · **target arch**.
 - **1b:** kernel name (names the output folder — layout per `docs/kernels/_TEMPLATE.md`) · caller-side
   constraints (grid/launch convention, ABI shape, batch stride, fusion it must absorb, any shared occupancy
   or LDS budget) · **"any values you want pinned?"**. "None" is a fine answer; ask anyway, because a caller
@@ -217,6 +218,15 @@ validated bank model exists · whether host == target. Four of five are free loo
 
 Then CLASSIFY: which stage classes are present + the knob instance per class. **NOVEL** → the architect
 learns it with the user and outputs the **stage table**, which is Emit's input.
+
+**A tensor that is not a plain strided view of the loop coordinates** (an implicit-GEMM convolution input
+with its halo, an LDS swizzle): its coordinate graph is part of the stage table, and Emit authors it with
+`rocke.helpers.tiling.tensor_transforms` (`make_transform_graph`, then `emit_accesses` for each access's split
+address and validity). Coordinates are **positional** (one per graph input, in `inputs(...)` order; a vector's
+`vector_axis` is a graph-input index, never a tile-axis index) and **plain IR values** -- the layer splits them
+and proves their ranges, so write them by the guide's spelling rule. Bound checks are DERIVED, never hand-added;
+lengths stay on the tensor description. How-to: `docs/tensor_transforms_guide.md`; rules and errors:
+`docs/tensor_transforms_api.md`.
 
 ### Emit
 

@@ -145,10 +145,6 @@ class AttnCfg:
     head_size: int
     dtype: str = "f16"
     causal: bool = False
-    # WMMA lane only: stage the K-tile's V rows through LDS for the PV
-    # B-operand. The LDS allocation, stores and loads are typed by ``dtype``,
-    # so bf16 x v_lds_stage is its own code path and needs its own case.
-    v_lds_stage: bool = False
 
 
 ATTN_CONFIGS: List[AttnCfg] = [
@@ -163,12 +159,12 @@ ATTN_CONFIGS: List[AttnCfg] = [
 # attention parity gate's tolerance (2e-2), matching the example harness.
 _ATTN_TOL = Tol(rtol=0.0, atol=2e-2)
 
-# RDNA WMMA FMHA forward (kernels/gfx1151/wmma_fmha_fwd.py), which carries the
-# bf16 I/O path. These are the on-GPU cases behind `--only wmma_fmha_fwd`;
-# without them that scope selects nothing and the gate passes vacuously.
-# is_valid_spec is capability-driven: it rejects any target whose catalog lacks
-# the wave32 16x16x16 WMMA atom for the dtype (CDNA has MFMA instead), so the
-# cases self-skip there rather than failing.
+# RDNA WMMA FMHA prefill (kernels/gfx1151/wmma_fmha_fwd_v2.py), which carries
+# the bf16 I/O path. These are the on-GPU cases behind
+# `--only wmma_fmha_fwd_v2`; without them that scope selects nothing and the
+# gate passes vacuously. is_valid_spec is capability-driven: it rejects any
+# target whose catalog lacks the wave32 16x16x16 WMMA atom for the dtype (CDNA
+# has MFMA instead), so the cases self-skip there rather than failing.
 WMMA_CONFIGS: List[AttnCfg] = [
     AttnCfg("wmma_mha_b2_h4_s64_d64_f16", 2, 4, 4, 64, 64, 64),
     AttnCfg("wmma_causal_b2_h4_s64_d64_f16", 2, 4, 4, 64, 64, 64, causal=True),
@@ -194,30 +190,25 @@ WMMA_CONFIGS: List[AttnCfg] = [
         128,
         dtype="bf16",
     ),
-    # bf16 crossed with staged V: the V-LDS tile is allocated, stored and
-    # loaded as the I/O type, so this is the one combination the other cases
-    # do not reach -- bf16 alone keeps the global-gather B-operand, and the
-    # fp16 staged-V parity config keeps the fp16 LDS type.
     AttnCfg(
-        "wmma_mha_b2_h4_s64_d64_bf16_vlds",
+        "wmma_gqa_causal_b1_h8kv2_s64_d128_f16",
+        1,
+        8,
         2,
-        4,
-        4,
         64,
         64,
-        64,
-        dtype="bf16",
-        v_lds_stage=True,
+        128,
+        causal=True,
     ),
 ]
 
 # Against an *fp32* reference the residual is dominated by the final rounding
 # to the I/O dtype, so bf16 (8 significand bits) lands ~8x above fp16 (11).
-# Worst observed on gfx1201 over the configs above, bar the bf16 staged-V one
-# (not yet run on hardware): fp16 2.2e-04, bf16 1.8e-03. bf16 therefore gets
-# 1e-2 (~5x headroom), while fp16 keeps its historical 2e-2 attention gate. A
-# tolerance loose enough to swallow bf16 quantisation noise would also swallow
-# a structural bug (TESTING.md gap G5), so bf16 is tightened, not relaxed.
+# Worst observed on gfx1201 with the single-wave predecessor kernel over the
+# same shapes: fp16 2.2e-04, bf16 1.8e-03. bf16 therefore gets 1e-2 (~5x
+# headroom), while fp16 keeps its historical 2e-2 attention gate. A tolerance
+# loose enough to swallow bf16 quantisation noise would also swallow a
+# structural bug (TESTING.md gap G5), so bf16 is tightened, not relaxed.
 _WMMA_TOL = {"fp16": Tol(rtol=0.0, atol=2e-2), "bf16": Tol(rtol=0.0, atol=1e-2)}
 
 
@@ -399,7 +390,7 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
 
 
 def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
-    """On-GPU numeric check for the RDNA WMMA FMHA forward (fp16 and bf16 I/O).
+    """On-GPU numeric check for the RDNA WMMA FMHA prefill (fp16 and bf16 I/O).
 
     Same shape as ``run_attn_config`` but drives the WMMA adapter instead of the
     MFMA one, and routes host tensors through ``_encode``/``_decode`` so bf16
@@ -408,12 +399,12 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
     import math as _m
 
     import numpy as np
-    from kernels.gfx1151.wmma_fmha_fwd import (
-        WmmaFmhaFwdSpec,
-        build_wmma_fmha_fwd,
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
+        WmmaFmhaFwdV2Spec,
+        build_wmma_fmha_fwd_v2,
         is_valid_spec,
-        wmma_fmha_fwd_grid,
-        wmma_fmha_fwd_signature,
+        wmma_fmha_fwd_v2_grid,
+        wmma_fmha_fwd_v2_signature,
     )
     from rocke.helpers.compile import compile_kernel
     from rocke.numeric.references import dense_attention_reference
@@ -423,7 +414,7 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
 
     tol_key = _ELEM_TOL_KEY.get(cfg.dtype, cfg.dtype)
     res = NumericResult(
-        family="wmma_fmha_fwd",
+        family="wmma_fmha_fwd_v2",
         name=cfg.name,
         status="GREEN",
         dtype=tol_key,
@@ -432,13 +423,13 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
     tol = _WMMA_TOL[tol_key]
     res.rtol, res.atol = tol.rtol, tol.atol
 
-    # Only head_size is compiled into the code object; the head counts, strides
-    # and sequence lengths below are kernel arguments.
-    spec = WmmaFmhaFwdSpec(
-        head_size=cfg.head_size,
-        dtype=cfg.dtype,
-        mask_mode="causal" if cfg.causal else "none",
-        v_lds_stage=cfg.v_lds_stage,
+    # Only the head-width bucket, dtype and mask class are compiled into the
+    # code object; the head counts and widths, strides and sequence lengths
+    # below are kernel arguments.
+    spec = WmmaFmhaFwdV2Spec(
+        dtype=tol_key,
+        head_dim=cfg.head_size,
+        mask="causal" if cfg.causal else "none",
         name=f"rocke_wmma_num_{cfg.name}",
     )
 
@@ -455,7 +446,7 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
         return res
 
     try:
-        art = compile_kernel(build_wmma_fmha_fwd(spec, arch=arch), arch=arch)
+        art = compile_kernel(build_wmma_fmha_fwd_v2(spec, arch=arch), arch=arch)
     except Exception as e:  # noqa: BLE001
         res.status = "BUILD_FAIL"
         res.detail = f"build/compile raised: {e}"
@@ -475,9 +466,8 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
     Qf, Kf, Vf = (_decode(t, tol_key) for t in (Q, K, V))
 
     scale_log2 = float(1.0 / _m.sqrt(D) * _m.log2(_m.e))
-    sig = wmma_fmha_fwd_signature(spec)
-    grid = wmma_fmha_fwd_grid(spec, seqlen_q=Sq, num_query_heads=Hq, batch=B)
-    block = (spec.block_size, 1, 1)
+    sig = wmma_fmha_fwd_v2_signature(spec)
+    grid, block = wmma_fmha_fwd_v2_grid(spec, batch=B, seqlen_q=Sq, num_query_heads=Hq)
 
     rt = Runtime()
     try:
@@ -490,7 +480,8 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
         rt.memcpy_h2d(v_dev.ptr(), as_u8_buffer(V), V.nbytes)
         rt.memset(o_dev.ptr(), 0, Out.nbytes)
         # [B, S, H, D] row-major; strides are in elements. LSE is not written
-        # (write_lse=0) but the pointer must still be a valid one.
+        # (write_lse=0) but the pointer must still be a valid one. Causal is
+        # top-left (window_right=0); no mask leaves both window sides open.
         values = {
             "Q": q_dev,
             "K": k_dev,
@@ -498,13 +489,17 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
             "O": o_dev,
             "LSE": o_dev,
             "scale_log2": scale_log2,
+            "batch": B,
             "seqlen_q": Sq,
             "seqlen_k": Sk,
             "num_query_heads": Hq,
             "num_kv_heads": Hk,
+            "num_v_heads": Hk,
+            "head_dim_q": D,
+            "head_dim_v": D,
             "bottom_right": 0,
             "window_left": -1,
-            "window_right": 0,
+            "window_right": 0 if cfg.causal else -1,
             "write_lse": 0,
             "stride_q_batch": Sq * Hq * D,
             "stride_q_token": Hq * D,
@@ -583,7 +578,7 @@ def _check_gpu() -> Optional[str]:
 # The families this harness owns. run_checks.py forwards its --op to --only for
 # every operator in the repo, most of which live in other harnesses, so "this
 # scope selected nothing" has two very different meanings -- see _scope_is_ours.
-_OWNED_FAMILIES = ("attention", "wmma_fmha_fwd")
+_OWNED_FAMILIES = ("attention", "wmma_fmha_fwd_v2")
 
 
 def _scope_is_ours(only: str) -> bool:
@@ -617,7 +612,7 @@ def run_all(arch: str = "gfx950", only: str = "") -> List[NumericResult]:
         if want("attention", cfg.name):
             results.append(run_attn_config(cfg, arch=arch))
     for cfg in WMMA_CONFIGS:
-        if want("wmma_fmha_fwd", cfg.name):
+        if want("wmma_fmha_fwd_v2", cfg.name):
             results.append(run_wmma_config(cfg, arch=arch))
     return results
 

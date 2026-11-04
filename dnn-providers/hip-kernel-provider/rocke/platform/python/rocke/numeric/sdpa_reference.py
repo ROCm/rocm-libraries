@@ -1,0 +1,612 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Torch-free float64 scaled-dot-product-attention oracle.
+
+Semantics follow the hipDNN CPU reference for the SDPA forward node:
+
+* ``scores = (Q @ K^T) * scale`` then ``+ bias`` (bias is added AFTER scaling).
+* The diagonal band keeps ``k`` iff
+  ``(right < 0 or k <= q + offset + right) and (left < 0 or k >= q + offset - left)``
+  with ``offset = 0`` for a top-left diagonal and ``s_kv - s_q`` for a
+  bottom-right one. ``-1`` means unbounded; values below ``-1`` are invalid.
+  ``left = W`` therefore keeps ``W + 1`` keys (the diagonal plus ``W`` to its left).
+  That is FlashAttention's window; hipDNN's graph ``left_bound = L`` keeps ``L``
+  keys (cuDNN's meaning; ``SdpaSemanticsRegister`` SEM-001), so pass ``W = L - 1``
+  (:func:`hipdnn_left_to_window`).
+* Softmax is over the kept keys; ``LSE`` is the natural log of the softmax
+  denominator (max-shifted: ``LSE = max + log(sum exp(s - max))``).
+* A row with no kept key (fully masked by band, padding or an all ``-inf``
+  bias row) yields ``O = 0`` and ``LSE = -inf``. This deliberately differs from
+  ``dense_attention_reference``, which uses a finite sentinel.
+* Query rows at or beyond the per-batch ``seq_len_q`` (padded layout) also
+  yield ``O = 0`` and ``LSE = -inf``; keys at or beyond ``seq_len_kv`` are
+  never attended. In the band, ``s_q``/``s_kv`` are the per-batch valid counts.
+
+Layouts
+-------
+Dense (padded) layout: ``Q[B, Hq, Sq, D]``, ``K[B, Hk, Skv, D]``,
+``V[B, Hv, Skv, Dv]`` -> ``O[B, Hq, Sq, Dv]``, ``LSE[B, Hq, Sq]``.
+Ragged (THD) layout: ``Q[T_q, Hq, D]``, ``K[T_kv, Hk, D]``, ``V[T_kv, Hv, Dv]``
+with ``q_offsets[B+1]`` / ``kv_offsets[B+1]`` token offsets -> ``O[T_q, Hq, Dv]``,
+``LSE[T_q, Hq]``. Rows outside every batch segment are zero / ``-inf``.
+
+GQA/MQA: ``Hq % Hk == 0`` and ``Hq % Hv == 0``; query head ``h`` uses KV head
+``h // (Hq // Hk)`` (contiguous grouping).
+
+Bias: rank 1-4, right-aligned against ``[B, Hq, Sq, Skv]``; any size-1 axis
+broadcasts. In the ragged layout the bias is indexed by in-batch positions
+and its Sq/Skv extents are the longest per-batch lengths.
+
+Backward (:func:`sdpa_reference_bwd`) follows the hipDNN CPU reference
+backward: it consumes the natural-log LSE of the forward, recomputes
+``P = exp(scale * q.k - LSE)`` on kept cells only, and returns ``dQ``, ``dK``,
+``dV`` (``dK``/``dV`` summed over each KV head's query-head group) plus
+``delta = rowsum(dO * O)``. Bias is not accepted in backward.
+"""
+
+from __future__ import annotations
+
+import math
+import operator
+
+import numpy as np
+
+__all__ = [
+    "SdpaBwdResult",
+    "keep",
+    "resolve_diagonal_band",
+    "as_index",
+    "check_hipdnn_band",
+    "hipdnn_left_to_window",
+    "resolve_hipdnn_band",
+    "sdpa_reference",
+    "sdpa_reference_bwd",
+]
+
+
+def resolve_diagonal_band(
+    *,
+    left_bound=None,
+    right_bound=None,
+    top_left=True,
+    causal=False,
+    causal_bottom_right=False,
+):
+    """Resolve user mask settings to ``(left_bound, right_bound, top_left)``.
+
+    ``None`` bounds mean unbounded (-1). The deprecated causal booleans take
+    precedence over explicit bounds and alignment: ``causal`` forces
+    ``(-1, 0, top_left=True)`` and ``causal_bottom_right`` forces
+    ``(-1, 0, top_left=False)``. Setting both booleans is an error.
+
+    hipDNN's own resolvers merge the flags with the stored bounds instead; use
+    :func:`resolve_hipdnn_band` to resolve a hipDNN SDPA node's attributes.
+    """
+    left = -1 if left_bound is None else int(left_bound)
+    right = -1 if right_bound is None else int(right_bound)
+    if left < -1 or right < -1:
+        raise ValueError(f"band bounds must be >= -1 (got left={left}, right={right})")
+    if causal and causal_bottom_right:
+        raise ValueError("causal and causal_bottom_right are mutually exclusive")
+    if causal:
+        return -1, 0, True
+    if causal_bottom_right:
+        return -1, 0, False
+    return left, right, bool(top_left)
+
+
+def as_index(value, name):
+    """``value`` as an ``int``; a float, bool or string is an error, not rounded.
+
+    Truncating would change a band: ``int(-1.75)`` is the unbounded ``-1``.
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer, got {value!r}")
+    try:
+        return operator.index(value)
+    except TypeError:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from None
+
+
+def _hipdnn_bound(value, name):
+    """A hipDNN band bound: ``None`` is unbounded (-1); a non-integer is an error."""
+    return -1 if value is None else as_index(value, name)
+
+
+def check_hipdnn_band(left_bound, right_bound):
+    """Reject a band outside hipDNN's domain (``SdpaSemanticsRegister`` SEM-005).
+
+    ``left_bound`` is ``-1`` (unbounded) or ``>= 1``; ``right_bound >= -1``. The one
+    copy of ``detail::validateSdpaDiagonalBand`` for rocKE: the band resolver, the
+    ``L -> L - 1`` conversion and ``SdpaRequest`` all call it.
+    """
+    if left_bound == 0 or left_bound < -1 or right_bound < -1:
+        raise ValueError(
+            "left_bound must be -1 (unbounded) or >= 1 and right_bound >= -1, got "
+            f"left_bound={left_bound}, right_bound={right_bound}"
+        )
+
+
+def resolve_hipdnn_band(
+    *,
+    left_bound=None,
+    right_bound=None,
+    diagonal_alignment="TOP_LEFT",
+    causal_mask=False,
+    causal_mask_bottom_right=False,
+):
+    """Resolve a hipDNN SDPA node's mask attributes to ``(diagonal, left, right)``.
+
+    The one definition of hipDNN's band semantics for rocKE. It matches hipDNN's
+    resolvers (``extractDiagonalBandParams`` in the CPU reference and
+    ``resolveDiagonalBand`` in the asm SDPA engine): a deprecated flag acts as if
+    its setter ran first (right bound 0, plus bottom-right alignment for
+    ``causal_mask_bottom_right``) and the stored bounds and alignment apply on
+    top. ``causal_mask`` keeps the stored alignment. An unset bound is ``-1``
+    (unbounded) and does not override the flag's right bound. Both flags set, a
+    bound below ``-1``, or ``left_bound = 0`` is an error.
+
+    The bounds keep hipDNN's (cuDNN's; SEM-001) meaning:
+    ``left_bound = L`` keeps the ``L`` keys ending at the diagonal. :func:`keep`
+    and :func:`sdpa_reference` take FlashAttention's window, so pass them
+    ``L - 1`` (see :func:`hipdnn_left_to_window`).
+
+    ``diagonal_alignment`` is hipDNN's spelling (``"TOP_LEFT"`` /
+    ``"BOTTOM_RIGHT"``, any case); the result's ``diagonal`` is ``"top_left"`` or
+    ``"bottom_right"``, the form :func:`keep` takes.
+    """
+    if causal_mask and causal_mask_bottom_right:
+        raise ValueError(
+            "causal_mask and causal_mask_bottom_right are mutually exclusive "
+            "but both are set"
+        )
+    alignment = str(diagonal_alignment or "TOP_LEFT").upper()
+    if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
+        raise ValueError(f"unknown diagonal_alignment {alignment!r}")
+    left = _hipdnn_bound(left_bound, "left_bound")
+    right = _hipdnn_bound(right_bound, "right_bound")
+    check_hipdnn_band(left, right)
+    if causal_mask or causal_mask_bottom_right:
+        right = right if right >= 0 else 0
+        if causal_mask_bottom_right:
+            alignment = "BOTTOM_RIGHT"
+    return alignment.lower(), left, right
+
+
+def hipdnn_left_to_window(left_bound):
+    """hipDNN's ``left_bound = L`` as the FlashAttention window :func:`keep` takes.
+
+    hipDNN keeps the ``L`` keys ending at the diagonal (``k > q + offset - L``);
+    :func:`keep` keeps ``W + 1`` (``k >= q + offset - W``), so ``W = L - 1``. The
+    one conversion point, as ``plan_utils::resolveDiagonalBand`` is for the
+    hip-kernel-provider engines. ``-1`` stays unbounded; ``0`` is rejected,
+    because ``L - 1`` would turn it into the unbounded ``-1``.
+    """
+    left = _hipdnn_bound(left_bound, "left_bound")
+    check_hipdnn_band(left, -1)
+    return -1 if left == -1 else left - 1
+
+
+def keep(q, k, s_q, s_kv, diagonal, left_bound, right_bound):
+    """True iff query ``q`` may attend key ``k``.
+
+    ``diagonal`` is ``"top_left"`` / ``"bottom_right"`` (or a bool where True
+    means top-left). Scalar arguments only.
+    """
+    if left_bound < -1 or right_bound < -1:
+        raise ValueError("band bounds must be >= -1")
+    if isinstance(diagonal, str):
+        if diagonal not in ("top_left", "bottom_right"):
+            raise ValueError(f"unknown diagonal alignment {diagonal!r}")
+        top_left = diagonal == "top_left"
+    else:
+        top_left = bool(diagonal)
+    offset = 0 if top_left else s_kv - s_q
+    if right_bound >= 0 and k > q + offset + right_bound:
+        return False
+    if left_bound >= 0 and k < q + offset - left_bound:
+        return False
+    return True
+
+
+def _band_mask(s_q, s_kv, top_left, left, right):
+    """Vectorised ``keep`` over a ``[s_q, s_kv]`` grid."""
+    qi = np.arange(s_q)[:, None]
+    ki = np.arange(s_kv)[None, :]
+    offset = 0 if top_left else s_kv - s_q
+    m = np.ones((s_q, s_kv), dtype=bool)
+    if right >= 0:
+        m &= ki <= qi + offset + right
+    if left >= 0:
+        m &= ki >= qi + offset - left
+    return m
+
+
+def _expand_bias(bias, B, H, Sq, Skv):
+    bias = np.asarray(bias, dtype=np.float64)
+    if not 1 <= bias.ndim <= 4:
+        raise ValueError("bias rank must be 1..4")
+    bias = bias.reshape((1,) * (4 - bias.ndim) + bias.shape)
+    want = (B, H, Sq, Skv)
+    for got, w in zip(bias.shape, want):
+        if got not in (1, w):
+            raise ValueError(f"bias shape {bias.shape} not broadcastable to {want}")
+    return np.broadcast_to(bias, want)
+
+
+def _attend(q, k, v, scale, bias2d, band):
+    """One (batch, head) problem. q[sq,D], k[skv,D], v[skv,Dv] -> (o, lse)."""
+    sq, skv = q.shape[0], k.shape[0]
+    if skv == 0:
+        return np.zeros((sq, v.shape[1])), np.full(sq, -np.inf)
+    s = (q @ k.T) * scale
+    if bias2d is not None:
+        s = s + bias2d
+    s = np.where(band, s, -np.inf)
+    mx = s.max(axis=1)
+    live = np.isfinite(mx)
+    safe = np.where(live, mx, 0.0)
+    e = np.where(live[:, None], np.exp(s - safe[:, None]), 0.0)
+    den = e.sum(axis=1)
+    den1 = np.where(live, den, 1.0)
+    o = (e / den1[:, None]) @ v
+    lse = np.where(live, mx + np.log(den1), -np.inf)
+    return o, lse
+
+
+def sdpa_reference(
+    q,
+    k,
+    v,
+    *,
+    scale=None,
+    bias=None,
+    left_bound=None,
+    right_bound=None,
+    top_left=True,
+    causal=False,
+    causal_bottom_right=False,
+    seq_len_q=None,
+    seq_len_kv=None,
+    q_offsets=None,
+    kv_offsets=None,
+):
+    """Float64 SDPA forward. Returns ``(O, LSE)``, both float64.
+
+    ``LSE`` is natural-log (``-inf`` for empty rows) and can be cast to fp32.
+    Provide ``q_offsets`` and ``kv_offsets`` for the ragged THD layout,
+    otherwise inputs are dense 4-D with optional per-batch ``seq_len_q`` /
+    ``seq_len_kv`` counts. ``scale`` defaults to ``1/sqrt(D)``.
+    """
+    q = np.asarray(q, dtype=np.float64)
+    k = np.asarray(k, dtype=np.float64)
+    v = np.asarray(v, dtype=np.float64)
+    left, right, tl = resolve_diagonal_band(
+        left_bound=left_bound,
+        right_bound=right_bound,
+        top_left=top_left,
+        causal=causal,
+        causal_bottom_right=causal_bottom_right,
+    )
+    ragged = q_offsets is not None or kv_offsets is not None
+    if ragged:
+        if q_offsets is None or kv_offsets is None:
+            raise ValueError("ragged layout needs both q_offsets and kv_offsets")
+        if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
+            raise ValueError("ragged layout expects [T, H, D] tensors")
+        if seq_len_q is not None or seq_len_kv is not None:
+            raise ValueError("seq_len_* and offsets are mutually exclusive")
+        qo = [int(x) for x in q_offsets]
+        ko = [int(x) for x in kv_offsets]
+        if len(qo) != len(ko) or len(qo) < 2:
+            raise ValueError("offsets must have B+1 entries")
+        B = len(qo) - 1
+        Hq, D = q.shape[1], q.shape[2]
+        Hk, Hv, Dv = k.shape[1], v.shape[1], v.shape[2]
+        lens_q = [qo[b + 1] - qo[b] for b in range(B)]
+        lens_kv = [ko[b + 1] - ko[b] for b in range(B)]
+        if min(lens_q + lens_kv) < 0 or qo[-1] > q.shape[0] or ko[-1] > k.shape[0]:
+            raise ValueError("offsets out of range")
+        Smax_q, Smax_kv = max(lens_q), max(lens_kv)
+        o = np.zeros((q.shape[0], Hq, Dv))
+        lse = np.full((q.shape[0], Hq), -np.inf)
+    else:
+        if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+            raise ValueError("dense layout expects [B, H, S, D] tensors")
+        B, Hq, Smax_q, D = q.shape
+        Hk, Hv, Dv = k.shape[1], v.shape[1], v.shape[3]
+        Smax_kv = k.shape[2]
+        lens_q = (
+            [Smax_q] * B
+            if seq_len_q is None
+            else [int(x) for x in np.reshape(seq_len_q, -1)]
+        )
+        lens_kv = (
+            [Smax_kv] * B
+            if seq_len_kv is None
+            else [int(x) for x in np.reshape(seq_len_kv, -1)]
+        )
+        if len(lens_q) != B or len(lens_kv) != B:
+            raise ValueError("seq_len arrays must have one entry per batch")
+        if any(not 0 <= n <= Smax_q for n in lens_q) or any(
+            not 0 <= n <= Smax_kv for n in lens_kv
+        ):
+            raise ValueError("seq_len out of range")
+        o = np.zeros((B, Hq, Smax_q, Dv))
+        lse = np.full((B, Hq, Smax_q), -np.inf)
+    if k.shape[-1] != D:
+        raise ValueError("Q and K head dims differ")
+    if Hq % Hk or Hq % Hv:
+        raise ValueError("Hq must be a multiple of Hk and Hv")
+    if scale is None:
+        scale = 1.0 / math.sqrt(D)
+    bias_full = None if bias is None else _expand_bias(bias, B, Hq, Smax_q, Smax_kv)
+
+    for b in range(B):
+        sq, skv = lens_q[b], lens_kv[b]
+        if sq == 0:
+            continue
+        band = _band_mask(sq, skv, tl, left, right)
+        for h in range(Hq):
+            hk, hv = h // (Hq // Hk), h // (Hq // Hv)
+            bb = None if bias_full is None else bias_full[b, h, :sq, :skv]
+            if ragged:
+                qs = slice(qo[b], qo[b] + sq)
+                ks = slice(ko[b], ko[b] + skv)
+                o[qs, h], lse[qs, h] = _attend(
+                    q[qs, h], k[ks, hk], v[ks, hv], scale, bb, band
+                )
+            else:
+                o[b, h, :sq], lse[b, h, :sq] = _attend(
+                    q[b, h, :sq], k[b, hk, :skv], v[b, hv, :skv], scale, bb, band
+                )
+    return o, lse
+
+
+# ---------------------------------------------------------------------------
+# backward
+# ---------------------------------------------------------------------------
+
+
+class SdpaBwdResult(tuple):
+    """``(dq, dk, dv, delta)`` with attribute access; unpacks as a 4-tuple."""
+
+    __slots__ = ()
+
+    def __new__(cls, dq, dk, dv, delta):
+        return super().__new__(cls, (dq, dk, dv, delta))
+
+    dq = property(lambda self: self[0])
+    dk = property(lambda self: self[1])
+    dv = property(lambda self: self[2])
+    delta = property(lambda self: self[3])
+
+
+def _bwd_geometry(q, k, v, seq_len_q, seq_len_kv, q_offsets, kv_offsets):
+    """Shared shape checks of the backward oracle.
+
+    Returns ``(ragged, B, lens_q, lens_kv, q_starts, kv_starts)`` where the
+    starts are token offsets (ragged) or ``None`` (dense).
+    """
+    ragged = q_offsets is not None or kv_offsets is not None
+    if ragged:
+        if q_offsets is None or kv_offsets is None:
+            raise ValueError("ragged layout needs both q_offsets and kv_offsets")
+        if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
+            raise ValueError("ragged layout expects [T, H, D] tensors")
+        if seq_len_q is not None or seq_len_kv is not None:
+            raise ValueError("seq_len_* and offsets are mutually exclusive")
+        qo = [int(x) for x in np.reshape(q_offsets, -1)]
+        ko = [int(x) for x in np.reshape(kv_offsets, -1)]
+        if len(qo) != len(ko) or len(qo) < 2:
+            raise ValueError("offsets must have B+1 entries")
+        B = len(qo) - 1
+        lens_q = [qo[b + 1] - qo[b] for b in range(B)]
+        lens_kv = [ko[b + 1] - ko[b] for b in range(B)]
+        if min(lens_q + lens_kv) < 0 or qo[-1] > q.shape[0] or ko[-1] > k.shape[0]:
+            raise ValueError("offsets out of range")
+        if v.shape[0] != k.shape[0]:
+            raise ValueError("K and V token counts differ")
+        return True, B, lens_q, lens_kv, qo[:-1], ko[:-1]
+    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+        raise ValueError("dense layout expects [B, H, S, D] tensors")
+    B, _, Smax_q, _ = q.shape
+    Smax_kv = k.shape[2]
+    if v.shape[2] != Smax_kv or k.shape[0] != B or v.shape[0] != B:
+        raise ValueError("K/V batch or sequence extents do not match")
+    lens_q = (
+        [Smax_q] * B
+        if seq_len_q is None
+        else [int(x) for x in np.reshape(seq_len_q, -1)]
+    )
+    lens_kv = (
+        [Smax_kv] * B
+        if seq_len_kv is None
+        else [int(x) for x in np.reshape(seq_len_kv, -1)]
+    )
+    if len(lens_q) != B or len(lens_kv) != B:
+        raise ValueError("seq_len arrays must have one entry per batch")
+    if any(not 0 <= n <= Smax_q for n in lens_q) or any(
+        not 0 <= n <= Smax_kv for n in lens_kv
+    ):
+        raise ValueError("seq_len out of range")
+    return False, B, lens_q, lens_kv, None, None
+
+
+def _stats_view(lse, want_shape, name):
+    """Accept ``want_shape`` or ``want_shape + (1,)`` (the rank-4 stats form)."""
+    lse = np.asarray(lse, dtype=np.float64)
+    if lse.shape == tuple(want_shape) + (1,):
+        lse = lse[..., 0]
+    if lse.shape != tuple(want_shape):
+        raise ValueError(f"{name} shape {lse.shape} != {tuple(want_shape)}")
+    return lse
+
+
+def _attend_bwd(q, k, v, do, delta, lse, scale, band):
+    """One (batch, head) problem: returns ``(dq, dk, dv)`` partials.
+
+    ``P = exp(scale * q.k - lse)`` on kept cells of live rows (finite ``lse``)
+    and exactly 0 elsewhere, so masked cells and fully masked rows contribute
+    nothing and never produce NaN.
+    """
+    live = np.isfinite(lse)
+    keepm = band & live[:, None]
+    s = (q @ k.T) * scale
+    safe_lse = np.where(live, lse, 0.0)
+    p = np.where(keepm, np.exp(np.where(keepm, s - safe_lse[:, None], 0.0)), 0.0)
+    dv = p.T @ do
+    dp = do @ v.T
+    ds = p * (dp - delta[:, None])
+    dq = (ds @ k) * scale
+    dk = (ds.T @ q) * scale
+    return dq, dk, dv
+
+
+def sdpa_reference_bwd(
+    q,
+    k,
+    v,
+    o,
+    do,
+    lse=None,
+    *,
+    scale=None,
+    bias=None,
+    left_bound=None,
+    right_bound=None,
+    top_left=True,
+    causal=False,
+    causal_bottom_right=False,
+    seq_len_q=None,
+    seq_len_kv=None,
+    q_offsets=None,
+    kv_offsets=None,
+    recompute_lse=False,
+):
+    """Float64 SDPA backward. Returns ``SdpaBwdResult(dq, dk, dv, delta)``.
+
+    Mirrors the hipDNN CPU reference backward: ``P = exp(scale * q.k - LSE)``
+    on kept cells (masked cells are skipped), ``delta = rowsum(dO * O)``,
+    ``dV = P^T dO``, ``dS = P * (dO V^T - delta)``, ``dQ = scale * dS K`` and
+    ``dK = scale * dS^T Q``. ``dK`` / ``dV`` of a KV head are summed over every
+    query head mapped to it (contiguous grouping ``h // (Hq // Hk)``, K and V
+    head counts independent).
+
+    Layout, band, padding and ragged conventions are those of
+    :func:`sdpa_reference`; ``dq``/``dk``/``dv`` are shaped like ``q``/``k``/``v``
+    and ``delta`` like the stats (``[B, Hq, Sq]`` or ``[T_q, Hq]``).
+
+    ``lse`` is the natural-log forward statistic (``[B, Hq, Sq]``, ``[T, Hq]``
+    or either with a trailing size-1 axis). Rows with ``LSE = -inf`` (fully
+    masked) contribute nothing and get ``dq = 0``. Query rows past
+    ``seq_len_q`` / outside every ragged segment are padding: they contribute
+    nothing and their ``dq`` and ``delta`` are 0. Keys past ``seq_len_kv`` get
+    ``dk = dv = 0``.
+
+    ``recompute_lse=True`` derives LSE (and ``O`` when ``o`` is None) from
+    :func:`sdpa_reference` instead of taking it from the caller; ``lse`` must
+    then be None. ``bias`` must be None: a backward with an additive bias is
+    out of scope.
+    """
+    if bias is not None:
+        raise ValueError(
+            "sdpa_reference_bwd: additive bias is not supported in backward "
+            "(bias is forward-only; no dBias)"
+        )
+    q = np.asarray(q, dtype=np.float64)
+    k = np.asarray(k, dtype=np.float64)
+    v = np.asarray(v, dtype=np.float64)
+    do = np.asarray(do, dtype=np.float64)
+    left, right, tl = resolve_diagonal_band(
+        left_bound=left_bound,
+        right_bound=right_bound,
+        top_left=top_left,
+        causal=causal,
+        causal_bottom_right=causal_bottom_right,
+    )
+    ragged, B, lens_q, lens_kv, qs0, ks0 = _bwd_geometry(
+        q, k, v, seq_len_q, seq_len_kv, q_offsets, kv_offsets
+    )
+    if ragged:
+        Hq, D = q.shape[1], q.shape[2]
+        Hk, Hv, Dv = k.shape[1], v.shape[1], v.shape[2]
+        stats_shape = (q.shape[0], Hq)
+        out_shape = (q.shape[0], Hq, Dv)
+    else:
+        _, Hq, Smax_q, D = q.shape
+        Hk, Hv, Dv = k.shape[1], v.shape[1], v.shape[3]
+        stats_shape = (B, Hq, Smax_q)
+        out_shape = (B, Hq, Smax_q, Dv)
+    if k.shape[-1] != D:
+        raise ValueError("Q and K head dims differ")
+    if Hq % Hk or Hq % Hv:
+        raise ValueError("Hq must be a multiple of Hk and Hv")
+    if do.shape != out_shape:
+        raise ValueError(f"dO shape {do.shape} != {out_shape}")
+    if scale is None:
+        scale = 1.0 / math.sqrt(D)
+    scale = float(scale)
+
+    if recompute_lse:
+        if lse is not None:
+            raise ValueError("pass lse=None with recompute_lse=True")
+        fo, lse = sdpa_reference(
+            q,
+            k,
+            v,
+            scale=scale,
+            left_bound=left,
+            right_bound=right,
+            top_left=tl,
+            seq_len_q=None if ragged else lens_q,
+            seq_len_kv=None if ragged else lens_kv,
+            q_offsets=q_offsets,
+            kv_offsets=kv_offsets,
+        )
+        if o is None:
+            o = fo
+    elif lse is None:
+        raise ValueError("lse is required unless recompute_lse=True")
+    if o is None:
+        raise ValueError("o is required unless recompute_lse=True")
+    o = np.asarray(o, dtype=np.float64)
+    if o.shape != out_shape:
+        raise ValueError(f"O shape {o.shape} != {out_shape}")
+    lse = _stats_view(lse, stats_shape, "LSE")
+
+    dq = np.zeros(q.shape)
+    dk = np.zeros(k.shape)
+    dv = np.zeros(v.shape)
+    delta = np.zeros(stats_shape)
+    for b in range(B):
+        sq, skv = lens_q[b], lens_kv[b]
+        if sq == 0:
+            continue
+        band = _band_mask(sq, skv, tl, left, right)
+        for h in range(Hq):
+            hk, hv = h // (Hq // Hk), h // (Hq // Hv)
+            if ragged:
+                qs = slice(qs0[b], qs0[b] + sq)
+                ks = slice(ks0[b], ks0[b] + skv)
+                qa, ka, va = q[qs, h], k[ks, hk], v[ks, hv]
+                oa, doa, la = o[qs, h], do[qs, h], lse[qs, h]
+            else:
+                qa, ka, va = q[b, h, :sq], k[b, hk, :skv], v[b, hv, :skv]
+                oa, doa, la = o[b, h, :sq], do[b, h, :sq], lse[b, h, :sq]
+            if np.isnan(la).any() or np.isposinf(la).any():
+                raise ValueError("LSE holds NaN or +inf on a valid query row")
+            dl = (doa * oa).sum(axis=1)
+            gq, gk, gv = _attend_bwd(qa, ka, va, doa, dl, la, scale, band)
+            if ragged:
+                delta[qs, h] = dl
+                dq[qs, h] = gq
+                dk[ks, hk] += gk
+                dv[ks, hv] += gv
+            else:
+                delta[b, h, :sq] = dl
+                dq[b, h, :sq] = gq
+                dk[b, hk, :skv] += gk
+                dv[b, hv, :skv] += gv
+    return SdpaBwdResult(dq, dk, dv, delta)

@@ -20,19 +20,10 @@
 # CHECK: v_wmma_scale
 
 # CHECK-LABEL: @valu_overwrite_waits_out_vm_vsrc
+# The ds_loads are not paced, so the whole burst issues before the v400 overwrite.
 # CHECK: v[500:503] = "st.ds_load_b128"(v400
-# CHECK: v400 = "st.v_add_nc_u32"
-# CHECK: v[516:519] = "st.ds_load_b128"(v401
-# CHECK: v[520:523] = "st.ds_load_b128"(v401
-# CHECK: v[524:527] = "st.ds_load_b128"(v401
-# CHECK: v[528:531] = "st.ds_load_b128"(v401
-# CHECK: v[532:535] = "st.ds_load_b128"(v401
-# CHECK: v[536:539] = "st.ds_load_b128"(v401
-# CHECK: v[540:543] = "st.ds_load_b128"(v401
-# CHECK: v[544:547] = "st.ds_load_b128"(v401
-# CHECK: v[548:551] = "st.ds_load_b128"(v401
-# CHECK: v[552:555] = "st.ds_load_b128"(v401
 # CHECK: v[556:559] = "st.ds_load_b128"(v401
+# CHECK: v400 = "st.v_add_nc_u32"
 
 st.func @prefetch_waits_out_va_vdst() {
 ^entry:

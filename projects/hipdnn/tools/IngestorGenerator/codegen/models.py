@@ -3,6 +3,7 @@
 
 """Data models for generic-kernel-ingestor descriptor generation."""
 
+import dataclasses
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -48,6 +49,16 @@ ROCKE_TARGET_NATIVE = "native"
 ROCKE_TARGET_GENERIC = "generic"
 ROCKE_TARGETS: tuple[str, ...] = (ROCKE_TARGET_NATIVE, ROCKE_TARGET_GENERIC)
 
+#: A launch name, and a rocKE ``role``: ``rocke.helpers.KernelModule`` roles and
+#: the packer's ``sources`` keys share this rule (RFC 0017 §15.1).
+LAUNCH_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+#: A multi-launch kernel needs at least this many launches: one launch is
+#: spelled ``kernel_source``, and two spellings of one fact drift.
+MIN_LAUNCHES = 2
+#: The UKD version a plain UKD carries, and the one ``sources`` needs.
+UKD_VERSION_BASE = "1.0"
+UKD_VERSION_SOURCES = "1.1"
+
 #: Every kind either dialect's format accepts, emittable here or not.
 KERNEL_SOURCE_KINDS: tuple[str, ...] = (
     KERNEL_SOURCE_KIND_EMBEDDED,
@@ -83,6 +94,15 @@ AUTHORED_TEST_SETS: tuple[str, ...] = (
 
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
 BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
+
+#: RFC 0021 §4: a slot name is a lowercase identifier, unique within the engine.
+#: ``global`` is reserved, since RFC 0004 owns ``global.`` knobs.
+SLOT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+RESERVED_SLOT_NAME = "global"
+
+#: RFC 0021 §6: the shared-workspace size is a bound token under the ``ws``
+#: root, which a slotted engine's native graph match publishes.
+SHARED_WORKSPACE_TOKEN_PREFIX = "ws."
 
 ENGINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
@@ -225,12 +245,80 @@ class KernelSource:
     #: descriptor naming it, and its kernel symbol.
     file: str = ""
     symbol: str = ""
+    #: ``packaged`` / ``rocke``, authored-only: the name of one of the builder
+    #: module's kernels. Empty takes the builder's primary kernel. Only a launch
+    #: entry carries it; a single-launch ``kernel_source`` never does.
+    role: str = ""
+    #: ``packaged`` / ``rocke``, ``hip`` or ``hsaco``: the launches of a
+    #: multi-stage kernel, each a FULL source of this source's kind (this source
+    #: with the launch's overrides merged on), keyed by launch name. Non-empty
+    #: makes this source a template: the UKD carries ``sources`` in place of
+    #: ``kernel_source`` and this source's own fields are never emitted. A launch
+    #: carries no launches of its own.
+    launches: dict = field(default_factory=dict)
+
+    def descriptor_fields(self) -> dict:
+        """The UKD key this source is written under: ``kernel_source``, or the
+        ``sources`` map of a multi-launch kernel. Every writer and every
+        identity comparison goes through here, so none reads one spelling and
+        ignores the other."""
+        if self.launches:
+            return {
+                "sources": {
+                    name: launch.as_document() for name, launch in self.launches.items()
+                }
+            }
+        return {"kernel_source": self.as_document()}
+
+    @property
+    def ukd_version(self) -> str:
+        """``sources`` needs UKD 1.1; every other UKD stays at 1.0."""
+        return UKD_VERSION_SOURCES if self.launches else UKD_VERSION_BASE
+
+    def authored_document(self) -> dict:
+        """The ``kernel_source`` mapping a config would state to get this source
+        back: this source's own object plus, for a multi-launch source, each
+        launch as the override it needs, i.e. only the keys that differ from this
+        source. A role-only launch is written as ``{role: ...}``, so it keeps
+        inheriting each variant's spec; writing its spec in full would make it a
+        static override that differs per kernel and cannot be factorised."""
+        document = self._own_document()
+        if self.launches:
+            document["launches"] = {
+                name: self._launch_override(name, launch)
+                for name, launch in self.launches.items()
+            }
+        return document
+
+    def _launch_override(self, name: str, launch: "KernelSource") -> dict:
+        base = self._own_document()
+        own = launch.as_document()
+        dropped = sorted(set(base) - set(own))
+        if dropped:
+            raise ValueError(
+                f"launch {name!r} drops {dropped} from its base kernel_source; an "
+                f"override can only set a key, not remove one"
+            )
+        # An override never states `kind`: a launch has its base source's kind.
+        return {k: v for k, v in own.items() if k != "kind" and base.get(k) != v}
 
     def as_document(self) -> dict:
-        """The ``kernel_source`` JSON object for this kind, and nothing more.
+        """The single ``kernel_source`` JSON object for this source. A
+        multi-launch source has none: it is written as a ``sources`` map, so
+        this refuses rather than emit the template's own fields as if they were
+        a kernel (use `descriptor_fields`)."""
+        if self.launches:
+            raise ValueError(
+                f"a kernel_source with launches {sorted(self.launches)} has no "
+                f"single kernel_source object; it is written as a 'sources' map "
+                f"(KernelSource.descriptor_fields)"
+            )
+        return self._own_document()
 
-        The runtime loader hard-fails an unknown key and ``hkp_pack`` validates
-        a closed field set per kind.
+    def _own_document(self) -> dict:
+        """This source's own fields for its kind, and nothing more. The runtime
+        loader hard-fails an unknown key and ``hkp_pack`` validates a closed
+        field set per kind.
         """
         if self.kind == KERNEL_SOURCE_KIND_EMBEDDED:
             return {
@@ -254,6 +342,8 @@ class KernelSource:
             if self.target:
                 document["target"] = self.target
             document["spec"] = self.spec
+            if self.role:
+                document["role"] = self.role
             return document
         if self.kind == KERNEL_SOURCE_KIND_HSACO:
             return {"kind": self.kind, "file": self.file, "symbol": self.symbol}
@@ -292,8 +382,12 @@ class PackSpec:
     #: scope a kernel's arch narrows.
     arch: list[str] = field(default_factory=list)
     #: Native symbol suffix for this pack's operation-matcher, e.g. "add" ->
-    #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack.
+    #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack
+    #: (for a slotted engine: when the pack's slot has >1 pack).
     discriminator: str = ""
+    #: RFC 0021 §4: the slot this pack's kernels serve. Required of every pack
+    #: of a slotted engine and forbidden otherwise.
+    slot: str = ""
 
     @property
     def pascal_name(self) -> str:
@@ -325,8 +419,15 @@ class EngineSpec:
     behavior_notes: list[str] = field(default_factory=list)
     knobs: list[str] = field(default_factory=list)
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
-    #: legal for an engine with no ranking model.
+    #: legal for an engine with no ranking model. A slotted engine's rankers
+    #: are per slot (`SlotSpec.ranker`), so its engine-level value is "none".
     heuristic: str = "native"
+    #: Optional IngestorPacks.hpp engine-name constant used by the generated
+    #: census test; the descriptor still carries ``name`` above.
+    census_name_symbol: str | None = None
+    #: RFC 0021 §6: the bound token holding the shared workspace region's size;
+    #: only a slotted engine has one. Empty omits ``shared_workspace``.
+    shared_workspace: str = ""
 
     @property
     def namespace(self) -> str:
@@ -360,6 +461,23 @@ class EngineSpec:
 
 
 @dataclass
+class SlotSpec:
+    """One ``slots[]`` entry (RFC 0021): everything an engine uses to select a
+    kernel, for one position in its launch order.
+    """
+
+    name: str
+    kmd_fields: list[KmdField] = field(default_factory=list)
+    knobs: list[str] = field(default_factory=list)
+    #: Emits a metric-less UHD scoring on `IngestorConfig.slot_score_symbol`;
+    #: a slot with no ranker orders its catalog by priority, then id.
+    ranker: bool = False
+    #: The slot's own ``specialization`` block: it partitions this slot's
+    #: ``kmd_fields``.
+    specialization: dict = field(default_factory=dict)
+
+
+@dataclass
 class IngestorConfig:
     """Complete configuration for one engine's descriptor bundle.
 
@@ -384,14 +502,64 @@ class IngestorConfig:
     specialization: dict = field(default_factory=dict)
     #: The ``reduction`` block, for selection tooling; never emitted.
     reduction: dict = field(default_factory=dict)
+    #: RFC 0021: the engine's slots in launch order. Empty for an unslotted
+    #: engine, whose ``kmd_fields``, ``engine.knobs`` and ``specialization``
+    #: sit on the config; a slotted engine keeps them on its slots instead.
+    slots: list[SlotSpec] = field(default_factory=list)
 
     @property
     def is_packaged(self) -> bool:
         return self.dialect == DIALECT_PACKAGED
 
     @property
+    def launch_names(self) -> tuple[str, ...]:
+        """The launch names the engine's dispatch handler declares, sorted; empty
+        for a single-launch engine. The loader requires every kernel to name the
+        same set (``_check_launch_names_agree``), so this is each kernel's set."""
+        return tuple(
+            sorted(
+                {
+                    name
+                    for pack in self.packs
+                    for kernel in pack.kernels
+                    for name in kernel.kernel_source.launches
+                }
+            )
+        )
+
+    @property
     def is_multi_pack(self) -> bool:
         return len(self.packs) > 1
+
+    @property
+    def is_slotted(self) -> bool:
+        return bool(self.slots)
+
+    def slot_of(self, pack: PackSpec) -> Optional[SlotSpec]:
+        """The slot `pack` serves; None for an unslotted engine's pack."""
+        return next((s for s in self.slots if s.name == pack.slot), None)
+
+    def slot_view(self, slot: SlotSpec) -> "IngestorConfig":
+        """This config as the unslotted engine one slot would be: that slot's
+        KMD fields, knobs, specialization and packs. Lets every per-KMD check
+        and builder run on a slot unchanged."""
+        return dataclasses.replace(
+            self,
+            engine=dataclasses.replace(self.engine, knobs=list(slot.knobs)),
+            kmd_fields=slot.kmd_fields,
+            packs=[p for p in self.packs if p.slot == slot.name],
+            specialization=slot.specialization,
+            slots=[],
+        )
+
+    def has_operation_umd(self, pack: PackSpec) -> bool:
+        """Whether `pack` narrows by an operation-scoped UMD: when the engine
+        has more than one pack, or for a slotted engine when the pack's slot
+        does (slots serve one graph, so a lone pack of a slot needs no
+        narrowing)."""
+        if not self.is_slotted:
+            return self.is_multi_pack
+        return sum(1 for p in self.packs if p.slot == pack.slot) > 1
 
     @property
     def descriptor_dir(self) -> str:
@@ -408,10 +576,11 @@ class IngestorConfig:
     def kdp_stem(self, pack: PackSpec) -> str:
         """The KDP file's stem (no ``.kdp.json``): the engine slug for a
         single-pack engine (``conv_fwd.kdp.json``), slug plus pack name for a
-        multi-pack engine (``pointwise_add.kdp.json``)."""
+        multi-pack engine (``pointwise_add.kdp.json``); a slotted engine always names the pack.
+        """
         return (
             self.engine.slug
-            if not self.is_multi_pack
+            if not (self.is_multi_pack or self.is_slotted)
             else f"{self.engine.slug}_{pack.name}"
         )
 
@@ -456,9 +625,17 @@ class IngestorConfig:
     def score_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.score"
 
+    def slot_score_symbol(self, slot: SlotSpec) -> str:
+        """The native ranker symbol of one slot: ``<namespace>.<slot>_score``."""
+        return f"{self.native_symbol_namespace}.{slot.name}_score"
+
     @property
     def dispatch_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.dispatch"
+
+    def slot_dispatch_symbol(self, slot: SlotSpec) -> str:
+        """The dispatch symbol of one slot: ``<namespace>.<slot>_dispatch``."""
+        return f"{self.native_symbol_namespace}.{slot.name}_dispatch"
 
     @property
     def kernel_match_symbol(self) -> str:

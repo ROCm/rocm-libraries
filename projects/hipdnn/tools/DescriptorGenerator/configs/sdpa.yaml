@@ -229,12 +229,14 @@ operation:
       attr_suffix: "SEQ_LEN_QDESC"
       required: false
       frontend_getter: "get_seq_len_q()"
+      work_data_dependent: true
 
     - name: "seq_len_kv"
       fbs_field: "seq_len_kv_tensor_uid"
       attr_suffix: "SEQ_LEN_KVDESC"
       required: false
       frontend_getter: "get_seq_len_kv()"
+      work_data_dependent: true
 
     - name: "seed"
       fbs_field: "seed_tensor_uid"
@@ -265,18 +267,21 @@ operation:
       attr_suffix: "PAGE_TABLE_KDESC"
       required: false
       frontend_getter: "get_page_table_k()"
+      work_data_dependent: true
 
     - name: "page_table_v"
       fbs_field: "page_table_v_tensor_uid"
       attr_suffix: "PAGE_TABLE_VDESC"
       required: false
       frontend_getter: "get_page_table_v()"
+      work_data_dependent: true
 
     - name: "block_mask"
       fbs_field: "block_mask_tensor_uid"
       attr_suffix: "BLOCK_MASK_DESC"
       required: false
       frontend_getter: "get_block_mask()"
+      work_data_dependent: true
 
     - name: "sink_token"
       fbs_field: "sink_token_tensor_uid"

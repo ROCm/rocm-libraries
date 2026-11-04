@@ -54,7 +54,7 @@ Dilation (`DirectConvProblem.dil_h` / `dil_w`) widens the staged halo to
 `(tile-1)*stride + (K-1)*dil + 1` and spaces the taps `dil` rows / columns apart
 in it; the kernel is the only direct variant that computes a dilated
 convolution. The AOT cache bakes a few dilated 3x3 rows next to the undilated
-ones (`direct_kernel_sweep._NONGROUPED_DILATED`).
+ones (`kernels.conv.direct_aot_jobs._NONGROUPED_DILATED`).
 
 Unlike the grouped kernels, the channel counts are runtime too: they only set
 the channel loop's trip count and the staging / store masks. `p_groups` is
@@ -289,7 +289,7 @@ geometries, so the correctness suite runs an evenly spaced sample of
 `nongrouped_specs` filters `nongrouped_knobs(arch, dtype, Wo=...)`; without
 `Wo` the same generator yields every width up to six atoms, which is the grid
 the AOT kernel cache builds (variant `direct_nongrouped` in
-`benchmarks/common/direct_kernel_sweep.py`, 3x3 filters at stride 1 and 2,
+`kernels/conv/direct_aot_jobs.py`, 3x3 filters at stride 1 and 2,
 `cpg = kpg = 0` in the identity, i.e. runtime channels). At run time the cache
 offers a problem the binaries whose width `tile_w_candidates(Wo, atom_tile)`
 would pick and whose spec validates on the real shape.

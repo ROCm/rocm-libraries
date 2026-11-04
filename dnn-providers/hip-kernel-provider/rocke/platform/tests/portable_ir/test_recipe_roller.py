@@ -32,8 +32,7 @@
 #   hsaco parity   the artifact itself is byte-identical. Strongest, slowest;
 #                  needs comgr.
 #
-# Every lane skips (never silently passes) when its artifact is missing, and the
-# skip reason names the command that produces it.
+# Shared-engine and standalone lanes consume one source-matched artifact bundle.
 
 import hashlib
 import os
@@ -50,6 +49,7 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
+from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 
 _DRIVER = "rocke.portable_ir.drivers.roll_hsaco_parity"
 _PLATFORM = _HERE.parents[1]
@@ -61,15 +61,8 @@ _GEMM_HOLDOUTS = (128, 256)
 _ARCH = "gfx950"
 
 
-def _skip_without_lib():
-    lib = _online_lib()
-    if lib is None:
-        pytest.skip(
-            "no shared librocke; build one with "
-            "`python -c 'from rocke.portable_ir.src import online; online.build_lib()'` "
-            "or point ROCKE_ONLINE_LIB at it"
-        )
-    return lib
+def _source_matched_lib():
+    return _online_lib()
 
 
 def _have_comgr():
@@ -82,9 +75,9 @@ def _have_comgr():
 
 
 def _run_driver(*extra):
-    lib = _skip_without_lib()
+    lib = _source_matched_lib()
     return subprocess.run(
-        [sys.executable, "-u", "-m", _DRIVER, *extra],
+        rocke_python_command("-m", _DRIVER, *extra, interpreter_flags=("-u",)),
         cwd=str(_PLATFORM),
         env={**_env(), "ROCKE_ONLINE_LIB": lib, "ROCKE_CPP_QUIET_FALLBACK": "1"},
         capture_output=True,
@@ -92,6 +85,7 @@ def _run_driver(*extra):
     )
 
 
+@pytest.mark.integration
 def test_roll_sha_parity():
     """Rolled .ll digest == Python .ll digest, sampled and held-out.
 
@@ -108,6 +102,7 @@ def test_roll_sha_parity():
     )
 
 
+@pytest.mark.integration
 def test_roll_hsaco_parity():
     """The rolled recipe compiles to a byte-identical HSACO.
 
@@ -115,7 +110,7 @@ def test_roll_hsaco_parity():
     device actually runs, which is what closes the gap between "the two engines
     agree" and "the two engines ship the same kernel".
     """
-    _skip_without_lib()
+    _source_matched_lib()
     if not _have_comgr():
         pytest.skip("no loadable comgr; install ROCm or set ROCM_PATH")
     r = _run_driver()
@@ -132,12 +127,6 @@ def test_standalone_cli_replays_rolled_recipe(tmp_path):
     replaying a recorded trace.
     """
     cli = _replay_cli()
-    if cli is None:
-        pytest.skip(
-            "replay CLI not built; "
-            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
-            "or point ROCKE_REPLAY_CLI at it"
-        )
 
     # Author out-of-process: the recorder rebinds core.ir.IRBuilder, which should
     # not happen inside the pytest process.
@@ -228,7 +217,7 @@ _MAGIC_D_HOLDOUTS = [192, 160, 224, 384]
 _MAGIC_BUILDER = """
 def _magic(D):
     from rocke.core.ir import I32, IRBuilder, PtrType
-    from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
+    from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 
     b = IRBuilder("magic_div")
     out = b.param("out", PtrType(I32, "global"))
@@ -255,7 +244,7 @@ def test_roll_nd_cross_product():
     unlike the lanes above it cannot skip -- a regression here always shows up.
     """
     r = subprocess.run(
-        [sys.executable, "-u", "-m", _ND_DRIVER, "--ll"],
+        rocke_python_command("-m", _ND_DRIVER, "--ll", interpreter_flags=("-u",)),
         cwd=str(_PLATFORM),
         env=_env(),
         capture_output=True,
@@ -279,12 +268,6 @@ def test_standalone_cli_replays_multi_axis_recipe(tmp_path):
     including at a point 8x the base on both axes at once.
     """
     cli = _replay_cli()
-    if cli is None:
-        pytest.skip(
-            "replay CLI not built; "
-            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
-            "or point ROCKE_REPLAY_CLI at it"
-        )
     points = list(_CONV_GRID + _CONV_HOLDOUTS)
     author = f"""
 import json, sys
@@ -351,12 +334,6 @@ def test_standalone_cli_regenerates_magic_division_constants(tmp_path):
     sampled point.
     """
     cli = _replay_cli()
-    if cli is None:
-        pytest.skip(
-            "replay CLI not built; "
-            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
-            "or point ROCKE_REPLAY_CLI at it"
-        )
     points = _MAGIC_D_SAMPLES + _MAGIC_D_HOLDOUTS
     author = f"""
 import json, sys

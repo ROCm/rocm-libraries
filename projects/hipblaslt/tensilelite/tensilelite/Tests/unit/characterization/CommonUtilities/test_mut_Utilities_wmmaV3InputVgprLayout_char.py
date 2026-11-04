@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.wmmaV3InputVgprLayout``.
+``tensilelite.Common.Utilities.wmmaV3InputVgprLayout``.
 
 The function maps a 4-tuple ``wmma`` instruction shape (and, for the 128-K
 shapes, a ``dtypeBitWidth``) to a fixed VGPR-layout 4-tuple
@@ -22,7 +22,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 wmmaV3InputVgprLayout = U.wmmaV3InputVgprLayout
 
 pytestmark = pytest.mark.unit

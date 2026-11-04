@@ -253,13 +253,13 @@ from typing import Any, Optional, Tuple
 
 from geko.constants import MX_SCALING_FORMAT, MX_SCALING_FORMAT_PRESWIZZLED, SUPPORTED_ARCH
 
-# Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
+# TensileLite LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX1250 = '["Device 73f0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX1250_MC = '["Device 75c7"]'
 
-# Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
+# Shared TensileLite LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
     "ScheduleName": '"gfx950"',
     "ArchitectureName": '"gfx950"',
@@ -319,7 +319,7 @@ ONLY_INCLUDE_MIs_MI45X_STRICT = {
     'F4': [[16, 16, 128, 1]],
 }
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value,
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, TensileLite LibraryLogic fields, MX scale value,
 # MX block size (keys align with geko.constants.SUPPORTED_ARCH).
 # mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
 # mx_block_size: MXBlockA/MXBlockB size (None = MX not supported on this arch).
@@ -520,7 +520,6 @@ _CONFIG_OPTIONAL_COMMON = {
     "search_space": None,
     "MACROTILE_OPT": False,
     "MT_DU": None,
-    "USE_HEURISTICS": False,
     "SIZE_OPTION": 0,
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,
@@ -542,7 +541,17 @@ ENV_UPDATABLE_KEYS = {
 # would otherwise fall back to their defaults. The MX format needs no entry:
 # each row carries it as its hipBLASLt scaleA / scaleB value, which is decoded
 # again when the rows are grouped into GemmConfigs, as for a workload log.
-LIST_FORWARDED_KEYS = ("EPILOGUES", "LIBRARY_TYPE")
+LIST_FORWARDED_KEYS = (
+    "StreamK",
+    "LIBRARY_TYPE", 
+    "MACROTILE_OPT",
+    "MT_DU",
+    "ONE_SIZE_PER_CONFIG",
+    "MI_FILTER",
+    "EPILOGUES", 
+    "CLUSTER",
+    "DUCTILE_VALIDATION_PROFILE",
+)
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
 _CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}

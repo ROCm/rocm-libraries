@@ -28,7 +28,9 @@ def verify_lds_roundtrip(pipeline: Any, space_id: int, *, tile_k: int) -> list[i
     the half is keyed on the RESOLVED free-origin, never the raw symbolic ``oth`` expression (the store
     writes ``oth`` while the same-iteration read reads ``cur`` -- pairing those would be a silent bug).
 
-    Rank-2 (free, K): ``free_stride = strides[0]``-locked; invoke once per squeezed batch slice for N-D.
+    Rank-2 ``(K, free)``: axis 1 is the free axis, and its length spans every buffer half; invoke once
+    per batch slice for N-D. Each read element is checked by its index and reported by its
+    carried ``(K, free)`` positions.
     ``tile_k`` pins the K-loop iteration for the resolver (from the render context). Returns the list of
     verified halves; raises :class:`RoundTripError` naming the first offending read.
     """
@@ -42,10 +44,8 @@ def verify_lds_roundtrip(pipeline: Any, space_id: int, *, tile_k: int) -> list[i
         return []
 
     store_desc, read_desc = stores[0].tile_desc, reads[0].tile_desc
-    strides = tuple(stores[0].strides)
-    free_stride = strides[
-        0
-    ]  # K-row stride = bufs*tile_m; the free axis (stride 1) spans both buffers
+    # Each side is replayed with its own descriptor: (K, free), the free axis spanning every half.
+    store_tensor, read_tensor = stores[0].tensor, reads[0].tensor
     store_lanes = _lane_span(
         store_desc.layout
     )  # cooperative: all waves' threads (e.g. 256)
@@ -60,44 +60,39 @@ def verify_lds_roundtrip(pipeline: Any, space_id: int, *, tile_k: int) -> list[i
         for kb in range(2)
     }
     bufs = len(store_frees)
-    tile_m = free_stride // bufs
+    tile_m = store_tensor.lengths[1] // bufs
 
     name = pipeline.spaces[space_id]
 
-    def elem_addrs(desc, origin, n_lanes, dtype, swizzle):
+    def elements(desc, tensor, origin, n_lanes, swizzle):
+        """Every element the access touches, as ``(index, (K, free) positions)``."""
         acc, _ = addr_map(
             desc,
-            strides,
+            tensor,
             origin=origin,
             n_lanes=n_lanes,
-            dtype_name=dtype,
             lds_swizzle=swizzle,
         )
         for a in acc:
             for i in range(a["vw"]):
-                yield a["base"] + i
+                yield a["base"] + i, a["element_positions"][i]
 
     verified: list[int] = []
     for h in range(bufs):
         lo, hi = h * tile_m, (h + 1) * tile_m
         # (a) confinement -- the store's DATA (pre-swizzle) stays within half h; a swizzle then permutes
         # WITHIN the buffer, so this leak check is a pre-swizzle property (post-swizzle freely crosses lo/hi).
-        for addr in elem_addrs(
-            store_desc, (0, h * tile_m), store_lanes, stores[0].dtype_name, False
+        for _addr, (_k, free) in elements(
+            store_desc, store_tensor, (0, h * tile_m), store_lanes, False
         ):
-            free = addr % free_stride
             if not (lo <= free < hi):
                 raise RoundTripError(
                     f"{name}: store data leaks half {h} at free {free}"
                 )
         # (b) coverage -- every read address (all waves, at the REAL swizzle) was written by the coop store.
         written: set[int] = set()
-        for addr in elem_addrs(
-            store_desc,
-            (0, h * tile_m),
-            store_lanes,
-            stores[0].dtype_name,
-            stores[0].swizzle,
+        for addr, _positions in elements(
+            store_desc, store_tensor, (0, h * tile_m), store_lanes, stores[0].swizzle
         ):
             if addr in written:
                 raise RoundTripError(f"{name}: store collision half {h} addr {addr}")
@@ -108,13 +103,13 @@ def verify_lds_roundtrip(pipeline: Any, space_id: int, *, tile_k: int) -> list[i
                 raise RoundTripError(
                     f"{name}: read wave {w} resolves to half {r_origin[1] // tile_m}, expected {h}"
                 )
-            for addr in elem_addrs(
-                read_desc, r_origin, wave_size, reads[0].dtype_name, reads[0].swizzle
+            for addr, (k, free) in elements(
+                read_desc, read_tensor, r_origin, wave_size, reads[0].swizzle
             ):
                 if addr not in written:
                     raise RoundTripError(
                         f"{name} half {h} wave {w}: read -> addr {addr} "
-                        f"(K={addr // free_stride}, free={addr % free_stride}) never written"
+                        f"(K={k}, free={free}) never written"
                     )
         verified.append(h)
     return verified

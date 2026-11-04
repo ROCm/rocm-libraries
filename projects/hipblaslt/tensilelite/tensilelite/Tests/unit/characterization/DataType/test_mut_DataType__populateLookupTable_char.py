@@ -6,7 +6,7 @@
 import pytest
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Common.DataType import _populateLookupTable
+from tensilelite.Common.DataType import _populateLookupTable
 
 pytestmark = pytest.mark.unit
 

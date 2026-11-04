@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[4]
 CATALOG = (
     REPO
     / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
-    / "rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json"
+    / "rocKE/gfx950_attention_dense/artifacts/gfx950_attention_dense.kdp.json"
 )
 ENGINE = "hipkernel:Gfx950AttentionDense"
 SWEEPS = [
@@ -81,6 +81,12 @@ def head_config_gaps(kdp_path, sweep_dirs):
 
 
 def test_the_sweeps_reach_exactly_the_catalogs_head_configurations():
+    # The KDP is a DVC output (descriptors/README.md), so a checkout without a
+    # `dvc pull` has no catalog to compare.
+    if not CATALOG.exists():
+        pytest.skip(
+            f"gfx950 catalog not pulled; run: dvc pull -r ingestor {CATALOG.parent}.dvc"
+        )
     # An unreadable or emptied catalog would otherwise pass as "nothing missing".
     assert catalog_head_configs(CATALOG), f"no kernels read from {CATALOG}"
     unreached, unknown = head_config_gaps(CATALOG, SWEEPS)

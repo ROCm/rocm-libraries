@@ -1,9 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Host packing fixtures and native authoring emission for test_mma_io.py. */
+/* Host packing fixtures and native authoring emission for test_mma_io.py.
+ *
+ * It also answers register-packing questions for test_storage.py, which
+ * compares each answer with core/storage.py (found through ROCKE_STORAGE_TEST):
+ *
+ *   --register-packing <dtype> <count>
+ *       print "none" (not packed by hand), the packing's fields, or
+ *       "error: <message>".
+ *   --packed-word-range <dtype> <count> <start> <length>
+ *       pack <count> <dtype> elements, then print the registers holding
+ *       elements [start, start + length) as "<first> <end>", or
+ *       "error: <message>".
+ */
 #include "rocke/storage.h"
 
 #include <initializer_list>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,6 +171,111 @@ static int emit(const char* dtype, bool hip, bool include_prologue = true)
     return 0;
 }
 
+/* Parse a whole decimal argument; false when any of it is not a number. */
+static bool parse_int64(const char* text, int64_t* value)
+{
+    char* end = NULL;
+    *value = strtoll(text, &end, 10);
+    return end != text && *end == '\0';
+}
+
+static int print_register_packing(const char* dtype, const char* count_text)
+{
+    int64_t count;
+    CHECK(parse_int64(count_text, &count));
+    bool packed = false;
+    rocke_fragment_packing_t packing;
+    char err[ROCKE_ERR_MSG_CAP];
+    if(!rocke_register_packing(dtype, count, &packed, &packing, err, sizeof err))
+        printf("error: %s\n", err);
+    else if(!packed)
+        printf("none\n");
+    else
+        printf("element_bits=%d slot_bits=%d count=%" PRIu64
+               " carrier_bits=%d carrier_count=%" PRIu64 "\n",
+               packing.packing.element_bits,
+               packing.packing.slot_bits,
+               packing.count,
+               packing.carrier_bits,
+               packing.carrier_count);
+    return 0;
+}
+
+static int print_packed_word_range(const char* dtype,
+                                   const char* count_text,
+                                   const char* start_text,
+                                   const char* length_text)
+{
+    int64_t count, start, length;
+    CHECK(parse_int64(count_text, &count) && parse_int64(start_text, &start)
+          && parse_int64(length_text, &length));
+    bool packed = false;
+    rocke_fragment_packing_t packing;
+    char err[ROCKE_ERR_MSG_CAP];
+    CHECK(rocke_register_packing(dtype, count, &packed, &packing, err, sizeof err) && packed);
+    uint64_t first, end;
+    if(rocke_packed_word_range(&packing, start, length, &first, &end, err, sizeof err))
+        printf("%" PRIu64 " %" PRIu64 "\n", first, end);
+    else
+        printf("error: %s\n", err);
+    return 0;
+}
+
+/* The register-packing answers and refusals, with core/storage.py's text. */
+static int test_register_packing()
+{
+    bool packed = false;
+    rocke_fragment_packing_t packing;
+    char err[ROCKE_ERR_MSG_CAP];
+    CHECK(rocke_register_packing("fp6e2m3", 32, &packed, &packing, err, sizeof err) && packed);
+    CHECK(packing.packing.element_bits == 6 && packing.count == 32);
+    CHECK(packing.carrier_bits == 32 && packing.carrier_count == 6);
+    CHECK(err[0] == '\0');
+    CHECK(rocke_register_packing("fp16", 8, &packed, &packing, err, sizeof err) && !packed);
+    const struct
+    {
+        const char* dtype;
+        int64_t count;
+        const char* error;
+    } refused[] = {
+        {"fp6e2m3",
+         3,
+         "3 fp6e2m3 elements occupy 18 bits, not a whole number of 32-bit registers -- packed "
+         "operands must fill whole registers"},
+        {"fp4e2m1", -4, "element count must be at least 1, got -4"},
+        {"i1", 32, "i1 is a predicate, not register data"},
+        {"custom_format", 8, "unknown dtype 'custom_format'"},
+    };
+    for(const auto& r : refused)
+    {
+        CHECK(!rocke_register_packing(r.dtype, r.count, &packed, &packing, err, sizeof err));
+        CHECK(strcmp(err, r.error) == 0);
+    }
+
+    CHECK(rocke_register_packing("fp4e2m1", 64, &packed, &packing, err, sizeof err) && packed);
+    uint64_t first, end;
+    CHECK(rocke_packed_word_range(&packing, 32, 32, &first, &end, err, sizeof err));
+    CHECK(first == 4 && end == 8);
+    CHECK(!rocke_packed_word_range(&packing, 3, 32, &first, &end, err, sizeof err));
+    CHECK(strcmp(err,
+                 "elements [3, 35) of a fragment packed at 4 bits per element do not start and "
+                 "end on a register boundary (32 bits) -- start and length must be multiples of "
+                 "8 elements")
+          == 0);
+    CHECK(!rocke_packed_word_range(&packing, 56, 16, &first, &end, err, sizeof err));
+    CHECK(strcmp(err, "elements [56, 72) run past the fragment's 64 elements") == 0);
+    // A message longer than the caller's buffer is truncated, never overrun.
+    char small[8];
+    memset(small, 0xA5, sizeof small);
+    CHECK(!rocke_packed_word_range(&packing, -8, 8, &first, &end, small, 6));
+    CHECK(strcmp(small, "start") == 0 && (unsigned char)small[6] == 0xA5);
+    // A hand-filled descriptor that no init() would accept is refused.
+    rocke_fragment_packing_t invalid = packing;
+    invalid.carrier_count = 1;
+    CHECK(!rocke_packed_word_range(&invalid, 0, 8, &first, &end, err, sizeof err));
+    return 0;
+}
+
 static int test_fragment_inputs()
 {
     const struct
@@ -247,6 +365,10 @@ int main(int argc, char** argv)
         return emit(argv[2], true);
     if(argc == 3 && strcmp(argv[1], "--hip-bare") == 0)
         return emit(argv[2], true, false);
+    if(argc == 4 && strcmp(argv[1], "--register-packing") == 0)
+        return print_register_packing(argv[2], argv[3]);
+    if(argc == 6 && strcmp(argv[1], "--packed-word-range") == 0)
+        return print_packed_word_range(argv[2], argv[3], argv[4], argv[5]);
     if(argc == 3 && strcmp(argv[1], "--parse") == 0)
     {
         rocke_ir_builder_t b;
@@ -293,6 +415,7 @@ int main(int argc, char** argv)
     }
     CHECK(test_fragment_inputs() == 0);
     CHECK(test_fragment_offset_bounds() == 0);
+    CHECK(test_register_packing() == 0);
     for(int count : {1, 2, 4, 8})
     {
         const rocke_scale_packing_t scales = {count, 32};
@@ -354,7 +477,8 @@ int main(int argc, char** argv)
         CHECK(rocke_strbuf_init(&text, 256) == 0);
         rocke_lower_hip_opts_t opts = {};
         opts.arch = "gfx1250";
-        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_KEY);
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_ERR_NOTIMPL);
+        CHECK(strstr(rocke_ir_builder_error(&b), "no HIP mapping for type vec<"));
         CHECK(text.len > 0); // The prologue is assembled before the vector walk.
         rocke_strbuf_free(&text);
         rocke_ir_builder_free(&b);

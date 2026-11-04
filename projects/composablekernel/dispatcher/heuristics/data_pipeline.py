@@ -25,7 +25,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
 
 from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH  # noqa: E402
-from codegen_common import normalize_gfx_arch  # noqa: E402
+from codegen_common import _VEC_ELEMENT_BYTES, normalize_gfx_arch  # noqa: E402
 
 
 CANONICAL_COLUMNS = [
@@ -37,6 +37,7 @@ CANONICAL_COLUMNS = [
     "m",
     "n",
     "k",
+    "batch_count",
     "split_k",
     "measured_tflops",
     "latency_ms",
@@ -62,6 +63,9 @@ CANONICAL_COLUMNS = [
     "vec_a",
     "vec_b",
     "vec_c",
+    # True when the kernel name fixed the widths with a _vec suffix.
+    # Absent on names that predate this field; 0 widths still mean native.
+    "is_fixed_width",
     "run_id",
 ]
 
@@ -77,19 +81,25 @@ def parse_kernel_name(name: str) -> dict:
       gemm[_universal]_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}
       _{padM}_{padN}_{padK}_{persistent}_{tileM}x{tileN}x{tileK}
       _{warpM}x{warpN}x{warpK}_{warpTileM}x{warpTileN}x{warpTileK}
-      [_vec{A}_{B}_{C}]
+      [_vec{A}_{B}_{C}][_batched]
+
+    A trailing ``_batched`` suffix is ignored. Widths stay 0 when the name has
+    no ``_vec`` suffix; 0 means native. ``is_fixed_width`` records whether the
+    suffix was present.
     """
     result = {}
     try:
-        # Not end-anchored: variant suffixes may follow it.
+        # Not end-anchored: variant suffixes such as _batched may follow it.
         vec_match = re.search(r"_vec(\d+)_(\d+)_(\d+)(?=_|$)", name)
         if vec_match:
             vec = tuple(int(g) for g in vec_match.groups())
+            fixed = True
             name = name[: vec_match.start()] + name[vec_match.end() :]
         elif re.search(r"_vec\d", name):
             return result
         else:
             vec = (0, 0, 0)
+            fixed = False
         prefix_match = re.match(
             r"gemm(?:_universal)?_(\w+?)_((?:rcr|rrr|crr|ccr))_(.*)", name
         )
@@ -98,6 +108,7 @@ def parse_kernel_name(name: str) -> dict:
         result["dtype"] = prefix_match.group(1)
         result["layout"] = prefix_match.group(2)
         result["vec_a"], result["vec_b"], result["vec_c"] = vec
+        result["is_fixed_width"] = fixed
         remainder = prefix_match.group(3)
 
         parts = remainder.split("_")
@@ -270,6 +281,90 @@ def parse_streaming_log(
     return df
 
 
+# Columns every gemm_full_benchmark.py CSV carries.
+GEMM_DRIVER_CSV_COLUMNS = {"kernel", "M", "N", "K", "latency_ms", "tflops"}
+# The driver's output (C) dtype per input dtype (gemm_utils._OUTPUT_DTYPE).
+_GEMM_DRIVER_C_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
+
+
+def is_gemm_driver_csv(columns, first_kernel: str) -> bool:
+    """True for a CSV written by tile_engine/ops/gemm/gemm_full_benchmark.py."""
+    return GEMM_DRIVER_CSV_COLUMNS <= set(columns) and str(first_kernel).startswith(
+        "gemm_"
+    )
+
+
+def parse_gemm_driver_csv(
+    path: str | Path,
+    arch: str,
+    run_id: Optional[str] = None,
+    op_type: str = "gemm_universal",
+) -> pd.DataFrame:
+    """Parse the CSV of tile_engine/ops/gemm/gemm_full_benchmark.py into canonical rows.
+
+    The driver writes one row per successful (kernel, problem) measurement. The
+    kernel name carries dtype, layout and every kernel field (parse_kernel_name),
+    so the canonical columns all come from the row and its name.
+
+    - A row whose ``verified`` column reads False (it failed ``--verify``) is
+      dropped; an empty column (a sweep run without ``--verify``) is kept. The
+      number dropped is in ``df.attrs["dropped_unverified"]``.
+    - A kernel name that does not decode raises instead of producing a row
+      without kernel fields.
+    - ``bandwidth_gb_s`` counts A and B in the input dtype and C in the
+      driver's output dtype.
+    """
+    path = Path(path)
+    if run_id is None:
+        run_id = hashlib.md5(path.name.encode()).hexdigest()[:12]
+    # round_trip: the default float parser is off by one ulp on some values.
+    raw = pd.read_csv(path, float_precision="round_trip", dtype={"verified": str})
+    missing = GEMM_DRIVER_CSV_COLUMNS - set(raw.columns)
+    if missing:
+        raise ValueError(
+            f"{path}: not a gemm_full_benchmark.py CSV, missing {sorted(missing)}"
+        )
+    verified = raw.get("verified", pd.Series("", index=raw.index))
+    failed = verified.fillna("").astype(str).str.strip().str.lower() == "false"
+    raw = raw[~failed]
+
+    parsed = {name: parse_kernel_name(name) for name in raw["kernel"].unique()}
+    undecoded = sorted(n for n, kp in parsed.items() if "warp_tile_k" not in kp)
+    if undecoded:
+        raise ValueError(
+            f"{path}: {len(undecoded)} kernel names do not decode, e.g. {undecoded[0]}"
+        )
+
+    rows = []
+    for r in raw.itertuples(index=False):
+        kp = parsed[r.kernel]
+        m, n, k = int(r.M), int(r.N), int(r.K)
+        latency, tflops = float(r.latency_ms), float(r.tflops)
+        in_bytes = _VEC_ELEMENT_BYTES[kp["dtype"]]
+        c_dtype = _GEMM_DRIVER_C_DTYPE.get(kp["dtype"], kp["dtype"])
+        moved = (m * k + k * n) * in_bytes + m * n * _VEC_ELEMENT_BYTES[c_dtype]
+        row = {
+            "op_type": op_type,
+            "arch": arch,
+            "kernel_name": r.kernel,
+            "m": m,
+            "n": n,
+            "k": k,
+            "split_k": 1,
+            "measured_tflops": tflops,
+            "latency_ms": latency,
+            "bandwidth_gb_s": moved / (latency * 1e6) if latency > 0 else 0.0,
+            "is_valid": tflops > 0 and latency > 0,
+            "run_id": run_id,
+        }
+        row.update(kp)
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=CANONICAL_COLUMNS)
+    df.attrs["dropped_unverified"] = int(failed.sum())
+    return df
+
+
 def check_capture_hw_arch(hw: dict, arch: str) -> None:
     """Raise if the profile's gfx target differs from ``arch``; pass if it has none."""
     local = re.search(r"(gfx[0-9a-f]+)", str(hw.get("gfx_name", "")))
@@ -386,13 +481,144 @@ def build_training_dataset(
     return pd.concat(frames, ignore_index=True)
 
 
+def find_batched_gemm_csvs(source: str | Path) -> list[Path]:
+    """``batched_gemm_results.csv`` files under ``source``.
+
+    A file path is returned as-is. Copies whose parent directory is named
+    ``csv`` are skipped; those are per-group duplicates of the merged CSV.
+    """
+    source = Path(source)
+    if source.is_file():
+        return [source]
+    if not source.is_dir():
+        raise FileNotFoundError(source)
+    found = sorted(
+        p
+        for p in source.rglob("batched_gemm_results.csv")
+        if p.parent.name != "csv"
+    )
+    if not found:
+        raise FileNotFoundError(
+            f"No batched_gemm_results.csv under {source} "
+            "(copies inside a csv/ directory are skipped)"
+        )
+    return found
+
+
+def _rename_batched_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Accept the benchmark CSV's headers and the canonical parquet headers."""
+    df = df.copy()
+    if "kernel" in df.columns and "kernel_name" not in df.columns:
+        df = df.rename(columns={"kernel": "kernel_name"})
+    mapping = {}
+    for src, dst in (
+        ("M", "m"),
+        ("N", "n"),
+        ("K", "k"),
+        ("tflops", "measured_tflops"),
+        ("bandwidth", "bandwidth_gb_s"),
+    ):
+        if src in df.columns and dst not in df.columns:
+            mapping[src] = dst
+    return df.rename(columns=mapping)
+
+
+def _join_unique(values) -> str:
+    return ",".join(sorted({str(v) for v in values}))
+
+
+def load_batched_gemm_results(
+    source: str | Path,
+    arch: str = "gfx950",
+    dtype: Optional[str] = None,
+    hw: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Merge batched GEMM benchmark CSVs into canonical training rows.
+
+    One row per (layout, batch, M, N, K, kernel). A pair measured more than
+    once keeps the median TFLOPS and latency. Rows that fail verification or
+    have non-positive TFLOPS are dropped. Kernel config, including vector
+    widths, comes from :func:`parse_kernel_name`.
+    """
+    paths = find_batched_gemm_csvs(source)
+    frames = []
+    for path in paths:
+        raw = pd.read_csv(path)
+        raw["source"] = "full" if "full-run" in path.parts else "trim"
+        raw["job_id"] = path.parent.name.rsplit("_", 1)[-1]
+        frames.append(raw)
+    raw = _rename_batched_columns(pd.concat(frames, ignore_index=True))
+
+    required = ("kernel_name", "batch_count", "m", "n", "k", "measured_tflops", "latency_ms")
+    missing = [c for c in required if c not in raw.columns]
+    if missing:
+        raise KeyError(f"batched GEMM CSV is missing {missing}")
+
+    parsed = {}
+    bad = []
+    for name in raw["kernel_name"].unique():
+        cfg = parse_kernel_name(str(name))
+        if not cfg or "tile_m" not in cfg:
+            bad.append(str(name))
+        else:
+            parsed[str(name)] = {**cfg, "kernel_name": str(name)}
+    if bad:
+        print(f"WARNING: {len(bad)} kernel names did not parse, e.g. {bad[0]}")
+    raw["kernel_name"] = raw["kernel_name"].astype(str)
+    raw = raw[raw["kernel_name"].isin(parsed)].copy()
+    if raw.empty:
+        raise ValueError(f"No parseable batched GEMM rows in {source}")
+
+    if "verified" in raw.columns:
+        raw = raw[raw["verified"].astype(str).str.lower().isin(("true", "1"))]
+    raw = raw[pd.to_numeric(raw["measured_tflops"], errors="coerce") > 0]
+    if raw.empty:
+        raise ValueError(f"No valid batched GEMM rows in {source}")
+
+    cfg_df = pd.DataFrame(parsed.values())
+    raw = raw.drop(columns=[c for c in ("layout", "dtype") if c in raw.columns])
+    df = raw.merge(cfg_df, on="kernel_name", how="left")
+
+    keys = ["layout", "batch_count", "m", "n", "k", "kernel_name"]
+    cfg_cols = [c for c in cfg_df.columns if c not in ("kernel_name", "layout")]
+    keep = keys + cfg_cols + ["measured_tflops", "latency_ms", "source", "job_id"]
+    if "bandwidth_gb_s" in df.columns:
+        keep.append("bandwidth_gb_s")
+    df = df[keep]
+    agg = {c: "first" for c in cfg_cols}
+    agg.update(
+        measured_tflops="median",
+        latency_ms="median",
+        source=_join_unique,
+        job_id=_join_unique,
+    )
+    if "bandwidth_gb_s" in df.columns:
+        agg["bandwidth_gb_s"] = "median"
+    df = df.groupby(keys, as_index=False).agg(agg)
+
+    df["op_type"] = "batched_gemm"
+    if dtype:
+        df["dtype"] = dtype
+    df["arch"] = arch
+    df["split_k"] = 1
+    df["is_valid"] = True
+    for col in ("batch_count", "m", "n", "k"):
+        df[col] = df[col].astype(int)
+    if hw:
+        for key, value in hw.items():
+            df[key] = value
+    return df
+
+
 def main(argv=None):
     """Command-line entry point."""
     import argparse
     import time
 
     parser = argparse.ArgumentParser(description="Parse CK Tile benchmark data")
-    parser.add_argument("input", help="Input file (log or parquet)")
+    parser.add_argument(
+        "input", help="Input file (log, gemm_full_benchmark.py CSV, or parquet)"
+    )
     parser.add_argument("--output", "-o", required=True, help="Output parquet path")
     parser.add_argument("--arch", default="gfx950", help="GPU architecture")
     parser.add_argument("--op_type", default="gemm_universal", help="Operation type")
@@ -410,6 +636,9 @@ def main(argv=None):
 
     if input_path.suffix == ".parquet":
         df = load_parquet(input_path)
+    elif input_path.suffix == ".csv":
+        df = parse_gemm_driver_csv(input_path, arch=args.arch, op_type=args.op_type)
+        print(f"  Dropped {df.attrs['dropped_unverified']} rows that failed --verify")
     else:
         df = parse_streaming_log(input_path, arch=args.arch, op_type=args.op_type)
 

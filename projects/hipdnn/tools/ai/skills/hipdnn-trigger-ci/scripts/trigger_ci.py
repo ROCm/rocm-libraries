@@ -31,12 +31,12 @@ Examples:
     # Dry-run multi-arch CI with test labels
     python3 <skill>/scripts/trigger_ci.py dispatch -w multi-arch \\
         -f linux_amdgpu_families=gfx94X,gfx950 \\
-        -f linux_test_labels=test:hipdnn,test:miopenprovider --dry-run
+        -f pr_labels=test:hipdnn,test:miopenprovider --dry-run
 
     # Re-run multi-arch tests at another tier, reusing run 36880722738's build
     python3 <skill>/scripts/trigger_ci.py --pr 12751 dispatch -w multi-arch \\
         -f linux_amdgpu_families=gfx94X \\
-        -f linux_test_labels=test:hipdnn,test_filter:comprehensive \\
+        -f pr_labels=test:hipdnn,test_filter:comprehensive \\
         --reuse-build 36880722738 --dry-run
 
     # Check CI status for a PR
@@ -70,7 +70,6 @@ CANONICAL_REMOTE_URL = re.compile(
 )
 
 WORKFLOWS = {
-    "therock-ci": "therock-ci.yml",
     "multi-arch": "therock-multi-arch-ci.yml",
     "hipdnn-superbuild": "hipdnn-superbuild-ci.yml",
 }

@@ -50,7 +50,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip3 install -i https://test.pypi.org/simple hip-python
+pip3 install "hip-python==10.0.*"
 pip3 install jinja2 kernel-tuner numpy
 
 # Run tuning

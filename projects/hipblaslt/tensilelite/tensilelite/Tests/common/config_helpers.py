@@ -34,7 +34,7 @@ import re
 import pytest
 import yaml
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
@@ -93,6 +93,35 @@ def markNamed(name):
     return getattr(pytest.mark, name)
 
 
+def _usingStinkytofuBackend(availableArchs):
+    """Return True when kernels for this config will be built on stinkytofu.
+
+    Checked in order:
+      1. ``ROCISA_BACKEND`` set -> True iff it is ``stinkytofu``.
+      2. Unset + no gfx1250 target -> False (only gfx1250 routes to stinkytofu).
+      3. Unset + gfx1250 target -> True iff rocisa has swapped in the stinkytofu
+         adaptor (a native fallback stays native -> False).
+    """
+    backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if backend:
+        return backend == "stinkytofu"
+
+    if not any("gfx1250" in arch for arch in availableArchs):
+        return False
+
+    try:
+        import rocisa
+    except Exception:
+        return False
+
+    # Read the already-loaded module instead of probing for the standalone
+    # stinkytofu binding: importing _stinkytofu.so alongside native _rocisa.so in
+    # one process registers the same nanobind types twice and aborts the process.
+    # When stinkytofu is unavailable rocisa never swaps the adaptor in, so the
+    # native fallback is already covered by this check returning False.
+    return "rocisa_stinkytofu_adaptor" in (getattr(rocisa, "__file__", "") or "")
+
+
 def configMarks(filepath, rootDir, availableArchs):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
@@ -128,9 +157,9 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(pytest.mark.syntax_error)
         return marks
 
-    # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
+    # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
     # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), which are not standalone Tensile.py configs. Signal the caller to
+    # files), which are not standalone tensilelite.py configs. Signal the caller to
     # skip them rather than crashing on doc["BenchmarkProblems"].
     if not isinstance(doc, dict):
         return None
@@ -166,8 +195,7 @@ def configMarks(filepath, rootDir, availableArchs):
             marks.append(pytest.mark.skip)
 
     # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
-    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+    if markNamed("skip-stinkytofu") in marks and _usingStinkytofuBackend(availableArchs):
         marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
 
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
@@ -233,7 +261,7 @@ def findAvailableArchs(gpu_targets=None):
         # stepping-specific mark; left intact it is rejected as unknown instead.
         return [t.strip() for t in gpu_targets.split(";") if t.strip()]
 
-    from Tensile.Tests.gpu_detection import get_available_archs
+    from tensilelite.Tests.gpu_detection import get_available_archs
     return get_available_archs()
 
 
@@ -271,13 +299,13 @@ def findConfigs(rootDir=None, availableArchs=None):
             # Skip build client script
             if filename == "build_client.yaml":
                 continue
-            # filter out yamls in logic_yaml since they are not meant for Tensile.py
+            # filter out yamls in logic_yaml since they are not meant for tensilelite.py
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
                     marks = configMarks(filepath, rootDir, availableArchs)
                     if marks is None:
-                        # Not a Tensile config (e.g. a library logic YAML); skip.
+                        # Not a TensileLite config (e.g. a library logic YAML); skip.
                         continue
 
                     # Conditionally xfail icache_flush.yaml on rocm 7.1 due to ROCm bug.

@@ -33,7 +33,9 @@
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
 
+#include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 #include <tensilelitehost/export.h>
@@ -80,7 +82,10 @@ namespace TensileLite
                                            * static_cast<uint64_t>(numWorkGroups.x)
                                            * static_cast<uint64_t>(numWorkGroups.y)
                                            * static_cast<uint64_t>(numWorkGroups.z);
-                        return workItems <= std::numeric_limits<uint32_t>::max();
+                        if(workItems > std::numeric_limits<uint32_t>::max())
+                            return false;
+                        // A cluster launch also limits grid z to 65535.
+                        return task.solution.clusterLaunchGridFits(task.problem, task.hardware);
                     }
 
                     return true;
@@ -103,6 +108,13 @@ namespace TensileLite
                         bool rv = (workItems <= std::numeric_limits<uint32_t>::max());
                         std::ostringstream details;
                         details << "workItems=" << workItems << " <= max=" << std::numeric_limits<uint32_t>::max();
+                        if(rv && !task.solution.clusterLaunchGridFits(task.problem, task.hardware))
+                        {
+                            rv          = false;
+                            dim3 grid   = task.solution.clusterLaunchGrid(task.problem, task.hardware);
+                            details << ", cluster grid z=" << grid.z
+                                    << " <= max=" << KernelInvocation::MaxClusterGridDimZ;
+                        }
                         PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                         return rv;
                     }
@@ -129,7 +141,7 @@ namespace TensileLite
                     return "WorkspaceCheck";
                 }
 
-                virtual bool operator()(Task const& task) const override
+                virtual bool operator()(Task const& task) const override try
                 {
                     size_t gsu = task.problem.getParams().gsu() != 0
                                      ? task.problem.getParams().gsu()
@@ -150,7 +162,15 @@ namespace TensileLite
                                <= task.problem.workspaceSize();
                 }
 
-                virtual bool debugEval(Task const& task, std::ostream& stream) const override
+                catch(std::invalid_argument const& error)
+                {
+                    // Grid selection can reject a budget smaller than one cluster.
+                    // Mark the solution ineligible instead of aborting selection.
+                    std::cerr << "hipBLASLt Error: " << error.what() << "\n";
+                    return false;
+                }
+
+                virtual bool debugEval(Task const& task, std::ostream& stream) const override try
                 {
                     size_t gsu = task.problem.getParams().gsu() != 0
                                      ? task.problem.getParams().gsu()
@@ -185,6 +205,11 @@ namespace TensileLite
                         "<=",
                         "max",
                         task.problem.workspaceSize());
+                }
+                catch(std::invalid_argument const& error)
+                {
+                    PredicateDebugger::printRow(stream, false, this->type(), error.what());
+                    return false;
                 }
             };
         } // namespace Contraction

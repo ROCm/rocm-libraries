@@ -98,7 +98,7 @@ Two things to add:
    )
    ```
 
-   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples.
+   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples. Newer declaration ABI generations inherit older generations' overrides (`_decls_for_flavor` resolves the chain in `_LlvmDeclarationAbi` order), so an entry goes only in the table of the generation where the signature changed; mirror it in the C++ array of the same generation (`cpp/core/lower_llvm/data.cpp`).
 
 2. Add an `_op_<dotted_name>` handler in `_Lowerer`. For `math.my_op`:
 
@@ -393,6 +393,23 @@ if __name__ == "__main__":
 
 Add a new `mfma_f32_<m>x<n>x<k>_<dt>` method to `IRBuilder` and the corresponding op name. Wire it through `core/lower_llvm.py::_op_tile_mfma_f32_...` and `_INTRINSIC_DECLS`.
 
+An instruction whose call is plain data -- the A, B and C operands in fixed
+register types plus literal immediates -- needs no handler. Describe it as a
+`MatrixCall` in `MATRIX_CALLS` (`core/isa/matrix_calls.py`) and as the same row
+in the C++ table (`cpp/core/isa/matrix_calls.cpp`). Each operand and the result
+take one form (`core/isa/matrix_operand_forms.py`):
+
+| Form | The operand the kernel holds | What reaches the instruction |
+|---|---|---|
+| `AsIs(t)` | `t`, or the same bits in another shape | unchanged, or one `bitcast` |
+| `ZeroPadded(<m x i32>, n)` | exactly its `n` packed words as `<n x i32>`, or the whole `<m x i32>` register | the words, then m - n zero words; the register unchanged |
+| `EvenHalves(<2n x h>)` | n 16-bit values | the values in the even half-slots |
+
+A register type that changed at a newer LLVM flavor is a `FlavorType`. The
+`declare` line is derived from the forms and added to every flavor's
+declaration table, so no `_INTRINSIC_DECLS` entry is written; a `decl_key` that
+names an existing entry must derive exactly its text.
+
 ### 5.2 `helpers/atoms.py`
 
 Add a new `MfmaAtom` class method and register it in `MFMA_F16_ATOMS` (or a new `MFMA_BF16_ATOMS`, etc.). Critically, fill in `lane_to_output(b, lane, i)` — this is the per-atom mapping that the epilogue depends on. Bad lane mapping is the single most common atom-extension bug.
@@ -404,14 +421,42 @@ Asserts:
 - a small kernel using the atom lowers to the expected intrinsic call;
 - `MfmaAtom.lane_to_output` for a few specific lanes returns the expected `(row, col)` SSA values when materialized (compare LLVM text against expected arithmetic).
 
-For a new dtype:
+### 5.4 Adding a dtype
 
-- Add the `Type` singleton in `core/ir.py`.
-- Add LLVM `_llvm_type` mapping.
-- Add load / store / cast support paths.
-- Add MFMA atom variants (`mfma_f32_<m>x<n>x<k>_<dt>`).
-- Add manifest dtype string canonicalization (`helpers/spec.py::ptr_type_str`).
-- Verify with both `lower_kernel_to_llvm` and an end-to-end `compile_kernel + KernelLauncher` test.
+One fact, one home. Work through the list in order; a step that does not apply
+(for example, a 4-bit format has no LLVM register type) is skipped, not faked.
+
+1. **Format** -- `core/dtypes.py`: a `(name, bits)` row under its category in
+   `_DTYPE_INFO`, and every accepted spelling in `_DTYPE_ALIASES`. This table is the
+   home of a format's bit width; `type_bits` and the packing helpers read it.
+2. **IR type** -- `core/ir.py`: the `Type` constant and its `dtype_to_ir_type`
+   entry; export it from `core/__init__.py` and `rocke/__init__.py` if kernels name it.
+3. **Reference width** -- `tests/core/test_dtypes.py`: add the width to
+   `_IR_SCALAR_BITS`, written by hand. Its completeness test fails until you do,
+   so the format table is always checked against an independent source. The
+   same map checks the C++ engine's widths (`rocke_ir_types --scalar-bits`), whose
+   name list in `tests/core/test_ir_types.cpp` fails to compile until the new
+   scalar kind is named there.
+4. **Register form** -- `core/lower_llvm.py::_llvm_type` if values of the type live
+   in registers as an LLVM type. Sub-byte formats have none: they travel packed in
+   32-bit registers (`core/storage.py::register_packing`).
+5. **Memory and constants** -- loads, stores, `zero_vec`, and the LDS element-byte
+   tables, only for the widths the type needs.
+6. **Conversions** -- explicit `cvt_<src>_to_<dst>` primitives, each one
+   instruction; no existing cast widens to the new type implicitly.
+7. **MMA** -- catalog rows in `core/arch/data/arch_specs.json` if an instruction
+   takes the type as an operand or accumulator.
+8. **Manifest** -- `helpers/spec.py::ptr_type_str` canonicalization.
+9. **C++ engine** -- mirror the change in the same change (`cpp/core/dtypes.cpp`,
+   `cpp/core/ir/core_types.cpp`, `cpp/core/lower_llvm/`, `cpp/core/lower_hip/`):
+   both engines emit the same IR and refuse the same input with the same text.
+10. **Docs** -- the type's row in [dtype support](../reference/dtype_support.md).
+11. **Tests** -- a lowering test that passes
+    `rocke.tests.ir_validity.assert_target_accepts`, and a numeric test that names
+    the architectures it supports (`rocke.tests.gpu.run_on_device`). Lower through
+    `lower_kernel_to_llvm`, so a `ROCKE_BACKEND=both ROCKE_CPP_STRICT=1` run
+    compares the engines, and state a refusal with
+    `rocke.tests.engines.assert_both_engines_reject`.
 
 ## 6. Adding A New Optimization Lever To The Autotuner
 

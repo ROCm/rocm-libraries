@@ -139,5 +139,8 @@ TYPE_PROPERTIES = MappingProxyType(
         "E5M3": _TypeProperties(
             char="E5M3", nameAbbrev="e5m3", miOutTypeNameAbbrev="f32", reg=0.25, hip="ERROR"
         ),
+        "Int4": _TypeProperties(
+            char="I4", nameAbbrev="i4", miOutTypeNameAbbrev="f32", reg=0.125, hip="tensile_int4x2"
+        ),
     }
 )

@@ -13,7 +13,8 @@ diagonal, with ``causal_top_left`` choosing the alignment:
 * non-causal bands: a window with an unbounded or lookahead right bound.
 
 The oracle is ``parity_unified_attention.ref_paged_attn``. Every test is
-``gpu``-marked and self-skips off a gfx950 device.
+``gpu``-marked. The tiled-kernel tests self-skip off a gfx950 device; the scalar
+kernel is arch-neutral, so its tests run on any GPU, compiled for that GPU.
 """
 
 from __future__ import annotations
@@ -33,6 +34,10 @@ def _gpu_ready() -> bool:
 
 requires_gfx950_gpu = pytest.mark.skipif(
     not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
+)
+
+requires_any_gpu = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="needs a GPU with ROCm torch"
 )
 
 
@@ -393,7 +398,14 @@ _SCALAR_MASKS = {
 
 
 class TestMaskScalar:
-    @requires_gfx950_gpu
+    """The scalar kernel against the oracle, on whatever GPU is present.
+
+    The ``gqa_40_8`` case maps 40 query heads onto 8 KV heads, a ratio of 5: the
+    kernel's head -> KV-head magic division then has a multiplier other than 1, which
+    a power-of-two ratio never exercises.
+    """
+
+    @requires_any_gpu
     @pytest.mark.gpu
     @pytest.mark.parametrize("mask", list(_SCALAR_MASKS))
     @pytest.mark.parametrize(
@@ -403,16 +415,16 @@ class TestMaskScalar:
             dict(seq_lens=[(40, 100), (60, 20)], use_sinks=True),
             dict(seq_lens=[(40, 100), (60, 20)], softcap=30.0),
             dict(seq_lens=[(40, 100), (60, 20)], sliding_window=16),
+            dict(seq_lens=[(40, 100), (60, 20)], num_query_heads=40, num_kv_heads=8),
         ],
-        ids=["mixed", "sinks", "softcap", "window"],
+        ids=["mixed", "sinks", "softcap", "window", "gqa_40_8"],
     )
     def test_scalar_matches_reference(self, kw, mask):
         from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
         P = _harness()
         band = _SCALAR_MASKS[mask]
-        s = P.Scenario(
-            name="scalar",
+        fields = dict(
             num_query_heads=4,
             num_kv_heads=2,
             head_size=128,
@@ -420,8 +432,9 @@ class TestMaskScalar:
             dtype=torch.float16,
             num_blocks=256,
             **band,
-            **kw,
         )
+        fields.update(kw)
+        s = P.Scenario(name="scalar", **fields)
         data = P.make_inputs(s)
         ref = P.run_reference(s, data)
         q = data["query"]

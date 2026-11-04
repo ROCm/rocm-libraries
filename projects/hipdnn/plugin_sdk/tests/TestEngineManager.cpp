@@ -122,7 +122,7 @@ TEST(TestEngineManager, AddMultipleEngines)
 
 /// Two engines hashing onto one id is an authoring collision (RFC 0003); the manager keeps
 /// the incumbent and logs the loser rather than dropping it silently. This is not the
-/// descriptor rule -- RFC 0020 §10.2.1 drops every UED in a name collision before
+/// descriptor rule -- RFC 0020 §13.2.1 drops every UED in a name collision before
 /// construction -- but the backstop for collisions that rule can't see, e.g. two
 /// hand-written engines.
 TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
@@ -194,6 +194,37 @@ TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
     EXPECT_TRUE(std::find(applicableIds.begin(), applicableIds.end(), 2) == applicableIds.end());
 }
 
+// An engine whose applicability check throws is treated as inapplicable; it must not
+// hide the plugin's other engines. ROCm/rocm-libraries#14266.
+TEST(TestEngineManager, GetApplicableEngineIdsSkipsEngineThatThrows)
+{
+    class ThrowingEngine : public TestEngine
+    {
+    public:
+        using TestEngine::TestEngine;
+
+        bool isApplicable(
+            TestHandle& /*handle*/,
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                        "no applicable solver");
+        }
+    };
+
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
+    manager.addEngine(std::make_unique<ThrowingEngine>(2, true));
+    manager.addEngine(createTestEngine(3, true));
+
+    TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    auto applicableIds = manager.getApplicableEngineIds(handle, mockGraph);
+    std::sort(applicableIds.begin(), applicableIds.end());
+
+    EXPECT_EQ(applicableIds, (std::vector<int64_t>{1, 3}));
+}
+
 TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
 {
     TestEngineManager manager;
@@ -219,4 +250,26 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);
+}
+
+TEST(TestEngineManager, NonEnumerableEngineDeclinesWithoutLosingNormalExecutionSupport)
+{
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048));
+    TestHandle handle;
+    const NiceMock<MockGraph> graph;
+    const NiceMock<MockEngineConfig> config;
+    ON_CALL(config, engineId()).WillByDefault(Return(1));
+    hipdnnPluginConstData_t page{};
+    try
+    {
+        manager.enumerateCandidates(handle, graph, config, 0, 10, page);
+        FAIL() << "Non-enumerable engine must decline explicitly";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    }
+    EXPECT_EQ(manager.getApplicableEngineIds(handle, graph), std::vector<int64_t>{1});
+    EXPECT_EQ(manager.getMaxWorkspaceSize(handle, graph, config), 2048U);
 }

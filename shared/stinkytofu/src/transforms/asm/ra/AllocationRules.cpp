@@ -25,11 +25,13 @@
 #include <algorithm>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -69,14 +71,21 @@ void forEachOperand(const StinkyInstruction& instruction, auto&& fn) {
 // ---------------------------------------------------------------------------
 
 RuleKind AllocationRule::kind() const {
+    // satisfiedBy is deliberately not counted. It judges what addPreferences
+    // collected rather than collecting anything itself, so counting it would
+    // make every pairing rule look like two rules at once.
     const int filled = static_cast<int>(static_cast<bool>(forbidsBase)) +
                        static_cast<int>(static_cast<bool>(clobbersEarly)) +
                        static_cast<int>(static_cast<bool>(addRelations)) +
-                       static_cast<int>(static_cast<bool>(baseCost));
+                       static_cast<int>(static_cast<bool>(baseCost)) +
+                       static_cast<int>(static_cast<bool>(addPreferences)) +
+                       static_cast<int>(static_cast<bool>(pinToProducer));
     if (filled != 1) return RuleKind::Empty;
     if (forbidsBase) return RuleKind::Placement;
     if (clobbersEarly) return RuleKind::Interference;
     if (addRelations) return RuleKind::Offset;
+    if (addPreferences) return RuleKind::Pairing;
+    if (pinToProducer) return RuleKind::Pin;
     return RuleKind::Preference;
 }
 
@@ -102,8 +111,12 @@ const char* ruleKindName(RuleKind kind) {
             return "interference";
         case RuleKind::Offset:
             return "offset";
+        case RuleKind::Pin:
+            return "pin";
         case RuleKind::Preference:
             return "preference";
+        case RuleKind::Pairing:
+            return "pairing";
     }
     return "empty";
 }
@@ -120,17 +133,34 @@ AllocationRules::AllocationRules(std::vector<AllocationRule> rules) : rules_(std
     kept.reserve(rules_.size());
     for (AllocationRule& rule : rules_) {
         if (rule.kind() == RuleKind::Empty) {
-            problems_.push_back("rule " + std::string(rule.name) +
-                                " fills in none or several of forbidsBase, clobbersEarly, "
-                                "addRelations, baseCost; exactly one is required");
+            problems_.push_back(
+                "rule " + std::string(rule.name) +
+                " fills in none or several of forbidsBase, clobbersEarly, addRelations, "
+                "baseCost, addPreferences, pinToProducer; exactly one is required" +
+                // satisfiedBy is the easiest one to fill in alone, and it is
+                // not on the list above, so the message would otherwise name
+                // nothing the author actually wrote.
+                (rule.satisfiedBy ? " (satisfiedBy is the companion to addPreferences, not a"
+                                    " rule of its own)"
+                                  : ""));
             continue;
         }
-        if (rule.kind() == RuleKind::Preference && rule.status == RuleStatus::Audit) {
+        // A pairing rule that cannot judge its own pairs would collect them and
+        // then score nothing, which is the believed-enabled-and-inert failure
+        // the rest of these checks exist to catch.
+        if ((rule.kind() == RuleKind::Pairing) != static_cast<bool>(rule.satisfiedBy)) {
+            problems_.push_back("rule " + std::string(rule.name) +
+                                " must fill in satisfiedBy exactly when it fills in "
+                                "addPreferences; one without the other does nothing");
+            continue;
+        }
+        const bool soft = rule.kind() == RuleKind::Preference || rule.kind() == RuleKind::Pairing;
+        if (soft && rule.status == RuleStatus::Audit) {
             // Audit asks "does the input already violate this", which presumes a
             // violation. A preference has none, so Audit here would be silently
             // inert -- how a rule ends up believed-enabled and doing nothing.
             problems_.push_back("rule " + std::string(rule.name) +
-                                " is a preference, which has no Audit state");
+                                " is a soft rule, which has no Audit state");
             rule.status = RuleStatus::Off;
         }
         kept.push_back(std::move(rule));
@@ -143,6 +173,33 @@ void AllocationRules::refresh() {
     prices_ = std::any_of(rules_.begin(), rules_.end(), [](const AllocationRule& rule) {
         return rule.status == RuleStatus::Active && static_cast<bool>(rule.baseCost);
     });
+    pairs_ = std::any_of(rules_.begin(), rules_.end(), [](const AllocationRule& rule) {
+        return rule.status == RuleStatus::Active && static_cast<bool>(rule.addPreferences);
+    });
+    pins_ = std::any_of(rules_.begin(), rules_.end(), [](const AllocationRule& rule) {
+        return rule.status == RuleStatus::Active && static_cast<bool>(rule.pinToProducer);
+    });
+}
+
+void AllocationRules::addPreferences(const StinkyInstruction& inst, const OperandValues& values,
+                                     std::vector<Preference>& preferences) const {
+    for (size_t index = 0; index < rules_.size(); ++index) {
+        const AllocationRule& rule = rules_[index];
+        if (rule.status != RuleStatus::Active || !rule.addPreferences) continue;
+
+        // Tagged here rather than by the rule, so a rule cannot name the wrong
+        // row and have its pairs judged by somebody else's predicate.
+        const size_t before = preferences.size();
+        rule.addPreferences(inst, values, preferences);
+        for (size_t i = before; i < preferences.size(); ++i) preferences[i].rule = index;
+    }
+}
+
+bool AllocationRules::satisfiedBy(const Preference& preference, RegKey a, RegKey b) const {
+    if (preference.rule >= rules_.size()) return false;
+    const AllocationRule& rule = rules_[preference.rule];
+    if (rule.status != RuleStatus::Active || !rule.satisfiedBy) return false;
+    return rule.satisfiedBy(a, b);
 }
 
 const AllocationRule* AllocationRules::forbidsBase(RegType regClass, uint32_t base,
@@ -181,13 +238,25 @@ double AllocationRules::baseCost(RegType regClass, uint32_t base, uint32_t width
 
 std::vector<std::string> AllocationRules::unknownNames(const RuleOverrides& overrides) const {
     std::vector<std::string> unknown;
-    for (const std::string& wanted : overrides.activate) {
-        const bool found =
-            std::any_of(rules_.begin(), rules_.end(),
-                        [&wanted](const AllocationRule& rule) { return rule.name == wanted; });
-        if (!found) unknown.push_back(wanted);
+    for (const std::vector<std::string>* named : {&overrides.activate, &overrides.disable}) {
+        for (const std::string& wanted : *named) {
+            const bool found =
+                std::any_of(rules_.begin(), rules_.end(),
+                            [&wanted](const AllocationRule& rule) { return rule.name == wanted; });
+            if (!found) unknown.push_back(wanted);
+        }
     }
     return unknown;
+}
+
+std::vector<std::string> AllocationRules::contradictoryNames(const RuleOverrides& overrides) {
+    std::vector<std::string> both;
+    for (const std::string& wanted : overrides.activate) {
+        if (std::find(overrides.disable.begin(), overrides.disable.end(), wanted) !=
+            overrides.disable.end())
+            both.push_back(wanted);
+    }
+    return both;
 }
 
 void AllocationRules::force(const RuleOverrides& overrides) {
@@ -197,6 +266,14 @@ void AllocationRules::force(const RuleOverrides& overrides) {
         return;
     }
     for (AllocationRule& rule : rules_) {
+        // Disable wins, so "everything on except this one" does what it says.
+        // Naming a rule in both lists is a mistake rather than a shorthand;
+        // contradictoryNames() is what refuses it, before anything gets here.
+        if (std::find(overrides.disable.begin(), overrides.disable.end(), rule.name) !=
+            overrides.disable.end()) {
+            rule.status = RuleStatus::Off;
+            continue;
+        }
         const bool named = std::find(overrides.activate.begin(), overrides.activate.end(),
                                      rule.name) != overrides.activate.end();
         if (overrides.activateAll || named) {
@@ -336,10 +413,40 @@ std::vector<std::string> auditRules(const Function& function, const AllocationRe
                 }
                 break;
             }
+            case RuleKind::Pin: {
+                if (!rule.pinToProducer) break;
+                const RegClassSet& classes = function.ssaArena().liftedClasses();
+                for (const BasicBlock& block : function) {
+                    for (const IRBase& ir : block) {
+                        const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
+                        if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
+                        const OperandGroups groups = operandGroupsOf(*instruction, classes);
+                        const OperandValues values = [&groups](size_t operand, bool isDest) {
+                            return groups.at(operand, isDest);
+                        };
+                        std::vector<SSAValueID> pinned;
+                        rule.pinToProducer(*instruction, values, pinned);
+                        for (const SSAValueID id : pinned) {
+                            if (id == kInvalidSSAValueID || !coloring.isAssigned(id)) continue;
+                            const StinkySSAValue* value = function.ssaArena().get(id);
+                            if (value == nullptr || !value->hasPhysicalBinding()) continue;
+                            const StinkySSAValue::PhysicalBinding& binding = value->physical();
+                            const RegKey producer{binding.type, binding.idx, RegHalf::NONE};
+                            const RegKey physical = coloring.assignmentOf(id);
+                            if (physical == producer) continue;
+                            report(rule, valueName(id) + " is " + regKeyToString(physical) +
+                                             " but the producer placed it at " +
+                                             regKeyToString(producer));
+                        }
+                    }
+                }
+                break;
+            }
             case RuleKind::Preference:
-                // Nothing to report: paying a preference produces a working
-                // kernel that is merely slower, which the shadow report already
-                // measures end to end.
+            case RuleKind::Pairing:
+                // Nothing to report for either soft kind: an unpaid preference
+                // produces a working kernel that is merely slower, which the
+                // shadow report already measures end to end.
                 break;
             case RuleKind::Empty:
                 break;

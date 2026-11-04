@@ -140,7 +140,7 @@ struct Gfx950AttentionDenseGeometry
 /**
  * @brief The launch geometry for one selected candidate over one graph.
  *
- * Mirrors `attention_dense_grid`:
+ * Mirrors `attention_dense_grid` for the qb_minor non-persistent block order:
  *
  *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
  *     return (nqb, spec.num_query_heads, spec.batch)

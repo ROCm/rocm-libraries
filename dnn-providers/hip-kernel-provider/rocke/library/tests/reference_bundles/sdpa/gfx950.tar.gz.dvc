@@ -1,0 +1,5 @@
+outs:
+- md5: 45ecc9f281ba2e1f29998f73929a41cf
+  size: 2540019
+  hash: md5
+  path: gfx950.tar.gz

@@ -1,6 +1,9 @@
 # RFC 0019: Universal Heuristic Descriptor (UHD): Data-Driven Kernel Selection
 
 - Contributors: Jason Campbell, Chris Erb
+- **Status**: In progress
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
   - [RFC 0020 Universal Engine Descriptor](0020_UniversalEngineDescriptor.md) — owns engine identity, the UED's `nodes` pattern, and the **symbol table matching it publishes**. That table is the binding this RFC's `features_signature` reads, and the set every UHD is validated against ([Section 6.1](#61-feature-sources), [Section 6.3](#63-contract-enforcement)).
@@ -118,6 +121,10 @@ matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.
 
 ### 3.1 Descriptor Relationships
 
+The UED loader (`parseEngineDescriptor()` in `DescriptorLoader.hpp`) reads the three role maps below.
+`predict_applicable_kernels` is parsed and its training provenance is checked. Not yet built: a
+consumer for `predict_applicable_kernels`.
+
 ```
 UED (engine)
  ├── sort_kernel_catalog:       {arch → [UHD id]} ← kernel-selection heuristics (the main UHD), one per metric
@@ -142,7 +149,7 @@ In JSON form:
 ```jsonc
 // The UED owns the heuristics + metadata schema; the KDP joins the engine and adds kernels.
 {
-  "schema": "hipdnn.ued/v1",
+  "version":  "1.0",
   "id":       "efc9eae4-…",              // engine identity
   "sort_kernel_catalog": {              // UHDs: rank this engine's kernels  <-- membership
     "gfx950":  ["ae896b07-…", "3d0c52e1-…"],   // e.g. a tflops ranker and a time ranker (Section 4.4)
@@ -154,7 +161,7 @@ In JSON form:
 }
 
 {
-  "schema": "hipdnn.kdp/v1",
+  "version":   "1.0",
   "arch":      ["gfx942"],
   "matchers":  ["968156a8-…"],      // shared matcher set (UMD ids)
   "engine":    "efc9eae4-…",        // UED: the engine these kernels join (carries the UHDs + KMD)
@@ -167,7 +174,7 @@ In JSON form:
 }
 ```
 
-**An engine names up to three role-scoped UHDs, each mapped by architecture** ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md)):
+**An engine names up to three role-scoped UHDs, each mapped by architecture** ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md#46-heuristic-roles-and-arch-keying)):
 
 | UED field | Role | When it runs | This RFC |
 |---|---|---|---|
@@ -186,10 +193,12 @@ above:
 
 Only the first runs before applicability is settled; the other two run after it
 ([Section 10](#10-applicability-flow)). Each role is **independently optional**, and each value is an
-**arch → UHD ids** map resolved by exact `gcnArchName`, then a `default` entry, then unavailable
-([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
-concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. `knobs` derives
-from `sort_kernel_catalog`'s `$kernel.*` feature axes and no other ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
+**arch → UHD ids** map resolved by the longest arch key that prefixes the device's `gcnArchName` (a
+base id such as `gfx942` serves a device reporting `gfx942:sramecc+:xnack-`), then a `default` entry,
+then unavailable ([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
+concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. `knobs` is
+authored, never derived from a model: of the three roles only `sort_kernel_catalog` may read `$kernel.*`,
+and every axis it reads must be both a KMD field and one of those knobs ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
 Three named fields, rather than a single id or an ordered list, keep each role independently optional
 and independently versioned, let a loader resolve exactly the role a request needs without walking a
@@ -214,9 +223,12 @@ each UHD declares in its own `score.metric`:
   `(gfx942, tflops)`. Crossing metrics would substitute a number in the wrong units.
 - **A single id is a one-element list.** An existing role map needs no rewrite.
 - **A catalog ranker need not declare a metric.** A `sort_kernel_catalog` UHD with no `score.metric`
-  (a `native` comparator, a `static_order`) orders its catalog but produces no comparable number. It is
-  the engine's **default ranker**, used when no metric is requested or the requested one has no ranker;
-  at most one per architecture key. Every `predict_engine` UHD must declare a metric
+  (a `native` comparator, a `static_order`) orders its catalog but produces no comparable number; at
+  most one per architecture key. The engine's **default ranker** — used for kernel choice when no
+  metric is requested or the requested one has no ranker for the device — is that metric-less ranker
+  if there is one, else the ranker for the default metric `tflops`, else static order. The second step
+  lets an engine that ships only a `tflops` ranker choose its kernel the same way whether or not the
+  request names a metric. Every `predict_engine` UHD must declare a metric
   ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
 `predict_applicable_kernels` stays single-valued: it generates the candidate set rather than scoring
@@ -250,7 +262,9 @@ Within that namespace the containment runs one way, and the asymmetry is the who
   hidden behind the result, which is worse than no dial at all. Note *reachable*: `$kernel.*` references
   nested inside a computed feature count too, so `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}`
   requires `tile_m0` to be exposed even though the signature never names it on its own
-  ([Section 6.2](#62-the-features_signature)).
+  ([Section 6.2](#62-the-features_signature)). An indexed reference names its field:
+  `$kernel.tile[0]` requires the field and the knob `tile`, because a KMD declares, and a UED exposes,
+  a field rather than one of its elements.
 - **A knob the model does not read stays exposed.** Training has no standing to withdraw it. The knob
   list is read by the engine's UMDs and by callers who tune, so it is the engine's to author and the
   engine's to change; a knob whose training column carried one value is simply a dial the current model
@@ -277,16 +291,31 @@ Within that namespace the containment runs one way, and the asymmetry is the who
   feature set still fits inside the declared knobs
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
 
+**A fact about the problem is a problem feature, even where kernel metadata also records it.** A pack
+that matches only causal fp16 graphs may carry `causal: true` and `dtype: fp16` in every UKD's
+`metadata`, and the engine's pattern binds the same facts from the graph. A model reads them from the
+problem side — `$<node>.causal`, `$graph.*`, whatever the match binding publishes — never as
+`$kernel.causal`. Read through `$kernel.*`, a data type or a head count would be a kernel axis — a
+dial a caller turns to choose a kernel — and a UED does not expose the problem's data type as a knob,
+so the [Section 6.3](#63-contract-enforcement) check refuses the model. The match binding is where a
+graph's facts are read ([Section 9.3](#93-efficient-evaluation-expressive-spec-fast-hot-path)), and the
+model reads them there like every other problem feature.
+
 **Benchmark wide, expose what the caller needs.** Generation still sweeps the full space — every
 addressable KMD field is exposed on the *generation* UED so every kernel is individually addressable and
-timeable ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). Feature selection then prunes the axes
-that do not earn their place **in the model**. The **emitted** UED keeps the engine's authored knobs,
-and the surviving feature set is checked to be contained in them.
+timeable ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). That exposure is for *timing*,
+not for the model: generation offers training only the **shipping** UED's knobs as `$kernel.*` axes, and
+feature selection then prunes the ones that do not earn their place **in the model**. The **emitted**
+UED keeps the engine's authored knobs, and the surviving feature set is checked to be contained in
+them — by promotion before install and by the loader again at load, with the same rule
+([Section 6.3](#63-contract-enforcement)).
 
 **Consequence: the public knob list is stable under retraining.** A retrain that drops `split_k` as a
 feature does not remove it as a knob, so a caller pinning it keeps working and the engine's UMDs keep
 reading a list that did not move underneath them. What the retrain produces is a **warning** — a dial
-the heuristic no longer reads — and the engine's author decides whether to withdraw it. That withdrawal
+the heuristic no longer reads — and the engine's author decides whether to withdraw it. The generation
+tool withdraws a knob only when asked explicitly (`uhd_gen promote --remove-knob`); that tool is not yet
+built ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). That withdrawal
 is a deliberate engine change and a **breaking content-revision** bump on the UED
 ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)), which disables a stale model and marks the
 API break without moving the file-format version that would orphan the descriptor outright.
@@ -339,7 +368,8 @@ catalog happens to contain for this graph. The same knob can report `{64, 128, 2
 reported value is achievable *on its own*, and nothing more — combining values across knobs may name a
 kernel that does not exist, and setting knobs that jointly match nothing is a legitimate empty result,
 not an internal error. The distinction that matters is **who sets the value**: the kernel's build (every
-KMD field, as `metadata`) versus the user (the exposed subset — which is the heuristic's feature set).
+KMD field, as `metadata`) versus the user (the exposed subset, which contains every kernel axis the
+heuristic reads).
 
 ### 3.3 Coupling Rules
 
@@ -369,10 +399,11 @@ This gives the UHD a firm, checkable contract:
   and the kernel vector); the **UHD and KMD belong to the UED (engine)**, shared by every pack that joins
   it. `arch` is a KDP property, so one engine — and its UHDs/KMD — spans arches, with per-arch model
   selection handled by the UED's arch-keyed heuristic maps ([Section 3.1](#31-descriptor-relationships)).
-- **The UHD's `$kernel.*` references must be a subset of the KMD fields, and must equal the UED's
+- **The UHD's `$kernel.*` references must be a subset of the KMD fields, and a subset of the UED's
   knobs** — a two-part load-time check ([Section 6.3](#63-contract-enforcement)). The KMD is the
-  authority on *what fields exist*; the UHD picks *which subset* it ranks on and how it derives from
-  them; the UED's `knobs` must then name exactly that subset. The fields left over serve the UDD.
+  authority on *what fields exist*, the UED's `knobs` on *which of them a caller may set*; the UHD picks
+  *which subset* of those it ranks on and how it derives from them. A knob the model does not read stays
+  a knob. The fields left over serve the UDD.
 
 **Engine-scoped, never per-pack.** Many KDPs may join the same engine and share its heuristics. A UHD
 is never inlined per kernel or per pack; the UED names one per role, and one per arch within a role
@@ -391,6 +422,12 @@ engine rather than folded into one model. **OPEN:** See [Open Question 2](#schem
 ---
 
 ## 4. UHD Schema
+
+The UHD parser (`heuristics/uhd/UhdParser.hpp`) admits the schema in this section, and
+`parseHeuristicDescriptor()` in `DescriptorLoader.hpp` reads it. `heuristics/uhd/AdapterFactory.hpp`
+builds the `native`, `tree_data`, `table`, and `custom_library` adapters; `static_order` needs no
+adapter. Not yet built: the `onnx` adapter. The parser admits an `onnx` UHD, and the engine then ranks
+its catalog by `priority`, then `id`.
 
 A UHD is a small, reusable scoring recipe. It names an `adapter` (ranking mechanism), a
 `features_signature` (model inputs), an objective, and — for model adapters — a model artifact.
@@ -418,7 +455,7 @@ identity, versioning, and the feature contract without understanding the ranking
     "$device.cu_count", "$device.lds_size",            // device props → arch-aware
     "$kernel.tile_m", "$kernel.split_k",               // KMD fields, exposed as knobs (Section 3.2)
     "$q.dims[3]", "$q.dims[2]",                        // positional tensor dims (Section 6.1)
-    {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]},     // computed inline — no $derived.* (Section 6.4)
+    {"/": ["$graph.flops", "$graph.logical_bytes"]},   // computed inline — no $derived.* (Section 6.4)
     {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]}    // tile quantization, also inline
   ],
   "categorical_encoding": { … },                       // string → code maps, generated (Section 6.5)
@@ -428,7 +465,8 @@ identity, versioning, and the feature contract without understanding the ranking
   "trained_against": {
     "kmd": {"id": "5a1c0000-…", "revision": "2.1"},
     "ued": {"id": "7f30b911-…", "revision": "1.3"},
-    "umd": [{"id": "1a7f52c8-…", "revision": "1.0"}] // one entry per matcher
+    "umd": [{"id": "1a7f52c8-…", "revision": "1.0"}], // one entry per matcher
+    "feature_semantics_revision": 1                   // what the published features mean (Section 6.9)
   },
 
   "objective": "max",                                  // higher predicted score wins
@@ -452,22 +490,24 @@ Other adapters keep the same header and swap the body:
 { …, "adapter": "onnx",
   "onnx": {"artifact": "fmha_fwd/model.onnx"} }
 
-// static_order — no features, no hash, no model
+// static_order — no features, no hash, no model, no parameters
 { "version": "1.0", "id": "…", "name": "…", "adapter": "static_order",
-  "static_order": {"order": ["priority", "id"]} }
+  "static_order": {} }
 
-// custom_library — author-shipped .so behind a C ABI; features_hash advisory if it self-features
+// custom_library — author-shipped .so behind a C ABI; a declared features_signature brings its hash
 { …, "adapter": "custom_library",
   "custom_library": {"library": "vendor_scorer.so", "symbol": "vendor.fmha_scorer",
-                     "config": { … }} }                // symbol + typed config, never inline code
+                     "hash": "<64 hex>", "config": {}} }  // symbol only; a nonempty config is refused
 ```
 
-**On `static_order.order`.** The entries are *ordering criteria* (`priority`, then `id`), not a literal
-list of UKD ids — the same deterministic arbitration
-[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. An explicit id list is a
-reasonable future extension for pinning a known-good order; if one is supplied, ids present in the list
-rank first in the given order and **any catalog entry not named falls through to the default criteria**,
-so a stale list degrades gracefully rather than hiding kernels.
+**On `static_order`.** The body has no parameters. It ranks by UKD `priority` (higher first), then by
+stable descriptor `id` — the same deterministic arbitration
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. Declared
+ordering criteria and an explicit id list for pinning a known-good order are possible future
+extensions, not part of v1.0: a v1.0 loader **refuses** a body that declares `order` rather than
+ignoring it, so a descriptor cannot appear to pin an order it does not get. Should the id list land,
+ids present in it rank first in the given order and **any catalog entry not named falls through to
+`priority` then `id`**, so a stale list degrades gracefully rather than hiding kernels.
 
 ### 4.1 Field Reference (normative)
 
@@ -482,10 +522,10 @@ The normative header. A loader can validate every row here without instantiating
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:` + 16 hex | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding`, truncated to 64 bits ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | descriptor refs, or `selector_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, or — for an engine that has no descriptor set — the opaque provider revision whose behaviour was measured ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
+| `trained_against` | if the adapter features | descriptor refs, `selector_revision`, or both; optionally `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, and/or the selector revision whose behaviour was measured — the provider's, for an engine that has no descriptor set, or the generic engine's own, which an engine estimate (`predict_engine`) of a descriptor engine must record beside its descriptor refs ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
 | `score` | no | object | `metric`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover the metric's value in its registered units ([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)). `metric` names a registered ranking metric and fixes the units and the winning direction, so `objective` must agree with it. A `calibrated` score requires a `metric`. |
-| `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file may also carry that file's `hash` ([Section 7.2](#72-default-tree_data)). |
+| `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file names it by a relative path that stays inside the descriptor's directory, and may also carry that file's `hash`: its SHA-256 as 64 lowercase hexadecimal digits. A `custom_library` body must ([Section 7.2](#72-default-tree_data)). |
 | `x-…`, `_…` | no | any | Author-reserved extension namespaces, ignored by the loader ([Section 4.1](#41-field-reference-normative)). |
 
 Two header rules govern the split:
@@ -497,80 +537,89 @@ Two header rules govern the split:
   provider does not implement produces a diagnosable "unsupported adapter" error rather than a parse
   failure, so a newer pack landing next to an older provider degrades predictably.
 
-Each `major.minor` is a standalone JSON Schema **file** in the repository; the inline copy below
-mirrors the authoritative `uhd/1.0.json`, and a CI check verifies the match. The schema targets
-**Draft 7**, matching [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema), so one
-file drives both the build-time and runtime checks.
+The authoritative schema is the source-tree file `projects/hipdnn/plugin_sdk/schemas/uhd.schema.json`
+(one file per `major.minor`); the inline copy below mirrors it. It targets **Draft 7**, matching
+[RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema). The schema is not installed:
+the runtime enforces the same rules through its own parser (`UhdParser.hpp`), and the packaging tests
+hold the schema and the packer together (below).
 
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "uhd/1.0.json",
-  "title": "hipdnn.uhd version 1.0",
+  "$id": "https://rocm.docs.amd.com/projects/hipDNN/schemas/uhd.schema.json",
+  "title": "hipDNN Universal Heuristic Descriptor",
   "type": "object",
   "additionalProperties": false,
-  "patternProperties": { "^(x-|_)": {} },
+  "patternProperties": {"^(x-|_)": {}},
   "required": ["version", "id", "name", "adapter"],
-
   "definitions": {
-    "guid":     { "type": "string",
-                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
-    "revision": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-    "descriptor_ref": {
-      "description": "Which descriptor, and which content revision of it (section 8.1).",
-      "type": "object", "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+    "uuid": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![\\s\\S])"},
+    "revision": {"type": "string", "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}(?![\\s\\S])"},
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
       "required": ["id", "revision"],
-      "properties": { "id":       { "$ref": "#/definitions/guid" },
-                      "revision": { "$ref": "#/definitions/revision" } }
+      "properties": {
+        "id": {"$ref": "#/definitions/uuid"},
+        "revision": {"$ref": "#/definitions/revision"}
+      }
+    },
+    "sha256": {
+      "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "relative_path": {
+      "description": "A portable '/'-separated file inside the descriptor's directory: no root, backslash, colon, NUL or '..' segment; the final segment names a file. Runtime and packer also reject symlinks escaping that directory at admission (not a concurrent filesystem-mutation boundary).",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![\\s\\S]*[\\\\:\\u0000])(?![\\s\\S]*(?:^|/)\\.\\.(?:/|(?![\\s\\S])))(?![\\s\\S]*(?:^|/)(?:\\.|)(?![\\s\\S]))"
     },
     "artifact": {
-      "description": "A model file beside the descriptor, optionally content-addressed (section 7.2).",
-      "type": "object", "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
       "required": ["artifact"],
-      "properties": { "artifact": { "type": "string", "minLength": 1 },
-                      "hash":     { "type": "string", "minLength": 1 } }
+      "properties": {
+        "artifact": {"$ref": "#/definitions/relative_path"},
+        "hash": {"$ref": "#/definitions/sha256"}
+      }
     }
   },
-
   "properties": {
-    "version":    { "type": "string", "const": "1.0" },
-    "id":         { "$ref": "#/definitions/guid" },
-    "name":       { "type": "string", "minLength": 1 },
-    "adapter":    { "enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"] },
-    "provenance": { "description": "Free-form authoring notes; never read by the loader." },
-
+    "version": {"const": "1.0"},
+    "id": {"$ref": "#/definitions/uuid"},
+    "name": {"type": "string", "minLength": 1},
+    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"]},
+    "provenance": {"description": "Free-form authoring notes; never read by the loader."},
     "features_signature": {
-      "description": "Ordered model inputs. A string is a $-reference; an object is an expression.",
       "type": "array",
       "minItems": 1,
       "items": {
         "oneOf": [
-          { "type": "string", "pattern": "^\\$." },
-          { "type": "object", "minProperties": 1, "maxProperties": 1 }
+          {"type": "string", "pattern": "^\\$.+"},
+          {"type": "object", "minProperties": 1, "maxProperties": 1}
         ]
       }
     },
+    "features_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{16}(?![\\s\\S])"},
     "categorical_encoding": {
-      "description": "Per-field value->code maps for string-valued features (section 6.5).",
       "type": "object",
-      "propertyNames": { "pattern": "^\\$." },
+      "propertyNames": {"pattern": "^\\$"},
       "additionalProperties": {
         "type": "object",
-        "additionalProperties": { "type": "integer" },
-        "minProperties": 1
+        "minProperties": 1,
+        "additionalProperties": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
       }
     },
-    "features_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$" },
     "trained_against": {
-      "description": "What this heuristic was generated against (section 8.1).",
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+      "patternProperties": {"^(x-|_)": {}},
       "anyOf": [
-        { "required": ["ued", "kmd", "umd"] },
-        { "required": ["selector_revision"] }
+        {"required": ["ued", "kmd", "umd"]},
+        {"required": ["selector_revision"]}
       ],
       "dependencies": {
         "ued": ["kmd", "umd"],
@@ -578,123 +627,129 @@ file drives both the build-time and runtime checks.
         "umd": ["ued", "kmd"]
       },
       "properties": {
-        "ued": { "$ref": "#/definitions/descriptor_ref" },
-        "kmd": { "$ref": "#/definitions/descriptor_ref" },
-        "umd": { "description": "One entry per matcher; empty records that none narrowed the catalog.",
-                 "type": "array", "uniqueItems": true,
-                 "items": { "$ref": "#/definitions/descriptor_ref" } },
-        "selector_revision": { "type": "string", "minLength": 1 }
+        "ued": {"$ref": "#/definitions/dependency"},
+        "kmd": {"$ref": "#/definitions/dependency"},
+        "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}},
+        "selector_revision": {"type": "string", "minLength": 1},
+        "feature_semantics_revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
       }
     },
-    "objective": { "enum": ["max", "min"] },
+    "objective": {"enum": ["max", "min"]},
     "score": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^(x-|_)": {} },
+      "patternProperties": {"^(x-|_)": {}},
       "properties": {
-        "metric":     { "enum": ["tflops", "time"] },
-        "calibrated": { "type": "boolean" },
-        "transform":  { "enum": ["identity", "log1p", "log", "exp", "sqrt"] }
+        "metric": {"enum": ["tflops", "time"]},
+        "calibrated": {"type": "boolean"},
+        "transform": {"enum": ["identity", "log1p", "log", "exp", "sqrt"]}
       }
     },
-
-    "static_order":   { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} },
-                        "properties": { "order": { "type": "array", "items": { "type": "string" } } } },
-    "native":         { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} },
-                        "required": ["symbol"],
-                        "properties": { "symbol": { "type": "string", "minLength": 1 } } },
-    "table":          { "$ref": "#/definitions/artifact" },
-    "tree_data":      { "$ref": "#/definitions/artifact" },
-    "onnx":           { "$ref": "#/definitions/artifact" },
-    "custom_library": { "type": "object", "additionalProperties": false,
-                        "patternProperties": { "^(x-|_)": {} },
-                        "required": ["library", "symbol"],
-                        "properties": { "library": { "type": "string", "minLength": 1 },
-                                        "symbol":  { "type": "string", "minLength": 1 },
-                                        "hash":    { "type": "string", "minLength": 1 },
-                                        "config":  { "type": "object" } } }
+    "static_order": {
+      "description": "No parameters: static_order ranks by UKD priority, then descriptor id. Declared ordering criteria (`order`) are not implemented and are refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}}
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
+      "required": ["symbol"],
+      "properties": {"symbol": {"type": "string", "minLength": 1}}
+    },
+    "table": {"$ref": "#/definitions/artifact"},
+    "tree_data": {"$ref": "#/definitions/artifact"},
+    "onnx": {"$ref": "#/definitions/artifact"},
+    "custom_library": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
+      "required": ["library", "symbol", "hash"],
+      "properties": {
+        "library": {"$ref": "#/definitions/relative_path"},
+        "symbol": {"type": "string", "minLength": 1},
+        "hash": {"$ref": "#/definitions/sha256"},
+        "config": {"type": "object", "maxProperties": 0}
+      }
+    }
   },
-
+  "oneOf": [
+    {"required": ["static_order"], "properties": {"adapter": {"const": "static_order"}}},
+    {"required": ["native"], "properties": {"adapter": {"const": "native"}}},
+    {"required": ["table"], "properties": {"adapter": {"const": "table"}}},
+    {"required": ["tree_data"], "properties": {"adapter": {"const": "tree_data"}}},
+    {"required": ["onnx"], "properties": {"adapter": {"const": "onnx"}}},
+    {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
+  ],
   "allOf": [
-    { "if":   { "properties": { "adapter": { "const": "static_order" } } },
-      "then": { "required": ["static_order"] } },
-    { "if":   { "properties": { "adapter": { "const": "native" } } },
-      "then": { "required": ["native", "objective"] } },
-    { "if":   { "properties": { "adapter": { "const": "table" } } },
-      "then": { "required": ["table", "objective",
-                             "features_signature", "features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "const": "tree_data" } } },
-      "then": { "required": ["tree_data", "objective",
-                             "features_signature", "features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "const": "onnx" } } },
-      "then": { "required": ["onnx", "objective",
-                             "features_signature", "features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "const": "custom_library" } } },
-      "then": { "required": ["custom_library", "objective"] } },
-
-    { "if": { "required": ["static_order"] },
-      "then": { "properties": { "adapter": { "const": "static_order" } } } },
-    { "if": { "required": ["native"] },
-      "then": { "properties": { "adapter": { "const": "native" } } } },
-    { "if": { "required": ["table"] },
-      "then": { "properties": { "adapter": { "const": "table" } } } },
-    { "if": { "required": ["tree_data"] },
-      "then": { "properties": { "adapter": { "const": "tree_data" } } } },
-    { "if": { "required": ["onnx"] },
-      "then": { "properties": { "adapter": { "const": "onnx" } } } },
-    { "if": { "required": ["custom_library"] },
-      "then": { "properties": { "adapter": { "const": "custom_library" } } } },
-
-    { "if":   { "required": ["features_signature"] },
-      "then": { "required": ["features_hash"] } },
-    { "if":   { "required": ["categorical_encoding"] },
-      "then": { "required": ["features_signature"] } },
-    { "if":   { "properties": { "score": { "required": ["calibrated"],
-                                           "properties": { "calibrated": { "const": true } } } },
-                "required": ["score"] },
-      "then": { "properties": { "score": { "required": ["metric"] } }, "required": ["objective"] } },
-    { "if":   { "properties": { "score": { "required": ["metric"],
-                                           "properties": { "metric": { "const": "tflops" } } } },
-                "required": ["score"] },
-      "then": { "properties": { "objective": { "const": "max" } }, "required": ["objective"] } },
-    { "if":   { "properties": { "score": { "required": ["metric"],
-                                           "properties": { "metric": { "const": "time" } } } },
-                "required": ["score"] },
-      "then": { "properties": { "objective": { "const": "min" } }, "required": ["objective"] } }
+    {"oneOf": [
+      {"required": ["static_order"]}, {"required": ["native"]},
+      {"required": ["table"]}, {"required": ["tree_data"]},
+      {"required": ["onnx"]}, {"required": ["custom_library"]}
+    ]},
+    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "onnx"]}}},
+     "then": {"required": ["features_signature", "features_hash", "trained_against"]}},
+    {"if": {"required": ["features_signature"]},
+     "then": {"required": ["features_hash", "trained_against"]}},
+    {"if": {"required": ["categorical_encoding"]},
+     "then": {"required": ["features_signature"]}},
+    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "onnx", "custom_library"]}}},
+     "then": {"required": ["objective"]}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["calibrated"],
+                                     "properties": {"calibrated": {"const": true}}}}},
+     "then": {"properties": {"score": {"required": ["metric"]}}}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["metric"],
+                                     "properties": {"metric": {"const": "tflops"}}}}},
+     "then": {"required": ["objective"], "properties": {"objective": {"const": "max"}}}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["metric"],
+                                     "properties": {"metric": {"const": "time"}}}}},
+     "then": {"required": ["objective"], "properties": {"objective": {"const": "min"}}}}
   ]
 }
 ```
 
-**The schema enforces the header rules; it does not merely accompany them.** Three of them are worth
+**The schema enforces the header rules; it does not merely accompany them.** Several of them are worth
 naming, because each needs an explicit construct rather than falling out of the document shape:
 
 - **Exactly one body, and it is the named one.** `additionalProperties: false` is not what delivers
   this. That keyword rejects *undeclared* property names, and every adapter body is declared — a
   `native` descriptor carrying an `onnx` body alongside it uses only names the schema knows, so the
-  keyword has nothing to object to. Exclusivity comes from the second block of conditionals: each body,
-  *if present*, constrains `adapter` to its own name. Paired with the first block (each `adapter` value
-  requires its body), the discriminant and the body imply each other in both directions, and a second
-  body of any kind is unsatisfiable.
+  keyword has nothing to object to. Two `oneOf` constructs deliver it instead. The top-level `oneOf`
+  pairs each `adapter` value with its own required body, so the named body must be present. The first
+  `allOf` entry is a `oneOf` over body presence alone, so exactly one body may be present. Together
+  they make the discriminant and the body imply each other, and a second body of any kind is
+  unsatisfiable.
 - **A body is required, including `static_order`'s.** The body is a required member for every adapter
-  ([Section 4.1](#41-field-reference-normative)), so `static_order` is conditioned like the rest rather
-  than left as the one adapter whose absent body validates.
-- **The scoring and training fields are conditioned, and their subfields are reachable.** A model
-  adapter requires `objective`, the feature contract, and `trained_against`. `trained_against` in turn
-  admits exactly two shapes — all three descriptor entries, or a `selector_revision` — through an
-  `anyOf` paired with `dependencies` that make partial descriptor provenance unsatisfiable. Each
+  ([Section 4.1](#41-field-reference-normative)), so `static_order` has its own `oneOf` branch like the
+  rest rather than being left as the one adapter whose absent body validates. Its body is closed: a
+  declared ordering criterion (`order`) is refused.
+- **The scoring and training fields are conditioned, and their subfields are reachable.** Every adapter
+  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `onnx`) also
+  require the feature contract and `trained_against`, and any document declaring a
+  `features_signature` requires `features_hash` and `trained_against` with it, whatever its adapter.
+  `trained_against` in turn
+  requires at least one complete form — all three descriptor entries, a `selector_revision`, or both —
+  through an `anyOf` paired with `dependencies` that make partial descriptor provenance unsatisfiable.
+  Which forms a binding *needs* is the loader's to check, not the schema's: an engine estimate of a
+  descriptor engine needs both ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Each
   descriptor entry requires both `id` and `revision`. An empty `trained_against`, a `umd` scalar, a
   `umd` entry with no revision, and a document claiming one descriptor's revision while omitting the
   others are all rejected at the point they would otherwise pass as "present". An empty `umd` **array**
   is accepted, because it is a claim rather than an omission
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  An optional `feature_semantics_revision` may accompany either shape but satisfies neither, so a
+  document recording only it still lacks provenance; it is an integer, so `"1"` and `true` are refused
+  ([Section 6.9](#69-feature-semantics-revision)).
 - **Direction is the metric's, not the author's.** A `score` naming a `metric` requires the
   `objective` that metric's registry entry fixes ([Section 4.4](#44-ranking-metrics)) — `max` for
   `tflops`, `min` for `time` — and a `calibrated` score must name its metric. The pairing is checked
   here rather than discovered when an engine's estimate sorts backwards
-  ([Section 11.3](#113-cross-engine-comparison)). The `metric` enum and these conditionals are generated
-  from the registry, one conditional per metric, so adding a metric adds a row rather than a hand edit.
+  ([Section 11.3](#113-cross-engine-comparison)). There is one conditional per metric, so adding a
+  metric adds an enum value and one conditional, beside its registry entry.
 - **`transform` is a closed, invertible vocabulary.** A consumer recovering real TFLOPS has to invert
   whatever the trainer applied, so the set is the one the runtime can invert rather than free text. An
   unrecognised transform is refused at load rather than silently treated as `identity`.
@@ -716,28 +771,33 @@ without `categorical_encoding`, under both provenance forms — and rejects each
 header rules describe: a missing or duplicated adapter body, a model adapter with no `objective` or
 `trained_against`, an empty or partial `trained_against`, a mixture of the two provenance forms, a
 scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score naming
-no metric, an `objective` that contradicts its metric's direction, and an untruncated digest. Descriptors at earlier versions, such as the `0.1`
-packaging-test fixtures with placeholder ids, are rejected by the `version` constraint, which is the
-accept rule working as intended rather than a gap. The shipping descriptors predate `score.metric` and
-spell the same fact `score.units: "tflops"`; they migrate to `metric` with the implementation of
-[Section 4.4](#44-ranking-metrics), in one cutover rather than behind an accepted alias, and this
-validation claim is re-established against the migrated tree.
+no metric, an `objective` that contradicts its metric's direction, an untruncated digest, a model `hash`
+spelled any way but 64 lowercase hexadecimal digits, a `custom_library` with no `hash`, and a model path
+that is not a portable descriptor-relative file name. The path pattern refuses a leading `/`, any
+backslash, colon or NUL, every `..` segment, and an empty or `.` final segment; the runtime parser
+applies the same spelling rules and then resolves symlinks, refusing a path whose target leaves the
+descriptor's directory, which no schema can express. Any `version` other than `1.0` is rejected by the
+`const`, which is the accept rule working as intended rather than a gap.
 
-**OPEN — remaining schema work.** The block above covers the header and the adapter bodies as they exist
-today. Still outstanding: publishing it as the standalone per-version `uhd/1.0.json` file with the CI
-parity check RFC 0020 §4.2 describes, and extending it as each further adapter lands, so validation is
-generated rather than hand-written. *(See [Open Question 13](#operational).)*
+**Schema and packer parity.** The hip-kernel-provider packaging tests
+(`descriptor-packaging/tests/test_hkp_pack_sidecars.py`) validate every in-tree UHD against
+`uhd.schema.json`, and for each admission rule check that the schema and the packer accept and refuse
+the same document. They do not run the runtime parser: their cases are written to mirror the rules in
+`UhdParser.hpp`, whose own admission behaviour is tested by the plugin SDK's C++ tests
+(`tests/ingestor/uhd/TestUhdKernelHeuristic.cpp`). A new adapter body or header rule lands in the
+schema file, the inline copy, the parser and both test suites together.
+*(See [Open Question 13](#operational).)*
 
 ### 4.2 Adapter Summary
 
-`adapter` is a **single discriminant** — it subsumes [RFC 0017](0017_UniversalKernelDescriptor.md)'s
-illustrative `kind` + `model.framework` into one field (`tree_data` ≈ `kind:model, framework:lightgbm`
-shipped as data), and the body is an adapter-keyed union. Adding a new ranker (a static list, ONNX, a
+`adapter` is a **single discriminant** naming both the ranking mechanism and the model format
+(`tree_data` is a GBDT model, such as LightGBM's, shipped as data), and the body is an adapter-keyed
+union. Adding a new ranker (a static list, ONNX, a
 new model family) is one more `adapter` value — the single discriminant is what makes that additive.
 
 | `adapter` | What it is | Ranking | Model artifact |
 |-----------|------------|---------|----------------|
-| `static_order` | A fixed precedence with no learned model | Declared criteria / UKD `priority` | none |
+| `static_order` | A fixed precedence with no learned model | UKD `priority`, then `id` | none |
 | `native` | A scorer compiled into the engine, resolved by symbol name — **first to land** | Whatever the function returns | none (code, not data) |
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
@@ -747,9 +807,11 @@ new model family) is one more `adapter` value — the single discriminant is wha
 See [Section 7](#7-model-adapters) for adapter details.
 
 **The model ships as data with the engine, not linked into the provider.** For every *data* adapter, the
-body's `artifact` is a path resolved relative to the engine's descriptor set (the UED + its UHD + KMD +
-model), which is itself standalone-droppable. The model is per-engine (owned by the UED), so there is
-no `(arch,dtype)→artifact` table — the single arch-aware model serves every pack that joins the engine.
+body's `artifact` is a path relative to the UHD's own directory, in it or below it, so the descriptor
+and its model are standalone-droppable together. A path that is absolute (`/…`, `\…`, `C:…`) or that
+normalises outside that directory is refused at load, as it is by the schema and the packer. The model
+is per-engine (owned by the UED), so there is no `(arch,dtype)→artifact` table — the single arch-aware
+model serves every pack that joins the engine.
 The `native` adapter is the deliberate exception: it names a symbol the engine already compiled in, so it
 is *not* droppable — which is exactly why it is the bootstrap path and not the destination
 ([Section 7.1](#71-first-native)).
@@ -809,8 +871,8 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s, FLOPs taken from the binding layer) | higher | Defined. The default metric, and the only one before this section. |
-| `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown has no `tflops` label. |
+| `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
 - **The metric fixes units and direction; the UHD only names it.** `objective` must equal the registered
@@ -824,8 +886,7 @@ lives beside the policy names in the data SDK, and each entry fixes three things
   model, even where one could be converted into the other for a fixed graph: the conversion would be
   the runtime inventing a number no model predicted. An engine with no model for the requested metric
   is *unscored* for that request ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)).
-- **`tflops` is the default.** A request that names no metric behaves exactly as engine selection did
-  before metrics existed.
+- **`tflops` is the default.** A request that names no metric is ranked by `tflops`.
 
 **Only a calibrated score takes part in cross-engine comparison.** A metric value is compared across
 engines, and across the two levels of [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker),
@@ -837,6 +898,11 @@ comparable number — but it answers no prediction and is invisible to engine se
 
 ## 5. Selection Flow
 
+`UhdKernelHeuristic` (`UhdKernelHeuristic.hpp`) implements steps 2 to 4 and step 8 for a UHD, with
+`heuristics/uhd/FeatureExtractor.hpp` for step 2. `IKernelHeuristic::rank()` orders the scores, and
+`UnrankedKernelHeuristic` implements step 6. `WinnerCache.hpp` and `WinnerCacheFile.hpp` implement
+step 9.
+
 The generic engine first builds the **catalog**: the set of the engine's kernels that pass every matcher
 for this graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)), each carrying
 its build `metadata`. The catalog is engine-scoped — the union across every KDP that joins the engine —
@@ -847,19 +913,33 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
 
 1. **Start from the catalog.** The applicable kernels for this graph are the candidate set.
 2. **Extract the shared features once.** Problem and device features are identical for every candidate,
-   so they are computed once per graph ([Section 6](#6-feature-extraction)); only each candidate's
-   `$kernel.*` metadata varies.
+   so the signature entries that read only them are computed once per selection
+   ([Section 6](#6-feature-extraction)); only the entries reading a candidate's `$kernel.*` metadata are
+   recomputed per candidate.
 3. **Score each candidate.** Invoke the UHD's scorer per candidate — for a model adapter, one inference
    call per candidate over its feature row.
-4. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel.
+4. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel. A
+   score enters that comparison only if the value recovered through `score.transform` is **finite**
+   and, when the score is **physical**, **positive**. A score is physical when it names a
+   `score.metric`, or when its transform (`log`, `log1p`, `sqrt`) implies the model was fitted to a
+   positive quantity; a metric-less `identity` or `exp` score is an ordering value, and may be signed or
+   zero. Any candidate failing admission is neither dropped nor ranked on its value: it orders last,
+   behind every admitted candidate, and step 5 orders those among themselves
+   ([Section 8.3](#83-out-of-distribution-inputs)). A negative predicted time under `min` would
+   otherwise win outright, and a model extrapolating below zero everywhere would still appear to rank.
+   A `native` scorer is held to the same rule: any non-finite value it returns — NaN or either
+   infinity — orders last and is reported as 0, so `+infinity` is never a "must pick" sentinel.
+   Offline evaluation applies the same admission, so the regret it reports for a model is the regret
+   the runtime incurs with it.
 5. **Tie-break deterministically.** On equal scores — or when no model ranks at all (steps 6 and 8) —
    fall through to explicit UKD `priority`, then stable `id` — the same deterministic arbitration
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. Declaration order
    is never used.
 6. **A UHD is optional.** An engine that names no heuristic is valid; it is the starting state
-   ([Section 13.1](#131-two-stage-workflow)). The catalog is returned in deterministic
-   `priority`-then-`id` order and a **warning** is logged once, naming the engine. No authoring is
-   required for a working engine; generating a heuristic is a later step the package owner opts into.
+   ([Section 13.1](#131-two-stage-workflow)). `UnrankedKernelHeuristic` returns the catalog in
+   deterministic `priority`-then-`id` order and logs a **warning**, naming the engine.
+   No authoring is required for a working engine; generating a heuristic is a later step the package
+   owner opts into.
 
    > "Unranked" is `priority`-then-`id` order, never *discovery* order. Descriptor sets are loaded by
    > scanning a directory, so discovery order varies by filesystem and would rank a package differently
@@ -888,8 +968,10 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    fallback: nothing else can build that plan, and substituting a different kernel silently would serve
    something other than what was authored, which is why step 7 rethrows it. **What is optional degrades;
    what is required raises.** Each heuristic failure mode resolves to a usable answer plus a diagnostic:
-   - **No model, or the scorer errors** → rank by `static_order` (priority + id). No ranking information
-     is available, and priority order is a valid answer. A benchmark record, where one exists, is
+   - **No model, or the scorer errors** → rank by `static_order` (priority + id). A scorer that throws,
+     a `native` function included, degrades the whole ranking to that declared order rather than
+     failing the request or mixing scored and unscored candidates. No ranking information is
+     available, and priority order is a valid answer. A benchmark record, where one exists, is
      consulted ahead of both ([step 9](#5-selection-flow)): a degraded model does not degrade a
      measurement.
    - **Broken feature contract** — `features_hash` disagrees, a `$kernel.*` reference is dangling, or the
@@ -937,12 +1019,19 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
      model does, and the partial record is ignored rather than mixed in. Deciding coverage per filtered
      subset would let a pinned and an unpinned request take different order sources over the same
      candidates, which is the failure the commuting property exists to prevent.
-   - **The record is keyed by what would invalidate it** — the graph, the device, and the engine's
-     descriptor-set version ([Section 9.2](#92-loading-and-caching)). A measurement describes the
-     kernels that were installed when it was taken, so a changed engine version does not merely age the
-     record, it makes it a measurement of something else. Keying on the version is what makes that
-     judgement automatic rather than a comparison a reader has to remember to perform.
-   - **The store is capacity-bounded and evicts**, in memory and on disk
+   - **The record is keyed by what would invalidate it.** The key is the graph content, the device,
+     the engine's UED revision, and the identity of every ranker the engine can resolve: the UHD id and
+     a content hash over its models ([Section 9.2](#92-loading-and-caching)). Knobs are not in the key:
+     a knob filter changes which candidates a run considers, not what the graph computes. A
+     measurement describes the kernels that were installed when it was taken, so a changed engine
+     revision makes it a measurement of something else. The key makes that judgement automatic. Each
+     entry also carries its kernel's pack id and dispatch id. If either does not agree with the
+     installed kernel, the record does not order the catalog. The key does not cover kernel code
+     objects: replacing one without changing its descriptor ids keeps serving the old record, so such a
+     change requires a UED `revision` bump.
+   - **The in-memory store is capacity-bounded and evicts.** It holds 4096 records by default, and an
+     evicted record is read again from disk. The on-disk store is append-only and is invalidated as a
+     whole, because a new revision or ranker writes to a new directory
      ([Section 9.2](#92-loading-and-caching)). A measured order that never expires is a cache that
      eventually describes a machine the process is no longer running on.
 
@@ -955,6 +1044,27 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    measure (accuracy, for a timing record) is answered by the model, not by the record. An engine with a
    record therefore competes on evidence rather than on prediction, which is the outcome this rule
    exists to produce.
+
+   **Configuration prediction and plan build read the same order source.** The per-configuration
+   prediction (B, [Section 11.2](#112-two-engine-selection-policies-rfc-0007)) names a configuration and
+   its value; plan build later builds one. Both resolve the full applicable catalog's order the same way
+   — a covering record first, then the model, then `static_order` — and only then apply any knob pin,
+   taking the first buildable entry in that order. A prediction names that entry by its knobs; when no
+   exposed knob setting names it alone, the prediction is unavailable rather than naming a later entry
+   plan build would not serve. So when a record covers the
+   catalog, it decides the configuration the prediction returns, and the plan built from that
+   prediction, or from the same request unpinned, is that configuration. The prediction's value is the
+   measured one wherever the record yields the requested metric — its time, or the throughput derived
+   from that time and the graph's `$graph.flops`. Where it cannot (throughput for a graph whose work is
+   unknown, or a metric no timing measures), the value is the calibrated model's estimate *for the
+   record's chosen configuration*, and the metric is unavailable if no such model exists; the model never
+   substitutes its own choice of configuration. A measured value names no UHD. A prediction that
+   consulted the model while plan build consulted the record would advertise one kernel and build
+   another, and the engine would have competed on a number its plan does not deliver. Both therefore
+   read one snapshot: a record that orders a cached catalog is cached with it, measured times and
+   all, and neither path looks the record up again while that catalog is cached. Otherwise the bounded
+   record store could evict the record from under a catalog it still orders, and the prediction alone
+   would fall back to the model.
 
 **The output is the ranked catalog, not just a winner.** Selection returns the candidates in score order;
 the winner is simply its first element. Callers need the ordering, not only the argmax — a knob query
@@ -982,6 +1092,10 @@ launches, mutates the graph, or touches device memory.
 ---
 
 ## 6. Feature Extraction
+
+`heuristics/uhd/FeatureExtractor.hpp` evaluates a `features_signature` over the bound symbols.
+`heuristics/EngineFeatures.hpp` publishes the `$graph.*` features, and `heuristics/DeviceFeatures.hpp`
+publishes the `$device.*` features.
 
 The feature vector is the contract between training and inference. It is the most failure-prone part of
 the design, and generalizing it is the central problem this RFC addresses.
@@ -1021,11 +1135,11 @@ that read like attributes are dims: for a rank-4 SDPA tensor laid out as
 `$q.dims[2]`, and head size `$q.dims[3]`. A node's `$<node>.*` namespace carries **scalar attributes**
 only — `$sdpa_fwd.dropout_probability` and the like — so a signature that reads a size reads a dim.
 
-> **Implementation note — the bound set is op-specific.** Which tensors a pattern binds, and what each
-> dim index means, differ per operation; the engine is op-scoped, so its UHD's references are valid for
-> that op by construction. The extractor evaluates whatever the signature names, and the engine's
-> published symbol set is the authority on what exists
-> ([Section 6.3](#63-contract-enforcement)).
+**The bound set is op-specific.** Which tensors a pattern binds, and what each
+dim index means, differ per operation; the engine is op-scoped, so its UHD's references are valid for
+that op by construction. The extractor evaluates whatever the signature names, and the engine's
+published symbol set is the authority on what exists
+([Section 6.3](#63-contract-enforcement)).
 
 Device features come from the same device-facts path [RFC 0007 §6](0007_EngineSelectionHeuristicsFramework.md#6-device-properties)
 defines. Kernel features are the compilation knobs the engine's KMD declares
@@ -1033,30 +1147,31 @@ defines. Kernel features are the compilation knobs the engine's KMD declares
 and are what make argmax meaningful.
 
 **The graph namespace carries whole-graph facts and indexed node access.** `$graph.node_count` and
-`$graph.tensor_count` describe the shape of the graph itself; `$graph.flops` and per-node
-`$graph.nodes[i].flops` carry the op-intrinsic work counts a physics feature divides
-([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). A node's tensors are reachable
-positionally through the same namespace, so a signature can read a shape without the engine's pattern
-having named that tensor as a top-level variable. The two spellings coexist deliberately: a pattern
-variable is the readable form for an engine whose pattern names its tensors, and indexed node access is
-what an engine reaching across a multi-node graph has.
+`$graph.tensor_count` describe the shape of the graph itself; `$graph.flops`, per-node
+`$graph.nodes[i].flops`, and `$graph.logical_bytes` are the work model a physics feature divides
+([Section 6.8](#68-the-work-model)). A node's operands and attributes are reachable through the same
+namespace by position and schema role — `$graph.nodes[0].x.dims[1]` — generated for every node type
+from the op schemas ([Section 6.7](#67-per-node-operand-features)), so a signature can read a shape
+without the engine's pattern having named that tensor as a top-level variable. The two spellings
+coexist deliberately: a pattern variable is the readable form for an engine whose pattern names its
+tensors, and indexed node access is what an engine reaching across a multi-node graph has.
 
 **Two `$kernel.*` entries are not KMD fields.** `$kernel.priority` is bound, because a kernel's declared
 priority is a fact about the candidate that a model may legitimately weigh. `$kernel.id` is not bound: a
 kernel id is a UUID, and a feature splitting on its bytes would be ranking by authoring accident. The id
 already decides ties ([Section 5](#5-selection-flow)), which is the only role it should have in an order.
 
-> **Implementation note — `$device.*` fields.** The device namespace publishes what the HIP runtime
-> resolves and what proves predictive for kernel selection: `cu_count`, `multi_processor_count`,
-> `warp_size`, `lds_size`, `total_global_mem`, `memory_bus_width`, `memory_clock_rate`, and
-> `peak_memory_bandwidth`. The set is closed at any moment and extended additively; a field is published
-> in the unit the runtime reports it in rather than a rescaled one, and `peak_memory_bandwidth` is the
-> one derived entry, computed from the clock and bus width so a model need not rebuild it inline.
-> **Architecture is not among them for an AOT engine:** `arch` is a KDP property gated at selection
-> ([Section 3.3](#33-coupling-rules)), and per-arch model choice is the UED's arch-keyed heuristic maps
-> ([Section 3.1](#31-descriptor-relationships)), so a `features_signature` does not read `$device.arch`.
-> Architecture coverage is checked against the model's own training provenance instead
-> ([Section 8.3](#83-out-of-distribution-inputs)).
+**`$device.*` fields.** The device namespace publishes what the HIP runtime
+resolves and what proves predictive for kernel selection: `cu_count`, `multi_processor_count`,
+`warp_size`, `lds_size`, `total_global_mem`, `memory_bus_width`, `memory_clock_rate`, and
+`peak_memory_bandwidth`. The set is closed at any moment and extended additively; a field is published
+in the unit the runtime reports it in rather than a rescaled one, and `peak_memory_bandwidth` is the
+one derived entry, computed from the clock and bus width so a model need not rebuild it inline.
+**Architecture is not among them for an AOT engine:** `arch` is a KDP property gated at selection
+([Section 3.3](#33-coupling-rules)), and per-arch model choice is the UED's arch-keyed heuristic maps
+([Section 3.1](#31-descriptor-relationships)), so a `features_signature` does not read `$device.arch`.
+Architecture coverage is checked against the model's own training provenance instead
+([Section 8.3](#83-out-of-distribution-inputs)).
 
 ### 6.2 The `features_signature`
 
@@ -1077,7 +1192,7 @@ Order and form must match training exactly.
   {"log2": ["$q.dims[2]"]},
   {"/": ["$q.dims[2]", "$k.dims[2]"]},                           // aspect ratio
   {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]},                // tile quantization
-  {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}                  // arithmetic intensity (Section 13.6)
+  {"/": ["$graph.flops", "$graph.logical_bytes"]}                // arithmetic intensity (Section 6.8)
 ]
 ```
 
@@ -1098,8 +1213,10 @@ dispatch formula. One parser, validator, and interpreter serve all three.
 
 The operator set covers the computed features required here; no extension is needed:
 
-> `and or !` · `== != < <= > >=` · `in` · `all` · `+ - * / %` · `divisible value_or_default` ·
+> `and or !` · `== != < <= > >=` · `in` · `+ - * / %` · `divisible value_or_default` ·
 > `present not_present` · `if` · `ceil_div min max abs pow log2 rsqrt`
+
+JsonLogic's `all` is not supported.
 
 `present` and `not_present` test whether a binding exists at all, which a comparison cannot: a signature
 that must tolerate an optional tensor needs to distinguish "absent" from "zero" before it computes with
@@ -1112,18 +1229,23 @@ candidate would be work with a constant answer.
 
 Log-scale sizes, aspect ratios, tile/wave quantization, and intensity are all expressible with this set.
 Evaluation is a bounded interpreter: it fails closed on an unknown symbol, a type error, or an invalid
-operation, and uses checked-width integers. A computation outside this closed set (for example a bespoke
-occupancy model) uses a compiled scorer ([Section 7](#7-model-adapters)) rather than extending the
-interpreter.
+operation. Arithmetic is IEEE double precision, and a non-finite result (an overflow, a division by
+zero, a NaN) is refused as an evaluation error rather than propagated into a feature. A computation outside
+this closed set (for example a bespoke occupancy model) uses a compiled scorer
+([Section 7](#7-model-adapters)) rather than extending the interpreter.
 
-**Implementation status.** The shared implementation provides the arithmetic and comparison operators
+**Implementation status.** The shared implementation
+(`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/JsonExpression.hpp`, #11632, documented in
+[`docs/JsonExpression.md`](../JsonExpression.md)) provides the arithmetic and comparison operators
 this RFC's features need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`,
 `value_or_default`, `if`) as a compile-once / evaluate-many `Expression<DataT>` over any
 `getData(path) → Value` source, which is the shape the feature extractor requires
-([Section 9](#9-performance)). Two caveats carry into this RFC:
+([Section 9](#9-performance)). The UHD feature extractor uses it through
+`heuristics/uhd/Expressions.hpp`. Two caveats carry into this RFC:
 
-- **`shape` is a compiler short-hand, not a runtime op**; the compiler lowers it at compile time. A
-  feature spec treats `shape`/`rank`-style helpers as lowered forms rather than runtime operators.
+- **`shape` is a compiler short-hand, not a runtime op.** `Expressions.hpp` lowers it at compile time.
+  JsonLogic's `all` is not supported. A feature spec treats `shape`/`rank`-style helpers as lowered
+  forms rather than runtime operators.
 - **The custom-operation (native-predicate) hook is deferred.** Until it lands, a UHD needing a
   computation outside the closed operator set has no in-language path; that is the boundary at which a
   compiled scorer ([Section 7](#7-model-adapters)) takes over.
@@ -1143,14 +1265,16 @@ the [Section 6.3](#63-contract-enforcement) contract check mechanical rather tha
 **Derived features commonly needed:**
 
 - **Arithmetic / algorithmic intensity** (FLOPs ÷ bytes) — the single most important derived feature
-  for predicting compute-bound vs. memory-bound behavior.
+  for predicting compute-bound vs. memory-bound behavior. Published directly as
+  `$graph.arithmetic_intensity`, with both terms beside it ([Section 6.8](#68-the-work-model)).
 - **Tile/wave quantization** — `num_tiles_*`, `total_output_tiles`, `tile_efficiency` (problem-vs-grid
   remainder waste). In GEMM sweeps this family is as predictive as intensity.
 - **Aspect ratios** — `M/N`, `M/K`, `N/K` (shape skew).
 - **Occupancy proxy** — `lds_usage_ratio` (and register pressure if available) → waves/CU.
 - **Padding-fit** — `needs_padding_*` / `has_padding_when_needed_*` (problem × kernel padding interaction).
 
-**OPEN:** See [Open Question 4](#schema-and-training) (derived feature set).
+Which of these a model reads is its signature's choice, pruned per model by feature selection; what the
+binding must supply for them is settled ([Open Question 4](#schema-and-training), resolved).
 
 ### 6.3 Contract Enforcement
 
@@ -1192,7 +1316,8 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    This bears on sequencing: the engines shipping first use the native arm, so the load-time guarantee
    arrives with the declarative pattern rather than with the first shipped model.
 2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
-   reachable from the `features_signature`, including those nested inside computed (expression) entries:
+   reachable from the `features_signature`, including those nested inside computed (expression) entries,
+   each named by its base field — `$kernel.tile[0]` contributes `tile`:
    - `F ⊆ KMD.fields` — a feature can never read a variant field the kernels don't carry.
    - `F ⊆ set(UED.knobs)` — every axis the model ranks on is a knob the engine exposes
      ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
@@ -1206,11 +1331,16 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    That case is **reported, never fatal**: an unread dial is worth surfacing so the engine's author can
    decide whether it still earns its place, and that decision is theirs rather than the trainer's.
 
-   The UED owns the KMD and the UHD, so this is an intra-engine check the pipeline enforces when it
-   emits the engine and the loader re-checks — catching a UED and UHD regenerated out of step, or
-   hand-edited.
+   The UED owns the KMD and the UHD, so this is an intra-engine check enforced at every point a model
+   could enter the engine, with one rule. Generation offers training only the shipping UED's knob axes
+   as `$kernel.*` features; promotion refuses, before installing, a model failing either assertion
+   against the UED it is installed beside (after any explicit `--remove-knob`); and the loader re-checks,
+   catching a UED and UHD regenerated out of step, or hand-edited. A model the pipeline installs is
+   therefore one the runtime admits. Both assertions are failures of the feature contract and take the
+   [Section 5](#5-selection-flow) step 8 path: the model is not used and the catalog ranks by `priority`,
+   then `id`.
 3. **Signature → model.** The UHD carries `features_hash`; the model artifact embeds the hash it was
-   trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). At load the checker
+   trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). When the model loads the checker
    **recomputes the digest from the feature contract it actually loaded** and requires a three-way
    identity:
 
@@ -1240,6 +1370,11 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    definitions back in to detect the change. The categorical encoding is folded in for the same reason,
    as [Section 6.5](#65-categorical-encoding) changes value semantics without changing feature names.
 
+   What `features_hash` cannot cover is the extractor itself. The C++ that computes `$graph.flops` is
+   not in any descriptor, so a changed FLOP convention changes a feature's value while the signature,
+   and therefore the hash, stays byte-identical. The feature-semantics revision recorded in
+   `trained_against` covers that half of the contract ([Section 6.9](#69-feature-semantics-revision)).
+
    **The canonical form is normative and shared.** `canonical()` serializes the signature compactly,
    in the order written, with object keys in a fixed order and numbers and strings in a fixed
    representation, so that whitespace and key order do not produce spurious mismatches. The categorical
@@ -1255,7 +1390,9 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 4. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
    checks feature count, `onnx` checks input arity/shape.
 
-A failed check disables the model rather than failing the request. These run at load, so a violation
+A failed check disables the model rather than failing the request. Checks 2–4 run when the model is first
+needed ([Section 9.2](#92-loading-and-caching)), not when descriptors are discovered: discovery parses the
+UHD's JSON, and its model artifact is read and checked against the contract on first use. A violation
 means a mis-built or mismatched descriptor set, and the model's scores would be wrong rather than missing.
 The response is the one [Section 5](#5-selection-flow) step 8 defines: the model is not used, an error is
 logged, ranking falls back to `static_order`, and the engine reports its estimate as *invalid*. Because
@@ -1282,18 +1419,23 @@ computed feature is an entry that is an expression rather than a bare `$` token.
 
 Computed features are inline rather than named because a named `$derived.*` layer would add a second
 binding mechanism, a second thing to version, and a second place a feature's meaning could live, for
-benefits the compiler supplies instead:
+benefits the evaluator can supply instead:
 
-- **Repetition has no runtime cost.** Computed features layer: `total_tiles` is the product of two tile
-  counts, tile efficiency builds on both, so the same subexpression appears in several entries. The
-  signature is compiled once at load into an expression tree
-  ([Section 9.3](#93-efficient-evaluation-expressive-spec-fast-hot-path)), and the compiler hash-conses
-  identical subtrees, evaluating each distinct one once per row. Common-subexpression elimination is the
+- **Repetition is the evaluator's to remove, not the schema's.** Computed features layer: `total_tiles`
+  is the product of two tile counts, tile efficiency builds on both, so the same subexpression appears
+  in several entries. The signature is compiled once at load, each entry into its own expression
+  ([Section 9.3](#93-efficient-evaluation-expressive-spec-fast-hot-path)), and each entry is evaluated
+  independently — a subexpression repeated across entries is evaluated once per entry that contains it.
+  Hash-consing identical subtrees so each distinct one is evaluated once per row is **future work**. It
+  needs no schema change and moves no `features_hash`, because common-subexpression elimination is the
   evaluator's responsibility, not the schema's.
-- **Hoisting is automatic.** A subexpression referencing only `$kernel.*` is graph-independent and is
-  cached per kernel; one referencing only `$q.*`/`$device.*` is invariant across candidates and belongs
-  in the shared prefix. The compiler classifies each subtree by the namespaces it touches; the author
-  does not partition them.
+- **Hoisting needs no annotation.** The extractor classifies each *entry* by the namespaces it reads.
+  An entry that reads no `$kernel.*` symbol is invariant across candidates and is evaluated once per
+  selection, into the shared prefix; an entry that reads any `$kernel.*` symbol is re-evaluated for
+  every candidate. The author does not partition them. The split is per entry rather than per subtree:
+  a kernel-dependent entry re-evaluates its problem-only subexpressions for each candidate, and an entry
+  reading only `$kernel.*` is recomputed at every selection rather than cached per kernel. Subtree-level
+  hoisting and a per-kernel cache are **future work** under the same contract.
 - **A single hash target.** The `features_signature` is the computation, so `features_hash` fingerprints
   it directly ([Section 6.3](#63-contract-enforcement)). A named block would permit editing an expression
   to change a feature's meaning while every signature string stayed byte-identical — a silent divergence
@@ -1306,8 +1448,8 @@ author ergonomics, which tooling covers, for one fewer runtime mechanism.
 
 The dim↔tile correspondence is engine-specific (the tile field names are the engine's), so it does not
 belong on the shared op vocabulary. The FLOP and byte terms are op-intrinsic and belong there instead, as
-precomputed fields the binding system provides for every op rather than anything the UHD declares
-([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)).
+the work model the plugin SDK publishes for every graph rather than anything the UHD declares
+([Section 6.8](#68-the-work-model)).
 
 ### 6.5 Categorical Encoding
 
@@ -1372,7 +1514,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 | `log2_batch … log2_hdim_v` (7) | computed: `{"log2": ["$q.<dim>"]}` |
 | `gqa_ratio` = nhead_q/nhead_k | `{"/": ["$q.dims[1]", "$k.dims[1]"]}` |
 | `aspect_sq_sk` = seqlen_q/seqlen_k | `{"/": ["$q.dims[2]", "$k.dims[2]"]}` |
-| `log2_ops` | `{"log2": ["$sdpa_fwd.flops"]}` |
+| `log2_ops` | `{"log2": ["$graph.flops"]}` |
 | `decode_flag` = (seqlen_q ≤ 1) | `{"<=": ["$q.dims[2]", 1]}` |
 
 **Kernel — `$kernel.*` (from the `kernel` dict = KMD fields) — 20**
@@ -1389,7 +1531,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 
 | rocKE feature | RFC inline expression (schematic) |
 |---|---|
-| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the counterpart of `$graph.arithmetic_intensity` ([Section 6.8](#68-the-work-model)), whose conventions differ in detail: it counts only the attended pairs under a causal mask, and sums every non-virtual tensor of the graph |
 | `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` |
 | `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.dims[2]", "$kernel.tile_n0"]}` |
 | `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
@@ -1431,6 +1573,202 @@ of [Section 6.1](#61-feature-sources)).
   differences are carried by the `$kernel.*` tile fields and the quantization derivations, exactly as
   [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) describes.
 
+### 6.7 Per-Node Operand Features
+
+Every node of the graph publishes its operands under `$graph.nodes[i].*`, **generated from the op
+schemas** rather than written per op. The schema pass that reads the `(cache_uid)` annotations for the
+winner cache also emits a per-node-type visitor (`scripts/gen_node_operands.py` →
+`node_operands_generated.h`), and the plugin SDK binds what it reports (`EngineFeatures.hpp`). A node
+type added to the schema publishes its operands with no per-op code, and a schema change regenerates
+the set.
+
+| Schema field | Published as (`$graph.nodes[i].…`) |
+|---|---|
+| tensor reference, e.g. `x_tensor_uid` (`cache_uid`) | `x.data_type`, `x.rank`, `x.numel`, `x.virtual`, `x.dims[d]`, `x.strides[d]` |
+| tensor-reference vector, e.g. `input_tensor_uids` | the same per element, under `input[k].…` |
+| scalar, enum, or bool attribute | its field name — integers and enums as integers, floats as doubles, bools as bools |
+| numeric vector attribute (convolution `stride`, resample `window`) | `name[k]` per element |
+| string, nested table or struct, union, byte vector | nothing |
+
+Beside those, each node publishes `type` (its `NodeAttributes` member), `compute_data_type`,
+`data_dependent` (below), and `flops` when its work is known ([Section 6.8](#68-the-work-model)); SDPA
+adds two derived flags no schema field carries, `has_attention_mask` and `has_variable_lengths`. Graph
+tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, dims[d], strides[d]}`.
+
+- **A role is the field name without `_tensor_uid`.** `$graph.nodes[0].x.dims[1]` is the second dim of
+  a convolution's input; what the dim means is positional, as for a pattern variable
+  ([Section 6.1](#61-feature-sources)).
+- **Absent is not zero.** An absent optional operand or attribute publishes nothing; a signature that
+  tolerates it tests `present` or supplies `value_or_default` ([Section 6.2](#62-the-features_signature)).
+  A non-optional scalar left unset publishes its schema default. `numel` is absent when a dim is
+  negative or the product overflows.
+- **The pre-existing names are held.** Matmul, ConvolutionFwd, and SDPA published hand-written operand
+  features before the generator existed. Its names and values match theirs exactly, because shipped
+  models read them, and a parity test holds them.
+- **`data_dependent` comes from a schema annotation, never from a field name.** A `(cache_uid)` field
+  annotated `work_data_dependent` references a tensor whose *contents* decide how much work the node
+  does: SDPA's `seq_len_q`/`seq_len_kv`, page tables, and block mask; MoE's `first_token_offset`; and
+  `TensorAttributes.ragged_offset_tensor_uid`, which marks every node reading or writing a ragged tensor.
+  An operand read densely whatever its values — an additive attention bias, a dropout seed, MoE's
+  `token_index` — is not annotated. A node with an annotated operand present publishes
+  `data_dependent = true`. The generator rejects the annotation anywhere its visitor would not report
+  it, so a misplaced one cannot compile and silently mark nothing.
+
+### 6.8 The Work Model
+
+The work features — `$graph.flops`, `$graph.nodes[i].flops`, `$graph.flops_by_type.*`,
+`$graph.logical_bytes`, and `$graph.arithmetic_intensity` — are the one family of problem features that
+is computed from the graph rather than read off it, and `$graph.flops` is also the numerator of the
+`tflops` label ([Section 4.4](#44-ranking-metrics)). Their conventions are fixed here, so every engine,
+the trainer, and the runtime compute the same number.
+
+1. **FLOPs are the logical work of the problem**, not the work an implementation executes. Padding a
+   tile, recomputing in a backward pass, or skipping a masked block changes what an engine does, not
+   what the problem asks for, so the same graph has the same count for every engine and a `tflops`
+   label is comparable across them ([Section 11.3](#113-cross-engine-comparison)). The conventions must
+   be consistent rather than exact: a model absorbs a fixed scale, but not a count that moves between
+   engines.
+2. **Counting.** A multiply-add is 2 FLOPs, elementwise work is 1 per output element, and a
+   transcendental is 1.
+3. **A graph's work is the sum of its nodes', all or nothing.** `$graph.flops` sums every node, virtual
+   intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
+   nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
+   the whole graph's time, a partial count reports a throughput the engine did not achieve. Each known
+   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes publishes no
+   graph-level work features, because the shapes it declares are not the ones it executes.
+4. **Content-dependent work is unknown.** A node whose `data_dependent` is true
+   ([Section 6.7](#67-per-node-operand-features)) has no count, whatever its type: its shapes bound its
+   work without determining it. Any present `work_data_dependent` operand or ragged operand tensor
+   makes it so, for Matmul, ConvolutionFwd, and SDPA as for every other type. A bound, where one is
+   worth publishing, takes its own name (`…flops_upper_bound`) and never `flops`.
+5. **One formula per node type**, over the operand roles of
+   [Section 6.7](#67-per-node-operand-features):
+
+   | Node type | FLOPs | Notes |
+   |---|---|---|
+   | `MatmulAttributes` | `2·c.numel·a.dims[-1]` | Batch broadcast is inside `c.numel`. |
+   | `ConvolutionFwdAttributes` | `2·y.numel·w.numel / w.dims[0]` | Groups via `w = [K, C/g, …]`. |
+   | `ConvolutionBwdAttributes` (data) | `2·dy.numel·w.numel / w.dims[0]` | Same iteration space as forward. |
+   | `ConvolutionWrwAttributes` | `2·dy.numel·dw.numel / dw.dims[0]` | Same iteration space as forward. |
+   | `PointwiseAttributes` | `out_0.numel` | |
+   | `ReductionAttributes` | `in.numel` | |
+   | `BatchnormInferenceAttributes`, `BatchnormInferenceAttributesVarianceExt` | `2·x.numel` | |
+   | `BatchnormAttributes` (training) | `5·x.numel` | |
+   | `BatchnormBackwardAttributes` | `8·x.numel` | |
+   | `LayernormAttributes` / `LayernormBackwardAttributes` | `5·x.numel` / `8·x.numel` | |
+   | `RMSNormAttributes` / `RMSNormBackwardAttributes` | `3·x.numel` / `6·x.numel` | |
+   | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
+   | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
+   | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
+   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
+   | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
+   | `MoeGroupedMatmulAttributes`, `MoeGroupedMatmulBwdAttributes` | unknown | `first_token_offset` decides how many rows are computed. |
+   | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
+
+   The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
+   chosen once and held; what matters is that every engine counts the same. A formula refuses — the
+   node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
+   shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
+   floating-point operands. So 20 of the 23 node types have a static count; whether a given graph has one
+   is still rule 3's to decide.
+6. **Bytes are a declared convention, and three different quantities are kept apart.**
+   - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
+     tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
+     types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
+     excluded, since keeping them out of memory is what fusion is for. Absent when any non-virtual
+     tensor's footprint is unknown — missing or negative dims, an unset data type, or a ragged tensor,
+     whose dims are only its padded bound. A zero-extent tensor contributes 0.
+   - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
+     generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
+   - **Measured traffic** — what the device actually moved, re-reads and cache effects included. Never
+     inferred from the graph; a model learns its effect from the label.
+7. **`$graph.arithmetic_intensity`** is `$graph.flops / $graph.logical_bytes`, published when both are
+   and the footprint is positive. It is the problem's intensity, identical for every candidate, so it
+   belongs to the shared prefix rather than separating kernels
+   ([Section 6.6](#66-example-mapping-the-current-rocke-sdpa-features)).
+8. **`$graph.flops_by_type.<member>`**, one per `NodeAttributes` member spelled as the schema spells it
+   (`$graph.flops_by_type.ConvolutionFwdAttributes`), sums the work of that type's nodes. It is **0**
+   when the graph has no node of that type and **absent** when any node of that type has unknown work;
+   an unknown node of one type does not suppress another type's entry. A mixed-op model can therefore
+   read how much of a graph is convolution even when a custom op elsewhere leaves `$graph.flops` absent.
+9. **Absent, zero, and unknown are different values.** "No node of this type" aggregates to 0; "this
+   work is unknown" is absent and never silently becomes 0. A signature that must tolerate absence says
+   so with `present` or `value_or_default` ([Section 6.2](#62-the-features_signature)): the default is the
+   model's choice, recorded in its signature, not the extractor's.
+10. **`time` never depends on FLOPs.** The `time` label is measured device time
+    ([Section 4.4](#44-ranking-metrics)), and collecting it requires no work count; a graph with unknown
+    work loses its `tflops` label and its work features, nothing else.
+
+**One place computes all of it.** `EngineFeatures.hpp` in the plugin SDK holds one function per node
+type. Every provider is built against it. Not yet built: `hipdnn_bench`, `hipdnn_corpus_gen`, the
+`hipdnn_uhd_features` evaluator the trainer calls, and `uhd_gen`
+([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). They are built against the same header,
+and `uhd_gen` reads the `$graph.flops` the bench publishes rather than recomputing it
+([Open Question 4](#schema-and-training), resolved). A golden value per node type, and parity with the
+Matmul, ConvolutionFwd, and SDPA counts, are held by test beside the
+feature-semantics revision they were computed under ([Section 6.9](#69-feature-semantics-revision)).
+
+**A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
+`nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
+reason, as `NONE`, `CustomOpAttributes`, and the MoE grouped matmuls are. A test over every member
+fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
+[Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
+contributor steps.
+
+**Catalog rankers read the same problem at collection and at runtime.** A `sort_kernel_catalog`
+ranker binds the problem half of its row through one function (`catalogProblemFeatures`,
+`UhdKernelHeuristic.hpp`): every `$graph.*` and `$device.*` feature of this section and
+[Section 6.7](#67-per-node-operand-features), the work model included, plus the graph-match
+bindings, onto which each candidate's `$kernel.*` metadata is bound. Enumeration pages
+(`problem_features`, `device_features`) and benchmark sweep rows publish from that same function, so a
+model trained on them reads at selection exactly the names and values it was fitted on, and `uhd_gen`
+derives a catalog `tflops` label from the page's `$graph.flops`. A matcher may add names but never
+rebind `graph.*`, `device.*`, `constraint.*`, or `kernel.*`. `$constraint.*` is not available to a
+catalog ranker: a ranked catalog is cached per graph, device, engine version, and ranking metric
+([Section 9.2](#92-loading-and-caching)), so its order cannot depend on the knobs or workspace bound of
+whichever request ranked it first. Constraints reach selection as filters on that order, and as
+features only of the engine-level estimate.
+
+### 6.9 Feature Semantics Revision
+
+`features_hash` fingerprints what a model reads — the signature and its encoding
+([Section 6.3](#63-contract-enforcement)) — not the code that computes each value. A changed FLOP
+convention changes what `$graph.flops` means while every signature, and so the hash, stays
+byte-identical, and a model trained on the old values would score the new ones without complaint. The
+feature-semantics revision covers that half of the contract.
+
+- **The constant.** `FEATURE_SEMANTICS_REVISION`
+  (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`) is an integer, 1 in this build, compiled into
+  everything built against the plugin SDK, with or without the kernel ingestor. Not yet built: the
+  `hipdnn_uhd_features` evaluator. It reports the revision with every response, so the trainer takes
+  the value from the build that computed its features rather than from a copy.
+- **The record.** Training stamps it into the UHD as `trained_against.feature_semantics_revision`, an
+  integer ≥ 1, beside either provenance form ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  It never satisfies `trained_against` on its own. **Absent means 1**, the revision the field was
+  introduced at, so every model trained before it stays valid without a restamp.
+- **The check is exact equality.** There is no additive component: a feature either means what the
+  model was trained on or it does not, and a model newer than the build is as wrong as one older. A
+  model that declares a `features_signature` and whose recorded revision differs from the build's is
+  refused in every role it is bound to — the engine estimate and the catalog ranker alike — at the
+  point descriptor provenance is checked, with an error naming both revisions ("trained against
+  feature semantics revision 2, this build computes revision 1"). The engine's estimate for that
+  metric and architecture is **UNAVAILABLE**, catalog ranking falls back to the declared order, and the
+  request never fails ([Section 5](#5-selection-flow)).
+  Promotion and offline evaluation apply the same check, so a stale model is refused before it ships
+  rather than at a user's load.
+  A model with no `features_signature` (`static_order`, or a `native` comparator over kernel metadata
+  compiled into the same build) reads no published feature, so no bump refuses it.
+- **The bump rule.** Bump the revision in the same change that alters the value or the meaning of any
+  feature already published — a FLOP or byte convention, a refusal that removes a value, a unit, an
+  encoding — and retrain the models that ship with it. Adding a feature name, or publishing a value
+  where none was published before (a node type gaining a formula), does not bump: no model could have
+  read it. The one signature such an addition changes is one that branches on absence (`present`,
+  `value_or_default`); that is a coverage change, like an additive descriptor revision
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)), answered by regenerating rather than by
+  refusing.
+- **A test enforces it.** The golden FLOP and feature values sit beside an assertion on the revision, so
+  changing a golden value fails until the revision and the assertion move together.
+
 ---
 
 ## 7. Model Adapters
@@ -1450,7 +1788,7 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | Adapter | Runtime dependency | Standalone drop-in? | Notes |
 |---------|-------------------|---------------------|-------|
 | *(none named)* | none | n/a | **A UHD is optional.** No heuristic → deterministic `priority`/`id` order plus a warning ([Section 5](#5-selection-flow) step 6) |
-| `static_order` | none | Yes (always available) | The same behavior, stated explicitly rather than inferred. Not a scorer: it names ordering criteria, so it resolves to a comparator rather than to an adapter instance |
+| `static_order` | none | Yes (always available) | The same behavior, stated explicitly rather than inferred. Not a scorer: it has no parameters and resolves to the fixed priority-then-id comparator rather than to an adapter instance |
 | `native` | none | **No — compiled into the engine** | Scorer function resolved by symbol name; the bootstrap path |
 | `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
@@ -1465,23 +1803,32 @@ dependency audit.
 
 ### 7.1 First: `native`
 
+The UHD names this adapter as `"adapter": "native"` and puts the scorer symbol in `native.symbol`. The
+symbol resolves through one of two registries:
+
+- A `native` UHD with a `features_signature`, and every `predict_engine` UHD, names a `UhdScoreFn`,
+  `double(const double* features, size_t numFeatures)`, registered in `NativeScorerRegistry`
+  (`heuristics/uhd/NativeScorerRegistry.hpp`). This is the same C ABI as
+  [Section 7.3](#73-escape-hatch-custom_library).
+- A `sort_kernel_catalog` UHD with no `features_signature` names a `ScoreFn`,
+  `double(const MatchContext&, const BoundTokens&, const KernelDefinition&)`, registered in
+  `ScoreRegistry` (`ingestor/NativeHooks.hpp`). This scorer featurizes from the bindings directly. An
+  example is `hipkernel.gfx950_attention_dense.score`.
+
 > **Two unrelated uses of "native."** This is the UHD's `native` *adapter* — a compiled **scorer**.
 > RFC 0020 § 4.5 defines a `graph_match` `native` *arm* — a compiled **matcher**. Different layers,
 > different registries, and an engine may use either independently of the other.
 
 The scorer is a function compiled into the engine and named in the UHD by symbol, resolved through the
-same symbol-registration mechanism the ingestor uses for matchers and dispatch handlers. The UHD still
-carries `objective` and `score`, so a native scorer participates in ranking and cross-engine comparison
-identically to a model; the ranking seam is exercised end to end while the scorer behind it is ordinary
-C++.
+same symbol-registration mechanism the ingestor uses for matchers and dispatch handlers. The ranking
+seam is exercised end to end while the scorer behind it is ordinary C++. The UHD carries `objective`
+and may carry `score`, so a native scorer participates in ranking and cross-engine comparison
+identically to a model.
 
 This is the simplest implementation and the fastest route to a working UHD, so it lands before the
 data-driven adapters. It is **not** a drop-in: changing the heuristic requires recompiling the engine, so
 it does not serve the data-driven, independently-shippable goal. It is scaffolding for the seam, an escape
 hatch for heuristics no model expresses, and a baseline against which `tree_data` is measured.
-
-`features_signature` is optional here: a native scorer may consume the standard feature row, holding it to
-the same contract as a model, or featurize from the bindings directly.
 
 ### 7.2 Default: `tree_data`
 
@@ -1511,7 +1858,11 @@ cycle in a tree is not a malformed buffer; it is a buffer that verifies cleanly 
 terminate.
 
 **A model artifact may be content-addressed.** The body naming the artifact may also carry the digest
-of its bytes, which the adapter recomputes before parsing and refuses on mismatch. `features_hash`
+of its bytes as `hash`: the file's SHA-256 as 64 lowercase hexadecimal digits, with no `sha256:` prefix
+(unlike `features_hash`). Any other spelling is refused at load, since it could never match. The
+adapter recomputes the digest before parsing and refuses on mismatch. Without one, the loader digests
+the bytes deployed at load. A `custom_library` must declare it, because its file is loaded as code
+([Section 7.3](#73-escape-hatch-custom_library)). `features_hash`
 fingerprints the model's *input contract*; this fingerprints the *model*, and the two answer different
 questions — a retrained model over an unchanged signature has the same feature hash and different
 content. The size a model may occupy is bounded before any of it is parsed, so a malformed or hostile
@@ -1520,13 +1871,15 @@ length cannot be turned into an allocation.
 ### 7.3 Escape Hatch: `custom_library`
 
 For a model the in-tree walker does not cover, the engine ships its own compiled scorer as a loadable
-library, resolved through the platform's own dynamic loader on every supported host rather than through
-a POSIX-only path, and called through a small C ABI (`score(const double* feats, size_t n) -> double`).
+library, opened through the platform's own dynamic loader with the library's own directory searched first
+for its dependents, and called through a small C ABI (`score(const double* feats, size_t n) -> double`).
 That ABI is deliberately the same one a `native` scorer implements, so a single scorer implementation
 serves either delivery route and moving between them is a packaging decision rather than a rewrite.
 Treelite generates such a library from a tree model. Any model family is supported, under the
 author-native-code trust class of
-[RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery).
+[RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery). A descriptor names one
+library file and one digest, so it cannot carry per-platform builds; Windows therefore refuses
+`custom_library` models at load, like any model that fails to load.
 
 The constraint is on linkage, not compilation. Compiling a model *into* the provider makes it
 non-portable to third-party provider builds; a model may still be compiled (a Treelite `.so`) provided it
@@ -1548,8 +1901,8 @@ covers. They sit at opposite ends of the same tradeoff, which is why `native` la
 The initial adapters are **`static_order`, then `native`, then `tree_data`**. `static_order` is trivial
 and always available; `native` proves the seam with a compiled function and needs no new format;
 `tree_data` is the data-driven shipping path. `table` is a low-cost addition for coarse bucketed
-heuristics. `onnx` and `custom_library` are added when a concrete need appears, the latter gated on the
-trust audit.
+heuristics. `onnx` is added when a concrete need appears. `custom_library` is implemented with no trust
+gate; [Open Question 11](#operational) records what the code does.
 
 ---
 
@@ -1653,13 +2006,17 @@ what the model records:
 ```
 
 `selector_revision` is an opaque string, compared for **exact equality** against the revision the
-running provider reports. A model whose recorded string differs is not used; one that records no
-provenance at all cannot be matched to any build and is refused the same way.
+running provider reports. A model whose recorded string differs is not used, and the engine's estimate
+for that metric and architecture is *unavailable*, with a reason naming both revisions — the model is
+sound, it describes a different build. One that records no selector revision cannot be matched to any
+build and is refused as *invalid*: that is a broken contract rather than a stale one
+([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
-The two forms are exclusive and exhaustive: a `trained_against` carries either all three descriptor
-entries or a `selector_revision`, never a mixture and never neither. Partial descriptor provenance is
+Neither form may be partial, and every model records at least one. Partial descriptor provenance is
 the failure mode both forms exist to prevent — it would let a model claim a dependency on the one
-descriptor that did not move.
+descriptor that did not move. A model of an opaque engine records the selector form alone; a
+`sort_kernel_catalog` model of a descriptor engine records the descriptor form; and an engine estimate
+(`predict_engine`) of a descriptor engine records **both**, for the reason below.
 
 The string is opaque **by construction, not by omission**. It names the thing whose behaviour was
 measured, at the granularity at which that behaviour changes. A provider build hash is the wrong
@@ -1667,6 +2024,33 @@ granularity: it would expire every model on every commit to the repository, incl
 cannot affect the engine in question, and no model could ever ship alongside the source that produced
 it. The revision an engine reports moves when what it wraps moves, which is the event a retrain is
 actually coupled to.
+
+**A descriptor engine's estimate is bound to its selector, too.** Descriptor revisions suffice for a
+`sort_kernel_catalog` model: it scores each candidate from that candidate's metadata, so what it depends
+on is what those revisions describe. An engine estimate predicts something larger — the figure of merit
+the engine achieves on a graph, which is the outcome of its whole selector: which ranker answers each
+metric and architecture, which kernels and code objects its packs carry, which matcher and dispatch
+symbols they resolve, which knobs it exposes, and how its pattern binds the graph. Several of those move
+with no descriptor's content revision moving — a retrained ranker restamps no UED, and a rebuilt code
+object changes no KMD. So the generic engine computes a selector revision of its own over exactly those
+inputs (`generic-untuned-v1/<sha256>`), and a `predict_engine` model bound to a descriptor engine must
+record a `selector_revision` equal to it, beside the descriptor entries. The check is the opaque
+engine's, unchanged: a different recorded revision makes the estimate *unavailable*, naming both; no
+recorded revision makes it *invalid*. The generation tool always records the engine's current revision
+when it trains an estimate. A `sort_kernel_catalog` model is not subject to the check: it is one of the
+selector's inputs, so a revision over itself would expire every ranker at every retrain.
+
+**Either form may also record what the features meant.** Descriptor revisions and a
+`selector_revision` say which selector was measured; neither says how the plugin SDK computed the
+features the model read. An integer `feature_semantics_revision` records that, beside either form:
+
+```jsonc
+"trained_against": {"selector_revision": "hip-kernel-provider/0.2.0/asm-sdpa-untuned-v1",
+                    "feature_semantics_revision": 1}
+```
+
+It is compared for exact equality rather than by the breaking/additive rule below, and an absent entry
+reads as 1 ([Section 6.9](#69-feature-semantics-revision)).
 
 **Enforcement — the concrete rule.** At load, for every revision recorded in `trained_against`:
 
@@ -1697,11 +2081,10 @@ applies to any `features_signature` reference to a field the KMD no longer decla
 training-coverage warning when the catalog spans a field value outside what the model was trained on
 ([Section 8.3](#83-out-of-distribution-inputs)).
 
-> **Not yet in the layout.** None of the three descriptors carries either field today
-> ([PR #10606](https://github.com/ROCm/rocm-libraries/pull/10606)); `EngineDescriptor::sdkVersion` is the
-> *graph schema* axis and is a different thing. Both are cheap to add now and awkward once descriptor
-> sets ship. `revision` is the newer of the two obligations — RFC 0020 §14 already specifies `version`
-> for the UED — and this section asks each of the three types to carry a content revision beside it.
+The UED, the KMD, and every UMD carry a `revision` beside `version`, and an absent `revision` reads as
+`1.0` (`declaredRevisionOf()` in `DescriptorLoader.hpp`). `provenanceError()` applies the rule above to
+every role a UHD is bound to. `EngineDescriptor::sdkVersion` is the *graph schema* axis and is a
+different thing.
 
 ### 8.2 Model Updates
 
@@ -1775,21 +2158,26 @@ than per-feature range checks, so they cost little and catch the highest-impact 
   token an AOT signature may reference ([Section 6.1](#61-feature-sources)). The GFX name is already
   resolved for the pack-level arch gate and for selecting the arch-keyed heuristic
   ([Section 3.1](#31-descriptor-relationships)), so it costs nothing additional. An unseen architecture
-  withholds the engine estimate rather than supplying an unfounded one.
+  withholds the calibrated engine estimate rather than supplying an unfounded one; the model still
+  ranks the catalog, and a warning is logged once per heuristic and architecture.
 - **Categorical values** — a string outside the UHD's `categorical_encoding`
   ([Section 6.5](#65-categorical-encoding)) is an exact-lookup miss, and therefore free.
-- **Score range** — a recovered score that is not finite and positive is not a usable prediction. Such a
+- **Score range** — a recovered score that is not finite, or a physical score that is not positive
+  ([Section 5](#5-selection-flow) step 4), is not a usable prediction. Such a
   candidate is distrusted **individually**: it orders last and is reported as 0, while the rest of the
-  ranking stands. One diagnostic per request carries the affected and total counts, so a model going
-  wrong everywhere reads differently from one candidate falling off the end of its trained region.
+  ranking stands. One diagnostic per heuristic, logged the first time it happens, carries that ranking's
+  affected and total counts, so a model going wrong everywhere reads differently from one candidate
+  falling off the end of its trained region.
 
 Carrying the arch set in the artifact rather than in the descriptor is deliberate: it is a property of
 the corpus a model was fitted to, not of the document that names the model, and keeping the two together
 means a model cannot be re-pointed at a new architecture by editing JSON. The same artifact-side slot
 keeps per-feature coverage metadata additive, so (b) remains available without a format break.
 
-Where the degradation is not per-candidate, it is the [Section 5](#5-selection-flow) one: fall back to
-`static_order`, log, and never fail. **OPEN:** See [Open Question 16](#operational).
+An unseen architecture is the one model-wide case that keeps the model's ranking: only the calibrated
+estimate, which other engines would compare against, is withheld. Every other model-wide degradation is
+the [Section 5](#5-selection-flow) step 8 one: fall back to `static_order`, log, and never fail.
+**OPEN:** See [Open Question 16](#operational).
 
 ---
 
@@ -1812,20 +2200,30 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
 
 ### 9.2 Loading and Caching
 
-- **Load on demand, and never before applicability.** Two rules govern loading:
+The engine's `KernelIngestorStateManager` holds an LRU catalog cache
+(`DEFAULT_CATALOG_CACHE_CAPACITY` = 256) keyed by `CatalogKey` (`MatchContext.hpp`): graph id, device id,
+the engine's UED revision, and the ranking metric. The ranked order is stored with the catalog
+(`Catalog::isSorted` in `Catalog.hpp`). The persistent cache stores benchmarked winners, under
+`<cacheRoot>/ingestor-winners/<data SDK version>/<engine>/<UHD id>/<engine revision>-<model hash>/<arch>/winners.jsonl`
+(`WinnerCacheFile.hpp`). Not yet built: a persistent cache of model rankings.
+
+- **Load on demand, and never before applicability.** Descriptor discovery parses each UHD's JSON with
+  the rest of its descriptor set; it builds no model and evaluates nothing. Two rules govern loading
+  the model:
   1. The UHD is never consulted to decide applicability; that is the matcher's job
-     ([Section 10](#10-applicability-flow)). No UHD is loaded, parsed, or evaluated until the engine has
+     ([Section 10](#10-applicability-flow)). No model is loaded or evaluated until the engine has
      been found applicable for the graph.
   2. After that, it loads only when something asks for what it produces. There is no eager ranking and no
      speculative load. The demand triggers are a policy requesting an estimate in its ranking metric to rank
      engines, a **knob query** (the reported default is the UHD's top-ranked value,
      [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), and kernel selection. A
-     policy that ranks by explicit user choice or fixed criteria asks for none of these and loads no UHD.
+     policy that ranks by explicit user choice or fixed criteria asks for none of these and loads no model.
+     The first load is also when [Section 6.3](#63-contract-enforcement) checks 2–4 run.
 
   Ranking can be triggered for an engine that goes on to lose — a policy may ask every applicable engine
   for an estimate before picking one — so the model must be cheap to load and cheap to rank with. A
-  provider that never sees FMHA never parses the FMHA model, and a policy that never asks for estimates
-  never parses any.
+  provider that never sees FMHA never loads the FMHA model, and a policy that never asks for estimates
+  never loads any.
 - **Model cache — per engine.** After first load the parsed model / tree table / native handle is cached
   **on the engine**, matching the mechanism in the kernel-ingestor foundation
   ([PR #10606](https://github.com/ROCm/rocm-libraries/pull/10606)): lazily loaded, then held for the
@@ -1836,8 +2234,10 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   provider-wide static cache only becomes interesting if UHDs are ever shared across engines, which the
   ownership model does not currently allow.
 - **Result cache on the descriptor cache key.** Selection is a pure function of (feature vector,
-  candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph id, device id)` plus
-  the engine's descriptor-set version** — rather than a bespoke fingerprint. "Engine id" here is the
+  candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph content,
+  graph-level fields, tensor uids, device id)` plus the engine's descriptor-set version** — rather
+  than a bespoke fingerprint ([RFC 0017 §8.1](0017_UniversalKernelDescriptor.md) says why each part
+  is in it). "Engine id" here is the
   **64-bit id** hipDNN keys on (the FNV-1a hash of the UED `name`), not the descriptor GUID;
   [RFC 0020 §3](0020_UniversalEngineDescriptor.md) keeps those two id spaces distinct. The device id
   because it is what `$device.*` resolved against, and the version so a pack that changed cannot be
@@ -1846,8 +2246,8 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   rather than absent from the key. In practice this is the **catalog cache** that foundation maintains:
   the ranked order rides along with the catalog it ranks rather than living in a second structure.
 
-  **Why a version rather than a process-local generation counter.** An earlier draft keyed on an
-  inventory counter bumped on re-scan. Descriptors are scanned when hipDNN initialises and not again, so
+  **Why a version rather than a process-local generation counter.** A counter bumped on re-scan does
+  not work. Descriptors are scanned when hipDNN initialises and not again, so
   in a running process that counter is a constant and the only invalidation it can express is one that
   never happens. The descriptor-set version says the same thing durably: it distinguishes two builds of
   an engine rather than two scans of one, which is the distinction that actually matters both in memory
@@ -1880,7 +2280,7 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   inside it:
 
   ```
-  <cache root>/<uhd id>/<uhd content hash>/<graph id>-<device>.rank
+  <cache root>/<uhd id>/<uhd content hash>/<graph content key>-<device>.rank
   ```
 
   Three details decide whether this actually works:
@@ -1910,10 +2310,10 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   - **The cache is capacity-bounded** (an LRU in the current foundation), so a working set larger than
     the bound re-ranks on eviction. The bound is a tuning parameter, not a correctness issue, but the
     latency budget should be justified against the *uncached* path.
-  - **Some graphs cannot be cached at all.** The key needs a stable graph identity; a graph that is
-    unfinalized, legacy, or carries a non-v4 id has none, so **every call re-ranks**. That is the real
-    worst case for selection overhead, and it is the one [Section 9.4](#94-latency-target) should be
-    measured against.
+  - **Some graphs cannot be cached at all.** The key is built from the graph's serialized bytes; a
+    graph that supplies none, or whose bytes do not verify, has no key, so **every call re-ranks**.
+    That is the real worst case for selection overhead, and it is the one
+    [Section 9.4](#94-latency-target) should be measured against.
 
   **OPEN:** in-process only vs. a persistent cross-run cache — see [Open Question 9](#operational).
 
@@ -1933,10 +2333,14 @@ make each iteration as small as possible:
   and a flat tree table — no strings, no JSON, no map lookups.
 - **Split the row into a shared prefix + per-candidate suffix.** Problem and device features
   (`$q.*`, `$device.*`) are identical across every candidate in the engine; only `$kernel.*` and the
-  computed subexpressions that depend on it vary. Compute the invariant prefix **once per graph** and refill
-  only the varying slots per candidate, turning O(N × full-featurize) into O(full-featurize + N × small)
-  for N candidates. The kernel-dependent tail is the part that cannot be hoisted or cached across
-  candidates, and keeping it small is the main lever on selection cost.
+  computed entries that depend on it vary. The split is made per signature entry
+  ([Section 6.4](#64-computed-features)): entries reading no `$kernel.*` symbol are evaluated **once per
+  selection** into a shared workspace, and only the kernel-dependent entries are refilled per candidate,
+  turning O(N × full-featurize) into O(full-featurize + N × small) for N candidates. The
+  kernel-dependent entries are recomputed in full for every candidate — a problem-only subexpression
+  inside one is not hoisted out of it, and nothing is cached per kernel across selections (both future
+  work, [Section 6.4](#64-computed-features)) — so keeping those entries small is the main lever on
+  selection cost.
 - **Reuse the engine's bound symbols; do not re-extract.** Matching the engine's pattern binds the
   problem tokens once per graph, and selection reads that table rather than re-featurizing
   ([Section 6.1](#61-feature-sources)). The scorer receives the bound symbol table alongside the
@@ -1990,8 +2394,8 @@ Graph
 So there is no flow in which ranking happens before applicability is confirmed, and none in which it
 happens without a request. Whether a UHD is loaded at all depends on the policy in play: one that ranks
 by explicit user selection or fixed criteria never asks, and never triggers a load. The load-timing
-rules, the per-engine model cache, and the shared `(engine id, graph id, device id)` +
-generation-counter result key are specified once in [Section 9.2](#92-loading-and-caching) and are not
+rules, the per-engine model cache, and the shared result key (RFC 0017's applicability cache key,
+plus the generation counter) are specified once in [Section 9.2](#92-loading-and-caching) and are not
 restated here.
 
 **Where estimates fit.** Once the policy has its applicable set, it *may* ask each engine for a
@@ -2075,6 +2479,13 @@ architecture a UHD serves come from the UED's role map; a document that names th
 against the binding it was resolved through and refused on disagreement. Otherwise a dropped-in
 descriptor could attach itself to an engine that never referenced it.
 
+**An estimate is bound to the selector it measured.** An engine estimate predicts the outcome of the
+engine's whole selector, so it records the selector revision it was trained against, and is bound only
+while that revision is the engine's current one — the provider's for an opaque engine, the generic
+engine's own for a descriptor engine ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). A
+different recorded revision resolves the estimate *unavailable*, with a reason naming both; a missing
+one resolves it *invalid*.
+
 ### 11.2 Two Engine-Selection Policies (RFC 0007)
 
 Shorthand in this section: **A** (L1) = the engine's `predict_engine` UHD for the requested metric, **B**
@@ -2087,8 +2498,8 @@ both policies compare engines only in that metric, ordered in its registered dir
   scored — B is never evaluated under this policy, for any engine, because the policy's purpose is a
   fast answer and B's cost is a catalog enumeration per engine. Engines with no descriptor layer (e.g.
   MIOpen) contribute their A like any other engine and, if they win, use their own internal kernel
-  selection. Whether the *winner's* configuration is then filled in from its B inside the policy, or left
-  to plan build, is [Open Question 21](#ranking-metrics).
+  selection. The winner's configuration is not filled in from its B inside the policy; its kernel is
+  chosen at plan build by the metric's ranker ([Open Question 21](#ranking-metrics), resolved).
   **OPEN:** See [Open Question 7](#structural) (non-descriptor engine estimates).
 - **Thorough policy (L2 first, then L1).** Run B for every applicable engine that has it (best
   configuration + its predicted value), fall back to A for engines that do not, then compare across
@@ -2179,7 +2590,7 @@ value in its registered units; the metric registry ([Section 4.4](#44-ranking-me
 role maps ([Section 3.1](#31-descriptor-relationships)); and a score-only evaluation mode (rank and return
 the best score without selecting for launch).
 
-**What is deferred:** Delivering cross-engine comparison requires changes outside the UHD:
+**What lies outside the UHD:** Delivering cross-engine comparison requires changes outside the UHD:
 
 1. **A plugin-query surface** for the per-graph figure of merit — both the cheap **A** (engine
    estimate) and the accurate **B** (config UHD run in a "score only, don't launch" mode), each asked
@@ -2196,7 +2607,12 @@ the best score without selecting for launch).
    requirement, not just plumbing — and the one most likely to force the rank-ordering fallback if it
    does not hold up, separately for each metric.
 
-This is a dedicated follow-up co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md).
+Items 1 and 2 are built. `IEngine::getPrediction()` answers A and B for one named metric
+(`heuristics/uhd/EnginePredictor.hpp`), and the backend implements the quick and thorough policies as
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. A caller names the metric through
+`HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`, `Graph::set_ranking_metric()`, or
+`HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet:
+no in-tree engine ships a calibrated model.
 
 ### 11.4 Selecting a UHD by Metric
 
@@ -2214,8 +2630,13 @@ set. The per-engine and per-configuration prediction queries carry the metric th
 (configuration). The engine answers from its UHD for that metric at that level, for the device's
 architecture, or reports the metric unavailable; it never answers in a different metric. The answer
 carries the **metric name and value** rather than a field named for one metric, and the host checks
-that the returned metric is the requested one — a mismatch is *invalid*, not a conversion. Validity
-of the value is the metric's: non-negative throughput, positive time.
+that the returned metric is the requested one — a mismatch is *invalid*, not a conversion. A valid
+value is finite and strictly positive in every metric (a 0 throughput is the kernel path's "no
+measurement"). An available engine (A) estimate
+names the UHD that produced it. An available configuration (B) answer names one too when a model
+produced its value, and names none when the value is measured ([Section 5](#5-selection-flow) step 9);
+the host admits both, never invents an identity for a measurement, and still applies every other
+check — the metric, the value, the engine, and any explicit configuration constraint.
 
 **Capability query.** A caller can ask an engine which metrics it serves at which level, for the
 current device, without evaluating any model: a list of `(kind, metric, UHD id)`. It reads bindings only,
@@ -2247,7 +2668,8 @@ Because selection is data-driven, it must be inspectable — consistent with
 - **Selection trace:** Candidates, scores, the ranked order, winner, and whether the model or a fallback
   decided
 - **Model provenance:** UHD id, adapter, model artifact version, `features_hash`,
-  `trained_against` (UED/UMD/KMD content revisions, each named by id), training provenance
+  `trained_against` (UED/UMD/KMD content revisions, each named by id, or the selector revision; and the
+  feature-semantics revision), training provenance
 - **Contract diagnostics:** A clear **error** (not a warning) naming which of the three checks failed and
   why, plus the fact that ranking degraded to `static_order` and the estimate was reported as 0
 - **Coverage warnings:** When a scored candidate or device falls outside what the model was trained on
@@ -2276,11 +2698,15 @@ provider-specific service.
 2. **Generate a real heuristic from on-hardware timings.** A standalone generation tool loads the pack
    **through a UED exposing every KMD field** ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)),
    times its kernels across a corpus of problem shapes, trains a model, and emits an updated UED/UHD —
-   now `adapter: tree_data` pointing at an exported model, with the categorical encoding and
+   an `adapter: tree_data` UHD pointing at an exported model, with the categorical encoding and
    `trained_against` revisions it was built from. Dropping that updated engine descriptor set back in
-   upgrades the pack in place. The emitted UED's `knobs` are **derived from the trained feature set** —
-   the axes that survived feature selection ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)),
-   which is normally fewer than the generation UED exposed.
+   upgrades the pack in place. The emitted UED keeps the engine's **authored** `knobs`: the generation
+   UED exposed every field only so each kernel could be timed. Training is offered only the shipping
+   UED's knobs as `$kernel.*` axes, and promotion refuses a model whose `$kernel.*` axes are not KMD
+   fields and shipping knobs — the admission the runtime applies at load
+   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes),
+   [Section 6.3](#63-contract-enforcement)) — so the pipeline never installs a model the runtime would
+   refuse.
    **OPEN:** See [Open Question 10](#operational) (shape corpus location).
 
 Because the shipped and generated heuristics are the same descriptor kind differing only in `adapter`
@@ -2306,9 +2732,14 @@ What changed?
 │     author supplies: additional corpus
 │     → extend sweep → retrain → re-emit UHD          [timings reusable, extended]
 │
-├─ Knobs pruned (feature dropped; kernels unchanged)
+├─ Feature dropped (kernels and knobs unchanged)
 │     author supplies: nothing
-│     → refit from existing timings → re-emit UHD + UED   [no new benchmarking]
+│     → refit from existing timings → re-emit UHD        [no new benchmarking]
+│
+├─ Knob withdrawn (the engine author's decision, not training's)
+│     author supplies: the major-revised UED
+│     → refit from existing timings → promote --remove-knob → re-emit UHD + UED
+│       [no new benchmarking; refused while the model still reads the knob]
 │
 ├─ Kernels removed from the pack
 │     author supplies: nothing
@@ -2344,6 +2775,13 @@ candidate, a cohort, or a device the sweep never saw has no evidence behind it, 
 refitting manufactures any.
 
 ### 13.2 Benchmarking via the hipDNN Bench CLI
+
+Not yet built. `hipdnn_bench` and the generation tool are the plan. The sweep tooling in the tree
+(`tools/IngestorGenerator/tools/sweep.py`, documented in
+[`README-sweeps.md`](../../tools/IngestorGenerator/tools/README-sweeps.md)) drives `dnn-benchmark`
+from the separate dnn-benchmarking project. The generator (`tools/IngestorGenerator/codegen/generator.py`)
+emits only `adapter: "native"` UHDs. No tool trains a model into a UHD. rocKE trains LightGBM models
+outside the descriptor path, in `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/heuristics/`.
 
 The timing substrate is **`hipdnn_bench`**, hipDNN's own benchmark tool, driving hipDNN's timing loop
 over explicitly enrolled candidates. It is provider-agnostic: it times whatever engine/kernel actually
@@ -2600,7 +3038,7 @@ The tool auto-derives Layer 1 and proposes a Layer-2 first pass from it, in thre
 |---|---|---|---|
 | 1 | Raw fields (`$kernel.*` = KMD fields; tensor dims/attrs = the engine's published symbols; `$device.*`) | KMD schema + the UED's published symbol set + device vocab | **none** |
 | 2 | Generic transforms (logs, ratios) and **tile/wave quantization** | Tier 1 + an expression pairing a problem dim with a `$kernel.*` tile axis | the **dim↔tile correspondence** — which dim goes with which tile field |
-| 3 | **Physics** — arithmetic intensity, roofline bound | the op's FLOP and byte counts, divided inline | **none** — supplied as precomputed op fields (below) |
+| 3 | **Physics** — arithmetic intensity, roofline bound | the graph's FLOP and byte counts, read directly or divided inline | **none** — published by the work model (below) |
 
 The tile/wave quantization (Tier 2) is not auto-inferable — the tool cannot guess that `seqlen_q` pairs
 with `tile_m0`. It is the one genuine author input, and it is small: a list of (problem dim, tile field)
@@ -2608,54 +3046,55 @@ pairs. From that list the tool writes the quantization entries into the `feature
 ([Section 6.4](#64-computed-features)); the author supplies correspondences, not expressions.
 
 **Arithmetic intensity, and where the FLOP/byte counts come from.** Intensity is
-`total_FLOPs / total_bytes_moved` (FLOP/byte) — the roofline x-axis that separates compute-bound from
+`logical FLOPs / logical bytes` (FLOP/byte) — the roofline x-axis that separates compute-bound from
 memory-bound problems, which is exactly the split that decides which kernel wins. Both terms are
 closed-form over the bound dims and dtype sizes, but they are **op-specific** and cannot be inferred
 from the KMD field list, so something has to supply them per op.
 
-**They are precomputed fields, declared in the hipDNN schema.** The binding layer already publishes
+**They are precomputed features, computed in the plugin SDK.** The binding layer already publishes
 derived values that no descriptor declares: `$q.stride_order` and `$q.packed` stand in for
 contiguous-stride arithmetic, and `$q.value_f32` coerces a tensor's compile-time value to a single typed
-token. Each is declared in the schema like any other field and versioned with it, so adding one is an
-additive schema change rather than a per-pack extension point
-([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). FLOP and
-byte counts fit that mechanism, as per-op precomputed fields:
+token ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)).
+Work counts fit that mechanism. The plugin SDK's work model ([Section 6.8](#68-the-work-model)) computes
+them once per graph, with one function per node type, and publishes them under `$graph.*`:
 
 ```jsonc
-// available wherever an sdpa_fwd node is bound — no descriptor declares these
-"$sdpa_fwd.flops"        // 4·B·H·Sq·Sk·D for SDPA forward
-"$sdpa_fwd.bytes"        // sum over Q/K/V/O of element_count × that tensor's dtype size
+// published for every graph whose work is known — no descriptor declares these
+"$graph.nodes[0].flops"        // per node; SDPA forward: 2·B·H·Sq·Sk·(Dq + Dv), causal pairs only
+"$graph.flops"                 // the sum over every node, all or nothing
+"$graph.logical_bytes"         // the sum over non-virtual tensors of element count × element size
+"$graph.arithmetic_intensity"  // the ratio of the two
 
-// so a features_signature entry just divides them
-"arithmetic_intensity": {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}
+// so a features_signature entry reads the ratio, or divides the terms itself
+{"/": ["$graph.flops", "$graph.logical_bytes"]}
 ```
 
-These are **not** authored as expression strings in table-level `.fbs` annotations. Embedding an
-expression language inside the schema file is awkward, and changing an `.fbs` requires codegen plus a
-recompile regardless — so a schema annotation buys none of the data-driven flexibility that would
-justify it. What needs a rebuild to change belongs in code, as a precomputed binding field.
+These are **not** authored as expression strings in table-level `.fbs` annotations, nor shipped as a
+per-op data file. Embedding an expression language inside the schema file is awkward, and changing an
+`.fbs` requires codegen plus a recompile regardless — so a schema annotation buys none of the
+data-driven flexibility that would justify it. A data file would buy that flexibility and have no use
+for it: every consumer of the counts is built against the plugin SDK, and a changed convention
+invalidates every model trained on the old one however it ships
+([Open Question 4](#schema-and-training), resolved). What needs a rebuild to change belongs in code, as
+a precomputed feature.
 
 Because they are **op-intrinsic** (SDPA's two GEMMs do `2·B·H·Sq·Sk·(hdim_q + hdim_v)` FLOPs regardless
 of engine or package — the familiar `4·B·H·Sq·Sk·D` is the specialization where the Q and V head
-dimensions are equal, which the frontend does not require), these fields live at Layer 1 and are shared
-by every package of that op — defined once per op-family.
-A `features_signature` then references intensity *identically* to a raw dim like `$q.dims[2]`, and the
-Tier-3 "physics" distinction disappears at the point of use.
-
-> **Coordinate with the UMD.** This says the op vocabulary should carry a *set* of useful precomputed
-> fields — some universal across ops, some per-op — of which FLOPs and bytes are two. Where that set is
-> defined and how per-op entries are registered is the UMD's to specify, not this RFC's; the requirement
-> here is only that FLOP and byte counts be among them. See [Open Question 4](#schema-and-training).
+dimensions are equal, which the frontend does not require), these features live at Layer 1 and are
+shared by every package of every op. A `features_signature` then references intensity *identically* to
+a raw dim like `$q.dims[2]`, and the Tier-3 "physics" distinction disappears at the point of use.
 
 Caveats:
 
 - **Mixed-dtype ops** (e.g. fp8 in / fp16 accumulate, or differing I/O dtypes) make the byte count a sum
-  over *per-tensor* dtype sizes, not one global `dtype_bytes`. Each tensor must contribute its own dtype
-  — a single-dtype shortcut is wrong for quantized kernels.
-- **Not every op has a clean closed form.** Ragged or data-dependent shapes (variable-length sequences,
-  data-dependent masking) may make an exact count impossible; the field should then expose a documented
-  upper bound or be absent rather than silently wrong, and a UHD that needs better can compute its own
-  inline in the signature.
+  over *per-tensor* element sizes, not one global `dtype_bytes`. `$graph.logical_bytes` takes each
+  tensor's own size, fractional for sub-byte types — a single-dtype shortcut is wrong for quantized
+  kernels.
+- **Not every op has a clean closed form.** Ragged or data-dependent work (variable-length sequences,
+  page tables, MoE routing) cannot be counted from shapes; the count is then absent rather than
+  silently wrong ([Section 6.8](#68-the-work-model)). A bound, where one is useful, is published under its
+  own name and never as the count, and a UHD that needs better can compute its own inline in the
+  signature.
 - **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
   bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
   per-op template) prunes it. Auto-derivation proposes; data or a template trims.
@@ -2758,7 +3197,8 @@ generation/execution loop can actually run.
 3. **Generate heuristics** from the results ([Section 13](#13-model-generation-pipeline)).
 4. **Backwards-evaluate the heuristics** to find the weakest knobs — the axes the trained model barely
    uses.
-5. **Regenerate the UED** with the reduced knob set.
+5. **Regenerate the UED** with the reduced knob set — an explicit, authored withdrawal
+   (`uhd_gen promote --remove-knob`), never a side effect of retraining.
 6. **Regenerate the AOT kernels** from the reduced knobs, or run the AOT-selection pipeline
    ([Section 14.2](#142-pipeline-aot-selection)).
 
@@ -2767,11 +3207,15 @@ Step 4 is the same signal as the feature-importance pruning noted in
 `features_signature`; here it trims the **knob space itself**. A knob the model never splits on is a knob
 whose variants are not earning their package size.
 
-**Steps 4–5 collapse into one action.** Because `UED.knobs` *is* the model's feature set
-([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), pruning a weak feature and dropping a
-knob are the same edit rather than two that have to be kept consistent by hand. Emitting the pruned UHD
-emits the reduced UED with it, and the [Section 6.3](#63-contract-enforcement) equality check guarantees
-they cannot drift apart.
+**Steps 4–5 are one signal and two actions.** Step 4's evidence is the model's: a feature the retrain
+no longer reads is reported as an unread knob
+([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). Step 5 is the engine's: the
+UED's `knobs` are its public tuning surface, so a retrain never shrinks them, and withdrawing one is an
+explicit `promote --remove-knob` that bumps the UED's breaking content revision
+([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). The two cannot drift into an inconsistent
+state: promotion refuses to remove a knob the model still reads, and the
+[Section 6.3](#63-contract-enforcement) containment check refuses, at promotion and at load, a model
+reading a knob the UED no longer exposes.
 
 Step 6 then closes the loop: a smaller knob set means fewer variant axes worth compiling, which shrinks
 the AOT explosion, which changes what the next model sees.
@@ -2818,6 +3262,9 @@ pack (all knobs) → benchmark → heuristic → prune knobs → regenerate pack
 
 ## 15. Phased Delivery
 
+Phases 1 to 4, 6 to 7a, and 8 are built. Not yet built: phase 5 (the generation tool), phase 9, and
+phase 10.
+
 Each phase is independently shippable and validated against the SDPA path and the reference tooling,
 using the parity and overhead checks of [RFC 0017 §14.1](0017_UniversalKernelDescriptor.md#141-testing-and-performance).
 
@@ -2832,12 +3279,12 @@ pipeline built on top of it.
 | 1 | No-UHD default + `static_order` | UHD header schema + UED membership. An engine naming **no** UHD returns the catalog in deterministic `priority`/`id` order and warns — the zero-authoring starting state. `static_order` makes the same intent explicit. Proves UED→UHD→catalog wiring end to end. |
 | 2 | `native` adapter | Scorer compiled into the engine, named by symbol ([Section 7.1](#71-first-native)). Exercises real ranking, `objective`/`score`, and the ranked-catalog output with no new format. Establishes the performance baseline everything later is measured against. |
 | 3 | `tree_data` (escape-hatched) | The tree-table format and the **new in-tree GBDT walker written for this work** — a bounded parser and evaluator with no external dependency — behind a hand-written featurizer rather than the generic extractor. Lands the real FMHA-fwd model. Adds lazy load + per-engine model cache. |
-| 4 | `features_signature` + generic extractor | Replaces the hand-written featurizer: inline signature with computed entries, one extractor over the shared namespaces, subexpression hash-consing, `features_hash` over signature + encoding, training↔runtime parity test. |
+| 4 | `features_signature` + generic extractor | Replaces the hand-written featurizer: inline signature with computed entries, one extractor over the shared namespaces, the entry-level split into shared (once per selection) and per-candidate kernel entries, `features_hash` over signature + encoding, training↔runtime parity test. Subexpression hash-consing, subtree-level hoisting, and a per-kernel cache are future work ([Section 6.4](#64-computed-features)). |
 | 5 | Generation tool | Standalone tool wrapping hipDNN: enumerates each graph's applicable catalog, times every enrolled candidate, logs results, trains, and emits an updated UHD + model alongside the engine's UED role map. |
 | 6 | `table` | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 7 | Engine-selection integration | Score-only mode, the A/B plugin-query surface, engine-selection policies. Introduces the engine estimate (A) — not needed before competing or opaque engines exist ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
 | 7a | Ranking metrics ([Section 4.4](#44-ranking-metrics), [Section 11.4](#114-selecting-a-uhd-by-metric)) | Lands in four independently shippable steps, each keeping `tflops` the default so no step changes a request that names no metric: (1) the metric registry, `score.metric`, list-valued role maps and the loader's `(role, arch, metric)` index; (2) the metric on the plugin query, the metric-carrying answer and the capability query; (3) the request's ranking metric, direction-aware policies, and the quick policy's L1-only rule; (4) the metric carried to plan build and into every ranking cache key. Generation emits several metrics from one timing run alongside step 1. |
-| 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated ([Open Question 11](#operational)). |
+| 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Implemented with no trust gate; the dependency and trust audit is open ([Open Question 11](#operational)). |
 | 9 | AOT selection ([Section 14.2](#142-pipeline-aot-selection)) | Benchmark an all-knobs KDP, prioritize by frequency / cost-of-poor-selection, emit the AOT kernel set. Needed first for **non-JIT** engines (rocKE today, CK), where it is filtering rather than selection. Depends on phase 5. |
 | 10 | Knob reduction loop ([Section 14.4](#144-pipeline-knob-reduction-hipdnn-jit-case)) | Backwards-evaluate a generated heuristic for weak knobs, regenerate the UED with a reduced knob set, then regenerate AOT kernels. Requires an engine that can **JIT in hipDNN**; depends on phases 5 and 9. |
 
@@ -2859,7 +3306,7 @@ dependency-gated and land only when a concrete need appears.
 | **Knob-set churn** | A retrain drops a feature and takes a caller's knob with it | Cannot happen: `UED.knobs` is the engine's authored public surface and the model's feature set is a subset of it, so feature selection never withdraws a knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement)). Removing a knob is a deliberate engine-authoring change, stamped as a breaking content revision ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); an unread knob is reported so the author can decide |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([Section 13.3](#133-one-source-of-truth-translated-once)) |
 | **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit revision rule at load (breaking `==`, additive `<=`) over the KMD's content revision, which is a separate axis from its file-format `version`; additive changes need no retrain until exposed ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
-| **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | The model artifact declares the architectures it was trained on and the runtime refuses an estimate for an unseen one; a candidate whose recovered score is non-finite or non-positive is distrusted individually and reported as 0; per-feature range coverage kept additive as a later option ([Section 8.3](#83-out-of-distribution-inputs)) |
+| **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | The model artifact declares the architectures it was trained on and the runtime refuses an estimate for an unseen one; a candidate whose recovered score is non-finite, or non-positive for a physical score, is distrusted individually and reported as 0; per-feature range coverage kept additive as a later option ([Section 8.3](#83-out-of-distribution-inputs)) |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Degrade to `static_order`; parity gate against the `native` baseline; model provenance in trace |
 | **Malformed drop-in heuristic** | Third-party UHD with a broken feature contract reaches a customer | Never fails the request — model disabled, error logged, estimate reported as 0 ([Section 5](#5-selection-flow) step 8); CI validation over shipped packs is the primary gate ([Open Question 14](#operational)) |
@@ -2898,21 +3345,33 @@ dependency-gated and land only when a concrete need appears.
    [Open Question 16](#operational) required rather than forcing a later format change.
    *(Impacts [Section 7.2](#72-default-tree_data).)*
 
-4. **Derived feature set.** Arithmetic intensity, tile quantization, aspect ratios, occupancy,
-   padding-fit — are there others? Candidates: memory-footprint / working-set vs. cache and HBM
-   capacity; a compute-vs-memory-bound flag from intensity vs. the device's roofline ridge point;
-   wave-quantization *tail* (last-wave occupancy); K-splitting overhead for split-K variants.
-   Enumerate the final set against real per-op sweeps before freezing.
-   *(The expression-op question is resolved — the UMD's operator set already covers the derived
-   features.)* *(Impacts [Section 6.2](#62-the-features_signature).)*
-   **Auto-derivation dependency:** the physics features (arithmetic intensity, roofline bound) need
-   per-op **FLOP and byte counts as precomputed fields**, declared in the hipDNN schema alongside the
-   existing precomputed values such as `$q.stride_order` and `$q.packed`
-   ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). The mechanism and its home are
-   settled; what remains open is which per-op counts to declare, and the mixed-dtype byte convention. Tier-2 quantization (the
-   dim↔tile correspondence) is written inline in the signature
-   ([Section 6.4](#64-computed-features)), from an author-supplied list of (problem dim, tile field)
-   pairs.
+4. **Derived feature set and per-op work counts — RESOLVED: computed in the plugin SDK.** Arithmetic
+   intensity, tile quantization, aspect ratios, occupancy, and padding-fit are inline expressions a
+   signature chooses ([Section 6.4](#64-computed-features)), and which of them a model reads is pruned
+   per model by feature selection ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)),
+   so this RFC does not freeze a list. The one dependency the physics features
+   have on the binding is per-op **FLOP and byte counts as precomputed values**. The options are (a) ship
+   them as data — a per-op table, or expression annotations beside the schema — or (b) compute them in
+   one C++ place every consumer is built against. (b) is built: `EngineFeatures.hpp` in the
+   plugin SDK holds one function per node type and publishes `$graph.flops`, `$graph.nodes[i].flops`,
+   `$graph.flops_by_type.*`, `$graph.logical_bytes`, and `$graph.arithmetic_intensity` under the
+   conventions of [Section 6.8](#68-the-work-model). It is **one source**: providers are C++ built
+   against the plugin SDK, and so are `hipdnn_bench`, `hipdnn_corpus_gen`, and the `hipdnn_uhd_features`
+   evaluator (not yet built, [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). `uhd_gen` reads
+   the `$graph.flops` the bench publishes, so no consumer
+   exists that a data file would reach and the header would not. It is **typed**: each formula reads the
+   node's FlatBuffer attributes and operand tensors directly and refuses inconsistent shapes, rather than
+   a second expression dialect over string names. It is **tested**: a golden value per node type, parity
+   for Matmul, ConvolutionFwd, and SDPA, and the golden set pinned to the feature-semantics
+   revision ([Section 6.9](#69-feature-semantics-revision)). The flexibility a data file would add is not
+   usable anyway, because a changed convention invalidates every model trained on the old one however
+   the convention ships. The mixed-dtype byte convention is each tensor's own element size, fractional
+   below a byte. Of the remaining candidates, footprint against capacity, wave-quantization tails, and
+   split-K overhead are expressible inline over published values; a roofline-bound flag needs a device
+   peak-throughput fact `$device.*` does not publish yet, which is an additive device-namespace change
+   ([Section 6.1](#61-feature-sources)).
+   *(Impacts [Section 6.2](#62-the-features_signature), [Section 6.8](#68-the-work-model),
+   [Section 13.6](#136-auto-deriving-a-first-pass-features_signature).)*
 
 ### Structural
 
@@ -2959,8 +3418,9 @@ dependency-gated and land only when a concrete need appears.
 
 ### Operational
 
-9. **Caching scope.** The in-process cache keyed on `(engine id, graph id, device id)` + inventory
-   generation counter is sufficient for repeated graphs within a session, and needs nothing
+9. **Caching scope.** The in-process catalog cache, held per engine and keyed on RFC 0017's
+   applicability cache key (graph content, not graph id), device id, UED revision, and ranking
+   metric, is sufficient for repeated graphs within a session, and needs nothing
    UHD-specific ([Section 9.2](#92-loading-and-caching)). Persistent cross-run caching is a different
    design — it needs the heuristic's content hash in the storage path, a device identity that is not the
    HIP ordinal, and a garbage-collection story — and it interacts with a future
@@ -2968,6 +3428,8 @@ dependency-gated and land only when a concrete need appears.
    before building it: whether persisting *rankings* repays its complexity at all when compilation and
    matching dominate the cost, and whether it should instead ride along with a persistent applicability
    or compiled-kernel cache. Defer until that policy is designed.
+   Code status: benchmarked winners persist across runs (`WinnerCacheFile.hpp`); model rankings do
+   not.
    *(Impacts [Section 9.2](#92-loading-and-caching).)*
 
 10. **Shape corpus location.** The variant space is fixed (the pack's UKDs, timed via autotune), but
@@ -2982,6 +3444,21 @@ dependency-gated and land only when a concrete need appears.
     the trust/signing rules for dropping in author-compiled native code. The former decides whether
     the in-tree tree-walker must be fully first-party or may vendor a third-party evaluator; the
     latter gates the `custom_library` drop-in path.
+
+    **Current status: no trust gate exists.** The adapter is implemented and enabled in every Linux
+    build with `HIPDNN_ENABLE_KERNEL_INGESTOR`, and that build flag is the only switch (Windows refuses
+    it, [Section 7.3](#73-escape-hatch-custom_library)). Any `.uhd.json` the loader accepts that names
+    `adapter: custom_library` with a `library` and `symbol` reaches `dlopen` (`AdapterFactory.hpp`,
+    `CustomLibraryAdapter::load`), whether bound as
+    `sort_kernel_catalog` or `predict_engine`. The only check is an integrity check the descriptor
+    itself supplies: a required `custom_library.hash`, compared against the library bytes before the
+    open, with the library confined to the descriptor's own directory. It is not a trust decision,
+    since whoever writes the descriptor also writes the hash. The
+    library exports no feature contract: as for `native`, the feature count and `features_hash` the
+    adapter reports are the descriptor's own, so a scorer built for another feature order is accepted
+    and the descriptor's declaration is trusted. The digest is computed from the path and the library
+    is then opened by the same path, so bytes replaced between the two load unverified. No signing,
+    allow-list, or opt-in exists; the audit this question asks for has not happened.
     *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
 12. **Enumerating the valid catalog — RESOLVED.** The generation path enumerates the applicable catalog
@@ -2997,11 +3474,13 @@ dependency-gated and land only when a concrete need appears.
     the UED knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
     *(Impacts [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli), [Section 15](#15-phased-delivery) phase 5.)*
 
-13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) now carries a normative Draft-7
-    block, validated against every shipping `version: "1.0"` descriptor. What remains is packaging it as
-    the standalone per-version `uhd/1.0.json` with the CI parity check
-    [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema) defines, deciding where that
-    file lives relative to the UED's, and extending it as `table`, `onnx`, and `custom_library` land.
+13. **Publishing the schema file — RESOLVED for the source tree.** The schema ships as
+    `projects/hipdnn/plugin_sdk/schemas/uhd.schema.json`, mirrored by [Section 4.1](#41-field-reference-normative)'s
+    inline block, and the packaging tests check every in-tree UHD against it along with
+    schema/packer parity for each admission rule. It is a source-tree file and is not
+    installed. What remains open is whether to install it beside the plugin SDK for out-of-tree
+    descriptor authors, and where it sits relative to the UED schema
+    ([RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)).
     *(Impacts [Section 4](#4-uhd-schema).)*
 
 14. **CI validation of shipped descriptor sets.** Because a broken feature contract degrades rather
@@ -3009,6 +3488,10 @@ dependency-gated and land only when a concrete need appears.
     it — a mis-built pack would ship and silently rank by `static_order`. What validates descriptor
     sets in CI, what does it check (hash agreement, KMD pairing, signature resolvability, knob-tuple
     uniqueness), and does it run per-provider or centrally over all shipped packs?
+    Code status: `hipdnn_validate_descriptors` (`tools/IngestorGenerator/ValidateDescriptors.cpp`)
+    runs the loader's validation over a descriptor tree, and CTest runs it on fixtures as
+    `hipdnn_validate_descriptors_smoke`. It also admits every UHD a role map binds as the runtime admits
+    that role: KMD fields and `features_hash` must match, and model artifacts load. It calls no scorer.
     *(Impacts [Section 6.3](#63-contract-enforcement), [Section 12](#12-observability).)*
 
 15. **The expression-language reference.** The descriptor expression language is specified in its own
@@ -3017,15 +3500,18 @@ dependency-gated and land only when a concrete need appears.
     settle when it lands: the normative operator list this RFC recaps, and whether the custom-operation
     hook arrives, which fixes the boundary at which a compiled scorer takes over
     ([Section 7](#7-model-adapters)). Until then, the operator set recapped here is the working contract.
+    Code status: the expression-language RFC is not written. The library ships as `JsonExpression.hpp`
+    (#11632), documented in [`docs/JsonExpression.md`](../JsonExpression.md), and the UHD feature
+    extractor uses it. It has no custom-operation hook.
     *(Impacts [Section 6.2](#62-the-features_signature), [Section 7](#7-model-adapters).)*
 
-16. **Out-of-distribution detection — partially resolved.** Training-arch coverage now rides in the
+16. **Out-of-distribution detection — partially resolved.** Training-arch coverage rides in the
     model artifact and is checked at runtime: a model declares the architectures it was trained on, and
-    an unseen one withholds the estimate and degrades the ranking
+    on an unseen one the calibrated estimate is withheld while the model still ranks, with a warning
     ([Section 8.3](#83-out-of-distribution-inputs)). The per-candidate axis is resolved the same way
-    [Section 5](#5-selection-flow) assumes — a candidate whose recovered score is non-finite or
-    non-positive is distrusted individually, ordered last, and reported as 0, with one diagnostic
-    carrying the affected and total counts for the request. What remains open is the *continuous* case:
+    [Section 5](#5-selection-flow) step 4 states — a candidate whose recovered score is non-finite, or
+    non-positive for a physical score, is distrusted individually, ordered last, and reported as 0, with
+    one diagnostic per heuristic carrying the affected and total counts. What remains open is the *continuous* case:
     whether per-feature training ranges ship alongside the arch list, and what a row outside them costs.
     Deciding that before more artifact fields land keeps it additive.
     *(Impacts [Section 8.3](#83-out-of-distribution-inputs), [Section 7.2](#72-default-tree_data).)*
@@ -3072,15 +3558,14 @@ dependency-gated and land only when a concrete need appears.
     [Open Question 19](#operational)(a), and settled with it — and whether one reference serves every op.
     *(Impacts [Section 4.4](#44-ranking-metrics).)*
 
-21. **The quick policy's winner configuration.** The quick policy never evaluates B to *rank*
-    ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Before metrics, it did evaluate the
-    **winner's** B once, to report that engine's configuration in the heuristic result. The options:
-    (a) keep that single evaluation, so the result names a tuned configuration at the cost of one B per
-    selection; (b) drop it, so the quick policy never evaluates B at all and the kernel is chosen at plan
-    build by the metric's ranker ([Section 11.4](#114-selecting-a-uhd-by-metric)) — paid once, for the
-    engine actually built. Recommendation: (b). It keeps the policy's cost bounded by the L1 models alone,
-    and the choice is not lost but moved to where it is needed; it makes carrying the metric to plan build
-    a requirement rather than a refinement.
+21. **The quick policy's winner configuration — RESOLVED: (b).** The quick policy never evaluates B to
+    *rank* ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)), and it does not evaluate the
+    **winner's** B to report that engine's configuration in the heuristic result. The kernel is chosen
+    at plan build by the metric's ranker ([Section 11.4](#114-selecting-a-uhd-by-metric)) — paid once,
+    for the engine actually built. The alternative, (a), evaluates the winner's B once, so the result
+    names a tuned configuration at the cost of one B per selection. (b) keeps the policy's cost bounded
+    by the L1 models alone, and the choice is not lost but moved to where it is needed, which makes
+    carrying the metric to plan build a requirement rather than a refinement.
     *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007), [Section 11.4](#114-selecting-a-uhd-by-metric).)*
 
 22. **Constraints alongside the ranking metric.** A request ranks by one metric. A common need is a
@@ -3171,7 +3656,18 @@ dependency-gated and land only when a concrete need appears.
   several independently revised matchers. Checked at load (breaking `==`, additive `<=`) to disable a
   model whose descriptors have moved under it. A content revision is a separate axis from the
   file-format `version` the accept rule gates on
-  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also carry the
+  `feature_semantics_revision` the model was trained under.
+
+- **Feature-semantics revision:** The plugin SDK's `FEATURE_SEMANTICS_REVISION`, bumped whenever a
+  published feature's value or meaning changes, and recorded in a UHD's `trained_against` (absent
+  means 1). A model that reads published features and records a different revision from the build's is
+  refused ([Section 6.9](#69-feature-semantics-revision)).
+
+- **Work model:** The conventions by which the plugin SDK counts a graph's logical FLOPs and bytes —
+  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work unknown — published as
+  `$graph.flops`, `$graph.logical_bytes`, and the features built from them
+  ([Section 6.8](#68-the-work-model)).
 
 - **Dispatch-only field:** A KMD field that is *not* a knob, and therefore not in the UHD's feature set —
   launch geometry or workspace detail a UDD consumes. Invisible to selection
@@ -3193,8 +3689,9 @@ dependency-gated and land only when a concrete need appears.
   features are inline, the signature is itself the computation.
 
 - **Computed feature:** A `features_signature` entry that is an expression rather than a bare `$` token.
-  Written **inline**; there is no `$derived.*` namespace and no named-value block. Repetition is free
-  because the signature compiles once and the evaluator hash-conses identical subtrees
+  Written **inline**; there is no `$derived.*` namespace and no named-value block. The signature compiles
+  once at load; a subexpression repeated across entries is evaluated once per entry, and
+  hash-consing identical subtrees is future work that needs no schema change
   ([Section 6.4](#64-computed-features)).
 
 - **`native`:** The bootstrap adapter — a scorer compiled into the engine and named in the UHD by symbol.
@@ -3206,7 +3703,8 @@ dependency-gated and land only when a concrete need appears.
   runtime dependency.
 
 - **`custom_library`:** The drop-in escape hatch — a compiled scorer `.so` shipped with the engine and
-  `dlopen`'d through a tiny C ABI; standalone, any model family, gated on the trust audit. Distinct from
+  `dlopen`'d through a tiny C ABI; standalone, any model family. It has no trust gate
+  ([Open Question 11](#operational)). Distinct from
   `native`, which is compiled *into* the engine and needs no loading or trust boundary.
 
 - **Scorer / adapter:** The thing that turns a UHD's model content into a per-candidate score; reached

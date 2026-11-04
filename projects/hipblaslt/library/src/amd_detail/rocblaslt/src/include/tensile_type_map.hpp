@@ -49,6 +49,9 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
         return rocisa::DataType::BFloat6;
     case HIP_R_4F_E2M1:
         return rocisa::DataType::Float4;
+    // Signedness comes from HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT.
+    case HIP_R_4I:
+        return rocisa::DataType::Int4;
     default:
         assert(!"hipDataType_to_tensile_type: non-supported type");
         return rocisa::DataType::None;

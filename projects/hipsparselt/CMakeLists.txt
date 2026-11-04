@@ -47,6 +47,15 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
+# Set explicitly rather than relying on hipBLASLt's cache variable, which is only
+# visible when hipBLASLt is pulled in via add_subdirectory(). Without this,
+# binaries built against a staged hipBLASLt package lose $ORIGIN/../llvm/lib and
+# fail to find libomp.so at startup.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
+mark_as_advanced(CMAKE_INSTALL_RPATH)
+mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+
 # --- Build options and validation ---
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
@@ -101,6 +110,21 @@ if(NOT HIPSPARSELT_ENABLE_CUDA)
     else()
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
     endif()
+
+    # Save original targets (with :xnack- suffix) for TensileCreateLibrary, which
+    # needs the suffix the next line strips for hip::device. A normal variable,
+    # as hipBLASLt keeps it: both readers are inside this configure -- the
+    # create_device_library() call below, and the embedded hipBLASLt, which
+    # inherits it through block(). A cache entry would additionally be offered
+    # as something to set, and then overwritten from GPU_TARGETS on the next
+    # configure, since it is derived rather than chosen.
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
+
+    # Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+    # offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+    # hip::device, and xnack_any platforms must use the bare arch.
+    hipsparselt_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
+
     message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 endif()
 
@@ -213,6 +237,11 @@ if(HIPSPARSELT_ENABLE_HIP)
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
             CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
             PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
+            # The unstripped targets: TensileCreateLibrary keys its capability
+            # overrides on the xnack suffix, which GPU_TARGETS has had removed
+            # for hip::device. Stated here rather than left to the default in
+            # create_device_library, so this call and hipBLASLt's cannot drift.
+            ARCHES ${TENSILELITE_GPU_TARGETS}
             ${_hipsparselt_codegen_host_sanitizer_args}
             ${_hipsparselt_codegen_product_args}
         )
@@ -244,7 +273,14 @@ if(HIPSPARSELT_BUILD_TESTING)
 endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+    # The clients link a CPU reference BLAS/LAPACK (xerbla_, dlange_) and need the
+    # Fortran runtime. TheRock's cblas is OpenBLAS and bundles LAPACK already, so
+    # only that configuration can skip this. Keep this selector in sync with
+    # clients/CMakeLists.txt and hipsparselt_link_blas_libraries().
+    #
+    # Do not widen to HIPSPARSELT_ENABLE_CLIENT: it defaults ON and TheRock does
+    # not override it, so fetch_lapack.cmake would FATAL_ERROR there.
+    if(NOT HIPSPARSELT_ENABLE_THEROCK OR HIPSPARSELT_ENABLE_BLIS)
         if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
             set(CMAKE_Fortran_COMPILER "gfortran")
         endif()

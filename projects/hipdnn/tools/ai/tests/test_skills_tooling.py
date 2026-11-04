@@ -59,6 +59,27 @@ def _write_skill(
         )
 
 
+def test_registered_claude_command_skills_carry_both_fields(validate_mod):
+    """Every registered skill's SKILL.md has argument-hint and allowed-tools."""
+    for name in sorted(validate_mod.CLAUDE_COMMAND_SKILLS):
+        fields = validate_mod.frontmatter_fields(SKILLS_DIR / name / "SKILL.md")
+        missing = set(validate_mod.REQUIRED_CLAUDE_COMMAND_FIELDS) - fields
+        assert not missing, f"{name}: missing {sorted(missing)}"
+
+
+def test_skills_with_claude_command_fields_are_registered(validate_mod):
+    """A skill whose SKILL.md has either command field must be registered,
+    otherwise the validator never checks that it carries both."""
+    required = set(validate_mod.REQUIRED_CLAUDE_COMMAND_FIELDS)
+    unregistered = [
+        skill_md.parent.name
+        for skill_md in sorted(SKILLS_DIR.glob("*/SKILL.md"))
+        if required & validate_mod.frontmatter_fields(skill_md)
+        and skill_md.parent.name not in validate_mod.CLAUDE_COMMAND_SKILLS
+    ]
+    assert not unregistered, f"not registered as claude commands: {unregistered}"
+
+
 # --------------------------------------------------------------------------- #
 # validate-skills.py
 # --------------------------------------------------------------------------- #
@@ -254,12 +275,31 @@ def test_validate_skill_ignores_generics_in_a_language_fence(validate_mod, tmp_p
 
 
 def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_path):
-    """A skill named in the claude_commands set needs argument-hint + allowed-tools."""
+    """A skill in CLAUDE_COMMAND_SKILLS needs argument-hint + allowed-tools."""
     skill = tmp_path / "hipdnn-pr-quality"
     _write_skill(skill)
     errors = validate_mod.validate_skill(skill)
     assert any("argument-hint" in error for error in errors)
     assert any("allowed-tools" in error for error in errors)
+
+
+def test_validate_skill_ignores_claude_fields_outside_frontmatter(
+    validate_mod, tmp_path
+):
+    """argument-hint and allowed-tools mentioned in the body do not satisfy the check."""
+    skill = tmp_path / "hipdnn-pr-quality"
+    _write_skill(skill, body="argument-hint: x\nallowed-tools: y\n")
+    errors = validate_mod.validate_skill(skill)
+    assert any("argument-hint" in error for error in errors)
+    assert any("allowed-tools" in error for error in errors)
+
+
+def test_expected_scripts_cover_every_deep_review_script(validate_mod):
+    """A deep-review script added or removed shows up in EXPECTED_SCRIPTS."""
+    on_disk = {
+        p.name for p in (SKILLS_DIR / "hipdnn-deep-review" / "scripts").glob("*.py")
+    }
+    assert set(validate_mod.EXPECTED_SCRIPTS["hipdnn-deep-review"]) == on_disk
 
 
 def test_symlink_target_recognises_a_git_materialized_link(validate_mod, tmp_path):

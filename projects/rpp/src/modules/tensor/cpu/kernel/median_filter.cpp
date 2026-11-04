@@ -1787,7 +1787,8 @@ template <typename T>
 static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDescPtr srcDescPtr,
                                                         T* dstPtrImage, RpptDescPtr dstDescPtr,
                                                         Rpp32u kernelSize, RpptROI roi,
-                                                        RppLayoutParams layoutParams) {
+                                                        RppLayoutParams layoutParams,
+                                                        Rpp32u intraThreads) {
     T *srcPtrChannel, *dstPtrChannel;
     srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
                     (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
@@ -1813,6 +1814,7 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
             for (Rpp32s c = 0; c < srcDescPtr->c; c++) {
 #if __AVX2__
                 if ((useSortNet3 || useSortNet5) && std::is_same<T, Rpp8u>::value) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                     for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
                         Rpp8u* dstRow = (Rpp8u*)dstPtrChannel + i * dstDescPtr->strides.hStride;
                         if (useSortNet3) {
@@ -1842,6 +1844,7 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                         }
                     }
                 } else if ((useSortNet3 || useSortNet5) && std::is_same<T, Rpp8s>::value) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                     for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
                         Rpp8s* dstRow = (Rpp8s*)dstPtrChannel + i * dstDescPtr->strides.hStride;
                         if (useSortNet3) {
@@ -1871,6 +1874,7 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                         }
                     }
                 } else if ((useSortNet3 || useSortNet5) && std::is_same<T, Rpp32f>::value) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                     for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
                         Rpp32f* dstRow = (Rpp32f*)dstPtrChannel + i * dstDescPtr->strides.hStride;
                         if (useSortNet3) {
@@ -1900,6 +1904,7 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                         }
                     }
                 } else if ((useSortNet3 || useSortNet5) && std::is_same<T, Rpp16f>::value) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                     for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
                         Rpp16f* dstRow = (Rpp16f*)dstPtrChannel + i * dstDescPtr->strides.hStride;
                         if (useSortNet3) {
@@ -1932,8 +1937,9 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
 #endif
                 {
                     // Scalar fallback for non-AVX2 or unsupported types/kernel sizes
-                    T* dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                     for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
+                        T* dstPtrRow = dstPtrChannel + i * dstDescPtr->strides.hStride;
                         T* dstPtrTemp = dstPtrRow;
                         for (Rpp32s j = 0; j < roi.xywhROI.roiWidth; j++) {
                             if (useSortNet3)
@@ -1951,7 +1957,6 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                                     srcDescPtr, dstDescPtr);
                             dstPtrTemp++;
                         }
-                        dstPtrRow += dstDescPtr->strides.hStride;
                     }
                 }
                 srcPtrChannel += srcDescPtr->strides.cStride;
@@ -1973,6 +1978,7 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                  (useSortNet3 || useSortNet5)) {
             const int channels = 3;
             const int widthBytes = roi.xywhROI.roiWidth * channels;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u* dstRow = (Rpp8u*)dstPtrChannel + i * dstDescPtr->strides.hStride;
 
@@ -2003,8 +2009,9 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
 #endif
         {
             // Scalar fallback
-            T* dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
+                T* dstPtrRow = dstPtrChannel + i * dstDescPtr->strides.hStride;
                 T* dstPtrTemp = dstPtrRow;
                 for (Rpp32s j = 0; j < roi.xywhROI.roiWidth; j++) {
                     if (useSortNet3)
@@ -2022,13 +2029,13 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                                               dstDescPtr);
                     dstPtrTemp += dstDescPtr->c;
                 }
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NHWC)) {
-        T* dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
+            T* dstPtrRow = dstPtrChannel + i * dstDescPtr->strides.hStride;
             T* dstPtrTemp = dstPtrRow;
             for (Rpp32s j = 0; j < roi.xywhROI.roiWidth; j++) {
                 T* dstPtrTempChn = dstPtrTemp;
@@ -2051,13 +2058,13 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                 }
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     } else if ((srcDescPtr->layout == RpptLayout::NHWC) &&
                (dstDescPtr->layout == RpptLayout::NCHW)) {
         for (Rpp32s c = 0; c < srcDescPtr->c; c++) {
-            T* dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (Rpp32s i = 0; i < roi.xywhROI.roiHeight; i++) {
+                T* dstPtrRow = dstPtrChannel + i * dstDescPtr->strides.hStride;
                 T* dstPtrTemp = dstPtrRow;
                 for (Rpp32s j = 0; j < roi.xywhROI.roiWidth; j++) {
                     if (useSortNet3)
@@ -2074,7 +2081,6 @@ static inline RppStatus median_filter_generic_host_impl(T* srcPtrImage, RpptDesc
                                               roi.xywhROI.roiWidth - 1, 1, srcDescPtr, dstDescPtr);
                     dstPtrTemp++;
                 }
-                dstPtrRow += dstDescPtr->strides.hStride;
             }
             srcPtrChannel += srcDescPtr->strides.cStride;
             dstPtrChannel += dstDescPtr->strides.cStride;
@@ -2091,19 +2097,18 @@ RppStatus median_filter_generic_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T
                                             RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (Rpp32s batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         T *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-
         median_filter_generic_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
-                                        kernelSize, roi, layoutParams);
+                                        kernelSize, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -2120,8 +2125,9 @@ RppStatus median_filter_generic_host_single_image(T* srcPtr, RpptDescPtr srcDesc
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return median_filter_generic_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, kernelSize, roi,
-                                           layoutParams);
+                                           layoutParams, intraThreads);
 }
 
 template RppStatus median_filter_generic_host_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*,

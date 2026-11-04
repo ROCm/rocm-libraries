@@ -34,14 +34,14 @@ constexpr HWModel kGfx1250Model = {
             // 0 => derive barrier-timing drain latency dynamically from
             // matching ds_read count and the latest ds_read's own latency.
             .readDrainLatency = 0,
-            .readThrottleLatency = 72,
+            .readCreditLifetime = 72,
             // Fallback when HwInstDesc::dsThroughput / dsMaxDrain are 0.
             .dsLoadDefaultThroughput = 4,
             .dsLoadDefaultMaxDrain = 120,
             // One ds issue pipe per 2 waves: the ISA's 1-cycle ds issue holds
             // at 1 wave, but 4 waves run as 2-2 pairs and each wave's issues
-            // cost 2. Independent of dagFeatures.dsReadPerCap, which stays a
-            // separately tuned ceiling.
+            // cost 2. Independent of dagFeatures.dsReadCyclesPerLoad, the
+            // modelled LDS return rate.
             //
             // TEMPORARILY DISABLED (set to 1, i.e. no sharing): measured on
             // real gfx1250 hardware to cost f8_tn_medium ~17.5% and

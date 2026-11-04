@@ -773,21 +773,6 @@ namespace rocisa
 
         auto pEXEC = MAKE(EXEC);
 
-        module->addT<VCvtU32toF32>(tmpVgpr, divRegSgpr, std::nullopt, dComment);
-        module->addT<VRcpIFlagF32>(tmpVgpr, tmpVgpr, dComment);
-        module->addT<VCvtU32toF32>(tmpVgpr1, dRegSgpr, std::nullopt, dComment);
-        module->addT<VMulF32>(tmpVgpr, tmpVgpr, tmpVgpr1, std::nullopt, dComment);
-        module->addT<VCvtF32toU32>(tmpVgpr, tmpVgpr, std::nullopt, dComment);
-        module->addT<VMulU32U24>(tmpVgpr1, tmpVgpr, divRegSgpr, dComment);
-        module->addT<VSubU32>(tmpVgpr1, dRegSgpr, tmpVgpr1, dComment);
-        module->addT<VCmpXEqU32>(pEXEC, tmpVgpr1, divRegSgpr, std::nullopt, dComment);
-        module->addT<VAddU32>(tmpVgpr, 1, tmpVgpr, dComment);
-
-        if(doRemainder)
-        {
-            module->addT<VMovB32>(tmpVgpr1, 0, std::nullopt, rComment);
-        }
-
         auto resetExec = [module, pEXEC](int wavewidth) {
             if(wavewidth == 64)
             {
@@ -798,18 +783,34 @@ namespace rocisa
                 module->addT<SMovB32>(pEXEC, -1, "Reset exec");
             }
         };
-        resetExec(wavewidth);
-        module->addT<VCmpXGtU32>(
-            pEXEC, tmpVgpr1, divRegSgpr, std::nullopt, "overflow happened in remainder");
-        module->addT<VSubU32>(tmpVgpr, tmpVgpr, 1, "quotient - 1");
 
-        if(doRemainder)
+        // Exact for every 32-bit dividend and nonzero divisor (the LLVM AMDGPU
+        // udiv32 expansion). The 0x4f7ffffe scale (2^32 - 512) keeps the
+        // reciprocal estimate below 2^32 / divisor for a 1-ulp v_rcp_iflag_f32,
+        // which the Newton step and the two corrections below rely on. The scale
+        // move sits between v_rcp_iflag_f32 and its consumer because gfx942,
+        // gfx950 and gfx1250 need one wait state there.
+        module->addT<VCvtU32toF32>(tmpVgpr, divRegSgpr, std::nullopt, dComment);
+        module->addT<VRcpIFlagF32>(tmpVgpr, tmpVgpr, dComment);
+        module->addT<VMovB32>(tmpVgpr1, std::string("0x4f7ffffe"), std::nullopt, "2^32 - 512");
+        module->addT<VMulF32>(tmpVgpr, tmpVgpr1, tmpVgpr, std::nullopt, "2^32 / divisor");
+        module->addT<VCvtF32toU32>(tmpVgpr, tmpVgpr, std::nullopt, dComment);
+        module->addT<VMulLOU32>(tmpVgpr1, tmpVgpr, divRegSgpr, "refine 2^32 / divisor");
+        module->addT<VSubU32>(tmpVgpr1, 0, tmpVgpr1, "refine 2^32 / divisor");
+        module->addT<VMulHIU32>(tmpVgpr1, tmpVgpr, tmpVgpr1, "refine 2^32 / divisor");
+        module->addT<VAddU32>(tmpVgpr, tmpVgpr, tmpVgpr1, "refine 2^32 / divisor");
+        module->addT<VMulHIU32>(tmpVgpr, dRegSgpr, tmpVgpr, dComment);
+        module->addT<VMulLOU32>(tmpVgpr1, tmpVgpr, divRegSgpr, dComment);
+        module->addT<VSubU32>(tmpVgpr1, dRegSgpr, tmpVgpr1, doRemainder ? rComment : dComment);
+        for(int i = 0; i < 2; ++i)
         {
-            module->addT<VMulU32U24>(tmpVgpr1, tmpVgpr, divRegSgpr, "re-calculate remainder");
-            module->addT<VSubU32>(tmpVgpr1, dRegSgpr, tmpVgpr1, "re-calculate remainder");
+            module->addT<VCmpXGeU32>(
+                pEXEC, tmpVgpr1, divRegSgpr, std::nullopt, "remainder >= divisor?");
+            module->addT<VAddU32>(tmpVgpr, 1, tmpVgpr, "quotient + 1");
+            module->addT<VSubU32>(tmpVgpr1, tmpVgpr1, divRegSgpr, "remainder - divisor");
+            resetExec(wavewidth);
         }
 
-        resetExec(wavewidth);
         module->addT<VReadfirstlaneB32>(qRegSgpr, tmpVgpr, "quotient");
 
         if(doRemainder)

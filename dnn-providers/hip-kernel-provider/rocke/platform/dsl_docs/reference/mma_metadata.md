@@ -12,7 +12,7 @@ These APIs operate at different levels:
 |---|---|---|
 | `target.mma.op_for_shape(...)` | Match one instruction's shape, A/B/C dtypes, family and scale contract in the target catalog | An `MmaOp`; no match returns `None`, ambiguity raises `ValueError`; no IR is emitted |
 | `builder.mma(atom, a, b, c, *extra)` | Record the selected operation and its operands | One `tile.mma` IR operation; lowering later emits the LLVM intrinsic selected by `op_id` |
-| `MfmaAtom.emit_scaled(...)` | Call the existing named 16x16x128 scaled-MFMA wrapper | Delegates to `builder.mma` with a fixed operation ID, regardless of the helper atom's shape or dtype |
+| `MfmaAtom.emit_scaled(...)` | Call the existing named 16x16x128 scaled-MFMA wrapper | Delegates to `builder.mma` with a fixed operation ID, regardless of the helper atom's shape or dtype. It passes the optional `a_format` and `b_format` (default `fp8e4m3`) to the builder. A and B must use the same format in this version |
 | Operator dispatcher | Select a kernel implementation and specialization for a workload | A kernel builder and spec; that builder selects and emits instructions |
 
 `mma` also accepts a raw operation-ID string, as the existing named wrappers
@@ -29,7 +29,8 @@ authoring entrypoints:
 
 | Path | Authoring entrypoint | Per-lane FP32 accumulator | Current consumer |
 |---|---|---|---|
-| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; A/B format selectors are fixed to zero in lowering |
+| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; `a_format` and `b_format` set the `cbsz` and `blgp` format selectors (default `fp8e4m3`). A and B must use the same format in this version. Every operand has 256 bits per lane |
+| Unscaled 16x16x128 op for every format | `IRBuilder.mfma_f32_16x16x128_fp4fp6fp8(...)` | 4 values | Direct operation authoring; both scale operands are literal 0, and `a_format` and `b_format` select the data type. A and B must use the same format in this version |
 | Existing 16x16x128 FP8 atom | `MfmaAtom.fp8_16x16x128().emit(...)` | 4 values | gfx950 FP8 fused-MoE dispatcher; the same scaled intrinsic is used with constant in-instruction scales |
 | Native 32x32x64 scaled family | `op_for_shape(family="mfma_scaled", ...)`, then `IRBuilder.mma(atom, a, b, c, a_scale, b_scale)` | 16 values | Direct packed GEMM builder and untuned examples, with independent A/B formats and K32 E8M0 scales |
 
@@ -107,6 +108,21 @@ atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
 assert atom is not None
 # result = builder.mma(atom, a, b, c, scale_a, scale_b)
 ```
+
+The instruction takes A and B as sixteen 32-bit words per lane. Each operand may
+arrive in any shape its own matrix format allows:
+
+| Operand holds | Shape | Reaches the register by |
+|---|---|---|
+| the sixteen register words | `vec<i32x16>` | nothing (passed unchanged) |
+| 64 fp8 or bf8 values | `vec<fp8e4m3x64>`, `vec<bf8e5m2x64>` | one bitcast |
+| the packed words of 64 fp6 or bf6 values | `vec<i32x12>` | four zero words appended |
+| the packed words of 64 fp4 values | `vec<i32x8>` | eight zero words appended |
+
+A mixed op such as fp8 x fp4 takes `vec<fp8e4m3x64>` for A and `vec<i32x8>` for
+B. Any other shape is refused with an error naming the operand and the register
+type, including a packed payload of fewer words than its format needs (an
+incomplete matrix). These operations lower with LLVM 23 only.
 
 For gfx950, select the 32x32x64 scaled-MFMA family in the same way. This
 example selects FP8 A and FP4 B, with independent E8M0 scales over K32:
@@ -216,3 +232,15 @@ dropped; see the [emulation description](../architecture/xf32_bf16x3_emulation.m
 See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 for the distinction between raw FP32 payloads and explicit RNE preparation,
 and for a reproducible comparison through both engines.
+
+## FP64 operands
+
+On gfx942, an `fp64`/`fp64`/`fp64` query selects `mfma_f64_16x16x4_f64`
+(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks); gfx90a
+and gfx950 list only `mfma_f64_16x16x4_f64`. A/B take one f64 element per lane,
+as `f64` or a one-element `vec<f64x1>` (reinterpreted
+with one bitcast); another number format is rejected. C/D take four and one, so
+`IRBuilder.mma` returns `<4 x f64>` or `<1 x f64>`. The accumulator element
+follows the atom's `c_dtype`. Both C/D layouts differ from the f32 atoms (see
+the [MFMA atom catalog](mfma_atom_catalog.md)). The probe instance
+`instances/gfx942/f64_mma_probe.py` drives both atoms through both engines.

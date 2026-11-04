@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.SolutionStructs.LdsPadding`` -- the pure
+"""Characterization tests for ``tensilelite.SolutionStructs.LdsPadding`` -- the pure
 numeric LDS-padding solvers (``get_fp4/fp8/fp16/fp32/mxs_mt_config`` and their
 ``_compute_*`` / bank-conflict-check helpers). Each public selector is exercised
 over a grid of (macro-tile, wave, vector-width) inputs and the full result
@@ -41,7 +41,7 @@ _K_B32  = 4
 _TDM    = True
 
 
-import Tensile.SolutionStructs.LdsPadding as L
+import tensilelite.SolutionStructs.LdsPadding as L
 
 pytestmark = pytest.mark.unit
 

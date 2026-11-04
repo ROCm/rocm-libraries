@@ -31,8 +31,9 @@ from kernels.common.conv_abi import (
     conv_arg_names,
     conv_direct_arg_names,
 )
+from rocke.helpers.spec import ceil_div
+from rocke.helpers.magic_division import calculate_magic_numbers
 from rocke.helpers.streamk import StreamKIterPartition, streamk_iter_partition
-from rocke.helpers.transforms import calculate_magic_numbers
 
 __all__ = [
     "ConvArgs",
@@ -58,10 +59,6 @@ def _magic_pair(name_prefix: str, divisor: int) -> Dict[str, int]:
         f"{name_prefix}_mult": _magic_as_i32(mult),
         f"{name_prefix}_shift": shift,
     }
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
 
 
 @dataclass(frozen=True)
@@ -179,7 +176,7 @@ class ConvGeometry:
             sW=problem.stride,
             pD=0,
             pH=problem.PAD,
-            pW=problem.PAD,
+            pW=getattr(problem, "PAD_W", problem.PAD),
             dD=1,
             dH=problem.dil_h,
             dW=problem.dil_w,
@@ -425,7 +422,8 @@ class ConvArgs:
     # mismatched by accident.
     tile_m: int = 0
     tile_n: int = 0
-    # wgrad only: the granularity the split-K slice width is rounded to.
+    # wgrad, and the fwd split-K binary: the granularity the split-K slice
+    # width is rounded to.
     tile_k: int = 0
 
     def __post_init__(self) -> None:
@@ -528,12 +526,12 @@ class ConvArgs:
     @property
     def num_pid_m(self) -> int:
         """M-axis tile count; the kernel reads this as ``p_num_pid_m``."""
-        return _ceil_div(self.gemm_m, self.tile_m)
+        return ceil_div(self.gemm_m, self.tile_m)
 
     @property
     def num_pid_n(self) -> int:
         """N-axis tile count; the kernel reads this as ``p_num_pid_n``."""
-        return _ceil_div(self.gemm_n, self.tile_n)
+        return ceil_div(self.gemm_n, self.tile_n)
 
     def grid(self, split_k: int = 1) -> Tuple[int, int, int]:
         """``(gx, gy, gz)``: N tiles by M tiles by groups (times the split).
@@ -563,7 +561,7 @@ class ConvArgs:
         return streamk_iter_partition(
             m_tiles=self.num_pid_m * self.geom.groups,
             n_tiles=self.num_pid_n,
-            iters_per_tile=_ceil_div(self.gemm_k, self.tile_k),
+            iters_per_tile=ceil_div(self.gemm_k, self.tile_k),
             max_active_wgs=pool,
             persistent=persistent,
         )
@@ -625,11 +623,11 @@ class ConvArgs:
 
     def _variant_values(self, split_k: int) -> Dict[str, int]:
         """Scalars whose meaning depends on the variant, not just the name."""
-        if self.algorithm == "direct" or self.direction != "wgrad":
+        if self.algorithm == "direct" or self.direction == "dgrad":
             if split_k != 1:
                 raise ValueError(
-                    f"split_k={split_k}: only implicit-GEMM wgrad splits the "
-                    f"reduction ({self.algorithm} {self.direction} has no "
+                    f"split_k={split_k}: only implicit-GEMM wgrad and fwd split "
+                    f"the reduction ({self.algorithm} {self.direction} has no "
                     f"split-K arguments)"
                 )
         if self.algorithm == "direct":
@@ -641,9 +639,20 @@ class ConvArgs:
             # The tail past wg_K reads zero through the descriptor's bounds,
             # which is what lets all ``split_k`` slices share one uniform
             # bound computation.
-            values["ks"] = _ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
-            values["ks_count"] = split_k
+            values.update(self._split_values(split_k))
         return values
+
+    def _split_values(self, split_k: int) -> Dict[str, int]:
+        """``ks`` / ``ks_count``: the split-K slice width and degree."""
+        if self.tile_k <= 0:
+            raise ValueError(
+                "a split-K launch needs the kernel's tile_k: the slice width is "
+                "rounded to it"
+            )
+        return {
+            "ks": ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k,
+            "ks_count": split_k,
+        }
 
     def _divisor(self, name: str) -> int:
         g = self.geom
@@ -761,6 +770,14 @@ class ConvArgs:
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()
         named.update(self._variant_values(split_k))
+        if self.direction == "fwd" and "ks" in names:
+            # The split-K forward binary (the ABI has its workspace pair).
+            named.update(self._split_values(split_k))
+        elif split_k != 1 and self.direction == "fwd":
+            raise ValueError(
+                f"split_k={split_k}: a forward split-K launch needs the "
+                f"workspace (ws_ptr / ws_bytes)"
+            )
         if streamk is not None:
             named.update(self._streamk_values(streamk))
         for name in names[6:]:

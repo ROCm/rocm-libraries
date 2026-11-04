@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -52,6 +52,10 @@ struct TdmEpilogue
 
     static constexpr index_t NumDTensor = Problem::NumDTensor;
 
+    // C leaves through a plain TDM store that ignores the atomic_add memory operation, so split-K
+    // would overwrite C rather than sum the splits, for every output type.
+    static constexpr bool SupportsSplitK = false;
+
     // no use of vector store in TDM epilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeC() { return 1; }
     template <index_t I>
@@ -85,6 +89,15 @@ struct TdmEpilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return kMPerBlock * kNPerBlock * sizeof(ODataType);
+    }
+
+    /// Number of workgroup barriers operator() issues. Must stay in sync with operator().
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBarrierCount() { return 2; }
+
+    /// Issues the barriers of operator() for wavelet load waves, which hold no C tile.
+    CK_TILE_DEVICE static void RunBarrierStub()
+    {
+        static_for<0, GetBarrierCount(), 1>{}([&](auto) { block_sync_lds(); });
     }
 
     template <typename LdsTile, typename InLdsWindow>
@@ -149,12 +162,15 @@ struct TdmEpilogue
                              {0, 0},
                              outLdsTileDistr);
 
+        // Barriers here must match GetBarrierCount(): RunBarrierStub() mirrors them.
         s_wait_tensorcnt_barrier<0 /*tensor_cnt*/, 0 /*lgkmcnt*/>();
 
         cast_lds_tile(o_acc_tile, in_lds_window);
         block_sync_lds();
 
         store_tile_tdm(tdm_config, out_dram_window, out_lds_window);
+        // The store reads p_smem asynchronously; retire it before the caller reuses LDS.
+        s_wait_tensorcnt();
     };
 };
 

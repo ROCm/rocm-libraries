@@ -80,7 +80,9 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
     ctx->BLOCK_CH = rocke_direct_depthwise_block_ch(spec);
     ctx->c_stride_dw = ctx->p.stride > 0 ? ctx->p.stride : 1;
     ctx->Ho = (ctx->p.H + 2 * ctx->p.PAD - ctx->p.KH) / ctx->c_stride_dw + 1;
-    ctx->Wo = (ctx->p.W + 2 * ctx->p.PAD - ctx->p.KW) / ctx->c_stride_dw + 1;
+    ctx->Wo
+        = (ctx->p.W + 2 * rocke_direct_conv_problem_pad_w(&ctx->p) - ctx->p.KW) / ctx->c_stride_dw
+          + 1;
     ctx->n_iters = ctx->p.H + ctx->p.KH - 1;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);

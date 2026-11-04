@@ -40,6 +40,7 @@
 #include "../../level2/rocsparse_csrsv.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -69,6 +70,7 @@ namespace rocsparse
                const J* __restrict__ map,
                J*                   zero_pivot,
                int64_t              zero_pivot_stride,
+               int64_t              batch_count,
                rocsparse_index_base idx_base,
                rocsparse_fill_mode  fill_mode,
                rocsparse_diag_type  diag_type,
@@ -77,29 +79,29 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
         //
-        // Batch index.
+        // grid.y is clamped to the device limit, so stride over the batches. Block
+        // uniform: every thread of the block runs the same batches.
         //
-        const auto batch_index = hipBlockIdx_y;
-
-        //
-        // Call batch sample.
-        //
-        rocsparse::csrsm_device<BLOCKSIZE, SLEEP, I, J, T, A_OP_CONJUGATE>(
-            transB,
-            m,
-            nrhs,
-            alpha,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + csr_val_stride * batch_index,
-            B + B_stride * batch_index,
-            ldb,
-            done_array + done_array_stride * batch_index,
-            map,
-            zero_pivot + zero_pivot_stride * batch_index,
-            idx_base,
-            fill_mode,
-            diag_type);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csrsm_device<BLOCKSIZE, SLEEP, I, J, T, A_OP_CONJUGATE>(
+                transB,
+                m,
+                nrhs,
+                alpha,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val + csr_val_stride * batch_index,
+                B + B_stride * batch_index,
+                ldb,
+                done_array + done_array_stride * batch_index,
+                map,
+                zero_pivot + zero_pivot_stride * batch_index,
+                idx_base,
+                fill_mode,
+                diag_type);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -135,7 +137,19 @@ namespace rocsparse
 
         const auto alpha_scalar = reinterpret_cast<const T*>(alpha->const_values);
 
-        const dim3 csrsm_blocks(((nrhs - 1) / blockdim + 1) * m, B->batch_count);
+        // One block per (RHS panel, row) pair, flattened onto grid.x. The count is
+        // formed in 64 bit and clamped to the device grid limit; csrsm_device
+        // grid-strides over whatever is left over. csrsm_compute has checked m
+        // against the clamp, so the result is never a grid past it.
+        const int64_t csrsm_grid_x = rocsparse::csrsm_solve_grid_size(
+            m,
+            nrhs,
+            blockdim,
+            rocsparse::get_grid_size_x(
+                handle, rocsparse::csrsm_num_blocks(m, nrhs, blockdim), blockdim));
+
+        const dim3 csrsm_blocks(static_cast<uint32_t>(csrsm_grid_x),
+                                rocsparse::get_grid_size_y(handle, B->batch_count));
 
         const dim3 csrsm_threads(blockdim);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csrsm<BLOCKSIZE, SLEEP, I, J, T, A_OP_CONJUGATE>),
@@ -159,6 +173,7 @@ namespace rocsparse
                                            reinterpret_cast<const J*>(map_),
                                            reinterpret_cast<J*>(zero_pivot),
                                            zero_pivot_stride,
+                                           B->batch_count,
                                            A->idx_base,
                                            fill_mode,
                                            diag_type,
@@ -487,6 +502,20 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         blockdim >>= 1;
     }
     blockdim <<= 1;
+
+    // A block is pinned to one row for its whole life, so the grid must hold at
+    // least one RHS panel: M blocks. get_grid_size_x is the launch limit for this
+    // block size, (2^32 - 1) / blockdim at most, which binds well below
+    // maxGridSize[0]: M > 4194303 once nrhs > 512. Launching past it would fail
+    // without an error unless ROCSPARSE_DEBUG_KERNEL_LAUNCH is set, so reject the
+    // size before anything is written to B or the temporary buffer.
+    if(static_cast<int64_t>(rocsparse::get_grid_size_x(handle, M, blockdim)) < M)
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_invalid_size,
+            "csrsm_solve: m exceeds the largest grid.x supported for this number of "
+            "right hand sides.");
+    }
 
     const int64_t narrays = (nrhs - 1) / blockdim + 1;
     //

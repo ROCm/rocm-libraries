@@ -42,8 +42,8 @@ from pathlib import Path
 
 import pytest
 
-import Tensile.TensileLogic.ValidWorkGroupMappingXCC as xcc_mod
-from Tensile.TensileLogic.ValidWorkGroupMappingXCC import (
+import tensilelite.TensileLogic.ValidWorkGroupMappingXCC as xcc_mod
+from tensilelite.TensileLogic.ValidWorkGroupMappingXCC import (
     _cu_count_from_path,
     _validateWorkGroupMappingXCC,
     reset_reported_failures,
