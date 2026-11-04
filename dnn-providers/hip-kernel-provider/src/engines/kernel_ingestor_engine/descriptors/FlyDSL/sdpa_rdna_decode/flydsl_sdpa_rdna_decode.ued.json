@@ -14,5 +14,8 @@
     "block_m",
     "block_n",
     "dv_split"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

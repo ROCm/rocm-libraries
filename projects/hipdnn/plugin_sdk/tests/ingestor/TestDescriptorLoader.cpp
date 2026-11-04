@@ -547,6 +547,23 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
 }
 
+TEST(TestDescriptorLoader, ParsesTheGraphCaptureBehaviorNote)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("graph_capture_note"));
+    auto documents = makeSetDocuments('1', "test:graph_capture_note");
+    documentOfType(documents, ".ued.json")["behavior_notes"]
+        = nlohmann::json::array({"runtime_compilation", "supports_graph_capture"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.behaviorNotes,
+              (std::vector<int32_t>{HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION,
+                                    HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE}));
+}
+
 TEST(TestDescriptorLoader, SemanticRevisionsAreIndependentOfFormatAndDescriptorKind)
 {
     const ScopedSymbols symbols;

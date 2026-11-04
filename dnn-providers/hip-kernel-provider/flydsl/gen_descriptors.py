@@ -98,6 +98,22 @@ SDPA_OPS = (
 )
 PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
+# Ops whose engines carry `supports_graph_capture` (capture-safe with default settings,
+# benchmarking off). Capture and graph replay are bit-exact on gfx950 (CDNA ops), on
+# gfx1152 (sdpa_rdna, sdpa_rdna_decode) and on gfx1201 (the RDNA ops and sdpa_aiw). The
+# note is engine-level: capture legality is a property of the shared host dispatch path
+# (GenericPlan -> pack launch(), kernel launches only), so it holds for every target an
+# engine's objects ship for.
+GRAPH_CAPTURE_OPS: tuple[str, ...] = (
+    "rmsnorm",
+    "rmsnorm_bwd",
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+)
 
 MANIFEST_NAME = "manifest.json"
 
@@ -376,6 +392,11 @@ class OpDescriptors:
                 "sort_kernel_catalog": {"default": self.uhd_id},
                 "metadata": self.kmd_id,
                 "knobs": [f for f in self.fields if f in TUNING_FIELDS],
+                **(
+                    {"behavior_notes": ["supports_graph_capture"]}
+                    if self.op in GRAPH_CAPTURE_OPS
+                    else {}
+                ),
             },
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,

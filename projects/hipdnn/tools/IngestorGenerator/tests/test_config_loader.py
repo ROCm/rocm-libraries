@@ -1359,6 +1359,14 @@ class TestBehaviorNotesVocabulary:
         config = load_config(path)
         assert config.engine.behavior_notes == ["runtime_compilation"]
 
+    def test_supports_graph_capture_accepted(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["engine"]["behavior_notes"] = ["supports_graph_capture"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        config = load_config(path)
+        assert config.engine.behavior_notes == ["supports_graph_capture"]
+
 
 class TestDirectLoadAuthoredSubpath:
     """Each set under ``test_descriptors/`` is its own pack target, walked by directory

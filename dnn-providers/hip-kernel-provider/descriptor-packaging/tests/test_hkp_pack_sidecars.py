@@ -1041,7 +1041,7 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
-        ued["behavior_notes"] = ["runtime_compilation"]
+        ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
         ued["numerical_notes"] = ["ftz"]
         ued["sdk_version"] = "1.2.3"
         ued["graph_match"] = {"native": "test.match", "x-note": "ignored"}

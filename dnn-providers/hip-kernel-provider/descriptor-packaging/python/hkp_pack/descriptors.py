@@ -809,7 +809,7 @@ _UHD_ADAPTERS = (
     "table",
     "custom_library",
 )
-_BEHAVIOR_NOTES = ("runtime_compilation",)
+_BEHAVIOR_NOTES = ("runtime_compilation", "supports_graph_capture")
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")

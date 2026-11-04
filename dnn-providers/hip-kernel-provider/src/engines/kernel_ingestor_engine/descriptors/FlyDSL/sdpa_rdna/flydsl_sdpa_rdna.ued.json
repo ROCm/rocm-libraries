@@ -15,5 +15,8 @@
     "block_n",
     "dv_split",
     "hd_pair"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

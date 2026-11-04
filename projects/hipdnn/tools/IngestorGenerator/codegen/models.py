@@ -93,7 +93,7 @@ AUTHORED_TEST_SETS: tuple[str, ...] = (
 )
 
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
-BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
+BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation", "supports_graph_capture")
 
 #: RFC 0021 §4: a slot name is a lowercase identifier, unique within the engine.
 #: ``global`` is reserved, since RFC 0004 owns ``global.`` knobs.

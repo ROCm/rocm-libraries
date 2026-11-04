@@ -12,5 +12,8 @@
   "metadata": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
   "knobs": [
     "block_threads"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

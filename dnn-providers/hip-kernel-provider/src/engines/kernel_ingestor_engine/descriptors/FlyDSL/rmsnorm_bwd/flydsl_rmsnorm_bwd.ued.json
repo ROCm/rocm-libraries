@@ -9,5 +9,8 @@
     "default": "f2cc7bac-2ce6-5237-8ceb-d9350ea7f62b"
   },
   "metadata": "68946940-ac32-5de0-85fe-92a8e85157dc",
-  "knobs": []
+  "knobs": [],
+  "behavior_notes": [
+    "supports_graph_capture"
+  ]
 }

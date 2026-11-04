@@ -588,13 +588,17 @@ inline KernelSourceKind kernelSourceKindFromString(const std::string& text,
 }
 
 /// Behavior notes are authored as names and mapped here to their transport values. An
-/// unknown name is a parse error: reject, never reinterpret. One entry is all this
-/// change needs; add further ones when a descriptor needs them.
+/// unknown name is a parse error: reject, never reinterpret. Add further entries when a
+/// descriptor needs them.
 inline int32_t behaviorNoteFromString(const std::string& text, const std::string& where)
 {
     if(text == "runtime_compilation")
     {
         return HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+    }
+    if(text == "supports_graph_capture")
+    {
+        return HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE;
     }
     fail("unknown behavior note '" + text + "' in " + where);
 }

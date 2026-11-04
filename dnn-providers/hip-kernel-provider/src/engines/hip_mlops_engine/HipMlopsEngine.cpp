@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -87,8 +88,12 @@ void HipMlopsEngine::getDetails(Handle& handle,
 
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+    const std::vector<int32_t> behaviorNotesVector{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    auto behaviorNotes = builder.CreateVector(behaviorNotesVector);
+
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, _id, knobs, behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
