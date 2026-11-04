@@ -216,7 +216,11 @@ With the warm start, the best kernel among each problem's first 50, 75 and
 it). The heuristic's own top 5 never held the best kernel (best of 5: 79%): the
 warm start moves the search into good regions rather than handing it the
 answer. `per_problem` seeds without a warm start did not help (88%, at 616
-builds).
+builds). The runs used 355 of the 1200 builds allowed: keep
+`new_builds_per_run` from binding by scaling it with the number of problems
+(the warm-started runs built about 45 kernels per problem). With a cap of 150
+builds for the 8 problems, the warm-started `per_problem` search fell from 99.4%
+to 91%.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -303,16 +307,18 @@ kernels (all `4x64x16`) that build in 180-300 s, which become
 `compile_error`. The default applies to a round of native kernels only. A
 round that builds a fixed-vector-width kernel keeps the build function's
 limits, as a full run does: 300 s per step and 1200 s to compile a fixed-width
-kernel. Fixed-width compile times were not measured, and such a round waits
-for the longer limit anyway. Such rounds are the rule in a run with a problem
-the native widths do not fit (its padded fixed-width kernels also pair with
-other problems where a native tile does not divide) or with
-`--tune-c-vector-width`, so those runs keep a full run's limits. A
+kernel. Fixed-width compile times were not measured, and one build call has
+one limit, so such a round keeps 300 s for its native kernels too; a shorter
+native limit would shorten it only when a native kernel never builds and
+every fixed-width one ends sooner. Such rounds are the rule in a run with a
+problem the native widths do not fit (its padded fixed-width kernels also pair
+with other problems where a native tile does not divide) or with
+`--tune-c-vector-width`, so those runs mostly keep a full run's limits. A
 `build_timeout_s` in the settings applies to every kernel of every round.
 Raise it when the slow native kernels matter, or on a host that compiles much
-slower. A timed-out step
-leaves its compiler running until it ends (the build function stops only
-`hipcc`), so a run with many timeouts loads the host for a while longer.
+slower. A timed-out step leaves its compiler running until it ends (the build
+function stops only `hipcc`), so a run with many timeouts loads the host for a
+while longer.
 
 Outputs, in a directory that must not hold an earlier run (a path that is, or
 lies under, an existing file, or whose nearest existing directory is not

@@ -61,7 +61,7 @@ from adaptive_search import (  # noqa: E402
     PairOutcome,
     PairRequest,
     SearchSettings,
-    SettingsError,  # the driver imports it from here
+    SettingsError,  # noqa: F401 - the driver imports it from here
     measure_built,
     source_info,
     valid_latency,
@@ -111,8 +111,11 @@ BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # function's: 300 s per step, 1200 s to compile a fixed-vector-width kernel).
 # 180 s per step: 1.6x the slowest gfx950 fp16 native build outside the one
 # slow-compiling class (warp tile 4x64x16), see "Build timeout" in README.md.
-# It applies to a round of native kernels only: fixed-width compile times were
-# not measured, and a round that builds one waits for its longer limit anyway.
+# It applies to a build call of native kernels only: fixed-width compile times
+# were not measured, and one call has one limit, so a round that builds a
+# fixed-width kernel (up to 1200 s to compile) keeps 300 s for its native
+# kernels too. A shorter native limit would shorten such a round only when a
+# native kernel never builds and every fixed-width one ends sooner.
 # ``build_timeout_s`` replaces it, for every kernel.
 SEARCH_BUILD_TIMEOUT_S = 180
 
