@@ -369,18 +369,14 @@ bool rocke_gfx950_attention_tiled_2d_supports(
 /* ===================================================================== *
  *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
  *
- *  INTEGRATION NOTE. The header-declared external definition of this symbol
- *  lives in the dedicated prologue TU (ctx_prologue.c). This driver TU carries
- *  its own self-consistent copy (it uses the file-local rocke_g950_* helpers and
- *  the gfx950-specific "leave ctx->target / ctx->qk_atom NULL" derivation that
- *  the phase functions this driver calls expect). To avoid a duplicate external
- *  symbol at link time, this copy is file-local (static); only this driver calls
- *  it. The cross-TU external symbol is the prologue TU's definition.
+ *  File-local: only this driver calls it. It uses the file-local rocke_g950_*
+ *  helpers and the gfx950-specific "leave ctx->target / ctx->qk_atom NULL"
+ *  derivation that the phase functions this driver calls expect.
  * ===================================================================== */
-static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                            rocke_ir_builder_t* b,
-                                            const rocke_attention_tiled_2d_spec_t* spec,
-                                            const char* arch)
+static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                               rocke_ir_builder_t* b,
+                                               const rocke_attention_tiled_2d_spec_t* spec,
+                                               const char* arch)
 {
     if(ctx == NULL || b == NULL || spec == NULL)
         return false;
@@ -906,7 +902,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
      * The transposed-32x32 path keeps P entirely in registers (softmax publish
      * is a no-op, PV reads PT32_n from registers), so P_lds was dead LDS there.
      * Drop the allocation to free the occupancy-limiting LDS at HD=128.
-     * Mirrors attention_tiled_2d.py P_LDS_DEAD and the ctx_prologue twin. */
+     * Mirrors attention_tiled_2d.py P_LDS_DEAD. */
     const bool P_LDS_DEAD = USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32;
     if(!ctx->REGISTER_PV && !P_LDS_DEAD)
     {
@@ -1018,7 +1014,7 @@ rocke_kernel_def_t* rocke_gfx950_build_unified_attention_2d_tiled(
          * smem_alloc, PV TransposeLdsReader bind, SSA constants. On any reject it
          * sets b's sticky error and returns false. */
         memset(&ctx, 0, sizeof(ctx));
-        if(!rocke_g950_build_ctx_init_local(&ctx, b, spec, arch))
+        if(!rocke_gfx950_attn2d_build_ctx_init(&ctx, b, spec, arch))
             return NULL;
 
         /* The emission order below mirrors the single linear Python emitter exactly
