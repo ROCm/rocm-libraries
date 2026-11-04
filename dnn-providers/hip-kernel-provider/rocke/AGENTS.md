@@ -32,6 +32,7 @@ cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
 ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 
@@ -82,6 +83,9 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **Helpers** — reuse them, write the missing ones, fix the broken ones, each
+  with a test, in the kernel's PR. New families too; the C++ mirror is not a
+  reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
@@ -134,6 +138,7 @@ the matching doc first.
 | Launch / benchmark harness | [kernel-launch-guide.md](platform/dsl_docs/optimization/utilities/skills/kernel-launch-guide.md) |
 | Bisect a perf regression | [bisect-perf-regression.md](platform/dsl_docs/optimization/utilities/skills/bisect-perf-regression.md) |
 | Real bug signatures + measured wins | [empirical-case-studies.md](platform/dsl_docs/optimization/utilities/skills/empirical-case-studies.md) |
+| Attention decode on gfx942/gfx950 (3D split-KV): defaults, per-lever outcomes, replay | [attention_3d_decode/CASE_STUDY.md](library/builders/common/attention_3d_decode/CASE_STUDY.md) |
 | Per-arch facts (MFMA atoms, LDS banks, occupancy caps, sched intrinsics) | [arch/gfx942.md](platform/dsl_docs/optimization/arch/gfx942.md), [arch/gfx950.md](platform/dsl_docs/optimization/arch/gfx950.md) |
 
 Hard rule from the runbook: **never report speed without correctness** — run the

@@ -364,18 +364,61 @@ fix cannot leave dead weight behind.
 
 ### 4.5 Can this target lower this intrinsic? (the arch-domain gate)
 
-§4.4 asks a compiler. The **arch-domain gate**,
-[`check_arch_domain.py`](platform/tools/check_arch_domain.py), asks *committed
-measured data* instead: `tools/gen_arch_domain.py` probes, per (declaration key,
-gfx target), whether that declaration actually links, and commits one JSON column
-per LLVM flavor under `platform/python/rocke/core/arch/data/`. The lowerer's
-`_need` chokepoint consults that table on every intrinsic demand and warns
-(`ArchDomainWarning`) when the answer is a measured negative. This gate lowers
-the same corpus §4.4 uses, harvests the warnings, and compares them against an
-`EXPECTED_WARNINGS` allowlist that names, for each entry, the corpus cases allowed
-to demand it.
+§4.4 asks a compiler. The **arch-domain lane** asks *committed measured data*
+instead: `tools/gen_arch_domain.py` probes, per (declaration key, gfx target),
+whether that declaration actually links, and commits one JSON column per LLVM
+flavor under `platform/python/rocke/core/arch/data/`. Both engines consult it at
+their demand chokepoint — `_Lowerer._need` in Python, `rocke_ll_need` in C++ —
+on every intrinsic a kernel demands. The C++ engine's copy of the table is
+generated from the same columns at build time (`tools/gen_arch_domain_cpp.py`),
+so there is one table and no hand-maintained mirror; regenerating a column needs
+no other step.
 
-The two gates overlap on purpose and neither subsumes the other:
+What the lane does with a measured negative is `ROCKE_ARCH_DOMAIN`:
+
+| mode | effect |
+|---|---|
+| `error` | refuse the lowering with `ArchDomainError` (a `NotImplementedError`), unless the cell is waived; both engines refuse with the same message |
+| `warn` (default) | report it as `ArchDomainWarning` and keep lowering |
+| `off` | skip the lookup |
+
+Any other value raises in both engines rather than falling back to the
+default. On the default `cpp` backend a refusal is raised, never "fallen back"
+from: the Python lowerer reads the same table and would refuse the same kernel.
+The C++ engine has no warning channel, so on that backend the reports come from
+a pass over the IR it emitted, which also checks that it refused what it had to.
+
+**Only a definite negative speaks.** `arch_absent` is the sole negative status.
+A flavor with no committed column, an unswept target, a key absent from the
+table, and the no-data statuses (`target_unsupported`, `toolchain_crash`,
+`toolchain_timeout`, `probe_error`) are all silent — 14% of the llvm20 column is
+no-data, and warning on those would train people to ignore the lane.
+`name_absent` is deliberately *not* reported: §4.4 already catches a reachable
+one with a real diagnostic.
+
+**The escape hatch is one cell.** A row can be measured wrong, and in `error`
+mode a wrong `arch_absent` would block every kernel that needs that intrinsic
+until the column is fixed. `platform/python/rocke/core/arch/data/arch_domain_waivers.json`
+lists waived `(key, arch, flavor)` cells, each with the reason the measurement is
+wrong; both engines read it through the same build step as the columns, and a
+waived cell is reported instead of refused — never silenced. It is for a wrong
+measurement, not a kernel bug: a kernel that demands an intrinsic its target
+cannot lower is fixed in the kernel. `ROCKE_ARCH_DOMAIN=warn` reports every
+negative instead of stopping at the first, which is a way to diagnose, not to
+ship.
+
+The gate, [`check_arch_domain.py`](platform/tools/check_arch_domain.py), lowers
+the same corpus §4.4 uses at every committed flavor with the lane in `warn` mode
+and goes red on:
+
+- a negative with no waiver: a kernel is demanding an intrinsic its target
+  cannot lower;
+- a stale waiver: its cell no longer measures negative, so the column was fixed
+  and the waiver is deleted in the same change;
+- when the `rocke_engine` extension is importable, the C++ engine in `error`
+  mode refusing a different set of cases than the Python lowerer would.
+
+This gate and §4.4 overlap on purpose and neither subsumes the other:
 
 - **It needs no toolchain.** Lowering is pure Python and the table is committed
   data, so this gate rules on *every* flavor on any host — where §4.4 can only
@@ -383,30 +426,20 @@ The two gates overlap on purpose and neither subsumes the other:
 - **It names the intrinsic.** §4.4 reports whatever the backend chose to say,
   often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
   diagnostic the probe recorded.
-- **Only a definite negative speaks.** `arch_absent` is the sole negative
-  status. A flavor with no committed column, an unswept target, a key absent
-  from the table, and the no-data statuses (`target_unsupported`,
-  `toolchain_crash`, `toolchain_timeout`, `probe_error`) are all silent — 14% of
-  the llvm20 column is no-data, and warning on those would train people to
-  ignore the lane.
-  `name_absent` is deliberately *not* warned on: §4.4 already catches a reachable
-  one with a real diagnostic.
-
-`EXPECTED_WARNINGS` carries the same rule as `KNOWN_BAD`: **it only shrinks**,
-and an entry, or one of its cases, that stops firing is itself a failure. Naming
-the cases is what stops it widening in silence: a different case that starts
-demanding an allowlisted intrinsic is a new finding. `ROCKE_ARCH_DOMAIN=off`
-disables the lookup.
 
 ### 4.6 Does the measured arch-domain artifact reproduce?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. The `rocke_arch_domain_reproducibility` CTest
-runs `tools/gen_arch_domain.py --check` over the full intrinsic/architecture
-matrix for the host flavor and compares the result with the committed column.
-This is an artifact-reproduction gate backed by the host toolchain, not a Python
-unit test: it owns external compiler processes, a dedicated timeout and resource
-policy, and an explicit CTest skip result.
+host's toolchain reproduces them. When the host compiler identity matches the
+provenance recorded in the committed column, the
+`rocke_arch_domain_reproducibility` CTest runs
+`tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
+and compares the result with that column. LLVM development builds with the same
+major can disagree about intrinsic availability and ABI, so a different compiler
+identity is explicitly unvalidated rather than compared as though it asked the
+same question. This is an artifact-reproduction gate backed by the host
+toolchain, not a Python unit test: it owns external compiler processes, a
+dedicated timeout and resource policy, and an explicit CTest skip result.
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
@@ -415,9 +448,10 @@ installed `rocke` package. This follows the library-side test contract: CMake
 stages every input, CTest supplies artifact-relative paths, and the test never
 configures or reaches back into a source checkout.
 
-The result mapping deliberately preserves the former pytest item's behavior:
-no clang, no committed host-flavor column, and a clang/resolved-flavor mismatch
-skip; a partial or internally inconsistent LLVM installation fails. Flavor
+The result mapping distinguishes applicability from failure: no clang, no
+committed host-flavor column, a clang/resolved-flavor mismatch, or a compiler
+identity different from the column's provenance skips with a named reason. A
+partial or internally inconsistent LLVM installation fails. Flavor
 auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
@@ -440,9 +474,10 @@ CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
 reproduction coverage: check the CTest result and reason, especially when the
-compiler's exact major differs from rocKE's resolved flavor or no committed
-column exists. Keeping one generator implementation behind two thin
-registrations preserves local coverage while avoiding duplicated test logic.
+compiler identity differs from the committed provenance, its major differs from
+rocKE's resolved flavor, or no committed column exists. Keeping one generator
+implementation behind two thin registrations preserves local coverage while
+avoiding duplicated test logic.
 
 **Kernel-author routing.** Ordinary kernel work does not need a separate focused
 run beyond the full pre-merge `tests/run_all.py`; once that runner has configured
@@ -461,7 +496,7 @@ performing comparisons**:
 
 | Execution class | Environment and oracle | Verdict |
 |---|---|---|
-| **Developer pre-merge gate** | `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. |
+| **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. `--only`, `--only-ir`, and `--pytest-target` are focused iteration selectors and do not produce this complete verdict. |
 | **Installed host CI** | Selected CTests from the relocated provider artifact, including platform and explicitly enrolled library pytest cohorts | Blocking when selected. Registration alone is not enrollment. |
 | **Installed pinned-reference GPU CI** | One independently qualified reference CTest per published operation/architecture pair | Blocking on its matching required lane; missing hardware, qualification, bundle, or comparisons fails. Other processors' entries skip. |
 | **Legacy/manual GPU numeric** | Live NumPy/Torch reference tests and diagnostic harnesses not covered by a required pinned lane | Opt-in or capability-skipped; a skip proves no kernel correctness. |
@@ -474,12 +509,15 @@ importable → CTest). **CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
-and selected library host/GPU suites. Test registration is authoritative in
-[`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
-[`platform/CMakeLists.txt`](platform/CMakeLists.txt); the provider's external
-test-category YAML and TheRock's tier selection determine which registered
-tests actually execute. Check the selected list in the job log or with CTest's
-verbose listing. Registration alone does not establish CI coverage.
+and selected library host/GPU suites. Build-tree C++ test registration is
+orchestrated by
+[`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
+[concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
+under `platform/tests/cmake/`. Installed Python and library CTest registration
+remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+external test-category YAML and TheRock's tier selection determine which
+registered tests actually execute. Check the selected list in the job log or
+with CTest's verbose listing. Registration alone does not establish CI coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -676,6 +714,83 @@ Repeat the native lane in a clean
 relocated install without source directories or native caches available; a
 source-only pass cannot establish installed-artifact support.
 
+#### 5.1.4 Installed CTest environment contracts
+
+An installed CTest entry's `ENVIRONMENT` property is part of its external
+contract. It is generated during configuration, evaluated from a relocated test
+tree, and can change whether a test runs, skips, or fails. Keep these concerns
+separate:
+
+- **Tool discovery** says where an executable or resource can be found, such as
+  compiler directories in `PATH` or `HIP_DEVICE_LIB_PATH`.
+- **Enforcement policy** says that a normally optional check is mandatory, such
+  as `ROCKE_REQUIRE_COMPILER_TOOLS=1` turning an unavailable-tool skip into a
+  failure.
+
+A shared discovery environment does not imply shared policy. Add an enforcement
+variable only to CTest entries whose tests consume it, and validate every
+consumer when changing a shared environment list. Exact environment assertions
+are intentional: an unexpected variable is observable behavior, especially when
+it changes skip/fail semantics.
+
+The current installed compiler-tool contract is:
+
+| Runtime environment | Compiler paths injected | MLA compiler checks required |
+|---|---:|---:|
+| Linux with `ROCM_PATH` | yes | yes |
+| Linux without `ROCM_PATH` | no | no |
+| Windows | no Unix-derived paths | no inferred requirement |
+
+The table describes values added by the generated manifest. CTest still passes
+through its parent process environment, so a caller that explicitly exports
+`ROCKE_REQUIRE_COMPILER_TOOLS=1` opts into strict checks independently of this
+automatic policy.
+
+These are native-host contracts. Linux tests must not pretend to cover Windows
+by patching Python platform values. If a Windows TheRock lane must require the
+MLA compiler checks, give that lane an explicit capability contract and its own
+tool-discovery rules; do not copy Unix `ROCM_PATH` layout assumptions or infer
+capability from the operating system alone.
+
+The source breadcrumb beside the environment construction in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt) names the focused regression
+test. Run it after changing an installed Python test environment:
+
+```bash
+python -m pytest \
+  platform/tests/test_engine_linkage.py::test_installed_ctest_entries_get_scoped_environment_contracts \
+  -q
+```
+
+The test reads the standalone and provider-layout generated manifests through
+CTest, rejects duplicate variable names, and compares the complete environments
+of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
+`ROCM_PATH`. Keep the expectations independently constructed rather than reusing
+the production CMake lists; otherwise production and test can repeat the same
+mistake.
+
+### 5.2 Single-arch tests: `arch_specific`
+
+A test that names one gfx target can hide a gap. The code under test may support more targets.
+Run such a test for each supported target. Use `subTest` or `pytest.mark.parametrize`.
+
+If the feature exists on a subset of targets only, mark the test with `arch_specific`.
+The decorator records the target list and the reason. It does not skip the test.
+
+```python
+from rocke.tests.arch_marks import arch_specific
+
+@arch_specific(("gfx950",), reason="mxfp6 A-scale layout exists on gfx950 only")
+def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None: ...
+```
+
+- **`archs`**: a non-empty list of names that `ArchTarget.from_gfx` accepts. A string raises `TypeError`.
+- **`reason`**: a non-empty sentence. A blank reason raises `ValueError`.
+- **Scope**: the decorator works on a function, a method, and a class. It works with `unittest` and `pytest`.
+- **Dependencies**: the helper imports no `torch`.
+
+The helper lives in `platform/python/rocke/tests/arch_marks.py`. Both `platform/tests` and `library/tests` import it as `rocke.tests.arch_marks`.
+
 ## 6. Invariants & contracts
 
 Cross-cutting properties every change must preserve:
@@ -721,7 +836,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
 
 ### 7.3 What "green" does and does not mean today

@@ -283,6 +283,77 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
         "Error: COO format is not supported");
     verify_hipsparse_status_success(hipsparseDestroySpMat(A_coo), "success");
 
+    // Half precision is rejected while reading the scalars in hipsparseSpGEAM_nnz and
+    // hipsparseSpGEAM. bufferSize does not take that path.
+#if !defined(CUDART_VERSION)
+    hipsparseSpMatDescr_t A_f16, B_f16, C_f16;
+    verify_hipsparse_status_success(hipsparseCreateCsr(&A_f16,
+                                                       m,
+                                                       n,
+                                                       nnz_A,
+                                                       dcsr_row_ptr_A,
+                                                       dcsr_col_ind_A,
+                                                       dcsr_val_A,
+                                                       idxType,
+                                                       idxType,
+                                                       idxBase,
+                                                       HIP_R_16F),
+                                    "success");
+    verify_hipsparse_status_success(hipsparseCreateCsr(&B_f16,
+                                                       m,
+                                                       n,
+                                                       nnz_B,
+                                                       dcsr_row_ptr_B,
+                                                       dcsr_col_ind_B,
+                                                       dcsr_val_B,
+                                                       idxType,
+                                                       idxType,
+                                                       idxBase,
+                                                       HIP_R_16F),
+                                    "success");
+    verify_hipsparse_status_success(hipsparseCreateCsr(&C_f16,
+                                                       m,
+                                                       n,
+                                                       nnz_C,
+                                                       dcsr_row_ptr_C,
+                                                       dcsr_col_ind_C,
+                                                       dcsr_val_C,
+                                                       idxType,
+                                                       idxType,
+                                                       idxBase,
+                                                       HIP_R_16F),
+                                    "success");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM_nnz(handle,
+                                                              transA,
+                                                              transB,
+                                                              &alpha,
+                                                              A_f16,
+                                                              &beta,
+                                                              B_f16,
+                                                              C_f16,
+                                                              HIP_R_16F,
+                                                              alg,
+                                                              descr,
+                                                              dbuf),
+                                          "Error: f16 is not supported");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM(handle,
+                                                          transA,
+                                                          transB,
+                                                          &alpha,
+                                                          A_f16,
+                                                          &beta,
+                                                          B_f16,
+                                                          C_f16,
+                                                          HIP_R_16F,
+                                                          alg,
+                                                          descr,
+                                                          dbuf),
+                                          "Error: f16 is not supported");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(A_f16), "success");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(B_f16), "success");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(C_f16), "success");
+#endif
+
     verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(B), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
@@ -448,8 +519,8 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_bufferSize(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, &bufferSize1));
 
-    void* externalBuffer1;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer1, bufferSize1));
+    auto  externalBuffer1_managed = hipsparse_unique_ptr{device_malloc(bufferSize1), device_free};
+    void* externalBuffer1         = externalBuffer1_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, externalBuffer1));
@@ -463,8 +534,8 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_bufferSize(
         handle, transA, transB, d_alpha, A, d_beta, B, C2, typeT, alg, descr2, &bufferSize2));
 
-    void* externalBuffer2;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer2, bufferSize2));
+    auto  externalBuffer2_managed = hipsparse_unique_ptr{device_malloc(bufferSize2), device_free};
+    void* externalBuffer2         = externalBuffer2_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, d_alpha, A, d_beta, B, C2, typeT, alg, descr2, externalBuffer2));
@@ -625,8 +696,6 @@ void testing_spgeam_csr(Arguments argus)
 #endif
     }
 
-    CHECK_HIP_ERROR(hipFree(externalBuffer1));
-
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
@@ -634,7 +703,6 @@ void testing_spgeam_csr(Arguments argus)
     // clang-format off
 #if(!defined(CUDART_VERSION))
     // clang-format on
-    CHECK_HIP_ERROR(hipFree(externalBuffer2));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
 #endif
 #endif

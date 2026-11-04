@@ -13,42 +13,9 @@ different authoring rules or separate kinds of kernels.
 
 The checked-in
 [`arch_specs.json`](../../python/rocke/core/arch/data/arch_specs.json) file is
-the source of truth for the `MmaOp` entries available to each exact gfx target.
-The catalog currently contains the following operation IDs.
-
-- **`gfx90a` (wave64)**
-  - f16: `mfma_f32_16x16x16_f16`, `mfma_f32_32x32x8_f16`
-  - bf16: `mfma_f32_16x16x16_bf16`, `mfma_f32_32x32x8_bf16`
-- **`gfx942` (wave64)**
-  - f32: `mfma_f32_16x16x4_f32`, `mfma_f32_32x32x2_f32`
-  - f16: `mfma_f32_16x16x16_f16`, `mfma_f32_32x32x8_f16`
-  - bf16: `mfma_f32_16x16x16_bf16`, `mfma_f32_32x32x8_bf16`
-  - fp8: `mfma_f32_16x16x32_fp8`, `mfma_f32_32x32x16_fp8`
-  - bf8: `mfma_f32_16x16x32_bf8`, `mfma_f32_32x32x16_bf8`
-- **`gfx950` (wave64)**
-  - f32: `mfma_f32_16x16x4_f32`, `mfma_f32_32x32x2_f32`
-  - f16: `mfma_f32_16x16x16_f16`, `mfma_f32_16x16x32_f16`,
-    `mfma_f32_32x32x8_f16`, `mfma_f32_32x32x16_f16`
-  - bf16: `mfma_f32_16x16x16_bf16`, `mfma_f32_16x16x32_bf16`,
-    `mfma_f32_32x32x8_bf16`, `mfma_f32_32x32x16_bf16`
-  - fp8: `mfma_f32_16x16x32_fp8`, `mfma_f32_32x32x16_fp8`
-  - bf8: `mfma_f32_16x16x32_bf8`, `mfma_f32_32x32x16_bf8`
-  - fp4: `mfma_f32_16x16x128_fp4`
-  - fp6: `mfma_f32_16x16x96_fp6`
-- **`gfx1151` and `gfx11-generic` (wave32)**
-  - f16: `wmma_f32_16x16x16_f16`
-  - bf16: `wmma_f32_16x16x16_bf16`
-  - integer: `wmma_i32_16x16x16_iu4`, `wmma_i32_16x16x16_iu8`
-- **`gfx1201` and `gfx12-generic` (wave32)**
-  - f16: `wmma_gfx12_f32_16x16x16_f16`
-  - bf16: `wmma_gfx12_f32_16x16x16_bf16`
-- **`gfx1250` (wave32)**
-  - f16: `wmma_gfx1250_f32_16x16x32_f16`
-  - bf16: `wmma_gfx1250_f32_16x16x32_bf16`
-  - fp8/bf8 combinations: `wmma_gfx1250_f32_16x16x64_fp8_fp8`,
-    `wmma_gfx1250_f32_16x16x64_fp8_bf8`,
-    `wmma_gfx1250_f32_16x16x64_bf8_fp8`,
-    `wmma_gfx1250_f32_16x16x64_bf8_bf8`
+the source of truth for the `MmaOp` entries available to each exact gfx target;
+read each target's `mma` list there (or `ArchTarget.from_gfx(gfx).mma.ops`)
+rather than a copy of it.
 
 Catalog presence, builder support, and wave geometry are separate facts. A
 builder must select an operation accepted by its validator and use the layout

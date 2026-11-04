@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -77,10 +77,21 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
     auto           check_numerics = handle->check_numerics;
     rocblas_status status         = rocblas_status_success;
 
-    // check alignment of pointers before casting
-    if(!isAligned(a, sizeof(Ta)) || !isAligned(b, sizeof(Tb)) || !isAligned(c, sizeof(Tc))
-       || !isAligned(d, sizeof(Td)))
-        return rocblas_status_invalid_size;
+    // check alignment before casting
+    if(BATCHED)
+    {
+        // batched arrays hold pointers; require pointer-sized alignment
+        if(!isAligned(a, sizeof(void*)) || !isAligned(b, sizeof(void*))
+           || !isAligned(c, sizeof(void*)) || !isAligned(d, sizeof(void*)))
+            return rocblas_status_invalid_size;
+    }
+    else
+    {
+        // non-batched buffers hold elements; require only element alignment
+        if(!isAligned(a, sizeof(Ti)) || !isAligned(b, sizeof(Ti)) || !isAligned(c, sizeof(To))
+           || !isAligned(d, sizeof(To)))
+            return rocblas_status_invalid_size;
+    }
 
     auto rocblas_gemm_ex_name
         = BATCHED ? "rocblas_gemm_batched_ex_64"
@@ -128,8 +139,8 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
     if(handle->layer_mode & rocblas_layer_mode_log_internal)
     {
         rocblas_internal_ostream alphass, betass;
-        (void)rocblas_internal_log_trace_alpha_beta_ex(
-            rocblas_datatype_from_type<TScal>, alpha, beta, alphass, betass);
+        PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+            rocblas_datatype_from_type<TScal>, alpha, beta, alphass, betass)));
 
         rocblas_internal_logger logger;
         logger.log_trace(handle,
@@ -204,6 +215,39 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
 
         if(status != rocblas_status_success)
             return status;
+    }
+
+    if(handle->layer_mode & rocblas_layer_mode_log_kernel_select)
+    {
+        rocblas_internal_gemm_problem p;
+        p.trans_a        = trans_a;
+        p.trans_b        = trans_b;
+        p.m              = m_64;
+        p.n              = n_64;
+        p.k              = k_64;
+        p.alpha          = alpha;
+        p.beta           = beta;
+        p.input_type     = rocblas_datatype_from_type<Ti>;
+        p.output_type    = rocblas_datatype_from_type<To>;
+        p.compute_type   = rocblas_datatype_from_type<TScal>;
+        p.lda            = lda_64;
+        p.ldb            = ldb_64;
+        p.ldc            = ldc_64;
+        p.ldd            = ldd_64;
+        p.stride_a       = stride_a;
+        p.stride_b       = stride_b;
+        p.stride_c       = stride_c;
+        p.stride_d       = stride_d;
+        p.batch_count    = batch_count_64;
+        p.pointer_array  = BATCHED;
+        p.algo           = algo;
+        p.solution_index = solution_index;
+        p.flags          = uint32_t(flags);
+        rocblas_internal_log_kernel_select(handle,
+                                           p,
+                                           "source",
+                                           "rocblas_gemm_source_solution_64",
+                                           rocblas_internal_take_kernel_select_fallback(handle));
     }
 
     if constexpr(check_numerics_supported)

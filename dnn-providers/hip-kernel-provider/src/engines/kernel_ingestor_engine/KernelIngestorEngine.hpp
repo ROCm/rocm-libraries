@@ -70,9 +70,9 @@ void rediscoverStateManagersForTesting();
 /// Process-lifetime: a device-property cache with no engine-specific state.
 const HandleDeviceResolver& deviceResolver();
 
-/// True when @p set has at least one kernel, every kernel has a source kind that
-/// `serialization::isSerializableSourceKind` accepts, and every pack's dispatch resolves to a
-/// handler whose supportsSaving() returns true.
+/// True when @p set has at least one kernel, every kernel has one launch (no `sources`)
+/// whose source kind `serialization::isSerializableSourceKind` accepts, and every pack's
+/// dispatch resolves to a handler whose supportsSaving() returns true.
 bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set);
 
 /// Returns @p set's engine with the behavior notes this provider computes. Adds

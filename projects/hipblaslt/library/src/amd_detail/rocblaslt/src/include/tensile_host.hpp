@@ -138,11 +138,33 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
                                          const rocblaslt_matmul_algo& algo);
 
+// In-device MX scale layout the algo's kernel expects (0 = canonical, 1 = gfx950 host
+// pre-swizzled, 2 = in-memory swizzled), or -1 if the algo is not a Tensile solution.
+int getMXScaleFormatFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
+
 /***********************************************************************************
  * Whether Tensile has been initialized for at least one device (used for
  *testing) *
  ***********************************************************************************/
 std::atomic_bool& rocblaslt_internal_tensile_is_initialized();
+
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNELS
+/***********************************************************************************
+ * Local kernel library. See hipblaslt-local-kernel.h for the public contract.
+ ***********************************************************************************/
+rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
+                                                 const char*       libraryPath,
+                                                 const char*       codeObjectPath,
+                                                 std::vector<int>& kernelIndices);
+
+rocblaslt_status rocblaslt_local_kernel_set_exact_match(
+    rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k);
+
+rocblaslt_status
+    rocblaslt_local_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable);
+
+bool rocblaslt_is_local_kernel_index(int index);
+#endif
 
 /**********************************************
  * Whether to suppress Tensile error messages *
@@ -354,6 +376,9 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
                                int*                               indexes,
                                size_t                             count);
 
+// Memoised adaptive re-selections held by a TensileDataGemm.
+size_t adaptiveReselectionCount(std::shared_ptr<void> gemmData);
+
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
 // Push the GemmPreference-supplied StreamK tile scheduling mode onto every
@@ -369,4 +394,9 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // desc- or handle-level enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
+
+// MX scale tensor padding on the current device. When true (gfx950) the K blocks are
+// padded to a multiple of 8 and the free dimension to a multiple of 32; otherwise only the
+// K blocks are padded, to a multiple of 128 / block size.
+bool mxScaleTensorPadsFreeDim();

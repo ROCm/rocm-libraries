@@ -199,8 +199,27 @@ class GbdtModel(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
         return o == 0
 
+    # GbdtModel
+    def ThresholdTableType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(30))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # The distinct split thresholds that split/leaf-encoded trees index. Absent when no
+    # tree uses that encoding.
+    # GbdtModel
+    def ThresholdTable(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(32))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
 def GbdtModelStart(builder):
-    builder.StartObject(13)
+    builder.StartObject(15)
 
 def Start(builder):
     GbdtModelStart(builder)
@@ -301,16 +320,31 @@ def GbdtModelStartGroupsVector(builder, numElems):
 def StartGroupsVector(builder, numElems):
     return GbdtModelStartGroupsVector(builder, numElems)
 
+def GbdtModelAddThresholdTableType(builder, thresholdTableType):
+    builder.PrependUint8Slot(13, thresholdTableType, 0)
+
+def AddThresholdTableType(builder, thresholdTableType):
+    GbdtModelAddThresholdTableType(builder, thresholdTableType)
+
+def GbdtModelAddThresholdTable(builder, thresholdTable):
+    builder.PrependUOffsetTRelativeSlot(14, flatbuffers.number_types.UOffsetTFlags.py_type(thresholdTable), 0)
+
+def AddThresholdTable(builder, thresholdTable):
+    GbdtModelAddThresholdTable(builder, thresholdTable)
+
 def GbdtModelEnd(builder):
     return builder.EndObject()
 
 def End(builder):
     return GbdtModelEnd(builder)
 
+import hipdnn_flatbuffers_sdk.data_objects.Float32Array
+import hipdnn_flatbuffers_sdk.data_objects.Float64Array
 import hipdnn_flatbuffers_sdk.data_objects.GbdtGroup
 import hipdnn_flatbuffers_sdk.data_objects.GbdtTree
+import hipdnn_flatbuffers_sdk.data_objects.RealArray
 try:
-    from typing import List
+    from typing import List, Union
 except:
     pass
 
@@ -332,6 +366,8 @@ class GbdtModelT(object):
         modelVersion = None,
         groupByFeatureIndex = -1,
         groups = None,
+        thresholdTableType = 0,
+        thresholdTable = None,
     ):
         self.trees = trees  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.GbdtTree.GbdtTreeT]]
         self.numFeatures = numFeatures  # type: int
@@ -346,6 +382,8 @@ class GbdtModelT(object):
         self.modelVersion = modelVersion  # type: Optional[str]
         self.groupByFeatureIndex = groupByFeatureIndex  # type: int
         self.groups = groups  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.GbdtGroup.GbdtGroupT]]
+        self.thresholdTableType = thresholdTableType  # type: int
+        self.thresholdTable = thresholdTable  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Float32Array.Float32ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Float64Array.Float64ArrayT']
 
     @classmethod
     def InitFromBuf(cls, buf, pos):
@@ -398,6 +436,8 @@ class GbdtModelT(object):
                 else:
                     gbdtGroup_ = hipdnn_flatbuffers_sdk.data_objects.GbdtGroup.GbdtGroupT.InitFromObj(gbdtModel.Groups(i))
                     self.groups.append(gbdtGroup_)
+        self.thresholdTableType = gbdtModel.ThresholdTableType()
+        self.thresholdTable = hipdnn_flatbuffers_sdk.data_objects.RealArray.RealArrayCreator(self.thresholdTableType, gbdtModel.ThresholdTable())
 
     # GbdtModelT
     def Pack(self, builder):
@@ -435,6 +475,8 @@ class GbdtModelT(object):
             for i in reversed(range(len(self.groups))):
                 builder.PrependUOffsetTRelative(groupslist[i])
             groups = builder.EndVector()
+        if self.thresholdTable is not None:
+            thresholdTable = self.thresholdTable.Pack(builder)
         GbdtModelStart(builder)
         if self.trees is not None:
             GbdtModelAddTrees(builder, trees)
@@ -457,5 +499,8 @@ class GbdtModelT(object):
         GbdtModelAddGroupByFeatureIndex(builder, self.groupByFeatureIndex)
         if self.groups is not None:
             GbdtModelAddGroups(builder, groups)
+        GbdtModelAddThresholdTableType(builder, self.thresholdTableType)
+        if self.thresholdTable is not None:
+            GbdtModelAddThresholdTable(builder, thresholdTable)
         gbdtModel = GbdtModelEnd(builder)
         return gbdtModel

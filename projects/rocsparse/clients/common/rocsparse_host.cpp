@@ -3957,7 +3957,8 @@ void host_csrsm(J                    M,
         std::vector<T> y(M, 0);
         for(size_t i = 0; i < x.size(); i++)
         {
-            x[i] = B[i];
+            x[i]
+                = (transB == rocsparse_operation_conjugate_transpose) ? rocsparse_conj(B[i]) : B[i];
         }
 
         for(J i = 0; i < M; i++)

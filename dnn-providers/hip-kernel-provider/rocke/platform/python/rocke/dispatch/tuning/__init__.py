@@ -9,6 +9,8 @@ supplies everything else:
 - :mod:`.walk` -- sweep levels, the pruned walk, the sampler;
 - :mod:`.identity` -- ``config_key`` / ``tuning_id``;
 - :mod:`.space` -- :class:`KnobSpace`, the one place specs are made;
+- :mod:`.waves` -- :class:`WavesPerEuSpace`, ``waves_per_eu`` as the outer
+  knob and its ``_wpe{N}`` id stem;
 - :mod:`.candidate` -- :func:`make_tuned_candidate` and pin resolution;
 - :mod:`.spec` -- the :class:`TunedSpec` / :class:`TunableRequest` protocols;
 - :mod:`.testing` -- :func:`assert_tuning_contract`, the conformance kit.
@@ -48,6 +50,7 @@ from .walk import (
     sample_count,
     sweep_level,
 )
+from .waves import WavesPerEuSpace
 
 __all__ = [
     "BUILD_ERRORS",
@@ -59,6 +62,7 @@ __all__ = [
     "TunableRequest",
     "TunedSpec",
     "Verdict",
+    "WavesPerEuSpace",
     "axis_knob_names",
     "choices",
     "config_key",

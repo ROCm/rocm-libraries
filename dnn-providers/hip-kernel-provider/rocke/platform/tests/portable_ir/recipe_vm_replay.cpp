@@ -24,7 +24,9 @@
  *   - spec strings reach the kernel name via kernel_name_fmt;
  *   - replay is deterministic (same spec -> byte-identical .ll), which is the
  *     precondition for the cross-engine byte-identity gate in
- *     python/rocke/portable_ir/drivers/parity_matrix.py.
+ *     python/rocke/portable_ir/drivers/parity_matrix.py;
+ *   - scf_if_else rebuilds a converging if/else (both arms, one join block),
+ *     including one nested in an arm, and a missing condition is an error.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -297,6 +299,118 @@ void check_kernel_list_attrs()
     }
 }
 
+// scf_if_else: C[tid] = tid < 32 ? A[tid] : (tid < 48 ? B[tid] : 0). The inner
+// if/else sits in the outer else arm, so arm routing and nesting both show up
+// in the lowered block structure. Values defined in an arm (a, bb) are used in
+// that arm only, the way the Python builder scopes them.
+const char* kIfElseRecipe = R"json({
+  "schema": "rocke.recipe/v1",
+  "kernel_name_fmt": "rocke_recipe_if_else",
+  "spec": [],
+  "attrs": {"max_workgroup_size": {"t": "i", "v": 64}},
+  "program": [
+    {"op": "param", "name": "A", "bind": "A",
+     "type": {"kind": "ptr", "pointee": "f32", "space": "global"}, "attrs": {}},
+    {"op": "param", "name": "B", "bind": "B",
+     "type": {"kind": "ptr", "pointee": "f32", "space": "global"}, "attrs": {}},
+    {"op": "param", "name": "C", "bind": "C",
+     "type": {"kind": "ptr", "pointee": "f32", "space": "global"}, "attrs": {}},
+    {"op": "thread_id_x", "bind": "tid"},
+    {"op": "const_i32", "bind": "c32", "val": 32},
+    {"op": "const_i32", "bind": "c48", "val": 48},
+    {"op": "emit", "opcode": "arith.cmp", "in": ["tid", "c32"],
+     "out": {"bind": "lo", "type": "i1"}, "attrs": {"pred": {"t": "s", "v": "lt"}}},
+    {"op": "scf_if_else", "cond": "lo",
+     "then": [
+       {"op": "emit", "opcode": "memref.global_load_typed", "in": ["A", "tid"],
+        "out": {"bind": "a", "type": "f32"},
+        "attrs": {"align": {"t": "i", "v": 4}, "elem_type": {"t": "s", "v": "f32"}}},
+       {"op": "emit", "opcode": "memref.global_store_typed", "in": ["C", "tid", "a"],
+        "attrs": {"align": {"t": "i", "v": 4}, "elem_type": {"t": "s", "v": "f32"}}}
+     ],
+     "else": [
+       {"op": "emit", "opcode": "arith.cmp", "in": ["tid", "c48"],
+        "out": {"bind": "mid", "type": "i1"}, "attrs": {"pred": {"t": "s", "v": "lt"}}},
+       {"op": "scf_if_else", "cond": "mid",
+        "then": [
+          {"op": "emit", "opcode": "memref.global_load_typed", "in": ["B", "tid"],
+           "out": {"bind": "bb", "type": "f32"},
+           "attrs": {"align": {"t": "i", "v": 4}, "elem_type": {"t": "s", "v": "f32"}}},
+          {"op": "emit", "opcode": "memref.global_store_typed", "in": ["C", "tid", "bb"],
+           "attrs": {"align": {"t": "i", "v": 4}, "elem_type": {"t": "s", "v": "f32"}}}
+        ],
+        "else": [
+          {"op": "const_f32", "bind": "z", "fval": 0.0},
+          {"op": "emit", "opcode": "memref.global_store_typed", "in": ["C", "tid", "z"],
+           "attrs": {"align": {"t": "i", "v": 4}, "elem_type": {"t": "s", "v": "f32"}}}
+        ]}
+     ]},
+    {"op": "ret"}
+  ]
+})json";
+
+// Run a spec-free recipe and lower it (gfx950, llvm20). Returns the status;
+// *out_err gets the VM or lowering diagnostic.
+rocke_status_t run_plain_recipe(const char* recipe, std::string* out_ll, std::string* out_err)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st
+        = rocke_recipe_run_from_json(recipe, nullptr, 0, nullptr, 0, &b, &kernel, err, sizeof(err));
+    out_err->assign(err);
+    if(st != ROCKE_OK || !kernel)
+    {
+        return st != ROCKE_OK ? st : ROCKE_ERR_VALUE;
+    }
+    char* ll = nullptr;
+    char lerr[ROCKE_ERR_MSG_CAP];
+    lerr[0] = '\0';
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, lerr, sizeof(lerr));
+    if(st == ROCKE_OK && ll)
+    {
+        out_ll->assign(ll);
+    }
+    else
+    {
+        out_err->assign(lerr);
+    }
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+void check_scf_if_else()
+{
+    std::string ll, err;
+    check(run_plain_recipe(kIfElseRecipe, &ll, &err) == ROCKE_OK,
+          ("scf_if_else recipe replays and lowers (got: " + err + ")").c_str());
+    // Two if/else ops -> two then/else/join block triples, every arm's store
+    // survives, and each arm ends in a branch to its own join block.
+    check(count(ll, "\nif.then") == 2, "two then blocks");
+    check(count(ll, "\nif.else") == 2, "two else blocks");
+    check(count(ll, "\nif.end") == 2, "two join blocks");
+    check(count(ll, "store float") == 3, "all three arm stores are emitted");
+    check(count(ll, "br i1") == 2, "one conditional branch per if/else");
+
+    std::string again, err2;
+    check(run_plain_recipe(kIfElseRecipe, &again, &err2) == ROCKE_OK && again == ll,
+          "scf_if_else replay is deterministic");
+
+    // A dangling condition is reported, not silently dropped.
+    std::string bad = kIfElseRecipe;
+    const std::string from = R"("cond": "lo")";
+    bad.replace(bad.find(from), from.size(), R"("cond": "nope")");
+    ll.clear();
+    err.clear();
+    check(run_plain_recipe(bad.c_str(), &ll, &err) != ROCKE_OK,
+          "scf_if_else with an unresolved cond is rejected");
+    check(err.find("scf_if_else") != std::string::npos,
+          ("unresolved cond names the op (got: " + err + ")").c_str());
+}
+
 } // namespace
 
 int main()
@@ -305,6 +419,7 @@ int main()
 
     check_kernel_list_attrs();
     check_invalid_integer_values();
+    check_scf_if_else();
 
     std::string ll4, name4, ll8, name8;
     if(!replay(4, "f32", &ll4, &name4) || !replay(8, "f32", &ll8, &name8))

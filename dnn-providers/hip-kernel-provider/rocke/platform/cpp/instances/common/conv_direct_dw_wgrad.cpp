@@ -306,13 +306,13 @@ extern "C" bool rocke_dw_wgrad_cols_is_valid_spec(const rocke_dw_wgrad_cols_spec
     char msg[ROCKE_ERR_MSG_CAP];
     if(s == NULL)
     {
-        set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
-        set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     const char* why = NULL;
@@ -359,10 +359,10 @@ extern "C" bool rocke_dw_wgrad_cols_is_valid_spec(const rocke_dw_wgrad_cols_spec
     }
     if(why != NULL)
     {
-        set_reason(reason, reason_cap, why);
+        rocke_spec_set_reason(reason, reason_cap, why);
         return false;
     }
-    set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -728,7 +728,7 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
     char msg[ROCKE_ERR_MSG_CAP];
     if(s == NULL)
     {
-        set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -742,9 +742,9 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
-        set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     int threads = rocke_dw_wgrad_lds_threads(s);
@@ -794,10 +794,10 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
     }
     if(why != NULL)
     {
-        set_reason(reason, reason_cap, why);
+        rocke_spec_set_reason(reason, reason_cap, why);
         return false;
     }
-    set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 

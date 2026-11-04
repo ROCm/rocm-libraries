@@ -224,6 +224,16 @@ inline const std::vector<DeprecatedCausalMaskCase>& deprecatedCausalMaskCases()
                                  std::nullopt},
         DeprecatedCausalMaskCase{
             "LeftBoundBelowMinusOne", false, false, -2, 0, ALIGN_TOP_LEFT, std::nullopt},
+        // left_bound = 0 is outside hipDNN's band domain (SEM-005).
+        DeprecatedCausalMaskCase{"LeftBoundZero", false, false, 0, 0, ALIGN_TOP_LEFT, std::nullopt},
+        // left_bound = 1 keeps only the diagonal: a band, not causal.
+        DeprecatedCausalMaskCase{"LeftBoundOneIsDiagonalOnly",
+                                 false,
+                                 false,
+                                 1,
+                                 0,
+                                 ALIGN_TOP_LEFT,
+                                 plan_utils::MaskType::SLIDING_WINDOW},
         DeprecatedCausalMaskCase{"BoundsOnlyTopLeftCausal",
                                  false,
                                  false,
