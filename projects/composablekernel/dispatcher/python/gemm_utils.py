@@ -1201,8 +1201,9 @@ def _fp8_encode_tables(exp_bits: int, mant_bits: int, use_ocp: bool):
     mant_bits <= 3, so midpoints use at most 4 mantissa bits out of the 7 kept
     in the top 16 bits of float32). No rounding boundary therefore falls strictly
     inside a top-16-bit bucket, and the encoded byte depends only on the top 16
-    bits (``hi16``) and on whether the low 16 bits (``lo16``) are non-zero (which
-    breaks odd-midpoint ties upward and turns +/-Inf payload bits into NaN).
+    bits (``hi16``) and on whether the low 16 bits (``lo16``) are non-zero: that
+    sends a midpoint whose tie goes to the even neighbour of smaller magnitude to
+    the larger one instead, and turns +/-Inf payload bits into NaN.
 
     Returns ``(lut0, lut1, diff)``: the ladder evaluated at ``lo16 == 0`` and at
     ``lo16 == 1`` (standing in for any non-zero ``lo16``) over all 65,536 ``hi16``
@@ -1239,7 +1240,8 @@ def _fp8_encode(
     u32 = np.ascontiguousarray(x, dtype=np.float32).reshape(-1).view(np.uint32)
     hi16 = (u32 >> np.uint32(16)).astype(np.uint16)
     out = lut0[hi16]
-    # Only odd-midpoint and +/-Inf buckets (~130 of 65536) depend on lo16.
+    # Only ~130 of 65536 buckets depend on lo16: +/-Inf, and the midpoints whose
+    # tie goes to the even neighbour of smaller magnitude.
     cand = np.flatnonzero(diff[hi16])
     fix = cand[(u32[cand] & np.uint32(0xFFFF)) != 0]
     out[fix] = lut1[hi16[fix]]
@@ -1432,6 +1434,7 @@ def _sweep_max_rel(runner, A: np.ndarray, B: np.ndarray, output: np.ndarray) -> 
 
     def build():
         ref = runner.reference(A, B)
+        # max|ref| as a 0-d array: _sweep_cached freezes every element it caches
         return ref, np.array(float(np.max(np.abs(ref))) or 1.0)
 
     key = _encoding(_dtype_from_kernel_name(runner.kernel_name), runner._use_ocp)
