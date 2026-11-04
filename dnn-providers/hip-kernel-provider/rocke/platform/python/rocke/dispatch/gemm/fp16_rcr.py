@@ -26,6 +26,7 @@ from ..core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    ShapeRange,
     stable_json_hash,
     selector_matches,
 )
@@ -164,6 +165,63 @@ def _spec_rdna_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
+def _spec_gfx1201_wmma_128x128x16(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=128,
+            tile_n=128,
+            tile_k=16,
+            warp_m=4,
+            warp_n=1,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="default"),
+    )
+
+
+def _spec_gfx1201_wmma_128x64x32(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=128,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=1,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="default"),
+    )
+
+
+def _spec_gfx1201_wmma_64x128x32(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=64,
+            tile_n=128,
+            tile_k=32,
+            warp_m=1,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="default"),
+    )
+
+
 def _make_candidate(
     *,
     name: str,
@@ -171,6 +229,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
     arches: Tuple[str, ...],
+    shapes: Tuple[ShapeRange, ...] = (),
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -205,7 +264,9 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=GEMM_FP16_RCR_ABI_VERSION,
         priority=priority,
-        capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
+        capability=Capability(
+            arches=arches, dtypes=("fp16",), layouts=("RCR",), shapes=shapes
+        ),
         _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
@@ -249,10 +310,59 @@ GEMM_FP16_REGISTRY.extend(
             spec_fn=_spec_cdna_cshuffle,
             arches=_CDNA_MFMA_FP16,
         ),
+        # Keep small outputs and short reductions on the existing RDNA tiles.
+        # The area gates leave enough independent workgroups before increasing
+        # per-workgroup reuse; exact tile divisibility is checked by support().
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_128x128x16",
+            spec_id="gfx1201_wmma_128x128x16",
+            priority=10,
+            spec_fn=_spec_gfx1201_wmma_128x128x16,
+            arches=("gfx1201",),
+            shapes=(
+                ShapeRange("output_elements", min=1 << 20, max=1 << 21),
+                ShapeRange("K", min=256),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_128x64x32",
+            spec_id="gfx1201_wmma_128x64x32",
+            priority=11,
+            spec_fn=_spec_gfx1201_wmma_128x64x32,
+            arches=("gfx1201",),
+            shapes=(
+                ShapeRange("output_elements", min=1 << 20),
+                ShapeRange("K", min=256),
+            ),
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_64x128x32",
+            spec_id="gfx1201_wmma_64x128x32",
+            priority=12,
+            spec_fn=_spec_gfx1201_wmma_64x128x32,
+            arches=("gfx1201",),
+            shapes=(
+                ShapeRange("output_elements", min=1 << 20),
+                ShapeRange("K", min=256),
+            ),
+        ),
+        # Large outputs whose K is a multiple of 16 but not 32 keep the
+        # medium tile rather than falling back to the RDNA default.
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_128x128x16_large",
+            spec_id="gfx1201_wmma_128x128x16_large",
+            priority=13,
+            spec_fn=_spec_gfx1201_wmma_128x128x16,
+            arches=("gfx1201",),
+            shapes=(
+                ShapeRange("output_elements", min=(1 << 21) + 1),
+                ShapeRange("K", min=256),
+            ),
+        ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma",
             spec_id="rdna_wmma_default",
-            priority=10,
+            priority=14,
             spec_fn=_spec_rdna_wmma,
             arches=RDNA_WMMA_GEMM_ARCHES,
         ),

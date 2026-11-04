@@ -43,10 +43,11 @@ class GemmRequest(OperatorRequest):
         return d
 
     def dims(self) -> dict[str, int]:
-        return {"M": int(self.M), "N": int(self.N), "K": int(self.K)}
+        m, n = int(self.M), int(self.N)
+        return {"M": m, "N": n, "K": int(self.K), "output_elements": m * n}
 
 
-GEMM_DIM_VOCABULARY = ("M", "N", "K")
+GEMM_DIM_VOCABULARY = ("M", "N", "K", "output_elements")
 
 # The RDNA targets the fp16 and bf16 WMMA candidates declare. Listing
 # gfx11-generic covers every gfx11 processor whose arch_specs.json row points at
