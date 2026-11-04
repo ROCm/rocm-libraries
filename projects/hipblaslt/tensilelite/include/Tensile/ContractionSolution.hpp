@@ -44,6 +44,7 @@
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
@@ -959,8 +960,9 @@ namespace TensileLite
         using Problem             = ContractionProblemGemm;
         using Inputs              = ContractionInputs;
         using GroupedInputs       = ContractionGroupedInputs;
-        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
-        using StaggerUParamsCache = CacheMap<std::tuple<size_t, size_t, size_t>, Problem>;
+        using WGMParamsCache
+            = InsertOnceCache<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
+        using StaggerUParamsCache = InsertOnceCache<std::tuple<size_t, size_t, size_t>, Problem>;
 
         /**
          * Indicate a solution's matching type
