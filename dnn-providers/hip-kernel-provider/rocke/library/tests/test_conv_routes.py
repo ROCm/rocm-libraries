@@ -246,3 +246,20 @@ def test_replay_loads_routes():
         for k, v in cases.items():
             assert ("route_plan" in v) == (v["route"] != "direct")
             assert v["kernel"]
+
+
+def test_shipped_route_kernels_are_the_pin_picks():
+    """The shipped route table names the shipped pin table's kernels: a row with its
+    ``kernel`` removed and the pin table passed resolves to the same plan."""
+    if "gfx942_unet3d_bf16" not in SHIPPED:
+        pytest.skip("no shipped route table")
+    doc = json.loads(SHIPPED["gfx942_unet3d_bf16"].read_text())
+    pins = cp.load_conv_pins(PIN_TABLE, "deterministic")
+    for mode, m in doc["modes"].items():
+        r = cr.load_conv_routes(SHIPPED["gfx942_unet3d_bf16"], mode)
+        bare = {k: {f: v for f, v in row.items() if f != "kernel"} for k, row in m["cases"].items()}
+        rb = cr.routes_from_mapping(dict(m, cases=bare), source="bare")
+        for case in r.by_case():
+            p1 = cr.dispatch_conv_route(_req(case, r), r)
+            p2 = cr.dispatch_conv_route(_req(case, rb), rb, pins)
+            assert (p1.route, p1.kernel_label) == (p2.route, p2.kernel_label), case

@@ -68,7 +68,8 @@ route table covers the problem, else a `direct` plan of the pin table's kernel (
 as `--run-from-cache` binds a cached binary). `benchmarks/common/conv_route_check.py` verifies, determinism-checks and
 times every routed case through dispatch; `benchmarks/common/conv_step_replay.py --routes <table>#<mode>@pad1`
 replays a training step through the routes (`--routes-variant NAME:<table>#<mode>@<form>` judges them against
-`--pins` in one session).
+`--pins` in one session; `--form-variant NAME:<pin table>#<mode>` adds the halo form of the same step, on its own
+buffers, as a reference).
 
 ## Regenerating a table
 
@@ -76,5 +77,9 @@ replays a training step through the routes (`--routes-variant NAME:<table>#<mode
    halo-form kernel on a pad copy, and the Winograd drop-in candidates (Winograd benchmark `--adapter`, with `--verify` and
    repeated-run determinism).
 2. Keep each case's fastest route; write the rows above (the halo-form kernel label, or the Winograd spec and `wtv`).
+   The `kernel` of a `direct` / `padcopy_halo` row is the deterministic pick of the shipped pin table
+   (`dispatch/conv_pin_tables`): the padded problem's pin, or the halo problem's pin. Regenerate the labels after a
+   pin table refresh (drop `kernel`, resolve with `pins=`, write the plan's `kernel_label` back);
+   `tests/test_conv_routes.py` checks that the two agree.
 3. Validate through dispatch: `conv_route_check.py --verify --det-runs N --rounds R` on every case, the output
    digests compared across two devices (`--against`), and the step replay.
