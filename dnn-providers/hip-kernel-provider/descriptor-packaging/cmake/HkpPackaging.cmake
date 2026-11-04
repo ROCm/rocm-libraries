@@ -872,6 +872,14 @@ want = os.environ.get(\"ROCKE_COMGR_LIB\")
 got = getattr(lib, \"_name\", None)
 if want and (not got or os.path.realpath(got) != os.path.realpath(want)):
     sys.exit(f\"comgr loaded {got!r} instead of the requested {want!r}\")
+try:
+    from rocke.core import lower_llvm
+    flavor = lower_llvm._resolve_llvm_flavor()
+    version = comgr._require_compiler_info().llvm_version
+    llvm = \".\".join(map(str, version)) if version else \"unknown\"
+except Exception as error:
+    flavor, llvm = \"unknown\", f\"unknown ({error})\"
+print(f\"{got};{llvm};{flavor}\", end=\"\")
 ")
     # Each assignment must reach `-E env` as ONE argv element: the Windows
     # PYTHONPATH separator is also CMake's list separator, so an unquoted
@@ -884,7 +892,9 @@ if want and (not got or os.path.realpath(got) != os.path.realpath(want)):
         ERROR_VARIABLE _err)
     if(_rc EQUAL 0)
         set(${out_ok} TRUE PARENT_SCOPE)
-        set(${out_detail} "" PARENT_SCOPE)
+        # On success the detail is "<loaded comgr>;<LLVM version>;<rocKE flavor>".
+        string(STRIP "${_out}" _detail)
+        set(${out_detail} "${_detail}" PARENT_SCOPE)
     else()
         set(${out_ok} FALSE PARENT_SCOPE)
         string(STRIP "${_err}${_out}" _detail)
@@ -1544,6 +1554,28 @@ the one named here.")
             "one discoverable, or configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF "
             "to pack without rocKE. Resolver said:\n"
             "${_comgr_detail}")
+    endif()
+    # The comgr that lowers the kernels decides their code quality, and nothing
+    # ties it to the ROCm the plugin is later loaded into: a build configured
+    # against an older ROCm silently ships kernels compiled by that ROCm's LLVM.
+    list(LENGTH _comgr_detail _comgr_fields)
+    if(_comgr_fields EQUAL 3)
+        list(GET _comgr_detail 0 _comgr_loaded)
+        list(GET _comgr_detail 1 _comgr_llvm)
+        list(GET _comgr_detail 2 _comgr_flavor)
+        message(STATUS
+            "hkp: rocKE kernels are compiled by ${_comgr_loaded} "
+            "(LLVM ${_comgr_llvm}, rocKE flavor ${_comgr_flavor})")
+        if(_comgr_flavor STREQUAL "llvm20")
+            message(WARNING
+                "hkp: rocKE kernels will be compiled by an LLVM 20 comgr "
+                "(${_comgr_loaded}), i.e. a ROCm 7.0/7.1 toolchain. Kernels "
+                "built this way can run far slower than the same kernels built "
+                "by the comgr of a current ROCm, so benchmarks and heuristics "
+                "measured on this build do not represent what a current ROCm "
+                "ships. Set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to the comgr of "
+                "the ROCm the plugin will run on.")
+        endif()
     endif()
     hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
     hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready _rocke_python_dir
