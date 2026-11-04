@@ -181,7 +181,8 @@ typedef void (*hipfftJITCallbackStoreD)(
    * supported for single-device transforms, this array must have one
    * pointer element in it if it is specified.  The pointer will be
    * passed to the callback function's `cbdata` parameter when it is
-   * executed on that device.
+   * executed on that device.  The specified array must remain valid until
+   * either the plan is initialized or callbacks are cleared from the plan.
    *
    * If specified, the `cbdata` array must remain valid until either
    * the plan is destroyed or callbacks are cleared from the plan.
