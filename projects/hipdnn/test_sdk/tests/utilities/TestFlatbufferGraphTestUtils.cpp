@@ -60,7 +60,7 @@ flatbuffers::FlatBufferBuilder
 
 } // namespace
 
-TEST(TestFlatbufferGraphTestUtils, MxMatmulGraphDefaultsToRowMajorScaleStrides)
+TEST(TestCreateValidMxMatmulGraph, DefaultsToRowMajorScaleStrides)
 {
     const auto builder = createValidMxMatmulGraph();
 
@@ -68,7 +68,7 @@ TEST(TestFlatbufferGraphTestUtils, MxMatmulGraphDefaultsToRowMajorScaleStrides)
     EXPECT_EQ(tensorStrides(builder, "scale_b"), (std::vector<int64_t>{32, 1}));
 }
 
-TEST(TestFlatbufferGraphTestUtils, MxMatmulGraphUsesGivenScaleStrides)
+TEST(TestCreateValidMxMatmulGraph, UsesGivenScaleStrides)
 {
     const auto builder = createMxMatmulGraphWithScaleStrides({1, 32}, {1, 4});
 
@@ -78,7 +78,7 @@ TEST(TestFlatbufferGraphTestUtils, MxMatmulGraphUsesGivenScaleStrides)
     EXPECT_EQ(tensorStrides(builder, "x_b"), (std::vector<int64_t>{32, 1}));
 }
 
-TEST(TestFlatbufferGraphTestUtils, MxMatmulGraphOverridesEachScaleSeparately)
+TEST(TestCreateValidMxMatmulGraph, OverridesEachScaleSeparately)
 {
     const auto onlyA = createMxMatmulGraphWithScaleStrides({1, 32}, {});
     EXPECT_EQ(tensorStrides(onlyA, "scale_a"), (std::vector<int64_t>{1, 32}));
