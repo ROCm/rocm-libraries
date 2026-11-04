@@ -201,20 +201,30 @@ Without a warm start the result depends on the seed.
 
 Evidence: an oracle replay of this coordinator (the real driver, adapter,
 coordinator and strategies; builds and GPU calls answered from an exhaustive
-sweep) on MI350X (gfx950), fp16 `rcr`, 8 problems with 5520 candidates each,
-the settings above. The figure is the geometric mean over the problems of the
-confirmed winner's speed relative to the best kernel's. Near-ties make it
-depend on the timing noise, so each range covers two noise models: one
-calibrated on the GPU's own search runs (a persistent offset per problem and
-kernel plus the GPU's run-to-run spread; 100 seeds) and heavy-tailed
-Student-t noise (60 seeds).
+sweep), fp16 `rcr`, 8 problems with 5520 candidates each, the settings above.
+The sweep ran on CPX compute partitions of an MI350X (gfx950), each an eighth
+of the GPU, and kernel rankings there differ from the full GPU's: "best" below
+means a partition's best. The replay and the GPU check below used the search
+code from before the deterministic TPE patch (`VENDOR.md` patch 5), with which
+a seed can take another path. The figure is the geometric mean over the
+problems of the confirmed winner's speed relative to the best kernel's.
+Near-ties make it depend on the timing noise, so each range covers two noise
+models: one calibrated on the GPU's own search runs (a persistent offset per
+problem and kernel plus the GPU's run-to-run spread; 100 seeds) and
+heavy-tailed Student-t noise (60 seeds).
 
 | Setting | Mean | p10 | Min | Runs >= 99% | Builds (8 problems) |
 |---|---|---|---|---|---|
 | `tpe`, `shared`, no warm start | 88% | 68% | 59-62% | 14-17% | 341-358 |
 | `tpe`, `shared`, warm start top 5 | 98.9-99.2% | 97.5-98.2% | 95% | 62-72% | 356-357 |
 
-On MI350X (gfx950), re-measured against the best kernel known for each
+Runs >= 99% depends most on the noise model: a third GPU calibration, which
+drew the offsets of kernels the GPU never measured regardless of how close
+they are to the best, gave 38% with the warm start (mean 98.6%). Its drop came
+mostly from one problem, whose 91%-of-best kernel drew a large speed-up and
+won half the runs, and was judged an artifact of that model.
+
+On one CPX partition, re-measured against the best kernel known for each
 problem, the seeds that missed without the warm start (seed 0: 85%, seed 1:
 72%) reached 100% with it at seed 1, `shared` (every problem got its
 best-known kernel), and 98.9% at seed 0, `per_problem` (worst problem 92%).
@@ -226,10 +236,11 @@ noise can swap near-ties. The heuristic's own top 5 never held the best kernel
 (best of 5: 79%): the warm start moves the search into good regions rather
 than handing it the answer. In the replay's original, lighter noise model,
 `per_problem` seeds without a warm start did not help (88%, at 616 builds),
-and a cap of 150 builds for the 8 problems took the warm-started
-`per_problem` search from 99.4% to 91%. The runs used about 356 of the 1200
-builds allowed: keep `new_builds_per_run` from binding by scaling it with the
-number of problems (the warm-started runs built about 45 kernels per problem).
+a cap of 150 builds for the 8 problems took the warm-started `per_problem`
+search from 99.4% to 91%, and the deterministic TPE patch left the means
+unchanged (88.9% and 99.6%). The runs used about 356 of the 1200 builds
+allowed: keep `new_builds_per_run` from binding by scaling it with the number
+of problems (the warm-started runs built about 45 kernels per problem).
 
 | Setting | Default | Meaning |
 |---|---|---|
