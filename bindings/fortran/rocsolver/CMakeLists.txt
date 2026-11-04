@@ -25,71 +25,25 @@
 # rocsolver.F90 is generated from the rocSOLVER headers; regenerate it, do not edit it.
 # It says `use rocblas`, so a rocblas.mod from the same compiler must exist to compile it.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.19)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(rocsolver-fortran LANGUAGES NONE)
-endif()
+project(rocsolver-fortran LANGUAGES NONE)
 
-# ROCm ships no Fortran compiler on Windows.
+# Not ON: ROCm ships no Fortran compiler on Windows.
 option(BUILD_FORTRAN_BINDINGS "Build the rocSOLVER Fortran bindings" "${UNIX}")
-
-option(BUILD_FORTRAN_CLIENTS "Build the rocSOLVER Fortran clients and binding tests" ON)
-
-# Both cache entries are shared monorepo-wide; the per-library names override them here only.
-if(DEFINED ROCSOLVER_BUILD_FORTRAN_BINDINGS)
-  set(BUILD_FORTRAN_BINDINGS ${ROCSOLVER_BUILD_FORTRAN_BINDINGS})
-endif()
-if(DEFINED ROCSOLVER_BUILD_FORTRAN_CLIENTS)
-  set(BUILD_FORTRAN_CLIENTS ${ROCSOLVER_BUILD_FORTRAN_CLIENTS})
-endif()
+option(BUILD_FORTRAN_CLIENTS "Build the rocSOLVER Fortran binding tests" ON)
 
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
              none assumed-shape assumed-rank)
 
-# Guarded: PARENT_SCOPE at the top level warns under -Wdev.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(ROCSOLVER_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
-endif()
-
 if(NOT BUILD_FORTRAN_BINDINGS)
   return()
 endif()
 
-if(DEFINED ROCM_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_HAVE_FORTRAN})
-elseif(DEFINED ROCM_LIBS_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_LIBS_HAVE_FORTRAN})
-else()
-  include(CheckLanguage)
-
-  # check_language() writes the CMAKE_Fortran_COMPILER cache entry, which
-  # rocm-cmake's toolchain-variable watch reports (and fails on under CI).
-  set(_rocm_warn_toolchain_var "${ROCM_WARN_TOOLCHAIN_VAR}")
-  set(_rocm_error_toolchain_var "${ROCM_ERROR_TOOLCHAIN_VAR}")
-  set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-  set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
-
-  # Must run before check_language(), which keeps any compiler already set.
-  include(${CMAKE_CURRENT_LIST_DIR}/cmake/ROCmFortranCompiler.cmake)
-  rocm_fortran_prefer_amdflang()
-
-  check_language(Fortran)
-  set(ROCM_WARN_TOOLCHAIN_VAR "${_rocm_warn_toolchain_var}")
-  set(ROCM_ERROR_TOOLCHAIN_VAR "${_rocm_error_toolchain_var}")
-  unset(_rocm_warn_toolchain_var)
-  unset(_rocm_error_toolchain_var)
-
-  if(CMAKE_Fortran_COMPILER)
-    set(_have_fortran TRUE)
-  else()
-    set(_have_fortran FALSE)
-  endif()
-endif()
-
-if(NOT _have_fortran)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCmFortranCompiler.cmake")
+if(NOT CMAKE_Fortran_COMPILER)
   message(STATUS "rocSOLVER: no Fortran compiler found, skipping the Fortran bindings")
   return()
 endif()
@@ -105,9 +59,7 @@ endif()
 include(GNUInstallDirs)
 
 # A missing optional binding must skip, not take the C library down with it.
-if(NOT TARGET roc::rocblas_fortran)
-  find_package(rocblas-fortran QUIET CONFIG PATH_SUFFIXES lib/cmake/rocblas)
-endif()
+find_package(rocblas-fortran QUIET CONFIG PATH_SUFFIXES lib/cmake/rocblas)
 if(NOT TARGET roc::rocblas_fortran)
   message(STATUS
     "rocSOLVER: the rocBLAS Fortran binding was not found, skipping the "
@@ -156,7 +108,6 @@ set(ROCSOLVER_FORTRAN_COMPILER_DIR "${_fc_name}" CACHE STRING
 set(_moddir "${CMAKE_CURRENT_BINARY_DIR}/include")
 set_target_properties(rocsolver_fortran PROPERTIES
   Fortran_MODULE_DIRECTORY "${_moddir}"
-  # Ignored before CMake 3.18; the .F90 suffix is preprocessed anyway.
   Fortran_PREPROCESS ON
   Fortran_FORMAT FREE
   POSITION_INDEPENDENT_CODE ON)
@@ -175,12 +126,8 @@ target_include_directories(rocsolver_fortran PUBLIC
 target_link_libraries(rocsolver_fortran PUBLIC roc::rocblas_fortran)
 
 # Link interface only. C is enabled because hip-config.cmake reaches FindThreads.
-if(NOT TARGET roc::rocsolver)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(rocsolver QUIET)
-endif()
+enable_language(C)
+find_package(rocsolver QUIET)
 
 # Substituted into a bare if() in the config template, so it must be TRUE or FALSE.
 if(TARGET roc::rocsolver)
@@ -191,19 +138,6 @@ else()
   message(STATUS
     "rocSOLVER: the C library was not found, so the Fortran bindings carry no "
     "link interface; a consumer will have to link it (-lrocsolver) itself.")
-endif()
-
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(ROCSOLVER_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
-endif()
-
-# In-tree the tests follow rocSOLVER's client switches, which also enable testing at the root.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
-   AND BUILD_FORTRAN_CLIENTS
-   AND NOT (BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES))
-  message(STATUS
-    "rocSOLVER: clients are not being built, skipping the Fortran binding tests.")
-  set(BUILD_FORTRAN_CLIENTS OFF)
 endif()
 
 # The uninstrumented Fortran executables cannot link an ASan librocsolver.
