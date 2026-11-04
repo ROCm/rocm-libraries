@@ -26,9 +26,8 @@ triggers the "other summation" branch (loopIdx=0 != unrollIdx=1).
 Two sub-paths tested
 --------------------
 1. **SGPR path (BufferLoad=True, globalReadIncsUseVgpr=False):**
-   Lines 5026-5092.  Uses tP_B (``isA=False``) to avoid the ``None``-rReg bug
-   in the ``isA=True`` branch's ``scalarStaticDivideAndRemainder`` call at
-   line 5047.  The SGPR path emits SMulI32 + SSubI32 + SLShiftLeftB32.
+   Lines 5026-5092, on tP_B (``isA=False``) and tP_A (``isA=True``).  With
+   tP_B the SGPR path emits SMulI32 + SSubI32 + SLShiftLeftB32.
 
 2. **printExit path (BufferLoad=False, globalReadIncsUseVgpr=True):**
    Lines 5023-5025.  With non-buffer-load the code calls ``printExit``
@@ -137,7 +136,6 @@ _MULTISUM_KERNEL = {
     "GlobalSplitUAlgorithm": "MultipleBuffer",
 }
 
-# tP for the B tensor (isA=False skips the broken None-rReg arm at line 5047).
 _TP_B = {
     "tensorChar": "B",
     "isA": False,

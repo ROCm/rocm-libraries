@@ -10,7 +10,9 @@ GlobalParameters:
   SleepPercent: 0
   NumElementsToValidate: -1
   NumBenchmarks: 1
-  EnqueuesPerSync: 1
+  EnqueuesPerSync: 3
+  RotatingBufferSize: 1024
+  ValidateAfterEnqueues: True
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   Device: 0

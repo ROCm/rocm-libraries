@@ -10,7 +10,9 @@ GlobalParameters:
   SleepPercent: 0
   NumElementsToValidate: -1
   NumBenchmarks: 1
-  EnqueuesPerSync: 1
+  EnqueuesPerSync: 3
+  RotatingBufferSize: 1024
+  ValidateAfterEnqueues: True
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 2
   Device: 0
@@ -48,7 +50,6 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: {sizes: [3072, 2048, 1, 4096], world: 1}
           - Exact: {sizes: [3072, 2048, 1, 4096], world: 2}
           - Exact: {sizes: [3072, 2048, 1, 4096], world: 4}
           - Exact: {sizes: [3072, 11264, 1, 4096], world: 4}

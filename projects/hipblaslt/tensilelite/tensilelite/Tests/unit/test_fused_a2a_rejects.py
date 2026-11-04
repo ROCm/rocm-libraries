@@ -47,6 +47,8 @@ _ARCH = "gfx942"
 _MI_MT128 = [16, 16, 32, 1, 1, 4, 4, 2, 2]
 # MIWaveTile0 = 2 -> MacroTile0 = 2 * 16 * 2 = 64, outside {128, 256}.
 _MI_MT64 = [16, 16, 32, 1, 1, 2, 4, 2, 2]
+# MIWaveTile1 = 2 -> MacroTile1 = 64.
+_MI_MT1_64 = [16, 16, 32, 1, 1, 4, 2, 2, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +245,12 @@ _A2A_GEMM_GUARDS = [
     ({"DirectToVgprB": True}, "DirectToVgprA=DirectToVgprB=0", "gfx942"),
     ({"UseSubtileImpl": True, "DepthU": 64}, "UseSubtileImpl=0", "gfx950"),
     ({"BufferLoad": False}, "BufferLoad=1", "gfx942"),
+    ({"ProblemType": {"DataTypeA": "b", "DataTypeB": "h"}}, "a bf16 B", "gfx942"),
+    ({"mi": list(_MI_MT64)}, "MacroTile0/1 in {128, 256}", "gfx942"),
+    ({"mi": list(_MI_MT1_64)}, "MacroTile0/1 in {128, 256}", "gfx942"),
+    ({"WorkGroupMapping": -1}, "WorkGroupMapping >= 0", "gfx942"),
+    ({"WorkGroupMappingXCC": 2}, "WorkGroupMappingXCC=1", "gfx942"),
+    ({"SpaceFillingAlgo": [0]}, "SpaceFillingAlgo=[]", "gfx942"),
 ]
 
 
@@ -272,6 +280,12 @@ def test_a2a_sub_rounds_accepted_with_a2a_gemm(_gp_gfx942, request, assembler, c
     sol, out = _derive_a2a_gemm(request, assembler, capsys, arch="gfx950",
                                 A2ASubRounds=2, DepthU=64)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+
+def test_a2a_sub_rounds_reject_depth_u_below_128_bytes(_gp_gfx942, request, assembler, capsys):
+    sol, out = _derive_a2a_gemm(request, assembler, capsys, A2ASubRounds=2)
+    assert sol.get("Valid") is False
+    assert "A2ASubRounds > 1 requires DepthU*bpeB % 128 == 0" in out
 
 
 def test_a2a_sub_rounds_rejected_without_a2a_gemm(_gp_gfx942, request, assembler, capsys):
