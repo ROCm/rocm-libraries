@@ -91,14 +91,18 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `platform/python/rocke/runtime/_comgr_fresh_process.py` | the child process of `compile_kernel(..., fresh_process=True)` (3.5a: `iglp_opt(1)` kernels) |
 | `library/tests/test_attention_bwd_ir_golden.py`, `tests/golden/attention_bwd_ir_sha256.json` | LLVM-IR golden hashes of the main, split dQ, aux and unified kernels on the four targets at every LLVM flavor (11) |
 | `library/tests/parity/barrier_fence_emit.py`, `tests/test_barrier_fence_parity_emit.py` | the Python reference emitter of the barrier `fence` attribute and its checks (11) |
+| `platform/cpp/instances/common/attention_bwd*.cpp`, `attention_dense_bwd*.cpp`, `_attention_bwd_*.cpp`, `_attention_dense_bwd_shell.cpp`; `platform/cpp/helpers/attention_band.cpp` | the C++ twins of the kernel builders and their helpers (0.3); headers `rocke/instance_attention_bwd*.h`, `rocke/instance_attention_dense_bwd*.h`, `rocke/helper_rocke.instances.common._attention_bwd_*.h`, `rocke/helper_rocke.helpers.attention_band.h` |
+| `library/tests/parity/attention_bwd_*_emit.{py,c}`, `attention_dense_bwd_*_emit.{py,c}` | the 20 parity pairs of the twins: a Python emitter and a C driver that build the same configs (0.3) |
+| `platform/tests/instances/differential/check_native_golden.py`, `platform/tests/cmake/NativeGoldenTests.cmake` | the ctest `rocke_native_golden_ll`: the installed C++ emitters against the differential golden (0.3, 11) |
+| `library/tests/test_attention_bwd_ir_cpp_parity.py` | both engines lower the dispatcher's kernels to the same `.ll` (0.3, 11) |
 
 ### 0.3 The C++ engine
 
-The backward modules are Python-only family glue: their selectors, specs,
-plans, knob registries and routing exist in Python only, and their kernels
-are lowered and compiled with the Python lowering backend. The change adds
-one thing to the C++ engine, the mirror of a Python change that other families
-share, and relies on two that the platform now carries itself:
+The kernel builders of the backward have C++ twins (below). The rest of the
+family is Python-only: its selectors, plans, knob registries, routing, tuned
+tables and recorded refusals. The Python family added one thing to the C++
+engine, the mirror of a Python change that other families share, and relies
+on two that the platform now carries itself:
 
 * **The barrier `fence` attribute** of `tile.sync`, `tile.sync_lds_only` and
   `tile.s_barrier_bare` (every backward barrier carries `fence="compiler"`,
@@ -128,24 +132,37 @@ share, and relies on two that the platform now carries itself:
   already emits, so the two engines name that kernel identically (a
   byte-identity fix of the forward family).
 
-**C++ engine waiver.** The attention backward families (general,
-split dQ, aux, dense, unified) have no C++ twin in this change: no C++
-selector, spec, plan, knob registry, routing or kernel builder. The
-dual-engine rule of `platform/AGENTS.md` (byte-identical IR from both
-engines) applies to every family the C++ engine builds and serves; the
-backward family is not one of them: the C++ engine does not build or serve a
-backward kernel and no C++ caller plans a backward request, so the provider's
-rocKE path does not offer this backward to hipDNN until a C++ port (or a
-Python-serving path) lands; hipDNN serves the backward with its other engines
-meanwhile.
-What the backward kernels share with the C++ engine, the barrier fence, is
-mirrored and tested above, and `check_byte_identity.py` (llvm20, llvm22,
-llvm23) holds the IR of every dual-engine family unchanged. The backward
-kernels' own IR is pinned by the Python golden hashes
-(`test_attention_bwd_ir_golden.py`, `test_attention_dense_bwd_ir.py`).
-Follow-up: a C++ port of the backward plan and kernels when a provider serves
-the backward without Python. The reviewer's sign-off on this waiver is
-recorded in the pull request.
+**C++ twins of the builders.** Every backward kernel builder has a C++
+twin: the aux kernels (prep, convert, reduce, page zero, page convert), the
+general main kernel, the split dQ kernel, the dense main and dQ kernels and
+the unified main kernel, with the helpers they use (the 0.2 file map lists
+the files). Each twin emits the same
+LLVM IR as its Python builder, byte for byte, for every config of its parity
+pair (`library/tests/parity/attention_bwd_*_emit.{py,c}` and
+`attention_dense_bwd_*_emit.{py,c}`, 20 families). The dual-engine rule of
+`platform/AGENTS.md` holds through three checks (11):
+
+* `check_byte_identity.py` builds the engine from source and compares the two
+  engines on every parity config, refusals included (CPU, not in CI).
+* The ctest `rocke_native_golden_ll` runs the installed C++ emitters against
+  the differential golden that `rocke_differential_golden_ll` checks the Python
+  emitters against, at every golden LLVM flavor. CI runs both, so a Python
+  builder that changes without its twin fails CI.
+* `test_attention_bwd_ir_cpp_parity.py`: the C++ lowerer gives the Python
+  `.ll` for every kernel the dispatcher can select (CPU, with `rocke_engine`
+  built; it is in no ctest list, so it runs locally only).
+
+**Not ported.** The recorded resource-gate refusals stay Python-only:
+`RESOURCE_REFUSED` (`_attention_bwd_refusals.py`) and `DQ_RESOURCE_REFUSED`
+(`attention_bwd_dq.py`), both keyed by `spec_digest`. The C++ main and dQ
+builders build those specs (the main one as Python's
+`_emit_main(..., main_kernel_refusals=False)` does). Until the tables are
+ported, a C++ caller that launches those kernels must ask Python first:
+`resource_refusal` for the main kernel, `validate_attn_bwd_dq_spec` for the
+dQ kernel. No C++ caller exists yet: no provider plans a backward request, so
+the provider's rocKE path does not offer this backward to hipDNN, which
+serves the backward with its other engines meanwhile (8.4). Follow-up: a
+provider backward path (C++ plan and routing, or a Python-serving path).
 
 ### 0.4 Family glue and the helper layer
 
@@ -153,8 +170,9 @@ The family's emitters live in `library/kernels/common/_attention_bwd_*.py`,
 not in `platform/python/rocke/helpers/`. By `platform/AGENTS.md` ("helpers/
 placement") an SSA emitter goes to `helpers/` when a second family uses it (or
 plausibly will) and it has a C++ port path; single-family glue stays with the
-family. The backward has one consumer family and no C++ port (0.3), so nothing
-is promoted; a piece moves when a second family needs it. The map against the
+family. The backward has one consumer family, and its C++ twins (0.3) live
+with the family in `platform/cpp/instances/common/`, so nothing is promoted; a
+piece moves, with its twin, when a second family needs it. The map against the
 existing helpers:
 
 | Family module | What it holds | Nearest helper | Relation |
@@ -171,7 +189,7 @@ existing helpers:
 **Shared code: one copy each.** A helper the family's modules repeat has one
 definition. Where it lives follows the placement rule above: a host-only
 utility (no IR) may go to a shared helper module, an emitter stays in the
-family glue (it would need a C++ port as a `helpers/` emitter, 0.3):
+family glue (promoting one moves its C++ twin to `platform/cpp/helpers/` too, 0.3):
 
 | Helper | Home | Users |
 |---|---|---|
@@ -200,8 +218,8 @@ tile layout next to `helpers/loads.py`); the atomic-aware `vmcnt` wait model
 of the prefetch ring and the counted waits (an extension of
 `helpers/pipeline.py`'s wait model); and the round-robin chunk dealing
 (`deal_chunks` / `chunk_coords`, close to `helpers/loads.py`'s
-`CoalescedTileLoader`). Each is an SSA emitter, so promoting it needs the C++
-port the backward does not have (0.3); none is promoted now. The LDS phase
+`CoalescedTileLoader`). Each is an SSA emitter, so promoting it moves its C++
+twin (0.3) to `platform/cpp/helpers/` as well; none is promoted now. The LDS phase
 planner, the stage tables, the workspace and paged addressing and `BlockGemm`
 (which overlaps `helpers/tiling`'s `TileMma`) are backward-specific or
 covered by an existing helper.
@@ -1913,15 +1931,16 @@ points `dispatch_attention_bwd`, `dispatch_attention_bwd_all`,
 
 **Production status: dormant.** This routing and the dispatcher are not
 load-bearing for production yet. No provider calls it: the hip-kernel-provider serves rocKE
-kernels through the C++ engine, which has no backward (0.3), so a hipDNN
-backward request is served by the provider's other engines. Its callers today are
+kernels through the C++ engine, which has the backward kernel builders but
+not this routing or the refusal tables (0.3), so a hipDNN backward request
+is served by the provider's other engines. Its callers today are
 the tests (`test_serving_policy.py` plans every accepted case through
 `routing.plan_attention_bwd` with the shipped policy and no override;
 `tests/dispatch/attention_bwd/test_registry.py` drives the dispatcher); the
 timing harness plans its rocKE arms with the configured policy of each arm
 (`attention_bwd_rocke_arm.config_policy`). Follow-up: wire the provider's backward path to
-`attention_bwd_declaration` and `plan_attention_bwd` (with the C++ port of
-0.3, or through a Python-serving provider).
+`attention_bwd_declaration` and `plan_attention_bwd` (a C++ port of the routing
+and plan on top of the twins of 0.3, or a Python-serving provider).
 
 The scalar `fmha_bwd.py` kernel and the `mfma_attention_bwd.py` helpers are a
 separate, older backward (CK Tile parity); this family neither uses nor
@@ -2293,7 +2312,9 @@ Runtime and aux values:
 
 | Gate | Where it runs | Proves | Does not prove |
 |---|---|---|---|
-| Byte identity (`platform/tools/check_byte_identity.py`, at llvm20, llvm22, llvm23, and llvm24) | CPU, with `rocke_engine` built | the C++ and Python engines emit the same LLVM IR for every dual-engine family, so the shared changes (the barrier fence, the gfx942 3-D kernel name) moved no forward family | anything about the backward kernels: they have no C++ builder (0.3) |
+| Byte identity (`platform/tools/check_byte_identity.py`, at llvm20, llvm22, llvm23, and llvm24) | CPU, with the engine built from source (not in CI) | the C++ and Python engines emit the same LLVM IR, and refuse the same configs, for every dual-engine family, the 20 backward parity families included (0.3) | numerics; the Python-only refusal tables and routing (0.3) |
+| Native golden (`ctest -R rocke_native_golden_ll`; `platform/tests/instances/differential/check_native_golden.py`) | CPU, in CI (quick and ffm-quick tiers), from the installed tree | each installed C++ backward emitter gives the blessed `.ll` for every config the golden blesses and refuses every other config, at llvm20, llvm22, llvm23 and llvm24; with `rocke_differential_golden_ll` (Python == golden) that is C++ == Python | refusal messages (the golden holds none; byte identity compares them) |
+| Lowerer parity (`tests/test_attention_bwd_ir_cpp_parity.py`) | CPU, with `rocke_engine` built; in no ctest list, so local only | the C++ lowerer gives the Python `.ll` for every kernel the dispatcher can select (tuned tables, defaults, unified page tiles, `_KNOB_CASES`) at every golden flavor | that the C++ builders match (the two rows above) |
 | Backward IR goldens (`tests/test_attention_bwd_ir_golden.py`, `tests/test_attention_dense_bwd_ir.py`) | CPU, every flavor in every run | the LLVM IR of the main, split dQ, aux, unified and dense kernels on their targets equals the blessed hashes, for the default of every problem base and every registered knob value switched on (the uncovered values are listed and kept exact); a refactor that should be byte-identical is | that the IR is correct (numerics) |
 | Barrier-fence parity (`tests/parity/barrier_fence_emit.py` with `tests/test_barrier_fence_parity_emit.py`; `platform/tests/core/test_barrier_fence.{py,cpp}`) | CPU; the cross-engine part with `rocke_engine` built | each barrier gets exactly its fence emission in both engines; the serialized IR keeps the fence; the C++ engine lowers the serialized backward kernels to the Python bytes | that LLVM keeps LDS accesses on their side of a barrier (next row) |
 | Fence in the code object (`tests/test_attention_bwd_barrier_fence.py`) | compile (comgr + `llvm-objdump`) | LDS bytes read and written between consecutive prologue barriers are the same in the ISA as in the IR; the unfenced kernel shows the crossing (negative control) | |
