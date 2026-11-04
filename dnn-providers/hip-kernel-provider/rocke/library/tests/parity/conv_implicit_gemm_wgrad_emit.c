@@ -417,14 +417,17 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
     case 57:
     case 67:
     case 68:
+    case 69:
+    case 70:
     {
         /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57,
-         * 67 (55 with bf16 operands) and 68 (55 with an explicit vector_size_a,
-         * which both engines must reject). */
+         * 67 (55 with bf16 operands), 68 (55 with an explicit vector_size_a,
+         * which both engines must reject) and 69-70 (55 on the synchronous
+         * K loop with A/B load-width caps 4/2, K-outer and M-outer). */
         const bool big = idx == 56;
         if(idx == 57)
             spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
-        else if(idx == 55 || idx == 67 || idx == 68)
+        else if(idx == 55 || idx >= 67)
             spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
         else
             spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
@@ -445,12 +448,17 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->pipeline = "mem";
         spec->epilogue = "default";
         spec->split_k = big ? 4 : 2;
-        spec->lds_k_outer = true;
-        spec->async_dma = true;
-        if(idx == 68)
+        spec->lds_k_outer = idx != 70;
+        spec->async_dma = idx < 69;
+        if(idx >= 68)
         {
             spec->has_vector_size_a = true;
             spec->vector_size_a = 4;
+        }
+        if(idx >= 69)
+        {
+            spec->has_vector_size_b = true;
+            spec->vector_size_b = 2;
         }
         *arch = "gfx1250";
         return 0;

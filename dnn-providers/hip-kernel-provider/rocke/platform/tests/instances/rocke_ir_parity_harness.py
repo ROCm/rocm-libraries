@@ -2889,6 +2889,30 @@ def cases():
             async_dma=True,
         ),
     )
+    # The synchronous K-outer loop with explicit A/B load-width caps (4 and 2
+    # under the auto 8/8), which both engines apply to the free-axis loads.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4_kouter_vec4x2",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_spk4_kouter_vec4x2",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=4,
+            dtype_d="bf16",
+            lds_k_outer=True,
+            vector_size_a=4,
+            vector_size_b=2,
+        ),
+    )
     # WMMA split-K through the cshuffle epilogue (paired atomics from LDS).
     add(
         "conv_wgrad",

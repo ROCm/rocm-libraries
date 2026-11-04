@@ -600,14 +600,16 @@ static bool wgrad_group_merge_available(const rocke_implicit_gemm_conv_wgrad_spe
 #undef GM_REJECT
 }
 
-/* Python _wgrad_free_axis_vec(chan, dtype) with no override. */
-static int wgrad_free_axis_vec(int chan, const char* dtype)
+/* Python _wgrad_free_axis_vec(chan, dtype, override): the widest of {8,4,2,1}
+ * ({4,2,1} for fp32) dividing the channel run, clamped by an explicit
+ * vector_size_a / vector_size_b. The override is a cap, not a replacement. */
+static int wgrad_free_axis_vec(int chan, const char* dtype, bool has_override, int override_vec)
 {
     const bool f32 = dtype != NULL && strcmp(dtype, "fp32") == 0;
-    for(int v = f32 ? 4 : 8; v > 1; v /= 2)
-        if(chan % v == 0)
-            return v;
-    return 1;
+    int v = f32 ? 4 : 8;
+    while(v > 1 && chan % v != 0)
+        v /= 2;
+    return (has_override && override_vec < v) ? override_vec : v;
 }
 
 /* Mirrors Python _wmma_async_available: whether a wave32 spec can take the
@@ -636,8 +638,12 @@ static bool wgrad_wmma_async_available(const rocke_implicit_gemm_conv_wgrad_spec
         return false;
     }
     const int threads = s->warp_m * s->warp_n * s->wave_size;
-    const int cap_a = wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem), s->dtype_a);
-    const int cap_b = wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem), s->dtype_b);
+    /* Python _wmma_async_vecs passes no override: the async K loop does not
+     * honour vector_size_a/b (the validator rejects them there). */
+    const int cap_a
+        = wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem), s->dtype_a, false, 0);
+    const int cap_b
+        = wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem), s->dtype_b, false, 0);
     int va = 1;
     int vb = 1;
     if(rocke_coalesced_tile_loader_choose_vec_axis(s->tile_k, s->tile_m, threads, cap_a, false, &va)
@@ -3101,26 +3107,16 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* Every sync path (MFMA and WMMA); the async branch is handled above. */
         {
             /* free-axis width: widest of {8,4,2,1} ({4,2,1} for fp32) dividing
-             * the channel count -- Python _free_axis_vec(kpg/cpg, dtype). */
-            int kpg = rocke_conv_problem_kpg(&spec->problem);
-            int cpg = rocke_conv_problem_cpg(&spec->problem);
-            bool a_fp32 = (spec->dtype_a != NULL && strcmp(spec->dtype_a, "fp32") == 0);
-            bool b_fp32 = (spec->dtype_b != NULL && strcmp(spec->dtype_b, "fp32") == 0);
-            int cap_a = 1;
-            int cap_b = 1;
-            int wa, wb;
-            for(wa = a_fp32 ? 4 : 8; wa >= 1; wa /= 2)
-                if(kpg % wa == 0)
-                {
-                    cap_a = wa;
-                    break;
-                }
-            for(wb = b_fp32 ? 4 : 8; wb >= 1; wb /= 2)
-                if(cpg % wb == 0)
-                {
-                    cap_b = wb;
-                    break;
-                }
+             * the channel count, clamped by an explicit vector_size_a/b --
+             * Python _free_axis_vec(kpg/cpg, dtype, spec.vector_size_a/b). */
+            const int cap_a = wgrad_free_axis_vec(rocke_conv_problem_kpg(&spec->problem),
+                                                  spec->dtype_a,
+                                                  spec->has_vector_size_a,
+                                                  spec->vector_size_a);
+            const int cap_b = wgrad_free_axis_vec(rocke_conv_problem_cpg(&spec->problem),
+                                                  spec->dtype_b,
+                                                  spec->has_vector_size_b,
+                                                  spec->vector_size_b);
             /* Mirror the Python choose_vec, which RAISES ValueError when the tile
              * geometry admits no usable width (not even 1): fail fast here too so
              * a bad geometry surfaces as a clear error instead of silently

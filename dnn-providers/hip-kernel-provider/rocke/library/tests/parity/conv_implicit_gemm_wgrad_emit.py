@@ -81,6 +81,10 @@
 #   68 -- both engines must reject: case 55 with an explicit vector_size_a
 #         (the async K loop derives its chunk widths from the channel counts,
 #         so an explicit A/B load-width cap is rejected rather than ignored)
+#   69-70 -- gfx1250 synchronous K loop with explicit A/B load-width caps
+#         (vector_size_a=4, vector_size_b=2 under the auto 8/8): case 55
+#         without async_dma, K-outer (69, vector_axis="col") and M-outer
+#         (70, the transpose-on-store vector_axis="row" loader)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no other case loads bf16 operands: the
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
@@ -97,7 +101,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-68, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-70, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -721,7 +725,7 @@ def _spec(idx: int):
             arch,
         )
 
-    if 55 <= idx <= 57 or idx in (67, 68):
+    if 55 <= idx <= 57 or idx in (67, 68, 69, 70):
         # gfx1250 WMMA K loop: the global_load_async_to_lds ping-pong.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -739,6 +743,22 @@ def _spec(idx: int):
                 2,
                 False,
                 {"async_dma": True, "vector_size_a": 4},
+                "gfx1250",
+            ),
+            69: (
+                p_small,
+                "fp32",
+                2,
+                False,
+                {"vector_size_a": 4, "vector_size_b": 2},
+                "gfx1250",
+            ),
+            70: (
+                p_small,
+                "fp32",
+                2,
+                False,
+                {"vector_size_a": 4, "vector_size_b": 2, "lds_k_outer": False},
                 "gfx1250",
             ),
         }[idx]
