@@ -182,11 +182,14 @@ def test_dual_period_accepts_pgr2_du128(_gp_gfx950, gfx950_iim, assembler, capsy
     assert isSubtileMultiDU(sol) is False
 
 
-def test_dual_period_rejects_plr0(_gp_gfx950, gfx950_iim, assembler, capsys):
+def test_dual_period_accepts_plr0(_gp_gfx950, gfx950_iim, assembler, capsys):
     sol, out = _derive(gfx950_iim, assembler, capsys, _MI_8WAVE, 128, 2, 0)
-    assert sol.get("Valid") is False
-    assert "dual-period MXFP8 requires PrefetchLocalRead=1" in out
-    assert sol.get("_DualPeriodMXFP8") is False
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["PrefetchLocalRead"] == 0
+    assert sol.get("_DualPeriodMXFP8") is True
+    assert sol["DepthU"] == 128
+    assert sol["_ScalePeriodUA"] == 256 and sol["_ScalePeriodUB"] == 256
+    assert sol["_ScaleReuseA"] == 2 and sol["_ScaleReuseB"] == 2
 
 
 def test_dual_period_rejects_single_partition_geometry(

@@ -4359,16 +4359,12 @@ class Solution(collections.abc.Mapping):
                          and SCALE_SWIZZLE_K % depthU == 0
                          and SCALE_SWIZZLE_K // depthU >= 2)
 
-      # These constraints belong after the scale period has confirmed this is
-      # truly dual-period.  The provisional gate above also covers DU256 while
-      # selecting geometry, but DU256 has ScaleReuse=1 and must retain its
-      # existing PLR/partition eligibility.
-      if dualPeriodMXFP8 and state["PrefetchLocalRead"] != 1:
-        reject(state, printRejectionReason,
-               "dual-period MXFP8 requires PrefetchLocalRead=1")
-        state["_DualPeriodMXFP8"] = False
-        return
-
+      # PrefetchLocalRead is not a gate. The dual-period schedule pins its own
+      # plr=0 base and applies for both PLR0 and PLR1, matching the baseline.
+      # The partition constraint belongs after the scale period has confirmed
+      # this is truly dual-period. The provisional gate above also covers
+      # DU256 while selecting geometry, but DU256 has ScaleReuse=1 and must
+      # retain its existing partition eligibility.
       if dualPeriodMXFP8:
         # Kernel.mainLoop splits each even MIWaveTile axis at the scale-LR
         # granularity (2 MFMA tiles), rounding the half upward.  An axis of
