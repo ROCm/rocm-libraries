@@ -312,6 +312,7 @@ Solutions:
     macrotile: [16, 32, 128]
     name: RR_GEMM_TN_BF6_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2
     threads: [128, 1, 1]
+    uniformSummationOrder: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -383,6 +384,7 @@ Solutions:
     macrotile: [64, 32, 128]
     name: RR_GEMM_TN_BF6_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2
     threads: [256, 1, 1]
+    uniformSummationOrder: true
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 63}
   - {tag: SizeGreaterThan, index: 3, value: 127}
