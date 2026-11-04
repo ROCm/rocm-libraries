@@ -98,8 +98,10 @@ def _load_lib() -> ctypes.CDLL:
     values = owner.environment
     paths = _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"], values)
     explicit = (values if values is not None else os.environ).get("ROCKE_HIP_LIB")
-    selected = explicit or next(
-        (p for p in paths if os.path.isfile(p)), paths[-1] if paths else None
+    selected = (
+        paths[0]
+        if explicit and paths
+        else next((p for p in paths if os.path.isfile(p)), paths[-1] if paths else None)
     )
     if not selected:
         raise HipError("no HIP runtime candidate; provision SDK HIP or ROCKE_HIP_LIB")
@@ -111,6 +113,10 @@ def _load_lib() -> ctypes.CDLL:
     accepted = False
     try:
         mapped = _loaded_libraries.loaded_runtimes()
+        if len(mapped) > 1:
+            raise HipError(
+                f"multiple mapped HIP providers are ambiguous: {[item.path for item in mapped]!r}"
+            )
         matches = []
         for item in mapped:
             try:

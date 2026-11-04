@@ -44,12 +44,12 @@ class RuntimeSession:
             attempt = self._pending
             initialize = attempt is None
             if initialize:
-                if self.compiler is None and self.hip is None:
-                    import os
+                import os
 
-                    # Inputs belong to this attempt until a resource commits.
-                    # Waiters share it; a later failed-load retry gets new inputs.
-                    self.environment = dict(os.environ)
+                # Each cold resource captures its own attempt inputs, even if
+                # the other handle is retained. Waiters share this snapshot;
+                # retries refresh it, while warm calls never replace an owner.
+                self.environment = dict(os.environ)
                 attempt = self._pending = _Attempt(kind)
         if not initialize:
             attempt.done.wait()

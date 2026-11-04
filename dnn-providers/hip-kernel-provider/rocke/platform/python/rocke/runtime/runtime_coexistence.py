@@ -213,20 +213,28 @@ def _rocm_root_libdirs(environment=None) -> List[str]:
     return roots
 
 
+def _anchor_explicit_path(path: str) -> str:
+    """An explicit file must not become a platform-loader basename search.
+
+    Keep parent traversal intact: normalizing a symlink followed by '..' can
+    select a different physical file from the one the caller requested.
+    """
+    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+
+
 def _candidate_lib_paths(
     stem: str, env_var: str, sonames: List[str], environment=None
 ) -> List[str]:
     """Select from the owner's captured inputs, without importing frameworks."""
     values = os.environ if environment is None else environment
+    override = values.get(env_var)
+    if override:
+        return [_anchor_explicit_path(override)]
     if stem == "amd_comgr":
         from ._sdk_comgr import candidates
 
-        override = values.get(env_var)
-        return [override] if override else candidates(windows=_IS_WINDOWS)
+        return candidates(windows=_IS_WINDOWS)
     paths: List[str] = []
-    override = values.get(env_var)
-    if override:
-        return [override]
     bundled = _torch_bundled_lib(stem)
     if bundled is not None:
         paths.append(bundled)

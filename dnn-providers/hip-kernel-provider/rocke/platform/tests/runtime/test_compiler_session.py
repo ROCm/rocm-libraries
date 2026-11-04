@@ -14,7 +14,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 from rocke.runtime import comgr, _session
@@ -153,6 +153,148 @@ def test_failed_waiters_share_attempt_inputs_then_retry(owner, monkeypatch):
     assert calls == ["old"]
     assert owner.resolve("compiler", load)._name == "new"
     assert calls == ["old", "new"]
+
+
+@pytest.mark.parametrize(
+    "first,second,key",
+    [("hip", "compiler", "ROCKE_COMGR_LIB"), ("compiler", "hip", "ROCKE_HIP_LIB")],
+)
+def test_second_resource_captures_its_cold_inputs(
+    owner, monkeypatch, first, second, key
+):
+    retained = SimpleNamespace(_name="retained")
+    assert owner.resolve(first, lambda: retained) is retained
+    monkeypatch.setenv(key, "late-selection")
+    seen = []
+
+    def load():
+        seen.append(owner.environment[key])
+        if len(seen) == 1:
+            raise RuntimeError("retryable selection failure")
+        return SimpleNamespace(_name=owner.environment[key])
+
+    with pytest.raises(RuntimeError, match="retryable selection failure"):
+        owner.resolve(second, load)
+    monkeypatch.setenv(key, "repaired-selection")
+    selected = owner.resolve(second, load)
+    assert selected._name == "repaired-selection"
+    assert seen == ["late-selection", "repaired-selection"]
+    monkeypatch.setenv(key, "ignored-warm-change")
+    assert owner.resolve(second, lambda: pytest.fail("warm reload")) is selected
+    assert owner.resolve(first, lambda: pytest.fail("retained reload")) is retained
+
+
+@pytest.mark.parametrize("kind", ["compiler", "hip"])
+def test_late_missing_override_reaches_second_loader(
+    owner, tmp_path, monkeypatch, kind
+):
+    from rocke.runtime import hip_module
+
+    other = "hip" if kind == "compiler" else "compiler"
+    retained = SimpleNamespace(_name=str(tmp_path / "retained"))
+    owner.resolve(other, lambda: retained)
+    key = "ROCKE_COMGR_LIB" if kind == "compiler" else "ROCKE_HIP_LIB"
+    missing = str(tmp_path / "late-missing")
+    monkeypatch.setenv(key, missing)
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", lambda: [])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: [])
+    monkeypatch.setattr(_session, "check_pair", lambda hip, compiler: None)
+    load = Mock(side_effect=OSError("exact missing file"))
+    monkeypatch.setattr(ctypes, "CDLL", load)
+    resolve = comgr._resolve_lib if kind == "compiler" else hip_module._resolve_hip
+    error = comgr.ComgrError if kind == "compiler" else hip_module.HipError
+    with pytest.raises(error, match="late-missing"):
+        resolve()
+    load.assert_called_once_with(missing)
+    assert getattr(owner, kind) is None and getattr(owner, other) is retained
+
+
+@pytest.mark.parametrize("kind", ["compiler", "initialize", "hip"])
+@pytest.mark.parametrize(
+    "relative", ["selected.so", "directory with spaces/selected.so"]
+)
+def test_explicit_paths_are_anchored_before_loading(
+    owner, tmp_path, monkeypatch, kind, relative
+):
+    from rocke.runtime import hip_module
+
+    monkeypatch.chdir(tmp_path)
+    expected = os.path.join(str(tmp_path), relative)
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", lambda: [])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: [])
+    load = Mock(side_effect=OSError("not loadable"))
+    monkeypatch.setattr(ctypes, "CDLL", load)
+    if kind == "initialize":
+        resolve = lambda: comgr.initialize_compiler(relative)
+    elif kind == "compiler":
+        monkeypatch.setenv("ROCKE_COMGR_LIB", relative)
+        resolve = comgr._resolve_lib
+    else:
+        monkeypatch.setenv("ROCKE_HIP_LIB", relative)
+        resolve = hip_module._resolve_hip
+    error = hip_module.HipError if kind == "hip" else comgr.ComgrError
+    with pytest.raises(error, match="selected.so"):
+        resolve()
+    load.assert_called_once_with(expected)
+
+
+@pytest.mark.parametrize(
+    "stem,key", [("amd_comgr", "ROCKE_COMGR_LIB"), ("amdhip64", "ROCKE_HIP_LIB")]
+)
+def test_explicit_candidates_preserve_symlink_parent_traversal(
+    tmp_path, monkeypatch, stem, key
+):
+    from rocke.runtime import runtime_coexistence
+
+    nested = tmp_path / "physical" / "nested"
+    nested.mkdir(parents=True)
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(nested, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlink unavailable: {error}")
+    physical = nested.parent / "selected.so"
+    physical.touch()
+    monkeypatch.chdir(tmp_path)
+    relative = os.path.join("alias", "..", "selected.so")
+    paths = runtime_coexistence._candidate_lib_paths(stem, key, [], {key: relative})
+    assert paths == [os.path.join(str(tmp_path), relative)]
+    assert os.path.samefile(paths[0], physical)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_multiple_mapped_hip_providers_are_rejected_even_with_match(
+    owner, tmp_path, monkeypatch, explicit
+):
+    from rocke.runtime import hip_module
+    from rocke.runtime._loaded_libraries import LoadedLibrary
+    from rocke.runtime._compiler_query import file_signature
+
+    providers = []
+    for name in ("selected.so", "foreign.so"):
+        path = tmp_path / name
+        path.touch()
+        providers.append(
+            LoadedLibrary(
+                SimpleNamespace(_name=str(path)), str(path), file_signature(path)
+            )
+        )
+    selected = providers[0].path
+    monkeypatch.setattr(hip_module, "_candidate_lib_paths", lambda *args: [selected])
+    if explicit:
+        monkeypatch.setenv("ROCKE_HIP_LIB", selected)
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: providers)
+    cleanup = Mock()
+    monkeypatch.setattr(comgr._loaded_libraries, "release", cleanup)
+    load = Mock(side_effect=AssertionError("new HIP load"))
+    monkeypatch.setattr(ctypes, "CDLL", load)
+    with pytest.raises(
+        hip_module.HipError, match="multiple mapped HIP providers.*ambiguous"
+    ):
+        hip_module._resolve_hip()
+    load.assert_not_called()
+    assert cleanup.call_args_list == [call(item) for item in providers]
+    assert owner.hip is None
 
 
 def test_explicit_reinitialization_preserves_exact_file(owner, tmp_path, monkeypatch):
@@ -442,6 +584,94 @@ def library(
         text=True,
     )
     return output
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not shutil.which("cc"), reason="ELF loader fixtures"
+)
+@pytest.mark.parametrize("kind", ["compiler", "initialize", "hip"])
+@pytest.mark.parametrize("local", ["missing", "corrupt"])
+def test_filename_override_cannot_search_for_another_file(tmp_path, kind, local):
+    name = "libamdhip64.so.7" if kind == "hip" else "libamd_comgr.so.3"
+    fallback = library(
+        tmp_path / "loader",
+        name=name,
+        constructor="int hipInit(unsigned x){return 0;} int hipGetDeviceCount(int*n){*n=0;return 0;}",
+    )
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    if local == "corrupt":
+        (cwd / name).write_text("not a shared library")
+    code = """
+import os,sys
+from rocke.runtime import comgr,hip_module,_session
+from rocke.runtime._loaded_libraries import loaded_compilers,loaded_runtimes,release
+name,kind=sys.argv[1:]
+if kind=='hip':
+    os.environ['ROCKE_HIP_LIB']=name
+    resolve=hip_module._resolve_hip
+    error=hip_module.HipError
+elif kind=='initialize':
+    resolve=lambda:comgr.initialize_compiler(name)
+    error=comgr.ComgrError
+else:
+    os.environ['ROCKE_COMGR_LIB']=name
+    resolve=comgr._resolve_lib
+    error=comgr.ComgrError
+try:resolve()
+except error as e:assert os.path.join(os.getcwd(),name) in str(e),str(e)
+else:raise AssertionError('filename override loaded a search-path fallback')
+assert _session.session.compiler is None and _session.session.hip is None
+providers=loaded_runtimes() if kind=='hip' else loaded_compilers()
+assert not providers
+for item in providers:release(item)
+"""
+    env = rocke_subprocess_env()
+    for key in ("ROCKE_COMGR_LIB", "ROCKE_HIP_LIB", "ROCKE_LLVM_FLAVOR"):
+        env.pop(key, None)
+    env["LD_LIBRARY_PATH"] = str(fallback.parent)
+    result = subprocess.run(
+        rocke_python_command("-c", code, name, kind),
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not shutil.which("cc"), reason="ELF loader fixtures"
+)
+def test_real_multiple_hip_providers_are_refused(tmp_path):
+    symbols = "int hipInit(unsigned x){return 0;} int hipGetDeviceCount(int*n){*n=0;return 0;}"
+    paths = [
+        library(tmp_path / name, name="libamdhip64.so.7", constructor=symbols)
+        for name in ("one", "two")
+    ]
+    code = """
+import ctypes,sys
+from rocke.runtime import hip_module
+from rocke.runtime._loaded_libraries import loaded_runtimes,release
+libs=[ctypes.CDLL(p) for p in sys.argv[1:]]
+providers=loaded_runtimes()
+assert len(providers)==2
+for item in providers:release(item)
+hip_module._candidate_lib_paths=lambda *args:[sys.argv[1]]
+try:hip_module._resolve_hip()
+except hip_module.HipError as e:assert 'multiple mapped HIP providers' in str(e),str(e)
+else:raise AssertionError('ambiguous HIP accepted')
+"""
+    env = rocke_subprocess_env()
+    for key in ("ROCKE_COMGR_LIB", "ROCKE_HIP_LIB", "ROCKE_LLVM_FLAVOR"):
+        env.pop(key, None)
+    result = subprocess.run(
+        rocke_python_command("-c", code, *map(str, paths)),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def sdk(site, major=23, patch=1, constructor=""):

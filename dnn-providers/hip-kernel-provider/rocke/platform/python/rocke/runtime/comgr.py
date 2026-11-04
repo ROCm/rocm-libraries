@@ -51,6 +51,7 @@ from ._ctypes_bind import _LazyFn
 from ._sdk_comgr import release_for_path
 from .runtime_coexistence import (
     _add_dll_dir,
+    _anchor_explicit_path,
     _candidate_lib_paths,
 )
 
@@ -82,7 +83,7 @@ class ComgrProcessDied(ComgrError):
 def _load_lib(explicit_path: str | None = None) -> ctypes.CDLL:
     values = _session.session.environment
     paths = (
-        [explicit_path]
+        [_anchor_explicit_path(explicit_path)]
         if explicit_path is not None
         else _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"], values)
     )
