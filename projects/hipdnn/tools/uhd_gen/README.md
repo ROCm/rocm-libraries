@@ -174,6 +174,8 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
+| `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
+| `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -1074,6 +1076,75 @@ files cross attention correctly) is marked `excluded_by_constraints`: no engine 
 
 L1 (`predict_engine`) models only: within-X% is a per-row error, which is what an L1 predicts.
 
+## Slotted engines (RFC 0021)
+
+A UED that declares `slots` selects one kernel per slot, in slot order. Everything above
+holds for an unslotted engine, and for each slot of a slotted one unless stated here.
+
+| | Unslotted | Slotted |
+|---|---|---|
+| Candidate id | the kernel id | per-slot kernel ids in slot order, `prep=<id>\|dkdv=<id>\|dq=<id>` |
+| Knob id | `<field>` | `<slot>.<field>` |
+| Sweep kernel columns | `kernel.<field>` | `kernel.<slot>.<field>`, plus `kernel` (the composite id) and `slot_reference` |
+| Catalog ranker | one `sort_kernel_catalog` | one per slot, metric-less |
+| Engine estimate | `predict_engine` | `predict_engine`, engine-level; its `trained_against` names every slot's KMD in `kmds` |
+| Descriptor `version` | `1.0` | `1.1` for the UED, KDPs and slot-aware UHDs (`uhd.schema.json` accepts `1.0` and `1.1`) |
+
+**Training data.** `hipdnn_bench --sweep` times every composite candidate: the product of the
+slot catalogs. `slot_reference` names the slots whose training rows a row is, joined by `|`:
+the reference program (every slot at its first kernel in kernel-id order) is every slot's row,
+a candidate that varies exactly one slot is that slot's row, any other is empty. A slot's
+ranker therefore learns whole-program times with the other slots held at their reference
+kernels. These training reference picks can differ from the runtime's; the RFC's
+separability assumption covers the difference. A reference program that fails to time fails
+the sweep; no row is dropped and no other kernel substitutes. `ws.*` workspace tokens
+describe the engine's buffer, not the problem, and never reach a training row.
+
+```bash
+hipdnn_bench --graph g.json --engine-name <engine> --plugin-dir <dir> --sweep > sweep.csv
+python -m uhd_gen.dataset add --into store --csv sweep.csv --engine <engine> --engine-id <id> \
+    --arch gfx950 --selector-revision <rev> --collected-at <timestamp>
+python -m uhd_gen.dataset export --from store --purpose training --slot dkdv --out dkdv.json
+python -m uhd_gen generate --dataset store --slot dkdv --no-promote --target avgTimeMs \
+    --objective min --features q.seqlen kernel.tile --eval-fraction 0.25 \
+    --descriptor-tree <tree> --engine <UED name> --arch gfx950 \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features --output-dir out/dkdv
+python -m uhd_gen promote --model-dir out/dkdv/model --descriptor-tree <tree> \
+    --engine <UED name> --role sort_kernel_catalog --arch gfx950 --corpus out/dkdv/corpus.json \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features
+python -m uhd_gen knobs --input sweep.csv --slot dkdv
+```
+
+`--slot <name>` takes one slot's rows and rewrites them as an unslotted corpus: `kernel` is the
+slot's kernel id, `kernel.<slot>.<field>` becomes `kernel.<field>` (the ranker's
+`$kernel.<field>` signature), and the other slots' columns, `slot_reference` and `ws.*` are
+dropped. `generate --slot` also records the slot's provenance (`trained_against` with `slot`
+and that slot's KMD, from `--descriptor-tree` and `--engine`), and `train` writes a model whose
+`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise). The dataset is a
+published one, so `generate` needs `--no-promote` and `--features` (or `--feature-signature`),
+needs at least five training problems plus held-out ones, and leaves installing to `promote`.
+
+`dataset export`, `generate` and `knobs` accept `--slot`, and each refuses a corpus that is
+not a slotted sweep; `generate` also needs `--dataset`. `generate` refuses to collect
+measurements for a slotted engine (the L2 `sort_kernel_catalog` path): sweep with
+`hipdnn_bench`, add the CSV, train per slot, and `promote` each model.
+
+A slot ranker is trained without `--metric`: a model that declares `score.metric` makes the
+loader drop the engine, and `generate --slot` and `promote` refuse it. `train` defaults
+`--metric` to `tflops` when `--target` is omitted or `tflops`, so give a slot ranker an
+explicit other target, such as `avgTimeMs`.
+
+**Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
+`heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
+engine. `promote` refuses a `sort_kernel_catalog` model that records no slot, names a slot
+the engine lacks, declares `score.metric`, has a `kernel.<field>` feature outside the slot's
+KMD fields and knobs, or reads a shared-workspace token (`$ws.*`); it also refuses the
+`predict_applicable_kernels` role (slots carry none). `--remove-knob NAME` edits the knobs of the model's slot only.
+
+**Tests.** The slot tests (`tests/test_promote_slots.py`, `test_slot_ranker_install.py`,
+`test_slotted_sweep.py`) import pandas, pyarrow and lightgbm, which CI does not install: they
+skip there and run only locally.
+
 ## Output
 
 `train` generates:
@@ -1142,6 +1213,41 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m uhd_gen train ...
 sha256sum model.bin   # equals tree_data.hash, and equals it again on the next conversion
 ```
 
+## The `model.bin` encoding
+
+`gbdt_model.fbs` holds a tree in one of two encodings, and each tree says which it uses.
+
+- **`split_leaf`** (written by default) stores splits and leaves apart. Every array is a
+  union of typed arrays, so its tag in the file says how it is stored, and the writer picks
+  the narrowest type that holds it exactly: split features, children and threshold indices
+  as `int8`/`uint8`, `int16`/`uint16` or `int32`; thresholds once each in a model-wide
+  `threshold_table`, `float32` when every one is exactly a `float32` and `float64` otherwise;
+  leaves as `float32` (`--leaf-precision float64` keeps them exact); and the per-split
+  routing flags only when they are not all the default.
+- **`node_arrays`** is the original encoding: seven node-parallel arrays of `int32`,
+  `double` and `bool`. A runtime built before `split_leaf` reads only this one: `train` and
+  `generate` write it with `--model-encoding node_arrays`.
+
+The runtime reads both. It decodes either one, at load, into the same in-memory nodes the
+tree walk reads, so scoring speed does not depend on the encoding. A tag it does not know (a
+type a later schema adds) is refused by name ("stored as integer array type N, which this
+runtime cannot read") rather than read as another type.
+
+Measured on a 500-tree, 127-leaf model with 54 features:
+
+| Encoding | `model.bin` | Load | Score |
+|---|---|---|---|
+| `node_arrays` | 3.83 MB | 1.22 ms | 32 µs/row |
+| `split_leaf`, `float64` leaves | 0.98 MB | 1.15 ms | 32 µs/row, identical scores |
+| `split_leaf`, `float32` leaves | 0.72 MB | 1.15 ms | 32 µs/row, within 2.4e-7 |
+
+A `float32` leaf is within 2^-24 of its `float64` value, so a row's score moves by at most
+2^-24 × Σ over trees of that tree's largest |leaf|, far below the accuracy of a measured
+throughput. A leaf outside `float32`'s normal range (magnitude above 3.4e38, or nonzero
+below 1.2e-38) is refused when the model is written, with the advice to use
+`--leaf-precision float64`, rather than stored as `inf` or `0`. Thresholds are never
+rounded: a split compares against the value LightGBM chose.
+
 ## Generated FlatBuffers bindings
 
 `model.bin` is written through flatc-generated Python bindings that
@@ -1150,7 +1256,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 
 ```
 _generated/hipdnn_flatbuffers_sdk/data_objects/
-└── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
+├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
+└── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import

@@ -30,7 +30,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorS
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
 from ..Common import IsaVersion, print2, ceilDivide, log2
-from ..Common.Utilities import isMxf4SubtilePath
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
@@ -361,6 +361,49 @@ class StreamK(TileProcessingStrategy):
     def staticPartition(self):
         return StaticPartition("PersistentIteration", "PersistentIterationEnd", "skGrid", "PersistentWorkGroupIndex")
 
+    def _contiguousQueueItem(self, writer, kernel, sWorkItemIdx):
+        """Renumber a popped work item so each per-XCD queue owns a contiguous
+        range of tiles, as the static WGMXCC remap does. Used by
+        DynamicWorkQueue and by the dynamic sub-mode of Hybrid.
+
+        Queue q pops i = cnt * numQueues + q; the tile decode reads the bijection
+        c = q * floor(T / numQueues) + min(q, T % numQueues) + cnt on [0, T)
+        (T = TotalItems). The pop, validity check and counter wrap keep i.
+        Emitted only for WorkGroupMappingXCC == -1; taken only when the static
+        remap would be the same (runtime WGMXCC == numQueues, chunk <= 1),
+        TotalItems <= the grid and there are no split tiles.
+        """
+        module = Module("StreamK contiguousQueueItem")
+        partition = self.queuePartition()
+        numQueues, mask, log2Queues, _ = Component.WorkAssignment.find(writer).queueConstants(writer, kernel)
+        if numQueues < 2 or kernel["WorkGroupMappingXCC"] != -1:
+            return module
+        skDone = Label(writer.labels.getNameInc("SK_ContiguousItemDone"), "")
+        sQ = writer.sgprPool.checkOut(1, "contiguousQ")
+        sTmp = writer.sgprPool.checkOut(1, "contiguousTmp")
+        # With more than one round or split tiles, the static remap walks
+        # tiles round by round, which the interleaved order already follows.
+        module.add(SCmpGtU32(src0=sgpr(partition.total_items), src1=sgpr(partition.grid), comment="more items than workgroups?"))
+        module.add(SCBranchSCC1(labelName=skDone.getLabelName(), comment="yes: keep the interleaved order"))
+        module.add(SCmpEQU32(src0=sgpr(self.splitTilesSgpr), src1=0, comment="whole tiles?"))
+        module.add(SCBranchSCC0(labelName=skDone.getLabelName(), comment="no: keep the interleaved order"))
+        # WGM bits: chunk [21:14], WGMXCC [13:10]. Mask chunk bit 0 so chunk 0 and 1 both match.
+        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("WGM"), src1=hex(0x3FBC00), comment="WGMXCC, chunk > 1 bits"))
+        module.add(SCmpEQU32(src0=sgpr(sTmp), src1=hex(numQueues << 10), comment="static uses the contiguous remap?"))
+        module.add(SCBranchSCC0(labelName=skDone.getLabelName(), comment="no: keep the interleaved order"))
+        module.add(SAndB32(dst=sgpr(sQ), src0=sgpr(sWorkItemIdx), src1=hex(mask), comment="q = item % numQueues"))
+        module.add(SLShiftRightB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx), shiftHex=log2Queues, comment="cnt = item / numQueues"))
+        module.add(SLShiftRightB32(dst=sgpr(sTmp), src=sgpr(partition.total_items), shiftHex=log2Queues, comment="floor(T / numQueues)"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sQ), src1=sgpr(sTmp), comment="q * floor(T / numQueues)"))
+        module.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sTmp), comment="cnt + q * floor(T / numQueues)"))
+        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(partition.total_items), src1=hex(mask), comment="T % numQueues"))
+        module.add(SMinU32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sQ), comment="min(q, T % numQueues)"))
+        module.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sTmp), comment="contiguous item of queue q"))
+        module.add(skDone)
+        for r in (sTmp, sQ):
+            writer.sgprPool.checkIn(r)
+        return module
+
     def persistentTileRegisters(self, kernel):
         peer = ["StreamKClusterPeer"] if isStreamKSpatialCluster(kernel) else []
         return list(self.tileWork(kernel).completion_identity) + ["StreamKLocalStart", "StreamKLocalEnd"] + peer
@@ -437,6 +480,28 @@ class StreamK(TileProcessingStrategy):
             if key in kernel:
                 return kernel[key]
         return kernel["DepthU"]
+
+    @staticmethod
+    def _preShuffleRows(kernel, tc):
+        """Rows a host pre-swizzled block interleaves into one K step, else 1.
+
+        A pre-shuffled tensor stores a whole 16-row block before moving along K,
+        so stepping one DepthU window consumes that many rows' worth of K.  The
+        unroll loop already advances the SRD by the scaled amount; a workgroup
+        whose StreamK range starts mid-tile has to start from the same scale or
+        it reads a K position 16x too close to the tile.
+
+        Only the subtile global read walks blocks this way.  The classic swizzle
+        path steps one row per K window, so scaling its start would move the
+        workgroup off its own range.
+        """
+        if tc not in ("A", "B"):
+            return 1
+        if not kernel["ProblemType"].get("SwizzleTensor%s" % tc):
+            return 1
+        if not isSubtileSwizzledTensor(kernel):
+            return 1
+        return kernel["MatrixInstM"] if tc == "A" else kernel["MatrixInstN"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
       module = Module("shiftSrd")
@@ -908,7 +973,9 @@ class StreamK(TileProcessingStrategy):
         tc = tP["tensorChar"]
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU, comment="StreamK tile start offset"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"),
+                           src1=depthU * self._preShuffleRows(kernel, tc),
+                           comment="StreamK tile start offset"))
         strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(sTmp), sgpr(sTmp+1), sgpr(sTmp), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
@@ -991,7 +1058,9 @@ class StreamK(TileProcessingStrategy):
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
-        module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
+        module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"),
+                           src1=int(depthU * tP["bpe"]) * self._preShuffleRows(kernel, tc),
+                           comment="StreamK tile start offset"))
         strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
@@ -1843,7 +1912,7 @@ class StreamK(TileProcessingStrategy):
 
             if hasDynamicAssignment(kernel):
                 # TODO modularize this section into abstract function
-                module.add(self.calculatePartialIdx(tmpSgpr))
+                module.add(self.calculatePartialIdx(writer, kernel, tmpSgpr))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4), comment="flag offset based on partial index"))
                 module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
             elif hasHybridAssignment(kernel):
@@ -1856,7 +1925,7 @@ class StreamK(TileProcessingStrategy):
                 module.add(SCBranchSCC1(labelName=sk5FlagStatic.getLabelName(),
                                         comment="SK5: branch to static flag offset"))
                 # SK4 (dynamic) flag offset
-                module.add(self.calculatePartialIdx(tmpSgpr))
+                module.add(self.calculatePartialIdx(writer, kernel, tmpSgpr))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4),
                                           comment="SK5/SK4: flag offset based on partial index"))
                 module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel),
@@ -2236,6 +2305,10 @@ class StreamK(TileProcessingStrategy):
         #         self.preLoopVmcntDict[self.currPreLoopVmcntCase] += storesIssued
 
         return module
+
+    # Sgpr holding the number of split tiles on the dynamic path; set by the
+    # strategies that have one.
+    splitTilesSgpr = None
 
     def fixupStep(self, writer, kernel, vectorWidths, elements, edges, tmpVgpr, cvtVgprStruct, sPartialIdx):
         module = Module("StreamK Common fixupStep")
@@ -3324,6 +3397,8 @@ class StreamKTwoTileDPFirst(StreamK):
         return module
 
 class StreamKDynamic(StreamK):
+    splitTilesSgpr = "skTiles"
+
     def queuePartition(self):
         return QueuePartition("skGrid", "TotalItems", "AddressFlags", "StreamKTileIdx", "StreamKStickyEmpty")
 
@@ -3339,6 +3414,8 @@ class StreamKDynamic(StreamK):
         skFullTile = Label("SK_FullTile", "")
         skPartialTile = Label("SK_PartialTile", "")
         skDone = Label("SK_Done", "")
+
+        module.add(self._contiguousQueueItem(writer, kernel, sWorkItemIdx))
 
         # Check if work item is a full tile. The full-tile work-item count
         # spans all batches (as TotalItems does), so it must use the
@@ -3442,6 +3519,8 @@ class StreamKDynamic(StreamK):
         skPartialTile = Label(writer.labels.getNameInc("SK_PAP_PartialTile"), "")
         skDone = Label(writer.labels.getNameInc("SK_PAP_Done"), "")
 
+        module.add(self._contiguousQueueItem(writer, kernel, sWorkItemIdx))
+
         # Full-tile work-item count spans all batches (as TotalItems does).
         sFullTile = writer.sgprPool.checkOut(1, "papFullTile")
         module.add(self.computeTotalTiles(writer, kernel, sFullTile))
@@ -3537,20 +3616,22 @@ class StreamKDynamic(StreamK):
         module.add(self.calculateLoopNumIterCommon(writer, kernel, loopCounterName, loopIdx, tmpSgprInfo))
         return module
 
-    def calculateFirstPartialIdx(self, sPartialIdx):
+    def calculateFirstPartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Dynamic calculateFirstPartialIdx")
 
-        module.add(SMulI32(dst=sgpr(sPartialIdx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Total tiles"))
+        # StreamKTileIdx and skTiles count tiles across all batches, so the
+        # full-tile count must too.
+        module.add(self.computeTotalTiles(writer, kernel, sPartialIdx))
         module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("skTiles"), comment="Number of full tiles"))
         module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr("StreamKTileIdx"), src1=sgpr(sPartialIdx), comment="PartialTile = (TileIdx - #FullTiles)"))
         module.add(SMulI32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("SKSplit"), comment="PartialIdxBase = PartialTile * SKSplit"))
 
         return module
 
-    def calculatePartialIdx(self, sPartialIdx):
+    def calculatePartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Dynamic calculatePartialIdx")
 
-        module.add(self.calculateFirstPartialIdx(sPartialIdx))
+        module.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
         module.add(SAddU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("StreamKPartialIdx"), comment="Offset to correct partials tile"))
 
         return module
@@ -3586,7 +3667,7 @@ class StreamKDynamic(StreamK):
             # if we finished the tile but did not start it, fix up step
             # run fixup code before regular store code
             sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-            module.add(self.calculateFirstPartialIdx(sPartialIdx))
+            module.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
 
             sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd")
             module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sPartialIdx), src1=sgpr("StreamKPartialIdx"), comment="Final partial tile index"))
@@ -3653,7 +3734,7 @@ class StreamKDynamic(StreamK):
         for edge in edges:
             module.add(partialsLabels[edge])
             sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-            module.add(self.calculatePartialIdx(sPartialIdx))
+            module.add(self.calculatePartialIdx(writer, kernel, sPartialIdx))
             module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPartialIdx)))
             writer.sgprPool.checkIn(sPartialIdx)
             module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
@@ -3680,6 +3761,8 @@ class StreamKDynamic(StreamK):
 
 
 class StreamKHybrid(StreamK):
+    splitTilesSgpr = "SKTiles"
+
     def queuePartition(self):
         return QueuePartition("SKGrid", "TotalItems", "AddressFlags", "StreamKTileIdx", "StreamKStickyEmpty", unique_labels=True)
 
@@ -3873,6 +3956,8 @@ class StreamKHybrid(StreamK):
         short-circuit are intentionally excluded (handled by the callers).
         """
         module = Module("StreamK Hybrid computeNextTileIdentity")
+
+        module.add(self._contiguousQueueItem(writer, kernel, sWorkItemIdx))
 
         skFullTile    = Label(writer.labels.getNameInc("SK_FullTile"), "")
         skPartialTile = Label(writer.labels.getNameInc("SK_PartialTile"), "")
@@ -4137,11 +4222,11 @@ class StreamKHybrid(StreamK):
     # partialsWriteProcedure and the dynamic SRD setup in writePartials).
     # Note: SK5 uses SKTiles (uppercase) as the SK4-dedicated tile count.
     # ------------------------------------------------------------------
-    def calculateFirstPartialIdx(self, sPartialIdx):
+    def calculateFirstPartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Hybrid calculateFirstPartialIdx")
-        module.add(SMulI32(dst=sgpr(sPartialIdx),
-                           src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
-                           comment="Total tiles"))
+        # StreamKTileIdx and SKTiles count tiles across all batches, so the
+        # full-tile count must too (as in _computeNextTileIdentity).
+        module.add(self.computeTotalTiles(writer, kernel, sPartialIdx))
         module.add(SSubU32(dst=sgpr(sPartialIdx),
                            src0=sgpr(sPartialIdx), src1=sgpr("SKTiles"),
                            comment="Number of full tiles"))
@@ -4153,9 +4238,9 @@ class StreamKHybrid(StreamK):
                            comment="PartialIdxBase = PartialTile * SKSplit"))
         return module
 
-    def calculatePartialIdx(self, sPartialIdx):
+    def calculatePartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Hybrid calculatePartialIdx")
-        module.add(self.calculateFirstPartialIdx(sPartialIdx))
+        module.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
         module.add(SAddU32(dst=sgpr(sPartialIdx),
                            src0=sgpr(sPartialIdx), src1=sgpr("StreamKPartialIdx"),
                            comment="Offset to correct partials tile"))
@@ -4191,7 +4276,7 @@ class StreamKHybrid(StreamK):
                                      comment="Branch if started and finished tile, go to regular store code"))
 
                 sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-                mod.add(self.calculateFirstPartialIdx(sPartialIdx))
+                mod.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
 
                 sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd")
                 mod.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sPartialIdx),
@@ -4275,7 +4360,7 @@ class StreamKHybrid(StreamK):
 
             def emitDynamicSrd(mod):
                 sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-                mod.add(self.calculatePartialIdx(sPartialIdx))
+                mod.add(self.calculatePartialIdx(writer, kernel, sPartialIdx))
                 mod.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPartialIdx)))
                 writer.sgprPool.checkIn(sPartialIdx)
 

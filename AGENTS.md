@@ -112,6 +112,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | hipBLASLt | [`projects/hipblaslt/AGENTS.md`](projects/hipblaslt/AGENTS.md) (reference material in `AGENTS_reference.md`) |
 | TensileLite | [`projects/hipblaslt/tensilelite/AGENTS.md`](projects/hipblaslt/tensilelite/AGENTS.md) |
 | hipDNN | [`projects/hipdnn/docs/ai-rules.md`](projects/hipdnn/docs/ai-rules.md) |
+| MIOpen | [`projects/miopen/AGENTS.md`](projects/miopen/AGENTS.md) |
 | MIOpen provider | [`dnn-providers/miopen-provider/docs/ai-rules.md`](dnn-providers/miopen-provider/docs/ai-rules.md) |
 | rocKE | [`dnn-providers/hip-kernel-provider/rocke/AGENTS.md`](dnn-providers/hip-kernel-provider/rocke/AGENTS.md) |
 | rocRoller | [`shared/rocroller/docs/ai-rules.md`](shared/rocroller/docs/ai-rules.md) |

@@ -59,7 +59,8 @@ public:
     /// Hides the base: the manager tracks which engines are staged. Register through this type.
     void addEngine(std::unique_ptr<Engine> engine, std::string_view name = {});
 
-    /// Same ids, in the same order, and the same exception as the base class's loop.
+    /// Same ids, in the same order, as the base class's loop, and an engine that throws is
+    /// skipped the same way: it is inapplicable and the others are still reported.
     std::vector<int64_t> getApplicableEngineIds(Handle& handle, const IGraph& opGraph);
 
     std::size_t stagedEngineCount() const noexcept;
