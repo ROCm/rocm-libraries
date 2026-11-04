@@ -8,8 +8,10 @@ A sequence's last KV tile spans rows past its length. Their scores are masked, s
 or blocks past its block-table row. Buffer copies load zero there, as the strided layout's rows
 past the sequence do (``strided_kv_offset``): the offset is made out of range, the address math is
 left as it is, and each copy adds a compare and a select. Plain loads have no range check, so their
-source row is clamped to the sequence's last row; the LDS row stays the same. Only a tile reaching
-past the sequence needs either, so kernels can skip both on the tiles before it.
+source row is clamped to the sequence's last row; the LDS row stays the same. Where the clamp costs
+the load schedule and the tile lies in one page, the rows can instead be loaded as they are and
+zeroed in LDS on the last tile. Only a tile reaching past the sequence needs any of these, so kernels
+can skip them on the tiles before it.
 """
 
 from __future__ import annotations

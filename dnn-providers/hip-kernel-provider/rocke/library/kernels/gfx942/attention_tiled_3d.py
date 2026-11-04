@@ -1013,10 +1013,41 @@ def build_unified_attention_3d_tiled(
             f"{FP8_MAX_CHUNKS_PER_THREAD} (T={T}, HD={HD})"
         )
 
-    def _issue_fp8_dequant_loads(
-        kv_tile_idx: Value, buf_idx: Value, lds_token: str
+    def _fp8_chunk_offsets(kv_tile_idx: Value) -> list:
+        """(offset, row, col) of each of a tile's per-thread fp8 chunks; the offsets carry the
+        tile's page lookup."""
+        assert fp8_elems_per_chunk == 8
+        chunks = []
+        for call in range(fp8_chunks_per_thread):
+            chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
+            row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
+            col = b.mul(
+                b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
+                b.const_i32(fp8_elems_per_chunk),
+            )
+            linear_half_first = b.add(b.mul(row, b.const_i32(HD)), col)
+            voff, _ = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half_first,
+                kv_head=kv_head_idx,
+            )
+            chunks.append((voff, row, col))
+        return chunks
+
+    def _issue_fp8_loads(chunks: list, lds_token: str) -> list:
+        src = key if lds_token == "K" else value
+        return [
+            b.global_load_vN(
+                src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
+            )
+            for voff, _, _ in chunks
+        ]
+
+    def _store_fp8_dequant(
+        loaded: list, chunks: list, buf_idx: Value, lds_token: str
     ) -> None:
-        """Sync per-thread fp8 -> f32 -> *scale -> bf16/fp16 -> LDS.
+        """Per-thread fp8 -> f32 -> *scale -> bf16/fp16 -> LDS.
 
         Uses ``cvt_pk_f32_fp8x4`` (the gfx942 2D kernel validates this packed
         cvt; see ``dequant_fp8x8_to_dtype``). The scale is applied unfused as a
@@ -1025,51 +1056,44 @@ def build_unified_attention_3d_tiled(
         """
         scale = k_scale_p if lds_token == "K" else v_scale_p
         lds = K_lds if lds_token == "K" else V_lds
-        src = key if lds_token == "K" else value
-        assert fp8_elems_per_chunk == 8
-        if lds_token == "V":  # V rows past the sequence read its last row instead
-            v_last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
-        # All of the tile's loads first, then the dequant: issued in that order, they stay in
-        # flight together (the V row clamp made the compiler drain each load before its dequant).
-        loaded = []
-        for call in range(fp8_chunks_per_thread):
-            chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
-            row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
-            col = b.mul(
-                b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
-                b.const_i32(fp8_elems_per_chunk),
-            )
-            # V: the global row it is read from; the LDS row stays ``row``.
-            src_row = b.smin(row, v_last_row) if lds_token == "V" else row
-            linear_half_first = b.add(b.mul(src_row, b.const_i32(HD)), col)
-            voff, _ = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear_half_first,
-                kv_head=kv_head_idx,
-            )
-            fp8_vec = b.global_load_vN(
-                src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
-            )
-            loaded.append((fp8_vec, row, col))
-        for fp8_vec, row, col in loaded:
+        for fp8_vec, (_, row, col) in zip(loaded, chunks):
             packed = dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
+
+    def _zero_fp8_v_rows_past_sequence(
+        chunks: list, buf_idx: Value, kv_tile_idx: Value
+    ) -> None:
+        """Zero the LDS rows of a V tile past the sequence, on its last tile only.
+
+        Their loads read the page's unused slots (a tile never straddles pages, so they stay
+        inside the sequence's last page). Clamping or zeroing them in the load path instead
+        made the compiler issue the page lookups after QK and wait for each.
+        """
+        assert BS % T == 0, "the unclamped V tail needs every tile inside one page"
+        rows = rows_in_sequence(b, seq_len, kv_tile_idx, T)
+        with b.scf_if(b.cmp_lt(rows, b.const_i32(T))):
+            zero = b.zero_vec(dtype, fp8_elems_per_chunk)
+            for _, row, col in chunks:
+                with b.scf_if(b.cmp_ge(row, rows)):
+                    b.smem_store_vN(
+                        V_lds, [buf_idx, row, col], zero, fp8_elems_per_chunk
+                    )
 
     WIDE_KV = spec.use_wide_kv_load and not KV_FP8 and WIDE_OK
 
     def _issue_k(tile_idx: Value, buf_idx: Value, page_id: Value | None) -> None:
         if KV_FP8:
-            _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
+            chunks = _fp8_chunk_offsets(tile_idx)
+            _store_fp8_dequant(_issue_fp8_loads(chunks, "K"), chunks, buf_idx, "K")
         elif WIDE_KV:
             _issue_wide_load(key, K_lds, tile_idx, buf_idx, page_id)
         else:
             _issue_k_load(tile_idx, buf_idx, page_id)
 
     def _issue_v(tile_idx: Value, buf_idx: Value, page_id: Value | None) -> None:
-        if KV_FP8:
-            _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
-        elif WIDE_KV:
+        # fp8 V is issued by the KV loop itself (its offsets are computed before QK).
+        assert not KV_FP8
+        if WIDE_KV:
             _issue_wide_load(value, V_lds, tile_idx, buf_idx, page_id, v_tail=True)
         else:
             _issue_v_load(tile_idx, buf_idx, page_id)
@@ -1205,6 +1229,10 @@ def build_unified_attention_3d_tiled(
             page_id_window = carry[4 + PV_N_TILES]
             nxt_page_id = _window_tile_page_id(page_id_window, safe_next_tile)
 
+        if KV_FP8:
+            # The offsets, and so the page lookups, ahead of QK: they overlap it.
+            v_chunks = _fp8_chunk_offsets(kv_tile_iv)
+            k_chunks = _fp8_chunk_offsets(safe_next_tile)
         # QK
         S_n = []
         for n in range(QK_N_TILES):
@@ -1218,8 +1246,16 @@ def build_unified_attention_3d_tiled(
                 acc_v = _mfma_16x16x16(b, dtype, K_v, Q_kits[k], acc_v)
             S_n.append(acc_v)
 
-        _issue_v(kv_tile_iv, v_buf, cur_page_id)
-        _issue_k(safe_next_tile, nxt_buf, nxt_page_id)
+        if KV_FP8:
+            # This tile's V and the next tile's K loads all in flight before any dequant.
+            v_loaded = _issue_fp8_loads(v_chunks, "V")
+            k_loaded = _issue_fp8_loads(k_chunks, "K")
+            _store_fp8_dequant(v_loaded, v_chunks, v_buf, "V")
+            _store_fp8_dequant(k_loaded, k_chunks, nxt_buf, "K")
+            _zero_fp8_v_rows_past_sequence(v_chunks, v_buf, kv_tile_iv)
+        else:
+            _issue_v(kv_tile_iv, v_buf, cur_page_id)
+            _issue_k(safe_next_tile, nxt_buf, nxt_page_id)
         if WAVE_PAGE_ID_LOAD:
             nxt_page_id_window = _refill_page_id_window(page_id_window, kv_tile_iv)
 
