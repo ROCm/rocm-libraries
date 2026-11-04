@@ -48,6 +48,8 @@ cmake --build build --target hipdnn-standard-check
 
 `hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` exist for each category in [`test_categories.yaml`](../test_categories.yaml): the tiers `quick`, `standard`, `comprehensive` and `full`, plus `ffm-quick`, `unit` and `integration`. They build and run the hipDNN core tests only; `hipdnn-check` runs all core tests. Provider and integration-tests targets are listed in [Building hipDNN: Superbuild Targets](./Building.md#superbuild-targets).
 
+`test_categories.yaml` labels whole CTest entries by name, so it cannot leave one gtest out of a binary. A target registered with `add_hipdnn_test(<target> <dir> GTEST_CATEGORIES)` also gets `<target>_<category>_suite` entries generated from [`test_categories_gtest.yaml`](../test_categories_gtest.yaml). Each runs the binary with that category's `--gtest_filter` and carries exactly the labels the file lists. Today only `hipdnn_backend_tests` opts in, and only for `ffm-quick`, where the file excludes tests the FFM simulator cannot pass. List such a target under `exclude_tests` for the same category in `test_categories.yaml`, so the plain entry does not carry the label and run the excluded tests. The `hipdnn-<category>-check` targets match their label exactly (`ctest -L '^<category>$'`), so `hipdnn-quick-check` does not also run the `ffm-quick` suite.
+
 **One provider.** Build the provider's preset (for example `miopen-provider`), then run the shared integration suite against it:
 
 ```bash

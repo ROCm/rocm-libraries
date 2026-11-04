@@ -32,7 +32,7 @@ from pathlib import Path
 from enum import Enum
 from glob import glob
 
-from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
+from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy, isFusedA2A
 from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from .Toolchain.Component import Assembler
 
@@ -42,7 +42,8 @@ from . import ROOT_PATH
 from . import LibraryIO
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from .Common.Architectures import archNamesByIsa, isaToGfx
+from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchName,
+                                   capOverrideKeyOf, isaToGfx)
 from .Common.GlobalParameters import globalParameters
 from .Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
@@ -140,11 +141,9 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  # The rebuild is a fresh process whose only statement of what to build is
-  # `--architecture=`, so it must carry any distinction the ISA cannot express.
-  # `gfxName` already is that name -- the caller resolved it for this same ISA --
-  # and resolving it a second time here would be a second place to keep right.
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), gfxName)
+  createLibraryScript = getBuildClientLibraryScript(
+      clientLibraryPath, libraryLogicPath, str(assembler.path),
+      rebuildTargetGfx(gfxName, archNames))
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   # The re-spawned build wrote its code objects into the subtree named for the
   # architecture it was asked for -- the same name just passed to it -- so they
@@ -171,7 +170,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
         logic.schedule, logic.problemType, logic.exactLogic, logic.library
     functions.append((scheduleName, problemType))
     functionNames.append("tensile_%s" % (problemType))
-    problemSizes = ProblemSizesMock(exactLogic) if exactLogic else ProblemSizesMockDummy()
+    problemSizes = ProblemSizesMock(exactLogic, problemType) if exactLogic else ProblemSizesMockDummy()
     if len(problemType["BiasDataTypeList"]) > 0:
       biasTypeArgs = BiasTypeArgs(problemType, [problemType["BiasDataTypeList"][0]])
     else:
@@ -310,6 +309,40 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
   return process.returncode
 
 
+def rebuildTargetGfx(gfxName, archNames):
+  """What to put after ``--architecture=`` when re-spawning TensileCreateLibrary.
+
+  That rebuild is a fresh process whose only statement of what to build is this
+  string, so it must carry every distinction the ISA cannot express. ``gfxName``
+  carries one of them, the stepping, but it is a bare name and the xnack mode is
+  the other: a qualifier reaches a build only by selecting ARCH_CAP_OVERRIDES,
+  which the subprocess does from this string alone. Handed the bare name, it
+  benchmarks xnack--tuned kernels and then rebuilds the shipped library with
+  replay on -- with the drains the benchmarked kernels did not have.
+
+  So the qualifier is restored from the request that produced ``gfxName`` in the
+  first place -- but only where it selects an override, which is the whole
+  reason to send it. One that selects nothing is pure cost: `gfx942:xnack+` has
+  no entry, so forwarding it changes no capability, while it does reach
+  `--offload-arch` and pins the source kernels to xnack+, where the bare name
+  leaves them loadable under either mode. The directory and the .co filter both
+  still resolve, so that surfaces when a device loads the library rather than at
+  build time.
+
+  The predicate is dropped for a different reason: it selects hardware, says
+  nothing about what goes into a code object, and is not this process's to
+  forward.
+
+  Falls back to ``gfxName``, which is every unqualified build and now also every
+  qualified one whose qualifier the capability table does not speak to.
+  """
+  return next(
+      (key for a in (archNames or [])
+       if baseArchName(a) == gfxName and (key := capOverrideKeyOf(a)) in ARCH_CAP_OVERRIDES),
+      gfxName,
+  )
+
+
 def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
   import io
   runScriptFile = io.StringIO()
@@ -327,6 +360,10 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
 
   if globalParameters["DisableAsmComments"]:
     callCreateLibraryCmd += " --disable-asm-comments"
+
+  if any(isFusedA2A(LibraryIO.rawLibraryLogic(LibraryIO.readYAML(f))[4])
+         for f in glob(os.path.join(libraryLogicPath, "*.yaml"))):
+    callCreateLibraryCmd += " --enable-gemm-a2a-fusion"
 
   callCreateLibraryCmd += " --architecture=" + targetGfx
   callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
@@ -565,6 +602,10 @@ def problemSizeParams(problemType, problem, factorDim):
         gatestrides[index.d] = sc[1]
       rv.append(('gate-strides', ",".join(map(str, gatestrides))))
 
+    if problemType.fusedGemmA2A:
+      rv.append(('world', problem.world))
+      rv.append(('fused-a2a-extent', problem.a2aExtent))
+
     return rv
 
 def dataInitParams(problemType):
@@ -673,9 +714,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
+            param('mx-a-free-block', problemType.mxBlockFreeA)
             param('mx-a-type', problemType.mxTypeA.toName())
         if problemType.mxBlockB:
             param('mx-b-block', problemType.mxBlockB)
+            param('mx-b-free-block', problemType.mxBlockFreeB)
             param('mx-b-type', problemType.mxTypeB.toName())
 
         if biasTypeArgs:
@@ -721,6 +764,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         if globalParameters["HybridAssignmentPolicy"] not in (["Default"], ("Default",)):
           for policy in globalParameters["HybridAssignmentPolicy"]:
             param('hybrid-assignment-policy', policy)
+
+        if globalParameters["UniformSummationOrder"] != -1:
+          param('uniform-summation-order', globalParameters["UniformSummationOrder"])
 
         param("device-idx",               deviceId)
 
@@ -770,6 +816,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
            numElementsToValidate = max(globalParameters["NumElementsToValidateWinner"], globalParameters["NumElementsToValidate"])
         param("num-elements-to-validate", numElementsToValidate)
         param("check-synchronizer",       globalParameters["CheckSynchronizer"])
+        param("validate-after-enqueues",  globalParameters["ValidateAfterEnqueues"])
         param("num-enqueues-per-sync",    globalParameters["EnqueuesPerSync"])
         param("max-enqueues-per-sync",    globalParameters["MaxEnqueuesPerSync"])
         param("num-syncs-per-benchmark",  globalParameters["SyncsPerBenchmark"])
@@ -800,6 +847,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
         param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
+        if problemType.fusedGemmA2A:
+            for world in globalParameters["WorldFilter"]:
+                param("world-filter", world)
         if globalParameters["RocProfCounter"]:
             for counter in globalParameters["RocProfCounter"]:
                 param("rocprof-counter", counter)
