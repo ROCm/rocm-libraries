@@ -1782,3 +1782,100 @@ def test_only_a_rocke_catalog_ships_the_rocke_kernels_of_its_arch(
         if r["path"] == OTHER_KERNEL
     ]
     assert row["status"] == status
+
+
+@needs_merge_tree
+def test_merged_view_does_not_fold_when_the_target_moved_what_the_change_imports(
+    mod, capsys, tmp_path
+):
+    # catches: a merged-view row folded because its own file equals the head's, although the
+    # target changed a module that file imports, so the emitter's base-vs-head proof says
+    # nothing about the merged program
+    helper = ROCKE_PY + "helpers/w.py"
+    use = "from rocke.helpers.w import W\n"
+    files = {BUILDER: use + BUILD, KDP: KDP_JSON, helper: "W = 32\n"}
+    repo, base = make_repo(tmp_path, files)
+    head = branch_commit(repo, base, {BUILDER: use + BODY_EDIT}, "feature")
+    tip = branch_commit(repo, base, {helper: "W = 64\n"}, "target")
+    emit = write_emit(tmp_path / "eq.json", repo, base, head)
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+    assert all(r["merged_only"] for r in rows_of(data, status="changed"))
+
+
+def test_member_removed_from_a_class_read_through_its_package_is_mismatch(
+    mod, capsys, tmp_path
+):
+    # catches: a reader importing the class from its package (`from hkp_pack.tuning import
+    # Space`, re-exported by the package __init__) taken for another module's class, so the
+    # removal of a member it still reads is not a break
+    pkg = HKP_PACK + "tuning/"
+    cls = "class Space:\n    def keep(self):\n        return 0\n\n    def probe_knob(self):\n        return 1\n"
+    reader = "from hkp_pack.tuning import Space\n\n\ndef f():\n    return Space().probe_knob()\n"
+    files = {pkg + "__init__.py": "from .waves import Space\n", pkg + "waves.py": cls,
+             HKP_PACK + "user.py": reader}  # fmt: skip
+    repo, base = make_repo(tmp_path, files)
+    head = commit(
+        repo, {pkg + "waves.py": cls.split("\n\n    def probe_knob")[0] + "\n"}
+    )
+    rows = rows_of(report(mod, capsys, repo, base, head), "symbols", "mismatch")
+    assert "Space.probe_knob" in {r["name"] for r in rows}
+
+
+@pytest.mark.parametrize(
+    "imports, call",
+    [("import kernels.common.decode as dec\n", "dec.grid_of(spec)"),
+     ("from kernels.common import decode as dec\n", "dec.grid_of(spec)")],
+    ids=["import-as", "from-import-module"],
+)  # fmt: skip
+def test_grid_surface_reaching_a_module_alias_is_not_folded_by_equal_ir(
+    mod, capsys, tmp_path, imports, call
+):
+    # catches: a host-side surface's reach following bare names and `from m import f` only,
+    # so a helper called through a module alias (`m.f(spec)`) changes unseen and folds to NONE
+    decode = HKP + "rocke/library/kernels/common/decode.py"
+    helper = "def grid_of(spec):\n    return (1, 2, 3)\n"
+    builder = imports + f"\n\ndef attn_grid(spec):\n    return {call}\n\n\n" + BUILD
+    grid = manifest(("grid", "kernels/gfx950/attn.py:attn_grid", GEOM))
+    files = {
+        BUILDER: builder,
+        decode: helper,
+        KDP: KDP_JSON,
+        GEOM: "int grid();\n",
+        MANIFEST: grid,
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {decode: helper.replace("(1, 2, 3)", "(2, 1, 3)")})
+    emit = write_emit(tmp_path / "eq.json", repo, base, head)
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    (row,) = rows_of(data, "surfaces")
+    assert (row["name"], row["status"]) == ("grid:attn_grid", "changed")
+
+
+def test_sdk_header_a_loader_header_includes_by_quoted_path_is_on_the_surface(
+    mod, capsys, tmp_path
+):
+    # catches: only `<hipdnn_plugin_sdk/...>` includes followed, so a header a loader header
+    # pulls in by a quoted path beside it (`#include "IUhdAdapter.hpp"`) reads N/A
+    uhd = SDK_INC + "heuristics/uhd/"
+    body = "inline int f() {{ return {}; }}\n"
+    files = {SDK_INC + "ingestor/DescriptorLoader.hpp": "#include <hipdnn_plugin_sdk/heuristics/uhd/A.hpp>\n",
+             uhd + "A.hpp": '#include "adapters/B.hpp"\n', uhd + "adapters/B.hpp": body.format(1)}  # fmt: skip
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {uhd + "adapters/B.hpp": body.format(2)})
+    data = report(mod, capsys, repo, base, head)
+    assert [r["status"] for r in rows_of(data, "file")] == ["changed"]
+
+
+def test_emit_row_of_a_generic_target_family_names_its_member_archs(
+    mod, capsys, tmp_path
+):
+    # catches: an emit row naming the generic compile target (gfx11-generic), which is no
+    # device a NEEDS-DEVICE run can be asked for
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    fam = family(arch="gfx11-generic", members=["gfx1151", "gfx1100"], ir_changed=["v"])
+    data = report(mod, capsys, repo, base, head, "--emit",
+                  write_emit(tmp_path / "g.json", repo, base, head, families=[fam]))  # fmt: skip
+    (row,) = [r for r in rows_of(data, "kernargs") if r["name"].startswith("emit-ir:")]
+    assert row["arch"] == "gfx1100, gfx1151"

@@ -19,7 +19,7 @@ change that breaks them leaves the default build green.
 | Applicability | Python spec validity and constants (scale range, tile legality) | native pack matchers and scores |
 | Shipped variants | `*.kdp.json` (DVC-held for gfx950; the emitter regenerates its variant list with the generator's registry enumerator, so a changed DVC pointer stays `changed`: the file's other fields are not read) | loader, native packs |
 | Generic targets | `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets*` and its CMake template `projects/hipdnn/plugin_sdk/cmake/GpuGenericTargetsTable.hpp.in` | packer and loader |
-| Loader code | the ingestor SDK headers under `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, and every plugin SDK header they include (`ArchMatch.hpp`, `heuristics/uhd/`; tagged `sdk-loader`) | the native packs and the loader that compile them |
+| Loader code | the ingestor SDK headers under `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, and every plugin SDK header they include, by `<hipdnn_plugin_sdk/...>` or by a quoted path beside the including header (`ArchMatch.hpp`, `heuristics/uhd/`; tagged `sdk-loader`) | the native packs and the loader that compile them |
 | Python symbols | rocKE and `hkp_pack` modules | other modules and tests that import them |
 
 Test code, CMake, CI test-category lists and `requirements*.txt` are not judged here: they are
@@ -35,8 +35,10 @@ How the copies are paired:
   no symbol, and the whole module is its Python side.
 - A host-side surface function (a grid or block helper: anything but the builder the packer
   compiles, or a `kernargs` entry) is compared together with every top-level def, class and
-  assignment it reaches by name, followed through `from` imports. A grid that hands off to
-  `NONPERSIST_DECODES[...].grid` changes when that class does, and no emitted IR covers it.
+  assignment it reaches by name, followed through `from` imports and module aliases (`import a.b
+  as m`, then `m.f`). A grid that hands off to `NONPERSIST_DECODES[...].grid` changes when that
+  class does, and no emitted IR covers it. A call through an argument (`spec.grid()` on an
+  un-annotated `spec`) is not followed: see *Known gaps*.
 - A declared `kernargs` pair compares each static C++ list in its `cpp_mirror` with the builder
   whose `b.param` list it matches, searched in the surface's module and the manifest's own
   `source` module, the declared function first. A multi-launch pack holds one list per launch (a
@@ -127,7 +129,9 @@ under `not_inspected`. `impact.py report --emit` folds the result into the rows.
 - An all-equal emit folds only the rows of modules a built family imports, and never a row on code
   that runs after lowering (`rocke/helpers/compile.py`, `rocke/runtime/`): the IR digest does not
   cover it. A static kernarg `mismatch` is never downgraded. In the merged view it folds only the
-  rows of modules whose merged content is the head's: the emitter never saw the target's.
+  rows of modules whose merged content is the head's, and only when the target changed no
+  descriptor and no module the shipped code imports since the base: the emitter compared the base
+  with the change, and a target that moved what the change builds on makes another program.
 
 ## Predicate tables
 
@@ -277,6 +281,10 @@ a flags-ON build when one exists), the architecture, and the flags.
 
 ## Known gaps
 
+- A host-side surface function is compared with the code it reaches by name and through module
+  aliases, not with a method called on an argument whose class the code does not name
+  (`spec.grid()` on an un-annotated `spec`). An edit to such a method can still fold to `NONE`
+  on an all-equal emit: read the surface function's callees when its row folds.
 - HIP-kind kernels (`ConvNative`, `PointwiseNative`) have their C++ argument lists checked but not
   their HIP producers.
 - A dynamic C++ signature (`Gfx1151WmmaAttentionNative`) cannot be compared statically.

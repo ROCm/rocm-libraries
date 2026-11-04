@@ -49,7 +49,8 @@ COMGR inputs are `changed` for that arch; when every family is equal (nothing ch
 failed, nothing not inspected) the rows that were `changed` only because a shipped module changed
 become `inert`, but only on modules a family with built variants imports, and never on code that
 runs after lowering (COMPILE_STEP) or on a DVC pointer. In the merged view the fold applies only to
-rows of modules whose merged blob is the head's. Static kernarg mismatch rows are never
+rows of modules whose merged blob is the head's, and only while the target changed no descriptor
+and no module of the shipped closure since the base. Static kernarg mismatch rows are never
 downgraded. A module that the packer reaches ships on every architecture. The emit file's
 predicate tables (a predicate that accepts a spec its builder raises on, or a value outside the
 sign range of every shipped spec) are pack-time facts: `report` lists them in their own section,
@@ -62,6 +63,7 @@ import copy
 import fnmatch
 import hashlib
 import json
+import posixpath
 import re
 import subprocess
 import sys
@@ -448,15 +450,14 @@ def collect_changes(before: Tree, after: Tree) -> list:
     return sorted(changes, key=lambda c: c.path)
 
 
-_SDK_INCLUDE = re.compile(
-    r'^[ \t]*#[ \t]*include[ \t]*[<"](hipdnn_plugin_sdk/[^>"]+)[>"]', re.M
-)
+_SDK_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"]+)[>"]', re.M)
 
 
 def loader_headers(tree: Tree) -> set:
     """SDK files compiled into the descriptor loader: the include closure, inside the plugin
-    SDK, of the ingestor SDK headers (`DescriptorLoader.hpp` among them). A header CMake
-    configures stands for its `cmake/<name>.in` template."""
+    SDK, of the ingestor SDK headers (`DescriptorLoader.hpp` among them): `<hipdnn_plugin_sdk/
+    ...>` from the SDK's include root, and a quoted include also beside the including header. A
+    header CMake configures stands for its `cmake/<name>.in` template."""
     include = SDK + "include/"
     paths = tree.paths
     seen = set()
@@ -464,9 +465,18 @@ def loader_headers(tree: Tree) -> set:
     while frontier:
         seen |= set(frontier)
         found = set()
-        for data in tree.read(frontier).values():
+        for path, data in tree.read(frontier).items():
             for match in _SDK_INCLUDE.finditer(strip_c_comments(decode(data) or "")):
-                target = include + match.group(1)
+                quote, name = match.groups()
+                beside = posixpath.normpath(
+                    posixpath.join(posixpath.dirname(path), name)
+                )
+                if quote == '"' and beside in paths:
+                    found.add(beside)
+                    continue
+                if not name.startswith("hipdnn_plugin_sdk/"):
+                    continue
+                target = include + name
                 template = f"{SDK}cmake/{PurePosixPath(target).name}.in"
                 found.add(
                     target if target in paths or template not in paths else template
@@ -2769,19 +2779,18 @@ def symbol_rows(ctx: Ctx) -> list:
     return rows
 
 
-def binds_elsewhere(path: str, tree, defining: str, name: str) -> bool:
-    """Whether `path` binds `name` only from somewhere other than `defining`: an import from
-    another module, or its own def or class. Its reads of `name` are then not of `defining`'s.
-    """
+def binds_elsewhere(
+    tree: Tree, known: list, path: str, defining: str, name: str
+) -> bool:
+    """Whether the class `name` that `path` reads is another module's than `defining`'s: its own
+    class of that name, or one imported from elsewhere, followed through package `__init__`
+    re-exports (`from rocke.dispatch.tuning import X` reaches the module defining X). Its
+    `.member` reads are then not of `defining`'s class. A name that does not resolve (the class
+    was removed, or comes from outside the repository) is not elsewhere."""
     if path == defining:
         return False
-    imports = [(stem, imp) for b, stem, imp, _ in iter_imports(path, tree) if b == name]
-    if any(imp is not None and in_module(defining, stem) for stem, imp in imports):
-        return False
-    return bool(imports) or any(
-        isinstance(n, (*DEFINITION_FUNCS, ast.ClassDef)) and n.name == name
-        for n in ast.walk(tree)
-    )
+    found = resolve_class(tree, known, path, name)
+    return found is not None and found[0] != defining
 
 
 def reader_rows(ctx: Ctx, cands: list) -> list:
@@ -2807,6 +2816,7 @@ def reader_rows(ctx: Ctx, cands: list) -> list:
     )
     ctx.after.read(mentioning)
     rows = []
+    known = sorted(p for p in ctx.after.paths if p.endswith(".py"))
     for ch, qual, entry, kind, new_entry in cands:
         name, is_method = qual.split(".")[-1], entry[3]
         own_hunks = [
@@ -2829,7 +2839,7 @@ def reader_rows(ctx: Ctx, cands: list) -> list:
                 ]
             else:
                 if is_method and binds_elsewhere(
-                    path, tree, ch.path, qual.split(".")[0]
+                    ctx.after, known, path, ch.path, qual.split(".")[0]
                 ):
                     # The file's class of that name comes from another module (a moved class
                     # keeps its name), so its `.name` reads are not reads of this one.
@@ -2987,16 +2997,18 @@ def call_arity_rows(ctx: Ctx) -> list:
 
 def reached_dumps(tree: Tree, path: str, nodes) -> list:
     """Sorted dumps of `nodes` (defs of `path`) and of every top-level def, class and assignment
-    they reach by name, followed through `from` imports into other repo modules. A host-side
+    they reach by name, followed through `from` imports and through module aliases (`import
+    a.b as m` or `from a import b as m`, then `m.f`) into other repo modules. A host-side
     surface function (a grid or block helper) can hand its work to such code
     (`NONPERSIST_DECODES[...].grid`), and no emitted IR covers any of it."""
     index, tops, seen, out = module_index(tree), {}, set(), []
 
     def bindings(where):
-        """Name -> [node] of a module's top-level defs, classes and assignments, and name ->
-        (module, name) of its `from` imports."""
+        """Name -> [node] of a module's top-level defs, classes and assignments, name ->
+        (module, name) of its `from` imports, and alias -> module of its module imports.
+        """
         if where not in tops:
-            module, nodes, imports = tree.ast(where), {}, {}
+            module, nodes, imports, modules = tree.ast(where), {}, {}, {}
             for node in module.body if module is not None else ():
                 if isinstance(node, (*DEFINITION_FUNCS, ast.ClassDef)):
                     nodes.setdefault(node.name, []).append(node)
@@ -3011,10 +3023,14 @@ def reached_dumps(tree: Tree, path: str, nodes) -> list:
             for bound, stem, imported, _ in (
                 iter_imports(where, module) if module is not None else ()
             ):
-                found = index.get(stem)
-                if imported is not None and found:
-                    imports[bound] = (found, imported)
-            tops[where] = nodes, imports
+                submodule = index.get(f"{stem}/{imported}") if imported else None
+                if submodule:  # `from a import b as m`, b a module
+                    modules[bound] = submodule
+                elif imported is None and index.get(stem):  # `import a.b as m`
+                    modules[bound] = index[stem]
+                if imported is not None and index.get(stem):
+                    imports[bound] = (index[stem], imported)
+            tops[where] = nodes, imports, modules
         return tops[where]
 
     work = [(path, node) for node in nodes]
@@ -3027,13 +3043,21 @@ def reached_dumps(tree: Tree, path: str, nodes) -> list:
         out.append(f"{where}: {ast.dump(without_docstrings(copy.deepcopy(node)))}")
         names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         pending = [(where, name) for name in sorted(names)]
+        modules = bindings(where)[2]
+        pending += sorted(
+            (modules[n.value.id], n.attr)
+            for n in ast.walk(node)
+            if isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and n.value.id in modules
+        )
         resolved = set()
         while pending:
             module, name = pending.pop()
             if (module, name) in resolved:
                 continue
             resolved.add((module, name))
-            local, imports = bindings(module)
+            local, imports, _ = bindings(module)
             work += [(module, n) for n in local.get(name, ())]
             if name in imports:
                 pending.append(imports[name])
@@ -3459,10 +3483,27 @@ def emit_source(ctx: Ctx, source: str) -> str:
     return source
 
 
+def tip_moved_the_closure(ctx: Ctx, mctx: Ctx, covered: set) -> bool:
+    """Whether the target changed, between the base and its tip, a file the shipped code
+    imports (the covered modules and every module a root reaches, at the tip and in the
+    merge) or a descriptor. The emitter compared base with base plus the change; that proves
+    nothing about the tip plus the change once the tip moved what the change builds on.
+    """
+    out = git(ctx.before.repo, "diff", "--name-only", "--no-renames", "-z",
+              ctx.before.oid, mctx.before.oid)  # fmt: skip
+    moved = {p for p in out.decode("utf-8", errors="replace").split("\0") if p}
+    closure = set(covered)
+    for side in ("before", "after"):
+        closure |= set(mctx.closure(side).consumed)
+    return any(p in closure or p.startswith(DESC_DIR) for p in moved)
+
+
 def fold_emit(ctx: Ctx, rows: list, emit: dict, merged=None) -> list:
     """Apply impact_emit output to the base..head view's rows (see the module docstring).
     `merged`, (merged view Ctx, its rows), has the same fold applied in place to the rows of
-    modules whose merged blob is the head's: the emitter proved that content, nothing else.
+    modules whose merged blob is the head's, and only while the target left the shipped
+    closure as the base had it (`tip_moved_the_closure`): the emitter proved that, nothing
+    else.
     """
     families = emit["families"]
     out = []
@@ -3472,6 +3513,15 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict, merged=None) -> list:
     covered = set()
     for fam in families:
         arch, builder = fam["arch"], fam["builder"]
+        # A generic-target family names the shard archs it compiled for, not the generic one.
+        members = fam.get("members")
+        devices = (
+            ", ".join(sorted(members))
+            if isinstance(members, list)
+            and members
+            and all(isinstance(m, str) for m in members)
+            else arch
+        )
         quiet = not any(
             fam[k]
             for k in (
@@ -3545,7 +3595,7 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict, merged=None) -> list:
                 p, e, label, why = bad[0]
                 out.append(make_row("kernargs", p, e["line"], f"emit:{arch}:{builder}", "mismatch",
                     f"emitted params of {label} ({arch}) disagree with static list {e['func']}(): {why}",
-                    counter, arch=arch))  # fmt: skip
+                    counter, arch=devices))  # fmt: skip
             else:
                 note = (
                     f"consistent with {len(entries)} static C++ list(s)"
@@ -3554,21 +3604,21 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict, merged=None) -> list:
                 )
                 out.append(make_row("kernargs", source, 0, f"emit:{arch}:{builder}", "changed",
                     f"emitted params of {builder} changed for {len(fam['params_changed'])} variant(s); {note}",
-                    counter, arch=arch))  # fmt: skip
+                    counter, arch=devices))  # fmt: skip
         elif fam.get("params_changed"):
             out.append(make_row("kernargs", source, 0, f"emit:{arch}:{builder}", "changed",
-                f"emitted params of {builder} changed for {len(fam['params_changed'])} variant(s); no param list recorded", arch=arch))  # fmt: skip
+                f"emitted params of {builder} changed for {len(fam['params_changed'])} variant(s); no param list recorded", arch=devices))  # fmt: skip
         if fam.get("ir_changed"):
             out.append(make_row("kernargs", source, 0, f"emit-ir:{arch}:{builder}", "changed",
-                f"emitted IR of {builder} changed for {len(fam['ir_changed'])} variant(s)", arch=arch))  # fmt: skip
+                f"emitted IR of {builder} changed for {len(fam['ir_changed'])} variant(s)", arch=devices))  # fmt: skip
         if fam["comgr_changed"]:
             out.append(make_row("kernargs", source, 0, f"emit-comgr:{arch}:{builder}", "changed",
                 f"COMGR inputs of {builder} (ISA, codegen options or fresh-process compile) changed for "
-                f"{len(fam['comgr_changed'])} variant(s): the code object can differ where the IR does not", arch=arch))  # fmt: skip
+                f"{len(fam['comgr_changed'])} variant(s): the code object can differ where the IR does not", arch=devices))  # fmt: skip
         failed = {side: v for side, v in failures.items() if v}
         if failed:
             out.append(make_row("kernargs", source, 0, f"emit-fail:{arch}:{builder}", "changed",
-                "variants failed to build: " + "; ".join(f"{s}: {len(v)}" for s, v in sorted(failed.items())), arch=arch))  # fmt: skip
+                "variants failed to build: " + "; ".join(f"{s}: {len(v)}" for s, v in sorted(failed.items())), arch=devices))  # fmt: skip
     for item in emit.get("not_inspected") or []:
         out.append(make_row("kernargs", item.get("kdp", ""), 0, f"emit-skip:{item.get('kdp')}:{item.get('side')}",
             "changed", f"not inspected ({item.get('side')}): {item.get('reason')}"))  # fmt: skip
@@ -3586,6 +3636,8 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict, merged=None) -> list:
             ):
                 row.update(fold)
         mctx, mrows = merged or (None, [])
+        if mctx is not None and tip_moved_the_closure(ctx, mctx, covered):
+            mrows = []
         for row in mrows:
             head, there = ctx.changes.get(row["path"]), mctx.changes.get(row["path"])
             if (
