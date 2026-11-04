@@ -62,7 +62,10 @@ UNRELATED = """\
 class Repo:
     def __init__(self, path: Path):
         self.path = path
-        self.git("init", "-q", "-b", "develop")
+        self.git("init", "-q")
+        self.git(
+            "symbolic-ref", "HEAD", "refs/heads/develop"
+        )  # `init -b` needs git 2.28
 
     def git(self, *args: str) -> str:
         proc = subprocess.run(
@@ -1828,11 +1831,12 @@ def test_a_crlf_working_tree_file_matches_the_lf_blobs_of_its_copies(repo):
 
 
 @pytest.mark.parametrize("autocrlf", (None, "true", "input"))
-def test_a_tracked_file_saved_with_crlf_is_not_reported_as_rewritten(
+def test_a_tracked_file_saved_with_crlf_still_reports_the_pasted_copy(
     repo, monkeypatch, autocrlf
 ):
-    # The blob is LF and the file on disk is CRLF: with core.autocrlf unset git
-    # reports every line as changed, which would turn a pasted copy into an edit.
+    # The blob is LF and the file on disk is CRLF. With core.autocrlf unset git
+    # reports every line as changed, so the copy is labelled LIKELY, not NEW; it
+    # must be reported either way.
     block = func("f", MULTILINE_STRING)
     repo.write("library/kernels/a.py", block)
     repo.write("library/kernels/b.py", block)
@@ -1843,9 +1847,26 @@ def test_a_tracked_file_saved_with_crlf_is_not_reported_as_rewritten(
         monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
         monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
         monkeypatch.setenv("GIT_CONFIG_VALUE_0", autocrlf)
-    (finding,) = repo.check("--base", base)[1]["findings"]
-    assert finding["kind"] == "NEW COPY"
+    rc, report = repo.check("--base", base, "--fail-on-new")
+    (finding,) = report["findings"]
+    assert finding["kind"] in ("NEW COPY", "LIKELY COPY")
     assert (finding["copies_before"], finding["copies_after"]) == (2, 3)
+    assert rc == 1
+
+
+def test_a_file_changed_only_in_its_line_endings_does_not_break_the_run(repo):
+    # git versions differ in whether they list such a file; a pasted copy in
+    # another file must still be found without an error.
+    block = func("f", MULTILINE_STRING)
+    repo.write("library/kernels/a.py", block)
+    base = repo.commit()
+    (repo.path / "library" / "kernels" / "a.py").write_bytes(
+        block.replace("\n", "\r\n").encode()
+    )
+    repo.write("library/kernels/b.py", block)
+    rc, report = repo.check("--base", base)
+    assert rc == 0
+    assert kinds(report) == ["NEW COPY"]
 
 
 def test_a_groups_file_with_a_utf8_bom_is_read(repo):
