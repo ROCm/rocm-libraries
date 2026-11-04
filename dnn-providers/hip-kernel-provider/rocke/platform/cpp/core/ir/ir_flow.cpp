@@ -2290,6 +2290,7 @@ rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_for: NULL bound/step");
         return out;
     }
+    rocke_i_refuse_declared_name(b, "loop induction variable", nm);
 
     body = rocke_i_new_region(b, "body");
     if(!body)
@@ -2369,6 +2370,12 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
             return out;
         }
     }
+    rocke_i_refuse_declared_name(b, "loop induction variable", nm);
+    for(i = 0; i < num_iter_args; ++i)
+    {
+        rocke_i_refuse_declared_name(
+            b, "loop-carried value", iter_args[i].name ? iter_args[i].name : "");
+    }
 
     body = rocke_i_new_region(b, "body");
     if(!body)
@@ -2403,7 +2410,7 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
     }
 
     /* result types: one per iter arg, type = init type. rocke_i_op makes the
-     * result Values, named with the "for" hint => "%for<N>" matching
+     * result Values, named with the "for" hint => "%for_<N>" matching
      * Python's self._fresh("for"). */
     rtys = NULL;
     if(num_iter_args > 0)

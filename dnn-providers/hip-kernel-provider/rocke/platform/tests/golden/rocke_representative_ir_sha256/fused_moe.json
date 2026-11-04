@@ -5,26 +5,26 @@
       "cases": {
         "fused_moe/gfx950/gather_h128": {
           "arch": "gfx950",
-          "bytes": 1797,
+          "bytes": 1826,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "e268ac538fec8cf72d0702beb5c54136d9d0f1a9ae864f5922b86cb35d1d0e43",
+          "sha256": "7e7806dbb85c51c71a053baeb4c2442c5054a891e6bebd157689580ff1d0597f",
           "status": "ok"
         },
         "fused_moe/gfx950/reduce_h128": {
           "arch": "gfx950",
-          "bytes": 2202,
+          "bytes": 2239,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "62e3fb533c7cbead0f4d545a898a5ac23d7dccf9ba90c66515ee07649bd3b5fd",
+          "sha256": "3dc2a99d1704dd99e78231f2838b7d99fe1cffc53d8ae1e0d2c0aab83b04f236",
           "status": "ok"
         },
         "fused_moe/gfx950/silu_i256": {
           "arch": "gfx950",
-          "bytes": 2948,
+          "bytes": 3038,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "ba083a9f753cf5de73b3a4f462bf519e3ec1afd4ef2fdd1a981869005bc0e3e5",
+          "sha256": "1fe17d7e795e8a82ed3505d09633faee258250ad6877d0b51c75e4f0b7c5b462",
           "status": "ok"
         }
       },
@@ -34,26 +34,26 @@
       "cases": {
         "fused_moe/gfx950/gather_h128": {
           "arch": "gfx950",
-          "bytes": 1804,
+          "bytes": 1833,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "86dff46ddc0564753bb49844690edc04daedf4d082c569507905ecc2af632c33",
+          "sha256": "b00ff01642377fa96eb1e5662f454b7aa6fa86540805fd7930d1bbaeac2ccc3b",
           "status": "ok"
         },
         "fused_moe/gfx950/reduce_h128": {
           "arch": "gfx950",
-          "bytes": 2209,
+          "bytes": 2246,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "2674041b11fd926ff708e6a3e00ffa6a75695c0802a1b891216a322ed814a639",
+          "sha256": "87696f5cc674ffb6bcfd8c4427adf5523dd45f541f19920e9d9287c2aacf3060",
           "status": "ok"
         },
         "fused_moe/gfx950/silu_i256": {
           "arch": "gfx950",
-          "bytes": 2955,
+          "bytes": 3045,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "30c820825e7b544eb412a845cbacf36ff0b3143299f01200dd6bb1f137fdfa28",
+          "sha256": "21d47ee5715d77f02fb46a1749bd0c4fd730c59797e61bb4365f31787497736a",
           "status": "ok"
         }
       },
@@ -63,26 +63,26 @@
       "cases": {
         "fused_moe/gfx950/gather_h128": {
           "arch": "gfx950",
-          "bytes": 1868,
+          "bytes": 1897,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "8635aec0de1ee81b1afea0d97512d55e290f3f5872de358cc4e9524865bdcda6",
+          "sha256": "fdb64891def97cbfa69f6346106681b3ed1fdedba3292fad82579fa69a72f9a1",
           "status": "ok"
         },
         "fused_moe/gfx950/reduce_h128": {
           "arch": "gfx950",
-          "bytes": 2273,
+          "bytes": 2310,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "0598cd0f21ba59fa7a395976417b849cfbcdc6b22480df52299a804af0a73562",
+          "sha256": "4cf8536590b48971c085b17206d47ce4b9e3c1092d391e30ebbf5c211c2e9a0d",
           "status": "ok"
         },
         "fused_moe/gfx950/silu_i256": {
           "arch": "gfx950",
-          "bytes": 3019,
+          "bytes": 3109,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "eb02f3c6e7e76507bcc86d533cd49e27825f67c009e2b7929457475713575669",
+          "sha256": "fe29c76303da46c903e2a260228c42d83c641a6a47c3f1deca645f1cb3cc7d43",
           "status": "ok"
         }
       },
@@ -92,26 +92,26 @@
       "cases": {
         "fused_moe/gfx950/gather_h128": {
           "arch": "gfx950",
-          "bytes": 1868,
+          "bytes": 1897,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "8635aec0de1ee81b1afea0d97512d55e290f3f5872de358cc4e9524865bdcda6",
+          "sha256": "fdb64891def97cbfa69f6346106681b3ed1fdedba3292fad82579fa69a72f9a1",
           "status": "ok"
         },
         "fused_moe/gfx950/reduce_h128": {
           "arch": "gfx950",
-          "bytes": 2273,
+          "bytes": 2310,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "0598cd0f21ba59fa7a395976417b849cfbcdc6b22480df52299a804af0a73562",
+          "sha256": "4cf8536590b48971c085b17206d47ce4b9e3c1092d391e30ebbf5c211c2e9a0d",
           "status": "ok"
         },
         "fused_moe/gfx950/silu_i256": {
           "arch": "gfx950",
-          "bytes": 3019,
+          "bytes": 3109,
           "family": "moe",
           "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
-          "sha256": "eb02f3c6e7e76507bcc86d533cd49e27825f67c009e2b7929457475713575669",
+          "sha256": "fe29c76303da46c903e2a260228c42d83c641a6a47c3f1deca645f1cb3cc7d43",
           "status": "ok"
         }
       },

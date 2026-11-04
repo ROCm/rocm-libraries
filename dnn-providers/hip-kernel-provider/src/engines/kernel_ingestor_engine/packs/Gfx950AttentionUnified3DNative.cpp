@@ -479,7 +479,7 @@ std::vector<KernelArgument> unified3DSegmentSignature()
             KernelArgument{"by_value", F32, 108, "softcap"},
             KernelArgument{"by_value", I32, 112, "num_seqs"},
             KernelArgument{"by_value", I32, 116, "block_table_stride"},
-            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"}};
+            KernelArgument{"by_value", I32, 120, "qq_bias_stride0"}};
 }
 
 /// The reduce kernel's signature: the output then the three scratch arrays it folds, and

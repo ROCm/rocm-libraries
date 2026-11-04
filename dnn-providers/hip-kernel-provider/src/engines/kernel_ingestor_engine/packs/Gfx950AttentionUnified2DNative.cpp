@@ -493,7 +493,7 @@ std::vector<KernelArgument> unified2DKernelSignature()
             KernelArgument{"by_value", F32, 96, "softcap"},
             KernelArgument{"by_value", I32, 100, "num_seqs"},
             KernelArgument{"by_value", I32, 104, "block_table_stride"},
-            KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"}};
+            KernelArgument{"by_value", I32, 108, "qq_bias_stride0"}};
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back into

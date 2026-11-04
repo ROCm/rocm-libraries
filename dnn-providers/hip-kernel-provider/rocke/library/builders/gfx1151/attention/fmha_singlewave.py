@@ -242,12 +242,12 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
     iter_args = []
     for t in range(BM):
         for r in range(c_frag):
-            iter_args.append((f"m{t}_{r}", neg_inf))
+            iter_args.append((f"m{t}_r{r}", neg_inf))
         for r in range(c_frag):
-            iter_args.append((f"l{t}_{r}", zero_f))
+            iter_args.append((f"l{t}_r{r}", zero_f))
     for t in range(BM):
         for d in range(n_dk):
-            iter_args.append((f"acc{t}_{d}", atom.zero_acc(b)))
+            iter_args.append((f"acc{t}_d{d}", atom.zero_acc(b)))
 
     def unpack(state):
         idx = 0

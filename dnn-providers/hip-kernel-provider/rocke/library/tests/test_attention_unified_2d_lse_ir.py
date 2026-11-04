@@ -261,7 +261,7 @@ def test_2d_lse_on_appends_lse_ptr_last_and_stores_once_per_slot(arch, branch):
     assert "@llvm.log2.f32" in on_ir
 
 
-# Additive-bias params are appended after qq_bias_stride_0; branch B rejects bias.
+# Additive-bias params are appended after qq_bias_stride0; branch B rejects bias.
 @pytest.mark.parametrize(
     "arch,branch", [("gfx950", "transposed32"), ("gfx950", "striped16")]
 )

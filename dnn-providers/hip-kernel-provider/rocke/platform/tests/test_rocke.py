@@ -4007,7 +4007,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
         hip = lower_kernel_to_hip(b.kernel)
         self.assertIn(
-            "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)",
+            "__builtin_amdgcn_update_dpp(c_1, c_1, 177, 15, 15, 1)",
             hip,
         )
 
@@ -4165,7 +4165,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                 b.warp_shuffle_xor_dpp(b.const_i32(1), 7)
                 hip = lower_kernel_to_hip(b.kernel, arch=arch)
                 self.assertIn(
-                    f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
+                    f"__builtin_amdgcn_update_dpp(c_1, c_1, {want}, 15, 15, 1)", hip
                 )
 
     def test_warp_shuffle_xor_dpp_f32_goes_through_i32(self):
@@ -5577,19 +5577,19 @@ class TestExpandedEpilogueOps(unittest.TestCase):
     def test_residual_add_declares_param_and_lowers(self):
         from rocke.helpers import ResidualAdd
 
-        op = ResidualAdd(param_name="residual_0")
+        op = ResidualAdd(param_name="residual0")
         kernel, ll = self._build_epilogue_kernel(op)
         self.assertIn("resadd_f16", kernel.name)
         # The residual pointer must show up as a kernel param.
-        self.assertIn("residual_0", ll)
+        self.assertIn("residual0", ll)
 
     def test_residual_mul_declares_param_and_lowers(self):
         from rocke.helpers import ResidualMul
 
-        op = ResidualMul(param_name="residual_mul_0")
+        op = ResidualMul(param_name="residual_mul0")
         kernel, ll = self._build_epilogue_kernel(op)
         self.assertIn("resmul_f16", kernel.name)
-        self.assertIn("residual_mul_0", ll)
+        self.assertIn("residual_mul0", ll)
 
 
 @_requires_torch
@@ -6072,7 +6072,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(args["N"], 128)
         self.assertEqual(args["K"], 64)
         self.assertIs(args["bias"], runtime_args["bias"])
-        self.assertIs(args["residual_0"], runtime_args["residual"])
+        self.assertIs(args["residual0"], runtime_args["residual"])
         # The grid is derived from the first candidate's tile, which the
         # autotuner selects against the launch device's MMA catalog (WMMA on
         # gfx11 wave32 picks a 32x32 first tile; a CDNA/no-GPU box picks a

@@ -685,7 +685,7 @@ def build_direct_wgrad_tiled(
 
         n_iter_args = [(f"a{i}", v) for i, v in enumerate(accs)]
         n_iter_args += [
-            (f"r{j}_{mi}", ring[j][mi]) for j in range(1, KH) for mi in range(WK16)
+            (f"r{j}_m{mi}", ring[j][mi]) for j in range(1, KH) for mi in range(WK16)
         ]
         row_loop = b.scf_for_iter(
             c0,

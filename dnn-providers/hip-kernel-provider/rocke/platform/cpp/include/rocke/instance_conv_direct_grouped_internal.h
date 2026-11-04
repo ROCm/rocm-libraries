@@ -1183,7 +1183,7 @@ typedef struct rocke_dw_win_plan
 
 /* A one-trip (or zero-trip) scf.for_iter guarding `body` on the block-uniform
  * `ok`, carrying `accs` (updated in place to the loop results). The iter args
- * are named `<prefix>_y<y>_<i>`, the induction variable `<prefix>_y<y>`.
+ * are named `<prefix>_y<y>_i<i>`, the induction variable `<prefix>_y<y>`.
  * `body` maps the carried values to the yielded ones; it is a template
  * parameter so each caller's lambda is called directly. */
 template <typename Body>
@@ -1202,7 +1202,7 @@ inline void rocke_dw_win_guarded(rocke_ir_builder_t* b,
     std::vector<rocke_iter_arg_t> iargs(accs.size());
     for(size_t i = 0; i < accs.size(); ++i)
     {
-        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_" + std::to_string(i);
+        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_i" + std::to_string(i);
         iargs[i].name = names[i].c_str();
         iargs[i].init = accs[i];
     }

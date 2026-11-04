@@ -118,7 +118,7 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesTheUnified2DListAsASegmentKer
                                                 scalar("softcap"),
                                                 scalar("num_seqs"),
                                                 scalar("block_table_stride"),
-                                                scalar("qq_bias_stride_0")};
+                                                scalar("qq_bias_stride0")};
     expectRefused(unified2d, pythonReduceAbi(), "the 2D kernel is not a segment kernel");
 }
 

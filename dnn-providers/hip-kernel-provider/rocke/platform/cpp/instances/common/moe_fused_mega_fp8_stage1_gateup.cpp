@@ -455,14 +455,14 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
     int na = 0;
     for(ni = 0; ni < nni; ++ni)
     {
-        snprintf(names[na], sizeof(names[na]), "g_out_%s_%d", tag ? tag : "", ni);
+        snprintf(names[na], sizeof(names[na]), "g_out_%s_n%d", tag ? tag : "", ni);
         iter_args[na].name = names[na];
         iter_args[na].init = moe_fp8_atom_zero_acc(b, atom);
         ++na;
     }
     for(ni = 0; ni < nni; ++ni)
     {
-        snprintf(names[na], sizeof(names[na]), "u_out_%s_%d", tag ? tag : "", ni);
+        snprintf(names[na], sizeof(names[na]), "u_out_%s_n%d", tag ? tag : "", ni);
         iter_args[na].name = names[na];
         iter_args[na].init = moe_fp8_atom_zero_acc(b, atom);
         ++na;

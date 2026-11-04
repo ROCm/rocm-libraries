@@ -507,7 +507,7 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
                 c0,
                 trip,
                 c1,
-                [(f"dfw_y{y}_{i}", acc[sl]) for i, sl in enumerate(slots)],
+                [(f"dfw_y{y}_i{i}", acc[sl]) for i, sl in enumerate(slots)],
                 iv_name=f"dfw_y{y}",
             )
             with loop as (_, accs):

@@ -111,7 +111,7 @@ TEST(TestGfx950AttentionUnified2DSignature, AcceptsTheAbiThePythonDeclares)
 
 TEST(TestGfx950AttentionUnified2DSignature, RefusesADroppedTrailingArgument)
 {
-    // qq_bias_stride_0 gone: 17 arguments against 18, so the kernel would read one slot past
+    // qq_bias_stride0 gone: 17 arguments against 18, so the kernel would read one slot past
     // what the host wrote.
     auto signature = pythonAbi();
     signature.pop_back();

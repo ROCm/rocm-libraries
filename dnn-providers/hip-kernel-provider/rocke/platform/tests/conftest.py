@@ -7,7 +7,10 @@
 #
 # source tree: this dir -> rocke/platform/tests, so parent -> rocke/platform
 
+import re
+import subprocess
 import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
@@ -50,6 +53,51 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     report.outcome = "skipped"
     report.longrepr = (str(item.path), item.location[1] + 1, str(call.excinfo.value))
+
+
+@pytest.fixture
+def provider_ctest_labels(tmp_path) -> Callable[[Iterable[str]], dict[str, set[str]]]:
+    """Return a function that labels CTest names the way the provider build does.
+
+    The provider's ``ROCKE_ENGINE_test_categories_external.yaml`` sits beside
+    ``rocke/`` and the monorepo's shared parser applies it to the installed
+    CTest file. The returned function feeds that parser one ``add_test`` line
+    per name and maps each name to the labels it would get; a name no category
+    matches maps to an empty set. A standalone rocKE tree has neither file, so
+    the requesting test is skipped there.
+    """
+    provider = _ROCKE.parents[1]
+    categories = provider / "ROCKE_ENGINE_test_categories_external.yaml"
+    parser = provider.parents[1] / "shared/ctest/parse_ctest_categories.py"
+    for path in (categories, parser):
+        if not path.is_file():
+            pytest.skip(f"no provider CTest categories to check: {path} does not exist")
+    pytest.importorskip("yaml", reason="the shared category parser needs PyYAML")
+
+    def labels_of(names: Iterable[str]) -> dict[str, set[str]]:
+        ordered_names = list(names)
+        # A subdirectory, so the requesting test's own tmp_path files are untouched.
+        ctests = tmp_path / "provider_ctest_labels" / "CTestTestfile.cmake"
+        ctests.parent.mkdir(exist_ok=True)
+        ctests.write_text(
+            "".join(f"add_test({name} python)\n" for name in ordered_names)
+        )
+        result = subprocess.run(
+            [sys.executable, str(parser), str(categories), str(ctests)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        labelled = {
+            name: set(value.split(";"))
+            for name, value in re.findall(
+                r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)',
+                result.stdout,
+            )
+        }
+        return {name: labelled.get(name, set()) for name in ordered_names}
+
+    return labels_of
 
 
 # The IR parity harness' attention families are the one sanctioned platform ->

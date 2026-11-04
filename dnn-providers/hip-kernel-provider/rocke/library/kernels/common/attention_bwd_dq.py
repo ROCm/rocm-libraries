@@ -980,7 +980,7 @@ def _emit_dq(spec: AttnBwdDqSpec, arch: str, *, sentinel: bool = True):
         )
     dq = step.zero_dq(b)  # after the range: the accumulators start here
     fm, fn = geom.g4t.frags_m, geom.g4t.frags_n
-    for (s0, _e, edge), trip, name in zip(ranges, trips, ("k", "ki_", "ke_")):
+    for (s0, _e, edge), trip, name in zip(ranges, trips, ("k", "ki", "ke")):
         flat = [v for row in dq for v in row]
         loop = b.scf_for_iter(
             zero, trip, one,

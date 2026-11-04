@@ -198,7 +198,7 @@ inline std::vector<KernelArgument> pythonAbi()
             scalar("softcap"),
             scalar("num_seqs"),
             scalar("block_table_stride"),
-            scalar("qq_bias_stride_0")};
+            scalar("qq_bias_stride0")};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, recording

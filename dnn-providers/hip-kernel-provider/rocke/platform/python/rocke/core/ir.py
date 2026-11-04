@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import enum
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -440,6 +441,157 @@ def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
             f"{op_name}: {elem.name} values travel packed in 32-bit words and have "
             "no scalar or vector form -- keep them in i32 storage and unpack "
             "explicitly"
+        )
+
+
+# Value names. The builder names every value it makes "%<hint>_<n>": the hint the
+# op chose, then "_", then a counter that never repeats inside one builder. The
+# counter is always the digits after the last "_", so two builder names are equal
+# only when their hints and counters are both equal: %cz16_5 and %cz1_65 cannot
+# meet the way %cz165 could. The names an author picks (kernel parameters, loop
+# induction variables, loop-carried values) must therefore not end in "_" and
+# digits, or one could spell a builder name. The HIP lowering prints value names
+# unchanged, as C++ identifiers, so they must also be identifiers and must not be
+# C++ keywords; a builder name always ends in "_" and digits, so it is never a
+# keyword. Other names the HIP output already uses (its type names such as
+# uint32_t, builtins such as threadIdx, names C++ reserves such as __x) are not
+# refused here.
+
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENDS_IN_COUNTER = re.compile(r".*_[0-9]+")
+
+# The C++20 keywords and alternative operator tokens (the standard's [lex.key]
+# and [lex.digraph] tables). The C++ engine's twin is kCxxKeywords in
+# cpp/core/ir/core_builder.cpp.
+_CXX_KEYWORDS = frozenset(
+    {
+        "alignas",
+        "alignof",
+        "and",
+        "and_eq",
+        "asm",
+        "auto",
+        "bitand",
+        "bitor",
+        "bool",
+        "break",
+        "case",
+        "catch",
+        "char",
+        "char16_t",
+        "char32_t",
+        "char8_t",
+        "class",
+        "co_await",
+        "co_return",
+        "co_yield",
+        "compl",
+        "concept",
+        "const",
+        "const_cast",
+        "consteval",
+        "constexpr",
+        "constinit",
+        "continue",
+        "decltype",
+        "default",
+        "delete",
+        "do",
+        "double",
+        "dynamic_cast",
+        "else",
+        "enum",
+        "explicit",
+        "export",
+        "extern",
+        "false",
+        "float",
+        "for",
+        "friend",
+        "goto",
+        "if",
+        "inline",
+        "int",
+        "long",
+        "mutable",
+        "namespace",
+        "new",
+        "noexcept",
+        "not",
+        "not_eq",
+        "nullptr",
+        "operator",
+        "or",
+        "or_eq",
+        "private",
+        "protected",
+        "public",
+        "register",
+        "reinterpret_cast",
+        "requires",
+        "return",
+        "short",
+        "signed",
+        "sizeof",
+        "static",
+        "static_assert",
+        "static_cast",
+        "struct",
+        "switch",
+        "template",
+        "this",
+        "thread_local",
+        "throw",
+        "true",
+        "try",
+        "typedef",
+        "typeid",
+        "typename",
+        "union",
+        "unsigned",
+        "using",
+        "virtual",
+        "void",
+        "volatile",
+        "wchar_t",
+        "while",
+        "xor",
+        "xor_eq",
+    }
+)
+
+
+def _refuse_value_name_hint(hint: str) -> None:
+    """Refuse an empty name hint or one that starts with a digit: a value name
+    must read as a hint and then its counter, and the HIP lowering prints it as
+    a C identifier."""
+    if not hint or hint[0] in "0123456789":
+        raise ValueError(
+            f"value name hint '{hint}' must be non-empty and must not start with "
+            "a digit"
+        )
+
+
+def _refuse_declared_name(what: str, name: str) -> None:
+    """Refuse an author-chosen value name (``what`` says which kind) that is not
+    an identifier, that is a C++ keyword, or that ends in ``_<digits>``, which
+    is reserved for the values the builder names."""
+    if not _IDENTIFIER.fullmatch(name):
+        raise ValueError(
+            f"{what} name '{name}' is not an identifier: use letters, digits and "
+            "'_', not starting with a digit"
+        )
+    if name in _CXX_KEYWORDS:
+        raise ValueError(
+            f"{what} name '{name}' is a C++ keyword, and the HIP lowering prints "
+            "value names as C++ identifiers; choose another name"
+        )
+    if _ENDS_IN_COUNTER.fullmatch(name):
+        raise ValueError(
+            f"{what} name '{name}' ends in '_' and digits, the form the builder "
+            "gives the values it names; choose a name that does not end in "
+            "'_<digits>'"
         )
 
 
@@ -1372,8 +1524,11 @@ class IRBuilder:
     # ----- naming -----
 
     def _fresh(self, prefix: str = "v") -> str:
+        """A new value name, ``%<prefix>_<n>`` (the "Value names" note above
+        says why the ``_`` is always there)."""
+        _refuse_value_name_hint(prefix)
         self._counter += 1
-        return f"%{prefix}{self._counter}"
+        return f"%{prefix}_{self._counter}"
 
     # ----- region management -----
 
@@ -1412,6 +1567,7 @@ class IRBuilder:
             Used by descriptor tables (P17): grouped-GEMM
             ``gemm_descs_const``, per-expert pointer arrays, etc.
         """
+        _refuse_declared_name("kernel parameter", name)
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
         _refuse_packed_only_value("param", t)
@@ -4755,9 +4911,6 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
-            # "dtr" prefix (not "tr...digits") so the fresh-name counter can never
-            # collide with an arith.trunc result ("tr"+id): e.g. trunc id 16631
-            # and tr16 id 631 both stringify to "tr16631".
             result_name_hint="dtr16",
         ).result
 
@@ -6214,6 +6367,7 @@ class IRBuilder:
     # ----- control flow -----
 
     def scf_for(self, lower: Value, upper: Value, step: Value, iv_name: str = "k0"):
+        _refuse_declared_name("loop induction variable", iv_name)
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         op = Op(
@@ -6257,6 +6411,9 @@ class IRBuilder:
         for index, (_, init) in enumerate(iter_args):
             if _is_buffer_descriptor(init):
                 raise ValueError(_loop_carried_descriptor_message(index))
+        _refuse_declared_name("loop induction variable", iv_name)
+        for arg_name, _ in iter_args:
+            _refuse_declared_name("loop-carried value", arg_name)
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         iter_vars: List[Value] = []

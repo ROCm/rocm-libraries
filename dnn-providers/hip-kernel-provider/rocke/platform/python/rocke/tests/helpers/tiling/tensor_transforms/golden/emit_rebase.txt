@@ -1,9 +1,9 @@
 kernel @emit_test() {
-  %c1 = arith.constant {ity = "i32", value = 40} : i32
-  %tid2 = gpu.thread_id {axis = "x"} : i32
-  %sub3 = arith.sub %c1, %tid2 : i32
-  %c4 = arith.constant {ity = "i32", value = 23} : i32
-  %add5 = arith.add %sub3, %c4 : i32
-  %c6 = arith.constant {ity = "i32", value = 16} : i32
-  %mul7 = arith.mul %add5, %c6 : i32
+  %c_1 = arith.constant {ity = "i32", value = 40} : i32
+  %tid_2 = gpu.thread_id {axis = "x"} : i32
+  %sub_3 = arith.sub %c_1, %tid_2 : i32
+  %c_4 = arith.constant {ity = "i32", value = 23} : i32
+  %add_5 = arith.add %sub_3, %c_4 : i32
+  %c_6 = arith.constant {ity = "i32", value = 16} : i32
+  %mul_7 = arith.mul %add_5, %c_6 : i32
 }

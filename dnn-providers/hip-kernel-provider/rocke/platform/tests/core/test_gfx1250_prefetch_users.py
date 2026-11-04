@@ -164,16 +164,16 @@ class TestBlockScaledGemmPrefetch(unittest.TestCase):
                 self.assertEqual(llvm.count("call void @llvm.amdgcn.s.setreg("), 1)
                 self.assertIn("call void @llvm.amdgcn.s.setreg(i32 1537, i32 1)", llvm)
                 m0 = re.search(
-                    r"%(bid\d+) = call i32 @llvm\.amdgcn\.workgroup\.id\.y\(\)\n"
-                    r"\s*%(mul\d+) = mul nsw i32 %\1, 16",
+                    r"%(bid_\d+) = call i32 @llvm\.amdgcn\.workgroup\.id\.y\(\)\n"
+                    r"\s*%(mul_\d+) = mul nsw i32 %\1, 16",
                     llvm,
                 )
                 self.assertIsNotNone(m0)
                 self.assertRegex(
                     llvm,
-                    rf"%(mul\d+) = mul nsw i32 %{m0.group(2)}, {row_bytes}\n"
+                    rf"%(mul_\d+) = mul nsw i32 %{m0.group(2)}, {row_bytes}\n"
                     r"\s*%(goff64\.\d+) = zext i32 %\1 to i64\n"
-                    r"\s*%(gptr\d+) = getelementptr inbounds i8, "
+                    r"\s*%(gptr_\d+) = getelementptr inbounds i8, "
                     r"ptr addrspace\(1\) %A_scale, i64 %\2\n"
                     r"\s*call void @llvm\.amdgcn\.s\.prefetch\.data\.p1\("
                     rf"ptr addrspace\(1\) %\3, i32 {lines}\)",
@@ -204,9 +204,9 @@ class TestBlockScaledGemmPrefetch(unittest.TestCase):
             with self.subTest(path=path, K=k):
                 llvm = _lower(_spec(path, K=k))
                 pairs = re.findall(
-                    r"%(add\d+) = add nsw i32 %mul\d+, (\d+)\n"
+                    r"%(add_\d+) = add nsw i32 %mul_\d+, (\d+)\n"
                     r"\s*%goff64\.\d+ = zext i32 %\1 to i64\n"
-                    r"\s*%(gptr\d+) = getelementptr inbounds i8, "
+                    r"\s*%(gptr_\d+) = getelementptr inbounds i8, "
                     r"ptr addrspace\(1\) %([AB]), i64 %goff64\.\d+\n"
                     r"\s*call void @llvm\.amdgcn\.global\.prefetch\("
                     r"ptr addrspace\(1\) %\3, i32 0\)",

@@ -271,8 +271,8 @@ def test_attn_signature_appends_lse_last():
     off = [p["name"] for p in au._attn_signature("bf16", **kw)]
     on = [p["name"] for p in au._attn_signature("bf16", emit_lse=True, **kw)]
     assert on == off + ["lse_ptr"]
-    assert off[-1] == "qq_bias_stride_0"
-    # The additive-bias params come after qq_bias_stride_0; lse_ptr
+    assert off[-1] == "qq_bias_stride0"
+    # The additive-bias params come after qq_bias_stride0; lse_ptr
     # stays last, after them, matching the gfx950 kernel's declaration order.
     kw["include_additive_bias"] = True
     off = [p["name"] for p in au._attn_signature("bf16", **kw)]

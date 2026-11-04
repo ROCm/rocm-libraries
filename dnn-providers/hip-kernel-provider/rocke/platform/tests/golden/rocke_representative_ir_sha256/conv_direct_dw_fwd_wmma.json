@@ -5,18 +5,18 @@
       "cases": {
         "conv_direct_dw_fwd_wmma/gfx1250/bf16_k3_default": {
           "arch": "gfx1250",
-          "bytes": 69238,
+          "bytes": 70774,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r3s3p1_wv4_bh8_f1_pf2_bf16",
-          "sha256": "c9b352f9bd5ee003f2c9092b5ae2aef2622e747a0bfa483d71bdae178adca15b",
+          "sha256": "d2e53ecc2e9badb4c16f9f540028ef4c69a69f490cd54557d802735d17aa09c6",
           "status": "ok"
         },
         "conv_direct_dw_fwd_wmma/gfx1250/fp16_k7_wv8_f4_pf4": {
           "arch": "gfx1250",
-          "bytes": 134826,
+          "bytes": 138287,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r7s7p3_wv8_bh4_f4_pf4",
-          "sha256": "f403df4d47bb270eb24962f35fc2b2a8ff7adb5d2149bdc34e0bf112218ed612",
+          "sha256": "26555752b8ff8f8f83ff8a66474477159ae4c9c41098d8c03d56a5d492d68374",
           "status": "ok"
         }
       },
@@ -26,18 +26,18 @@
       "cases": {
         "conv_direct_dw_fwd_wmma/gfx1250/bf16_k3_default": {
           "arch": "gfx1250",
-          "bytes": 69377,
+          "bytes": 70913,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r3s3p1_wv4_bh8_f1_pf2_bf16",
-          "sha256": "5f05ad9920c13fb2cf8b4b399626fd2a5d60cd6c63ba5318453e7666965f27f3",
+          "sha256": "e4a7710862590cfd1df70c8cb8d2ba75118fdd0722126430a2d0bb6c54e17705",
           "status": "ok"
         },
         "conv_direct_dw_fwd_wmma/gfx1250/fp16_k7_wv8_f4_pf4": {
           "arch": "gfx1250",
-          "bytes": 134965,
+          "bytes": 138426,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r7s7p3_wv8_bh4_f4_pf4",
-          "sha256": "e30a68bdd0e5c0160453a56026c2fa5b6f354ff9ed635e85458b8713d6d530c3",
+          "sha256": "c74fbfd872b80442aa2a3f1bed768d97ac25a8b6c9fd4af957587ef8b8aa2374",
           "status": "ok"
         }
       },
@@ -47,18 +47,18 @@
       "cases": {
         "conv_direct_dw_fwd_wmma/gfx1250/bf16_k3_default": {
           "arch": "gfx1250",
-          "bytes": 69441,
+          "bytes": 70977,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r3s3p1_wv4_bh8_f1_pf2_bf16",
-          "sha256": "13794de6752957e973ad2191bcb1cee1e3efde91806a972f6096c8886115f192",
+          "sha256": "dff37b71c1d1deef219af21727ef70c8c145ea6694a97ec0dcb2982eb6076d1f",
           "status": "ok"
         },
         "conv_direct_dw_fwd_wmma/gfx1250/fp16_k7_wv8_f4_pf4": {
           "arch": "gfx1250",
-          "bytes": 135029,
+          "bytes": 138490,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r7s7p3_wv8_bh4_f4_pf4",
-          "sha256": "d22779f0e82ef43e7050041c27d1d5b612c57d51ce795ccc6c90b3511f5be054",
+          "sha256": "f23ba1572553274f819c8c972d47972a20ba5bf90cefff2bfd2160d246577424",
           "status": "ok"
         }
       },
@@ -68,18 +68,18 @@
       "cases": {
         "conv_direct_dw_fwd_wmma/gfx1250/bf16_k3_default": {
           "arch": "gfx1250",
-          "bytes": 69441,
+          "bytes": 70977,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r3s3p1_wv4_bh8_f1_pf2_bf16",
-          "sha256": "13794de6752957e973ad2191bcb1cee1e3efde91806a972f6096c8886115f192",
+          "sha256": "dff37b71c1d1deef219af21727ef70c8c145ea6694a97ec0dcb2982eb6076d1f",
           "status": "ok"
         },
         "conv_direct_dw_fwd_wmma/gfx1250/fp16_k7_wv8_f4_pf4": {
           "arch": "gfx1250",
-          "bytes": 135029,
+          "bytes": 138490,
           "family": "conv_direct_dw_fwd_wmma",
           "kernel_name": "rocke_direct_dw_fwd_wmma_r7s7p3_wv8_bh4_f4_pf4",
-          "sha256": "d22779f0e82ef43e7050041c27d1d5b612c57d51ce795ccc6c90b3511f5be054",
+          "sha256": "f23ba1572553274f819c8c972d47972a20ba5bf90cefff2bfd2160d246577424",
           "status": "ok"
         }
       },
