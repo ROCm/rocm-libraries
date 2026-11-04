@@ -170,6 +170,10 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
             tree = expand_sweep(
                 str(config_path), "gfx1250", reduction_strategies=["tree"], **kwargs
             )
+            single = expand_sweep(
+                str(config_path), "gfx1250", reduction_strategies="tree", **kwargs
+            )
+        self.assertEqual([c.name for c in single], [c.name for c in tree])
         self.assertEqual(len(swept), 3 * len(tree))
         self.assertEqual({c.reduction_strategy for c in tree}, {"tree"})
         self.assertEqual(len({c.name for c in tree}), len(tree))

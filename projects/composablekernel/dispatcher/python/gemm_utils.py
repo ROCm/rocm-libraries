@@ -38,7 +38,7 @@ import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -2758,7 +2758,7 @@ def expand_sweep(
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
     vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
     rejects: Optional[Dict[str, int]] = None,
-    reduction_strategies: Optional[List[str]] = None,
+    reduction_strategies: Optional[Union[str, List[str]]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2790,10 +2790,11 @@ def expand_sweep(
     triple that is illegal for the tile is dropped and its reason counted in
     ``rejects`` (when given).
 
-    ``reduction_strategies`` (``variant='stream_k'`` only) replaces the
-    config's ``streamk_config.reduction_strategy`` list before expansion, so an
-    override never multiplies the sweep by the config's own strategies. An
-    unknown strategy name raises ``ValueError`` before any codegen/build.
+    ``reduction_strategies`` (``variant='stream_k'`` only; one name or a list)
+    replaces the config's ``streamk_config.reduction_strategy`` list before
+    expansion, so an override never multiplies the sweep by the config's own
+    strategies. An unknown strategy name raises ``ValueError`` before any
+    codegen/build.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2855,6 +2856,8 @@ def expand_sweep(
     # variants keep a single dummy value so the product is unaffected.
     if variant == "stream_k":
         sk = cfg.get("streamk_config", {})
+        if isinstance(reduction_strategies, str):
+            reduction_strategies = [reduction_strategies]
         reductions = reduction_strategies or _expand_values(
             sk.get("reduction_strategy"), ["atomic"]
         )
