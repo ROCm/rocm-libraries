@@ -290,8 +290,12 @@ inline void compute_separable_horizontal_resample(
 
                         for (int l = 0; l < numOutPixels; l++) {
                             Rpp32s srcx = index[x + l] + k;
-                            pCoeffs[l] = _mm_loadu_ps(
-                                &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
+                            // Guard coefficient loads to prevent reading past allocated buffer
+                            // when filter.size is not divisible by 4
+                            if (l < kernelAdd) {
+                                pCoeffs[l] = _mm_loadu_ps(
+                                    &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
+                            }
 
                             // Safe load with boundary clamping for both left and right edges
                             pInputR[l] = rpp_safe_load_4f32_clamped(
@@ -312,6 +316,15 @@ inline void compute_separable_horizontal_resample(
                             pOutputG[vec] = _mm_fmadd_ps(pCoeffs[l], pInputG[l], pOutputG[vec]);
                             pOutputB[vec] = _mm_fmadd_ps(pCoeffs[l], pInputB[l], pOutputB[vec]);
                         }
+                    }
+                }
+                // Clamp floating-point results to [0,1] for F32/F16 outputs to prevent
+                // bicubic/Lanczos overshoot at boundaries
+                if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value) {
+                    for (int i = 0; i < numVecs; i++) {
+                        pOutputR[i] = _mm_min_ps(_mm_max_ps(pOutputR[i], xmm_p0), xmm_p1);
+                        pOutputG[i] = _mm_min_ps(_mm_max_ps(pOutputG[i], xmm_p0), xmm_p1);
+                        pOutputB[i] = _mm_min_ps(_mm_max_ps(pOutputB[i], xmm_p0), xmm_p1);
                     }
                 }
                 Rpp32s xStride = outLocCol * outputDescPtr->strides.wStride;
@@ -389,6 +402,15 @@ inline void compute_separable_horizontal_resample(
                         pOutputB[vec] = _mm_fmadd_ps(pCoeffs, pInput[2], pOutputB[vec]);
                     }
                 }
+                // Clamp floating-point results to [0,1] for F32/F16 outputs to prevent
+                // bicubic/Lanczos overshoot at boundaries
+                if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value) {
+                    for (int i = 0; i < numVecs; i++) {
+                        pOutputR[i] = _mm_min_ps(_mm_max_ps(pOutputR[i], xmm_p0), xmm_p1);
+                        pOutputG[i] = _mm_min_ps(_mm_max_ps(pOutputG[i], xmm_p0), xmm_p1);
+                        pOutputB[i] = _mm_min_ps(_mm_max_ps(pOutputB[i], xmm_p0), xmm_p1);
+                    }
+                }
 
                 Rpp32s xStride = outLocCol * outputDescPtr->strides.wStride;
                 if (outputDescPtr->layout == RpptLayout::NCHW)  // For PLN3 outputs
@@ -449,8 +471,12 @@ inline void compute_separable_horizontal_resample(
                         set_zeros(pCoeffs, numOutPixels);
                         for (int l = 0; l < numOutPixels; l++) {
                             Rpp32s srcx = index[x + l] + k;
-                            pCoeffs[l] = _mm_loadu_ps(
-                                &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
+                            // Guard coefficient loads to prevent reading past allocated buffer
+                            // when filter.size is not divisible by 4
+                            if (l < kernelAdd) {
+                                pCoeffs[l] = _mm_loadu_ps(
+                                    &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
+                            }
 
                             // Safe load with boundary clamping for both left and right edges
                             pInput[l] = rpp_safe_load_4f32_clamped(inRowPtr, srcx, inputWidthLimit,
@@ -462,6 +488,13 @@ inline void compute_separable_horizontal_resample(
                                          // from different output locations in each vector
                         for (int l = 0; l < kernelAdd; l++)
                             pOutput[vec] = _mm_fmadd_ps(pCoeffs[l], pInput[l], pOutput[vec]);
+                    }
+                }
+                // Clamp floating-point results to [0,1] for F32/F16 outputs to prevent
+                // bicubic/Lanczos overshoot at boundaries
+                if constexpr (std::is_same<T, Rpp32f>::value || std::is_same<T, Rpp16f>::value) {
+                    for (int i = 0; i < numVecs; i++) {
+                        pOutput[i] = _mm_min_ps(_mm_max_ps(pOutput[i], xmm_p0), xmm_p1);
                     }
                 }
                 rpp_resize_store(out_row + outLocCol, pOutput);
