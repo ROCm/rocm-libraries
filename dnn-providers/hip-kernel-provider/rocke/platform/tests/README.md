@@ -23,6 +23,18 @@ ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 ```
 
+The multi-layer suite can also run directly from the platform directory:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.py
+```
+
+That command covers one test file. A default `python tests/run_all.py` additionally
+runs the corpus validity/domain gates and the full pytest suite, including a
+`ROCKE_BACKEND=both` pass when the extension is importable. Report the actual
+command and any disabled or skipped stages; a runner invocation with
+`--no-pytest` or `--no-gate` establishes only its enabled stages.
+
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`. That `sys.path` change belongs only to the
@@ -64,12 +76,14 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
-> Notes: `instances/rocke_ir_parity_harness.py` is a helper imported by the
-> gate, not a `test_`-prefixed pytest module. The pybind **`rocke_engine` module
-> has no default-pytest coverage**: the C-engine vs Python-engine equivalence is
-> owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
-> 81 matched `*_emit.c`/`*_emit.py` pairs), and the binding itself by the
-> consistency proof documented in `cpp/bindings/README.md`.
+> Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
+> to `test_rocke_ci_static.py` and the corpus gates. It is not itself a
+> `test_`-prefixed pytest module. `tools/check_byte_identity.py` drives a separate
+> paired-emitter inventory. Representative cases lowered in strict `both` pytest
+> mode compare Python/native bytes through the `rocke_engine` binding; cases
+> registered only in that corpus are not included in the paired-emitter totals.
+> See the [NVFP4 validation commands](../python/rocke/examples/gfx1250/gemm/NVFP4.md#validation-and-scope)
+> for the four representative NVFP4 variants and their focused backend matrix.
 
 ### CMake registration ownership
 
@@ -325,7 +339,41 @@ output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
 verification; committed golden entries anchor the existing configurations.
 `instances/test_optimization_barrier_numeric.py` compiles through COMGR and
 checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
-Native HIP-source lowering is outside this feature's supported path.
+NVFP4 HIP compilation uses Python-generated source; complete native NVFP4 HIP
+compilation is not claimed. Both HIP handlers lower single-output inline assembly.
+`core/test_optimization_barrier.cpp` checks LLVM/HIP support for the isolated
+BF16/FP16 tensor epilogue, directly and after serialization, on gfx950/gfx1250
+with absent/empty clobbers, plus malformed-attribute rejection. The existing
+`rocke_optimization_barrier` CTest runs those checks in build and installed trees.
+`optimization_barrier_emit.{py,c}` provides seventeen `hip` configurations:
+eight for this epilogue matrix, four for multiline void/single-output assembly
+on gfx950/gfx1250 (including quotes and backslashes), four for `m0`/`memory`
+clobbers on those targets, and the three-input gfx950 LDS-DMA assembly form.
+Its LLVM/IR modes are unchanged. The `rocke_optimization_barrier_hip_pair` CTest
+executes the prebuilt C emitter's `hip` mode and the selected Python emitter for
+all seventeen configurations plus the range boundary, in build-tree and
+installed layouts. Installed native paths include the CMake executable suffix;
+configuration tests compare them with the actual target filename under both
+host-default and explicitly nonempty suffixes, without substituting the host OS.
+It checks C-builder evaluation order, unlike binding tests that consume
+Python-serialized IR. The focused Python tests use `rocke.tests.engines` for exact
+HIP text and rejection-message parity; the `ROCKE_BACKEND=both` LLVM gate alone
+does not perform that HIP comparison. Both LLVM handlers reject non-boolean
+`sideeffect` attributes for void, single-output, and multi-output assembly at every
+supported flavor; absent, false, and true attributes retain their existing output.
+
+Both HIP handlers validate constraint counts before emitting assembly. The
+supported subset is ordered outputs (`=v`, `=s`, `=a`, including early-clobber
+`=&` forms), inputs (`v`, `s`, `a`, `i`, `n`, or the sole output tie `0`), then
+LLVM clobbers (`~{memory}`, `~{m0}`, `~{scc}`, `~{vcc}`, `~{exec}`). Constraint
+suitability for operand types and the selected ISA still belongs to the compiler.
+Clobbers are retained in GCC's clobber list and merged with the explicit/default
+clobber without duplicates. Missing/extra operands or outputs, empty entries,
+repeated/missing ties, read/write outputs, alternatives, unsupported numbered
+registers, and malformed clobbers are refused rather than silently discarded.
+Python-only admission tests and independent C-builder tests cover direct and
+serialized IR; exact engine-parity tests check both source and rejection text.
+Valid pure barriers and existing LLVM goldens are unchanged.
 
 ## Installed pinned-reference suites
 

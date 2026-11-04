@@ -5,8 +5,10 @@ Quick reference for the shipped instance builders. Each row points to the per-fa
 The `File` columns list module basenames. Cross-arch builders live under
 `instances/common/`; arch-specialized matrix-core bodies (e.g. the tiled
 attention kernels) live in the per-arch dirs `instances/gfx942/`,
-`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`. All public
-symbols are re-exported from `rocke.instances`. Targets: gfx942 / gfx950
+`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`, and
+`instances/gfx1250/`. Core public symbols are re-exported from
+`rocke.instances`; arch-specific APIs use the indicated
+`rocke.instances.<gfx>` package. Targets: gfx942 / gfx950
 (CDNA, wave64, MFMA) and gfx1151 / gfx1201 (RDNA, wave32, WMMA — gfx1201 is
 RDNA4); gfx950 is the default build target. See `instances/SUPPORT_MATRIX.md`
 for the per-instance arch grid.
@@ -18,6 +20,7 @@ for the per-instance arch grid.
 | `gemm_universal.py` | `TileSpec`, `TraitSpec`, `DataSpec`, `UniversalGemmSpec` | `instances/gemm.md` |
 | `batched_gemm.py` | `BatchedGemmSpec` | `instances/gemm.md` |
 | `grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `GroupedGemmLauncher` | `instances/gemm.md` |
+| `gfx1250/nvfp4_gemm.py` | `NvFp4GemmSpec` | [gfx1250 NVFP4 GEMM](gemm.md#gfx1250-nvfp4-gemm) |
 
 ABI: `(A, B, C, M, N, K)` for plain GEMM, with `stride_a/b/c` added for batched.
 
