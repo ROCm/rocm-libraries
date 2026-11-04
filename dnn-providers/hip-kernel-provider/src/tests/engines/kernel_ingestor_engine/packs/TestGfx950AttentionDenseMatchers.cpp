@@ -1809,15 +1809,12 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
 
 /// One shape and the tile order the scorer must produce for it.
 ///
-/// PHASE 2 SEAM. The orders below are the shipped shape-blind ranking: baseline
-/// 256/64 first, then ascending (block_m, block_n). When the gfx950 tile sweep
-/// fits a measured rule into `tilePreference`, these expectations become the
-/// measured winner order and new rows are added for the shapes that distinguish
-/// the rule -- in particular either side of the grid-fill boundary, where a rule
-/// that reads the CU count must differ from one that does not.
+/// The orders are the measured rule's: closeness to `preferredTile` for the shape's
+/// cohort, block_m weighted above block_n, then ascending (block_m, block_n) as the
+/// remainder. Both cohorts here carry `causal = 0`, so both take the non-causal
+/// thresholds.
 ///
-/// Keeping the cases in a table rather than one test each is what makes that a
-/// data edit instead of a rewrite under time pressure.
+/// A table rather than one test each, so adding a case is a data edit.
 struct ColdOrderCase
 {
     const char* name;
@@ -1829,17 +1826,26 @@ struct ColdOrderCase
 std::vector<ColdOrderCase> coldOrderCases()
 {
     return {
-        // All seven D64 tiles are legal at S1024, so this pins the full order.
-        {"d64 s1024, every tile legal",
+        // All seven D64 tiles are legal at S1024, so this pins the full order. D64
+        // non-causal takes block_m 256 from 1024, and block_n 128 everywhere outside
+        // D128 causal, so 256/128 leads and the rest fall back lexicographically.
+        {"d64 s1024 non-causal, every tile legal",
          d64H32Noncausal(1024, 1024),
          d64H32Cohort(),
-         {{256, 64}, {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 128}, {256, 256}}},
-        // Sq 384 rules out every block_m 256 tile, the baseline included, so the
-        // order starts from the best remaining alternative.
-        {"d128 sq384, baseline cannot serve",
+         {{256, 128}, {256, 32}, {256, 64}, {256, 256}, {128, 128}, {128, 32}, {128, 64}}},
+        // Sq 384 rules out every block_m 256 tile, the preferred one included, so only
+        // the block_n bonus separates what is left: 128/128 leads on that alone.
+        {"d128 sq384 non-causal, preferred block_m cannot serve",
          d128H9Noncausal(1, 384, 512),
          d128H9Cohort(),
-         {{128, 32}, {128, 64}, {128, 128}}},
+         {{128, 128}, {128, 32}, {128, 64}}},
+        // The causal cohort, which is the one the rule treats differently: D128 causal is
+        // the only cohort preferring block_n 64, and below its 4096 threshold it wants the
+        // narrow query tile too. Both halves of the preference show here as 128/64 first.
+        {"d128 s256 causal, both preferences differ from the non-causal cohorts",
+         GraphSpec{},
+         cohortOf(canonicalAligned(), d128Tiles()),
+         {{128, 64}, {128, 32}, {128, 128}, {256, 64}, {256, 32}, {256, 128}}},
     };
 }
 
@@ -1893,6 +1899,90 @@ TEST(TestGfx950AttentionDenseScore, NeverRanksATileThatCannotServeTheShape)
             EXPECT_EQ(graph.seqLenKv % blockN, 0) << blockM << "/" << blockN;
         }
     }
+}
+
+/// A forced knob case whose forced tile is also the tile its shape wins cold.
+///
+/// Such a case still checks numerics and that the class exists, but it cannot catch a
+/// knob that never reached the plugin: with the knob and without it the selector lands
+/// on the same kernel, so the id check passes either way.
+struct BlindForcedCase
+{
+    const char* name;
+    GraphSpec graph;
+    std::vector<KernelSpec> cohort;
+    Tile forcedTile;
+};
+
+/// The selection problems behind the forced knob cases that cannot discriminate.
+///
+/// Head counts are absent on purpose: the scorer does not read them, so two knob cases
+/// differing only in (Hq, Hkv) are one selection problem here. `covers` names the cases.
+std::vector<BlindForcedCase> blindForcedCases()
+{
+    auto d128Causal = [](int64_t seq) {
+        GraphSpec graph;
+        graph.seqLenQ = seq;
+        graph.seqLenKv = seq;
+        return graph;
+    };
+    auto d64Causal = [](int64_t seq) {
+        GraphSpec graph;
+        graph.headSize = 64;
+        graph.seqLenQ = seq;
+        graph.seqLenKv = seq;
+        return graph;
+    };
+    return {
+        // covers D128_Bm128Bn64
+        {"d128 causal s128", d128Causal(128), cohortOf(canonicalAligned(), d128Tiles()), {128, 64}},
+        // covers D128_Hq64Kv4_Bm128Bn64
+        {"d128 causal s256", d128Causal(256), cohortOf(canonicalAligned(), d128Tiles()), {128, 64}},
+        // covers D64_Hq8Kv1_Bm128Bn128 and D64_Hq8Kv8_Bm128Bn128
+        {"d64 causal s256", d64Causal(256), d64H64Kv8Cohort(), {128, 128}},
+        // covers D128_Hq28Kv4_Bm256Bn128 and D128_Hq48Kv8_Bm256Bn128. D128 non-causal
+        // always prefers 256/128, so no shape makes this case discriminate.
+        {"d128 non-causal s256", d128H9Noncausal(1, 256, 256), d128H9Cohort(), {256, 128}},
+        // covers D128_Bm256Bn32. Skv 480 is not a multiple of 64, so block_n 32 is the
+        // only width that divides it and the preferred 256/128 cannot serve.
+        {"d128 non-causal sq256 skv480", d128H9Noncausal(1, 256, 480), d128H9Cohort(), {256, 32}},
+    };
+}
+
+/// Pins the forced knob cases that cannot catch a knob that never arrived.
+///
+/// IntegrationGpuGfx950AttentionDenseKnobs.cpp counts how many of its forced cases
+/// discriminate and names this set as its blind spot. That count is prose, and the
+/// property is a pure function of the scorer, so it is checked here rather than on a
+/// device: if a threshold moves and a case joins or leaves the set, this fails and the
+/// integration comment is what needs updating.
+///
+/// What it would MISS: a case whose forced tile stops being the cold winner for a reason
+/// unrelated to the rule, such as the catalog dropping the tile that used to outrank it.
+/// The admitted-tile tests above are what cover that.
+TEST(TestGfx950AttentionDenseScore, PinsTheForcedKnobCasesThatCannotDiscriminate)
+{
+    for(const auto& testCase : blindForcedCases())
+    {
+        SCOPED_TRACE(testCase.name);
+        const auto ranked = coldOrder(testCase.graph, testCase.cohort);
+        ASSERT_FALSE(ranked.empty()) << "a servable shape must rank at least one tile";
+        EXPECT_EQ(ranked.front(), testCase.forcedTile)
+            << "this case now picks a different tile cold, so it discriminates and should "
+               "leave the blind-spot list in IntegrationGpuGfx950AttentionDenseKnobs.cpp";
+    }
+}
+
+/// The positive control for the test above: a shape whose cold winner differs from the
+/// tile a knob would force. Without this, a scorer that returned one constant would
+/// satisfy every expectation in blindForcedCases() and look correct.
+TEST(TestGfx950AttentionDenseScore, AForcedCaseOutsideTheBlindSpotDoesDiscriminate)
+{
+    // D64 non-causal takes block_m 256 from 1024, so forcing 128/32 here differs from
+    // the cold winner and a knob that never arrived would fail the id check.
+    const auto ranked = coldOrder(d64H32Noncausal(1024, 1024), d64H32Cohort());
+    ASSERT_FALSE(ranked.empty());
+    EXPECT_NE(ranked.front(), (Tile{128, 32}));
 }
 
 } // namespace

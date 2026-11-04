@@ -44,10 +44,31 @@ using namespace hip_kernel_provider::test_utilities;
  *        computes, and a knob pair no kernel has is refused before any plan exists.
  *
  * Each expected kernel id is resolved at run time from the production descriptors by
- * expectedKernelId(). Every forced tile except the 256/64 baseline is paired with a shape
- * whose no-knob winner is a different tile, so a knob that failed to reach the plugin would
- * select that winner and fail the id check. The baseline always wins where it fits, so its
- * two cases select the no-knob winner by design.
+ * expectedKernelId().
+ *
+ * A forced case earns its keep when its tile differs from the shape's no-knob winner: a
+ * knob that failed to reach the plugin would then select that winner and fail the id
+ * check. That holds for 49 of the 56 forced cases. The other seven force the tile their
+ * shape would have chosen anyway, so they still check numerics and that the class exists,
+ * but they cannot catch a knob that never arrived.
+ *
+ * That split is a consequence of the tile heuristic, not of how the cases were authored.
+ * The cases were written when the cold winner was 256/64 for every shape that could take
+ * it; selection now reads the shape (see preferredTile in Gfx950AttentionDenseNative.cpp),
+ * so the winners moved and some coincide with their forced tile. Three cases were given a
+ * longer query length to restore the property, which changes no (head size, dtype, causal,
+ * tile) class because selection does not read sequence length into the class.
+ *
+ * The remaining seven cannot be repaired that way:
+ *  - Two force 256/128 at D128 non-causal, which is what preferredTile wants for that
+ *    cohort at every length, so no shape makes the cold winner differ.
+ *  - One forces 256/32 at Skv 480, a length no wider block_n divides. That is the point
+ *    of the case, so widening Skv to separate the winners would delete its coverage.
+ *  - Four are causal, where the kernel needs seqlen_q == seqlen_kv, so crossing the
+ *    block_m threshold means growing both lengths to 4096 or 8192. The per-case CPU
+ *    reference is quadratic in those, which is not worth paying for an id check.
+ * TestGfx950AttentionDenseScore.PinsTheForcedKnobCasesThatCannotDiscriminate pins that
+ * set on the host, so it cannot grow here without a test saying so.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -154,8 +175,10 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 128, 256),
          FORCED,
          Tile{128, 64}},
+        // Sq 1024 rather than 384: D64 non-causal takes block_m 256 from 1024, so the
+        // cold winner is 256/128 and forcing 128/128 is a knob this case can miss.
         {"D64_Bm128Bn128",
-         makeShape(BF16, 64, 8, 1, Mask::NO_MASK, MMA_UNSET, 2, 384, 128),
+         makeShape(BF16, 64, 8, 1, Mask::NO_MASK, MMA_UNSET, 2, 1024, 128),
          FORCED,
          Tile{128, 128}},
         {"D64_Bm256Bn32",
@@ -170,7 +193,9 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 64, 12, 12, Mask::NO_MASK, MMA_UNSET, 1, 512, 256),
          FORCED,
          Tile{256, 256}},
-        // The baseline tile: forced and cold select the same kernel.
+        // 256/64, which every shape won cold under the shape-blind scorer. preferredTile()
+        // sends this shape elsewhere now, so the forced tile differs from the cold winner
+        // and the case does catch a knob that never reached the plugin.
         {"D64_Bm256Bn64",
          makeShape(BF16, 64, 10, 10, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          FORCED,
@@ -184,8 +209,10 @@ std::vector<KnobCase> knobCases()
          makeShape(BF16, 128, 8, 1, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 128, 128),
          FORCED,
          Tile{128, 64}},
+        // Sq 256 rather than 128, keeping Sq < Skv: block_m 256 then divides the query
+        // length, so the cold winner is 256/128 and differs from the forced tile.
         {"D128_Bm128Bn128",
-         makeShape(FP16, 128, 4, 4, Mask::NO_MASK, MMA_UNSET, 3, 128, 384),
+         makeShape(FP16, 128, 4, 4, Mask::NO_MASK, MMA_UNSET, 3, 256, 384),
          FORCED,
          Tile{128, 128}},
         {"D128_Bm256Bn32",
@@ -196,7 +223,9 @@ std::vector<KnobCase> knobCases()
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          FORCED,
          Tile{256, 128}},
-        // The baseline tile: forced and cold select the same kernel.
+        // 256/64, which every shape won cold under the shape-blind scorer. preferredTile()
+        // sends this shape elsewhere now, so the forced tile differs from the cold winner
+        // and the case does catch a knob that never reached the plugin.
         {"D128_Bm256Bn64",
          makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          FORCED,
@@ -204,23 +233,25 @@ std::vector<KnobCase> knobCases()
         {"Cold_MmaHalf",
          makeShape(BF16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
          COLD,
-         Tile{256, 64}},
+         Tile{128, 128}},
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
          COLD,
-         Tile{128, 32}},
+         Tile{128, 128}},
         {"Cold_CausalBottomRightFlag",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 2, 512, 512),
          COLD,
-         Tile{256, 64}},
+         Tile{128, 128}},
         {"Cold_D128Heads9",
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 2, 256, 256),
          COLD,
-         Tile{256, 64}},
+         Tile{128, 64}},
         // One case for each catalog head configuration the cases above leave out, at
-        // Sq=Skv=256 where the cold winner is 256/64, so no forced tile is the cold winner.
-        // Dtype, mask and tile are chosen, not rotated: together with the rows around them
-        // they run every (head size, dtype, causal, tile) class the catalog compiles.
+        // Sq=Skv=256. These were authored when the cold winner there was 256/64 for every
+        // shape, so no forced tile coincided with it; selection now reads the shape and
+        // some of them do (see the file comment). Dtype, mask and tile are chosen, not
+        // rotated: together with the rows around them they run every (head size, dtype,
+        // causal, tile) class the catalog compiles, which is why the shapes stay put.
         {"D64_Hq20Kv20_Bm128Bn64",
          makeShape(BF16, 64, 20, 20, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          FORCED,
@@ -322,8 +353,9 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 64, 12, 12, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          FORCED,
          Tile{128, 64}},
+        // Sq 1024 rather than 256, for the same reason as D64_Bm128Bn128 above.
         {"D64_Hq16Kv2_Bm128Bn128",
-         makeShape(FP16, 64, 16, 2, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         makeShape(FP16, 64, 16, 2, Mask::NO_MASK, MMA_UNSET, 1, 1024, 256),
          FORCED,
          Tile{128, 128}},
         {"D64_Hq16Kv16_Bm256Bn32",
@@ -350,29 +382,67 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 64, 12, 12, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
          FORCED,
          Tile{256, 256}},
-        // The non-causal 256/64 classes. 256/64 is the cold winner at Sq=Skv=256, so only a
-        // cold case reaches it here.
+        // The 256/64 and 128/32 classes a cold case used to reach for free. 256/64 was the
+        // cold winner at Sq=Skv=256 under the shape-blind scorer, so the cold cases below
+        // covered these classes as a side effect of selection. preferredTile() reads the
+        // shape now, the winners moved, and the classes were left uncovered until
+        // CoversEveryCatalogKernelClass said so. They are forced here instead: a coverage
+        // table that depends on what the scorer picks stops covering the moment it changes.
+        {"D64_Hq16Kv16_Bf16NoMask_Bm256Bn64",
+         makeShape(BF16, 64, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 64}},
+        {"D64_Hq8Kv8_Fp16NoMask_Bm128Bn32",
+         makeShape(FP16, 64, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        {"D64_Hq12Kv4_Fp16NoMask_Bm256Bn64",
+         makeShape(FP16, 64, 12, 4, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 64}},
+        {"D64_Hq16Kv8_Fp16Causal_Bm256Bn64",
+         makeShape(FP16, 64, 16, 8, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 64}},
+        {"D128_Hq8Kv8_Bf16NoMask_Bm128Bn32",
+         makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        {"D128_Hq16Kv4_Bf16NoMask_Bm256Bn64",
+         makeShape(BF16, 128, 16, 4, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 64}},
+        {"D128_Hq24Kv8_Bf16Causal_Bm256Bn64",
+         makeShape(BF16, 128, 24, 8, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 64}},
+        {"D128_Hq32Kv8_Fp16Causal_Bm256Bn64",
+         makeShape(FP16, 128, 32, 8, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 64}},
+        // The same three graphs as cold cases, which now assert where preferredTile() sends
+        // a non-causal shape at Sq=Skv=256 rather than standing in for the classes above.
         {"Cold_D64Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 64, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{256, 64}},
+         Tile{128, 128}},
         {"Cold_D64Hq16Kv16_Fp16NoMask",
          makeShape(FP16, 64, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{256, 64}},
+         Tile{128, 128}},
         {"Cold_D128Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{256, 64}},
+         Tile{256, 128}},
         // An fp16 graph with each explicit mma_core_mode.
         {"Cold_Fp16MmaHalf",
          makeShape(FP16, 128, 16, 16, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
          COLD,
-         Tile{256, 64}},
+         Tile{128, 64}},
         {"Cold_Fp16MmaBfloat16",
          makeShape(FP16, 64, 32, 8, Mask::NO_MASK, BF16, 1, 384, 256),
          COLD,
-         Tile{128, 32}},
+         Tile{128, 128}},
         // No attn_scale_value: the CPU reference applies 1.0 (no scaling), so a kernel
         // launched with any other scale fails the comparison.
         {"D64_Bm256Bn64_NoScale",
