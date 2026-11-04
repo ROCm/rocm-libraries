@@ -166,10 +166,10 @@ TEST(TestMiopenReductionChecks, TensorSpanBytesCapsEachAxisAtInt32Max)
     // Uncapped, (3 - 1) * INT32_MAX elements; capped, the term is INT32_MAX.
     EXPECT_EQ(spanBytesOf({3}, {INT32_LIMIT}), (INT32_LIMIT + 1) * 4);
 
-    // Six axes of 2^40 by 2^40 would overflow int64; each term saturates instead.
+    // Five axes of 2^40 by 2^40 would overflow int64; each term saturates instead.
     constexpr int64_t HUGE_EXTENT = int64_t{1} << 40;
-    const std::vector<int64_t> huge(6, HUGE_EXTENT);
-    EXPECT_EQ(spanBytesOf(huge, huge), (6 * INT32_LIMIT + 1) * 4);
+    const std::vector<int64_t> huge(5, HUGE_EXTENT);
+    EXPECT_EQ(spanBytesOf(huge, huge), (5 * INT32_LIMIT + 1) * 4);
 }
 
 // ============================================================================
@@ -198,14 +198,14 @@ TEST(TestMiopenReductionChecks, AcceptsLargestShapeableInputElementCount)
 {
     // INT32_MAX is prime, so an input of exactly INT32_MAX elements has an axis of that length
     // and spans more than INT32_MAX bytes. This is the next count down: 2^31 - 2. It is also the
-    // rank-6 accept, and its 331 outputs keep it clear of the single-output limit.
-    EXPECT_TRUE(isAccepted(selfOverlappingInputSpec({331, 151, 31, 11, 7, 18})));
+    // rank-5 accept, and its 331 outputs keep it clear of the single-output limit.
+    EXPECT_TRUE(isAccepted(selfOverlappingInputSpec({331, 151, 31, 11, 126})));
 }
 
 TEST(TestMiopenReductionChecks, DeclinesInputElementCountThatOverflowsInt64)
 {
-    // 2^96 elements: an unsaturated product would wrap to 0 and pass the limit.
-    EXPECT_TRUE(isDeclinedWith(selfOverlappingInputSpec(std::vector<int64_t>(6, 65536)),
+    // 2^80 elements: an unsaturated product would wrap to 0 and pass the limit.
+    EXPECT_TRUE(isDeclinedWith(selfOverlappingInputSpec(std::vector<int64_t>(5, 65536)),
                                "input tensor has more than INT32_MAX elements"));
 }
 
@@ -424,17 +424,17 @@ TEST(TestMiopenReductionChecks, DeclinesRankZero)
     spec.x.dims.clear();
     spec.x.strides = std::vector<int64_t>{};
 
-    EXPECT_TRUE(isDeclinedWith(spec, "input tensor rank must be between 1 and 6, got 0"));
+    EXPECT_TRUE(isDeclinedWith(spec, "input tensor rank must be between 1 and 5, got 0"));
 }
 
-TEST(TestMiopenReductionChecks, DeclinesRankSeven)
+TEST(TestMiopenReductionChecks, DeclinesRankSix)
 {
-    // Three leading length-1 axes take the rank-4 tensor to rank 7 without changing its span.
+    // Two leading length-1 axes take the rank-4 tensor to rank 6 without changing its span.
     ReductionGraphSpec spec;
-    spec.x.dims = {1, 1, 1, 2, 3, 4, 5};
-    spec.x.strides = std::vector<int64_t>{60, 60, 60, 60, 20, 5, 1};
+    spec.x.dims = {1, 1, 2, 3, 4, 5};
+    spec.x.strides = std::vector<int64_t>{60, 60, 60, 20, 5, 1};
 
-    EXPECT_TRUE(isDeclinedWith(spec, "input tensor rank must be between 1 and 6, got 7"));
+    EXPECT_TRUE(isDeclinedWith(spec, "input tensor rank must be between 1 and 5, got 6"));
 }
 
 TEST(TestMiopenReductionChecks, DeclinesNonPositiveDim)

@@ -41,9 +41,9 @@ namespace
 // The message the outer catch prepends; kept out of every throw below.
 constexpr auto LOG_PREFIX = "Reduction plan builder: ";
 
-// miopenReduceTensor takes at most 6 dimensions. Before #12874 only ReduceTensor enforced this;
-// miopenGetReductionWorkspaceSize did not, so check before the plan queries the workspace.
-constexpr uint32_t MAX_RANK = 6;
+// miopenReduceTensor takes up to 6 dimensions, but the GPU reference and the support-feature
+// catalogue stop at 5, so a rank-6 reduction could be neither verified nor claimed.
+constexpr uint32_t MAX_RANK = 5;
 
 constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
 
@@ -351,7 +351,7 @@ int64_t tensorSpanBytes(const TensorAttributes& tensor)
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
 
-    // Capping each term keeps the sum of at most six terms from wrapping once the span is
+    // Capping each term keeps the sum of at most five terms from wrapping once the span is
     // already out of range.
     int64_t lastOffset = 0;
     for(flatbuffers::uoffset_t i = 0; i < dims->size(); ++i)

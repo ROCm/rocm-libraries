@@ -24,7 +24,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
-| Reduction (standalone) | FP16, FP32 | Any, rank 1-6 | Single-node graph<sup>9</sup> |
+| Reduction (standalone) | FP16, FP32 | Any, rank 1-5 | Single-node graph<sup>9</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -98,7 +98,7 @@ The following table lists all operations currently supported in hipDNN:
 > [!NOTE]
 > **Standalone Reduction:** A single-node reduction graph supports ADD, MUL, MIN, MAX, AMAX, AVG,
 > NORM1 and NORM2 through MIOpen's `miopenReduceTensor`, with an FP32 compute type. Input and
-> output share one datatype (FP16 or FP32) and one rank (1-6); each output dimension is either 1
+> output share one datatype (FP16 or FP32) and one rank (1-5); each output dimension is either 1
 > (reduced) or equal to the input dimension, and at least one dimension must be reduced. Any set
 > of dimensions may be reduced, including the innermost, and any positive strides are accepted
 > as long as distinct output elements do not overlap in memory. Not supported: MUL_NO_ZEROS
