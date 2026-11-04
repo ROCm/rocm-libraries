@@ -2451,6 +2451,21 @@ python tests/run_device_shards.py --devices 8 -- \
     -p no:cacheprovider -q
 ```
 
+One more knob is on by default, and unlike the three above it trades
+compiles for memory: `ROCKE_BWD_MEMO_MAX=<n>` (default 8). The
+`test_attention_bwd*` / `test_attention_dense_bwd*` modules in `tests/` that
+define a `functools.cache` helper (13 today) keep every kernel they build
+alive, so `pytest -n N` workers grow until they are OOM-killed. In those
+modules the `conftest` runs the tests of one parameter set back to back (the
+`ROCKE_TEST_SHARD` key, module plus parameter id), and when the next test in
+the process has another key it empties every such memo holding more than
+`<n>` entries. A memo can exceed `<n>` while one parameter set runs, and a
+kernel that a later parameter set needs again is rebuilt. `<n> <= 0`
+restores collection order and never clears; a very large `<n>` keeps the
+grouped order but never clears. To tell whether a failure in these modules
+depends on test order or on a cleared memo, rerun with `0`, then with a large
+`<n>`.
+
 ## 12. Host contract
 
 ### 12.1 Statistics (LSE)
