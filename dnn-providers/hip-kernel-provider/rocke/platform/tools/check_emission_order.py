@@ -19,9 +19,12 @@
 # An argument "emits" when it calls a rocke_b_* builder function other than the
 # type and info helpers in NON_OP, or a function whose body emits. The second
 # set is derived from every function and member function defined in the scanned
-# trees, to a fixed point: a body that calls an emitting function emits too. A
-# lambda body inside an argument does not count, since it runs when the callee
-# calls it, not while the arguments are evaluated.
+# trees, to a fixed point: a body that calls an emitting function emits too.
+# A lambda bound to a name (auto f = [&](...) { ... };) emits the same way, but
+# only within its own file, since its name is local. A lambda body inside an
+# argument does not count, since it runs when the callee calls it, not while
+# the arguments are evaluated, unless the argument calls it on the spot
+# ([&] { ... }()).
 #
 # This is a lexical scan, not a C++ parser: comments, string literals and
 # preprocessor lines are ignored, functions are matched by name across files,
@@ -80,6 +83,12 @@ _NOT_DEFINITIONS = _NOT_CALLS | {"catch"}
 # What may sit between a parameter list's ')' and the body's '{'.
 _QUALIFIERS = re.compile(r"\)\s*(?:(?:const|noexcept|override|final|mutable)\s*)*$")
 _NAME_BEFORE = re.compile(r"([A-Za-z_]\w*)\s*$")
+# What may sit between a lambda's parameter list and its body.
+_LAMBDA_TAIL = re.compile(
+    r"(?:\s*(?:mutable|constexpr|noexcept)\b)*(?:\s*->\s*[\w:<>,\s*&]+?)?\s*$"
+)
+# "name = [" where the '[' opens a lambda's capture list.
+_LAMBDA_BINDING = re.compile(r"\b([A-Za-z_]\w*)\s*=\s*\[")
 
 
 @dataclass(frozen=True)
@@ -172,8 +181,8 @@ def _header_name(text: str, brace: int) -> str | None:
 
 def _is_lambda_body(text: str, brace: int) -> bool:
     """Whether the '{' at brace opens a lambda body."""
-    head = text[:brace].rstrip()
-    head = re.sub(r"(?:\bmutable\s*)$", "", head).rstrip()
+    tail = _LAMBDA_TAIL.search(text, max(0, brace - 200), brace)
+    head = text[: tail.start() if tail else brace].rstrip()
     if head.endswith("]"):
         return True
     if head.endswith(")"):
@@ -183,7 +192,8 @@ def _is_lambda_body(text: str, brace: int) -> bool:
 
 
 def _without_lambda_bodies(arg: str) -> str:
-    """arg with the body of every lambda in it blanked out."""
+    """arg with the body of every lambda in it blanked out, except a lambda
+    the argument calls on the spot."""
     out, i = arg, 0
     while True:
         i = out.find("{", i)
@@ -191,8 +201,48 @@ def _without_lambda_bodies(arg: str) -> str:
             return out
         if _is_lambda_body(out, i):
             j = _close(out, i)
-            out = out[:i] + " " * (j + 1 - i) + out[j + 1 :]
+            if not out[j + 1 :].lstrip().startswith("("):
+                out = out[:i] + " " * (j + 1 - i) + out[j + 1 :]
         i += 1
+
+
+def _lambda_body(text: str, capture: int) -> str | None:
+    """Body of the lambda whose capture list opens at capture, if it is one."""
+    end = _close(text, capture)
+    rest = end + 1
+    while rest < len(text) and text[rest].isspace():
+        rest += 1
+    if rest < len(text) and text[rest] == "(":
+        rest = _close(text, rest) + 1
+    brace = text.find("{", rest)
+    if brace < 0 or ";" in text[rest:brace] or not _is_lambda_body(text, brace):
+        return None
+    return text[brace : _close(text, brace) + 1]
+
+
+def named_lambdas(text: str) -> dict[str, str]:
+    """{name: body} of every lambda bound to a name in text (stripped)."""
+    found: dict[str, str] = {}
+    for m in _LAMBDA_BINDING.finditer(text):
+        body = _lambda_body(text, m.end() - 1)
+        if body is not None:
+            found[m.group(1)] = found.get(m.group(1), "") + body
+    return found
+
+
+def _derive(callees: dict[str, set[str]], emitting: set[str]) -> frozenset[str]:
+    """emitting, grown to a fixed point over callees."""
+    emitting = set(emitting)
+    emitting |= {name for name, calls in callees.items() if _calls_an_op(calls)}
+    while True:
+        more = {
+            name
+            for name, calls in callees.items()
+            if name not in emitting and calls & emitting
+        }
+        if not more:
+            return frozenset(emitting)
+        emitting |= more
 
 
 def function_bodies(text: str) -> Iterable[tuple[str, str]]:
@@ -215,16 +265,17 @@ def emitting_functions(texts: Iterable[str]) -> frozenset[str]:
     for text in texts:
         for name, body in function_bodies(text):
             callees.setdefault(name, set()).update(_CALL.findall(body))
-    emitting = {name for name, calls in callees.items() if _calls_an_op(calls)}
-    while True:
-        more = {
-            name
-            for name, calls in callees.items()
-            if name not in emitting and calls & emitting
-        }
-        if not more:
-            return frozenset(emitting)
-        emitting |= more
+    return _derive(callees, set())
+
+
+def _with_local_lambdas(text: str, emitters: frozenset[str]) -> frozenset[str]:
+    """emitters plus the lambdas named in text whose bodies emit."""
+    callees = {
+        name: set(_CALL.findall(body)) for name, body in named_lambdas(text).items()
+    }
+    if not callees:
+        return emitters
+    return emitters | _derive(callees, set(emitters))
 
 
 def _arguments(src: str, open_paren: int) -> list[str]:
@@ -251,6 +302,7 @@ def _emits(arg: str, emitters: frozenset[str]) -> bool:
 
 
 def _sites(text: str, emitters: frozenset[str]) -> list[Site]:
+    emitters = _with_local_lambdas(text, emitters)
     sites = []
     for m in _CALL.finditer(text):
         if m.group(1) in _NOT_CALLS:

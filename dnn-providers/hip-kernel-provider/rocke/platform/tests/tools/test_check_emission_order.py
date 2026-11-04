@@ -5,7 +5,8 @@
 
 Source-tree only (it reads cpp/ and tools/); excluded from the installed tree.
 The pre-commit hooks rocke-emission-order and rocke-emission-order-tests run
-the tree check and this file.
+the tree check and this file, on the same changes: some tests here name
+functions in cpp/, so a C++ change can break them.
 """
 
 from __future__ import annotations
@@ -74,10 +75,47 @@ def _callees(src: str, emitters=frozenset()) -> list[str]:
         # A lambda body runs when the callee calls it, not with the arguments.
         ("e.if_(rocke_b_cmp_lt(b, x, y), [&]() { rocke_b_store(b, p, v); });", []),
         ("e.if_(rocke_b_cmp_lt(b, x, y), [&] { rocke_b_store(b, p, v); });", []),
+        (
+            (
+                "e.if_(rocke_b_cmp_lt(b, x, y), [&]() mutable -> void { "
+                "rocke_b_store(b, p, v); });"
+            ),
+            [],
+        ),
         # A braced list is evaluated with its argument, so it counts.
         (
             "f(rocke_b_mul(b, p, q), Pair{rocke_b_const_i32(b, 1), y});",
             ["f"],
+        ),
+        # A lambda the argument calls on the spot runs with the arguments.
+        (
+            (
+                "x = rocke_b_add(b, [&] { return rocke_b_neg(b, p); }(), "
+                "rocke_b_const_i32(b, 1));"
+            ),
+            ["rocke_b_add"],
+        ),
+        (
+            (
+                "x = rocke_b_add(b, [&](V a) { return rocke_b_neg(b, a); }(p), "
+                "rocke_b_const_i32(b, 1));"
+            ),
+            ["rocke_b_add"],
+        ),
+        # A lambda bound to a name emits when its body does.
+        (
+            (
+                "auto neg = [&](V a) { return rocke_b_neg(b, a); };\n"
+                "x = rocke_b_add(b, neg(p), rocke_b_const_i32(b, 1));"
+            ),
+            ["rocke_b_add"],
+        ),
+        (
+            (
+                "auto ty = [&](int n) { return rocke_vector_type(b, t, n); };\n"
+                "x = rocke_b_bitcast(b, rocke_b_mul(b, p, q), ty(4));"
+            ),
+            [],
         ),
     ],
 )
@@ -96,11 +134,43 @@ def test_emitting_functions_are_derived_transitively():
         "static V lane(Ctx* c) { if(!c->v) { c->v = rocke_b_div(c->b, c->t, k); } "
         "return c->v; }\n"
         "static V lane2(Ctx* c) { return lane(c); }\n"
+        "static V lane3(Ctx* c) { return lane2(c); }\n"
         "static const T* vec_t(B* b, int n) { return rocke_vector(rocke_i32(), n); }\n"
         "static V info(B* b) { return rocke_b_get_param(b, 0); }\n"
     )
     text = ceo.strip_source(src)
-    assert ceo.emitting_functions([text]) == {"lane", "lane2"}
+    assert ceo.emitting_functions([text]) == {"lane", "lane2", "lane3"}
+
+
+def test_named_lambdas_are_derived_transitively():
+    src = (
+        "void f(B* b, V p) {\n"
+        "    auto neg = [&](V a) { return rocke_b_neg(b, a); };\n"
+        "    auto twice = [&](V a) { return neg(a); };\n"
+        "    auto thrice = [&](V a) mutable -> V { return twice(a); };\n"
+        "    V x = pick(thrice(p), rocke_b_const_i32(b, 1));\n"
+        "}\n"
+    )
+    assert set(ceo.named_lambdas(ceo.strip_source(src))) == {"neg", "twice", "thrice"}
+    assert _callees(src) == ["pick"]
+
+
+def test_named_lambdas_count_only_in_their_own_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(ceo, "KNOWN_SITES", {})
+    (tmp_path / "a.cpp").write_text(
+        "void f(B* b) { auto lane = [&] { return rocke_b_mul(b, p, q); }; }\n"
+    )
+    (tmp_path / "b.cpp").write_text(
+        "x = rocke_b_add(b, lane(), rocke_b_mul(b, p, q));\n"
+    )
+    assert ceo.scan([tmp_path]) == {}
+    (tmp_path / "a.cpp").write_text(
+        "void f(B* b) { auto lane = [&] { return rocke_b_mul(b, p, q); };\n"
+        "x = rocke_b_add(b, lane(), rocke_b_mul(b, p, q)); }\n"
+    )
+    assert [s.callee for s in ceo.scan([tmp_path])[str(tmp_path / "a.cpp")]] == [
+        "rocke_b_add"
+    ]
 
 
 def test_member_functions_are_derived():

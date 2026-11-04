@@ -321,7 +321,15 @@ repos:
           dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_check_emission_order.py
         language: python
         additional_dependencies: ["pytest==8.4.2"]
-        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(tools/check_emission_order|tests/tools/test_check_emission_order)\.py$
+        # The scan hook's files, since some tests name functions in cpp/.
+        files: >-
+          (?x)^dnn-providers/hip-kernel-provider/rocke/(
+            platform/cpp/.*\.(c|cpp|h|hpp)|
+            platform/tests/instances/parity/.*\.(c|cpp|h|hpp)|
+            library/tests/parity/.*\.(c|cpp|h|hpp)|
+            platform/tools/check_emission_order\.py|
+            platform/tests/tools/test_check_emission_order\.py
+          )$
         pass_filenames: false
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit
