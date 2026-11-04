@@ -467,7 +467,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     #   in hkp-unpulled-models.record; the suite tolerates an absent UHD only when that record
     #   names it, and never when HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON, which it
     #   learns from the compile definition below.
-    set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
+    #   SchemaGate feeds the engine a ragged graph and a graph declaring a non-default
+    #   alignment, both stamped engine API 1.3.0, which GenericPlanBuilder's schema gate
+    #   declines because the descriptor declares sdk_version 1.0.0 and graph_match checks
+    #   neither feature. IngestorGenerator's test_gfx950_attention_dense_schema_gate pins
+    #   the same sdk_version where no gfx950 shard is built.
+    set(_hkp_companion_suites
+        CatalogTiles catalog_tiles ModelBinding model_binding SchemaGate schema_gate)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
@@ -479,6 +485,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryEntryLaunchesItsSegmentAndReduceKernels)
     set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_schema_gate_cases_gfx950_dense
+        DeclinesARaggedGraphAtTheSchemaGate
+        DeclinesANonDefaultAlignmentGraphAtTheSchemaGate
+        PassesTheBaselineGraphThroughTheSchemaGate)
     set(_hkp_model_binding_cases_gfx942_unified_3d
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
