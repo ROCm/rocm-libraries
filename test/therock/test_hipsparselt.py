@@ -41,8 +41,6 @@ if test_type == "quick":
     )
 elif test_type == "standard":
     test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
-elif test_type == "full":
-    test_filter.append("--gtest_filter=*quick*")
 
 cmd = [f"{THEROCK_BIN_DIR}/hipsparselt-test"] + test_filter
 

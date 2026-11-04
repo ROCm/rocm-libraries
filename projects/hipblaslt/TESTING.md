@@ -913,8 +913,9 @@ nightly at 07:00 UTC, and on manual dispatch.
 It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
 `linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
 nightly on all three architectures. gfx90a tests hipBLASLt; gfx942/gfx950 test both libraries.
-Manual dispatch requires a freeform `test_type` input, passed to the test runners for every
-architecture. Each architecture has one build and each library has a separate
+Manual dispatch accepts the test type as a workflow input.
+The selected type is passed to the test runners for every architecture.
+Each architecture has one build and each library has a separate
 GPU job. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
 request to this repository with host-only ASAN, and builds full ASAN for its nightly and
 manually dispatched runs.

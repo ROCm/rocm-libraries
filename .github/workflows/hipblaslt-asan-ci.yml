@@ -18,7 +18,8 @@ on:
     inputs:
       test_type:
         description: "Test type passed to the test runners"
-        type: string
+        type: choice
+        options: [quick, standard, comprehensive, full]
         required: true
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
