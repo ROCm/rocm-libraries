@@ -246,33 +246,42 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
             self.driver.resolve_configs(args), [str(self.driver.DEFAULT_CONFIG)]
         )
 
+    def _main_build_configs(self, *args):
+        """Run main() with a mocked build; return the configs it would build and
+        its stdout."""
+        argv = ["streamk_gemm_full_benchmark.py", "--max-kernels", "1", *args]
+        out = io.StringIO()
+        with patch.object(sys, "argv", argv), patch.object(
+            self.driver, "resolve_devices", return_value=["0"]
+        ), patch.object(
+            self.driver,
+            "load_problems",
+            return_value=[{"M": 128, "N": 128, "K": 33}],
+        ), patch.object(
+            self.driver,
+            "setup_multiple_gemm_dispatchers",
+            side_effect=lambda configs, **kwargs: [None] * len(configs),
+        ) as build, contextlib.redirect_stdout(
+            out
+        ):
+            self.assertEqual(self.driver.main(), 1)
+        return build.call_args.args[0], out.getvalue()
+
+    def test_detected_arch_selects_its_default_config(self):
+        with patch.object(gemm_utils, "_get_arch", return_value="gfx1250") as detect:
+            configs, out = self._main_build_configs()
+        detect.assert_called_once_with()
+        self.assertTrue(configs)
+        self.assertEqual({c.gfx_arch for c in configs}, {"gfx1250"})
+        self.assertIn(f"Configs: {GFX1250_CONFIG}", out)
+
     def test_reduction_override_preserves_limited_vector_fallback(self):
         for reduction in (None, "atomic", "linear", "tree"):
             with self.subTest(reduction=reduction):
-                argv = [
-                    "streamk_gemm_full_benchmark.py",
-                    "--arch",
-                    "gfx1250",
-                    "--max-kernels",
-                    "1",
-                ]
+                argv = ["--arch", "gfx1250"]
                 if reduction is not None:
                     argv.extend(["--reduction-strategy", reduction])
-                with patch.object(sys, "argv", argv), patch.object(
-                    self.driver, "resolve_devices", return_value=["0"]
-                ), patch.object(
-                    self.driver,
-                    "load_problems",
-                    return_value=[{"M": 128, "N": 128, "K": 33}],
-                ), patch.object(
-                    self.driver,
-                    "setup_multiple_gemm_dispatchers",
-                    side_effect=lambda configs, **kwargs: [None] * len(configs),
-                ) as build, contextlib.redirect_stdout(
-                    io.StringIO()
-                ):
-                    self.assertEqual(self.driver.main(), 1)
-                configs = build.call_args.args[0]
+                configs, _ = self._main_build_configs(*argv)
                 self.assertEqual(sum(not any(c.vector_sizes) for c in configs), 1)
                 self.assertTrue(any(any(c.vector_sizes) for c in configs))
                 self.assertEqual(
