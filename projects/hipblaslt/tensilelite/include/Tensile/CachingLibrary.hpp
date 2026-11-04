@@ -194,9 +194,9 @@ namespace TensileLite
         using Cache  = CacheMap<std::tuple<std::shared_ptr<MySolution>, double>, AMDGPU, MyProblem>;
 
         // The solutions found for a problem and whether they are all of the
-        // solutions the sub-library has. They are published and read as one
-        // CacheMap value, so no thread can see one request's solutions paired
-        // with another request's already-returned-all bit.
+        // solutions the sub-library has: true when it returned fewer than were
+        // asked for. Both come from one call and are published and read as one
+        // CacheMap value.
         struct TopSolutionsEntry
         {
             SolutionVector<MySolution> solutions;
@@ -300,31 +300,28 @@ namespace TensileLite
             return m_subLibrary;
         }
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             try
             {
-                auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
-                SolutionVector<MySolution> solutions;
+                auto const& amdgpu = dynamic_cast<AMDGPU const&>(hardware);
 
                 // One lookup returns the solutions and their already-returned-all bit together.
                 auto cached = m_caches.find(problem, amdgpu);
-
-                // flag for this call in case of early return
                 if(cached.solutions.size() >= numSolutions || cached.alreadyRetAll)
-                    return {std::move(cached.solutions), cached.alreadyRetAll};
+                    return std::move(cached.solutions);
 
-                auto sub = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
-                solutions = std::move(sub.solutions);
+                auto solutions = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
                 if(solutions.size() != 0)
                 {
                     // A shorter list must not replace a longer one for this problem.
                     // For equal-length lists, keep the incoming one only if it upgrades
                     // alreadyRetAll from false to true to avoid repeated top-up rescans.
+                    const bool alreadyRetAll = solutions.size() < numSolutions;
                     m_caches.addIfPreferred(
-                        TopSolutionsEntry{solutions, sub.alreadyRetAll},
+                        TopSolutionsEntry{solutions, alreadyRetAll},
                         [](TopSolutionsEntry const& existing, TopSolutionsEntry const& incoming) {
                             return incoming.solutions.size() > existing.solutions.size()
                                    || (incoming.solutions.size() == existing.solutions.size()
@@ -334,9 +331,7 @@ namespace TensileLite
                         amdgpu);
                 }
 
-                // can't reach the requested number, means findTop already done its best
-                const bool alreadyRetAll = (solutions.size() < numSolutions);
-                return {std::move(solutions), alreadyRetAll};
+                return solutions;
             }
             catch(std::bad_cast const& exc)
             {

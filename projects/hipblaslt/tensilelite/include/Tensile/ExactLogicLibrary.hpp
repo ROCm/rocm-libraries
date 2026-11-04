@@ -258,9 +258,9 @@ namespace TensileLite
             return concatenate(this->type(), " library (", rows.size(), " rows)");
         }
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             SolutionVector<MySolution> rv, solutions;
             const bool                 debug   = Debug::Instance().printPropertyEvaluation();
@@ -285,8 +285,7 @@ namespace TensileLite
                 if(row.first(problem, hardware))
                 {
                     solutions
-                        = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size())
-                              .solutions;
+                        = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
                     // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
                     if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(
@@ -326,15 +325,12 @@ namespace TensileLite
                     }
 
                     rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
-                    // false in case of early return
                     if(rv.size() == numSolutions)
-                        return {std::move(rv), false};
+                        return rv;
                 }
             }
 
-            // can't reach the requested number, means findTop already done its best
-            const bool alreadyRetAll = (rv.size() < numSolutions);
-            return {std::move(rv), alreadyRetAll};
+            return rv;
         }
 
         virtual SolutionVector<MySolution>

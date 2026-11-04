@@ -100,7 +100,7 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            SolutionVector<MySolution>  solutions = findTopSolutions(problem, hardware, 1).solutions;
+            SolutionVector<MySolution>  solutions = findTopSolutions(problem, hardware, 1);
             std::shared_ptr<MySolution> solution  = nullptr;
             if(solutions.size() > 0)
                 solution = solutions[0];
@@ -128,9 +128,9 @@ namespace TensileLite
             return rv;
         }
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             std::vector<float> problemkey
                 = ProblemKey::keyForProblem<std::vector<float>, MyProblem, float>(
@@ -193,9 +193,7 @@ namespace TensileLite
                 }
             }
 
-            // can't reach the requested number, means findTop already done its best
-            const bool alreadyRetAll = (rv.size() < numSolutions);
-            return {std::move(rv), alreadyRetAll};
+            return rv;
         }
 
         virtual SolutionSet<MySolution>

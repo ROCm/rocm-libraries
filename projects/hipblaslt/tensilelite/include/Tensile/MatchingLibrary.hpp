@@ -141,9 +141,9 @@ namespace TensileLite
             return rv;
         }
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             typename Table::Transform transform
                 = [&](Element library) -> std::shared_ptr<MySolution> {
@@ -164,9 +164,7 @@ namespace TensileLite
                     std::cout << "No solution found" << std::endl;
             }
 
-            // can't reach the requested number, means findTop already done its best
-            const bool alreadyRetAll = (solutions.size() < numSolutions);
-            return {std::move(solutions), alreadyRetAll};
+            return solutions;
         }
 
         virtual SolutionVector<MySolution>

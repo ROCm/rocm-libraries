@@ -353,20 +353,20 @@ namespace TensileLite
             return solutions;
         }
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             auto lib = loadPlaceholderLibrary();
 
-            auto result = lib->findTopSolutions(problem, hardware, numSolutions);
+            auto solutions = lib->findTopSolutions(problem, hardware, numSolutions);
 
-            for(auto& solution : result.solutions)
+            for(auto& solution : solutions)
             {
                 solution->codeObjectFilename = getCodeObjectFileName();
             }
 
-            return result;
+            return solutions;
         }
 
         virtual SolutionVector<MySolution>

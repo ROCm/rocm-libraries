@@ -1086,14 +1086,14 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
     auto tensile_prob = ConstructTensileProblem(prob);
 
     // auto handle = prob.handle;
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestConfigs).solutions;
+    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestConfigs);
 
     *foundConfigs = std::min((int)solutions.size(), requestConfigs);
 
     // Finding alternative solutions.
     auto findAlternativeSolution = [&](int useBias, int useScaleAlphaVec) {
         tensile_prob  = ConstructTensileProblem(prob, useBias, useScaleAlphaVec);
-        solutions     = library->findTopSolutions(tensile_prob, *hardware, requestConfigs).solutions;
+        solutions     = library->findTopSolutions(tensile_prob, *hardware, requestConfigs);
         *foundConfigs = std::min((int)solutions.size(), requestConfigs);
     };
 

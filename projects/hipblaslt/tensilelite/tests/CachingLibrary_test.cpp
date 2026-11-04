@@ -278,7 +278,7 @@ namespace
             return p.getParams().smCountTarget() == 64;
         }
 
-        TopSolutionsResult<ContractionSolution>
+        SolutionVector<ContractionSolution>
             findTopSolutions(ContractionProblemGemm const& problem,
                              Hardware const&,
                              int numSolutions) const override
@@ -288,9 +288,6 @@ namespace
             SolutionVector<ContractionSolution> out;
             for(int i = 0; i < n; i++)
                 out.push_back(makeSolution("sol_" + std::to_string(i), i));
-
-            // Correct, per-problem answer: "I returned everything I have".
-            bool retAll = (n >= available);
 
             if(isA(problem))
             {
@@ -304,7 +301,7 @@ namespace
                     cv.wait_for(lk, std::chrono::seconds(5), [&] { return bDone; });
                 }
             }
-            return {std::move(out), retAll};
+            return out;
         }
     };
 } // namespace
@@ -325,7 +322,7 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsDoesNotPoisonAlreadyRetAllCac
     sub->gateArmed = true;
 
     size_t aFirst = 0;
-    std::thread tA([&] { aFirst = caching->findTopSolutions(problemA, device, 5).solutions.size(); });
+    std::thread tA([&] { aFirst = caching->findTopSolutions(problemA, device, 5).size(); });
 
     // Start B only after A has computed its (correct, false) answer.
     {
@@ -333,7 +330,7 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsDoesNotPoisonAlreadyRetAllCac
         ASSERT_TRUE(
             sub->cv.wait_for(lk, std::chrono::seconds(5), [&] { return sub->aComputed; }));
     }
-    size_t bSize = caching->findTopSolutions(problemB, device, 5).solutions.size();
+    size_t bSize = caching->findTopSolutions(problemB, device, 5).size();
     sub->markBDone();
     tA.join();
     sub->gateArmed = false;
@@ -343,17 +340,15 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsDoesNotPoisonAlreadyRetAllCac
 
     // Same problem A, now asking for everything it has.
     auto again = caching->findTopSolutions(problemA, device, 10);
-    EXPECT_EQ(again.solutions.size(), 10u)
+    EXPECT_EQ(again.size(), 10u)
         << "thread A's cache entry was marked already-returned-all using thread B's "
            "already-returned-all bit; A got fewer solutions than it asked for";
-    EXPECT_FALSE(again.alreadyRetAll);
 }
 
 namespace
 {
     // Holds 10 solutions for every problem. findTopSolutions(n) returns the
-    // first min(n, 10) of them and reports alreadyRetAll == (n >= 10), which is
-    // the per-call answer production code computes.
+    // first min(n, 10) of them.
     class TenSolutionSubLibrary : public ContractionLibrary
     {
     public:
@@ -396,7 +391,7 @@ namespace
 
         mutable std::atomic<int> calls{0};
 
-        TopSolutionsResult<ContractionSolution>
+        SolutionVector<ContractionSolution>
             findTopSolutions(ContractionProblemGemm const&,
                              Hardware const&,
                              int numSolutions) const override
@@ -406,14 +401,14 @@ namespace
             SolutionVector<ContractionSolution> out;
             for(int i = 0; i < n; i++)
                 out.push_back(makeSolution("sol_" + std::to_string(i), i));
-            return {std::move(out), numSolutions >= available};
+            return out;
         }
     };
 } // namespace
 
-// Same problem, two request sizes. A result marked already-returned-all must
-// hold every solution. A shorter list must not replace a longer cached list,
-// so the later request for every solution is served from the cache.
+// Same problem, two request sizes. A result with fewer solutions than were
+// asked for must hold every solution. A shorter list must not replace a longer
+// cached list, so the later request for every solution is served from the cache.
 TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndFlagTogether)
 {
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
@@ -442,8 +437,8 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndF
                 while(!go.load(std::memory_order_acquire))
                     ;
                 auto r = caching->findTopSolutions(problem, device, numSolutions);
-                // A result marked already-returned-all must hold everything.
-                if(r.alreadyRetAll && r.solutions.size() != all)
+                // Fewer than requested means the library had nothing more.
+                if(r.size() < static_cast<size_t>(numSolutions) && r.size() != all)
                     splitPairs++;
             });
         }
@@ -453,7 +448,7 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndF
 
         const int callsAfterJoin = sub->calls.load();
         auto again = caching->findTopSolutions(problem, device, static_cast<int>(all));
-        if(again.solutions.size() != all)
+        if(again.size() != all)
             finalMismatches++;
         if(sub->calls.load() != callsAfterJoin)
             finalMismatches++;
@@ -468,9 +463,8 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndF
 
 namespace
 {
-    // Holds N solutions and reports alreadyRetAll only when asked for more than N.
-    // This mirrors the cache-upgrade scenario: N then N+1 both return N solutions,
-    // but the second result has a stronger alreadyRetAll=true answer.
+    // Holds N solutions. Asking for N and then N+1 returns the same N, but only
+    // the second call shows that the library has nothing more.
     class ExactNThenTopUpSubLibrary : public ContractionLibrary
     {
     public:
@@ -513,7 +507,7 @@ namespace
 
         mutable std::atomic<int> calls{0};
 
-        TopSolutionsResult<ContractionSolution>
+        SolutionVector<ContractionSolution>
             findTopSolutions(ContractionProblemGemm const&, Hardware const&, int numSolutions) const override
         {
             calls.fetch_add(1, std::memory_order_relaxed);
@@ -521,15 +515,13 @@ namespace
             SolutionVector<ContractionSolution> out;
             for(int i = 0; i < n; i++)
                 out.push_back(makeSolution("sol_" + std::to_string(i), i));
-
-            const bool alreadyRetAll = (numSolutions > available);
-            return {std::move(out), alreadyRetAll};
+            return out;
         }
     };
 } // namespace
 
-// If two same-size results differ only by alreadyRetAll=false->true, cache
-// should keep the upgraded entry. Otherwise repeated top-up requests rescan.
+// Two same-size results where only the second was shorter than its request:
+// the cache keeps the second, so repeating that request does not rescan.
 TEST(CachingLibraryTest, TopUpUpgradesAlreadyRetAllForEqualSizedResult)
 {
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
@@ -539,18 +531,15 @@ TEST(CachingLibraryTest, TopUpUpgradesAlreadyRetAllForEqualSizedResult)
     auto caching = std::make_shared<CachingLibrary<ContractionProblemGemm>>(sub);
 
     auto exact = caching->findTopSolutions(problem, device, ExactNThenTopUpSubLibrary::available);
-    EXPECT_EQ(exact.solutions.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
-    EXPECT_FALSE(exact.alreadyRetAll);
+    EXPECT_EQ(exact.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
 
     auto topUp = caching->findTopSolutions(problem, device, ExactNThenTopUpSubLibrary::available + 1);
-    EXPECT_EQ(topUp.solutions.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
-    EXPECT_TRUE(topUp.alreadyRetAll);
+    EXPECT_EQ(topUp.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
 
     const int callsAfterTopUp = sub->calls.load();
     auto repeatTopUp
         = caching->findTopSolutions(problem, device, ExactNThenTopUpSubLibrary::available + 1);
-    EXPECT_EQ(repeatTopUp.solutions.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
-    EXPECT_TRUE(repeatTopUp.alreadyRetAll);
+    EXPECT_EQ(repeatTopUp.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
     EXPECT_EQ(sub->calls.load(), callsAfterTopUp)
         << "repeating N+1 should reuse upgraded cache entry instead of rescanning sub-library";
 }

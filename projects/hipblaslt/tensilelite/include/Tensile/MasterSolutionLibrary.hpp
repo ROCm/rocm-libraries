@@ -595,9 +595,9 @@ namespace TensileLite
             return library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
         }
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             if(Debug::Instance().printSolutionSelectionTime())
             {
@@ -615,9 +615,9 @@ namespace TensileLite
             }
         }
 
-        TopSolutionsResult<MySolution> findTopSolutions_runner(MyProblem const& problem,
-                                                               Hardware const&  hardware,
-                                                               int              numSolutions) const
+        SolutionVector<MySolution> findTopSolutions_runner(MyProblem const& problem,
+                                                           Hardware const&  hardware,
+                                                           int              numSolutions) const
         {
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
             // The mapped kernel goes first and the shipped library fills the
@@ -628,12 +628,12 @@ namespace TensileLite
                 local = localLibrary->findExact(problem, hardware);
             if(local)
             {
+                SolutionVector<MySolution> rv{local};
                 if(numSolutions == 1)
-                    return {{local}, false};
-
+                    return rv;
                 auto rest = library->findTopSolutions(problem, hardware, numSolutions - 1);
-                rest.solutions.insert(rest.solutions.begin(), local);
-                return rest;
+                rv.insert(rv.end(), rest.begin(), rest.end());
+                return rv;
             }
 #endif
             return library->findTopSolutions(problem, hardware, numSolutions);

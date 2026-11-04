@@ -187,15 +187,14 @@ namespace TensileLite
         std::shared_ptr<Property<MyProblem, Key>> property;
         LibraryMap<MyProblem, MySolution, Key>    map;
 
-        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
-                                                                Hardware const&  hardware,
-                                                                int numSolutions) const override
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
         {
             auto library = lookup(problem, hardware);
 
-            // false in case of early return
             if(library == nullptr)
-                return {SolutionVector<MySolution>(), false};
+                return SolutionVector<MySolution>();
 
             return library->findTopSolutions(problem, hardware, numSolutions);
         }
