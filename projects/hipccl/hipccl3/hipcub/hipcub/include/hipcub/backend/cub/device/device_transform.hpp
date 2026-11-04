@@ -1,6 +1,6 @@
 /******************************************************************************.
  * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,8 @@
 
 #include "../../../config.hpp"
 
+#include "../tuple.hpp"
+
 #include <hip/hip_runtime.h>
 
 #include <cub/device/device_transform.cuh> // IWYU pragma: export
@@ -42,16 +44,17 @@ struct DeviceTransform
     template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t Transform(std::tuple<RandomAccessIteratorsIn...> inputs,
-                                RandomAccessIteratorOut                output,
-                                NumItemsT                              num_items,
-                                TransformOp                            transform_op,
-                                hipStream_t                            stream = nullptr)
+    static hipError_t Transform(::hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                RandomAccessIteratorOut                     output,
+                                NumItemsT                                   num_items,
+                                TransformOp                                 transform_op,
+                                EnvT                                        env = {})
     {
         return hipCUDAErrorTohipError(
-            ::cub::DeviceTransform::Transform(inputs, output, num_items, transform_op, stream));
+            ::cub::DeviceTransform::Transform(inputs, output, num_items, transform_op, env));
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -59,13 +62,13 @@ struct DeviceTransform
              typename NumItemsT,
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t Transform(void*                                  d_temp_storage,
-                                size_t&                                temp_storage_bytes,
-                                std::tuple<RandomAccessIteratorsIn...> inputs,
-                                RandomAccessIteratorOut                output,
-                                NumItemsT                              num_items,
-                                TransformOp                            transform_op,
-                                hipStream_t                            stream = nullptr)
+    static hipError_t Transform(void*                                       d_temp_storage,
+                                size_t&                                     temp_storage_bytes,
+                                ::hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                RandomAccessIteratorOut                     output,
+                                NumItemsT                                   num_items,
+                                TransformOp                                 transform_op,
+                                hipStream_t                                 stream = nullptr)
     {
         return hipCUDAErrorTohipError(::cub::DeviceTransform::Transform(d_temp_storage,
                                                                         temp_storage_bytes,
@@ -79,16 +82,17 @@ struct DeviceTransform
     template<typename RandomAccessIteratorIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t Transform(RandomAccessIteratorIn  input,
                                 RandomAccessIteratorOut output,
                                 NumItemsT               num_items,
                                 TransformOp             transform_op,
-                                hipStream_t             stream = nullptr)
+                                EnvT                    env = {})
     {
         return hipCUDAErrorTohipError(
-            ::cub::DeviceTransform::Transform(input, output, num_items, transform_op, stream));
+            ::cub::DeviceTransform::Transform(input, output, num_items, transform_op, env));
     }
 
     template<typename RandomAccessIteratorIn,
@@ -114,24 +118,178 @@ struct DeviceTransform
                                                                         stream));
     }
 
+    template<typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Generator,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Generate(RandomAccessIteratorOut output,
+                               NumItemsT               num_items,
+                               Generator               generator,
+                               EnvT                    env = {})
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceTransform::Generate(output, num_items, generator, env));
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Generate(void*                   d_temp_storage,
+                               size_t&                 temp_storage_bytes,
+                               RandomAccessIteratorOut output,
+                               NumItemsT               num_items,
+                               Generator               generator,
+                               hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::Generate(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       output,
+                                                                       num_items,
+                                                                       generator,
+                                                                       stream));
+    }
+
+    template<typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Value,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Fill(RandomAccessIteratorOut output, NumItemsT num_items, Value value, EnvT env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::Fill(output, num_items, value, env));
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Fill(void*                   d_temp_storage,
+                           size_t&                 temp_storage_bytes,
+                           RandomAccessIteratorOut output,
+                           NumItemsT               num_items,
+                           Value                   value,
+                           hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::Fill(d_temp_storage,
+                                                                   temp_storage_bytes,
+                                                                   output,
+                                                                   num_items,
+                                                                   value,
+                                                                   stream));
+    }
+
+    template<typename... RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename Predicate,
+             typename NumItemsT,
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf(::hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                  RandomAccessIteratorOut                     output,
+                                  NumItemsT                                   num_items,
+                                  Predicate                                   predicate,
+                                  TransformOp                                 transform_op,
+                                  EnvT                                        env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::TransformIf(inputs,
+                                                                          output,
+                                                                          num_items,
+                                                                          predicate,
+                                                                          transform_op,
+                                                                          env));
+    }
+
     template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
+             typename Predicate,
              typename TransformOp>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf(void*                                     d_temp_storage,
+                                  size_t&                                   temp_storage_bytes,
+                                  hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                  RandomAccessIteratorOut                   output,
+                                  NumItemsT                                 num_items,
+                                  Predicate                                 predicate,
+                                  TransformOp                               transform_op,
+                                  hipStream_t                               stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::TransformIf(d_temp_storage,
+                                                                          temp_storage_bytes,
+                                                                          inputs,
+                                                                          output,
+                                                                          num_items,
+                                                                          predicate,
+                                                                          transform_op,
+                                                                          stream));
+    }
+
+    template<typename RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename Predicate,
+             typename NumItemsT,
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf(RandomAccessIteratorsIn input,
+                                  RandomAccessIteratorOut output,
+                                  NumItemsT               num_items,
+                                  Predicate               predicate,
+                                  TransformOp             transform_op,
+                                  EnvT                    env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::TransformIf(input,
+                                                                          output,
+                                                                          num_items,
+                                                                          predicate,
+                                                                          transform_op,
+                                                                          env));
+    }
+
+    template<typename RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename Predicate,
+             typename TransformOp>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformIf(void*                   d_temp_storage,
+                                  size_t&                 temp_storage_bytes,
+                                  RandomAccessIteratorsIn input,
+                                  RandomAccessIteratorOut output,
+                                  NumItemsT               num_items,
+                                  Predicate               predicate,
+                                  TransformOp             transform_op,
+                                  hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::TransformIf(d_temp_storage,
+                                                                          temp_storage_bytes,
+                                                                          input,
+                                                                          output,
+                                                                          num_items,
+                                                                          predicate,
+                                                                          transform_op,
+                                                                          stream));
+    }
+
+    template<typename... RandomAccessIteratorsIn,
+             typename RandomAccessIteratorOut,
+             typename NumItemsT,
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
-        TransformStableArgumentAddresses(std::tuple<RandomAccessIteratorsIn...> inputs,
-                                         RandomAccessIteratorOut                output,
-                                         NumItemsT                              num_items,
-                                         TransformOp                            transform_op,
-                                         hipStream_t                            stream = nullptr)
+        TransformStableArgumentAddresses(::hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                         RandomAccessIteratorOut                     output,
+                                         NumItemsT                                   num_items,
+                                         TransformOp                                 transform_op,
+                                         EnvT                                        env = {})
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceTransform::TransformStableArgumentAddresses(inputs,
                                                                      output,
                                                                      num_items,
                                                                      transform_op,
-                                                                     stream));
+                                                                     env));
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -140,13 +298,13 @@ struct DeviceTransform
              typename TransformOp>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
-        TransformStableArgumentAddresses(void*                                  d_temp_storage,
-                                         size_t&                                temp_storage_bytes,
-                                         std::tuple<RandomAccessIteratorsIn...> inputs,
-                                         RandomAccessIteratorOut                output,
-                                         NumItemsT                              num_items,
-                                         TransformOp                            transform_op,
-                                         hipStream_t                            stream = nullptr)
+        TransformStableArgumentAddresses(void*   d_temp_storage,
+                                         size_t& temp_storage_bytes,
+                                         ::hipcub::tuple<RandomAccessIteratorsIn...> inputs,
+                                         RandomAccessIteratorOut                     output,
+                                         NumItemsT                                   num_items,
+                                         TransformOp                                 transform_op,
+                                         hipStream_t stream = nullptr)
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceTransform::TransformStableArgumentAddresses(d_temp_storage,
@@ -161,20 +319,21 @@ struct DeviceTransform
     template<typename RandomAccessIteratorIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
-             typename TransformOp>
+             typename TransformOp,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t TransformStableArgumentAddresses(RandomAccessIteratorIn  input,
                                                        RandomAccessIteratorOut output,
                                                        NumItemsT               num_items,
                                                        TransformOp             transform_op,
-                                                       hipStream_t             stream = nullptr)
+                                                       EnvT                    env = {})
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceTransform::TransformStableArgumentAddresses(input,
                                                                      output,
                                                                      num_items,
                                                                      transform_op,
-                                                                     stream));
+                                                                     env));
     }
 
     template<typename RandomAccessIteratorIn,

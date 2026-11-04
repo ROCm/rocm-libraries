@@ -43,16 +43,15 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #include _HIPCUB_LIBCXX_INCLUDE(bit)
-#endif
+#include _HIPCUB_LIBCXX_INCLUDE(__bit/bitfield.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__type_traits/is_floating_point.h)
 
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
 /** \brief Twiddling keys for radix sort. */
-template <bool IS_DESCENDING, typename KeyT>
+template<bool IsDescending, typename KeyT>
 struct RadixSortTwiddle
 {
     using TraitsT      = Traits<KeyT>;
@@ -60,12 +59,18 @@ struct RadixSortTwiddle
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits In(UnsignedBits key)
     {
         key = TraitsT::TwiddleIn(key);
-        if (IS_DESCENDING) key = ~key;
+        if constexpr(IsDescending)
+        {
+            key = ~key;
+        }
         return key;
     }
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits Out(UnsignedBits key)
     {
-        if (IS_DESCENDING) key = ~key;
+        if constexpr(IsDescending)
+        {
+            key = ~key;
+        }
         key = TraitsT::TwiddleOut(key);
         return key;
     }

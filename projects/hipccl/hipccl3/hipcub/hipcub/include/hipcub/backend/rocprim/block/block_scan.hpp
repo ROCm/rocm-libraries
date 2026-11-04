@@ -34,7 +34,7 @@
 
 #include <rocprim/block/block_scan.hpp> // IWYU pragma: export
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
 #include <type_traits>
 
@@ -62,30 +62,26 @@ enum BlockScanAlgorithm
 };
 
 template<typename T,
-         int                BLOCK_DIM_X,
-         BlockScanAlgorithm ALGORITHM   = BLOCK_SCAN_RAKING,
-         int                BLOCK_DIM_Y = 1,
-         int                BLOCK_DIM_Z = 1>
+         int                BlockDimX,
+         BlockScanAlgorithm Algorithm = BLOCK_SCAN_RAKING,
+         int                BlockDimY = 1,
+         int                BlockDimZ = 1>
 class BlockScan
     : private ::rocprim::block_scan<T,
-                                    BLOCK_DIM_X,
-                                    static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
-                                    BLOCK_DIM_Y,
-                                    BLOCK_DIM_Z>
+                                    BlockDimX,
+                                    static_cast<::rocprim::block_scan_algorithm>(Algorithm),
+                                    BlockDimY,
+                                    BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type =
-        typename ::rocprim::block_scan<
-            T,
-            BLOCK_DIM_X,
-            static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+        typename ::rocprim::block_scan<T,
+                                       BlockDimX,
+                                       static_cast<::rocprim::block_scan_algorithm>(Algorithm),
+                                       BlockDimY,
+                                       BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -126,25 +122,25 @@ public:
                                   _HIPCUB_STD::plus<>{});
     }
 
-    template<int ITEMS_PER_THREAD>
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD])
+    template<int ItemsPerThread>
+    HIPCUB_DEVICE
+    inline void InclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread])
     {
         base_type::inclusive_scan(input, output, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD>
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                      T& block_aggregate)
+    template<int ItemsPerThread>
+    HIPCUB_DEVICE
+    inline void
+        InclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread], T& block_aggregate)
     {
         base_type::inclusive_scan(input, output, block_aggregate, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
+    template<int ItemsPerThread, typename BlockPrefixCallbackOp>
     HIPCUB_DEVICE
-    inline void InclusiveSum(T (&input)[ITEMS_PER_THREAD],
-                             T (&output)[ITEMS_PER_THREAD],
+    inline void InclusiveSum(T (&input)[ItemsPerThread],
+                             T (&output)[ItemsPerThread],
                              BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::inclusive_scan(input,
@@ -177,35 +173,38 @@ public:
         );
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD], ScanOp scan_op)
+    template<int ItemsPerThread, typename ScanOp>
+    HIPCUB_DEVICE
+    inline void
+        InclusiveScan(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread], ScanOp scan_op)
     {
         base_type::inclusive_scan(input, output, temp_storage_, scan_op);
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp>
+    template<int ItemsPerThread, typename ScanOp>
     HIPCUB_DEVICE
-    inline void InclusiveScan(T (&input)[ITEMS_PER_THREAD],
-                              T (&output)[ITEMS_PER_THREAD],
+    inline void InclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
                               T      initial_value,
                               ScanOp scan_op)
     {
         base_type::inclusive_scan(input, initial_value, output, temp_storage_, scan_op);
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                       ScanOp scan_op, T& block_aggregate)
+    template<int ItemsPerThread, typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
+                              ScanOp scan_op,
+                              T&     block_aggregate)
     {
         base_type::inclusive_scan(input, output, block_aggregate, temp_storage_, scan_op);
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp>
+    template<int ItemsPerThread, typename ScanOp>
     HIPCUB_DEVICE
-    inline void InclusiveScan(T (&input)[ITEMS_PER_THREAD],
-                              T (&output)[ITEMS_PER_THREAD],
+    inline void InclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
                               T      initial_value,
                               ScanOp scan_op,
                               T&     block_aggregate)
@@ -218,10 +217,12 @@ public:
                                   scan_op);
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                       ScanOp scan_op, BlockPrefixCallbackOp& block_prefix_callback_op)
+    template<int ItemsPerThread, typename ScanOp, typename BlockPrefixCallbackOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
+                              ScanOp                 scan_op,
+                              BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::inclusive_scan(
             input, output, temp_storage_, block_prefix_callback_op, scan_op
@@ -251,25 +252,25 @@ public:
                                   _HIPCUB_STD::plus<>{});
     }
 
-    template<int ITEMS_PER_THREAD>
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD])
+    template<int ItemsPerThread>
+    HIPCUB_DEVICE
+    inline void ExclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread])
     {
         base_type::exclusive_scan(input, output, T(0), temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD>
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                      T& block_aggregate)
+    template<int ItemsPerThread>
+    HIPCUB_DEVICE
+    inline void
+        ExclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread], T& block_aggregate)
     {
         base_type::exclusive_scan(input, output, T(0), block_aggregate, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
+    template<int ItemsPerThread, typename BlockPrefixCallbackOp>
     HIPCUB_DEVICE
-    inline void ExclusiveSum(T (&input)[ITEMS_PER_THREAD],
-                             T (&output)[ITEMS_PER_THREAD],
+    inline void ExclusiveSum(T (&input)[ItemsPerThread],
+                             T (&output)[ItemsPerThread],
                              BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::exclusive_scan(input,
@@ -306,28 +307,35 @@ public:
         );
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                       T initial_value, ScanOp scan_op)
+    template<int ItemsPerThread, typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
+                              T      initial_value,
+                              ScanOp scan_op)
     {
         base_type::exclusive_scan(input, output, initial_value, temp_storage_, scan_op);
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                       T initial_value, ScanOp scan_op, T& block_aggregate)
+    template<int ItemsPerThread, typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
+                              T      initial_value,
+                              ScanOp scan_op,
+                              T&     block_aggregate)
     {
         base_type::exclusive_scan(
             input, output, initial_value, block_aggregate, temp_storage_, scan_op
         );
     }
 
-    template<int ITEMS_PER_THREAD, typename ScanOp, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                       ScanOp scan_op, BlockPrefixCallbackOp& block_prefix_callback_op)
+    template<int ItemsPerThread, typename ScanOp, typename BlockPrefixCallbackOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScan(T (&input)[ItemsPerThread],
+                              T (&output)[ItemsPerThread],
+                              ScanOp                 scan_op,
+                              BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::exclusive_scan(
             input, output, temp_storage_, block_prefix_callback_op, scan_op

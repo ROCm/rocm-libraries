@@ -73,10 +73,21 @@ constexpr auto config_name()
     }
 }
 
+template<class T>
+struct predicate_t
+{
+    __device__ __host__
+    inline constexpr bool operator()(const T& value) const
+    {
+        return (value > T{10});
+    }
+};
+
 template<typename T,
          bool IsPointer,
-         bool IsBinary   = false,
-         typename Config = rocprim::default_config>
+         bool IsBinary     = false,
+         bool IsPredicated = false,
+         typename Config   = rocprim::default_config>
 struct device_transform_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
@@ -97,6 +108,7 @@ struct device_transform_benchmark : public primbench::benchmark_interface
             .add("lvl", "device")
             .add("algo", algo())
             .add("is_binary", IsBinary)
+            .add("is_predicated", IsPredicated)
             .add("value_type", primbench::name<T>())
             .add("cfg", config_name<Config>());
     }
@@ -108,6 +120,8 @@ struct device_transform_benchmark : public primbench::benchmark_interface
         const auto& seed   = state.seed;
 
         using output_type = T;
+        using predicate_type = std::
+            conditional_t<IsPredicated, predicate_t<T>, rocprim::detail::always_true_predicate>;
 
         size_t items = bytes / sizeof(T);
 
@@ -154,6 +168,7 @@ struct device_transform_benchmark : public primbench::benchmark_interface
                     d_input.get(),
                     d_output.get(),
                     items,
+                    predicate_type{},
                     transform_op,
                     stream,
                     debug_synchronous);
@@ -181,7 +196,7 @@ struct device_transform_benchmark_generator
         {
             storage.emplace_back(
                 std::make_unique<
-                    device_transform_benchmark<T, IsPointer, false, generated_config>>());
+                    device_transform_benchmark<T, IsPointer, false, false, generated_config>>());
         }
     };
 

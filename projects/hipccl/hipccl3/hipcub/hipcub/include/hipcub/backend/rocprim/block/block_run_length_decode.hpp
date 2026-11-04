@@ -37,10 +37,6 @@
 #include "../util_type.hpp"
 #include "block_scan.hpp"
 
-#include _HIPCUB_STD_INCLUDE(limits)
-
-#include <type_traits>
-
 BEGIN_HIPCUB_NAMESPACE
 
 /**
@@ -49,8 +45,8 @@ BEGIN_HIPCUB_NAMESPACE
  * array.
  * Due to the nature of the run-length decoding algorithm ("decompression"), the output size of the run-length decoded
  * array is runtime-dependent and potentially without any upper bound. To address this, BlockRunLengthDecode allows
- * retrieving a "window" from the run-length decoded array. The window's offset can be specified and BLOCK_THREADS *
- * DECODED_ITEMS_PER_THREAD (i.e., referred to as window_size) decoded items from the specified window will be returned.
+ * retrieving a "window" from the run-length decoded array. The window's offset can be specified and BlockThreads *
+ * DECODED_ItemsPerThread (i.e., referred to as window_size) decoded items from the specified window will be returned.
  *
  * \note: Trailing runs of length 0 are supported (i.e., they may only appear at the end of the run_lengths array).
  * A run of length zero may not be followed by a run length that is not zero.
@@ -65,22 +61,22 @@ BEGIN_HIPCUB_NAMESPACE
  *   using RunLengthT = uint32_t;
  *
  *   // Specialising BlockRunLengthDecode for a 1D block of 128 threads
- *   constexpr int BLOCK_DIM_X = 128;
+ *   constexpr int BlockDimX = 128;
  *   // Specialising BlockRunLengthDecode to have each thread contribute 2 run-length encoded runs
- *   constexpr int RUNS_PER_THREAD = 2;
+ *   constexpr int RunsPerThread = 2;
  *   // Specialising BlockRunLengthDecode to have each thread hold 4 run-length decoded items
- *   constexpr int DECODED_ITEMS_PER_THREAD = 4;
+ *   constexpr int DECODED_ItemsPerThread = 4;
  *
  *   // Specialize BlockRunLengthDecode for a 1D block of 128 threads owning 4 integer items each
  *   using BlockRunLengthDecodeT =
- *     hipcub::BlockRunLengthDecode<RunItemT, BLOCK_DIM_X, RUNS_PER_THREAD, DECODED_ITEMS_PER_THREAD>;
+ *     hipcub::BlockRunLengthDecode<RunItemT, BlockDimX, RunsPerThread, DECODED_ItemsPerThread>;
  *
  *   // Allocate shared memory for BlockRunLengthDecode
  *   __shared__ typename BlockRunLengthDecodeT::TempStorage temp_storage;
  *
  *   // The run-length encoded items and how often they shall be repeated in the run-length decoded output
- *   RunItemT run_values[RUNS_PER_THREAD];
- *   RunLengthT run_lengths[RUNS_PER_THREAD];
+ *   RunItemT run_values[RunsPerThread];
+ *   RunLengthT run_lengths[RunsPerThread];
  *   ...
  *
  *   // Initialize the BlockRunLengthDecode with the runs that we want to run-length decode
@@ -92,14 +88,14 @@ BEGIN_HIPCUB_NAMESPACE
  *   uint32_t decoded_window_offset = 0U;
  *   while (decoded_window_offset < total_decoded_size)
  *   {
- *     RunLengthT relative_offsets[DECODED_ITEMS_PER_THREAD];
- *     RunItemT decoded_items[DECODED_ITEMS_PER_THREAD];
+ *     RunLengthT relative_offsets[DECODED_ItemsPerThread];
+ *     RunItemT decoded_items[DECODED_ItemsPerThread];
  *
  *     // The number of decoded items that are valid within this window (aka pass) of run-length decoding
  *     uint32_t num_valid_items = total_decoded_size - decoded_window_offset;
  *     block_rld.RunLengthDecode(decoded_items, relative_offsets, decoded_window_offset);
  *
- *     decoded_window_offset += BLOCK_DIM_X * DECODED_ITEMS_PER_THREAD;
+ *     decoded_window_offset += BlockDimX * DECODED_ItemsPerThread;
  *
  *     ...
  *   }
@@ -114,21 +110,21 @@ BEGIN_HIPCUB_NAMESPACE
  * 3, 0, 1], [2, 3, 4, 0], ..., [3, 4, 0, 0] }</tt> during the first iteration of the while loop.
  *
  * \tparam ItemT The data type of the items being run-length decoded
- * \tparam BLOCK_DIM_X The thread block length in threads along the X dimension
- * \tparam RUNS_PER_THREAD The number of consecutive runs that each thread contributes
- * \tparam DECODED_ITEMS_PER_THREAD The maximum number of decoded items that each thread holds
+ * \tparam BlockDimX The thread block length in threads along the X dimension
+ * \tparam RunsPerThread The number of consecutive runs that each thread contributes
+ * \tparam DECODED_ItemsPerThread The maximum number of decoded items that each thread holds
  * \tparam DecodedOffsetT Type used to index into the block's decoded items (large enough to hold the sum over all the
  * runs' lengths)
- * \tparam BLOCK_DIM_Y The thread block length in threads along the Y dimension
- * \tparam BLOCK_DIM_Z The thread block length in threads along the Z dimension
+ * \tparam BlockDimY The thread block length in threads along the Y dimension
+ * \tparam BlockDimZ The thread block length in threads along the Z dimension
  */
-template <typename ItemT,
-          int BLOCK_DIM_X,
-          int RUNS_PER_THREAD,
-          int DECODED_ITEMS_PER_THREAD,
-          typename DecodedOffsetT = uint32_t,
-          int BLOCK_DIM_Y = 1,
-          int BLOCK_DIM_Z = 1>
+template<typename ItemT,
+         int BlockDimX,
+         int RunsPerThread,
+         int DECODED_ItemsPerThread,
+         typename DecodedOffsetT = uint32_t,
+         int BlockDimY           = 1,
+         int BlockDimZ           = 1>
 class BlockRunLengthDecode
 {
     //---------------------------------------------------------------------
@@ -136,13 +132,14 @@ class BlockRunLengthDecode
     //---------------------------------------------------------------------
 private:
     /// The thread block size in threads
-    static constexpr int BLOCK_THREADS = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z;
+    static constexpr int BlockThreads = BlockDimX * BlockDimY * BlockDimZ;
 
     /// The number of runs that the block decodes (out-of-bounds items may be padded with run lengths of '0')
-    static constexpr int BLOCK_RUNS = BLOCK_THREADS * RUNS_PER_THREAD;
+    static constexpr int BLOCK_RUNS = BlockThreads * RunsPerThread;
 
     /// BlockScan used to determine the beginning of each run (i.e., prefix sum over the runs' length)
-    using RunOffsetScanT = BlockScan<DecodedOffsetT, BLOCK_DIM_X, BLOCK_SCAN_WARP_SCANS, BLOCK_DIM_Y, BLOCK_DIM_Z>;
+    using RunOffsetScanT
+        = BlockScan<DecodedOffsetT, BlockDimX, BLOCK_SCAN_WARP_SCANS, BlockDimY, BlockDimZ>;
 
     /// Type used to index into the block's runs
     using RunOffsetT = uint32_t;
@@ -185,12 +182,14 @@ public:
    * algorithm's temporary storage may not be repurposed between the constructor call and subsequent
    * <b>RunLengthDecode</b> calls.
    */
-    template <typename RunLengthT, typename TotalDecodedSizeT>
-    HIPCUB_DEVICE __forceinline__ BlockRunLengthDecode(TempStorage &temp_storage,
-                                                       ItemT (&run_values)[RUNS_PER_THREAD],
-                                                       RunLengthT (&run_lengths)[RUNS_PER_THREAD],
-                                                       TotalDecodedSizeT &total_decoded_size)
-        : temp_storage(temp_storage.Alias()), linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+    template<typename RunLengthT, typename TotalDecodedSizeT>
+    HIPCUB_DEVICE __forceinline__
+    BlockRunLengthDecode(TempStorage& temp_storage,
+                         ItemT (&run_values)[RunsPerThread],
+                         RunLengthT (&run_lengths)[RunsPerThread],
+                         TotalDecodedSizeT& total_decoded_size)
+        : temp_storage(temp_storage.Alias())
+        , linear_tid(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {
         InitWithRunLengths(run_values, run_lengths, total_decoded_size);
     }
@@ -200,11 +199,13 @@ public:
    * algorithm's temporary storage may not be repurposed between the constructor call and subsequent
    * <b>RunLengthDecode</b> calls.
    */
-    template <typename UserRunOffsetT>
-    HIPCUB_DEVICE __forceinline__ BlockRunLengthDecode(TempStorage &temp_storage,
-                                                       ItemT (&run_values)[RUNS_PER_THREAD],
-                                                       UserRunOffsetT (&run_offsets)[RUNS_PER_THREAD])
-        : temp_storage(temp_storage.Alias()), linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+    template<typename UserRunOffsetT>
+    HIPCUB_DEVICE __forceinline__
+    BlockRunLengthDecode(TempStorage& temp_storage,
+                         ItemT (&run_values)[RunsPerThread],
+                         UserRunOffsetT (&run_offsets)[RunsPerThread])
+        : temp_storage(temp_storage.Alias())
+        , linear_tid(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {
         InitWithRunOffsets(run_values, run_offsets);
     }
@@ -212,11 +213,12 @@ public:
     /**
    * \brief Constructor specialised for static temporary storage, initializing using the runs' lengths.
    */
-    template <typename RunLengthT, typename TotalDecodedSizeT>
-    HIPCUB_DEVICE __forceinline__ BlockRunLengthDecode(ItemT (&run_values)[RUNS_PER_THREAD],
-                                                       RunLengthT (&run_lengths)[RUNS_PER_THREAD],
-                                                       TotalDecodedSizeT &total_decoded_size)
-        : temp_storage(PrivateStorage()), linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+    template<typename RunLengthT, typename TotalDecodedSizeT>
+    HIPCUB_DEVICE __forceinline__
+    BlockRunLengthDecode(ItemT (&run_values)[RunsPerThread],
+                         RunLengthT (&run_lengths)[RunsPerThread],
+                         TotalDecodedSizeT& total_decoded_size)
+        : temp_storage(PrivateStorage()), linear_tid(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {
         InitWithRunLengths(run_values, run_lengths, total_decoded_size);
     }
@@ -224,10 +226,10 @@ public:
     /**
    * \brief Constructor specialised for static temporary storage, initializing using the runs' offsets.
    */
-    template <typename UserRunOffsetT>
-    HIPCUB_DEVICE __forceinline__ BlockRunLengthDecode(ItemT (&run_values)[RUNS_PER_THREAD],
-                                                    UserRunOffsetT (&run_offsets)[RUNS_PER_THREAD])
-        : temp_storage(PrivateStorage()), linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+    template<typename UserRunOffsetT>
+    HIPCUB_DEVICE __forceinline__ BlockRunLengthDecode(ItemT (&run_values)[RunsPerThread],
+                                                      UserRunOffsetT (&run_offsets)[RunsPerThread])
+        : temp_storage(PrivateStorage()), linear_tid(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {
         InitWithRunOffsets(run_values, run_offsets);
     }
@@ -267,14 +269,16 @@ private:
         return lower_bound;
     }
 
-    template <typename RunOffsetT>
-    HIPCUB_DEVICE __forceinline__ void InitWithRunOffsets(ItemT (&run_values)[RUNS_PER_THREAD],
-                                                          RunOffsetT (&run_offsets)[RUNS_PER_THREAD])
+    template<typename RunOffsetT>
+    HIPCUB_DEVICE __forceinline__
+    void InitWithRunOffsets(ItemT (&run_values)[RunsPerThread],
+                            RunOffsetT (&run_offsets)[RunsPerThread])
     {
         // Keep the runs' items and the offsets of each run's beginning in the temporary storage
-        RunOffsetT thread_dst_offset = static_cast<RunOffsetT>(linear_tid) * static_cast<RunOffsetT>(RUNS_PER_THREAD);
+        RunOffsetT thread_dst_offset
+            = static_cast<RunOffsetT>(linear_tid) * static_cast<RunOffsetT>(RunsPerThread);
         HIPCUB_PRAGMA_UNROLL_FULL()
-        for (int i = 0; i < RUNS_PER_THREAD; i++)
+        for(int i = 0; i < RunsPerThread; i++)
         {
             temp_storage.runs.run_values[thread_dst_offset] = run_values[i];
             temp_storage.runs.run_offsets[thread_dst_offset] = run_offsets[i];
@@ -285,15 +289,16 @@ private:
         __syncthreads();
     }
 
-    template <typename RunLengthT, typename TotalDecodedSizeT>
-    HIPCUB_DEVICE __forceinline__ void InitWithRunLengths(ItemT (&run_values)[RUNS_PER_THREAD],
-                                                          RunLengthT (&run_lengths)[RUNS_PER_THREAD],
-                                                          TotalDecodedSizeT &total_decoded_size)
+    template<typename RunLengthT, typename TotalDecodedSizeT>
+    HIPCUB_DEVICE __forceinline__
+    void InitWithRunLengths(ItemT (&run_values)[RunsPerThread],
+                            RunLengthT (&run_lengths)[RunsPerThread],
+                            TotalDecodedSizeT& total_decoded_size)
     {
         // Compute the offset for the beginning of each run
-        DecodedOffsetT run_offsets[RUNS_PER_THREAD];
+        DecodedOffsetT run_offsets[RunsPerThread];
         HIPCUB_PRAGMA_UNROLL_FULL()
-        for (int i = 0; i < RUNS_PER_THREAD; i++)
+        for(int i = 0; i < RunsPerThread; i++)
         {
             run_offsets[i] = static_cast<DecodedOffsetT>(run_lengths[i]);
         }
@@ -311,7 +316,7 @@ public:
     /**
    * \brief Run-length decodes the runs previously passed via a call to Init(...) and returns the run-length decoded
    * items in a blocked arrangement to \p decoded_items. If the number of run-length decoded items exceeds the
-   * run-length decode buffer (i.e., <b>DECODED_ITEMS_PER_THREAD * BLOCK_THREADS</b>), only the items that fit within
+   * run-length decode buffer (i.e., <b>DECODED_ItemsPerThread * BlockThreads</b>), only the items that fit within
    * the buffer are returned. Subsequent calls to <b>RunLengthDecode</b> adjusting \p from_decoded_offset can be
    * used to retrieve the remaining run-length decoded items. Calling __syncthreads() between any two calls to
    * <b>RunLengthDecode</b> is not required.
@@ -324,13 +329,15 @@ public:
    * \param[in] from_decoded_offset If invoked with from_decoded_offset that is larger than total_decoded_size results
    * in undefined behavior.
    */
-    template <typename RelativeOffsetT>
-    HIPCUB_DEVICE __forceinline__ void RunLengthDecode(ItemT (&decoded_items)[DECODED_ITEMS_PER_THREAD],
-                                                       RelativeOffsetT (&item_offsets)[DECODED_ITEMS_PER_THREAD],
-                                                       DecodedOffsetT from_decoded_offset = 0)
+    template<typename RelativeOffsetT>
+    HIPCUB_DEVICE __forceinline__
+    void RunLengthDecode(ItemT (&decoded_items)[DECODED_ItemsPerThread],
+                         RelativeOffsetT (&item_offsets)[DECODED_ItemsPerThread],
+                         DecodedOffsetT from_decoded_offset = 0)
     {
         // The (global) offset of the first item decoded by this thread
-        DecodedOffsetT thread_decoded_offset = from_decoded_offset + linear_tid * DECODED_ITEMS_PER_THREAD;
+        DecodedOffsetT thread_decoded_offset
+            = from_decoded_offset + linear_tid * DECODED_ItemsPerThread;
 
         // The run that the first decoded item of this thread belongs to
         // If this thread's <thread_decoded_offset> is already beyond the total decoded size, it will be assigned to the
@@ -343,13 +350,13 @@ public:
 
         // If this thread is getting assigned the last run, we make sure it will not fetch any other run after this
         DecodedOffsetT assigned_run_end = (assigned_run == BLOCK_RUNS - 1)
-                                              ? thread_decoded_offset + DECODED_ITEMS_PER_THREAD
+                                              ? thread_decoded_offset + DECODED_ItemsPerThread
                                               : temp_storage.runs.run_offsets[assigned_run + 1];
 
         ItemT val = temp_storage.runs.run_values[assigned_run];
 
         HIPCUB_PRAGMA_UNROLL_FULL()
-        for (DecodedOffsetT i = 0; i < DECODED_ITEMS_PER_THREAD; i++)
+        for(DecodedOffsetT i = 0; i < DECODED_ItemsPerThread; i++)
         {
             decoded_items[i] = val;
             item_offsets[i] = thread_decoded_offset - assigned_run_begin;
@@ -361,8 +368,9 @@ public:
                 assigned_run_begin = temp_storage.runs.run_offsets[assigned_run];
 
                 // If this thread is getting assigned the last run, we make sure it will not fetch any other run after this
-                assigned_run_end = (assigned_run == BLOCK_RUNS - 1) ? thread_decoded_offset + DECODED_ITEMS_PER_THREAD
-                                                                    : temp_storage.runs.run_offsets[assigned_run + 1];
+                assigned_run_end = (assigned_run == BLOCK_RUNS - 1)
+                                       ? thread_decoded_offset + DECODED_ItemsPerThread
+                                       : temp_storage.runs.run_offsets[assigned_run + 1];
                 val = temp_storage.runs.run_values[assigned_run];
             }
             thread_decoded_offset++;
@@ -372,7 +380,7 @@ public:
     /**
    * \brief Run-length decodes the runs previously passed via a call to Init(...) and returns the run-length decoded
    * items in a blocked arrangement to \p decoded_items. If the number of run-length decoded items exceeds the
-   * run-length decode buffer (i.e., <b>DECODED_ITEMS_PER_THREAD * BLOCK_THREADS</b>), only the items that fit within
+   * run-length decode buffer (i.e., <b>DECODED_ItemsPerThread * BlockThreads</b>), only the items that fit within
    * the buffer are returned. Subsequent calls to <b>RunLengthDecode</b> adjusting \p from_decoded_offset can be
    * used to retrieve the remaining run-length decoded items. Calling __syncthreads() between any two calls to
    * <b>RunLengthDecode</b> is not required.
@@ -381,10 +389,11 @@ public:
    * \param[in] from_decoded_offset If invoked with from_decoded_offset that is larger than total_decoded_size results
    * in undefined behavior.
    */
-    HIPCUB_DEVICE __forceinline__ void RunLengthDecode(ItemT (&decoded_items)[DECODED_ITEMS_PER_THREAD],
-                                                       DecodedOffsetT from_decoded_offset = 0)
+    HIPCUB_DEVICE __forceinline__
+    void RunLengthDecode(ItemT (&decoded_items)[DECODED_ItemsPerThread],
+                         DecodedOffsetT from_decoded_offset = 0)
     {
-        DecodedOffsetT item_offsets[DECODED_ITEMS_PER_THREAD];
+        DecodedOffsetT item_offsets[DECODED_ItemsPerThread];
         RunLengthDecode(decoded_items, item_offsets, from_decoded_offset);
     }
 };

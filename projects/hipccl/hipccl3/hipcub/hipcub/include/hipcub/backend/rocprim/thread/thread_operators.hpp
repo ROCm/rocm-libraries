@@ -38,11 +38,30 @@
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 #include <rocprim/type_traits_functions.hpp>
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__utility/forward.h)
 
 #include <hip/hip_bf16.h>
 
 BEGIN_HIPCUB_NAMESPACE
+
+// TODO: deprecate when CUB does it too
+template<class EqualityOp>
+struct InequalityWrapper
+{
+    EqualityOp         op;
+
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE InequalityWrapper(EqualityOp op)
+        : op(op)
+    {}
+
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE bool operator()(T&& t, U&& u)
+    {
+        return !op(_HIPCUB_STD::forward<T>(t), _HIPCUB_STD::forward<U>(u));
+    }
+};
 
 struct ArgMax
 {

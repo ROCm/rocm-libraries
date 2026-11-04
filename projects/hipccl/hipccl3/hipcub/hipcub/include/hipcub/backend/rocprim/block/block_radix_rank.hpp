@@ -52,7 +52,7 @@ BEGIN_HIPCUB_NAMESPACE
 
 namespace detail
 {
-template<typename DigitExtractorT, typename UnsignedBits, int RADIX_BITS, bool IS_DESCENDING>
+template<typename DigitExtractorT, typename UnsignedBits, int RadixBits, bool IsDescending>
 struct DigitExtractorAdopter
 {
     DigitExtractorT& digit_extractor_;
@@ -64,10 +64,10 @@ struct DigitExtractorAdopter
     HIPCUB_DEVICE inline UnsignedBits operator()(const UnsignedBits key)
     {
         UnsignedBits digit = digit_extractor_.Digit(key);
-        if(IS_DESCENDING)
+        if constexpr(IsDescending)
         {
             // Flip digit bits
-            digit ^= (1 << RADIX_BITS) - 1;
+            digit ^= (1 << RadixBits) - 1;
         }
         return digit;
     }
@@ -78,20 +78,20 @@ struct DigitExtractorAdopter
  * \brief BlockRadixRank provides operations for ranking unsigned integer types within a CUDA thread block.
  * \ingroup BlockModule
  *
- * \tparam BLOCK_DIM_X          The thread block length in threads along the X dimension
- * \tparam RADIX_BITS           The number of radix bits per digit place
- * \tparam IS_DESCENDING           Whether or not the sorted-order is high-to-low
- * \tparam MEMOIZE_OUTER_SCAN   <b>[optional]</b> Whether or not to buffer outer raking scan partials to incur fewer shared memory reads at the expense of higher register pressure (default: true for architectures SM35 and newer, false otherwise).  See BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE for more details.
- * \tparam INNER_SCAN_ALGORITHM <b>[optional]</b> The hipcub::BlockScanAlgorithm algorithm to use (default: hipcub::BLOCK_SCAN_WARP_SCANS)
- * \tparam SMEM_CONFIG          <b>[optional]</b> Shared memory bank mode (default: \p hipSharedMemBankSizeFourByte)
- * \tparam BLOCK_DIM_Y          <b>[optional]</b> The thread block length in threads along the Y dimension (default: 1)
- * \tparam BLOCK_DIM_Z          <b>[optional]</b> The thread block length in threads along the Z dimension (default: 1)
+ * \tparam BlockDimX          The thread block length in threads along the X dimension
+ * \tparam RadixBits           The number of radix bits per digit place
+ * \tparam IsDescending           Whether or not the sorted-order is high-to-low
+ * \tparam MemoizeOuterScan   <b>[optional]</b> Whether or not to buffer outer raking scan partials to incur fewer shared memory reads at the expense of higher register pressure (default: true for architectures SM35 and newer, false otherwise).  See BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE for more details.
+ * \tparam InnerScanAlgorithm <b>[optional]</b> The hipcub::BlockScanAlgorithm algorithm to use (default: hipcub::BLOCK_SCAN_WARP_SCANS)
+ * \tparam SMemConfig          <b>[optional]</b> Shared memory bank mode (default: \p hipSharedMemBankSizeFourByte)
+ * \tparam BlockDimY          <b>[optional]</b> The thread block length in threads along the Y dimension (default: 1)
+ * \tparam BlockDimZ          <b>[optional]</b> The thread block length in threads along the Z dimension (default: 1)
  * \tparam ARCH                 <b>[optional]</b> ptx version
  *
  * \par Overview
- * Blah...
  * - Keys must be in a form suitable for radix ranking (i.e., unsigned bits).
- *
+ * - **Important**: BlockRadixRank ranks only ``RadixBits`` bits at a time from the keys, not the entire key.
+ *   The digit extractor determines which bits are ranked.
  * \par Performance Considerations
  * - granularity
  *
@@ -101,40 +101,62 @@ struct DigitExtractorAdopter
  *      \code
  *      #include <hipcub/hipcub.hpp>
  *
- *      template <int BLOCK_THREADS>
+ *      template <int BlockThreads = 2, RadixBits = 5>
  *      __global__ void ExampleKernel(...)
  *      {
+ *          // Specialize BlockRadixRank for a 1D block of 2 threads
+ *          using block_radix_rank = hipcub::BlockRadixRank<BlockThreads, RadixBits, false>;
+ *          using storage_t = typename block_radix_rank::TempStorage;
  *
+ *          // Allocate shared memory for BlockRadixRank
+ *          __shared__ storage_t temp_storage;
+ *
+ *          // Obtain a segment of consecutive items that are blocked across threads
+ *          unsigned int keys[2];
+ *          int ranks[2];
+ *          ...
+ *
+ *          // Extract the lowest RadixBits from each key
+ *          hipcub::BFEDigitExtractor<unsigned int> extractor(0, RadixBits);
+ *          block_radix_rank(temp_storage).RankKeys(keys, ranks, extractor);
+ *
+ *          ...
+ *      }
  *      \endcode
+ *
+ *      Suppose the set of input ``keys`` across the block of threads is ``{ [16,10], [9,11] }``.
+ *      The extractor will rank only the lowest 5 bits: ``{ [16,10], [9,11] }`` (bits 0-4).
+ *      The corresponding output ``ranks`` in those threads will be ``{ [3,1], [0,2] }``.
+ *
  */
-template<int                BLOCK_DIM_X,
-         int                RADIX_BITS,
-         bool               IS_DESCENDING,
-         bool               MEMOIZE_OUTER_SCAN   = false,
-         BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS,
-         hipSharedMemConfig SMEM_CONFIG          = hipSharedMemBankSizeFourByte,
-         int                BLOCK_DIM_Y          = 1,
-         int                BLOCK_DIM_Z          = 1>
+template<int                BlockDimX,
+         int                RadixBits,
+         bool               IsDescending,
+         bool               MemoizeOuterScan   = false,
+         BlockScanAlgorithm InnerScanAlgorithm = BLOCK_SCAN_WARP_SCANS,
+         hipSharedMemConfig SMemConfig         = hipSharedMemBankSizeFourByte,
+         int                BlockDimY          = 1,
+         int                BlockDimZ          = 1>
 class BlockRadixRank
-    : private ::rocprim::block_radix_rank<BLOCK_DIM_X,
-                                          RADIX_BITS,
-                                          MEMOIZE_OUTER_SCAN
+    : private ::rocprim::block_radix_rank<BlockDimX,
+                                          RadixBits,
+                                          MemoizeOuterScan
                                               ? ::rocprim::block_radix_rank_algorithm::basic_memoize
                                               : ::rocprim::block_radix_rank_algorithm::basic,
-                                          BLOCK_DIM_Y,
-                                          BLOCK_DIM_Z>
+                                          BlockDimY,
+                                          BlockDimZ>
 {
-    static_assert(BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-                  "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0");
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type
-        = ::rocprim::block_radix_rank<BLOCK_DIM_X,
-                                      RADIX_BITS,
-                                      MEMOIZE_OUTER_SCAN
+        = ::rocprim::block_radix_rank<BlockDimX,
+                                      RadixBits,
+                                      MemoizeOuterScan
                                           ? ::rocprim::block_radix_rank_algorithm::basic_memoize
                                           : ::rocprim::block_radix_rank_algorithm::basic,
-                                      BLOCK_DIM_Y,
-                                      BLOCK_DIM_Z>;
+                                      BlockDimY,
+                                      BlockDimZ>;
 
 public:
     using TempStorage = typename base_type::storage_type;
@@ -150,11 +172,7 @@ private:
     }
 
 public:
-    enum
-    {
-        /// Number of bin-starting offsets tracked per thread
-        BINS_TRACKED_PER_THREAD = base_type::digits_per_thread,
-    };
+    static constexpr int BINS_TRACKED_PER_THREAD = base_type::digits_per_thread;
 
     /******************************************************************//**
      * \name Collective constructors
@@ -192,7 +210,7 @@ public:
         int (&ranks)[KEYS_PER_THREAD], ///< [out] For each key, the local rank within the tile
         DigitExtractorT digit_extractor) ///< [in] The digit extractor
     {
-        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RADIX_BITS, IS_DESCENDING>
+        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RadixBits, IsDescending>
             digit_extractor_adopter(digit_extractor);
         base_type::rank_keys(keys,
                              reinterpret_cast<unsigned int(&)[KEYS_PER_THREAD]>(ranks),
@@ -206,7 +224,8 @@ public:
     template<typename UnsignedBits,
              int KEYS_PER_THREAD,
              typename DigitExtractorT>
-    HIPCUB_DEVICE inline void RankKeys(
+    HIPCUB_DEVICE
+    inline void RankKeys(
         UnsignedBits (&keys)[KEYS_PER_THREAD], ///< [in] Keys for this tile
         int (&ranks)
             [KEYS_PER_THREAD], ///< [out] For each key, the local rank within the tile (out parameter)
@@ -215,7 +234,7 @@ public:
             [BINS_TRACKED_PER_THREAD]) ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
     {
         unsigned int counts[BINS_TRACKED_PER_THREAD];
-        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RADIX_BITS, IS_DESCENDING>
+        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RadixBits, IsDescending>
             digit_extractor_adopter(digit_extractor);
         base_type::rank_keys(
             keys,
@@ -230,27 +249,27 @@ public:
 /**
  * Radix-rank using match.any
  */
-template<int                BLOCK_DIM_X,
-         int                RADIX_BITS,
-         bool               IS_DESCENDING,
-         BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS,
-         int                BLOCK_DIM_Y          = 1,
-         int                BLOCK_DIM_Z          = 1>
+template<int                BlockDimX,
+         int                RadixBits,
+         bool               IsDescending,
+         BlockScanAlgorithm InnerScanAlgorithm = BLOCK_SCAN_WARP_SCANS,
+         int                BlockDimY          = 1,
+         int                BlockDimZ          = 1>
 class BlockRadixRankMatch
-    : private ::rocprim::block_radix_rank<BLOCK_DIM_X,
-                                          RADIX_BITS,
+    : private ::rocprim::block_radix_rank<BlockDimX,
+                                          RadixBits,
                                           ::rocprim::block_radix_rank_algorithm::match,
-                                          BLOCK_DIM_Y,
-                                          BLOCK_DIM_Z>
+                                          BlockDimY,
+                                          BlockDimZ>
 {
-    static_assert(BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-                  "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0");
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
-    using base_type = ::rocprim::block_radix_rank<BLOCK_DIM_X,
-                                                  RADIX_BITS,
+    using base_type = ::rocprim::block_radix_rank<BlockDimX,
+                                                  RadixBits,
                                                   ::rocprim::block_radix_rank_algorithm::match,
-                                                  BLOCK_DIM_Y,
-                                                  BLOCK_DIM_Z>;
+                                                  BlockDimY,
+                                                  BlockDimZ>;
 
 public:
     using TempStorage = typename base_type::storage_type;
@@ -266,11 +285,8 @@ private:
     }
 
 public:
-    enum
-    {
-        /// Number of bin-starting offsets tracked per thread
-        BINS_TRACKED_PER_THREAD = base_type::digits_per_thread,
-    };
+    /// Number of bin-starting offsets tracked per thread
+    static constexpr int BINS_TRACKED_PER_THREAD = base_type::digits_per_thread;
 
     /******************************************************************//**
      * \name Collective constructors
@@ -308,7 +324,7 @@ public:
         int (&ranks)[KEYS_PER_THREAD], ///< [out] For each key, the local rank within the tile
         DigitExtractorT digit_extractor) ///< [in] The digit extractor
     {
-        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RADIX_BITS, IS_DESCENDING>
+        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RadixBits, IsDescending>
             digit_extractor_adopter(digit_extractor);
         base_type::rank_keys(keys,
                              reinterpret_cast<unsigned int(&)[KEYS_PER_THREAD]>(ranks),
@@ -322,7 +338,8 @@ public:
     template<typename UnsignedBits,
              int KEYS_PER_THREAD,
              typename DigitExtractorT>
-    __device__ __forceinline__ void RankKeys(
+    __device__ __forceinline__
+    void RankKeys(
         UnsignedBits (&keys)[KEYS_PER_THREAD], ///< [in] Keys for this tile
         int (&ranks)
             [KEYS_PER_THREAD], ///< [out] For each key, the local rank within the tile (out parameter)
@@ -331,7 +348,7 @@ public:
             [BINS_TRACKED_PER_THREAD]) ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
     {
         unsigned int counts[BINS_TRACKED_PER_THREAD];
-        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RADIX_BITS, IS_DESCENDING>
+        detail::DigitExtractorAdopter<DigitExtractorT, UnsignedBits, RadixBits, IsDescending>
             digit_extractor_adopter(digit_extractor);
         base_type::rank_keys(
             keys,

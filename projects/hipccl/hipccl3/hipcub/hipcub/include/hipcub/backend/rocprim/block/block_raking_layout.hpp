@@ -1,6 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c)2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -55,39 +56,40 @@ BEGIN_HIPCUB_NAMESPACE
  * (for most data types).
  *
  * \tparam T                        The data type to be exchanged.
- * \tparam BLOCK_THREADS            The thread block size in threads.
+ * \tparam BlockThreads            The thread block size in threads.
  */
-template<typename T, int BLOCK_THREADS>
+template<typename T, int BlockThreads>
 struct BlockRakingLayout
 {
     //---------------------------------------------------------------------
     // Constants and type definitions
     //---------------------------------------------------------------------
 
-    enum
-    {
-        /// The total number of elements that need to be cooperatively reduced
-        SHARED_ELEMENTS = BLOCK_THREADS,
+    /// The total number of elements that need to be cooperatively reduced
+    static constexpr int SHARED_ELEMENTS = BlockThreads;
 
-        /// Maximum number of warp-synchronous raking threads
-        MAX_RAKING_THREADS = ::rocprim::detail::get_min_warp_size(
-            static_cast<unsigned int>(BLOCK_THREADS), HIPCUB_DEVICE_WARP_THREADS),
+    /// Maximum number of warp-synchronous raking threads
+    static constexpr int MAX_RAKING_THREADS = ::rocprim::detail::get_min_warp_size(
+        static_cast<unsigned int>(BlockThreads), HIPCUB_DEVICE_WARP_THREADS);
 
-        /// Number of raking elements per warp-synchronous raking thread (rounded up)
-        SEGMENT_LENGTH = (SHARED_ELEMENTS + MAX_RAKING_THREADS - 1) / MAX_RAKING_THREADS,
+    /// Number of raking elements per warp-synchronous raking thread (rounded up)
+    static constexpr int SEGMENT_LENGTH
+        = (SHARED_ELEMENTS + MAX_RAKING_THREADS - 1) / MAX_RAKING_THREADS;
 
-        /// Never use a raking thread that will have no valid data (e.g., when BLOCK_THREADS is 62 and SEGMENT_LENGTH is 2, we should only use 31 raking threads)
-        RAKING_THREADS = (SHARED_ELEMENTS + SEGMENT_LENGTH - 1) / SEGMENT_LENGTH,
+    /// Never use a raking thread that will have no valid data (e.g., when BlockThreads is 62 and SEGMENT_LENGTH is 2,
+    /// we should only use 31 raking threads)
+    static constexpr int RAKING_THREADS = (SHARED_ELEMENTS + SEGMENT_LENGTH - 1) / SEGMENT_LENGTH;
 
-        /// Pad each segment length with one element if segment length is not relatively prime to warp size and can't be optimized as a vector load
-        USE_SEGMENT_PADDING = ((SEGMENT_LENGTH & 1) == 0) && (SEGMENT_LENGTH > 2),
+    /// Pad each segment length with one element if segment length is not relatively prime to warp size and can't be
+    /// optimized as a vector load
+    static constexpr bool USE_SEGMENT_PADDING = ((SEGMENT_LENGTH & 1) == 0) && (SEGMENT_LENGTH > 2);
 
-        /// Total number of elements in the raking grid
-        GRID_ELEMENTS = RAKING_THREADS * (SEGMENT_LENGTH + USE_SEGMENT_PADDING),
+    /// Total number of elements in the raking grid
+    static constexpr int GRID_ELEMENTS = RAKING_THREADS * (SEGMENT_LENGTH + USE_SEGMENT_PADDING);
 
-        /// Whether or not we need bounds checking during raking (the number of reduction elements is not a multiple of the number of raking threads)
-        UNGUARDED = (SHARED_ELEMENTS % RAKING_THREADS == 0),
-    };
+    /// Whether or not we need bounds checking during raking (the number of reduction elements is not a multiple of the
+    /// number of raking threads)
+    static constexpr int UNGUARDED = (SHARED_ELEMENTS % RAKING_THREADS == 0);
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
     /**
@@ -114,7 +116,7 @@ struct BlockRakingLayout
         unsigned int offset = linear_tid;
 
         // Add in one padding element for every segment
-        if (USE_SEGMENT_PADDING > 0)
+        if constexpr(USE_SEGMENT_PADDING > 0)
         {
             offset += offset / SEGMENT_LENGTH;
         }

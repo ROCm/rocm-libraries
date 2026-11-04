@@ -426,7 +426,7 @@ endif(USER_BUILD_TEST)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 3.1.4)
+  set(CCCL_MINIMUM_VERSION 3.2.1)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -515,7 +515,7 @@ else()
   message(STATUS "Searching for ${REPO_NAME} package")
 
   # Add default install location for WIN32 and non-WIN32 as hint
-  find_package(${REPO_NAME} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${REPO_NAME}")
+  find_package(${REPO_NAME} ${MIN_LIBHIPCXX_PACKAGE_VERSION} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${REPO_NAME}")
 
   if(NOT ${${REPO_NAME}_FOUND})
     message(STATUS "No existing ${REPO_NAME} package was found.")
