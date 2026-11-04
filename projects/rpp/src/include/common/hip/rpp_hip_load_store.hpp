@@ -1283,16 +1283,19 @@ __device__ __forceinline__ void rpp_hip_pack_float8_and_store8(half* dstPtr, d_f
 // Partial stores without layout toggle (first n < 8 F32/F16 pixels of a row tail)
 
 template <typename T>
-__device__ __forceinline__ void rpp_hip_pack_float8_and_store_n(T* dstPtr, d_float8* dstPtr_f8,
-                                                                int n) {
+__device__ __forceinline__ void rpp_hip_pack_float_and_store1(T* dstPtr, float src) {
     static_assert(std::is_same<T, float>::value || std::is_same<T, half>::value,
                   "partial store supports F32/F16 destinations only");
-    for (int i = 0; i < n; i++) {
-        if constexpr (std::is_same<T, half>::value)
-            dstPtr[i] = __float2half(dstPtr_f8->f1[i]);
-        else
-            dstPtr[i] = dstPtr_f8->f1[i];
-    }
+    if constexpr (std::is_same<T, half>::value)
+        *dstPtr = __float2half(src);
+    else
+        *dstPtr = src;
+}
+
+template <typename T>
+__device__ __forceinline__ void rpp_hip_pack_float8_and_store_n(T* dstPtr, d_float8* dstPtr_f8,
+                                                                int n) {
+    for (int i = 0; i < n; i++) rpp_hip_pack_float_and_store1(dstPtr + i, dstPtr_f8->f1[i]);
 }
 
 // U8 stores without layout toggle PKD3 to PKD3 (24 U8 pixels)

@@ -131,8 +131,8 @@ __global__ void log_nd_hip_tensor(T* srcPtr, uint* srcStrides, uint* srcDims, ui
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;  // batchsize
 
-    if (id_x >= srcStrides[0]) return;
-    int numValid = min(8, (int)srcStrides[0] - id_x);  // elements left in this sample
+    uint sampleSize = srcStrides[0];
+    if (id_x >= sampleSize) return;
 
     uint* roi = roiTensor + id_z * numDims * 2;
     uint* begin = roi;
@@ -140,27 +140,45 @@ __global__ void log_nd_hip_tensor(T* srcPtr, uint* srcStrides, uint* srcDims, ui
     uint dstIdx = (id_z * *dstStrides++);
     uint srcIdx = (id_z * *srcStrides++);
     uint coords[RPPT_MAX_DIMS];
+    bool inRoi = true;
 
     for (int i = 0; i < numDims; i++) {
         coords[i] = (id_x / srcStrides[i]) % srcDims[i];
-        if (coords[i] >= length[i]) return;
-    }
-
-    for (int i = 0; i < numDims; i++) {
-        dstIdx += (coords[i] * dstStrides[i]);
-        srcIdx += (begin[i] + (coords[i] * srcStrides[i]));
+        inRoi = inRoi && (coords[i] < length[i]);
     }
 
     d_float8 src_f8, dst_f8;
-    if (numValid == 8) {
+    // All 8 elements lie in one ROI row: vector load/store
+    if (inRoi && (coords[numDims - 1] + 8 <= length[numDims - 1])) {
+        for (int i = 0; i < numDims; i++) {
+            dstIdx += (coords[i] * dstStrides[i]);
+            srcIdx += (begin[i] + (coords[i] * srcStrides[i]));
+        }
         rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
         log_hip_compute(srcPtr, &src_f8, &dst_f8);
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
-    } else {
-        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, numValid);
-        log_hip_compute(srcPtr, &src_f8, &dst_f8);
-        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, numValid);
+        return;
     }
+
+    // Row end, ROI edge or sample end: map each element on its own
+    uint srcIdxLane[8], dstIdxLane[8];
+    bool valid[8];
+    for (int lane = 0; lane < 8; lane++) {
+        uint flatIdx = id_x + lane;
+        valid[lane] = (flatIdx < sampleSize);
+        srcIdxLane[lane] = srcIdx;
+        dstIdxLane[lane] = dstIdx;
+        for (int i = 0; i < numDims && valid[lane]; i++) {
+            uint coord = (flatIdx / srcStrides[i]) % srcDims[i];
+            valid[lane] = (coord < length[i]);
+            dstIdxLane[lane] += (coord * dstStrides[i]);
+            srcIdxLane[lane] += (begin[i] + (coord * srcStrides[i]));
+        }
+        src_f8.f1[lane] = valid[lane] ? static_cast<float>(srcPtr[srcIdxLane[lane]]) : 0.0f;
+    }
+    log_hip_compute(srcPtr, &src_f8, &dst_f8);
+    for (int lane = 0; lane < 8; lane++)
+        if (valid[lane]) rpp_hip_pack_float_and_store1(dstPtr + dstIdxLane[lane], dst_f8.f1[lane]);
 }
 
 // -------------------- Set 3 - executor kernels --------------------
