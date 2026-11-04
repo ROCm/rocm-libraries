@@ -68,6 +68,9 @@ namespace rocsparse
         // Sub-row sum accumulators
         T sum[UNROLL]{};
 
+        I columns[UNROLL];
+        T values[UNROLL];
+
         if(row < m)
         {
             const uint32_t step = UNROLL * nworkers;
@@ -75,22 +78,43 @@ namespace rocsparse
             I i = worker;
             for(; (nnz - i) > tail; i += step)
             {
-                for(uint32_t u = 0; u < UNROLL; u++)
+                #pragma unroll
+                for(uint32_t u = 0; u < UNROLL; ++u)
                 {
                     const I j = i + u * nworkers;
-
-                    sum[u] = rocsparse::fma(x_val[j], A[(x_ind[j] - idx_base) * lda + row], sum[u]);
+                    columns[u] = (x_ind[j] - idx_base) * lda + row;
+                    values[u]  = x_val[j];
+                }
+                #pragma unroll
+                for(uint32_t u = 0; u < UNROLL; ++u)
+                {
+                    sum[u] = rocsparse::fma(values[u], A[columns[u]], sum[u]);
                 }
             }
 
-            // Fewer than UNROLL entries left for this wavefront.
-            for(uint32_t u = 0; u < UNROLL - 1; u++)
+            #pragma unroll
+            for(uint32_t u = 0; u < UNROLL; ++u)
+            {
+                columns[u] = 0;
+                values[u] = static_cast<T>(0);
+            }
+            #pragma unroll
+            for(uint32_t u = 0; u < UNROLL; ++u)
             {
                 const I j = i + u * nworkers;
-
                 if(j < nnz)
                 {
-                    sum[u] = rocsparse::fma(x_val[j], A[(x_ind[j] - idx_base) * lda + row], sum[u]);
+                    columns[u] = (x_ind[j] - idx_base) * lda + row;
+                    values[u]  = x_val[j];
+                }
+            }
+            #pragma unroll
+            for(uint32_t u = 0; u < UNROLL; ++u)
+            {
+                const I j = i + u * nworkers;
+                if(j < nnz)
+                {
+                    sum[u] = rocsparse::fma(values[u], A[columns[u]], sum[u]);
                 }
             }
         }
