@@ -333,10 +333,10 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
     # Each lane scales the outputs it holds, so it needs the A scale of each
     # output's row and the B scale of each output's column. In the 16x16
     # atom a lane's ``c_per_lane`` outputs sit in ``c_per_lane`` rows of one
-    # column (``atom.lane_to_output``, the mapping the store uses): the rows
-    # are not the row the lane loads A from (``m_in_atom``), so the lane
-    # loads one A scale per output, while its column is the one it loads B
-    # from (``n_in_atom``), so one B scale serves all its outputs.
+    # column (``atom.lane_to_output``, the mapping the store uses): in
+    # general they are not the row the lane loads A from (``m_in_atom``), so
+    # the lane loads one A scale per output, while its column is the one it
+    # loads B from (``n_in_atom``), so one B scale serves all its outputs.
     #
     # The scales are read with buffer loads: the per-lane byte offset of each
     # scale row (A) or column (B) is computed once, before the K-group loop,

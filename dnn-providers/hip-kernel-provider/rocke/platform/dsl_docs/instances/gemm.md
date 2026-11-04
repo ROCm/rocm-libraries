@@ -370,8 +370,8 @@ pieces the v2 body composes.
 
 Each output is scaled with the A scale of its own row and the B scale of its
 own column. A lane of the 16x16 MFMA loads A from one row but holds outputs
-of four other rows (``MfmaAtom.lane_to_output``), so it loads one A scale per
-output it holds and one B scale for its column.
+of four rows (``MfmaAtom.lane_to_output``), in general not that one, so it
+loads one A scale per output it holds and one B scale for its column.
 
 ## gfx1250 NVFP4 GEMM
 

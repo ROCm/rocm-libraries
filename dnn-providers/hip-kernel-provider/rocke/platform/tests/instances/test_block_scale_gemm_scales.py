@@ -6,10 +6,11 @@ and column.
 The block-scaled GEMM computes ``C[m, n] = sum_g AScale[m // gm, g] *
 BScale[g, n // gn] * dot_g(m, n)``, where ``dot_g`` is the fp8 / bf8 dot
 product of row ``m`` of A and column ``n`` of B over K group ``g``. A lane of
-the 16x16 MFMA loads A from one row but holds the outputs of four other rows
-(``MfmaAtom.lane_to_output``, the mapping the store uses), so it must load the
-A scale of each output's row, not of the row it loads A from. A lane's
-outputs share the column it loads B from, so one B scale serves them all.
+the 16x16 MFMA loads A from one row but holds the outputs of four rows, in
+general not that one (``MfmaAtom.lane_to_output``, the mapping the store
+uses), so it must load the A scale of each output's row, not of the row it
+loads A from. A lane's outputs share the column it loads B from, so one B
+scale serves them all.
 
 Checks:
 
