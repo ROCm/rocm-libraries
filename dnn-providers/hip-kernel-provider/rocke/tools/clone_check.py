@@ -809,6 +809,9 @@ def file_windows(path: str, source: bytes) -> FileKeys:
     """Every window of ``MIN_TOKENS`` consecutive code tokens that is neither all
     setup nor touches harness code."""
     size = MIN_TOKENS
+    # A CRLF working-tree file (Windows autocrlf) must hash like the LF blob git
+    # stores: a multi-line string token would otherwise keep its "\r".
+    source = source.replace(b"\r\n", b"\n")
     marks = _mark(ast.parse(source, filename=path))
     tokens = _code_tokens(source)
     keys = FileKeys()
