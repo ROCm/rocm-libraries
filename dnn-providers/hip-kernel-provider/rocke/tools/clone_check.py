@@ -343,6 +343,7 @@ def collect_diffs(
         "--text",
         "--submodule=short",
         "--inter-hunk-context=0",
+        "--ignore-cr-at-eol",
         "-l1000",
     ]
     revisions = [base] if head is None else [base, head]
@@ -1062,7 +1063,7 @@ def load_groups(root: Path, head: str | None) -> list[Group]:
             return []
         raw = _git(root, "show", f"{head}:./{GROUPS_FILE}")
     try:
-        return parse_groups(raw.decode())
+        return parse_groups(raw.decode("utf-8-sig"))  # editors on Windows add a BOM
     except UnicodeDecodeError as exc:
         raise ToolError(f"{GROUPS_FILE}: not valid UTF-8 ({exc})") from exc
 

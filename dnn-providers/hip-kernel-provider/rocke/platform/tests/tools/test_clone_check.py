@@ -1387,6 +1387,7 @@ GIT_SETTINGS = {
     "renames-off": {"diff.renames": "false"},
     "color": {"color.ui": "always"},
     "quotePath": {"core.quotePath": "true"},
+    "autocrlf": {"core.autocrlf": "true"},
     "external-diff": {},  # not a config key: set through the environment below
     "diff-opts": {},  # likewise (GIT_DIFF_OPTS)
 }
@@ -1823,4 +1824,50 @@ def test_a_crlf_working_tree_file_matches_the_lf_blobs_of_its_copies(repo):
     crlf = repo.path / "library" / "kernels" / "c.py"
     crlf.write_bytes(block.replace("\n", "\r\n").encode())
     (finding,) = repo.check("--base", base)[1]["findings"]
+    assert (finding["copies_before"], finding["copies_after"]) == (2, 3)
+
+
+@pytest.mark.parametrize("autocrlf", (None, "true", "input"))
+def test_a_tracked_file_saved_with_crlf_is_not_reported_as_rewritten(
+    repo, monkeypatch, autocrlf
+):
+    # The blob is LF and the file on disk is CRLF: with core.autocrlf unset git
+    # reports every line as changed, which would turn a pasted copy into an edit.
+    block = func("f", MULTILINE_STRING)
+    repo.write("library/kernels/a.py", block)
+    repo.write("library/kernels/b.py", block)
+    base = repo.commit()
+    crlf = (block + block).replace("\n", "\r\n").encode()
+    (repo.path / "library" / "kernels" / "a.py").write_bytes(crlf)
+    if autocrlf is not None:
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", autocrlf)
+    (finding,) = repo.check("--base", base)[1]["findings"]
+    assert finding["kind"] == "NEW COPY"
+    assert (finding["copies_before"], finding["copies_after"]) == (2, 3)
+
+
+def test_a_groups_file_with_a_utf8_bom_is_read(repo):
+    target = repo.path / GROUPS_PATH
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"\xef\xbb\xbf" + GROUPS.encode())
+    repo.write("library/kernels/gfx942/k.py", func("f"))
+    repo.write("library/kernels/gfx950/k.py", "Z = 0\n")
+    base = repo.commit()
+    repo.write("library/kernels/gfx950/k.py", func("f"))
+    head = repo.commit()
+    for args in (["--base", base], ["--base", base, "--head", head]):
+        assert kinds(repo.check(*args)[1]) == ["SIBLING COPY"]
+
+
+def test_a_committed_crlf_blob_matches_lf_blobs_in_head_mode(repo):
+    block = func("f", MULTILINE_STRING)
+    repo.write("library/kernels/a.py", block)
+    repo.write("library/kernels/b.py", block)
+    base = repo.commit()
+    crlf = repo.path / "library" / "kernels" / "c.py"
+    crlf.write_bytes(block.replace("\n", "\r\n").encode())  # git stores it as CRLF
+    head = repo.commit()
+    (finding,) = repo.check("--base", base, "--head", head)[1]["findings"]
     assert (finding["copies_before"], finding["copies_after"]) == (2, 3)
