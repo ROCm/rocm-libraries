@@ -2436,8 +2436,9 @@ class IRBuilder:
             raise ValueError(_gpu_check_unchecked_text(*unchecked))
         const = self.const_i64 if value.type == I64 else self.const_i32
         type_max = int_type_limits(value.type.name)[1]
-        lower_word = next((w for w in ("ge", "gt") if w in stated), None)
-        upper_word = next((w for w in ("le", "lt") if w in stated), None)
+        # _gpu_check_form refused two of a kind, so each side states at most one.
+        lower_word = next((w for w in LOWER_WORDS if w in stated), None)
+        upper_word = next((w for w in UPPER_WORDS if w in stated), None)
         fails: list[Value] = []
         if (
             lower == 0

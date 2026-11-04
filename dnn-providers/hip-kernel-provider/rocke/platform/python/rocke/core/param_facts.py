@@ -64,9 +64,10 @@ __all__ = [
 # is not known.
 Interval = tuple[int | None, int | None]
 
-# The words that state an integer fact, in the order they are checked and printed.
-FACT_WORDS = ("ge", "gt", "le", "lt", "eq", "multiple_of")
+# The words that state an integer fact, in the order they are checked and printed:
+# the words that take a bound, then multiple_of.
 _BOUND_WORDS = ("ge", "gt", "le", "lt", "eq")
+FACT_WORDS = (*_BOUND_WORDS, "multiple_of")
 # Two of a kind on one declaration are refused; each pair is named exclusive first.
 LOWER_WORDS = ("gt", "ge")
 UPPER_WORDS = ("lt", "le")
