@@ -44,7 +44,7 @@
 //    kernels in both directions on both sides of the 128 boundary, with
 //    partial last slices.
 //
-#include "unit_test_utils.hpp"
+#include "unit_test_device_level2_common.hpp"
 
 #include "rocsparse.h"
 
@@ -162,8 +162,8 @@ namespace
                    int64_t*              analysis_pivot,
                    int64_t*              solve_pivot)
     {
-        rocsparse_sptrsv_descr descr = nullptr;
-        ASSERT_EQ(rocsparse_create_sptrsv_descr(&descr), rocsparse_status_success);
+        level2::sptrsv_descr_guard descr;
+        ASSERT_TRUE(descr.d);
 
         const rocsparse_operation  trans = rocsparse_operation_none;
         const rocsparse_sptrsv_alg alg   = rocsparse_sptrsv_alg_default;
@@ -263,8 +263,6 @@ namespace
         ASSERT_EQ(pivot_status,
                   pivot == -1 ? rocsparse_status_success : rocsparse_status_zero_pivot);
         *solve_pivot = pivot;
-
-        EXPECT_EQ(rocsparse_destroy_sptrsv_descr(descr), rocsparse_status_success);
     }
 
     // ===========================================================================
@@ -450,8 +448,8 @@ namespace
         const int64_t nnz = count_nonneg(col_ind);
         ASSERT_GT(nnz, 0);
 
-        rocsparse_spmat_descr A = nullptr;
-        ASSERT_EQ(rocsparse_create_sell_descr(&A,
+        level2::spmat_guard A;
+        ASSERT_EQ(rocsparse_create_sell_descr(&A.d,
                                               m,
                                               n,
                                               nnz,
@@ -481,14 +479,14 @@ namespace
         device_vector<float> y{hy};
         ASSERT_TRUE(x.ptr && y.ptr);
 
-        rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, x_size, x.ptr, rocsparse_datatype_f32_r),
+        level2::dnvec_guard dx, dy;
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&dx.d, x_size, x.ptr, rocsparse_datatype_f32_r),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, y_size, y.ptr, rocsparse_datatype_f32_r),
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&dy.d, y_size, y.ptr, rocsparse_datatype_f32_r),
                   rocsparse_status_success);
 
-        rocsparse_spmv_descr spmv_descr = nullptr;
-        ASSERT_EQ(rocsparse_create_spmv_descr(&spmv_descr), rocsparse_status_success);
+        level2::spmv_descr_guard spmv_descr;
+        ASSERT_TRUE(spmv_descr.d);
 
         const rocsparse_spmv_alg alg = rocsparse_spmv_alg_sell;
         const rocsparse_datatype dt  = rocsparse_datatype_f32_r;
@@ -568,11 +566,6 @@ namespace
         {
             EXPECT_EQ(hy_out[i], y_sentinel) << "write past y at index " << i;
         }
-
-        EXPECT_EQ(rocsparse_destroy_spmv_descr(spmv_descr), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
     }
 
     // Runs build_banded_sell(m, sell_slice_size, depth) with x[i] = i + 1 through
@@ -647,8 +640,8 @@ TEST_F(EllSv, lower_non_unit)
     device_vector<float>   d_val{val};
     ASSERT_TRUE(d_col.ptr && d_val.ptr);
 
-    rocsparse_spmat_descr A = nullptr;
-    ASSERT_EQ(rocsparse_create_ell_descr(&A,
+    level2::spmat_guard A;
+    ASSERT_EQ(rocsparse_create_ell_descr(&A.d,
                                          m,
                                          n,
                                          d_col.ptr,
@@ -679,10 +672,10 @@ TEST_F(EllSv, lower_non_unit)
     device_vector<float> y{std::vector<float>(static_cast<size_t>(m), 0.0f)};
     ASSERT_TRUE(x.ptr && y.ptr);
 
-    rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r),
+    level2::dnvec_guard dx, dy;
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx.d, n, x.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy.d, m, y.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
@@ -695,10 +688,6 @@ TEST_F(EllSv, lower_non_unit)
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, -1);
     expect_vectors_eq(expected, to_host(y));
-
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
 
 // Lower triangular, unit diagonal. The stored diagonal entries carry a
@@ -716,8 +705,8 @@ TEST_F(EllSv, lower_unit_diagonal)
     device_vector<float>   d_val{val};
     ASSERT_TRUE(d_col.ptr && d_val.ptr);
 
-    rocsparse_spmat_descr A = nullptr;
-    ASSERT_EQ(rocsparse_create_ell_descr(&A,
+    level2::spmat_guard A;
+    ASSERT_EQ(rocsparse_create_ell_descr(&A.d,
                                          m,
                                          n,
                                          d_col.ptr,
@@ -748,10 +737,10 @@ TEST_F(EllSv, lower_unit_diagonal)
     device_vector<float> y{std::vector<float>(static_cast<size_t>(m), 0.0f)};
     ASSERT_TRUE(x.ptr && y.ptr);
 
-    rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r),
+    level2::dnvec_guard dx, dy;
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx.d, n, x.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy.d, m, y.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
@@ -765,10 +754,6 @@ TEST_F(EllSv, lower_unit_diagonal)
     EXPECT_EQ(ref_pivot, -1);
     // y = {2, 3, 7.25}: the garbage diagonal values must not leak in.
     expect_vectors_eq(expected, to_host(y));
-
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
 
 // Lower triangular, non-unit diagonal, explicit zero on the diagonal of row 1
@@ -790,8 +775,8 @@ TEST_F(EllSv, zero_pivot)
     device_vector<float>   d_val{val};
     ASSERT_TRUE(d_col.ptr && d_val.ptr);
 
-    rocsparse_spmat_descr A = nullptr;
-    ASSERT_EQ(rocsparse_create_ell_descr(&A,
+    level2::spmat_guard A;
+    ASSERT_EQ(rocsparse_create_ell_descr(&A.d,
                                          m,
                                          n,
                                          d_col.ptr,
@@ -822,10 +807,10 @@ TEST_F(EllSv, zero_pivot)
     device_vector<float> y{std::vector<float>(static_cast<size_t>(m), 0.0f)};
     ASSERT_TRUE(x.ptr && y.ptr);
 
-    rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r),
+    level2::dnvec_guard dx, dy;
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx.d, n, x.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy.d, m, y.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
@@ -841,10 +826,6 @@ TEST_F(EllSv, zero_pivot)
     EXPECT_EQ(ref_pivot, 1);
     // y = {2, 8, -1}, using the library's "treat a zero diagonal as 1" rule.
     expect_vectors_eq(expected, to_host(y));
-
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
 
 // ===========================================================================
