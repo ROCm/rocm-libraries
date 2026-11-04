@@ -100,9 +100,9 @@ hipsparseStatus_t
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
 *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -206,9 +206,9 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
 *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,

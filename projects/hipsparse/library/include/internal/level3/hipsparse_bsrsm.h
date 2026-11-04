@@ -103,9 +103,9 @@ hipsparseStatus_t
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()" and
+*                     \ref hipsparseSbsrsm2_solve "hipsparseXbsrsm2_solve()".
 *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
-*              \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()" and
-*              \ref hipsparseSbsrsm2_solve "hipsparseXbsrsm2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nrhs, \p nnzb, \p blockDim,
