@@ -142,6 +142,371 @@ Tests:
   batch_mode: [0, 1]
   batch_count: 1
 
+# Skinny MXFP8 TN GEMMs (f8 E4M3 A/B, E8M0 32-block pre-swizzled scales, bf16 D, f32 compute,
+# gfx950, skinny extent 1..4 on n or on m, any alpha and beta, natural leading dimensions, batch 1).
+# The six skinny kernels are selected only by the Equality ExactLogic shard, both orientations:
+# routing is by (m, n, batch, k) (the leading-dimension entries of the keys are ignored) and the
+# solution predicates. Those also require batch 1, unit stride on the leading dimensions, strides
+# A and B that are a multiple of 4, wide extent <= 1048576, tensors below 4 GiB, no bias,
+# activation or scale-alpha-vec, and a K that is a multiple of 256 (1024 for the K16 kernel).
+# Only the sizes listed in the shard route to them (see matmul_skinny_mxfp8_tn_exact_logic); the
+# other sizes here run the generic kernels, and gtest cannot assert which kernel ran. The kernels
+# truncate f32 to bf16, hence norm_check (threshold 0.125 for f8 inputs) and no unit_check. Sizes
+# are (m, n, k); the skinny extent is n for the first group and m for the second, and K is a
+# multiple of 256.
+- name: matmul_skinny_mxfp8_tn
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Wide H, skinny n: vLLM Qwen3-32B gate_up and lm_head.
+    - { M: 51200,  N: 1, K: 5120  }
+    - { M: 51200,  N: 4, K: 5120  }
+    - { M: 151936, N: 2, K: 5120  }
+    - { M: 151936, N: 3, K: 5120  }
+    - { M: 40960,  N: 2, K: 16384 }
+    - { M: 40960,  N: 3, K: 16384 }
+    # Wide H, skinny n: tails of the BN 32 tile and K tails that are not multiples of 1024.
+    - { M: 29584,  N: 4, K: 8192  }
+    - { M: 16385,  N: 3, K: 8192  }
+    - { M: 16401,  N: 2, K: 2304  }
+    - { M: 40001,  N: 1, K: 32768 }
+    - { M: 20001,  N: 3, K: 5376  }
+    - { M: 51203,  N: 4, K: 4096  }
+    # Wide H, skinny n: the largest wide extents.
+    - { M: 262143, N: 3, K: 7936  }
+    - { M: 262143, N: 4, K: 7936  }
+    - { M: 106496, N: 3, K: 32768 }
+    - { M: 106496, N: 1, K: 32768 }
+    # Wide H, skinny m.
+    - { M: 1, N: 51200,  K: 5120  }
+    - { M: 4, N: 51200,  K: 5120  }
+    - { M: 2, N: 151936, K: 5120  }
+    - { M: 1, N: 18432,  K: 16384 }
+    - { M: 3, N: 18432,  K: 16384 }
+    - { M: 2, N: 16385,  K: 2304  }
+    - { M: 3, N: 20001,  K: 5376  }
+    - { M: 1, N: 40001,  K: 32768 }
+    - { M: 4, N: 51203,  K: 4096  }
+    # Wide H, skinny m: the largest wide extents.
+    - { M: 4, N: 262143, K: 7936  }
+    - { M: 1, N: 262143, K: 7936  }
+    - { M: 4, N: 106496, K: 32768 }
+    - { M: 2, N: 106496, K: 32768 }
+    # Large K, skinny n: vLLM Llama-8B down, plus tails of the BN 5 tile.
+    - { M: 4096,  N: 1, K: 14336 }
+    - { M: 4096,  N: 2, K: 14336 }
+    - { M: 4096,  N: 3, K: 14336 }
+    - { M: 5000,  N: 3, K: 8448  }
+    - { M: 3001,  N: 1, K: 12288 }
+    - { M: 10001, N: 2, K: 16384 }
+    - { M: 2049,  N: 3, K: 16384 }
+    - { M: 10240, N: 1, K: 8448  }
+    # Large K, skinny m.
+    - { M: 1, N: 4096,  K: 14336 }
+    - { M: 2, N: 4096,  K: 14336 }
+    - { M: 3, N: 4096,  K: 14336 }
+    - { M: 3, N: 5000,  K: 8448  }
+    - { M: 1, N: 3001,  K: 12288 }
+    - { M: 2, N: 10001, K: 16384 }
+    - { M: 3, N: 2049,  K: 16384 }
+    # Medium, skinny n: vLLM Qwen3-32B qkv and o_proj, Llama-8B qkv, plus tails of the BN 16 tile.
+    - { M: 10240, N: 1, K: 5120 }
+    - { M: 10240, N: 4, K: 5120 }
+    - { M: 5120,  N: 2, K: 8192 }
+    - { M: 5120,  N: 4, K: 8192 }
+    - { M: 6144,  N: 1, K: 4096 }
+    - { M: 6144,  N: 3, K: 4096 }
+    - { M: 6144,  N: 4, K: 4096 }
+    - { M: 3001,  N: 2, K: 2304 }
+    - { M: 5000,  N: 4, K: 5376 }
+    - { M: 2049,  N: 3, K: 2048 }
+    - { M: 10001, N: 1, K: 8192 }
+    - { M: 16384, N: 2, K: 5120 }
+    # Medium, skinny m.
+    - { M: 1, N: 10240, K: 5120 }
+    - { M: 4, N: 10240, K: 5120 }
+    - { M: 2, N: 5120,  K: 8192 }
+    - { M: 4, N: 5120,  K: 8192 }
+    - { M: 1, N: 6144,  K: 4096 }
+    - { M: 3, N: 6144,  K: 4096 }
+    - { M: 4, N: 6144,  K: 4096 }
+    - { M: 2, N: 3001,  K: 2304 }
+    - { M: 4, N: 5000,  K: 5376 }
+    - { M: 3, N: 2049,  K: 2048 }
+    - { M: 1, N: 10001, K: 7168 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Shapes listed in the shard ExactLogic, so these do route to the skinny kernels: skinny n in 1..4
+# with m wide, then skinny m in 1..4 with n wide, spanning all six solution indices.
+- name: matmul_skinny_mxfp8_tn_exact_logic
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 4096, N: 1, K: 4096 }
+    - { M: 10240, N: 2, K: 5120 }
+    - { M: 10240, N: 3, K: 5120 }
+    - { M: 128256, N: 4, K: 4096 }
+    - { M: 5120, N: 3, K: 8192 }
+    - { M: 1152, N: 1, K: 5120 }
+    - { M: 1, N: 1152, K: 5120 }
+    - { M: 2, N: 10240, K: 5120 }
+    - { M: 3, N: 10240, K: 5120 }
+    - { M: 4, N: 128256, K: 4096 }
+    - { M: 3, N: 5120, K: 8192 }
+    - { M: 1, N: 10240, K: 8192 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# The vendored kernels compute D = bf16(alpha * A^T B + beta * C) for any alpha and beta, so these
+# are in the same region as matmul_skinny_mxfp8_tn (only ExactLogic shapes use the skinny kernels,
+# the rest run the generic kernels). C and D are distinct buffers (c_equal_d is off),
+# and the leading dimensions stay natural. Shapes cover both orientations and several K and wide-extent
+# classes.
+- name: matmul_skinny_mxfp8_tn_alpha_beta
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Wide H, skinny n.
+    - { M: 51200, N: 1, K: 5120  }
+    - { M: 29584, N: 4, K: 8192  }
+    # Wide H, skinny m.
+    - { M: 1, N: 51200, K: 5120 }
+    - { M: 4, N: 16385, K: 2304 }
+    # Large K, skinny n.
+    - { M: 4096,  N: 1, K: 14336 }
+    - { M: 10240, N: 3, K: 9216  }
+    # Large K, skinny m.
+    - { M: 3, N: 4096,  K: 14336 }
+    - { M: 1, N: 10240, K: 9216  }
+    # Medium, skinny n.
+    - { M: 10240, N: 4, K: 5120 }
+    - { M: 16384, N: 2, K: 5120 }
+    # Medium, skinny m.
+    - { M: 4, N: 10240, K: 5120 }
+    - { M: 2, N: 5120,  K: 8192 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# A negative alpha and a beta above one, on more shapes in both orientations.
+- name: matmul_skinny_mxfp8_tn_alpha_beta_negative
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Wide H, skinny n.
+    - { M: 51203, N: 4, K: 4096 }
+    # Wide H, skinny m.
+    - { M: 3, N: 20001, K: 5376 }
+    # Large K, skinny n.
+    - { M: 3001, N: 3, K: 12288 }
+    # Large K, skinny m.
+    - { M: 2, N: 10001, K: 16384 }
+    # Medium, skinny n.
+    - { M: 5120, N: 2, K: 8192 }
+    # Medium, skinny m.
+    - { M: 3, N: 2049, K: 2048 }
+  alpha: -1
+  beta: 2
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# A padded ldc with beta != 0: the kernels only require C to be contiguous along the leading
+# dimension (AssertStrideCEqual {0: 1}). Routing ignores the leading dimensions and both shapes
+# (5120x2x8192 and 4x10240x5120) are ExactLogic keys, so both still route to the skinny kernels.
+# Padded lda/ldb is not exercised by these entries.
+- name: matmul_skinny_mxfp8_tn_alpha_beta_padded_ldc
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Medium, skinny n.
+    - { M: 5120, N: 2, K: 8192, lda: 8192, ldb: 8192, ldc: 5248, ldd: 5120 }
+    # Medium, skinny m.
+    - { M: 4, N: 10240, K: 5120, lda: 5120, ldb: 5120, ldc: 8, ldd: 4 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Same configuration as matmul_skinny_mxfp8_tn, but the sizes are not in the shard ExactLogic (or
+# violate a solution guard), so these run the generic kernels, except {5120,4,25600} and
+# {4,5120,25600}, which are in the ExactLogic and do use the skinny kernels.
+# Skinny 5, K not a multiple of 256 (but of 32), and K or wide extents the shard does not list.
+- name: matmul_skinny_mxfp8_tn_fallback
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Skinny 5 on n and on m.
+    - { M: 5120,  N: 5, K: 5120 }
+    - { M: 51200, N: 5, K: 5120 }
+    - { M: 5,  N: 5120,  K: 5120 }
+    - { M: 5,  N: 51200, K: 5120 }
+    # K a multiple of 32 but not of 256.
+    - { M: 5120, N: 2, K: 5152 }
+    - { M: 5120, N: 4, K: 4128 }
+    - { M: 5120, N: 1, K: 2080 }
+    - { M: 2, N: 5120, K: 4128 }
+    - { M: 4, N: 5120, K: 5152 }
+    # K below 2048 and above 32768.
+    - { M: 5120, N: 2, K: 1024  }
+    - { M: 5120, N: 4, K: 1536  }
+    - { M: 5120, N: 2, K: 40960 }
+    - { M: 2, N: 5120, K: 1024  }
+    - { M: 4, N: 5120, K: 40960 }
+    # Small and large wide extents with no ExactLogic key.
+    - { M: 1024,  N: 2, K: 5120  }
+    - { M: 2, N: 1024,  K: 5120  }
+    - { M: 12288, N: 2, K: 12288 }
+    - { M: 2, N: 12288, K: 12288 }
+    # Large K with skinny 4: these two are in the ExactLogic and do route to the skinny kernels.
+    - { M: 5120, N: 4, K: 25600 }
+    - { M: 4, N: 5120, K: 25600 }
+    # Large wide extents: 1048576 passes the wide-extent guard but is not in the ExactLogic, so
+    # these fall back to a generic kernel.
+    - { M: 1048576, N: 4, K: 4096  }
+    - { M: 4, N: 1048576, K: 4096  }
+    - { M: 262144,  N: 3, K: 16384 }
+    - { M: 4, N: 262144,  K: 16384 }
+    - { M: 131072,  N: 3, K: 32768 }
+    - { M: 4, N: 131072,  K: 32768 }
+    # Skinny n: lm_head and qkv shapes that are not in the ExactLogic (Llama-70B and Llama-405B
+    # lm_head, Llama-405B qkv, narrow H at K above 8192).
+    - { M: 128256, N: 1, K: 8192  }
+    - { M: 128256, N: 4, K: 8192  }
+    - { M: 128256, N: 2, K: 16384 }
+    - { M: 18432,  N: 1, K: 16384 }
+    - { M: 18432,  N: 3, K: 16384 }
+    - { M: 16416,  N: 2, K: 16640 }
+    - { M: 20001,  N: 1, K: 32768 }
+    - { M: 262143, N: 3, K: 16384 }
+    - { M: 262143, N: 4, K: 8192  }
+    - { M: 131071, N: 3, K: 32768 }
+    - { M: 131071, N: 1, K: 32768 }
+    # Skinny m: very wide H at K of 8192 or more, not in the ExactLogic.
+    - { M: 3, N: 128256, K: 8192  }
+    - { M: 4, N: 128256, K: 8192  }
+    - { M: 2, N: 128256, K: 16384 }
+    - { M: 4, N: 262143, K: 16384 }
+    - { M: 1, N: 262143, K: 16384 }
+    - { M: 4, N: 131071, K: 32768 }
+    - { M: 2, N: 131071, K: 32768 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Strided-batched problems fail the batch-1 guard (AssertSizeEqual {2: 1}), so they fall back to
+# the existing kernels even for sizes whose batch-1 form is in the ExactLogic ({4,5120,5120} and {51200,3,5120}).
+- name: matmul_skinny_mxfp8_tn_fallback_batched
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 51200, N: 3, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 2
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Bias problems use a different problem type than the skinny kernels, so they fall back to the
+# existing kernels even for sizes whose no-bias form is in the ExactLogic ({4,5120,5120} and {51200,3,5120}).
+- name: matmul_skinny_mxfp8_tn_fallback_bias
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 51200, N: 3, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Activation problems use a different problem type than the skinny kernels, so they fall back
+# to the existing kernels even for the size whose no-activation form is in the ExactLogic ({4,5120,5120}).
+- name: matmul_skinny_mxfp8_tn_fallback_activation
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 4, N: 5120, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  activation_type: relu
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

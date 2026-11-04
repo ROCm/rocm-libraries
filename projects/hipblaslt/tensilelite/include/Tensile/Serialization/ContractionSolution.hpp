@@ -91,6 +91,8 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceType", s.workspaceType);
                 iot::mapOptional(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
+                iot::mapOptional(io, "kStep", s.kStep);
+                iot::mapOptional(io, "noSplitK", s.noSplitK);
                 iot::mapOptional(io, "generated", s.generated);
             }
 

@@ -33,6 +33,11 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .Common.ValidParameters import (
+    ASSERT_DIM_MULTIPLE_PARAMETERS,
+    checkAssertMultipleMapIsValid,
+    checkAssertSizeMapIsValid,
+)
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -511,8 +516,11 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeEqual": "SizeEqual",
     "AssertSizeGreaterThan": "SizeGreaterThan",
     "AssertSizeLessThan": "SizeLessThan",
+    "AssertSizeMultiple": "SizeMultiple",
     "AssertStrideAEqual": "StrideAEqual",
     "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
 }
@@ -571,7 +579,21 @@ class ProblemPredicate(Properties.Predicate):
                 raise RuntimeError(
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
+            if key in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                # Checked here as well as on the YAML inputs because logic-file
+                # and custom.config values reach the predicate without that gate.
+                checkAssertSizeMapIsValid(key, value)
+                checkAssertMultipleMapIsValid(key, value)
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
+
+        if key == "AssertTensorBytesLessThan":
+            if value == -1:
+                return None
+            if type(value) is not int or value <= 0:
+                raise RuntimeError(
+                    "{} must be a positive int or -1, got {!r}".format(key, value)
+                )
+            return cls("TensorBytesLessThan", value=value)
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -740,6 +762,8 @@ class CustomKernel:
                  'workspaceType',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
+                 'kStep',
+                 'noSplitK',
                  'generated']
 
     @classmethod
@@ -752,6 +776,8 @@ class CustomKernel:
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   kStep=d.get('kStep', 0),
+                   noSplitK=d.get('noSplitK', False),
                    generated=d.get('generated', False))
 
     def __init__(self, **kwargs):

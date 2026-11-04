@@ -108,6 +108,100 @@ namespace TensileLite
         }
     }
 
+    // Handwritten wide/skinny grids size each grid dimension from tile counts oriented
+    // along (wide, skinny) instead of (m, n).
+    static bool isWideSkinnyGridSize(CustomGridSize size)
+    {
+        return size == CustomGridSize::TilesWide || size == CustomGridSize::TilesSkinny
+               || size == CustomGridSize::TilesWideSkinnyBatch;
+    }
+
+    // These launch one work-group per output tile, so no GSU slice.
+    static bool isTileCountGridSize(CustomGridSize size)
+    {
+        switch(size)
+        {
+        case CustomGridSize::One:
+        case CustomGridSize::TilesX:
+        case CustomGridSize::TilesY:
+        case CustomGridSize::Batch:
+        case CustomGridSize::TilesXY:
+        case CustomGridSize::TilesXYBatch:
+            return true;
+        default:
+            return isWideSkinnyGridSize(size);
+        }
+    }
+
+    // TilesX and TilesY count tiles of an (m, n) macrotile, which a [wide, skinny]
+    // macrotile does not describe.
+    static bool combinesWithWideSkinnyGrid(CustomGridSize size)
+    {
+        return isWideSkinnyGridSize(size) || size == CustomGridSize::One
+               || size == CustomGridSize::Batch;
+    }
+
+    static bool usesWideSkinnyGrid(CustomKernel const& kernel)
+    {
+        return !kernel.generated
+               && (isWideSkinnyGridSize(kernel.grid.x) || isWideSkinnyGridSize(kernel.grid.y)
+                   || isWideSkinnyGridSize(kernel.grid.z));
+    }
+
+    // Overflow policy: grid products are checked, and every value narrowed into a
+    // 32-bit kernarg goes through checkedKernArg32, because the kernels read these
+    // as unsigned 32-bit and a silent truncation would launch a wrong grid.
+    static uint32_t checkedKernArg32(size_t value, std::string const& name)
+    {
+        if(value > std::numeric_limits<uint32_t>::max())
+            throw std::runtime_error(
+                concatenate(name, " ", value, " does not fit a 32-bit kernel argument"));
+        return static_cast<uint32_t>(value);
+    }
+
+    static size_t numWorkGroupsComponent(dim3 const& grid, CustomArgSemantic semantic)
+    {
+        switch(semantic)
+        {
+        case CustomArgSemantic::NumWorkGroupsX:
+            return grid.x;
+        case CustomArgSemantic::NumWorkGroupsY:
+            return grid.y;
+        case CustomArgSemantic::NumWorkGroupsZ:
+            return grid.z;
+        default:
+            break;
+        }
+        throw std::runtime_error(
+            concatenate("custom kernel argument ", toString(semantic), " is not a grid dimension"));
+    }
+
+    // The only source of wide/skinny grid values, so LaunchLimits (calculateGrid) and
+    // the launch (generateCustomCall) cannot disagree.
+    static size_t wideSkinnyGridDim(CustomGridSize size,
+                                    size_t         tilesWide,
+                                    size_t         tilesSkinny,
+                                    size_t         batches)
+    {
+        switch(size)
+        {
+        case CustomGridSize::One:
+            return 1;
+        case CustomGridSize::Batch:
+            return batches;
+        case CustomGridSize::TilesWide:
+            return tilesWide;
+        case CustomGridSize::TilesSkinny:
+            return tilesSkinny;
+        case CustomGridSize::TilesWideSkinnyBatch:
+            return checkedMultiply(checkedMultiply(tilesWide, tilesSkinny), batches);
+        default:
+            break;
+        }
+        throw std::runtime_error(
+            concatenate("custom-kernel grid ", toString(size), " is not a wide/skinny grid"));
+    }
+
     std::string toString(CustomArgSemantic arg)
     {
         static const std::array<std::string, static_cast<int>(CustomArgSemantic::COUNT)> CustomArgSemanticStrings = {
@@ -186,6 +280,9 @@ namespace TensileLite
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
         case CustomGridSize::TilesYGSU:        return "TilesYGSU";
         case CustomGridSize::ComputeUnits:     return "ComputeUnits";
+        case CustomGridSize::TilesWide:        return "TilesWide";
+        case CustomGridSize::TilesSkinny:      return "TilesSkinny";
+        case CustomGridSize::TilesWideSkinnyBatch: return "TilesWideSkinnyBatch";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -210,6 +307,9 @@ namespace TensileLite
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
             {"TilesYGSU",        CustomGridSize::TilesYGSU},
             {"ComputeUnits",     CustomGridSize::ComputeUnits},
+            {"TilesWide",        CustomGridSize::TilesWide},
+            {"TilesSkinny",      CustomGridSize::TilesSkinny},
+            {"TilesWideSkinnyBatch", CustomGridSize::TilesWideSkinnyBatch},
         };
 
         auto it = lookup.find(str);
@@ -2649,43 +2749,110 @@ namespace TensileLite
         }
     }
 
+    void ContractionSolution::calculateFreeExtents(size_t& extentX,
+                                                   size_t& extentY,
+                                                   ContractionSolution::Problem const& problem) const
+    {
+        extentX = 1;
+        extentY = 1;
+
+        for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+            extentX *= problem.freeSizeA(i);
+        for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+            extentY *= problem.freeSizeB(i);
+
+        if(problem.transposeC01())
+            std::swap(extentX, extentY);
+    }
+
+    size_t ContractionSolution::calculateBatchTiles(
+        ContractionSolution::Problem const& problem) const
+    {
+        size_t batches = 1;
+        if(sizeMapping.packBatchDims)
+            return batches;
+        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+            batches = checkedMultiply(batches, problem.batchSize(i));
+        return batches;
+    }
+
     void ContractionSolution::calculateTiles(dim3& tiles,
                                              ContractionSolution::Problem const& problem) const
     {
-        tiles.x = 1;
-        tiles.y = 1;
+        size_t extentX;
+        size_t extentY;
+        calculateFreeExtents(extentX, extentY, problem);
 
-        for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-        {
-            tiles.x *= problem.freeSizeA(i);
-        }
-        for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-        {
-            tiles.y *= problem.freeSizeB(i);
-        }
+        tiles.z = calculateBatchTiles(problem);
+        tiles.x = CeilDivide(extentX, customKernel.macrotile.x);
+        tiles.y = CeilDivide(extentY, customKernel.macrotile.y);
+    }
 
-        tiles.z = 1;
-        for(size_t i = 0; i < problem.batchIndices().size(); i++)
-        {
-            // if(sizeMapping.packBatchDims & 0x1)
-            //     numWorkGroups.x *= problem.batchSize(i);
-            // if(sizeMapping.packBatchDims & 0x2)
-            //     numWorkGroups.y *= problem.batchSize(i);
-            if(!sizeMapping.packBatchDims)
-                tiles.z *= problem.batchSize(i);
-        }
+    // One kernel serves a skinny-n and a skinny-m problem alike because its macrotile
+    // is oriented along max(m, n) and min(m, n).
+    void ContractionSolution::calculateWideSkinnyTiles(size_t& tilesWide,
+                                                       size_t& tilesSkinny,
+                                                       size_t& batches,
+                                                       ContractionSolution::Problem const& problem) const
+    {
+        size_t extentX;
+        size_t extentY;
+        calculateFreeExtents(extentX, extentY, problem);
 
-        if(problem.transposeC01())
-            std::swap(tiles.x, tiles.y);
+        tilesWide   = CeilDivide(std::max(extentX, extentY), customKernel.macrotile.x);
+        tilesSkinny = CeilDivide(std::min(extentX, extentY), customKernel.macrotile.y);
+        batches     = calculateBatchTiles(problem);
+    }
 
-        tiles.x = CeilDivide(tiles.x, customKernel.macrotile.x);
-        tiles.y = CeilDivide(tiles.y, customKernel.macrotile.y);
+    std::string ContractionSolution::wideSkinnyGridObstacle() const
+    {
+        if(!usesWideSkinnyGrid(customKernel))
+            return "";
+
+        vector3<CustomGridSize> const& grid = customKernel.grid;
+        if(!combinesWithWideSkinnyGrid(grid.x) || !combinesWithWideSkinnyGrid(grid.y)
+           || !combinesWithWideSkinnyGrid(grid.z))
+            return concatenate("custom-kernel grid [",
+                               toString(grid.x),
+                               ", ",
+                               toString(grid.y),
+                               ", ",
+                               toString(grid.z),
+                               "] combines wide/skinny tile counts with values other than One and Batch");
+
+        if(customKernel.macrotile.x == 0 || customKernel.macrotile.y == 0
+           || customKernel.threads.x == 0)
+            return concatenate("custom-kernel ",
+                               customKernel.name,
+                               " declares a wide/skinny grid with a zero macrotile or thread count");
+        return "";
     }
 
     void ContractionSolution::calculateGrid(dim3&                               workGroupSize,
                                             dim3&                               numWorkGroups,
                                             ContractionSolution::Problem const& problem) const
     {
+        // A wide/skinny kernel's placeholder sizeMapping.macroTile does not describe its
+        // launch, so LaunchLimits and occupancy hints take the grid the launch uses.
+        if(usesWideSkinnyGrid(customKernel))
+        {
+            std::string obstacle = wideSkinnyGridObstacle();
+            if(!obstacle.empty())
+                throw std::runtime_error(obstacle);
+
+            workGroupSize = customKernel.threads;
+
+            size_t tilesWide   = 0;
+            size_t tilesSkinny = 0;
+            size_t batches     = 0;
+            calculateWideSkinnyTiles(tilesWide, tilesSkinny, batches, problem);
+
+            numWorkGroups.x = wideSkinnyGridDim(customKernel.grid.x, tilesWide, tilesSkinny, batches);
+            numWorkGroups.y = wideSkinnyGridDim(customKernel.grid.y, tilesWide, tilesSkinny, batches);
+            numWorkGroups.z = wideSkinnyGridDim(customKernel.grid.z, tilesWide, tilesSkinny, batches);
+            return;
+        }
+
         workGroupSize.x = checkedMultiply(checkedMultiply(sizeMapping.workGroupSize.x,
                                                          sizeMapping.workGroupSize.y),
                                           sizeMapping.workGroupSize.z);
@@ -3050,12 +3217,21 @@ namespace TensileLite
             computeUnits = std::min(computeUnits, pAMDGPU->persistentMaxCUs);
         computeUnits = std::max(1, computeUnits);
 
+        std::string obstacle = wideSkinnyGridObstacle();
+        if(!obstacle.empty())
+            throw std::runtime_error(obstacle);
+
         if(customKernel.threads.x == 0 || customKernel.macrotile.x == 0)
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
 
         dim3 tiles;
         calculateTiles(tiles, problem);
+        size_t tilesWide   = 0;
+        size_t tilesSkinny = 0;
+        size_t batches     = 0;
+        if(usesWideSkinnyGrid(customKernel))
+            calculateWideSkinnyTiles(tilesWide, tilesSkinny, batches, problem);
 
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
@@ -3122,6 +3298,7 @@ namespace TensileLite
             std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
             std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
             std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
+            std::cout << "kStep: " << customKernel.kStep << " noSplitK: " << customKernel.noSplitK << std::endl;
         }
 
         if(T_Debug)
@@ -3149,6 +3326,11 @@ namespace TensileLite
                     break;
                 case CustomGridSize::TilesXYBatch:
                     dim = tiles.x * tiles.y * tiles.z;
+                    break;
+                case CustomGridSize::TilesWide:
+                case CustomGridSize::TilesSkinny:
+                case CustomGridSize::TilesWideSkinnyBatch:
+                    dim = wideSkinnyGridDim(size, tilesWide, tilesSkinny, batches);
                     break;
                 case CustomGridSize::TilesXYBatchGSU:
                     dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
@@ -3186,22 +3368,8 @@ namespace TensileLite
         // A split-K kernel reduces into D only once every GSU slice of a tile has
         // arrived, so a grid sized from tile counts alone would return success with
         // D unwritten. GSU and persistent grids account for the split themselves.
-        auto tileCountOnly = [](CustomGridSize size) {
-            switch(size)
-            {
-            case CustomGridSize::One:
-            case CustomGridSize::TilesX:
-            case CustomGridSize::TilesY:
-            case CustomGridSize::Batch:
-            case CustomGridSize::TilesXY:
-            case CustomGridSize::TilesXYBatch:
-                return true;
-            default:
-                return false;
-            }
-        };
-        if(gsu > 1 && tileCountOnly(customKernel.grid.x) && tileCountOnly(customKernel.grid.y)
-           && tileCountOnly(customKernel.grid.z))
+        if(gsu > 1 && isTileCountGridSize(customKernel.grid.x)
+           && isTileCountGridSize(customKernel.grid.y) && isTileCountGridSize(customKernel.grid.z))
             throw std::runtime_error(concatenate("Solution ",
                                                  kernelName,
                                                  " runs with GSU ",
@@ -3358,6 +3526,20 @@ namespace TensileLite
                             : 1,
                         arg.type);
                     break;
+                case CustomArgSemantic::Spk:
+                {
+                    if(customKernel.kStep == 0)
+                        throw std::runtime_error(concatenate("custom kernel ",
+                                                             customKernel.name,
+                                                             " declares an Spk kernarg without a kStep"));
+                    // The kernels have no K tail path and run K in one chunk when K <= Spk,
+                    // so Spk is K rounded up to at least one step.
+                    size_t k = problem.problemSizes()[problem.problemSizes().size() - 1];
+                    size_t spk = checkedMultiply(std::max(divideUp(k, customKernel.kStep), size_t(1)),
+                                                 customKernel.kStep);
+                    rv.args.appendCustomType("Spk", checkedKernArg32(spk, "Spk"), arg.type);
+                    break;
+                }
                 case CustomArgSemantic::StrideA0:
                     rv.args.appendCustomType("StrideA0", descriptorA.strides()[descriptorStrideAB], arg.type);
                     break;
@@ -3447,21 +3629,22 @@ namespace TensileLite
                 case CustomArgSemantic::StrideScaleB2:
                     rv.args.appendCustomType("StrideScaleB2", problem.mxsb().strides().at(descriptorStrideAB + 2), arg.type);
                     break;
+                // Computed in integers: a float product rounds to 24 bits and corrupts large strides.
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
-                        descriptorA.strides()[1] * descriptorA.elementBytes(), arg.type);
+                        multiplyElementSize(descriptorA.strides()[1], descriptorA.elementBytes()), arg.type);
                     break;
                 case CustomArgSemantic::StrideB0Bytes:
                     rv.args.appendCustomType("StrideB0Bytes",
-                        descriptorB.strides()[1] * descriptorB.elementBytes(), arg.type);
+                        multiplyElementSize(descriptorB.strides()[1], descriptorB.elementBytes()), arg.type);
                     break;
                 case CustomArgSemantic::StrideC0Bytes:
                     rv.args.appendCustomType("StrideC0Bytes",
-                        problem.c().strides()[1] * problem.c().elementBytes(), arg.type);
+                        multiplyElementSize(problem.c().strides()[1], problem.c().elementBytes()), arg.type);
                     break;
                 case CustomArgSemantic::StrideD0Bytes:
                     rv.args.appendCustomType("StrideD0Bytes",
-                        problem.d().strides()[1] * problem.d().elementBytes(), arg.type);
+                        multiplyElementSize(problem.d().strides()[1], problem.d().elementBytes()), arg.type);
                     break;
                 case CustomArgSemantic::StrideMetadata0:
                     rv.args.appendCustomType("StrideMetadata0", problem.metadata().strides()[descriptorStrideAB], arg.type);
@@ -3752,6 +3935,17 @@ namespace TensileLite
                     if(!appendedInternalArgs)
                         rv.args.appendCustomType("NumWorkGroups", getNumWorkGroups(rv), arg.type);
                     break; // handled by InternalArgs via kernelArgs when present
+                // The cluster and NumWorkGroups flattening above already ran, so these
+                // report the grid that is actually launched.
+                case CustomArgSemantic::NumWorkGroupsX:
+                case CustomArgSemantic::NumWorkGroupsY:
+                case CustomArgSemantic::NumWorkGroupsZ:
+                {
+                    size_t count = numWorkGroupsComponent(rv.numWorkGroups, arg.semantic);
+                    std::string name = toString(arg.semantic);
+                    rv.args.appendCustomType(name, checkedKernArg32(count, name), arg.type);
+                    break;
+                }
 
                 // ---- DataParallel scheduling args ----
                 case CustomArgSemantic::ItersPerTile:
@@ -6046,6 +6240,7 @@ namespace TensileLite
         // path to avoid changing grouped solution selection/host-arg sizing.
         bool useLegacyWorkspaceLogic = customKernel.name.empty() || customKernel.generated;
         bool inferSplitKWorkspaceForCustom = !useLegacyWorkspaceLogic
+                                             && !customKernel.noSplitK
                                              && !problem.groupedGemm()
                                              && customKernel.workspaceType == CustomWorkspaceType::None
                                              && customKernel.workspaceSizePerElemC == 0
@@ -6176,6 +6371,7 @@ namespace TensileLite
         bool inferWorkspaceSizeForCustom = !problem.groupedGemm()
                                            && !customKernel.name.empty()
                                            && !customKernel.generated
+                                           && !customKernel.noSplitK
                                            && customKernel.workspaceType == CustomWorkspaceType::None
                                            && customKernel.workspaceSizePerElemC == 0
                                            && sizeMapping.globalAccumulation != 0
@@ -7052,6 +7248,11 @@ namespace TensileLite
         if(problem.getParams().uniformSummationOrder() == 0)
             return true;
 
+        // A single-pass handwritten kernel has a launch-independent summation
+        // order; its placeholder sizeMapping must not run the launch obstacles.
+        if(handwrittenCustomKernel() && customKernel.noSplitK)
+            return true;
+
         PersistentLaunchSettings launch;
         uint32_t        gsu        = 0;
         size_t          resolvedGA = 0;
@@ -7151,9 +7352,13 @@ namespace TensileLite
         };
 
         if(handwrittenCustomKernel())
+        {
+            if(customKernel.noSplitK)
+                return {};
             return refuse("CustomKernel",
                           "custom kernel " + customKernel.name
                               + " is not supported under uniform summation order");
+        }
 
         if(sizeMapping.isStreamK())
         {

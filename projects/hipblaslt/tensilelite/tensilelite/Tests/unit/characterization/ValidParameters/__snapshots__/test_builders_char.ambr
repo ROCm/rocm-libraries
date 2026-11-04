@@ -1372,11 +1372,15 @@
     'AssertSizeEqual',
     'AssertSizeGreaterThan',
     'AssertSizeLessThan',
+    'AssertSizeMultiple',
     'AssertStrideAEqual',
+    'AssertStrideAMultiple',
     'AssertStrideBEqual',
+    'AssertStrideBMultiple',
     'AssertStrideCEqual',
     'AssertStrideDEqual',
     'AssertSummationElementMultiple',
+    'AssertTensorBytesLessThan',
     'BufferLoad',
     'BufferStore',
     'ClusterAIDMapping',
@@ -1647,11 +1651,23 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertSizeMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideAEqual': dict({
       'type': 'int',
       'value': -1,
     }),
+    'AssertStrideAMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideBEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideBMultiple': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -1671,6 +1687,10 @@
       ]),
       'len': 9,
       'type': 'list',
+    }),
+    'AssertTensorBytesLessThan': dict({
+      'type': 'int',
+      'value': -1,
     }),
     'BufferLoad': dict({
       'head': list([

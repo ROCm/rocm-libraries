@@ -27,6 +27,7 @@ from .Common.ValidParameters import checkParametersAreValid, validParameters, ne
 
 from .ExecutionPolicy import isPersistent, isPersistentDataParallel
 
+import math
 import re
 import yaml
 
@@ -100,6 +101,11 @@ _METADATA_NAME_TO_SEMANTIC = {
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
     "batchOffsetB":           "BatchOffsetB",
+    "m":                      "SizeFree0",
+    "n":                      "SizeFree1",
+    # A GEMM has a single summation index, so k is the last problem size.
+    "k":                      "SizeSum",
+    "spk":                    "Spk",
 }
 
 _ACTIVATION_ARG_INDEX = {
@@ -116,10 +122,12 @@ _ACTIVATION_ARG_INDEX = {
 # solution; InternalSupportParams threads through to the kernel writer) and
 # would otherwise be popped because they're not tunable parameters.
 #
-# Provenance-only keys (Source, Version, Features) are deliberately NOT in this
-# set: getCustomKernelConfig drops them so they don't pollute the solution
-# dict, while validateCustomKernelMetadata still sees them via its independent
-# readCustomKernelConfig call.
+# Source, Version and Features are deliberately NOT in this set:
+# getCustomKernelConfig drops them so they don't pollute the solution dict, while
+# validateCustomKernelMetadata and LibraryIO still see them via their independent
+# readCustomKernelConfig calls. Features SupportsBias, SupportsActivation and
+# SupportsScaleAlpha set to false make LibraryIO restrict that solution's
+# ProblemType so it rejects bias, activation and scale-alpha-vector problems.
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
 
 def isCustomKernelConfig(config):
@@ -439,6 +447,79 @@ def validateCustomPersistentArgs(kernelConfig):
         raise ValueError("DataParallel custom kernels with argument layout version 1 cannot require partial workspace")
 
 
+# Grids that tile the output with a [wide, skinny] macrotile, oriented along
+# max(m, n) and min(m, n) instead of (m, n).
+WIDE_SKINNY_GRIDS = frozenset({"TilesWide", "TilesSkinny", "TilesWideSkinnyBatch"})
+
+# Grids that launch one work-group per output tile, so no GSU slice can be
+# addressed by them.
+TILE_COUNT_GRIDS = frozenset(
+    {"One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch"}) | WIDE_SKINNY_GRIDS
+
+# TilesX and TilesY count tiles of an (m, n) macrotile, which a [wide, skinny]
+# macrotile does not describe; only the grids below carry no such assumption.
+WIDE_SKINNY_COMPATIBLE_GRIDS = WIDE_SKINNY_GRIDS | {"One", "Batch"}
+
+
+def validateCustomKernelGrid(grid, kernelName="?"):
+    """Reject a grid that mixes wide/skinny tile counts with (m, n) tile counts."""
+    if WIDE_SKINNY_GRIDS.isdisjoint(grid):
+        return
+    incompatible = sorted(set(grid) - WIDE_SKINNY_COMPATIBLE_GRIDS)
+    if incompatible:
+        raise RuntimeError(
+            f"Custom kernel '{kernelName}' grid {list(grid)} mixes wide/skinny tile counts "
+            f"with {incompatible}, which count tiles of an (m, n) macrotile")
+
+
+def _mxScaleBlockK(value):
+    """K extent of one MX scale block; the list form of MXBlock is [free, k] or [k]."""
+    if isinstance(value, (list, tuple)):
+        value = value[-1]
+    return value if type(value) is int else 0
+
+
+def _admittedKMultiple(kernelConfig):
+    """K multiple that the config's assertions admit, 1 when it declares none."""
+    multiple = kernelConfig.get("AssertSummationElementMultiple", 1)
+    problemType = kernelConfig.get("ProblemType")
+    batched = problemType.get("Batched", True) if isinstance(problemType, dict) else True
+    sizeMultiple = kernelConfig.get("AssertSizeMultiple")
+    if isinstance(sizeMultiple, dict):
+        kMultiple = sizeMultiple.get(3 if batched else 2, -1)
+        if kMultiple != -1:
+            multiple = math.lcm(multiple, kMultiple)
+    return multiple
+
+
+def validateCustomKernelStepAndSplitK(kernelConfig):
+    """Validate the optional kStep and noSplitK fields of a CustomKernel block."""
+    descriptor = kernelConfig.get("CustomKernel")
+    if not isinstance(descriptor, dict):
+        return
+    kStep = descriptor.get("kStep", 0)
+    if type(kStep) is not int or kStep < 0:
+        raise ValueError(f"CustomKernel.kStep must be a non-negative integer, got {kStep!r}")
+    if not isinstance(descriptor.get("noSplitK", False), bool):
+        raise ValueError(f"CustomKernel.noSplitK must be a boolean, got {descriptor['noSplitK']!r}")
+    if kStep == 0:
+        return
+    problemType = kernelConfig.get("ProblemType")
+    if isinstance(problemType, dict):
+        # The client uses kStep as the MX scale-gate K granule.
+        for tc in "AB":
+            mxBlock = _mxScaleBlockK(problemType.get(f"MXBlock{tc}", 0))
+            if mxBlock > 0 and kStep % mxBlock != 0:
+                raise ValueError(
+                    f"CustomKernel.kStep {kStep} must be a multiple of MXBlock{tc} {mxBlock}")
+    # The kernels have no K tail, so every admitted K must be whole steps.
+    kMultiple = _admittedKMultiple(kernelConfig)
+    if kMultiple % kStep != 0:
+        raise ValueError(
+            f"CustomKernel.kStep {kStep} does not divide the K multiple {kMultiple} that "
+            f"AssertSummationElementMultiple and AssertSizeMultiple admit")
+
+
 def _hasRocRollerWgmArgs(args):
     """True when the metadata expressions are rocRoller's workgroup-mapping kernargs.
 
@@ -627,6 +708,7 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernelName"] = kernelName
 
     validateCustomPersistentArgs(kernelConfig)
+    validateCustomKernelStepAndSplitK(kernelConfig)
 
     return kernelConfig
 
