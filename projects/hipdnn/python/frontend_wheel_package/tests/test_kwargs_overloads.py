@@ -662,13 +662,13 @@ def _paged_attention(t):
         dict(
             paged_attention_k_table=k_table,
             paged_attention_v_table=v_table,
-            paged_attention_max_seq_len_kv=32,
+            paged_attention_max_seq_len_kv=128,
             **seq_len_keywords,
         ),
         lambda a: seq_len_configure(a)
         .set_paged_attention_k_table(k_table)
         .set_paged_attention_v_table(v_table)
-        .set_paged_attention_max_seq_len_kv(32),
+        .set_paged_attention_max_seq_len_kv(128),
     )
 
 
