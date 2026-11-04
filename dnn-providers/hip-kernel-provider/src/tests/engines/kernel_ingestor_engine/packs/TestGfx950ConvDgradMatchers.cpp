@@ -208,6 +208,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
                          .Union();
     }
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.reserve(spec.nodeCount);
     for(unsigned int i = 0; i < spec.nodeCount; ++i)
     {
         nodes.push_back(data_objects::CreateNodeDirect(
@@ -837,9 +838,15 @@ TEST(TestGfx950ConvDgradScore, DirectPipelinesThenMfmaThenImplicitGemmAndRefusal
                 continue;
             }
             const auto& variant = entries[i].text("direct_variant");
-            const int64_t family = variant == "none"                           ? 0
-                                   : variant.find("mfma") != std::string::npos ? 2
-                                                                               : 1;
+            int64_t family = 1;
+            if(variant == "none")
+            {
+                family = 0;
+            }
+            else if(variant.find("mfma") != std::string::npos)
+            {
+                family = 2;
+            }
             auto [it, inserted] = range.emplace(family, std::make_pair(score, score));
             it->second.first = std::min(it->second.first, score);
             it->second.second = std::max(it->second.second, score);
