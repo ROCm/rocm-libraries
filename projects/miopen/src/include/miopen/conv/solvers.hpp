@@ -4670,7 +4670,8 @@ struct PerformanceConfigConvHipConv : PerfConfig
     mutable void* kernel = nullptr;
 
     PerformanceConfigConvHipConv() = default;
-    PerformanceConfigConvHipConv(bool) {}
+    // GenericSearch's config iterator starts here; index 0 makes IsValid() enumerate the configs.
+    PerformanceConfigConvHipConv(bool) : index(0) {}
 
     void Serialize(std::ostream& stream) const override { stream << descriptor; }
     bool Deserialize(const std::string& s) override
