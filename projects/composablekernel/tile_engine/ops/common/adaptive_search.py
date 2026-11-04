@@ -138,6 +138,7 @@ class PairOutcome:
     status: str
     latency_ms: Optional[float]
     diag: str = ""
+    device: str = ""  # where it ran, when the adapter knows (recorded only)
 
 
 class OperationAdapter(Protocol):
@@ -151,7 +152,8 @@ class OperationAdapter(Protocol):
         """Exactly one outcome per request."""
 
     def confirm(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
-        """Fresh verified calls, exactly one outcome per request."""
+        """Fresh verified calls, exactly one outcome per request. The
+        requests of one problem should run on one device: they are compared."""
 
     def context(self) -> dict:
         """arch/dtype/layout/variant/sources, recorded in run.json."""
@@ -965,7 +967,8 @@ class SearchCoordinator:
             for req in requests:
                 status, lat, diag = _checked(outcomes[req.call_id])
                 p, t, key, c = waiting[req.call_id]
-                progress |= self._settle(p, t, key, c, told, status, lat, diag, req.call_id)
+                progress |= self._settle(p, t, key, c, told, status, lat, diag, req.call_id,
+                                         outcomes[req.call_id].device)
         for p in active:
             for t in p.deferred:  # resolved by the in-flight trial of the same key
                 key = p.space.key(t.genome)
@@ -1031,10 +1034,10 @@ class SearchCoordinator:
                                f"first {lost[0]!r}")
         return got
 
-    def _settle(self, p, t, key, c, told, status, lat, diag, call_id) -> bool:
+    def _settle(self, p, t, key, c, told, status, lat, diag, call_id, device="") -> bool:
         """Turn one outcome into a told observation or a scheduler event."""
         base = dict(problem=p.key, trial_uid=t.uid, kernel=c.kernel_name,
-                    call_id=call_id, diag=diag)
+                    call_id=call_id, diag=diag, device=device)
         if status == "unattempted" and t.uid not in p.retried:
             p.retried.add(t.uid)
             p.requeue.append(t)
@@ -1072,7 +1075,8 @@ class SearchCoordinator:
     def _confirm(self, stop: str) -> Dict[str, dict]:
         """Re-measure each problem's finalists with ``fresh_calls`` fresh verified
         calls. Call j of every surviving finalist goes into one adapter call, so
-        competing kernels interleave; a finalist is dropped at its first failed
+        competing kernels interleave (on one device per problem, see
+        ``OperationAdapter.confirm``); a finalist is dropped at its first failed
         call. The winner is the lowest median among the finalists whose calls all
         passed: there is no fallback to unconfirmed discovery results."""
         cf = self.settings.confirm
@@ -1097,7 +1101,8 @@ class SearchCoordinator:
                 calls[(r.problem_key, r.candidate_key)].append((status, lat))
                 self._event("confirm", problem=r.problem_key, kernel=r.kernel_name,
                             trial_uid=r.trial_uid, call_id=r.call_id, call=j,
-                            status=status, latency_ms=lat, diag=diag)
+                            status=status, latency_ms=lat, diag=diag,
+                            device=got[r.call_id].device)
         winners = {}
         for p, best in fins.items():
             passed = []

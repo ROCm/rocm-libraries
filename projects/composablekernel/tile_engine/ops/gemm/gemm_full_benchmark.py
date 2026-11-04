@@ -629,7 +629,7 @@ def worker_setup():
 
 def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_path,
                          base_env, csv_path, extra=None, *, record_failures=None,
-                         measured=None):
+                         measured=None, device_of=None):
     """Phase 3: fan (problem, kernel-batch) units out over device-pinned workers.
 
     ``pairs[i]`` lists the indices into ``built_kernels`` to run on
@@ -638,7 +638,8 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
 
     ``record_failures``, if given, is called with each batch's FAILURE_FIELDS
     dicts (under the output lock); ``measured``, if given, is a list every CSV
-    row is also appended to.
+    row is also appended to. ``device_of``, if given, names the device that
+    runs every unit of ``problems[i]`` (the devices still run in parallel).
     """
     print(f"\n{'=' * 80}")
     print("Phase 3: Benchmark (multi-GPU, subprocess isolation, batched)")
@@ -652,20 +653,23 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
     writer.writeheader()
 
     work_q = queue.Queue()
+    pinned = None if device_of is None else {d: queue.Queue() for d in devices}
     for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
         prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
+        q = work_q if pinned is None else pinned[device_of[prob_idx]]
         for start in range(0, len(idx), args.batch_size):
             batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
-            work_q.put((prob_idx, prob_dict, batch))
+            q.put((prob_idx, prob_dict, batch))
 
     io_lock = threading.Lock()
     stats = {"measurements": 0, "failures": 0, "skipped": 0}
     t0 = time.perf_counter()
 
     def device_thread(device_id):
+        q = work_q if pinned is None else pinned[device_id]
         while True:
             try:
-                unit = work_q.get_nowait()
+                unit = q.get_nowait()
             except queue.Empty:
                 return
             # The failure list is passed only when recording, so the call is
@@ -688,7 +692,7 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
                 stats["measurements"] += len(rows)
                 stats["failures"] += n_fail
                 stats["skipped"] += n_skip
-            work_q.task_done()
+            q.task_done()
 
     threads = [
         threading.Thread(target=device_thread, args=(d,), daemon=True) for d in devices

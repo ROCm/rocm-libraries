@@ -223,7 +223,9 @@ Option rules:
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
   `--verify-tol`, `--kernel-timeout`, `--workers`, `--build-timeout` and
-  `--devices` apply as usual.
+  `--devices` apply as usual. Discovery measurements spread over the devices;
+  each problem's confirmation calls run on one device (problem `i` on device
+  `i mod n`), so its finalists are compared on the same GPU.
 - The candidates of a problem are exactly the kernels a full run measures with
   it when every kernel builds (its `--list-pairs` pairs). `--pairs` and
   `--max-kernels` narrow them (recorded in `run.json`); `--pairs` also limits

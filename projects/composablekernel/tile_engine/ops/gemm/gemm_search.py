@@ -19,7 +19,8 @@ driver's own build and measure functions, which the driver passes in as
   requested kernel (``check_identity``). Each call writes its own CSV under
   ``<out>/rounds/``, next to a JSON file mapping its ``problem_idx`` to the
   request (call id, trial) and holding its failure records;
-- confirmation: the same path with fresh calls.
+- confirmation: the same path with fresh calls, each problem's on one device
+  (problem i on device i mod n), so its finalists run on the same GPU.
 
 ``reconcile`` turns a request's rows and failure records into its one outcome;
 ``read_ranked_csv`` turns ``select_kernels.py --out_ranked`` predictions into
@@ -294,13 +295,17 @@ class GemmSearchAdapter:
                 cfg = self.cands[r.candidate_key].original_config
                 built.append((cfg, self.store.path(r.candidate_key)))
         csv_path = self.calls.new(kind, ".csv")
-        rows, fails = [], []
+        rows, fails, pin = [], [], {}
+        if kind == "confirm":  # a problem's finalists are compared on one GPU
+            order = {key: i for i, key in enumerate(self.problems)}
+            pin["device_of"] = [self.devices[order[r.problem_key] % len(self.devices)]
+                                for r in reqs]
         self.hooks.measure(
             [self.problems[r.problem_key] for r in reqs],
             [[index[r.candidate_key]] for r in reqs],
             built, self.devices, self.margs, self.worker_path, self.base_env,
             csv_path, extra={"check_identity": True},
-            record_failures=fails.extend, measured=rows,
+            record_failures=fails.extend, measured=rows, **pin,
         )
         self.calls.write_json(csv_path, {
             "requests": [
@@ -315,9 +320,13 @@ class GemmSearchAdapter:
             by_rows[row.get("problem_idx")].append(row)
         for f in fails:
             by_fails[f.get("problem_idx")].append(f)
-        return [PairOutcome(r, *reconcile(r, self.problems[r.problem_key], by_rows[i],
-                                          by_fails[i]))
-                for i, r in enumerate(reqs)]
+        out = []
+        for i, r in enumerate(reqs):
+            ran = by_rows[i] + by_fails[i]
+            out.append(PairOutcome(
+                r, *reconcile(r, self.problems[r.problem_key], by_rows[i], by_fails[i]),
+                device=str(ran[0].get("device", "")) if ran else ""))
+        return out
 
 
 def run_gemm_search(args, settings: SearchSettings, hooks: DriverHooks, *,

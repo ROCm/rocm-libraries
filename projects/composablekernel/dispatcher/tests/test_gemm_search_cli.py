@@ -237,6 +237,18 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
         (p["M"], p["N"], p["K"], winners[k][0]) for k, p in zip(KEYS, PROBLEMS)}
 
 
+def test_confirmation_keeps_each_problem_on_one_device(monkeypatch, capsys, tmp_path):
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path,
+                                         devices=("0", "1"))
+    assert rc == 0, cap.out
+    confirm = [e for e in map(json.loads, (out / "trials.jsonl").read_text()
+                              .splitlines()) if e["event"] == "confirm"]
+    devices = {}
+    for e in confirm:
+        devices.setdefault(e["problem"], set()).add(e["device"])
+    assert devices == {k: {"01"[i % 2]} for i, k in enumerate(KEYS)}
+
+
 def test_ranked_csv_is_the_search_prior(monkeypatch, capsys, tmp_path):
     eligible = _listing(monkeypatch, capsys, tmp_path)
     rows = [f"{KEYS[0]},{i + 1},{name},{10.0 - i}"

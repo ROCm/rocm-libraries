@@ -432,6 +432,31 @@ def test_attribution_holds_across_devices(tmp_path, monkeypatch):
                    else ("ok", ms(n, prob[k])) for n in (A, B, C) for k in (K1, K2)}
 
 
+def test_confirmation_runs_each_problem_on_one_device(tmp_path, monkeypatch):
+    # Two devices, two problems with two finalists each: every confirmation
+    # unit of a problem runs on that problem's device (K1 on 0, K2 on 1), and
+    # each outcome says where it ran.
+    ran = []
+
+    def run_batch(device_id, unit, args, worker_path, base_env, extra=None,
+                  failures=None):
+        prob_idx, prob, batch = unit
+        ran.append((device_id, prob["M"]))
+        return [{"kernel": cfg.name, "problem_idx": prob_idx, **prob,
+                 "device": device_id, "latency_ms": 1.0, "tflops": 1.0, "non_zero": 1,
+                 "max_rel": 0.0, "verified": True} for _, cfg, _ in batch], [], 0, 0
+
+    monkeypatch.setattr(drv, "_run_batch_on_device", run_batch)
+    tc = Toolchain(tmp_path, monkeypatch)
+    ad = _adapter(tmp_path, tc.build, devices=("0", "1"))
+    ad.build_missing([ad.cands[n] for n in (A, B)])
+    reqs = [AS.PairRequest(k, n, n, f"{k}:{n}", f"c{i}")
+            for i, (k, n) in enumerate((k, n) for k in (K1, K2) for n in (A, B))]
+    for _ in range(4):
+        assert [o.device for o in ad.confirm(reqs)] == ["0", "0", "1", "1"]
+    assert sorted(set(ran)) == [("0", P1["M"]), ("1", P2["M"])] and len(ran) == 16
+
+
 @pytest.mark.parametrize("confirm_ok", [False, True])
 def test_misleading_rows_never_become_winners(tmp_path, monkeypatch, confirm_ok):
     # Fixture 2: a fast row with verified "False", one with a blank verified and
@@ -443,7 +468,7 @@ def test_misleading_rows_never_become_winners(tmp_path, monkeypatch, confirm_ok)
     calls = []
 
     def measure(problems, pairs, built, devices, args, wp, env, csv_path,
-                extra=None, *, record_failures=None, measured=None):
+                extra=None, *, record_failures=None, measured=None, **kw):
         confirm = "confirm" in Path(csv_path).name
         for i, (prob, idx) in enumerate(zip(problems, pairs)):
             name = built[idx[0]][0].name
