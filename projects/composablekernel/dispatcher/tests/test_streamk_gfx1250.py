@@ -137,27 +137,22 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
     def test_k_block_divides_across_all_k_waves(self):
         with open(GFX1250_CONFIG) as f:
             cfg = json.load(f)
+        # 1x2x2 is a gfx1250 warp layout with two K waves, so only the K rule
+        # separates the tile_k values.
+        cfg["tile_config"]["warp_m"]["values"] = [1]
         cfg["tile_config"]["warp_k"]["values"] = [2]
         cfg["tile_config"]["warp_tile_k"]["values"] = [32]
         cfg["tile_config"]["tile_k"]["values"] = [32, 64, 96, 128]
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.json"
             config_path.write_text(json.dumps(cfg))
-            # Isolate K divisibility from the independent architecture/trait validators.
-            with patch.object(
-                gemm_utils, "_warp_config_supported", return_value=True
-            ), patch.object(
-                gemm_utils._cu,
-                "validate_kernel_config",
-                return_value=SimpleNamespace(is_valid=True),
-            ):
-                configs = expand_sweep(
-                    str(config_path),
-                    "gfx1250",
-                    dtype="fp16",
-                    layout="rcr",
-                    variant="stream_k",
-                )
+            configs = expand_sweep(
+                str(config_path),
+                "gfx1250",
+                dtype="fp16",
+                layout="rcr",
+                variant="stream_k",
+            )
         self.assertEqual({c.tile_k for c in configs}, {64, 128})
         self.assertEqual(len(configs), 4)
 
