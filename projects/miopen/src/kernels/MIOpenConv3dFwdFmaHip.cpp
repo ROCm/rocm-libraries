@@ -36,9 +36,11 @@
 //   y[m][k] = sum_{z, y, x, c} x[n][di][hi][wi][c] * w[k][z][y][x][c]
 //
 // Each 256-thread workgroup computes a TILE_M x TILE_N output tile and every thread accumulates
-// a 4x4 register tile in fp32. The K_gemm loop runs over filter taps (z, y, x) outside and input
-// channels in TILE_C chunks inside, so the spatial bounds check is done once per tap. Inputs are
-// converted to fp32 when they are staged in LDS.
+// a MICRO_M x MICRO_N register tile in fp32. One K_gemm iteration covers one filter tap (z, y, x)
+// and TILE_C input channels, so the spatial bounds check is done once per tap. Inputs are
+// converted to fp32 when they are staged in LDS. The global loads for the next iteration are
+// issued before the FMAs of the current one and land in the other half of a double-buffered LDS
+// tile, so each iteration needs one barrier.
 //
 // The weights are always read as K x (Z * Y * X) x (C / groups), so the channels of one filter tap
 // are contiguous. That is the NDHWC weight layout as is. For NCDHW (K x (C / groups) x Z x Y x X)
@@ -48,6 +50,7 @@
 // Compile-time parameters (set by the solver):
 //   CONV3D_DTYPE  0 = fp32, 1 = fp16, 2 = bf16
 //   CONV3D_NDHWC  0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
+//   TILE_N        output channels per workgroup: 128, 64 or 32 (MICRO_N = TILE_N / 16)
 
 #ifndef CONV3D_DTYPE
 #define CONV3D_DTYPE 0
@@ -55,15 +58,18 @@
 #ifndef CONV3D_NDHWC
 #define CONV3D_NDHWC 0
 #endif
+#ifndef TILE_N
+#define TILE_N 128
+#endif
 
-#define TILE_M 64
-#define TILE_N 64
+#define TILE_M 128
 #define TILE_C 16
-#define MICRO_M 4
-#define MICRO_N 4
+#define MICRO_M 8
+#define MICRO_N (TILE_N / 16)
 #define BLOCK_SIZE 256
-// Each thread stages one row of the A (input) and B (weight) tiles, LOAD_C channels long.
-#define LOAD_C (TILE_M * TILE_C / BLOCK_SIZE)
+// Each thread stages one row of the A (input) and B (weight) tiles, LOAD_A / LOAD_B channels long.
+#define LOAD_A (TILE_M * TILE_C / BLOCK_SIZE)
+#define LOAD_B (TILE_N * TILE_C / BLOCK_SIZE)
 
 #if CONV3D_DTYPE == 0
 typedef float data_t;
@@ -116,8 +122,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
                           int dw,
                           int groups)
 {
-    __shared__ float as[TILE_C][TILE_M + 4];
-    __shared__ float bs[TILE_C][TILE_N + 4];
+    __shared__ float as[2][TILE_C][TILE_M + 4];
+    __shared__ float bs[2][TILE_C][TILE_N + 4];
 
     const int tid      = threadIdx.x;
     const int Cg       = C / groups;
@@ -135,11 +141,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     // positions so the loads coalesce along W; NDHWC: consecutive threads take consecutive
     // channels of one position.
 #if CONV3D_NDHWC
-    const int a_row = tid / (TILE_C / LOAD_C);
-    const int a_col = (tid % (TILE_C / LOAD_C)) * LOAD_C;
+    const int a_row = tid / (TILE_C / LOAD_A);
+    const int a_col = (tid % (TILE_C / LOAD_A)) * LOAD_A;
 #else
     const int a_row = tid % TILE_M;
-    const int a_col = (tid / TILE_M) * LOAD_C;
+    const int a_col = (tid / TILE_M) * LOAD_A;
 #endif
     const long am    = m0 + a_row;
     const bool am_ok = am < M;
@@ -166,8 +172,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
 #endif
 
     // B row (output channel) staged by this thread.
-    const int b_row  = tid / (TILE_C / LOAD_C);
-    const int b_col  = (tid % (TILE_C / LOAD_C)) * LOAD_C;
+    const int b_row  = tid / (TILE_C / LOAD_B);
+    const int b_col  = (tid % (TILE_C / LOAD_B)) * LOAD_B;
     const int bk     = k0 + b_row;
     const bool bk_ok = bk < Kg;
     const data_t* wei_k =
@@ -189,54 +195,91 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         for(int j = 0; j < MICRO_N; ++j)
             acc[i][j] = 0.f;
 
-    for(int z = 0; z < Z; ++z)
-    {
-        const int di = di0 + z * dd;
-        for(int y = 0; y < Y; ++y)
-        {
-            const int hi = hi0 + y * dh;
-            for(int x = 0; x < X; ++x)
-            {
-                const int wi = wi0 + x * dw;
-                const bool a_ok =
-                    am_ok && di >= 0 && di < Di && hi >= 0 && hi < Hi && wi >= 0 && wi < Wi;
-                const long a_sp = a_ok ? (static_cast<long>(di) * Hi + hi) * Wi + wi : 0;
-                const int tap   = (z * Y + y) * X + x;
+    // Flattened K loop: iteration `it` covers filter tap it / nc and channels
+    // [(it % nc) * TILE_C, + TILE_C).
+    const int nc    = (Cg + TILE_C - 1) / TILE_C;
+    const int iters = taps * nc;
+    const int yx    = Y * X;
+    float ra[LOAD_A], rb[LOAD_B];
+
+    auto load = [&](int it) {
+        const int tap   = it / nc;
+        const int c0    = (it - tap * nc) * TILE_C;
+        const int z     = tap / yx;
+        const int r     = tap - z * yx;
+        const int y     = r / X;
+        const int x     = r - y * X;
+        const int di    = di0 + z * dd;
+        const int hi    = hi0 + y * dh;
+        const int wi    = wi0 + x * dw;
+        const bool a_ok = am_ok && di >= 0 && di < Di && hi >= 0 && hi < Hi && wi >= 0 && wi < Wi;
+        // Out-of-range rows read the clamped offset 0 and are replaced by 0 with a select, so
+        // the loads do not branch.
+        const long a_sp = a_ok ? (static_cast<long>(di) * Hi + hi) * Wi + wi : 0;
 #if CONV3D_NDHWC
-                const data_t* a_ptr = in_n + a_sp * C;
+        const data_t* a_ptr = in_n + a_sp * C;
 #else
-                const data_t* a_ptr = in_n + a_sp;
+        const data_t* a_ptr = in_n + a_sp;
 #endif
-                const data_t* b_ptr = wei_k + static_cast<long>(tap) * Cg;
-                for(int c0 = 0; c0 < Cg; c0 += TILE_C)
-                {
-                    for(int i = 0; i < LOAD_C; ++i)
-                    {
-                        const int c = c0 + a_col + i;
-                        as[a_col + i][a_row] =
-                            (a_ok && c < Cg) ? to_float(a_ptr[c * in_cstride]) : 0.f;
-                    }
-                    for(int i = 0; i < LOAD_C; ++i)
-                    {
-                        const int c          = c0 + b_col + i;
-                        bs[b_col + i][b_row] = (bk_ok && c < Cg) ? to_float(b_ptr[c]) : 0.f;
-                    }
-                    __syncthreads();
-                    for(int kk = 0; kk < TILE_C; ++kk)
-                    {
-                        float a[MICRO_M], b[MICRO_N];
-                        for(int i = 0; i < MICRO_M; ++i)
-                            a[i] = as[kk][tm + i * (TILE_M / MICRO_M)];
-                        for(int j = 0; j < MICRO_N; ++j)
-                            b[j] = bs[kk][tn + j * (TILE_N / MICRO_N)];
-                        for(int i = 0; i < MICRO_M; ++i)
-                            for(int j = 0; j < MICRO_N; ++j)
-                                acc[i][j] = __builtin_fmaf(a[i], b[j], acc[i][j]);
-                    }
-                    __syncthreads();
-                }
+        const data_t* b_ptr = wei_k + static_cast<long>(tap) * Cg;
+        if(c0 + TILE_C <= Cg)
+        {
+            for(int i = 0; i < LOAD_A; ++i)
+            {
+                const float v = to_float(a_ptr[(c0 + a_col + i) * in_cstride]);
+                ra[i]         = a_ok ? v : 0.f;
             }
+            for(int i = 0; i < LOAD_B; ++i)
+            {
+                const float v = to_float(b_ptr[c0 + b_col + i]);
+                rb[i]         = bk_ok ? v : 0.f;
+            }
+            return;
         }
+        // Partial channel chunk (wave-uniform).
+        for(int i = 0; i < LOAD_A; ++i)
+        {
+            const int c = c0 + a_col + i;
+            ra[i]       = (a_ok && c < Cg) ? to_float(a_ptr[c * in_cstride]) : 0.f;
+        }
+        for(int i = 0; i < LOAD_B; ++i)
+        {
+            const int c = c0 + b_col + i;
+            rb[i]       = (bk_ok && c < Cg) ? to_float(b_ptr[c]) : 0.f;
+        }
+    };
+    auto store = [&](int buf) {
+        for(int i = 0; i < LOAD_A; ++i)
+            as[buf][a_col + i][a_row] = ra[i];
+        for(int i = 0; i < LOAD_B; ++i)
+            bs[buf][b_col + i][b_row] = rb[i];
+    };
+    auto compute = [&](int buf) {
+        for(int kk = 0; kk < TILE_C; ++kk)
+        {
+            float a[MICRO_M], b[MICRO_N];
+            for(int i = 0; i < MICRO_M; ++i)
+                a[i] = as[buf][kk][tm + i * (TILE_M / MICRO_M)];
+            for(int j = 0; j < MICRO_N; ++j)
+                b[j] = bs[buf][kk][tn + j * (TILE_N / MICRO_N)];
+            for(int i = 0; i < MICRO_M; ++i)
+                for(int j = 0; j < MICRO_N; ++j)
+                    acc[i][j] = __builtin_fmaf(a[i], b[j], acc[i][j]);
+        }
+    };
+
+    load(0);
+    store(0);
+    __syncthreads();
+    for(int it = 0; it < iters; ++it)
+    {
+        const int buf = it & 1;
+        if(it + 1 < iters)
+            load(it + 1);
+        compute(buf);
+        if(it + 1 < iters)
+            store(buf ^ 1);
+        __syncthreads();
     }
 
     for(int i = 0; i < MICRO_M; ++i)

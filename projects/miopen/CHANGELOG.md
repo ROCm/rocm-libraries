@@ -75,7 +75,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `gfx103X`, `gfx110X`, `gfx115X`, `gfx117X`, `gfx120X`). It is an implicit GEMM on plain FMA
   instructions, so it also runs on targets without WMMA, and covers fp32, fp16 and bf16, NCDHW and
   NDHWC, and grouped convolutions with at least 16 output channels per group. On gfx1151 it is
-  2.3x to 4.4x faster than `GemmFwdRest` on fp32 3x3x3 convolutions and is selected through Find
+  3.6x to 6.8x faster than `GemmFwdRest` on fp32 3x3x3 convolutions and is selected through Find
   mode.
 
 ### Changed
