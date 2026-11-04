@@ -6765,7 +6765,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for reclaimStart, reclaimSize in reclaimRanges:
       self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB")
       module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
-          (reclaimStart, self.rapPoolRangeEnd(reclaimRanges, reclaimStart, reclaimSize, self.states.lastValuAB)))
+          (reclaimStart, self.rapPoolRangeEnd(reclaimStart, reclaimSize, self.states.lastValuAB, self.states.lastValuAB)))
     residentAB = self.rapResidentValuABRange(kernel)
     if residentAB is not None:
       module.addComment1("RAP: Valu%s vgpr [%u...%u) held resident across persistent iterations" % \
@@ -7356,7 +7356,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       for mxsStart, mxsSize in mxsRanges:
         self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB")
         module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
-            (mxsStart, self.rapPoolRangeEnd(mxsRanges, mxsStart, mxsSize, self.states.lastValuMXSAB)))
+            (mxsStart, self.rapPoolRangeEnd(mxsStart, mxsSize, self.states.lastValuMXSAB, self.states.lastValuMXSAB)))
       if kernel["ReuseAcrossPersistent"]:
         # The resident scale block's own bounds; for MXSA the withheld prefix also
         # covers whatever sits below it.
@@ -9439,6 +9439,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       vgprIdx = (vgprIdx+1)//2*2
       self.states.lastValuMXSAB = vgprIdx
+      # The WMMA scale operands have no s_set_vgpr_msb field, so a resident scale
+      # block, which grows with the resident k-tiles, has to end below v256.
+      if "MXSB" in self.rapResidentTcs(kernel):
+        assert self.states.mxsb.startVgprValu + self.states.mxsb.numVgprValu <= 256, \
+          "ReuseAcrossPersistent: the resident MXSB block runs past v255"
 
       self.states.totalAgprs      = 0
       self.states.totalMixedAgprs = 0
@@ -9661,6 +9666,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           vgprIdx = ((vgprIdx+1)//2)*2
       else:
         vgprIdx = ((vgprIdx+1)//2)*2
+
+      # RAP: a resident B block spans the whole K extent too, so it gets the same
+      # operand-width alignment as a resident A block above, applied after the
+      # bank adjustment so the start only moves up.
+      if "B" in self.rapResidentTcs(kernel):
+        operandVgprs = max(1, int(kernel["MIInputPerThreadB"] * tensorParametersB["bpe"] // self.states.bpr))
+        vgprIdx = ((vgprIdx + operandVgprs - 1)//operandVgprs)*operandVgprs
 
       self.states.b.startVgprValu = vgprIdx
       vgprIdx += self.states.b.numVgprValu

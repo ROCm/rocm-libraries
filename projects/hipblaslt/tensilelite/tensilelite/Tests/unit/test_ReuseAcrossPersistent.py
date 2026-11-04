@@ -62,9 +62,11 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 # Registration
 # ---------------------------------------------------------------------------
 def test_rap_is_valid_solution_parameter():
-    assert validParameters["ReuseAcrossPersistent"] == [0, 1]
+    # 1 holds A, 2 holds B; 3 would read as both and is not a value.
+    assert validParameters["ReuseAcrossPersistent"] == [0, 1, 2]
     assert defaultSolution["ReuseAcrossPersistent"] == 0
     validateParameterTypes({"ReuseAcrossPersistent": 1})
+    validateParameterTypes({"ReuseAcrossPersistent": 2})
 
 
 def test_rap_is_in_the_min_roster():
@@ -384,6 +386,71 @@ def test_rap_leaves_both_free_dims_alone(
     # And K still does, so this is not just an empty predicate list.
     kIdx = sol["ProblemType"]["NumIndicesC"]
     assert any(p.index == kIdx for p in preds), "K must still be constrained"
+
+
+# MacroTile 256x64: the RAP2 mirror of the MT64x256 base, for M large, N small.
+_MI_MT256x64 = [16, 16, 128, 1, 1, 8, 2, 2, 2]
+_MX_F8 = {"MXBlockA": 32, "MXBlockB": 32, "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"}
+
+
+@pytest.mark.parametrize("problemType", [{}, _MX_F8, {**_MX_F8, "MacDataTypeB": "F4"}],
+                         ids=["f8", "mx_f8", "mx_f8_f4"])
+def test_rap_b_starts_with_one_n_tile_whole_m_tiles_and_whole_k_tiles(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, problemType
+):
+    """RAP 2 holds B, and its first cut serves what RAP 1 first served for A.
+
+    One N-tile, so every tile reads the same B and the entry guard only ever sees
+    the batch change; whole M-tiles; whole k-tiles. K's multiple is a predicate,
+    not a reject on ASEM: fp4 forces ASEM to 32, which a reject would turn into
+    refusing every F8 x F4 kernel.
+    """
+    import tensilelite.Contractions as C
+
+    sol, out = _derive(gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=2,
+                       MatrixInstruction=_MI_MT256x64, ProblemType=problemType)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert (sol["MacroTile0"], sol["MacroTile1"]) == (256, 64)
+    assert sol["_RAPNumResidentKTiles"] >= sol["PrefetchGlobalRead"] + 1
+
+    problemType = C.ProblemType.FromOriginalState(sol["ProblemType"])
+    preds = C.ProblemPredicate.CompoundPredicates(sol, problemType)
+    kIdx = sol["ProblemType"]["NumIndicesC"]
+    rapPreds = {(p.index, p.tag, p.value) for p in preds if p.index in (0, 1, kIdx)}
+    depthU, kTiles = sol["DepthU"], sol["_RAPNumResidentKTiles"]
+    assert rapPreds >= {
+        (1, "SizeEqual", 64),
+        (0, "SizeMultiple", 256),
+        (kIdx, "SizeMultiple", depthU),
+        (kIdx, "SizeGreaterThan", 0),
+        (kIdx, "SizeLessThan", kTiles * depthU + 1),
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        pytest.param({"ReuseAcrossPersistent": 1, "HalfPLR": 1},
+                     "ReuseAcrossPersistent does not support HalfPLR", id="rap1_with_half_plr"),
+        pytest.param({"ReuseAcrossPersistent": 2, "HalfPLR": 2, "MatrixInstruction": _MI_MT256x64},
+                     "ReuseAcrossPersistent does not support HalfPLR", id="rap2_with_half_plr"),
+        pytest.param({"ReuseAcrossPersistent": 2, "MatrixInstruction": _MI_MT256x64,
+                      "ProblemType": {"MXBlockA": 128, "MXBlockB": 128,
+                                      "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"}},
+                     "ReuseAcrossPersistent = 2 supports MXBlock 32 scales only", id="rap2_with_mx128"),
+        # Without MX scales, where RAP 1 accepts TDMFuse 1-3 (A rides every wave
+        # of its own set).
+        pytest.param({"ReuseAcrossPersistent": 2, "MatrixInstruction": _MI_MT256x64,
+                      "PrefetchAcrossPersistent": 0, "TDMFuse": 1},
+                     "ReuseAcrossPersistent = 2 requires TDMFuse = 0", id="rap2_with_tdm_fuse"),
+    ],
+)
+def test_rap_rejects_what_its_resident_side_cannot_serve(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides, reason
+):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **overrides)
+    assert sol.get("Valid") is False, f"expected reject for {overrides}"
+    assert reason in out, f"expected {reason!r} in reject output, got: {out!r}"
 
 
 def test_rap_k_predicates_admit_every_k_up_to_the_resident_block(
@@ -909,6 +976,45 @@ def test_rap_without_the_local_read_prefetch_reads_each_k_tile_before_overwritin
 
 
 # ---------------------------------------------------------------------------
+# A resident B, end to end. The whole kernel is emitted and read the way the
+# hardware will run it: the fill copy loads every resident k-tile of B into its
+# own buffer set, the reuse copy loads no B at all while A keeps coming, and
+# every WMMA reads B from a buffer the fill copy wrote.
+# ---------------------------------------------------------------------------
+def _bufs(text, tensor):
+    return {int(b) for b in re.findall(r"vgprValu%s_X(\d+)_I0" % tensor, text)}
+
+
+@pytest.mark.parametrize("problemType", [{}, _MX_PROBLEM_TYPE], ids=["f8", "mx_f8"])
+def test_rap_b_holds_every_k_tile_of_b_and_reloads_only_a(
+    _gp_gfx1250, gfx1250_iim, assembler, problemType
+):
+    sol = Solution(_make_params(gfx1250_iim, ReuseAcrossPersistent=2, MatrixInstruction=_MI_MT256x64,
+                                ProblemType=problemType, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    source = _kernelSource(sol, assembler)
+    resident = set(range(sol["_RAPNumResidentKTiles"] * sol["LoopIters"]))
+    tensors = ["B", "MXSB"] if problemType else ["B"]
+
+    fill, reuse = source.split("label_RAP_IterN:", 1)
+    reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
+    fillLoads = "\n".join(l for l in fill.splitlines() if l.strip().startswith("ds_load"))
+    reuseLoads = "\n".join(l for l in reuse.splitlines() if l.strip().startswith("ds_load"))
+    wmma = "\n".join(l for l in source.splitlines() if l.strip().startswith("v_wmma"))
+    for tc in tensors:
+        assert _bufs(fillLoads, tc) == resident, "the fill copy must load every resident %s k-tile" % tc
+        assert not _bufs(reuseLoads, tc), "the reuse copy reloads the resident %s" % tc
+        assert _bufs(wmma, tc) == resident, "a WMMA reads %s outside the resident block" % tc
+    assert _bufs(reuseLoads, "A"), "the reuse copy still has to load A"
+
+    # The guard and the PAP keep-mask follow the N-tile; odd waves are silenced.
+    assert "sgprRAPResidentNTile" in source and "sgprRAPResidentMTile" not in source
+    assert "RAP: odd wave carries B -> NULL descriptor" in reuse
+    assert "RAP: ValuB vgpr [" in source
+
+
+# ---------------------------------------------------------------------------
 # k_max model. Pinned to the two audited gfx1250 configs, whose true bounds were
 # measured by sweeping the resident k-tile count until rapCheckStoreNeutrality
 # fired: MacroTile 64x256 clears k=8 and trips at 9, 64x512 clears k=3 at 4.
@@ -922,6 +1028,7 @@ def _modelTerms(threadTile1):
     from tensilelite.Common.DataType import DataType
 
     state = {
+        "ReuseAcrossPersistent": 1,
         "ThreadTile0": 16, "ThreadTile1": threadTile1,
         "StoreVectorWidth": 2, "BufferStore": True,
         "GlobalSplitU": 0, "_GlobalAccumulation": None,
@@ -951,6 +1058,36 @@ def _kMax(threadTile1, stateOverrides=None, **problemTypeOverrides):
 def test_rap_kmax_model_reproduces_the_measured_bound_on_mt64x256():
     # ValuC 128, E 64, V 4, R 68 -> (1024 - 128 - 256 - 40) / 68
     assert _kMax(8) == 8
+
+
+def test_rap_kmax_model_prices_a_resident_b_by_b_s_own_terms():
+    # The same footprint on the B side prices the same; an F4 B is half the data
+    # per WaveTile, R 2*(16 + 2) = 36 -> (1024 - 128 - 256 - 40) / 36.
+    bSide = {"ReuseAcrossPersistent": 2, "MIWaveTileB": 2, "MIInputPerThreadB": 64,
+             "MIWaveTileMXSB": 2, "MIInputPerThreadMXSB": 4}
+    from tensilelite.Common.DataType import DataType
+    assert _kMax(8, bSide, MacDataTypeB=DataType("F8"), MXBlockB=32) == 8
+    assert _kMax(8, bSide, MacDataTypeB=DataType("F4"), MXBlockB=32) == 16
+
+
+@pytest.mark.parametrize("mi, problemType, kTiles", [
+    pytest.param(_MI_MT256x64, {}, 9, id="mt256x64_f8"),
+    pytest.param(_MI_MT256x64, _MX_F8, 8, id="mt256x64_mx_f8"),
+    pytest.param([16, 16, 128, 1, 1, 16, 2, 2, 2], _MX_F8, 3, id="mt512x64_mx_f8"),
+    # The one bound the A-side overhead misses: 6 k-tiles overflow the VGPRs.
+    pytest.param([16, 16, 128, 1, 1, 16, 2, 2, 2], {**_MX_F8, "MacDataTypeB": "F4"}, 5,
+                 id="mt512x64_mx_f8_f4"),
+    pytest.param([16, 16, 128, 1, 1, 4, 4, 2, 2], _MX_F8, 4, id="mt128x128_mx_f8"),
+])
+def test_rap_b_kmax_model_reproduces_the_measured_bounds(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, mi, problemType, kTiles
+):
+    # Measured by pinning the model and emitting each kernel: these are the
+    # largest k-tile counts that still allocate and keep the store in one batch.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=2,
+                       MatrixInstruction=mi, ProblemType=problemType)
+    assert sol.get("Valid") is True, out
+    assert sol["_RAPNumResidentKTiles"] == kTiles
 
 
 def test_rap_kmax_model_reproduces_the_measured_bound_on_mt64x512():
@@ -1087,11 +1224,12 @@ def test_rap_reuse_copy_skips_only_the_resident_operands_loads(rap):
         assert writer.rapSkipsResidentLoads(kernel, tc) == (tc in resident)
 
 
-def test_rap_pool_comments_keep_their_end_for_a_single_range():
-    # One range prints the end its comment always printed, so lending that did
-    # not change leaves the asm text alone; several print their own ends.
-    assert PersistentKernelState.rapPoolRangeEnd([(8, 38)], 8, 38, 99) == 99
-    assert PersistentKernelState.rapPoolRangeEnd([(0, 10), (42, 4)], 42, 4, 99) == 46
+def test_rap_pool_comments_keep_their_end_for_a_range_that_reaches_the_block_end():
+    # A range up to the end of its block prints the end its comment always
+    # printed, so lending that did not change leaves the asm text alone; a range
+    # that stops below a resident B prints where it stops.
+    assert PersistentKernelState.rapPoolRangeEnd(8, 38, 46, 99) == 99
+    assert PersistentKernelState.rapPoolRangeEnd(0, 10, 46, 99) == 10
 
 
 # ---------------------------------------------------------------------------
@@ -1356,7 +1494,7 @@ class _Labels:
         return "%s_%d" % (name, self.count)
 
 
-class _PeekWriter:
+class _PeekWriter(PersistentKernelState):
     def __init__(self):
         self.labels = _Labels()
         self.sgprPool = _Pool(100)
@@ -1372,8 +1510,9 @@ class _PeekWriter:
         yield [SimpleNamespace(idx=self.sgprPool.checkOut(n), size=n) for n in nums]
 
 
-def _peekKernel(wgmxcc):
+def _peekKernel(wgmxcc, rap=1):
     return {
+        "ReuseAcrossPersistent": rap,
         "WorkGroupMappingXCC": wgmxcc,
         "ClusterDim": [1, 1],
         "WavefrontSize": 32,
@@ -1427,29 +1566,34 @@ _TILE_IDENTITY_CASES = list(itertools.product(
 ))
 
 
+@pytest.mark.parametrize("coord", ["M", "N"])
 @pytest.mark.parametrize("n0, n1, wgm, wgmxcc", _TILE_IDENTITY_CASES)
-def test_guard_peek_names_the_m_tile_default_wgm_gives_the_tile(_cpu, n0, n1, wgm, wgmxcc):
+def test_guard_peek_names_the_tile_default_wgm_gives_the_tile(_cpu, n0, n1, wgm, wgmxcc, coord):
+    """The M-tile for a resident A, the N-tile -- WorkGroup1 after the remap -- for B."""
     batches = 2
     kernel = _peekKernel(wgmxcc)
-    peek = StaticGrid().peekTileBatch(_PeekWriter(), kernel, "RAPResidentBatch", "RAPResidentMTile")
+    resident = "RAPResident%sTile" % coord
+    peek = StaticGrid().peekTileBatch(_PeekWriter(), kernel, "RAPResidentBatch",
+                                      **{"dst%sTileSgpr" % coord: resident})
     remap = DefaultWGM(_PeekWriter(), kernel, "WGM")
     common = {
         str(sgpr("NumWorkGroups0")): n0,
         str(sgpr("NumWorkGroups1")): n1,
         str(sgpr("WGM")): _wgm_field(wgm, wgmxcc),
     }
+    side = 0 if coord == "M" else 1
     for tile in range(n0 * n1 * batches):
         peeked = _run_scalar(peek, {**common, str(sgpr("NextTile")): tile})
         batch, inBatch = divmod(tile, n0 * n1)
         remapped = _run_scalar(remap, {**common,
                                        str(sgpr("WorkGroup0")): inBatch % n0,
                                        str(sgpr("WorkGroup1")): inBatch // n0})
-        mTile = remapped[str(sgpr("WorkGroup0"))]
-        assert mTile == _wgm_map(inBatch % n0, inBatch // n0, n0, n1, wgm)[0]
+        expected = remapped[str(sgpr("WorkGroup%d" % side))]
+        assert expected == _wgm_map(inBatch % n0, inBatch // n0, n0, n1, wgm)[side]
         assert peeked[str(sgpr("RAPResidentBatch"))] == batch
-        assert peeked[str(sgpr("RAPResidentMTile"))] == mTile, (
-            "tile %d: guard expects M-tile %d, the tile reads %d"
-            % (tile, peeked[str(sgpr("RAPResidentMTile"))], mTile))
+        assert peeked[str(sgpr(resident))] == expected, (
+            "tile %d: guard expects %s-tile %d, the tile reads %d"
+            % (tile, coord, peeked[str(sgpr(resident))], expected))
         for claimed in ("WorkGroup0", "WorkGroup1", "WorkGroup2"):
             assert str(sgpr(claimed)) not in peeked, "the peek claimed %s" % claimed
 

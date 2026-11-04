@@ -234,7 +234,7 @@ class WorkAssignment(Component):
                 unaligned.append("PersistentPrefetchState")
             if kernel["ReuseAcrossPersistent"]:
                 unaligned.append("RAPResidentBatch")
-                unaligned.append("RAPResidentMTile")
+                unaligned.append(writer.rapResidentTileSgpr(kernel))
                 unaligned.extend(["RAPPhasePlan", "RAPPhaseStart"])
         else:
             partition = processing.queuePartition()
@@ -862,6 +862,12 @@ class StaticGrid(WorkAssignment):
         """
         from .WorkGroupMappingAlgos import decodeWGM
         module = Module("StaticGrid RAP phase walk")
+        if "A" not in writer.rapResidentTcs(kernel):
+            # The period above is the M-tile's. A resident B follows the N-tile,
+            # whose period is not derived yet, so it keeps the plain grid stride.
+            module.add(SMovB32(dst=sgpr("RAPPhasePlan"), src=hex(1 << 16), comment="RAP: one phase, the plain grid stride"))
+            module.add(SMovB32(dst=sgpr("RAPPhaseStart"), src=sgpr(partition.cursor), comment="RAP: the first tile starts the first phase"))
+            return module
         grid, bound = partition.grid, partition.bound
         nwg0, nwg1 = "NumWorkGroups0", "NumWorkGroups1"
         plain = Label(writer.labels.getNameInc("RAPPhasePlain"), "")
@@ -1032,7 +1038,7 @@ class StaticGrid(WorkAssignment):
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
         return module
 
-    def peekTileBatch(self, writer, kernel, dstSgpr, dstMTileSgpr=None):
+    def peekTileBatch(self, writer, kernel, dstSgpr, dstMTileSgpr=None, dstNTileSgpr=None):
         """Return the batch of the tile about to be activated, without advancing it.
 
         Call at persistent-loop entry, before activateReservedOrAcquire/graWorkGroup.
@@ -1043,29 +1049,34 @@ class StaticGrid(WorkAssignment):
         together name the A a tile reads -- A does not depend on N -- which is what
         ReuseAcrossPersistent's entry guard compares. A's address is built from
         WorkGroup0 after DefaultWGM, which folds the N-tile into it, so the M-tile
-        goes through the same remap here.
+        goes through the same remap here. ``dstNTileSgpr`` is the same for B: the
+        N-tile after the remap, WorkGroup1's value. One or the other, not both.
         """
         from .WorkGroupMappingAlgos import DefaultWGM
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
         assert partition.tile_units, "RAP needs whole-tile assignment"
+        assert dstMTileSgpr is None or dstNTileSgpr is None, "peek one tile coordinate"
         module = Module("StaticGrid peekTileBatch")
-        withMTile = dstMTileSgpr is not None
-        with writer.allocTmpSgpr(3 if withMTile else 2, 2, "PersistentBatchPeek") as tmp:
+        withTile = dstMTileSgpr is not None or dstNTileSgpr is not None
+        with writer.allocTmpSgpr(3 if withTile else 2, 2, "PersistentBatchPeek") as tmp:
             module.add(SMulI32(dst=sgpr(tmp.idx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Tiles per batch"))
             vtmp = writer.vgprPool.checkOut(2, "PersistentBatchDivide")
             tmpVgprRes = ContinuousRegister(idx=vtmp, size=2)
             module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=partition.cursor, divReg=tmp.idx, rReg=tmp.idx + 1,
-                tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=withMTile,
+                tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=withTile,
                 comment="Batch of the tile about to be activated"))
-            if withMTile:
+            # The coordinate not asked for lands in scratch: DefaultWGM needs both.
+            mTile = dstMTileSgpr if dstMTileSgpr is not None else tmp.idx + 2
+            nTile = dstNTileSgpr if dstNTileSgpr is not None else tmp.idx + 2
+            if withTile:
                 # M varies fastest, so the M-tile is the remainder; the quotient is
                 # the N-tile.
-                module.add(scalarUInt32DivideAndRemainder(qReg=tmp.idx + 2, dReg=tmp.idx + 1, divReg="NumWorkGroups0", rReg=dstMTileSgpr,
+                module.add(scalarUInt32DivideAndRemainder(qReg=nTile, dReg=tmp.idx + 1, divReg="NumWorkGroups0", rReg=mTile,
                     tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True,
-                    comment="M-tile of the tile about to be activated"))
+                    comment="%s-tile of the tile about to be activated" % ("M" if dstMTileSgpr is not None else "N")))
             writer.vgprPool.checkIn(vtmp)
-            if withMTile:
-                module.add(DefaultWGM(writer, kernel, "WGM", wg0=dstMTileSgpr, wg1=tmp.idx + 2))
+            if withTile:
+                module.add(DefaultWGM(writer, kernel, "WGM", wg0=mTile, wg1=nTile))
         return module
 
     def closeLoop(self, writer, kernel):

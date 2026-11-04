@@ -445,8 +445,8 @@ validParameters = { # we need to make sure this matches develop
     # The value names the one resident operand; it is not a bit mask, and A and B are never both held.
     #   0 = off (default)
     #   1 = A resident
-    #   2 = B resident -- planned, not implemented yet
-    "ReuseAcrossPersistent": [0, 1],
+    #   2 = B resident
+    "ReuseAcrossPersistent": [0, 1, 2],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
