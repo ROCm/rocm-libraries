@@ -42,9 +42,9 @@ from kernels.common._attention_strided_kv import (
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
-    split_kv_reduce_lds_bytes,
-    split_kv_reduce_max_segments,
+    reduce_max_segments,
     split_kv_reduce_spec,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -1717,72 +1717,16 @@ def supports_tiled_3d_spec(
     )
 
 
-# The reduce builder assumes one wave64 owns ``head_size // 64`` output dims per thread.
-_REDUCE_THREADS = 64
-
-
-def reduce_max_segments(arch: str) -> int:
-    """The most segments whose factor cache fits ``arch``'s LDS
-    (``ArchTarget.lds_capacity_bytes``). The C++ host mirrors gfx950's as
-    ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
-    from rocke.core.arch.target import ArchTarget
-
-    return split_kv_reduce_max_segments(ArchTarget.from_gfx(arch).lds_capacity_bytes)
-
-
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
 
-    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
-    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
-    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
-    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
-    evenly, and the segment-factor cache fits in LDS. The kernel is one 64-thread CTA
-    whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
-    gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
-    wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules are
+    :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`, shared with
+    every arch's reduce.
     """
-    from rocke.core.arch.target import ArchTarget
-
-    from ..common.attention_arch import validate_tiled_attention_arch
-
-    arch_ok, arch_reason = validate_tiled_attention_arch(arch)
-    if not arch_ok:
-        return False, f"tiled reduce kernel: {arch_reason}"
-    if spec.dtype not in ("fp16", "bf16"):
-        return (
-            False,
-            f"tiled reduce kernel currently supports fp16/bf16 (got {spec.dtype!r})",
-        )
-    if spec.head_size <= 0 or spec.head_size % _REDUCE_THREADS != 0:
-        return (
-            False,
-            "tiled reduce kernel needs head_size divisible by "
-            f"{_REDUCE_THREADS} (got {spec.head_size})",
-        )
-    if (
-        spec.num_kv_heads < 1
-        or spec.num_query_heads < 1
-        or spec.num_query_heads % spec.num_kv_heads != 0
-    ):
-        return (
-            False,
-            "tiled reduce kernel needs a positive num_query_heads divisible by "
-            f"num_kv_heads (got {spec.num_query_heads} / {spec.num_kv_heads})",
-        )
-    # ``arch`` passed validate_tiled_attention_arch, so it has a catalog row.
-    target = ArchTarget.from_gfx(arch)
-    lds_bytes = split_kv_reduce_lds_bytes(spec.num_segments)
-    if not target.fits_lds(lds_bytes):
-        return (
-            False,
-            f"tiled reduce kernel caches one f32 LDS factor per segment; "
-            f"num_segments={spec.num_segments} needs {lds_bytes} B, over {arch}'s "
-            f"{target.lds_capacity_bytes} B LDS (at most {reduce_max_segments(arch)})",
-        )
-    return True, "supported"
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def reduce_spec_for(
