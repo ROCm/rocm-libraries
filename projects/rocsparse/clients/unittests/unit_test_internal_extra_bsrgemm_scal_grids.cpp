@@ -363,8 +363,10 @@ namespace
             status = rocsparse_set_pointer_mode(handle, mode);
         }
 
-        device_vector<rocsparse_int> d_ind_C(static_cast<size_t>(std::max(nnzb_C, 1)));
-        device_vector<T> d_val_C(static_cast<size_t>(std::max(nnzb_C, 1)) * block_dim * block_dim);
+        device_vector<rocsparse_int> d_ind_C(
+            static_cast<size_t>(std::max<rocsparse_int>(nnzb_C, 1)));
+        device_vector<T> d_val_C(static_cast<size_t>(std::max<rocsparse_int>(nnzb_C, 1)) * block_dim
+                                 * block_dim);
         // Poison C: hipMalloc may hand back the previous run's buffer, whose
         // stale values would hide elements this run never writes.
         if(status == rocsparse_status_success

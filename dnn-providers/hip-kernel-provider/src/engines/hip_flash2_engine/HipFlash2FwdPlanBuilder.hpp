@@ -92,4 +92,18 @@ inline bool useFlash2ForShape(int seqLenQ, int seqLenKv)
            > (static_cast<uint64_t>(ctaQBlocks) * 6000u);
 }
 
+// =============================================================================
+// KV sequence-length ceiling.
+// =============================================================================
+//
+// Both kernels count KV tiles in signed int: HipFlash2FwdPlan.hip forms
+// (seq_len_kv + 63) / 64 and HipFlash2FwdPlanVariant.hip forms
+// (seq_len_kv + F2_BK - 1) / F2_BK, where F2_BK = F2_KG * 16 and F2_KG is 2 or
+// 4, so 64 is the largest KV tile this engine dispatches. One full tile of
+// headroom below INT32_MAX keeps both additions in range. isApplicable
+// declines anything above this rather than dispatch a kernel whose KV loop
+// bound has already overflowed.
+constexpr int64_t K_FLASH2_MAX_KV_TILE = 64;
+constexpr int64_t K_FLASH2_MAX_SEQ_LEN_KV = static_cast<int64_t>(INT32_MAX) - K_FLASH2_MAX_KV_TILE;
+
 } // namespace hip_flash2_engine

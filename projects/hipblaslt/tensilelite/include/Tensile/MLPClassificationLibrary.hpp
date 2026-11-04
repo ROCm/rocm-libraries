@@ -171,7 +171,7 @@ namespace TensileLite
                     // kernels accepted before the per-tile split mapping was added. With
                     // that mode off, restore the narrower filter: problemPredicate alone.
                     bool accept;
-                    if(problem.getParams().uniformSummationOrder())
+                    if(problem.getParams().uniformSummationOrder() != 0)
                     {
                         accept = (*solution->hardwarePredicate)(hardware)
                                  && softwarePredicate(SolutionLibrarySearchType::DEFAULT,

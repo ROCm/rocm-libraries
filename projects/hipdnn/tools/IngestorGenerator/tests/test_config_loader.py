@@ -545,6 +545,79 @@ class TestEmittedIdentifierShape:
         )
         _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
 
+    @pytest.mark.parametrize("slug", ["../evil", "a/b", "a.b", "", "-lead", " "])
+    def test_slug_override_must_be_a_single_path_stem(self, slug):
+        """The slug is the descriptor directory's name and every file's stem, so an
+        override gets the same containment the derived slug gets."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(slug_override=slug))
+        with pytest.raises(ConfigError, match="engine.slug"):
+            _check_emitted_identifiers(config)
+
+    def test_slug_override_is_accepted_when_it_is_a_stem(self):
+        from codegen.config_loader import _check_emitted_identifiers
+
+        _check_emitted_identifiers(
+            make_minimal_config(
+                engine=make_engine(
+                    name="hipkernel:Gfx950AttentionUnified2D",
+                    slug_override="gfx950_attention_unified_2d",
+                )
+            )
+        )  # no raise
+
+    def test_load_config_reads_engine_slug(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "slug.yaml"
+        path.write_text(
+            yaml.dump(
+                {
+                    "dialect": "packaged",
+                    "authored_subpath": "rocKE/x",
+                    "engine": {
+                        "name": "hipkernel:Gfx950AttentionUnified2D",
+                        "slug": "gfx950_attention_unified_2d",
+                        "knobs": ["block_size"],
+                    },
+                    "kmd_fields": [
+                        {"name": "block_size", "type": "int", "default_value": 64},
+                        {"name": "dtype", "type": "string"},
+                    ],
+                    "specialization": {
+                        "metadata_fields": ["block_size", "dtype"],
+                        "bindings": {
+                            "block_size": {"field": "block_size"},
+                            "dtype": {"field": "dtype"},
+                        },
+                    },
+                    "kernel_source_kind": "rocke",
+                    "packs": [
+                        {
+                            "name": "p",
+                            "arch": ["gfx950"],
+                            "kernels": [
+                                {
+                                    "name": "k",
+                                    "kernel_source": {
+                                        "kind": "rocke",
+                                        "source": "s.py",
+                                        "builder": "b",
+                                        "spec": {"head_size": 64},
+                                    },
+                                    "metadata": {"block_size": 64, "dtype": "BF16"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+        )
+        config = load_config(path)
+        assert config.engine.slug == "gfx950_attention_unified_2d"
+        assert config.native_symbol_namespace == "hipkernel.gfx950_attention_unified_2d"
+
     def test_census_name_symbol_rejects_cpp_expressions(self):
         from codegen.config_loader import _check_emitted_identifiers
 
@@ -1398,7 +1471,12 @@ class TestShippedExampleConfigsLoad:
         for path in paths:
             manifest = registry_enumerator.load_manifest(str(path))
             assert manifest["engine"]["name"], path
-            assert manifest["enumerate"]["max_kernels"] > 0, path
+            # Every manifest freezes its build cost: a slice by max_kernels, a full space
+            # (which the enumerator does not hold to max_kernels) by the AOT budget.
+            if manifest["enumerate"].get("space", "slice") == "full":
+                assert manifest["reduction"]["aot_budget_per_arch"] > 0, path
+            else:
+                assert manifest["enumerate"]["max_kernels"] > 0, path
             assert manifest["provider_root"], path
 
     def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
@@ -2307,9 +2385,8 @@ class TestSpecializationDeclaration:
         _check_specialization_declaration(config)  # does not raise
 
     def test_an_authored_consumer_identity_is_rejected(self):
-        """Ids are minted, never authored. One config declares one engine and one KMD,
-        so an authored id would be a second source of truth pointing at whatever engine
-        shared a name."""
+        """Ids are assigned at generation, never authored. A config declares exactly one
+        engine and one KMD, and a 'consumers' list belongs to the emitted contract."""
         from codegen.config_loader import _check_specialization_declaration
 
         config = make_minimal_config(
@@ -2321,7 +2398,7 @@ class TestSpecializationDeclaration:
                 "engine_id": "00000000-0000-0000-0000-000000000000",
             }
         )
-        with pytest.raises(ConfigError, match="minted"):
+        with pytest.raises(ConfigError, match="assigned at generation"):
             _check_specialization_declaration(config)
 
     def test_a_vocabulary_entry_for_an_unchecked_field_is_rejected(self):

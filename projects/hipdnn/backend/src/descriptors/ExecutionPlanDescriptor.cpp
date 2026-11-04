@@ -13,10 +13,12 @@
 #include <cstring>
 #include <flatbuffers/flatbuffer_builder.h>
 #include <flatbuffers/verifier.h>
+#include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <mutex>
+#include <spdlog/fmt/fmt.h>
 #include <vector>
 
 namespace hipdnn_backend
@@ -109,6 +111,8 @@ void ExecutionPlanDescriptor::finalize()
                 0,
                 HIPDNN_STATUS_INTERNAL_ERROR,
                 "ExecutionPlanDescriptor::finalize() failed: Invalid workspace size.");
+
+    recordDevice(*handle);
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }
@@ -421,7 +425,8 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
 
     const std::lock_guard<std::mutex> lock(_serializedPlanCacheMutex);
 
-    // Build the serialized plan on the first call. Reuse it for all later size and fill calls.
+    // A loaded plan starts with the plan bytes it was loaded from; a built plan builds them on
+    // its first save. Later size and fill calls reuse the cached bytes.
     if(_serializedPlanCache.empty())
     {
         std::vector<uint8_t> pluginPayload;
@@ -535,14 +540,14 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
     {
         _tensorAlignments.clear();
     }
-    std::vector<uint8_t> pluginPayload(serializedPluginPayload->begin(),
-                                       serializedPluginPayload->end());
-
-    const hipdnnPluginConstData_t pluginPayloadData{pluginPayload.data(), pluginPayload.size()};
+    const hipdnnPluginConstData_t pluginPayloadData{serializedPluginPayload->data(),
+                                                    serializedPluginPayload->size()};
 
     _pluginResourceManager = pluginResourceManager;
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContextFromSerialized(
         _pluginResourceManager, _engineId, &pluginPayloadData);
+
+    _serializedPlanCache.assign(serializedPlan, serializedPlan + planByteSize);
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }
@@ -556,6 +561,45 @@ uint64_t ExecutionPlanDescriptor::nextPlanId()
 uint64_t ExecutionPlanDescriptor::recordExecution()
 {
     return _executionCount.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+void ExecutionPlanDescriptor::recordDevice(const hipdnnHandle& handle)
+{
+    int device = -1;
+    if(handle.getDevice(&device) != hipSuccess || device < 0)
+    {
+        // An unbound plan is still usable, so the failed query must not surface later through
+        // the caller's hipGetLastError().
+        (void)hipGetLastError();
+        _device.reset();
+        return;
+    }
+    _device = device;
+}
+
+void ExecutionPlanDescriptor::validateExecutionDevice(const hipdnnHandle& handle) const
+{
+    if(!_device.has_value())
+    {
+        return;
+    }
+
+    int device = -1;
+    const auto status = handle.getDevice(&device);
+    THROW_IF_NE(status,
+                hipSuccess,
+                HIPDNN_STATUS_INTERNAL_ERROR,
+                fmt::format("Cannot resolve the device of the handle's stream to check it against "
+                            "the execution plan's device {}: {}",
+                            *_device,
+                            hipGetErrorName(status)));
+    THROW_IF_NE(device,
+                *_device,
+                HIPDNN_STATUS_BAD_PARAM,
+                fmt::format("The execution plan was created for device {}, but the handle's "
+                            "stream is on device {}.",
+                            *_device,
+                            device));
 }
 
 hipdnnBackendDescriptorType_t ExecutionPlanDescriptor::getStaticType()

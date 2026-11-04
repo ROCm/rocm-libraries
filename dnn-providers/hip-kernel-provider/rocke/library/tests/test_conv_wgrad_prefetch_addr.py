@@ -323,6 +323,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["tap_outer_k"]  # dgrad's tap-outer K loop, off
         del fields["dy_halo"], fields["halo_max_wo"]  # dgrad dY halo, off
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
+        del fields["split_k_cluster"]  # cluster split-K forward, off
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()

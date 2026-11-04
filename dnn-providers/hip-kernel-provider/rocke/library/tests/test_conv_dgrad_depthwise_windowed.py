@@ -242,6 +242,49 @@ class TestMfmaSpec(unittest.TestCase):
         tall = self._mfma(_problem(1, 224, 16, 64, 7, 7, 3))
         self.assertTrue(self._ok(tall)[0])
 
+    def test_fwd_rejects_a_non_square_filter(self):
+        # N1: _depthwise_dgrad_win_check used to accept fwd with KH != KW, so
+        # a spec built directly read shifted columns; the C++ twin mirrors
+        # this check.
+        p = _problem(2, 16, 16, 64, 3, 5, 1)
+        spec = DirectDepthwiseDgradWindowedSpec(
+            problem=p,
+            mfma=True,
+            fwd=True,
+            block_waves=8,
+            block_h=8,
+            w_fold=1,
+            prefetch_rows=1,
+        )
+        ok, why = self._ok(spec)
+        self.assertFalse(ok)
+        self.assertIn("square filter", why)
+        with self.assertRaises(ValueError):
+            build_direct_depthwise_dgrad_windowed(spec)
+
+    def test_grouped_mfma_count_includes_the_channel_chunks(self):
+        # N1: unrolled_mfmas() used to ignore the cpg/8 input chunks, so a
+        # grouped spec's MFMA cap missed them (96 estimated instead of 768);
+        # the C++ twin mirrors this count.
+        p = DirectConvProblem(
+            N=1, H=16, W=16, groups=2, cpg=64, kpg=64, KH=3, KW=3, PAD=1, dtype="fp16"
+        )
+        spec = DirectDepthwiseDgradWindowedSpec(
+            problem=p,
+            mfma=True,
+            fwd=True,
+            block_waves=8,
+            block_h=32,
+            w_fold=1,
+            prefetch_rows=1,
+        )
+        self.assertEqual(spec.unrolled_mfmas(), 768)
+        ok, why = self._ok(spec)
+        self.assertFalse(ok)
+        self.assertIn("MFMAs", why)
+        with self.assertRaises(ValueError):
+            build_direct_depthwise_dgrad_windowed(spec)
+
     def test_mfma_only_knobs_need_mfma(self):
         p = _problem(2, 8, 8, 64, 3, 3, 1)
         for kw in ({"w_fold": 2}, {"prefetch_rows": 2}):
@@ -829,15 +872,21 @@ def _fwd_launch(knobs: dict, p: DirectConvProblem, arch: str):
 
 # (N, H, W, groups, cpg, K, stride, dtype, knobs): depthwise and grouped, odd
 # and ragged extents, partial channel blocks, N not a multiple of w_fold,
-# a 3-wave block holding one 24-channel group, stride 2 on odd images.
+# a 3-wave block holding one 24-channel group, stride 2 on odd images, a 9x9
+# depthwise filter, cpg 56 (not a power of two), cpg 24 at stride 1, and
+# cpg 64 at stride 2.
 _FWD_CASES = (
     (3, 15, 17, 64, 1, 3, 1, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
     (2, 13, 21, 40, 1, 7, 1, "bf16", dict(block_waves=4, block_h=14, w_fold=1)),
     (2, 15, 13, 72, 1, 5, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=4)),
+    (2, 17, 19, 32, 1, 9, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=1)),
     (2, 14, 19, 12, 8, 3, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=2)),
     (3, 13, 11, 6, 16, 3, 2, "bf16", dict(block_waves=4, block_h=4, w_fold=1)),
     (1, 9, 18, 4, 32, 3, 1, "fp16", dict(block_waves=8, block_h=16, w_fold=1)),
     (2, 11, 10, 3, 24, 3, 2, "bf16", dict(block_waves=3, block_h=12, w_fold=2)),
+    (2, 12, 14, 3, 24, 3, 1, "fp16", dict(block_waves=3, block_h=12, w_fold=2)),
+    (2, 10, 13, 2, 56, 3, 1, "bf16", dict(block_waves=7, block_h=4, w_fold=1)),
+    (2, 11, 12, 2, 64, 3, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
 )
 
 

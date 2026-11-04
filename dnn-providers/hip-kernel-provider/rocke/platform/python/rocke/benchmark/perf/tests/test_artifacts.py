@@ -23,6 +23,8 @@ RAW = (
 
 
 class TestArtifactExport(unittest.TestCase):
+    ARCH = "gfx950"
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -53,7 +55,7 @@ class TestArtifactExport(unittest.TestCase):
                 [
                     "profile",
                     "--arch",
-                    "gfx950",
+                    self.ARCH,
                     "--op",
                     "gemm",
                     "--kernel-name",
@@ -203,3 +205,7 @@ class TestArtifactExport(unittest.TestCase):
         )
         schema.validate(self.read_json(dest / "samples/0000/measurement.json"))
         self.assertFalse((dest / "measurement.json").exists())
+
+
+class TestArtifactExportGfx942(TestArtifactExport):
+    ARCH = "gfx942"

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -73,7 +74,6 @@ void testing_spsv_csc_bad_arg(const Arguments& argus)
 
     // SpSV structures
     hipsparseSpMatDescr_t A;
-    hipsparseDnVecDescr_t x, y;
 
     hipsparseSpSVDescr_t descr;
 
@@ -85,8 +85,8 @@ void testing_spsv_csc_bad_arg(const Arguments& argus)
     verify_hipsparse_status_success(
         hipsparseCreateCsc(&A, m, n, nnz, dptr, drow, dval, idxType, idxType, idxBase, dataType),
         "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, m, dx, dataType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, dataType), "success");
+    hipsparseLocalDnVec x(m, dx, dataType);
+    hipsparseLocalDnVec y(m, dy, dataType);
 
     // SpSV buffer
     verify_hipsparse_status_invalid_handle(
@@ -151,8 +151,6 @@ void testing_spsv_csc_bad_arg(const Arguments& argus)
     // Destruct
     verify_hipsparse_status_success(hipsparseSpSV_destroyDescr(descr), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
 }
 
@@ -248,10 +246,9 @@ void testing_spsv_csc(Arguments argus)
         hipsparseCreateCsc(&A, m, m, nnz, dptr, drow, dval, typeI, typeJ, idx_base, typeT));
 
     // Create dense vectors
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    hipsparseLocalDnVec x(m, dx, typeT);
+    hipsparseLocalDnVec y1(m, dy_1, typeT);
+    hipsparseLocalDnVec y2(m, dy_2, typeT);
 
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(A, HIPSPARSE_SPMAT_FILL_MODE, &uplo, sizeof(uplo)));
@@ -264,8 +261,8 @@ void testing_spsv_csc(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_bufferSize(
         handle, transA, &h_alpha, A, x, y1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -391,13 +388,8 @@ void testing_spsv_csc(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
-
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
 
