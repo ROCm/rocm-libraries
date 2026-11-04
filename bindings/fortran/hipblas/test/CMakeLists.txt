@@ -300,3 +300,29 @@ if(NOT FORTRAN_ARRAY_INTERFACES STREQUAL "none")
     hipblas_fortran_add_test(${_t} f08)
   endforeach()
 endif()
+
+# Installed tests: the executables go to bin/, and a CTestTestfile.cmake with
+# the same tests and properties to bin/hipblas-fortran/, for ctest --test-dir.
+include(GNUInstallDirs)
+get_property(_hipblas_fortran_tests DIRECTORY PROPERTY TESTS)
+if(_hipblas_fortran_tests)
+  set(_ctest "${CMAKE_CURRENT_BINARY_DIR}/install-CTestTestfile.cmake")
+  file(WRITE "${_ctest}" "")
+  foreach(_test IN LISTS _hipblas_fortran_tests)
+    string(REPLACE "_fortran_" "_fortran_test_" _target "${_test}")
+    install(TARGETS ${_target} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests)
+    file(APPEND "${_ctest}" "add_test(${_test} \"../${_target}\")\n")
+    foreach(_prop LABELS SKIP_RETURN_CODE ENVIRONMENT PASS_REGULAR_EXPRESSION FAIL_REGULAR_EXPRESSION)
+      get_test_property(${_test} ${_prop} _value)
+      if(_value)
+        file(APPEND "${_ctest}" "set_tests_properties(${_test} PROPERTIES ${_prop} [=[${_value}]=])\n")
+      endif()
+    endforeach()
+  endforeach()
+  install(
+    FILES "${_ctest}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/hipblas-fortran"
+    COMPONENT tests
+    RENAME CTestTestfile.cmake
+  )
+endif()
