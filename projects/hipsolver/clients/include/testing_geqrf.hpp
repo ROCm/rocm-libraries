@@ -426,7 +426,7 @@ void geqrf_getError(const hipsolverHandle_t   handle,
                  HIPSOLVER_OP_N,
                  min_mn,
                  min_mn,
-                 min_mn,
+                 m,
                  neg_one,
                  hARes[b], // -Q^H
                  lda,
