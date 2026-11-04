@@ -1760,10 +1760,12 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
 
 
 def _check_knobs_int_typed(config: IngestorConfig, where: str = "engine.knobs") -> None:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field.
-    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives,
-    so the loader silently produces no knob at all for any other type. For a
-    slot, `config` is its `slot_view` and `where` names ``slots[<name>].knobs``."""
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field.
+    A knob is an int64: ``GenericPlanBuilder::getCustomKnobs`` advertises an int
+    field's own values and a string field's ordinals (the index into the field's
+    sorted value set, RFC 0019 §13.2). Any other type has no ordering a caller
+    could pin. For a slot, `config` is its `slot_view` and `where` names
+    ``slots[<name>].knobs``."""
     declared = config.kmd_field_by_name
     for knob in config.engine.knobs:
         kmd_field = declared.get(knob)
@@ -1772,15 +1774,12 @@ def _check_knobs_int_typed(config: IngestorConfig, where: str = "engine.knobs") 
                 f"{where} names '{knob}', which no kmd_fields entry "
                 f"declares. Every knob must name a declared KMD field."
             )
-        if not kmd_field.is_int_typed:
+        if not kmd_field.is_int_typed and kmd_field.type != "string":
             raise ConfigError(
                 f"{where} names '{knob}', declared in kmd_fields with "
-                f"type '{kmd_field.type}'. Only int-typed fields become "
-                f"usable knobs -- a non-int knob is accepted by the loader "
-                f"and then silently produces no knob at all, with no error "
-                f"and no warning, discovered only at plan-build time against "
-                f"a real device (GenericPlanBuilder::getCustomKnobs). Retype "
-                f"'{knob}' to 'int' or remove it from {where}."
+                f"type '{kmd_field.type}'. Only int-typed fields, and string "
+                f"fields addressed by ordinal, become usable knobs. Retype "
+                f"'{knob}' to 'int' or 'string', or remove it from {where}."
             )
 
 

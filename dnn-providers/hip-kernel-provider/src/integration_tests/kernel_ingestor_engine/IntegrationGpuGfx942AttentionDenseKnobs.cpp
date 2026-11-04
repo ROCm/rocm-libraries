@@ -71,9 +71,19 @@ using namespace hip_kernel_provider::test_utilities;
  * diagonal included). Hand-written rows add cold selection, B > 1, Sq != Skv, both alignments, the
  * deprecated causal flag and the default and a non-default scale.
  *
+ * Each row also names the launch grid it forces: the one-CTA-per-block grid at a block
+ * order (qb_minor, bt_hkv_minor, hq_minor_swz) or the persistent grid at a decode, forced
+ * through the persistent, nonpersist_decode and persist_decode knobs (the string ones by
+ * ordinal). Persistent rows cover W < NP, W % NP != 0, W >> NP, GQA 40/8 and 28/4, B > 1,
+ * an odd query-block count, Sq != Skv, every window and LSE; a cold row expects the
+ * persistent arm exactly where the engine's score prefers it on this device (D128 without
+ * a narrow window, and 304 CTAs a multiple of its CU count). A graph with Hq = 12 is never
+ * offered an hq_minor_swz kernel, which would drop and repeat work items there.
+ *
  * Each expected kernel id is resolved at run time from the production descriptors: the
- * one kernel of the class whose lds_row_pad and pv_priority are the policy arms, which
- * the engine's score ranks first among the arms sharing a tile.
+ * one kernel of the class and grid whose lds_row_pad, pv_priority, lds_num_buffers and
+ * v_reg_prefetch are the policy arms, which the engine's score ranks first among the arms
+ * sharing a tile and grid.
  *
  * A saved plan of one case, and of its LSE twin, is loaded with a new handle in both save
  * forms and must compute the original graph's CPU reference without selecting a kernel
@@ -91,6 +101,14 @@ constexpr const char* SERVED_ARCH = "gfx942";
 
 constexpr const char* BLOCK_M_KNOB = "block_m";
 constexpr const char* BLOCK_N_KNOB = "block_n";
+constexpr const char* PERSISTENT_KNOB = "persistent";
+constexpr const char* NONPERSIST_DECODE_KNOB = "nonpersist_decode";
+constexpr const char* PERSIST_DECODE_KNOB = "persist_decode";
+
+/// The persistent CTA count every persistent variant bakes, and the narrow-window bound
+/// past which the engine's cold score prefers it at D128.
+constexpr int64_t NUM_PERSISTENT = 304;
+constexpr int64_t NARROW_WINDOW = 256;
 
 /// The policy arms of the two knobs the engine does not expose (the score's first rank).
 constexpr int64_t POLICY_LDS_ROW_PAD = 8;
@@ -110,6 +128,12 @@ constexpr const char* SAVE_LOAD_CASE = "Shape_WindowTopLeftCrossLength";
 /// The same case binding the stats output: its plan saves the stats uid and restores the
 /// 11-argument kernel.
 constexpr const char* SAVE_LOAD_LSE_CASE = "Shape_WindowTopLeftCrossLength_Lse";
+
+/// A persistent case (bt_hkv_minor, GQA 40/8, B 3, W = 480 work items over 304 CTAs) and
+/// its LSE twin: the plan saves the grid and restores the 14- and 15-argument kernels with
+/// the fast-division pairs recomputed.
+constexpr const char* SAVE_LOAD_PERSISTENT_CASE = "Persist_Gqa40x8WNotAMultipleOfNp";
+constexpr const char* SAVE_LOAD_PERSISTENT_LSE_CASE = "Persist_Gqa40x8WNotAMultipleOfNp_Lse";
 
 /// The suffix of an LSE row's name.
 constexpr const char* LSE_SUFFIX = "_Lse";
@@ -157,15 +181,35 @@ struct Tile
     int64_t blockN;
 };
 
-/// One graph and the tile the engine must serve it with. A forced case sets block_m and
-/// block_n to the tile; a cold case sets no knob, and the tile is the one the engine's own
-/// ranking picks.
+/// A launch grid: the one-CTA-per-block grid at a block order, or the persistent grid at a
+/// decode.
+struct Grid
+{
+    bool persistent = false;
+    /// The nonpersist_decode, or on the persistent grid the persist_decode.
+    std::string order = "qb_minor";
+};
+
+Grid persistentGrid(const char* decode)
+{
+    return Grid{true, decode};
+}
+
+Grid blockOrder(const char* order)
+{
+    return Grid{false, order};
+}
+
+/// One graph and the tile and grid the engine must serve it with. A forced case sets
+/// block_m, block_n and the grid knobs; a cold case sets no knob, and the tile and grid are
+/// the ones the engine's own ranking picks (coldGrid for a case built with the default).
 struct KnobCase
 {
     std::string name;
     GraphShape shape;
     bool forced;
     Tile tile;
+    Grid grid = {};
 };
 
 /// One graph and a knob pair whose values the engine advertises for it one by one while
@@ -299,11 +343,87 @@ std::vector<KnobCase> knobCases()
                          tile});
                 }
             }
+            // The grids past qb_minor the catalog carries at the 256/64 tile: bt_hkv_minor
+            // in the causal cell, and at D128 the persistent base arm of every mask, at the
+            // decode the registry pins (bt_hkv_minor where the decodes balance causal work
+            // at the build shape, qb_major for no mask and the 128-key window).
+            const Tile base{256, 64};
+            addClass({prefix + "Causal_BtHkvMinor",
+                      makeShape(dataType, headSize, 16, 2, Mask::BOUNDS_TOP_LEFT, 0, 2, 512, 512),
+                      FORCED,
+                      base,
+                      blockOrder("bt_hkv_minor")});
+            if(headSize != 128)
+            {
+                continue;
+            }
+            addClass({prefix + "Causal_Persistent",
+                      makeShape(dataType, headSize, 8, 8, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512),
+                      FORCED,
+                      base,
+                      persistentGrid("bt_hkv_minor")});
+            addClass({prefix + "NoMask_Persistent",
+                      makeShape(dataType, headSize, 16, 4, Mask::NO_MASK, 0, 2, 512, 512),
+                      FORCED,
+                      base,
+                      persistentGrid("qb_major")});
+            for(const int64_t window : catalogWindows())
+            {
+                const int64_t seq = std::max<int64_t>(512, 2 * window);
+                addClass({prefix + "Window" + std::to_string(window) + "_Persistent",
+                          makeShape(
+                              dataType, headSize, 8, 2, Mask::WINDOW_TOP_LEFT, window, 1, seq, seq),
+                          FORCED,
+                          base,
+                          persistentGrid(window < 512 ? "qb_major" : "bt_hkv_minor")});
+            }
         }
     }
 
+    // hq_minor_swz, both grids, on bf16 D128 causal: Hq a multiple of 8, and an even
+    // query-block count under causal balancing on the persistent grid.
+    addClass({"D128_Bf16_Causal_HqMinorSwz",
+              makeShape(BF16, 128, 16, 2, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024),
+              FORCED,
+              Tile{256, 64},
+              blockOrder("hq_minor_swz")});
+    addClass({"D128_Bf16_Causal_PersistentHqMinorSwz",
+              makeShape(BF16, 128, 16, 2, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("hq_minor_swz")});
+
+    // The persistent grid over its work-item count W = nqb * Hq * B against NP = 304 CTAs.
+    // W % NP != 0 and W > NP, GQA 40/8, B > 1; then W >> NP (3.4 rounds), GQA 16; then GQA
+    // 28/4 with an odd query-block count; then Sq != Skv, causal and unmasked.
+    addClass({"Persist_Gqa40x8WNotAMultipleOfNp",
+              makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 3, 1024, 1024),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("bt_hkv_minor")});
+    addClass({"Persist_WFarAboveNp",
+              makeShape(BF16, 128, 128, 8, Mask::BOUNDS_TOP_LEFT, 0, 4, 512, 512),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("bt_hkv_minor")});
+    addClass({"Persist_Gqa28x4OddQueryBlocks",
+              makeShape(FP16, 128, 28, 4, Mask::BOUNDS_TOP_LEFT, 0, 2, 768, 768),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("bt_hkv_minor")});
+    addClass({"Persist_CausalCrossLength",
+              makeShape(BF16, 128, 8, 2, Mask::BOUNDS_TOP_LEFT, 0, 2, 512, 1024),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("bt_hkv_minor")});
+    addClass({"Persist_NoMaskCrossLength",
+              makeShape(FP16, 128, 12, 4, Mask::NO_MASK, 0, 3, 512, 1280),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("qb_major")});
+
     // Cold: no knob, so the 256/64 policy kernel where it divides, and otherwise the
-    // smallest dividing tile, which the score ranks next.
+    // smallest dividing tile, which the score ranks next; on the grid coldGrid names.
     cases.push_back({"Cold_Causal",
                      makeShape(BF16, 128, 32, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024),
                      COLD,
@@ -534,11 +654,18 @@ private:
     std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> _validator;
 };
 
-std::vector<KnobSetting> knobSettingsFor(const Tile& tile)
+/// The knob value that pins @p value of the string field @p field: its ordinal, the index
+/// into the field's sorted value set over the engine's packs (RFC 0019 13.2).
+int64_t ordinalOf(const std::string& field, const std::string& value);
+
+std::vector<KnobSetting> knobSettingsFor(const Tile& tile, const Grid& grid = {})
 {
     std::vector<KnobSetting> settings;
     settings.emplace_back(BLOCK_M_KNOB, tile.blockM);
     settings.emplace_back(BLOCK_N_KNOB, tile.blockN);
+    settings.emplace_back(PERSISTENT_KNOB, int64_t{grid.persistent ? 1 : 0});
+    const std::string field = grid.persistent ? PERSIST_DECODE_KNOB : NONPERSIST_DECODE_KNOB;
+    settings.emplace_back(field, ordinalOf(field, grid.order));
     return settings;
 }
 
@@ -611,7 +738,8 @@ int64_t catalogCausal(Mask mask)
 
 /// The id of the one rank-zero kernel this engine's gfx942 packs carry for @p shape's
 /// semantic fields and @p tile, as the selection line spells it.
-std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile& tile)
+std::optional<std::string>
+    expectedKernelId(const GraphShape& shape, const Tile& tile, const Grid& grid)
 {
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
     {
@@ -631,6 +759,10 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         {"lds_row_pad", POLICY_LDS_ROW_PAD},
         {"pv_priority", POLICY_PV_PRIORITY},
         {"emit_lse", int64_t{shape.withStats ? 1 : 0}},
+        {"persistent", int64_t{grid.persistent ? 1 : 0}},
+        {grid.persistent ? "persist_decode" : "nonpersist_decode", grid.order},
+        {"lds_num_buffers", int64_t{1}},
+        {"v_reg_prefetch", int64_t{0}},
     };
 
     std::vector<std::string> ids;
@@ -654,6 +786,59 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         return std::nullopt;
     }
     return ids.front();
+}
+
+int64_t ordinalOf(const std::string& field, const std::string& value)
+{
+    std::set<std::string> values;
+    forEachServedKernel(
+        [&field, &values](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+            const auto found = kernel.metadata.find(field);
+            if(found != kernel.metadata.end())
+            {
+                if(const auto* text = std::get_if<std::string>(&found->second))
+                {
+                    values.insert(*text);
+                }
+            }
+        });
+    const auto at = values.find(value);
+    EXPECT_NE(at, values.end()) << "no " << ENGINE_NAME << " kernel carries " << field << "="
+                                << value;
+    return static_cast<int64_t>(std::distance(values.begin(), at));
+}
+
+/// The device's compute-unit count, which the engine's cold score reads.
+int deviceMultiProcessorCount()
+{
+    int device = 0;
+    int count = 0;
+    if(hipGetDevice(&device) != hipSuccess
+       || hipDeviceGetAttribute(&count, hipDeviceAttributeMultiprocessorCount, device)
+              != hipSuccess)
+    {
+        ADD_FAILURE() << "cannot read the device's compute-unit count";
+        return 0;
+    }
+    return count;
+}
+
+/// The grid a cold case selects: the persistent arm at the decode the registry pins for the
+/// mask where the engine's score prefers it -- D128, no window or one wider than
+/// NARROW_WINDOW keys, and NUM_PERSISTENT a multiple of this device's CU count -- and the
+/// qb_minor grid otherwise.
+Grid coldGrid(const GraphShape& shape)
+{
+    const int cus = deviceMultiProcessorCount();
+    if(shape.headSize != 128 || (shape.window != 0 && shape.window <= NARROW_WINDOW) || cus <= 0
+       || NUM_PERSISTENT % cus != 0)
+    {
+        return Grid{};
+    }
+    // The registry pins its decode at the build shape (Sq = Skv = 512).
+    const bool causal = shape.mask != Mask::NO_MASK;
+    const bool balanced = causal && (shape.window <= 0 || shape.window >= 512);
+    return persistentGrid(balanced ? "bt_hkv_minor" : "qb_major");
 }
 
 /// The kernel id the plugin's selection line names, or nullopt when no plan was built.
@@ -786,6 +971,8 @@ using IntegrationGpuGfx942AttentionDenseKnobFilter
     = IntegrationGpuGfx942AttentionDenseBase<UnsatisfiableCase>;
 using IntegrationGpuGfx942AttentionDenseKnobCoverage
     = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
+using IntegrationGpuGfx942AttentionDenseSwzLegality
+    = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head
 /// size, dtype, causal flag, window, LSE and tile. The table must run every such class the
@@ -796,19 +983,32 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
            "read the catalog's kernel classes from";
 
-    using KernelClass
-        = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t, int64_t, int64_t>;
+    using KernelClass = std::tuple<int64_t,
+                                   std::string,
+                                   int64_t,
+                                   int64_t,
+                                   int64_t,
+                                   int64_t,
+                                   int64_t,
+                                   int64_t,
+                                   std::string>;
 
     std::set<KernelClass> tableClasses;
     for(const auto& knobCase : knobCases())
     {
+        if(!knobCase.forced)
+        {
+            continue;
+        }
         tableClasses.emplace(knobCase.shape.headSize,
                              catalogDtypeName(knobCase.shape.dataType),
                              catalogCausal(knobCase.shape.mask),
                              knobCase.shape.window,
                              int64_t{knobCase.shape.withStats ? 1 : 0},
                              knobCase.tile.blockM,
-                             knobCase.tile.blockN);
+                             knobCase.tile.blockN,
+                             int64_t{knobCase.grid.persistent ? 1 : 0},
+                             knobCase.grid.order);
     }
 
     std::set<KernelClass> catalogClasses;
@@ -827,15 +1027,33 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         const auto* emitLse = intField("emit_lse");
         const auto* blockM = intField("block_m");
         const auto* blockN = intField("block_n");
+        const auto* persistent = intField("persistent");
+        const auto stringField = [&kernel](const char* field) -> const std::string* {
+            const auto value = kernel.metadata.find(field);
+            return value == kernel.metadata.end() ? nullptr
+                                                  : std::get_if<std::string>(&value->second);
+        };
+        const auto* order = persistent != nullptr && *persistent == 1
+                                ? stringField("persist_decode")
+                                : stringField("nonpersist_decode");
         if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || window == nullptr
-           || emitLse == nullptr || blockM == nullptr || blockN == nullptr)
+           || emitLse == nullptr || blockM == nullptr || blockN == nullptr || persistent == nullptr
+           || order == nullptr)
         {
             ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
-                          << " carries no string dtype and integer head_size, causal, "
-                             "sliding_window, emit_lse, block_m and block_n";
+                          << " carries no string dtype and grid decode, and integer head_size, "
+                             "causal, sliding_window, emit_lse, block_m, block_n and persistent";
             return;
         }
-        catalogClasses.emplace(*headSize, *dtypeName, *causal, *window, *emitLse, *blockM, *blockN);
+        catalogClasses.emplace(*headSize,
+                               *dtypeName,
+                               *causal,
+                               *window,
+                               *emitLse,
+                               *blockM,
+                               *blockN,
+                               *persistent,
+                               *order);
     });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
@@ -844,12 +1062,23 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         {
             if(other.count(kernelClass) == 0)
             {
-                const auto& [headSize, dtype, causal, window, emitLse, blockM, blockN]
+                const auto& [headSize,
+                             dtype,
+                             causal,
+                             window,
+                             emitLse,
+                             blockM,
+                             blockN,
+                             persistent,
+                             order]
                     = kernelClass;
                 text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
                         + std::to_string(causal) + ", window " + std::to_string(window)
                         + ", emit_lse " + std::to_string(emitLse) + ", " + std::to_string(blockM)
-                        + "/" + std::to_string(blockN) + ")";
+                        + "/" + std::to_string(blockN);
+                text += ", persistent " + std::to_string(persistent) + " ";
+                text += order;
+                text += ")";
             }
         }
         return text.empty() ? std::string(" none") : text;
@@ -876,8 +1105,8 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
-    const auto settings
-        = testCase.forced ? knobSettingsFor(testCase.tile) : std::vector<KnobSetting>{};
+    const auto settings = testCase.forced ? knobSettingsFor(testCase.tile, testCase.grid)
+                                          : std::vector<KnobSetting>{};
     auto result = sdpa.graph->create_execution_plan_ext(engineId(), settings);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -893,7 +1122,8 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
         << "no selection line from " << ENGINE_NAME << ". Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    const auto expectedId = expectedKernelId(testCase.shape, testCase.tile);
+    const auto grid = testCase.forced ? testCase.grid : coldGrid(testCase.shape);
+    const auto expectedId = expectedKernelId(testCase.shape, testCase.tile, grid);
     ASSERT_TRUE(expectedId.has_value());
     EXPECT_EQ(*selected, *expectedId) << "Captured logs:\n" << recorder.getRecordedLogsAsString();
 
@@ -958,6 +1188,57 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
                                                          << recorder.getRecordedLogsAsString();
 }
 
+/// hq_minor_swz at Hq = 12 drops and repeats work items, so the engine never offers its
+/// kernels to such a graph: neither grid's hq_minor_swz ordinal is advertised (while a
+/// graph with Hq = 16 is offered both), and the graph forced to the persistent grid at the
+/// swz kernels' tile is served by the bt_hkv_minor arm and matches the CPU reference.
+TEST_F(IntegrationGpuGfx942AttentionDenseSwzLegality, NeverOffersAnHqMinorSwzKernelAtHq12)
+{
+    const auto twelve
+        = makeShape(DataType::BFLOAT16, 128, 12, 4, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024);
+    const auto sixteen
+        = makeShape(DataType::BFLOAT16, 128, 16, 2, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024);
+    const int64_t gridSwz = ordinalOf(NONPERSIST_DECODE_KNOB, "hq_minor_swz");
+    const int64_t persistentSwz = ordinalOf(PERSIST_DECODE_KNOB, "hq_minor_swz");
+    for(const auto& [shape, offered] : {std::pair{sixteen, true}, std::pair{twelve, false}})
+    {
+        auto sdpa = buildSdpaGraph("SwzLegality", shape);
+        ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
+        std::vector<Knob> knobs;
+        const auto result = sdpa.graph->get_knobs_for_engine(engineId(), knobs);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(advertises(knobs, NONPERSIST_DECODE_KNOB, gridSwz), offered)
+            << "Hq " << shape.queryHeads;
+        EXPECT_EQ(advertises(knobs, PERSIST_DECODE_KNOB, persistentSwz), offered)
+            << "Hq " << shape.queryHeads;
+    }
+
+    const ScopedPluginLogCapture capture(this);
+    const auto& recorder = capture.recorder();
+    auto sdpa = buildSdpaGraph("SwzLegalityHq12", twelve);
+    ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
+    std::vector<KnobSetting> settings;
+    settings.emplace_back(BLOCK_M_KNOB, int64_t{256});
+    settings.emplace_back(BLOCK_N_KNOB, int64_t{64});
+    settings.emplace_back(PERSISTENT_KNOB, int64_t{1});
+    auto result = sdpa.graph->create_execution_plan_ext(engineId(), settings);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    result = sdpa.graph->check_support();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    result = sdpa.graph->build_plans();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const auto selected = selectedKernelId(recorder);
+    const auto expected = expectedKernelId(twelve, Tile{256, 64}, persistentGrid("bt_hkv_minor"));
+    ASSERT_TRUE(selected.has_value() && expected.has_value());
+    EXPECT_EQ(*selected, *expected) << "Captured logs:\n" << recorder.getRecordedLogsAsString();
+
+    GraphVerificationContext context(*sdpa.graph);
+    const float tolerance = sdpaForwardTolerance(twelve.dataType);
+    registerValidator(context, sdpa.output, tolerance, tolerance);
+    verifyBuiltGraph(context, /*seed=*/0);
+}
+
 class IntegrationGpuGfx942AttentionDenseSaveLoad
     : public IntegrationGpuGfx942AttentionDenseBase<KnobCase>
 {
@@ -982,8 +1263,8 @@ protected:
             const ScopedPluginLogCapture capture(this);
             ASSERT_NO_FATAL_FAILURE(this->buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
-            auto result
-                = sdpa.graph->create_execution_plan_ext(engineId(), knobSettingsFor(knobCase.tile));
+            auto result = sdpa.graph->create_execution_plan_ext(
+                engineId(), knobSettingsFor(knobCase.tile, knobCase.grid));
             ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
             result = sdpa.graph->check_support();
             ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -1102,6 +1383,24 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAnLseGraphAndPlanInAF
 TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAnLsePlanOnlyInAFreshHandle)
 {
     roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_LSE_CASE);
+}
+
+// The saved grid selects the persistent kernel's arguments on load, and the loaded plan
+// recomputes the fast-division pairs and the 304-CTA grid from the saved shape.
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, SAVE_LOAD_PERSISTENT_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_PERSISTENT_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentLsePlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, SAVE_LOAD_PERSISTENT_LSE_CASE);
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_PERSISTENT_LSE_CASE);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick,

@@ -39,14 +39,14 @@
  * a success status. This is the silent-wrong-answer class the layout and stride gates in
  * the matcher exist to stop, one layer lower down.
  *
- * Every variant in gfx942_attention_dense.kdp.json declares `persistent: false` and
- * `use_sinks: false`, so two forms ship: the 10-argument form -- four pointers, scale,
- * then batch, seqlen_q, seqlen_kv, num_query_heads and num_kv_heads -- of an
- * `emit_lse: false` kernel, and the 11-argument form of an `emit_lse: true` kernel, which
- * takes lse_ptr last. A graph that binds a stats output prepares the 11-argument form and
- * any other the 10-argument one. The fast-division and sink tails of
- * attention_dense_signature are unreachable from this catalog; the persistent form is
- * covered here only as a shape the pack must refuse.
+ * Every variant in gfx942_attention_dense.kdp.json declares `use_sinks: false`. A grid
+ * kernel takes the 10-argument form -- four pointers, scale, then batch, seqlen_q,
+ * seqlen_kv, num_query_heads and num_kv_heads -- whatever its block order, and a kernel on
+ * the persistent grid then takes a magic/shift pair per fast-division divisor of its
+ * decode, in the decode's own order (14 or 16 arguments). An `emit_lse: true` kernel takes
+ * lse_ptr last. A graph that binds a stats output prepares the LSE form and any other the
+ * form without it; the candidate's own grid selects the pairs. The sink tail of
+ * attention_dense_signature is unreachable from this catalog.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
  * one. The name comparison is the only one that tells the four pointers apart, or `scale`
@@ -110,19 +110,41 @@ std::vector<KernelArgument> pythonAbi()
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
-/// The form the persistent body takes on its default qb_major decode: the same ten
-/// arguments, then a magic/shift pair per fast-division divisor (batch, num_query_heads,
-/// gqa), so the pointers and shape all still line up and only the count differs.
-std::vector<KernelArgument> persistentAbi()
+/// The divisors of each persistent decode, in kernarg order (PersistDecode.fastdiv_divisors).
+const std::vector<std::pair<std::string, std::vector<std::string>>>& persistentDecodes()
+{
+    static const std::vector<std::pair<std::string, std::vector<std::string>>> s_decodes{
+        {"qb_major", {"batch", "num_query_heads", "gqa"}},
+        {"hkv_major", {"batch", "gqa", "nqb"}},
+        {"bt_hkv_minor", {"batch", "num_query_heads"}},
+        {"hq_minor_swz", {"nqb", "num_query_heads", "gqa"}},
+    };
+    return s_decodes;
+}
+
+/// The form the persistent body takes on @p decode (qb_major by default): the same ten
+/// arguments, then a magic/shift pair per fast-division divisor, so the pointers and shape
+/// all still line up and only the count differs; lse_ptr last for @p lse.
+std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major", bool lse = false)
 {
     auto signature = pythonAbi();
-    for(const char* divisor : {"batch", "num_query_heads", "gqa"})
+    for(const auto& [name, divisors] : persistentDecodes())
     {
-        for(const char* part : {"_magic", "_shift"})
+        if(name != decode)
         {
-            signature.push_back(
-                KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, std::string(divisor) + part});
+            continue;
         }
+        for(const auto& divisor : divisors)
+        {
+            for(const char* part : {"_magic", "_shift"})
+            {
+                signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, divisor + part});
+            }
+        }
+    }
+    if(lse)
+    {
+        signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
     }
     return signature;
 }
@@ -262,7 +284,8 @@ constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 /// as reporting the absence. The metadata is the completed baseline tile prepare() reads
 /// before the comparison; the tile is not what these cases are about, and
 /// TestGfx942AttentionDenseDispatch.cpp owns its refusal.
-KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
+KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded,
+                            const std::string& persistDecode = "")
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -279,18 +302,31 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
     kernel.source.signature = recorded;
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
+    // The qb_minor grid, as a record completed through the KMD defaults carries it.
     kernel.metadata = {
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), int64_t{256}},
         {std::string("block_n"), int64_t{64}},
+        {std::string("persistent"), int64_t{0}},
+        {std::string("num_persistent"), int64_t{304}},
+        {std::string("persist_decode"), std::string("auto")},
+        {std::string("nonpersist_decode"), std::string("qb_minor")},
     };
+    // A persistent candidate at @p persistDecode, 304 CTAs.
+    if(!persistDecode.empty())
+    {
+        kernel.metadata[std::string("persistent")] = int64_t{1};
+        kernel.metadata[std::string("persist_decode")] = persistDecode;
+    }
     return kernel;
 }
 
 /// Runs the pack's prepare() over a descriptor recording @p recorded, for a graph that
 /// binds @p stats, and returns the message of whatever it throws. Empty means it returned
 /// a prepared dispatch, which no case expects.
-std::string prepareFailure(const std::vector<KernelArgument>& recorded, Stats stats = Stats::NONE)
+std::string prepareFailure(const std::vector<KernelArgument>& recorded,
+                           Stats stats = Stats::NONE,
+                           const std::string& persistDecode = "")
 {
     registerNativeIngestorSymbols();
 
@@ -323,7 +359,7 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded, Stats st
 
     try
     {
-        handler->prepare(context, *bound, makeKernel(recorded));
+        handler->prepare(context, *bound, makeKernel(recorded, persistDecode));
     }
     catch(const std::exception& error)
     {
@@ -336,9 +372,10 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded, Stats st
 /// other grounds prepare() can fail for.
 void expectRefused(const std::vector<KernelArgument>& recorded,
                    const char* what,
-                   Stats stats = Stats::NONE)
+                   Stats stats = Stats::NONE,
+                   const std::string& persistDecode = "")
 {
-    const std::string failure = prepareFailure(recorded, stats);
+    const std::string failure = prepareFailure(recorded, stats, persistDecode);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
@@ -386,9 +423,55 @@ TEST(TestGfx942AttentionDenseSignature, RefusesAnExtraTrailingArgument)
     expectRefused(signature, "an eleven-argument list is not this ABI");
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesThePersistentFastDivisionForm)
+TEST(TestGfx942AttentionDenseSignature, RefusesThePersistentFastDivisionFormForAGridKernel)
 {
-    expectRefused(persistentAbi(), "the persistent form does not ship in this catalog");
+    expectRefused(persistentAbi(), "a grid kernel takes no fast-division pairs");
+}
+
+/// A persistent candidate prepares its own decode's form, with and without lse_ptr; the
+/// grid form and every other decode's pairs are refused.
+TEST(TestGfx942AttentionDenseSignature, AcceptsThePersistentFormOfTheCandidatesOwnDecode)
+{
+    for(const auto& [decode, divisors] : persistentDecodes())
+    {
+        for(const auto stats : {Stats::NONE, Stats::BOUND})
+        {
+            const bool lse = stats == Stats::BOUND;
+            const std::string failure = prepareFailure(persistentAbi(decode, lse), stats, decode);
+            ASSERT_FALSE(failure.empty()) << decode;
+            EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+                << decode << " lse " << lse << ": " << failure;
+        }
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheGridFormForAPersistentKernel)
+{
+    for(const auto& [decode, divisors] : persistentDecodes())
+    {
+        expectRefused(pythonAbi(), "a persistent kernel takes its pairs", Stats::NONE, decode);
+        expectRefused(pythonLseAbi(),
+                      "a persistent LSE kernel takes its pairs before lse_ptr",
+                      Stats::BOUND,
+                      decode);
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesAnotherDecodesPairs)
+{
+    for(const auto& [decode, divisors] : persistentDecodes())
+    {
+        for(const auto& [other, otherDivisors] : persistentDecodes())
+        {
+            if(other != decode)
+            {
+                expectRefused(persistentAbi(other),
+                              "another decode's pairs name other divisors",
+                              Stats::NONE,
+                              decode);
+            }
+        }
+    }
 }
 
 // =============================================================================

@@ -384,10 +384,15 @@ KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64, bool writ
     kernel.source.signature = recordedSignature(writesLse);
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
+    // The qb_minor grid, as a record completed through the KMD defaults carries it.
     kernel.metadata = {
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), blockM},
         {std::string("block_n"), blockN},
+        {std::string("persistent"), int64_t{0}},
+        {std::string("num_persistent"), int64_t{304}},
+        {std::string("persist_decode"), std::string("auto")},
+        {std::string("nonpersist_decode"), std::string("qb_minor")},
     };
     return kernel;
 }

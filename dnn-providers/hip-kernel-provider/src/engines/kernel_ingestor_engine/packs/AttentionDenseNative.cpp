@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -944,6 +945,35 @@ std::optional<int64_t> integerMetadata(const KernelDefinition& kernel, std::stri
     return *value;
 }
 
+std::optional<std::string> stringMetadata(const KernelDefinition& kernel, std::string_view field)
+{
+    const auto it = kernel.metadata.find(std::string(field));
+    if(it == kernel.metadata.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&it->second);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
+
+AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch)
+{
+    AttentionDenseGridShape shape;
+    shape.batch = launch.problem.batch;
+    shape.seqLenQ = launch.problem.seqLenQ;
+    shape.seqLenKv = launch.problem.seqLenKv;
+    shape.numQueryHeads = launch.problem.numQueryHeads;
+    shape.numKvHeads = launch.problem.numKvHeads;
+    shape.blockM = launch.blockM;
+    shape.causal = launch.binding.causal != 0;
+    shape.slidingWindow = launch.binding.slidingWindow;
+    return shape;
+}
+
 std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
                                                 const AttentionDenseArch& arch)
 {
@@ -977,6 +1007,11 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
  * On an arch that serves stats, LSE is baked at compile time: a candidate that writes it
  * takes a trailing lse_ptr and serves exactly the graphs that bind a stats output, and
  * one that does not serves exactly the graphs that bind none.
+ *
+ * On an arch that serves grids, the candidate's launch grid must be legal at the graph's
+ * shape (AttentionDensePersistent.hpp gridIllegality): hq_minor_swz at a head count that
+ * is not a multiple of the XCD count, or a persistent decode past its fast-division bound,
+ * is declined so another grid serves the graph.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -1058,10 +1093,32 @@ bool kernelMatches(const MatchContext& context,
         }
     }
 
-    return tileDivides(*tile, problem)
-           && (!arch.servesSlidingWindow()
-               || arch.windowReachesKeys(
-                   tile->blockM, tile->blockN, problem.seqLenQ, problem.seqLenKv, *slidingWindow));
+    if(!tileDivides(*tile, problem)
+       || (arch.servesSlidingWindow()
+           && !arch.windowReachesKeys(
+               tile->blockM, tile->blockN, problem.seqLenQ, problem.seqLenKv, *slidingWindow)))
+    {
+        return false;
+    }
+
+    if(arch.servesGrids())
+    {
+        const auto grid = arch.candidateGrid(kernel);
+        if(!grid.has_value())
+        {
+            return false;
+        }
+        AttentionDenseLaunchInputs launch;
+        launch.problem = problem;
+        launch.blockM = tile->blockM;
+        launch.binding.causal = *causal;
+        launch.binding.slidingWindow = *slidingWindow;
+        if(gridIllegality(*grid, gridShape(launch)).has_value())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 namespace
@@ -1081,14 +1138,38 @@ int64_t savedStatsUidSelector(const SavedLaunchInputs& inputs)
     return uid == nullptr ? ATTENTION_DENSE_NO_STATS : *uid;
 }
 
-/// The kernel signature a contract's launch passes, for a kernel that writes LSE
+/// The saved grid as restore's selector reads it, before any value is checked: the
+/// persistent grid at the saved decode when `grid_order` is `persistent` and
+/// `persist_decode` names a runtime decode, else the qb_minor grid (every non-persistent
+/// order takes the same arguments). Anything malformed is refused by the reader afterwards.
+AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
+{
+    const auto savedString = [&inputs](std::string_view name) -> std::string {
+        const auto found = inputs.values.find(std::string(name));
+        const auto* value
+            = found == inputs.values.end() ? nullptr : std::get_if<std::string>(&found->second);
+        return value == nullptr ? std::string() : *value;
+    };
+    AttentionDenseGrid grid;
+    const auto decode = parsePersistDecode(savedString(PERSIST_DECODE_VALUE));
+    if(parseGridOrder(savedString(GRID_ORDER_VALUE)) == AttentionDenseGridOrder::PERSISTENT
+       && decode.has_value())
+    {
+        grid.order = AttentionDenseGridOrder::PERSISTENT;
+        grid.decode = *decode;
+    }
+    return grid;
+}
+
+/// The kernel signature a contract's launch passes, for a kernel on @p grid that writes LSE
 /// (@p writesLse) or not.
 ///
-/// Every shipped variant is non-persistent, so no fast-division kernargs follow the shape,
-/// and use_sinks=False, so no sink_ptr slot. RUNTIME_HEAD_COUNTS is the form every kernel
-/// in both catalogs takes; BAKED_HEAD_COUNTS is the 8-argument form of kernels built before
-/// the head counts became runtime arguments. An emit_lse kernel (gfx942 only) takes one
-/// more argument, lse_ptr, last: the 11-argument form.
+/// RUNTIME_HEAD_COUNTS is the form every kernel in both catalogs takes; BAKED_HEAD_COUNTS is
+/// the 8-argument form of kernels built before the head counts became runtime arguments. A
+/// kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
+/// fast-division divisor of its decode after the shape (runtime_kernarg_fields), 14 or 16
+/// arguments; a non-persistent order takes none. An emit_lse kernel (gfx942 only) takes one
+/// more argument, lse_ptr, last. use_sinks=False everywhere, so there is no sink_ptr slot.
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one. Kind and size alone cannot tell the four pointers
@@ -1102,7 +1183,8 @@ int64_t savedStatsUidSelector(const SavedLaunchInputs& inputs)
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
 /// mismatch diagnostic prints the real layout beside the recorded one instead of ten
 /// zeroes that read as data.
-std::vector<KernelArgument> kernelSignature(AttentionDenseAbi abi, bool writesLse)
+std::vector<KernelArgument>
+    kernelSignature(AttentionDenseAbi abi, const AttentionDenseGrid& grid, bool writesLse)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
@@ -1121,9 +1203,22 @@ std::vector<KernelArgument> kernelSignature(AttentionDenseAbi abi, bool writesLs
         signature.push_back(KernelArgument{"by_value", I32, 48, "num_query_heads"});
         signature.push_back(KernelArgument{"by_value", I32, 52, "num_kv_heads"});
     }
+    if(grid.persistent())
+    {
+        for(const auto divisor : fastDivDivisors(grid.decode))
+        {
+            for(const char* part : {"_magic", "_shift"})
+            {
+                const uint32_t end = signature.back().offset + signature.back().size;
+                signature.push_back(
+                    KernelArgument{"by_value", I32, end, std::string(divisorName(divisor)) + part});
+            }
+        }
+    }
     if(writesLse)
     {
-        // At the next pointer-aligned offset: 56 after num_kv_heads.
+        // At the next pointer-aligned offset: 56 after num_kv_heads, 72 or 80 after two or
+        // three fast-division pairs.
         const uint32_t end = signature.back().offset + signature.back().size;
         signature.push_back(
             KernelArgument{"global_buffer", PTR, (end + PTR - 1) / PTR * PTR, "lse_ptr"});
@@ -1142,6 +1237,7 @@ public:
         : _code(std::move(code))
         , _launch(launch)
         , _contract(contract)
+        , _fastDiv(fastDivKernargs(launch.grid, gridShape(launch)))
     {
     }
 
@@ -1167,19 +1263,29 @@ public:
         return _contract;
     }
 
+    /// The persistent grid's fast-division kernargs, computed from the launch shape; empty
+    /// off it.
+    const std::vector<AttentionDenseFastDivPair>& fastDiv() const
+    {
+        return _fastDiv;
+    }
+
 private:
     IngestorKernelCode _code;
     AttentionDenseLaunchInputs _launch;
     AttentionDenseContract _contract;
+    std::vector<AttentionDenseFastDivPair> _fastDiv;
 };
 
 // Applies the launch geometry to `code` and builds the prepared dispatch. A plan built
 // from a graph and a plan restored from a saved payload both come through here.
 // `kernelName` is only for the diagnostic.
 //
-// Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from descriptor
-// shape metadata: that carries canonical build inputs (B=1, Sq=Skv=512), not runtime
-// constraints. block_n does not enter the launch.
+// Grid from the SELECTED CANDIDATE'S block_m and launch grid and the GRAPH PROBLEM, not
+// from descriptor shape metadata: that carries canonical build inputs (B=1, Sq=Skv=512),
+// not runtime constraints. block_n does not enter the launch. The arch's geometry validates
+// block_m and sizes the CTA and the qb_minor grid; another order is sized by
+// AttentionDensePersistent.hpp, the persistent grid being exactly num_persistent CTAs.
 std::unique_ptr<PreparedDispatch>
     makePreparedAttentionDense(IngestorKernelCode code,
                                const AttentionDenseLaunchInputs& launch,
@@ -1192,7 +1298,37 @@ std::unique_ptr<PreparedDispatch>
         launch.blockM, problem.seqLenQ, problem.numQueryHeads, problem.batch, kernelName);
 
     code.setBlockSize(geometry.blockX, 1, 1);
-    code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+    if(launch.grid.order == AttentionDenseGridOrder::QB_MINOR)
+    {
+        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+    }
+    else
+    {
+        const auto shape = gridShape(launch);
+        const auto illegal = gridIllegality(launch.grid, shape);
+        if(illegal.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string(arch.label) + " attention_dense: kernel '" + kernelName
+                    + "' cannot launch its " + std::string(gridOrderName(launch.grid.order))
+                    + " grid over this shape: " + *illegal);
+        }
+        const auto dims = gridDims(launch.grid, shape);
+        for(const int64_t dim : dims)
+        {
+            if(dim <= 0 || dim > std::numeric_limits<int32_t>::max())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string(arch.label) + " attention_dense: kernel '" + kernelName
+                        + "' has a grid dimension of " + std::to_string(dim) + " over this shape");
+            }
+        }
+        code.setGridSize(static_cast<unsigned>(dims[0]),
+                         static_cast<unsigned>(dims[1]),
+                         static_cast<unsigned>(dims[2]));
+    }
 
     return std::make_unique<PreparedAttentionDense>(std::move(code), launch, contract);
 }
@@ -1250,6 +1386,24 @@ public:
                     + "' declares no supported block_m/block_n tile");
         }
 
+        // kernel_match declines a candidate without a grid the arch launches; the same
+        // defence in depth, since the grid decides the CTA count and the kernel arguments.
+        AttentionDenseGrid grid;
+        if(_arch.servesGrids())
+        {
+            const auto candidateGrid = _arch.candidateGrid(kernel);
+            if(!candidateGrid.has_value())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string(_arch.label) + " attention_dense: kernel '"
+                        + toString(kernel.kernelId)
+                        + "' declares no launch grid the engine "
+                          "launches");
+            }
+            grid = *candidateGrid;
+        }
+
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
@@ -1272,11 +1426,11 @@ public:
         }
 
         auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, kernelSignature(_contract.abi, writesLse));
+            _kpackLoader, context, kernel, kernelSignature(_contract.abi, grid, writesLse));
 
         return makePreparedAttentionDense(
             std::move(code),
-            AttentionDenseLaunchInputs{binding, problem, tile->blockM},
+            AttentionDenseLaunchInputs{binding, problem, tile->blockM, grid},
             toString(kernel.kernelId),
             _arch,
             _contract);
@@ -1294,15 +1448,18 @@ public:
             return readLaunchInputs(saved, _arch);
         };
         // Which of the contract's argument lists the saved kernel must take is selected by
-        // the saved stats uid, read before restoreIngestorLaunch checks anything. A kernel
-        // whose arguments disagree with the uid -- an LSE kernel saved without a stats
-        // output, or the reverse -- is then refused by the signature check.
+        // the saved stats uid and grid, read before restoreIngestorLaunch checks anything. A
+        // kernel whose arguments disagree with them -- an LSE kernel saved without a stats
+        // output, a persistent kernel saved under another decode or as a grid, or the
+        // reverse -- is then refused by the signature check.
         const bool writesLse
             = _arch.servesStats() && savedStatsUidSelector(inputs) != ATTENTION_DENSE_NO_STATS;
+        const AttentionDenseGrid grid
+            = _arch.servesGrids() ? savedGridSelector(inputs) : AttentionDenseGrid{};
         auto restored = restoreIngestorLaunch<AttentionDenseLaunchInputs>(
             inputs,
             std::move(code),
-            kernelSignature(_contract.abi, writesLse),
+            kernelSignature(_contract.abi, grid, writesLse),
             readThisContract,
             deviceOrdinal);
         return makePreparedAttentionDense(
@@ -1316,7 +1473,7 @@ public:
         const auto& launch = preparedDense.launchInputs();
         return SavedLaunchInputs{
             std::string(preparedDense.contract().symbol),
-            launchValues(launch.binding, launch.problem, launch.blockM, _arch)};
+            launchValues(launch.binding, launch.problem, launch.blockM, _arch, launch.grid)};
     }
 
     bool supportsSaving() const override
@@ -1342,54 +1499,63 @@ public:
         const auto o
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
-        const auto& p = preparedDense.launchInputs().problem;
+        const auto& launchInputs = preparedDense.launchInputs();
+        const auto& p = launchInputs.problem;
         auto& kernel = preparedDense.kernelForStream(handle.getStream());
-        // Exactly the arguments the code object was checked against: a BAKED_HEAD_COUNTS
-        // code object bakes the head counts, a RUNTIME_HEAD_COUNTS one reads them as the
-        // two trailing arguments, and one that writes LSE takes lse_ptr after them. Only
-        // gfx950 has a BAKED_HEAD_COUNTS contract, and it binds no stats output.
-        if(preparedDense.contract().abi == AttentionDenseAbi::BAKED_HEAD_COUNTS)
+
+        // Exactly the arguments the code object was checked against (kernelSignature): a
+        // BAKED_HEAD_COUNTS code object bakes the head counts, a RUNTIME_HEAD_COUNTS one
+        // reads them after seqlen_kv, a persistent one then takes its fast-division pairs,
+        // and one that writes LSE takes lse_ptr last. Only gfx950 has a BAKED_HEAD_COUNTS
+        // contract, and it binds no stats output and launches no persistent grid.
+        std::array<void*, 4> pointers{q.ptr, k.ptr, v.ptr, o.ptr};
+        float scale = binding.scale;
+        std::array<int32_t, 5> shape{static_cast<int32_t>(p.batch),
+                                     static_cast<int32_t>(p.seqLenQ),
+                                     static_cast<int32_t>(p.seqLenKv),
+                                     static_cast<int32_t>(p.numQueryHeads),
+                                     static_cast<int32_t>(p.numKvHeads)};
+        auto fastDiv = preparedDense.fastDiv();
+        const bool writesLse = binding.stats != ATTENTION_DENSE_NO_STATS;
+        void* lse = writesLse ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                    binding.stats, deviceBuffers, numDeviceBuffers)
+                                    .ptr
+                              : nullptr;
+
+        const bool headCounts
+            = preparedDense.contract().abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
+        std::vector<void*> params;
+        params.reserve(pointers.size() + 1 + shape.size() + 2 * fastDiv.size() + 1);
+        for(auto& pointer : pointers)
         {
-            kernel.launch(handle.getStream(),
-                          q.ptr,
-                          k.ptr,
-                          v.ptr,
-                          o.ptr,
-                          binding.scale,
-                          static_cast<int32_t>(p.batch),
-                          static_cast<int32_t>(p.seqLenQ),
-                          static_cast<int32_t>(p.seqLenKv));
-            return;
+            params.push_back(static_cast<void*>(&pointer));
         }
-        if(binding.stats != ATTENTION_DENSE_NO_STATS)
+        params.push_back(&scale);
+        for(size_t index = 0; index < (headCounts ? shape.size() : 3); ++index)
         {
-            const auto lse = hipdnn_plugin_sdk::findDeviceBuffer(
-                binding.stats, deviceBuffers, numDeviceBuffers);
-            kernel.launch(handle.getStream(),
-                          q.ptr,
-                          k.ptr,
-                          v.ptr,
-                          o.ptr,
-                          binding.scale,
-                          static_cast<int32_t>(p.batch),
-                          static_cast<int32_t>(p.seqLenQ),
-                          static_cast<int32_t>(p.seqLenKv),
-                          static_cast<int32_t>(p.numQueryHeads),
-                          static_cast<int32_t>(p.numKvHeads),
-                          lse.ptr);
-            return;
+            params.push_back(&shape.at(index));
         }
-        kernel.launch(handle.getStream(),
-                      q.ptr,
-                      k.ptr,
-                      v.ptr,
-                      o.ptr,
-                      binding.scale,
-                      static_cast<int32_t>(p.batch),
-                      static_cast<int32_t>(p.seqLenQ),
-                      static_cast<int32_t>(p.seqLenKv),
-                      static_cast<int32_t>(p.numQueryHeads),
-                      static_cast<int32_t>(p.numKvHeads));
+        for(auto& pair : fastDiv)
+        {
+            params.push_back(&pair.magic);
+            params.push_back(&pair.shift);
+        }
+        if(writesLse)
+        {
+            params.push_back(static_cast<void*>(&lse));
+        }
+        // The count is the signature's by construction; checked so a skew can never launch.
+        const auto expected
+            = kernelSignature(preparedDense.contract().abi, launchInputs.grid, writesLse).size();
+        if(params.size() != expected)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string(_arch.label) + " attention_dense: the launch packs "
+                    + std::to_string(params.size()) + " kernel arguments, the signature "
+                    + std::to_string(expected));
+        }
+        kernel.launchWithParams(handle.getStream(), params.data());
     }
 
 private:
@@ -1500,6 +1666,62 @@ void requireServedSavedShape(const SavedLaunchInputs& inputs,
     }
 }
 
+// Reads the saved grid of an arch that serves grids, and refuses one the kernel match never
+// admits at the saved shape. The shape must already have been validated.
+AttentionDenseGrid readSavedGrid(const SavedLaunchInputs& inputs,
+                                 const AttentionDenseLaunchInputs& launch)
+{
+    constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
+    const std::string orderName = requireLaunchString(inputs, GRID_ORDER_VALUE);
+    const auto order = parseGridOrder(orderName);
+    if(!order.has_value())
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GRID_ORDER_VALUE,
+                                        "must be qb_minor, bt_hkv_minor, hq_minor_swz or "
+                                        "persistent; the plan holds '"
+                                            + orderName + "'");
+    }
+    AttentionDenseGrid grid;
+    grid.order = *order;
+    const std::string decodeName = requireLaunchString(inputs, PERSIST_DECODE_VALUE);
+    if(grid.persistent())
+    {
+        const auto decode = parsePersistDecode(decodeName);
+        if(!decode.has_value())
+        {
+            refuseAttentionDenseLaunchValue(
+                inputs,
+                PERSIST_DECODE_VALUE,
+                "must name a decode the persistent kernel reads the shape for at run time "
+                "(qb_major, hkv_major, bt_hkv_minor or hq_minor_swz); the plan holds '"
+                    + decodeName + "'");
+        }
+        grid.decode = *decode;
+        grid.numPersistent = requireLaunchInt(inputs, NUM_PERSISTENT_VALUE, 1, INT32_LIMIT);
+    }
+    else
+    {
+        if(!decodeName.empty())
+        {
+            refuseAttentionDenseLaunchValue(inputs,
+                                            PERSIST_DECODE_VALUE,
+                                            "must be empty off the persistent grid; the plan "
+                                            "holds '"
+                                                + decodeName + "'");
+        }
+        static_cast<void>(requireLaunchInt(inputs, NUM_PERSISTENT_VALUE, 0, 0));
+    }
+    AttentionDenseLaunchInputs withGrid = launch;
+    withGrid.grid = grid;
+    const auto illegal = gridIllegality(grid, gridShape(withGrid));
+    if(illegal.has_value())
+    {
+        refuseAttentionDenseLaunchValue(inputs, GRID_ORDER_VALUE, "cannot launch: " + *illegal);
+    }
+    return grid;
+}
+
 } // namespace
 
 std::unique_ptr<IKernelDispatchHandler<Handle>>
@@ -1513,7 +1735,8 @@ std::unique_ptr<IKernelDispatchHandler<Handle>>
 MetadataValues launchValues(const AttentionDenseBinding& binding,
                             const AttentionDenseProblem& problem,
                             int64_t blockM,
-                            const AttentionDenseArch& arch)
+                            const AttentionDenseArch& arch,
+                            const AttentionDenseGrid& grid)
 {
     MetadataValues values{{std::string(Q_UID_VALUE), binding.q},
                           {std::string(K_UID_VALUE), binding.k},
@@ -1535,6 +1758,15 @@ MetadataValues launchValues(const AttentionDenseBinding& binding,
     if(arch.servesStats())
     {
         values.emplace(std::string(STATS_UID_VALUE), binding.stats);
+    }
+    if(arch.servesGrids())
+    {
+        values.emplace(std::string(GRID_ORDER_VALUE), std::string(gridOrderName(grid.order)));
+        values.emplace(std::string(PERSIST_DECODE_VALUE),
+                       grid.persistent() ? std::string(persistDecodeName(grid.decode))
+                                         : std::string());
+        values.emplace(std::string(NUM_PERSISTENT_VALUE),
+                       grid.persistent() ? grid.numPersistent : int64_t{0});
     }
     return values;
 }
@@ -1569,6 +1801,12 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     if(arch.servesStats())
     {
         names.push_back(STATS_UID_VALUE);
+    }
+    if(arch.servesGrids())
+    {
+        names.push_back(GRID_ORDER_VALUE);
+        names.push_back(PERSIST_DECODE_VALUE);
+        names.push_back(NUM_PERSISTENT_VALUE);
     }
     requireOnlyLaunchValues(inputs, names);
 
@@ -1670,6 +1908,10 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     if(arch.refusesUnservedSavedValues)
     {
         requireServedSavedShape(inputs, launch);
+    }
+    if(arch.servesGrids())
+    {
+        launch.grid = readSavedGrid(inputs, launch);
     }
     return launch;
 }

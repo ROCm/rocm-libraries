@@ -137,6 +137,10 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
         scope={
             "persistent": lambda s: s.nonpersist_decode == "auto",
             "nonpersist_decode": lambda s: s.nonpersist_decode == "auto",
+            # A base that pins its persistent decode (the ingestor's persistent
+            # grid) pins the CTA count with it: the decode's legality was checked
+            # at that count, and the launch passes exactly that many CTAs.
+            "num_persistent": lambda s: s.persist_decode == "auto",
             "interleave": lambda s: bool(s.causal),
             "lds_row_pad": lambda s: int(s.head_size) == 128,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
@@ -375,6 +379,9 @@ class DenseSpace(WavesPerEuSpace):
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None
+    # The axes this candidate walks, or None for every declared dense axis in
+    # scope. An empty set leaves the default spec alone.
+    axis_names: Optional[frozenset] = None
 
     def recorded(self, base):
         # A moving bottom-right diagonal on the default grid resolves its query
@@ -392,7 +399,10 @@ class DenseSpace(WavesPerEuSpace):
         return fields
 
     def axes(self, base):
-        return _dense_axes_for(base, self.arch)
+        axes = _dense_axes_for(base, self.arch)
+        if self.axis_names is None:
+            return axes
+        return tuple(a for a in axes if a.name in self.axis_names)
 
     def production(self, base, axes, is_valid) -> Iterable[dict]:
         crossed_names = _dense_arch(self.arch).production_crossed
@@ -408,7 +418,10 @@ class DenseSpace(WavesPerEuSpace):
                 yield {**point, **knobs}
 
     def known_knobs(self, base):
-        return axis_knob_names(tuning_axes(self.arch, "dense"))
+        declared = tuning_axes(self.arch, "dense")
+        if self.axis_names is not None:
+            declared = tuple(a for a in declared if a.name in self.axis_names)
+        return axis_knob_names(declared)
 
     def defaults(self, base, kernel):
         # The fields recorded per problem carry their value in the knobs, so the

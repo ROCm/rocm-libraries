@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -274,12 +275,14 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
 class Graph
 {
 public:
-    explicit Graph(const GraphSpec& spec)
+    /// @p multiProcessorCount is the device's CU count the score reads (0: unresolved).
+    explicit Graph(const GraphSpec& spec, int multiProcessorCount = 0)
         : _builder(buildSdpaGraph(spec))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
         , _properties(testDeviceProperties())
         , _context{_graph, 0, _properties}
     {
+        _properties.multiProcessorCount = multiProcessorCount;
         registerNativeIngestorSymbols();
     }
 
@@ -359,6 +362,13 @@ struct KernelSpec
     int64_t ldsRowPad = 8;
     int64_t pvPriority = 0;
     int64_t emitLse = 0;
+    /// The launch grid: the qb_minor grid unless a case moves it.
+    int64_t persistent = 0;
+    int64_t numPersistent = 304;
+    std::string persistDecode = "auto";
+    std::string nonpersistDecode = "qb_minor";
+    int64_t ldsNumBuffers = 1;
+    int64_t vRegPrefetch = 0;
 };
 
 KernelDefinition makeKernel(const KernelSpec& spec)
@@ -382,6 +392,12 @@ KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("lds_row_pad"), spec.ldsRowPad},
         {std::string("pv_priority"), spec.pvPriority},
         {std::string("emit_lse"), spec.emitLse},
+        {std::string("persistent"), spec.persistent},
+        {std::string("num_persistent"), spec.numPersistent},
+        {std::string("persist_decode"), spec.persistDecode},
+        {std::string("nonpersist_decode"), spec.nonpersistDecode},
+        {std::string("lds_num_buffers"), spec.ldsNumBuffers},
+        {std::string("v_reg_prefetch"), spec.vRegPrefetch},
     };
     return kernel;
 }
@@ -406,9 +422,11 @@ bool matches(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     return matches(graphSpec, makeKernel(kernelSpec));
 }
 
-double scoreOf(const KernelSpec& kernelSpec)
+double scoreOf(const KernelSpec& kernelSpec,
+               int multiProcessorCount = 0,
+               const GraphSpec& graphSpec = GraphSpec{})
 {
-    const Graph graph(GraphSpec{});
+    const Graph graph(graphSpec, multiProcessorCount);
     const auto bound = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
         std::string(GRAPH_MATCHER_SYMBOL))(graph.context());
     EXPECT_TRUE(bound.has_value());
@@ -421,6 +439,32 @@ GraphSpec windowGraph(int64_t leftBound)
     GraphSpec spec;
     spec.leftBound = leftBound;
     spec.rightBound = 0;
+    return spec;
+}
+
+/// A D128 candidate on the persistent grid at @p decode, 304 CTAs.
+KernelSpec persistentKernel(const std::string& decode)
+{
+    KernelSpec spec;
+    spec.persistent = 1;
+    spec.persistDecode = decode;
+    return spec;
+}
+
+/// A candidate on the one-CTA-per-block grid at @p order.
+KernelSpec gridKernel(const std::string& order)
+{
+    KernelSpec spec;
+    spec.nonpersistDecode = order;
+    return spec;
+}
+
+/// A causal graph with @p heads query heads over @p kvHeads.
+GraphSpec headsGraph(int64_t heads, int64_t kvHeads)
+{
+    GraphSpec spec;
+    spec.numQueryHeads = heads;
+    spec.numKvHeads = kvHeads;
     return spec;
 }
 
@@ -937,9 +981,207 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateWithoutAValidEmitLse)
     }
 }
 
+// Every grid the catalog carries serves a graph its decode is a bijection for.
+TEST(TestGfx942AttentionDenseKernelMatch, ServesEveryGridWhereItsDecodeIsLegal)
+{
+    for(const char* order : {"qb_minor", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        EXPECT_TRUE(matches(GraphSpec{}, gridKernel(order))) << order;
+    }
+    for(const char* decode : {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        EXPECT_TRUE(matches(GraphSpec{}, persistentKernel(decode))) << decode;
+    }
+}
+
+// hq_minor_swz gives each of the 8 XCDs a band of Hq / 8 heads: at Hq % 8 != 0 it drops
+// and repeats work items with a success status, so both grids decline such a graph, and
+// the persistent one also an odd query-block count under causal balancing. Every other
+// grid still serves it.
+TEST(TestGfx942AttentionDenseKernelMatch, DeclinesHqMinorSwzWhereItIsNotABijection)
+{
+    const auto twelve = headsGraph(12, 4);
+    EXPECT_FALSE(matches(twelve, gridKernel("hq_minor_swz")));
+    EXPECT_FALSE(matches(twelve, persistentKernel("hq_minor_swz")));
+    EXPECT_TRUE(matches(twelve, gridKernel("qb_minor")));
+    EXPECT_TRUE(matches(twelve, gridKernel("bt_hkv_minor")));
+    EXPECT_TRUE(matches(twelve, persistentKernel("bt_hkv_minor")));
+    EXPECT_TRUE(matches(headsGraph(16, 2), persistentKernel("hq_minor_swz")));
+
+    // Sq 768 over 256-row blocks: three query blocks, causal and no window.
+    auto oddBlocks = headsGraph(16, 2);
+    oddBlocks.seqLenQ = 768;
+    oddBlocks.seqLenKv = 768;
+    EXPECT_FALSE(matches(oddBlocks, persistentKernel("hq_minor_swz")));
+    EXPECT_TRUE(matches(oddBlocks, gridKernel("hq_minor_swz")));
+    EXPECT_TRUE(matches(oddBlocks, persistentKernel("qb_major")));
+}
+
+// bt_hkv_minor divides gqa * t by Hq: with Hq = 32768 over one KV head that dividend reaches
+// 2^30, where the decode's fast division is wrong, while the extents are still legal.
+TEST(TestGfx942AttentionDenseKernelMatch, DeclinesAPersistentDecodePastItsDividendBound)
+{
+    auto extreme = headsGraph(32768, 1);
+    extreme.batch = 1;
+    extreme.seqLenQ = 256;
+    extreme.seqLenKv = 256;
+    EXPECT_FALSE(matches(extreme, persistentKernel("bt_hkv_minor")));
+    EXPECT_TRUE(matches(extreme, persistentKernel("qb_major")));
+    EXPECT_TRUE(matches(extreme, gridKernel("bt_hkv_minor")));
+}
+
+// A completed record always carries the grid fields, so an absent or unknown value, an
+// `auto` or gqa_pair decode (their kernel arguments are unknown here) or a CTA count below
+// one is a malformed record.
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateWithoutAGridItLaunches)
+{
+    std::vector<KernelDefinition> malformed;
+    for(const char* field : {"persistent", "nonpersist_decode"})
+    {
+        auto absent = makeKernel(KernelSpec{});
+        absent.metadata.erase(field);
+        malformed.push_back(absent);
+    }
+    KernelSpec two;
+    two.persistent = 2;
+    malformed.push_back(makeKernel(two));
+    malformed.push_back(makeKernel(gridKernel("auto")));
+    malformed.push_back(makeKernel(gridKernel("persistent")));
+    for(const char* decode : {"auto", "gqa_pair", "gqa_pair_2phase", ""})
+    {
+        malformed.push_back(makeKernel(persistentKernel(decode)));
+    }
+    auto noCtas = persistentKernel("qb_major");
+    noCtas.numPersistent = 0;
+    malformed.push_back(makeKernel(noCtas));
+    auto mistyped = makeKernel(persistentKernel("qb_major"));
+    mistyped.metadata[std::string("persist_decode")] = int64_t{0};
+    malformed.push_back(mistyped);
+
+    for(const auto& kernel : malformed)
+    {
+        EXPECT_FALSE(matches(GraphSpec{}, kernel));
+    }
+    // persist_decode and num_persistent are read only on the persistent grid.
+    auto gridWithAuto = gridKernel("bt_hkv_minor");
+    gridWithAuto.numPersistent = 0;
+    EXPECT_TRUE(matches(GraphSpec{}, gridWithAuto));
+}
+
 // =============================================================================
 // score: a total cold order, policy arms first
 // =============================================================================
+
+// U3: persistent is the cold choice at D128 without a narrow window where its 304 CTAs are
+// a multiple of the device's CU count (304 or 38 CUs); otherwise the qb_minor grid comes
+// first and persistent after every block order.
+TEST(TestGfx942AttentionDenseScore, PersistentLeadsOnlyWhereItsCtasFillTheDevice)
+{
+    const auto persistent = persistentKernel("bt_hkv_minor");
+    for(const int cus : {304, 38})
+    {
+        EXPECT_GT(scoreOf(persistent, cus), scoreOf(KernelSpec{}, cus)) << cus;
+        EXPECT_GT(scoreOf(KernelSpec{}, cus), scoreOf(gridKernel("bt_hkv_minor"), cus)) << cus;
+    }
+    for(const int cus : {228, 80, 0})
+    {
+        EXPECT_GT(scoreOf(KernelSpec{}, cus), scoreOf(gridKernel("bt_hkv_minor"), cus)) << cus;
+        EXPECT_GT(scoreOf(gridKernel("hq_minor_swz"), cus), scoreOf(persistent, cus)) << cus;
+    }
+
+    // Not at D64, and not under a window of 256 keys or fewer.
+    auto d64 = persistent;
+    d64.headSize = 64;
+    KernelSpec d64Grid;
+    d64Grid.headSize = 64;
+    GraphSpec d64Graph;
+    d64Graph.headSize = 64;
+    EXPECT_GT(scoreOf(d64Grid, 304, d64Graph), scoreOf(d64, 304, d64Graph));
+    for(const int64_t window : {int64_t{128}, int64_t{256}})
+    {
+        auto narrow = persistentKernel("qb_major");
+        narrow.slidingWindow = window;
+        KernelSpec narrowGrid;
+        narrowGrid.slidingWindow = window;
+        EXPECT_GT(scoreOf(narrowGrid, 304, windowGraph(window)),
+                  scoreOf(narrow, 304, windowGraph(window)))
+            << window;
+    }
+    auto wide = persistentKernel("bt_hkv_minor");
+    wide.slidingWindow = 512;
+    KernelSpec wideGrid;
+    wideGrid.slidingWindow = 512;
+    EXPECT_GT(scoreOf(wide, 304, windowGraph(512)), scoreOf(wideGrid, 304, windowGraph(512)));
+}
+
+// Every grid crossed with the tile and the persistent pipeline levers: distinct, positive
+// scores on both a device persistent leads on and one it does not, the policy arm first.
+TEST(TestGfx942AttentionDenseScore, EveryGridAndPipelineArmScoresDistinctly)
+{
+    std::vector<KernelSpec> grids;
+    for(const char* order : {"qb_minor", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        grids.push_back(gridKernel(order));
+    }
+    for(const char* decode : {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        grids.push_back(persistentKernel(decode));
+    }
+    for(const int cus : {304, 228})
+    {
+        std::set<double> scores;
+        std::size_t combinations = 0;
+        double best = 0.0;
+        for(const auto& grid : grids)
+        {
+            for(const int64_t blockM : {int64_t{128}, int64_t{256}})
+            {
+                for(const int64_t buffers : {int64_t{1}, int64_t{2}})
+                {
+                    for(const int64_t prefetch : {int64_t{0}, int64_t{1}})
+                    {
+                        auto spec = grid;
+                        spec.blockM = blockM;
+                        spec.ldsNumBuffers = buffers;
+                        spec.vRegPrefetch = prefetch;
+                        const double score = scoreOf(spec, cus);
+                        EXPECT_GT(score, 0.0);
+                        best = std::max(best, score);
+                        scores.insert(score);
+                        ++combinations;
+                    }
+                }
+            }
+        }
+        EXPECT_EQ(scores.size(), combinations) << cus;
+        const auto policy = cus == 304 ? persistentKernel("bt_hkv_minor") : KernelSpec{};
+        EXPECT_EQ(best, scoreOf(policy, cus)) << cus;
+    }
+}
+
+// Among persistent arms of one tile, the decode the registry's base arm pins for the mask
+// comes first: bt_hkv_minor where the decodes balance causal work at the build shape,
+// qb_major elsewhere.
+TEST(TestGfx942AttentionDenseScore, ThePinnedDecodeLeadsThePersistentArms)
+{
+    for(const char* other : {"qb_major", "hkv_major", "hq_minor_swz"})
+    {
+        EXPECT_GT(scoreOf(persistentKernel("bt_hkv_minor"), 304),
+                  scoreOf(persistentKernel(other), 304))
+            << other;
+    }
+    auto unmasked = GraphSpec{};
+    unmasked.leftBound.reset();
+    unmasked.rightBound.reset();
+    for(const char* other : {"bt_hkv_minor", "hkv_major", "hq_minor_swz"})
+    {
+        auto pinned = persistentKernel("qb_major");
+        pinned.causal = 0;
+        auto alternative = persistentKernel(other);
+        alternative.causal = 0;
+        EXPECT_GT(scoreOf(pinned, 304, unmasked), scoreOf(alternative, 304, unmasked)) << other;
+    }
+}
 
 TEST(TestGfx942AttentionDenseScore, ThePolicyArmsOutrankEveryAlternative)
 {

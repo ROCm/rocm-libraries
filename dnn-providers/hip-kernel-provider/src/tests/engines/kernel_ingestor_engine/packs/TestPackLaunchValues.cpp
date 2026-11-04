@@ -5,8 +5,10 @@
 
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -497,7 +499,10 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseValuesMatchTheV1Contract)
                                   {"scale", static_cast<double>(0.1F)},
                                   {"data_type", std::string("HALF")},
                                   {"stride_layout", std::string("bshd")},
-                                  {"stats.uid", int64_t{-1}}};
+                                  {"stats.uid", int64_t{-1}},
+                                  {"grid_order", std::string("qb_minor")},
+                                  {"persist_decode", std::string()},
+                                  {"num_persistent", int64_t{0}}};
     EXPECT_EQ(values, expected);
     EXPECT_EQ(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
               "hipkernel.gfx942_attention_dense.dispatch.v1");
@@ -545,6 +550,113 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseInputsRoundTripThroughTheirValues
         std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
         gfx942AttentionDenseLaunchValues(withStats.binding, withStats.problem, withStats.blockM)};
     EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(saved).binding.stats, 65);
+}
+
+// The launch grid round-trips: a persistent plan reads back its decode and CTA count, a grid
+// plan its block order. Off the persistent grid persist_decode is empty and num_persistent 0.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseGridRoundTripsThroughItsValues)
+{
+    using attention_dense::AttentionDenseGrid;
+    using attention_dense::AttentionDenseGridOrder;
+    using attention_dense::AttentionDensePersistDecode;
+    const auto launch = gfx942AttentionDenseInputs();
+    std::vector<AttentionDenseGrid> grids;
+    for(const auto order : {AttentionDenseGridOrder::QB_MINOR,
+                            AttentionDenseGridOrder::BT_HKV_MINOR,
+                            AttentionDenseGridOrder::HQ_MINOR_SWZ})
+    {
+        AttentionDenseGrid grid;
+        grid.order = order;
+        grids.push_back(grid);
+    }
+    for(const auto decode : {AttentionDensePersistDecode::QB_MAJOR,
+                             AttentionDensePersistDecode::HKV_MAJOR,
+                             AttentionDensePersistDecode::BT_HKV_MINOR,
+                             AttentionDensePersistDecode::HQ_MINOR_SWZ})
+    {
+        AttentionDenseGrid grid;
+        grid.order = AttentionDenseGridOrder::PERSISTENT;
+        grid.decode = decode;
+        grid.numPersistent = 304;
+        grids.push_back(grid);
+    }
+    for(const auto& grid : grids)
+    {
+        const auto values
+            = gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM, grid);
+        EXPECT_EQ(values.at("grid_order"),
+                  MetadataValue{std::string(attention_dense::gridOrderName(grid.order))});
+        EXPECT_EQ(values.at("persist_decode"),
+                  MetadataValue{grid.persistent()
+                                    ? std::string(attention_dense::persistDecodeName(grid.decode))
+                                    : std::string()});
+        EXPECT_EQ(values.at("num_persistent"),
+                  MetadataValue{grid.persistent() ? int64_t{304} : int64_t{0}});
+        const auto read = readGfx942AttentionDenseLaunchInputs(
+            {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1), values});
+        EXPECT_EQ(read.grid.order, grid.order);
+        EXPECT_EQ(read.grid.persistent(), grid.persistent());
+        if(grid.persistent())
+        {
+            EXPECT_EQ(read.grid.decode, grid.decode);
+            EXPECT_EQ(read.grid.numPersistent, 304);
+        }
+    }
+}
+
+// A saved grid the kernel match never admits is refused: an unknown order, a persistent
+// decode without runtime kernargs, a persistent grid without CTAs, persistent values off
+// the persistent grid, hq_minor_swz at Hq % 8 != 0, and a decode past its 2^30 bound.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAGridTheKernelMatchNeverAdmits)
+{
+    const auto valid = savedGfx942AttentionDense();
+    const auto with = [&valid](std::initializer_list<std::pair<const char*, MetadataValue>> moved) {
+        auto saved = valid;
+        for(const auto& [name, value] : moved)
+        {
+            saved.values[name] = value;
+        }
+        return saved;
+    };
+    const MetadataValue persistent{std::string("persistent")};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      with({{"grid_order", std::string("auto")}}),
+                      "launch value 'grid_order'");
+    for(const char* decode : {"auto", "gqa_pair", "gqa_pair_2phase", ""})
+    {
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                          with({{"grid_order", persistent},
+                                {"persist_decode", std::string(decode)},
+                                {"num_persistent", int64_t{304}}}),
+                          "launch value 'persist_decode'");
+    }
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      with({{"grid_order", persistent},
+                            {"persist_decode", std::string("qb_major")},
+                            {"num_persistent", int64_t{0}}}),
+                      "launch value 'num_persistent'");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      with({{"persist_decode", std::string("qb_major")}}),
+                      "launch value 'persist_decode'");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      with({{"num_persistent", int64_t{304}}}),
+                      "launch value 'num_persistent'");
+    expectReadRefusal(
+        &readGfx942AttentionDenseLaunchInputs,
+        with({{"grid_order", std::string("hq_minor_swz")}, {"num_query_heads", int64_t{12}}}),
+        "needs num_query_heads (12) divisible by chiplet_num_xcds");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      with({{"grid_order", persistent},
+                            {"persist_decode", std::string("bt_hkv_minor")},
+                            {"num_persistent", int64_t{304}},
+                            {"batch", int64_t{1}},
+                            {"seqlen_q", int64_t{256}},
+                            {"seqlen_kv", int64_t{256}},
+                            {"num_query_heads", int64_t{32768}},
+                            {"num_kv_heads", int64_t{1}},
+                            {"block_m", int64_t{256}},
+                            {"sliding_window", int64_t{0}}}),
+                      "must be below 2^30");
 }
 
 // stats.uid is -1 for a plan without a stats output, or the output's uid. graph_match binds

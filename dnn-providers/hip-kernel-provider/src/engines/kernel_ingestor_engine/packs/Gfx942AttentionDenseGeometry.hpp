@@ -133,7 +133,7 @@ struct Gfx942AttentionDenseGeometry
 /**
  * @brief The launch geometry for one selected candidate over one graph.
  *
- * Mirrors the non-persistent branch of `attention_dense_grid`:
+ * Mirrors the non-persistent branch of `attention_dense_grid` at the qb_minor order:
  *
  *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
  *     return (nqb, spec.num_query_heads, spec.batch)
@@ -144,8 +144,8 @@ struct Gfx942AttentionDenseGeometry
  * @p numQueryHeads and @p batch are the graph's, since the binary takes its shape at
  * runtime and its metadata carries only canonical build inputs.
  *
- * Every shipped variant is non-persistent; the Python's persistent grid,
- * `(spec.num_persistent, 1, 1)`, has no counterpart in this catalog.
+ * The other block orders and the persistent grid, `(spec.num_persistent, 1, 1)`, are
+ * AttentionDensePersistent.hpp's gridDims; the block is this one's on every grid.
  *
  * Throws instead of returning a degenerate grid: an empty or negative launch returns
  * cleanly having written nothing, and prepare() is the last place a named failure is

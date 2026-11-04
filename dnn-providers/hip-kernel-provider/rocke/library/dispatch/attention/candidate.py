@@ -152,6 +152,7 @@ def make_dense_candidate(
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None,
+    axis_names: Optional[frozenset] = None,
 ) -> KernelCandidate:
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
@@ -160,7 +161,9 @@ def make_dense_candidate(
     ``algorithm`` the selector a pin names it by; ``recorded`` names the
     fields ``base_spec`` resolves per problem (see
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
-    problem fields that depend on the knobs (see :class:`.DenseSpace`)."""
+    problem fields that depend on the knobs (see :class:`.DenseSpace`);
+    ``axis_names`` limits the knobs the candidate takes (``None``: every
+    declared dense axis; empty: its default spec only)."""
 
     def bind_torch(request, spec, tensors, **kwargs):
         from .bindings import bind_dense_attention_torch
@@ -188,6 +191,7 @@ def make_dense_candidate(
             supports=supports,
             recorded_fields=frozenset(recorded),
             derived=derived,
+            axis_names=axis_names,
         ),
         base=base_spec,
         request_errors=_request_errors,

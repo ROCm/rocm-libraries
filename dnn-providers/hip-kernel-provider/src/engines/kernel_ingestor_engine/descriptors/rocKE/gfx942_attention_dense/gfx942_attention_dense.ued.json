@@ -14,6 +14,11 @@
     "block_m",
     "block_n",
     "lds_row_pad",
-    "pv_priority"
+    "pv_priority",
+    "persistent",
+    "persist_decode",
+    "nonpersist_decode",
+    "lds_num_buffers",
+    "v_reg_prefetch"
   ]
 }

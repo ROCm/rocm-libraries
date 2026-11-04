@@ -90,7 +90,7 @@ class TestEngineNameCheck:
 
 
 class TestKnobsIntTypedCheck:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field."""
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field."""
 
     def test_undeclared_knob_rejected(self):
         from codegen.config_loader import _check_knobs_int_typed
@@ -99,7 +99,17 @@ class TestKnobsIntTypedCheck:
         with pytest.raises(ConfigError, match="no kmd_fields entry declares"):
             _check_knobs_int_typed(config)
 
-    def test_non_int_knob_rejected(self):
+    def test_float_knob_rejected(self):
+        from codegen.config_loader import _check_knobs_int_typed
+
+        config = make_minimal_config(
+            kmd_fields=[make_kmd_field(name="ratio", type="float", default_value=None)],
+            engine=make_engine(knobs=["ratio"]),
+        )
+        with pytest.raises(ConfigError, match="int-typed"):
+            _check_knobs_int_typed(config)
+
+    def test_string_knob_accepted_as_an_ordinal(self):
         from codegen.config_loader import _check_knobs_int_typed
 
         config = make_minimal_config(
@@ -108,8 +118,7 @@ class TestKnobsIntTypedCheck:
             ],
             engine=make_engine(knobs=["dtype"]),
         )
-        with pytest.raises(ConfigError, match="int-typed"):
-            _check_knobs_int_typed(config)
+        _check_knobs_int_typed(config)  # does not raise
 
     def test_int_typed_knob_accepted(self):
         from codegen.config_loader import _check_knobs_int_typed

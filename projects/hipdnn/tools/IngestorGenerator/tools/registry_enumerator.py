@@ -10,7 +10,9 @@
 The manifest's ``enumerate`` block names the family's candidate list and request
 class; ``pin`` selects exactly one candidate, and each cell of the ``cells`` cross
 product (first group outermost) is a request whose ``select_spec``/``sweep_space``
-specs become kernels. ``space: slice`` keeps the specs differing from the cell's
+specs become kernels. ``pin`` may also be a list of such selectors: the first
+candidate gives every cell its default spec and must admit every cell, and each
+later one adds its ``sweep_space`` specs to the cells it admits. ``space: slice`` keeps the specs differing from the cell's
 default only in ``free_fields``. ``space: full`` keeps those matching the default
 in ``reduction.fields.feature``, projects varying ``performance`` knobs into the
 spec, KMD, metadata, bindings and name, and holds any other varying field at the
@@ -361,7 +363,16 @@ class Registry:
                 f"cannot resolve the type hints of {decl['request']!r}: {exc}"
             ) from exc
 
-        self.pin = _mapping(decl, "pin")
+        raw_pins = decl["pin"]
+        if isinstance(raw_pins, list):
+            if not raw_pins or not all(isinstance(p, dict) for p in raw_pins):
+                raise EnumerationError(
+                    f"enumerate.pin must be a mapping or a non-empty list of mappings, "
+                    f"got {raw_pins!r}."
+                )
+            pins = [dict(p) for p in raw_pins]
+        else:
+            pins = [_mapping(decl, "pin")]
         self.fixed = _mapping(decl, "fixed")
         arch = manifest.get("arch")
         if "arch" in self.fixed and self.fixed["arch"] != arch:
@@ -369,7 +380,7 @@ class Registry:
                 f"enumerate.fixed.arch {self.fixed['arch']!r} disagrees with the "
                 f"manifest's arch {arch!r}."
             )
-        clash = sorted(set(self.pin) & set(self.fixed))
+        clash = sorted(set().union(*pins) & set(self.fixed))
         if clash:
             raise EnumerationError(
                 f"enumerate.pin and enumerate.fixed both set {clash}."
@@ -379,13 +390,13 @@ class Registry:
         check_value_map_cells(
             self.groups, (manifest.get("ground_truth") or {}).get("value_map")
         )
-        for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
+        for name in itertools.chain(*pins, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
                     f"enumerate names request field '{name}', which "
                     f"{self.request_cls.__name__} does not define."
                 )
-        self.pin = {k: self.coerce(k, v, strict=True) for k, v in self.pin.items()}
+        pins = [{k: self.coerce(k, v, strict=True) for k, v in p.items()} for p in pins]
         self.fixed = {k: self.coerce(k, v, strict=True) for k, v in self.fixed.items()}
 
         try:
@@ -395,22 +406,11 @@ class Registry:
                 f"the registry's candidate list could not be built "
                 f"({type(exc).__name__}): {exc}"
             ) from exc
-        matched = [
-            c
-            for c in candidates
-            if all(getattr(c, k, _Missing) == v for k, v in self.pin.items())
-        ]
-        if len(matched) != 1:
-            shown = (
-                [getattr(c, "name", repr(c)) for c in matched]
-                if matched
-                else sorted({getattr(c, "name", repr(c)) for c in candidates})
-            )
-            raise EnumerationError(
-                f"enumerate.pin {self.pin} matches {len(matched)} registry candidates, "
-                f"not one. {'Matched' if matched else 'Available'}: {shown}."
-            )
-        self.candidate = matched[0]
+        pinned = [_pinned_candidate(candidates, pin) for pin in pins]
+        # The first pin: every cell's default spec, and the request shapes_report
+        # judges. Each later pin only adds specs (`space`).
+        self.pin, self.candidate = pins[0], pinned[0]
+        self.extra_pins = list(zip(pins[1:], pinned[1:]))
 
         try:
             from rocke.dispatch.tuning import walk
@@ -482,9 +482,9 @@ class Registry:
     def cell_key(self, cell: dict) -> tuple:
         return tuple(cell.get(f) for f in self.cell_fields)
 
-    def request(self, cell: dict):
+    def request(self, cell: dict, pin: dict | None = None):
         try:
-            return self.request_cls(**self.fixed, **self.pin, **cell)
+            return self.request_cls(**self.fixed, **(pin or self.pin), **cell)
         except (TypeError, ValueError) as exc:
             raise EnumerationError(
                 f"cannot build a {self.request_cls.__name__} for cell "
@@ -492,10 +492,28 @@ class Registry:
             ) from exc
 
     def space(self, cell: dict) -> tuple:
-        """``(select_spec spec, sweep specs)`` for one cell, both unwrapped."""
-        request = self.request(cell)
+        """``(select_spec spec, sweep specs)`` for one cell, both unwrapped: the first
+        pinned candidate's, then the sweep specs of every later pinned candidate that
+        admits the cell, each spec once."""
+        base, specs = self._candidate_space(cell, self.pin, self.candidate)
+        for pin, candidate in self.extra_pins:
+            request = self.request(cell, pin)
+            try:
+                ok, _why = candidate.admits(request)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise EnumerationError(
+                    f"the registry cannot judge cell {_show(cell)} for pin {pin} "
+                    f"({type(exc).__name__}): {exc}"
+                ) from exc
+            if ok:
+                _, more = self._candidate_space(cell, pin, candidate)
+                specs += [s for s in more if s not in specs]
+        return base, specs
+
+    def _candidate_space(self, cell: dict, pin: dict, candidate) -> tuple:
+        request = self.request(cell, pin)
         try:
-            ok, why = self.candidate.admits(request)
+            ok, why = candidate.admits(request)
         except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
                 f"the registry cannot judge cell {_show(cell)} "
@@ -507,9 +525,9 @@ class Registry:
                 f"cells promise: {why}"
             )
         try:
-            base = _unwrap(self.candidate.select_spec(request))
+            base = _unwrap(candidate.select_spec(request))
             with self._sweep_level(self.decl["sweep_level"]):
-                specs = [_unwrap(s) for s in self.candidate.sweep_space(request)]
+                specs = [_unwrap(s) for s in candidate.sweep_space(request)]
         except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
                 f"the registry rejects cell {_show(cell)}, which the manifest's cells "
@@ -550,6 +568,26 @@ class Registry:
 
 class _Missing:
     """No such candidate attribute; equal to nothing a pin can name."""
+
+
+def _pinned_candidate(candidates: list, pin: dict):
+    """The one registry candidate whose attributes equal every value of ``pin``."""
+    matched = [
+        c
+        for c in candidates
+        if all(getattr(c, k, _Missing) == v for k, v in pin.items())
+    ]
+    if len(matched) != 1:
+        shown = (
+            [getattr(c, "name", repr(c)) for c in matched]
+            if matched
+            else sorted({getattr(c, "name", repr(c)) for c in candidates})
+        )
+        raise EnumerationError(
+            f"enumerate.pin {pin} matches {len(matched)} registry candidates, "
+            f"not one. {'Matched' if matched else 'Available'}: {shown}."
+        )
+    return matched[0]
 
 
 def _show(cell: dict) -> str:

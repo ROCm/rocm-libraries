@@ -76,6 +76,36 @@
       "name": "pv_priority",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "persistent",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_persistent",
+      "type": "int",
+      "default_value": 304
+    },
+    {
+      "name": "persist_decode",
+      "type": "string",
+      "default_value": "auto"
+    },
+    {
+      "name": "nonpersist_decode",
+      "type": "string",
+      "default_value": "qb_minor"
+    },
+    {
+      "name": "lds_num_buffers",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "v_reg_prefetch",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

@@ -10,14 +10,18 @@ has no 32x32x16 fp16/bf16 atom, so it doubles the K loop), unlike the unified
 why the dense kernel is a per-gfx module rather than an arch branch in the
 gfx950 body.
 
-Two candidates, identified like every other tuned candidate: ``spec_id``
+Five candidates, identified like every other tuned candidate: ``spec_id``
 names one and ``tuning_id`` names one configuration from its knob space,
 geometry included (``auto`` is the default spec). ``gfx942_dense`` is the
 tuned default; ``gfx942_dense_qbminor`` is the one-CTA-per-block grid at the
 qb_minor block order, the grid the hipDNN kernel ingestor launches (the twin
-of gfx950's ``qbminor`` variant). Both are opt-in: only an explicit
-``spec_id`` selects them. Admission is the kernel's own
-``supports_attention_dense``.
+of gfx950's ``qbminor`` variant). The three ``*_aot`` candidates are the other
+grids that ingestor launches, each with its grid fixed by its default spec:
+``gfx942_dense_persist_aot`` is the D128 persistent grid at 304 CTAs with its
+work decode pinned, and ``gfx942_dense_btminor_aot`` / ``gfx942_dense_hqswz_aot``
+are the one-CTA-per-block grid at the bt_hkv_minor / hq_minor_swz block order.
+All are opt-in: only an explicit ``spec_id`` selects them. Admission is the
+kernel's own ``supports_attention_dense``.
 """
 
 from __future__ import annotations
@@ -37,6 +41,34 @@ _VARIANT_ID = "dense"
 QBMINOR_CANDIDATE_NAME = "attention_gfx942_dense_qbminor"
 QBMINOR_SPEC_ID = "gfx942_dense_qbminor"
 _QBMINOR_VARIANT_ID = "qbminor"
+# The ingestor's other grids: (candidate name, spec_id, variant_id, persistent,
+# nonpersist_decode). None of the names starts with QBMINOR_CANDIDATE_NAME.
+PERSIST_AOT_SPEC_ID = "gfx942_dense_persist_aot"
+BTMINOR_AOT_SPEC_ID = "gfx942_dense_btminor_aot"
+HQSWZ_AOT_SPEC_ID = "gfx942_dense_hqswz_aot"
+_AOT_GRIDS = (
+    (
+        "attention_gfx942_dense_persist_aot",
+        PERSIST_AOT_SPEC_ID,
+        "persist_aot",
+        True,
+        "qb_minor",
+    ),
+    (
+        "attention_gfx942_dense_btminor_aot",
+        BTMINOR_AOT_SPEC_ID,
+        "btminor_aot",
+        False,
+        "bt_hkv_minor",
+    ),
+    (
+        "attention_gfx942_dense_hqswz_aot",
+        HQSWZ_AOT_SPEC_ID,
+        "hqswz_aot",
+        False,
+        "hq_minor_swz",
+    ),
+)
 
 # block_n (KV tile) the default spec ships; 64 is the resource-efficient peak
 # (see AttentionDenseSpec.block_n). The knob space sweeps block_m / block_n.
@@ -147,6 +179,22 @@ def _qbminor_base_spec(req: AttentionRequest):
     than :func:`_default_block_m`, whose work count is the build-time shape's;
     the knob space varies it.
     """
+    return _ingestor_base_spec(req, persistent=False, nonpersist_decode="qb_minor")
+
+
+def _ingestor_base_spec(
+    req: AttentionRequest, *, persistent: bool, nonpersist_decode: str
+):
+    """The default spec of one grid the hipDNN kernel ingestor launches.
+
+    The shared default tile and one KV segment, with the grid fixed: the
+    non-persistent grid at ``nonpersist_decode``, or (``persistent``) the
+    persistent grid at the 304-CTA count with ``persist_decode`` pinned to what
+    ``auto`` resolves to at the build shape. Pinning names the same binary and
+    symbol as ``auto`` there, but the ingestor reads the decode to pass its
+    fast-division kernargs, and every runtime shape must keep that decode. The
+    persistent grid is D128 only: at D64 the grid measured ahead.
+    """
     from dataclasses import replace
 
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -155,9 +203,16 @@ def _qbminor_base_spec(req: AttentionRequest):
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
+    if persistent and int(req.hdim_q) != 128:
+        raise ValueError(
+            f"the ingestor's gfx942 persistent grid is D128 only, got D{req.hdim_q}"
+        )
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=False)
-    return replace(spec, nonpersist_decode="qb_minor", kv_segments=1)
+    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=persistent)
+    spec = replace(spec, nonpersist_decode=nonpersist_decode, kv_segments=1)
+    if persistent:
+        spec = replace(spec, persist_decode=spec.resolved_persist_decode)
+    return spec
 
 
 def _make_spec(
@@ -315,10 +370,42 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
     )
 
 
+def _make_gfx942_attention_dense_aot_candidate(
+    name: str, spec_id: str, variant_id: str, persistent: bool, nonpersist_decode: str
+) -> KernelCandidate:
+    """One more grid the ingestor launches (see :func:`_ingestor_base_spec`).
+
+    The persistent grid walks the whole dense knob space bar the CTA count,
+    which the dense rules scope out of a base whose decode is pinned. A grid
+    at another block order offers its default spec only: the qb_minor
+    candidate walks the tile and the other knobs on the default grid.
+    """
+    from functools import partial
+
+    return make_dense_candidate(
+        arch="gfx942",
+        name=name,
+        spec_id=spec_id,
+        variant_id=variant_id,
+        base_spec=partial(
+            _ingestor_base_spec,
+            persistent=persistent,
+            nonpersist_decode=nonpersist_decode,
+        ),
+        supports=_supports,
+        features=frozenset(
+            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+        ),
+        recorded=frozenset({"waves_per_eu"}),
+        axis_names=None if persistent else frozenset(),
+    )
+
+
 def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     for candidate in (
         _make_gfx942_attention_dense_candidate(),
         _make_gfx942_attention_dense_qbminor_candidate(),
+        *(_make_gfx942_attention_dense_aot_candidate(*grid) for grid in _AOT_GRIDS),
     ):
         route.register(candidate)
         execution.register(candidate)

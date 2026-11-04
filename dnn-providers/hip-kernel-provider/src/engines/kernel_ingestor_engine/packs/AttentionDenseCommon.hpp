@@ -18,6 +18,8 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp"
+
 /**
  * @file AttentionDenseCommon.hpp
  * @brief What the gfx942 and gfx950 dense-attention ingestor packs share: the launch state
@@ -29,7 +31,8 @@
  * same grid formula and are bound from the same graph contract, so one copy of that code
  * serves both engines. What differs per arch reaches it through the descriptor: the tile
  * rules and launch geometry, the scale range, whether a causal sliding window is served,
- * whether the candidate's head counts are compared, and the launch contracts. Scoring and
+ * whether the candidate's head counts are compared, the launch grids its catalog carries
+ * (AttentionDensePersistent.hpp), and the launch contracts. Scoring and
  * every read of a KMD field only one engine declares stay in that engine's own
  * `Gfx9xxAttentionDenseNative.cpp`, which also owns the module cache and registration.
  */
@@ -83,6 +86,9 @@ struct AttentionDenseLaunchInputs
     AttentionDenseBinding binding;
     AttentionDenseProblem problem;
     int64_t blockM = 0;
+    /// The candidate's launch grid: the qb_minor grid unless its arch reads another
+    /// (AttentionDenseArch::candidateGrid).
+    attention_dense::AttentionDenseGrid grid;
 };
 
 namespace attention_dense
@@ -109,6 +115,14 @@ inline constexpr std::string_view STRIDE_LAYOUT_VALUE = "stride_layout";
 /// The stats output's uid, or ATTENTION_DENSE_NO_STATS. Saved only by an arch that serves
 /// stats; it also selects the kernel arguments a restored plan launches.
 inline constexpr std::string_view STATS_UID_VALUE = "stats.uid";
+/// The launch grid, saved only by an arch whose catalog carries more than the qb_minor
+/// grid: `grid_order` (qb_minor, bt_hkv_minor, hq_minor_swz or persistent), and on the
+/// persistent grid its `persist_decode` and `num_persistent` (empty and 0 off it). They
+/// also select the kernel arguments a restored plan launches. The fast-division magic
+/// numbers and the grid are recomputed, never saved.
+inline constexpr std::string_view GRID_ORDER_VALUE = "grid_order";
+inline constexpr std::string_view PERSIST_DECODE_VALUE = "persist_decode";
+inline constexpr std::string_view NUM_PERSISTENT_VALUE = "num_persistent";
 
 /// The one stride layout the kernels support. prepare() refuses every other layout.
 inline constexpr std::string_view BSHD_LAYOUT = "bshd";
@@ -203,6 +217,13 @@ struct AttentionDenseArch
     std::optional<bool> (*candidateWritesLse)(
         const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
         = nullptr;
+    /// The launch grid a candidate is built for, read from KMD fields only that arch's
+    /// manifest declares; nullopt for a record without a valid one, which kernelMatches
+    /// declines. nullptr for an arch whose catalog has only the qb_minor grid: every
+    /// candidate launches it, and its launch values carry no grid.
+    std::optional<AttentionDenseGrid> (*candidateGrid)(
+        const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+        = nullptr;
     /// Whether restore refuses saved values the graph and kernel match never bind: causal
     /// outside {0, 1}, a negative window, a window without causal, or one that leaves query
     /// rows no key; num_query_heads not a multiple of num_kv_heads, a head_size other than
@@ -223,6 +244,11 @@ struct AttentionDenseArch
     bool servesStats() const
     {
         return candidateWritesLse != nullptr;
+    }
+
+    bool servesGrids() const
+    {
+        return candidateGrid != nullptr;
     }
 };
 
@@ -249,6 +275,15 @@ bool kernelMatches(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
 /// type. Total: never throws, so a malformed record declines instead of faulting a match.
 std::optional<int64_t> integerMetadata(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                                        std::string_view field);
+
+/// A candidate's string metadata field, or nullopt when it is absent or holds another type.
+/// Total, as integerMetadata.
+std::optional<std::string>
+    stringMetadata(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                   std::string_view field);
+
+/// The launch shape of @p launch, for AttentionDensePersistent.hpp's grid functions.
+AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch);
 
 /// A candidate's (block_m, block_n) tile, read from its completed metadata.
 struct AttentionDenseTile
@@ -282,11 +317,13 @@ std::unique_ptr<hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>>
                         const AttentionDenseContract& contract);
 
 /// The launch values @p arch saves, one value set for every contract of the arch: the
-/// sixteen both engines save, and `stats.uid` where the arch serves stats.
+/// sixteen both engines save, `stats.uid` where the arch serves stats, and `grid_order`,
+/// `persist_decode` and `num_persistent` where it serves grids past qb_minor.
 hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBinding& binding,
                                                          const AttentionDenseProblem& problem,
                                                          int64_t blockM,
-                                                         const AttentionDenseArch& arch);
+                                                         const AttentionDenseArch& arch,
+                                                         const AttentionDenseGrid& grid = {});
 
 /**
  * @brief Reads @p arch's launch values back into the launch state.
@@ -301,7 +338,11 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
  * match never bind. An arch that serves stats also reads `stats.uid`, which must be
  * ATTENTION_DENSE_NO_STATS or a uid (non-negative); whether the restored kernel writes LSE
  * is checked against it by the restore's signature comparison, which this reader does not
- * see.
+ * see. An arch that serves grids also reads `grid_order`, which must name one; on the
+ * persistent grid `persist_decode` must name a runtime decode (never `auto` or gqa_pair*)
+ * and `num_persistent` be in [1, INT32_MAX], and off it they must be empty and 0. The
+ * grid's legality at the saved shape (AttentionDensePersistent.hpp gridIllegality) is
+ * re-checked.
  *
  * @throws HipdnnPluginException with a load refusal when the dispatch name is neither
  *         contract, or when a value is missing, extra, of another type or out of range.

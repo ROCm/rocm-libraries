@@ -387,6 +387,153 @@ class TestGfx942DenseQbMinor(unittest.TestCase):
                         )
 
 
+class TestGfx942DenseIngestorGrids(unittest.TestCase):
+    """The ``*_aot`` candidates: the other grids the hipDNN kernel ingestor launches,
+    each fixed by its default spec, so its native dispatch can read the grid, decode
+    and CTA count from the descriptor of every spec they offer."""
+
+    _PERSIST = "gfx942_dense_persist_aot"
+    _ORDERS = {
+        "gfx942_dense_btminor_aot": "bt_hkv_minor",
+        "gfx942_dense_hqswz_aot": "hq_minor_swz",
+    }
+    _RUNTIME_DECODES = {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"}
+
+    def _specs(self, spec_id, level, **kw):
+        req = _req(
+            spec_id=spec_id, nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512, **kw
+        )
+        name = next(c.name for c in attention_candidates() if c.spec_id == spec_id)
+        return [
+            spec.kernel_spec
+            for candidate, spec in islice(
+                iter_registered_attention_combos(
+                    req, candidate_prefix=name, sweep_level=level
+                ),
+                400,
+            )
+        ]
+
+    def test_persistent_space_holds_explicit_decodes_at_304_ctas(self):
+        """Every spec is on the persistent grid at NP 304 with a decode the native
+        dispatch can pass fast-division kernargs for: never ``auto`` (it resolves
+        from the build shape) and never the shape-derived ``work`` CTA count."""
+        with _Gfx942Arch():
+            for kw in (
+                dict(),
+                dict(mask_type=0),
+                dict(sliding_window=128),
+                dict(sliding_window=1024),
+                dict(dtype="fp16"),
+                dict(emit_lse=True),
+            ):
+                for level in ("production", "full"):
+                    with self.subTest(level=level, **kw):
+                        specs = self._specs(self._PERSIST, level, **kw)
+                        self.assertTrue(specs)
+                        self.assertEqual(
+                            {
+                                (s.persistent, s.num_persistent, s.nonpersist_decode)
+                                for s in specs
+                            },
+                            {(True, 304, "qb_minor")},
+                        )
+                        self.assertLessEqual(
+                            {s.persist_decode for s in specs}, self._RUNTIME_DECODES
+                        )
+                        self.assertEqual({s.kv_segments for s in specs}, {1})
+
+    def test_persistent_default_pins_what_auto_resolves_to(self):
+        """Pinning names the same binary and symbol as ``auto`` at the build shape."""
+        with _Gfx942Arch():
+            for kw, decode in (
+                (dict(), "bt_hkv_minor"),
+                (dict(mask_type=0), "qb_major"),
+                (dict(sliding_window=128), "qb_major"),
+                (dict(sliding_window=512), "bt_hkv_minor"),
+            ):
+                with self.subTest(**kw):
+                    req = _req(
+                        spec_id=self._PERSIST,
+                        nhead_q=8,
+                        nhead_k=8,
+                        seqlen_q=512,
+                        seqlen_k=512,
+                        **kw,
+                    )
+                    spec = attention_tuning_spec(req, self._PERSIST).kernel_spec
+                    self.assertEqual(spec.persist_decode, decode)
+                    auto = dataclasses.replace(spec, persist_decode="auto")
+                    self.assertEqual(auto.resolved_persist_decode, decode)
+                    self.assertEqual(auto.kernel_name(), spec.kernel_name())
+                    self.assertEqual(
+                        attention_dense_cache_key(auto, arch="gfx942"),
+                        attention_dense_cache_key(spec, arch="gfx942"),
+                    )
+
+    def test_persistent_grid_is_d128_only(self):
+        """At D64 the grid measured ahead, so the candidate admits no D64 request."""
+        candidate = next(
+            c for c in attention_candidates() if c.spec_id == self._PERSIST
+        )
+        with _Gfx942Arch():
+            ok, why = candidate.admits(
+                _req(spec_id=self._PERSIST, hdim_q=64, hdim_v=64)
+            )
+        self.assertFalse(ok)
+        self.assertIn("D128 only", why)
+
+    def test_block_order_candidates_offer_their_default_only(self):
+        with _Gfx942Arch():
+            for spec_id, order in self._ORDERS.items():
+                for kw in (dict(), dict(hdim_q=64, hdim_v=64), dict(mask_type=0)):
+                    for level in ("production", "full"):
+                        with self.subTest(spec_id=spec_id, level=level, **kw):
+                            specs = self._specs(spec_id, level, **kw)
+                            self.assertTrue(specs)
+                            self.assertEqual(
+                                {
+                                    (
+                                        s.persistent,
+                                        s.nonpersist_decode,
+                                        s.kv_segments,
+                                        s.block_m,
+                                        s.block_n,
+                                        s.lds_row_pad,
+                                        s.pv_priority,
+                                    )
+                                    for s in specs
+                                },
+                                {(False, order, 1, 256, 64, 8, 0)},
+                            )
+
+    def test_no_ingestor_grid_shares_the_qbminor_prefix(self):
+        """test_knob_space_never_leaves_the_grid selects qbminor by name prefix."""
+        names = [
+            c.name
+            for c in attention_candidates()
+            if c.spec_id in {self._PERSIST, *self._ORDERS}
+        ]
+        self.assertEqual(len(names), 3)
+        for name in names:
+            self.assertFalse(name.startswith("attention_gfx942_dense_qbminor"), name)
+
+    def test_tuned_candidate_still_sweeps_the_cta_count(self):
+        """Only a base that pins its decode scopes num_persistent out."""
+        with _Gfx942Arch():
+            specs = [
+                spec.kernel_spec
+                for candidate, spec in islice(
+                    iter_registered_attention_combos(
+                        _req(), candidate_prefix=_NAME, sweep_level="production"
+                    ),
+                    2000,
+                )
+                if candidate.name == _NAME
+            ]
+        self.assertGreater(len({s.num_persistent for s in specs if s.persistent}), 1)
+
+
 class TestGfx942DenseWavesPerEu(unittest.TestCase):
     def test_shipped_policy_and_knob_override(self):
         self.assertEqual(_spec(_req()).waves_per_eu, 2)

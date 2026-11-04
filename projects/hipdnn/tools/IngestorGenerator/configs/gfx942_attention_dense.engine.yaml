@@ -22,6 +22,13 @@
 # cell axis, a KMD field and a name slot, so an LSE kernel and its non-LSE twin with the
 # same knobs never share a catalog key, and every non-LSE kernel keeps its spec and code
 # object (emit_lse=False emits no new IR).
+#
+# The launch grid is a tuning arm inside a cell: the one-CTA-per-block grid at the
+# qb_minor, bt_hkv_minor or hq_minor_swz block order, or (D128) the persistent grid of
+# num_persistent = 304 CTAs at a pinned persist_decode, whose launch adds a fast-division
+# magic/shift pair per decode divisor. persistent, num_persistent, persist_decode and
+# nonpersist_decode are KMD fields the native dispatch reads to size the grid and pass
+# those kernargs, and every field that varies inside a cell is also an engine knob.
 
 dialect: packaged
 authored_subpath: rocKE/gfx942_attention_dense
@@ -34,6 +41,11 @@ engine:
   - block_n
   - lds_row_pad
   - pv_priority
+  - persistent
+  - persist_decode
+  - nonpersist_decode
+  - lds_num_buffers
+  - v_reg_prefetch
   heuristic: native
 kmd_fields:
 - name: dtype
@@ -86,6 +98,30 @@ kmd_fields:
 - name: pv_priority
   type: int
   default_value: 0
+# The launch grid. persistent 0: one CTA per (query block, query head, batch) in the
+# nonpersist_decode block order. persistent 1: num_persistent CTAs stride over the work
+# items in the persist_decode order. Each grid ignores the other's fields; a record
+# omitting them completes to the qb_minor grid, and a persistent record must name its
+# decode ('auto' is refused: it resolves from the build shape).
+- name: persistent
+  type: int
+  default_value: 0
+- name: num_persistent
+  type: int
+  default_value: 304
+- name: persist_decode
+  type: string
+  default_value: auto
+- name: nonpersist_decode
+  type: string
+  default_value: qb_minor
+# Persistent-grid pipeline levers: two K buffers, V register prefetch. Body only.
+- name: lds_num_buffers
+  type: int
+  default_value: 1
+- name: v_reg_prefetch
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -103,6 +139,12 @@ specialization:
   - block_n
   - lds_row_pad
   - pv_priority
+  - persistent
+  - num_persistent
+  - persist_decode
+  - nonpersist_decode
+  - lds_num_buffers
+  - v_reg_prefetch
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -139,6 +181,18 @@ specialization:
       field: lds_row_pad
     pv_priority:
       field: pv_priority
+    persistent:
+      field: persistent
+    num_persistent:
+      field: num_persistent
+    persist_decode:
+      field: persist_decode
+    nonpersist_decode:
+      field: nonpersist_decode
+    lds_num_buffers:
+      field: lds_num_buffers
+    v_reg_prefetch:
+      field: v_reg_prefetch
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -154,11 +208,18 @@ enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
   # gfx942_dense_qbminor is the dense candidate whose default spec is the grid the
-  # native dispatch launches: one CTA per (query block, query head, batch) at the
-  # qb_minor block order, one KV segment. Its knob space scopes persistent,
-  # nonpersist_decode and kv_segments out (dense_rules.py), so no enumerated spec
-  # leaves that grid kind; reduction.fields.ignored lists them too, as a second guard.
-  pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+  # native dispatch launches by default: one CTA per (query block, query head, batch)
+  # at the qb_minor block order, one KV segment. Its knob space scopes persistent,
+  # nonpersist_decode and kv_segments out (dense_rules.py), so none of its specs leaves
+  # that grid kind; it gives every cell its default spec. The other pins add the other
+  # grids the native dispatch launches, each fixed by its candidate's default spec:
+  # the D128 persistent grid (304 CTAs, decode pinned, its knob space minus the CTA
+  # count), and the bt_hkv_minor and hq_minor_swz block orders (default spec only).
+  pin:
+    - {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+    - {algorithm: attention_dense, spec_id: gfx942_dense_persist_aot}
+    - {algorithm: attention_dense, spec_id: gfx942_dense_btminor_aot}
+    - {algorithm: attention_dense, spec_id: gfx942_dense_hqswz_aot}
   # Request fields every cell shares. Batch, sequence lengths and head counts are
   # runtime kernel params on gfx942, so they only seed the build-time spec.
   fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
@@ -192,8 +253,9 @@ enumerate:
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
   spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
-  # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 1000
+  # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
+  # bound is reduction.aot_budget_per_arch).
+  max_kernels: 1600
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
@@ -205,10 +267,17 @@ reduction:
       - {name: block_n, divides: seqlen_kv}
       - {name: lds_row_pad}
       - {name: pv_priority}
-    # Held at the registry default. The grid catalog never varies the persistent
-    # fields; the rest are gfx942 levers left to the kernel's own policy.
-    ignored: [waves_per_eu, lds_k_group_pad, persistent, num_persistent, interleave, persist_decode, use_exp2_fast, iglp, iglp_mode, pv_loop_order, o_store_width, pv_sched_fence_mask, causal_diag_split, v_row_pad, use_cfvst, use_v_swizzle, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
-  aot_budget_per_arch: 1000
+      - {name: persistent}
+      - {name: persist_decode}
+      - {name: nonpersist_decode}
+      - {name: lds_num_buffers}
+      - {name: v_reg_prefetch}
+    # Held at the registry default: the persistent CTA count (one value, 304) and the
+    # interleaved order, the KV split, and the gfx942 levers left to the kernel's own
+    # policy.
+    ignored: [waves_per_eu, lds_k_group_pad, num_persistent, interleave, use_exp2_fast, iglp, iglp_mode, pv_loop_order, o_store_width, pv_sched_fence_mask, causal_diag_split, v_row_pad, use_cfvst, use_v_swizzle, kv_segments, window_wave_skip, chiplet_num_xcds]
+  # Bounds the enumerated (swept) catalog; the shipped catalog is a reduced subset.
+  aot_budget_per_arch: 1600
 
 # How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
 ground_truth:
@@ -230,8 +299,8 @@ launch_surface:
       that is not a positive multiple of 32 within a 1024-thread CTA, and for
       non-positive seqlen_q, num_query_heads or batch. Grid is
       (ceil(Sq/block_m), Hq, B) from the candidate's own block_m and the graph's
-      shape; every shipped variant is non-persistent, and emit_lse does not change
-      the grid.
+      shape on the qb_minor grid; the other grids are the grid_order surface, and
+      emit_lse does not change the grid.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
 
   - name: block
@@ -272,17 +341,20 @@ launch_surface:
   - name: kernargs
     python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch]
+    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode]
     guard: >
-      kernelSignature(RUNTIME_HEAD_COUNTS, writesLse), the ABI of gfx942's one
+      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse), the ABI of gfx942's one
       launch contract (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg
-      form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) for
-      an emit_lse=0 kernel, and the 11-arg form with lse_ptr last (offset 56) for an
-      emit_lse=1 kernel, chosen by whether the graph binds a stats output. Every
-      variant is non-persistent (no fast-division kernargs) and use_sinks=False.
+      form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) on
+      every non-persistent grid; on the persistent grid a <d>_magic, <d>_shift i32 pair
+      per fast-division divisor of persist_decode follows, in the decode's own order
+      (14 or 16 args); an emit_lse=1 kernel takes lse_ptr last (offset 56, 72 or 80),
+      chosen by whether the graph binds a stats output. use_sinks=False everywhere.
       Validated at prepare() time by buildIngestorKernelCode(..., expectedSignature),
       and at restore by restoreIngestorLaunch() before any saved value is read; the
-      restore selects the form from the saved stats.uid first.
+      restore selects the form from the saved stats.uid, grid_order and persist_decode
+      first. launch() packs its argument addresses in the same order and throws if their
+      count is not the signature's.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseSignature.cpp
 
   # emit_lse is baked into the kernel (one trailing lse_ptr store of the natural-log LSE
@@ -300,15 +372,78 @@ launch_surface:
       validate_dense_lse requires; prepare() re-checks it and throws BAD_PARAM.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
-  # The cold ranking reads the two LDS/scheduling knobs to order arms; they do not
-  # enter the launch.
+  # The cold ranking reads the grid, the LDS/scheduling knobs and the persistent pipeline
+  # levers to order arms; only the grid enters the launch (grid_select).
   - name: score
-    python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
+    python_source: dispatch/attention/gfx942_dense.py:_base_spec
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
-    kmd_fields: [block_m, block_n, lds_row_pad, pv_priority]
+    kmd_fields: [block_m, block_n, lds_row_pad, pv_priority, lds_num_buffers, v_reg_prefetch, head_size, causal, sliding_window, seqlen_kv]
     guard: >
-      scoreKernel() returns 0 for a record without a launchable tile or with a
-      missing or negative lds_row_pad / pv_priority; otherwise a distinct positive
-      score per knob combination, policy arms (256/64, lds_row_pad 8,
-      pv_priority 0) first.
+      scoreKernel() returns 0 for a record without a launchable tile or grid, or with a
+      missing or negative lds_row_pad / pv_priority / v_reg_prefetch or an
+      lds_num_buffers below 1; otherwise a distinct positive score per knob
+      combination, lexicographic over (grid, tile, lds_row_pad, pv_priority,
+      lds_num_buffers, v_reg_prefetch) with the policy arms first. The grid rank puts
+      persistent first where _base_spec turns it on (D128, no window or one wider than
+      256 keys) and the catalog's 304 CTAs are a multiple of the device's
+      multiProcessorCount; otherwise qb_minor first and persistent last. Among
+      persistent arms the decode the registry pins for the mask leads (bt_hkv_minor
+      under balance_causal at the build shape's seqlen_kv, else qb_major).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # The launch grid each candidate is built for, read from its KMD.
+  - name: grid_select
+    python_source: dispatch/attention/gfx942_dense.py:_ingestor_base_spec
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [persistent, num_persistent, persist_decode, nonpersist_decode]
+    guard: >
+      candidateGrid() answers nullopt, which kernelMatches() declines and prepare()
+      refuses with BAD_PARAM, for a persistent value other than 0 or 1, a
+      nonpersist_decode that is not qb_minor, bt_hkv_minor or hq_minor_swz, and on
+      the persistent grid a persist_decode that is auto (it resolves from the build
+      shape) or gqa_pair* (it bakes the shape), or a num_persistent outside
+      [1, INT32_MAX]. Each grid ignores the other's fields.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # The grids past qb_minor: NONPERSIST_DECODES[order].grid, and (num_persistent, 1, 1).
+  - name: grid_order
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp
+    kmd_fields: [persistent, num_persistent, nonpersist_decode, block_m, seqlen_q, num_query_heads, batch]
+    guard: >
+      gridDims() gives (B, Hq, nqb) at bt_hkv_minor, (8 nqb, Hq/8, B) at hq_minor_swz
+      and exactly (num_persistent, 1, 1) on the persistent grid, nqb =
+      ceil(Sq/block_m); makePreparedAttentionDense() throws BAD_PARAM for a dimension
+      outside [1, INT32_MAX]. Checked against the Python's own grid over a shape table
+      (gen_attention_dense_persistent_goldens.py).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDensePersistent.cpp
+
+  # The persistent decode's fast-division kernargs, recomputed per launch and on restore.
+  - name: fastdiv_kernargs
+    python_source: kernels/common/attention_dense_decode.py:fastdiv_kernargs
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp
+    kmd_fields: [persistent, persist_decode, num_query_heads, num_kv_heads, batch, seqlen_q, block_m]
+    guard: >
+      fastDivKernargs() passes one (magic, shift) per PERSIST_DECODES[decode]
+      .fastdiv_divisors entry, in that order -- qb_major (batch, Hq, gqa), hkv_major
+      (batch, gqa, nqb), bt_hkv_minor (batch, Hq), hq_minor_swz (nqb, Hq, gqa) -- from
+      fastDivPair(), calculate_magic_numbers with the magic as its i32 bit pattern;
+      gqa = Hq/Hkv and nqb = Sq/block_m. Never saved. Checked against
+      calculate_magic_numbers for every divisor in 1..4096 and 512 random ones to 2^20,
+      and against attention_dense_runtime_args over a shape table.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDensePersistent.cpp
+
+  # Where a decode is a bijection, and the fast division exact.
+  - name: decode_legality
+    python_source: kernels/common/attention_dense_decode.py:fastdiv_dividend_bound
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp
+    kmd_fields: [persistent, persist_decode, nonpersist_decode, num_persistent, causal, sliding_window]
+    guard: >
+      gridIllegality() restates each decode's check and the 2^30 dividend bound:
+      hq_minor_swz needs Hq % 8 == 0 (both grids), and on the persistent grid
+      num_persistent % 8 == 0 and an even query-block count under balance_causal
+      (causal, no window shorter than Skv); every persistent decode needs nqb*Hq*B, and
+      bt_hkv_minor also gqa*Hq, below 2^30. kernelMatches() declines, prepare() throws
+      BAD_PARAM and restore refuses the plan. Checked against Gfx942AttentionDenseSpec
+      construction and fastdiv_kernargs over a shape table.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDensePersistent.cpp

@@ -101,6 +101,44 @@ def test_the_synthetic_manifest_enumerates(probe):
     assert len({k["name"] for k in kernels}) == len(kernels) > 0
 
 
+def test_a_pin_list_adds_each_later_candidates_specs_to_the_cells_it_admits(probe):
+    """The first pin gives each cell its default spec; a later one adds its sweep specs
+    where it admits the cell, each spec once."""
+    single = re_.Registry(probe.manifest)
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    listed = re_.Registry(probe.manifest)
+    assert listed.candidate.name == "probe_grid"
+    assert [c.name for _, c in listed.extra_pins] == ["probe_persist_a"]
+    cell = listed.cells()[0]
+    # The probe candidates sweep the same specs: the union holds each once.
+    assert listed.space(cell) == single.space(cell)
+
+    extra = listed.extra_pins[0][1]
+    base = listed.candidate.select_spec(listed.request(cell))
+    added = dataclasses.replace(base, tile_m=256)
+    extra.sweep_space = lambda request: [added]
+    _, specs = listed.space(cell)
+    assert specs == single.space(cell)[1] + [added]
+
+    extra.admits = lambda request: (False, "declined")
+    assert listed.space(cell) == single.space(cell)
+
+
+def test_each_pin_of_a_list_must_match_one_candidate(probe, capsys):
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist"},
+    ]
+    assert _run_probe(probe) == 2
+    assert "matches 2 registry candidates" in capsys.readouterr().err
+    probe.manifest["enumerate"]["pin"] = []
+    assert _run_probe(probe) == 2
+    assert "non-empty list of mappings" in capsys.readouterr().err
+
+
 def _declined(m):
     m["enumerate"]["cells"][0]["values"] = [[96, 8]]
 
