@@ -1,0 +1,361 @@
+# Layer 1 — the meaningful space of FORWARD scaled dot-product attention (SDPA).
+#
+# What this file is
+#   One-time research record. Each rule removes Layer 0 combinations (L0-axes.yaml) that are
+#   meaningless BY THE DEFINITION OF ATTENTION, with a one-line reason. Every rule has kind
+#   `definition`: a fact about attention that does not change when a library or API changes.
+#
+# Method (test-case-narrowing-flow.md § 4)
+#   Rule A — a dependency is a child axis in Layer 0, not a forbidden pair here. Those
+#            dependencies are listed under `structural` so that a later comparison with an API can
+#            see them; they remove nothing from Layer 0 because Layer 0 cannot state them.
+#   Rule B — every candidate was asked: "mathematically meaningless, or only unsupported somewhere?"
+#            Only the first is a rule. The candidates that failed are listed under
+#            `rejected_candidates` with what they really are.
+#            Debatable cases are not here; they are in open-questions.md.
+#   Rule C — value-dependent exclusions are written against the relationship axes of Layer 0.
+#
+# Attribution: every rule, reason and verdict is the agent's proposal (2026-10-27). None is
+# confirmed by the user.
+# Amended 2026-10-29 (layers redo, for the L0 additions): rules D-REL-ALIBI-HEAD-COUNT and
+# D-REL-PAGED-NOT-RAGGED, two structural facts; and, found by the chain check as model-only,
+# D-REL-STRIDE-NEEDS-EXTENT and structural D-S-ONE-DROPOUT-SOURCE; six rejected candidates, three equivalences, and the
+# D-S-VARLEN-NEEDS-LENGTHS wording. Agent's proposal.
+#
+# Rule format
+#   id       stable identifier.
+#   kind     always `definition` in this file.
+#   basis    `meaning`     — the combination has no defined result under attention's definition;
+#            `consistency` — the combination contradicts itself (a relationship value that the two
+#                            size classes it relates make impossible). Also a fact, never a choice.
+#   reason   one line.
+#   forbid   a map axis -> list of values. A case is excluded when, for EVERY listed axis, the case's
+#            value is in the list. One listed axis = a meaningless value inside one axis.
+#   forbid_any  a list of `forbid` maps; the rule excludes a case that matches any one of them.
+#   source   where the axis or the fact comes from.
+
+schema_version: 1
+layer: 1
+direction: forward
+derived_from: L0-axes.yaml
+
+rules:
+
+  # ------------------------------------------------------------------ basis: meaning
+  - id: D-HEADS-K-DIVIDES
+    kind: definition
+    basis: meaning
+    reason: "Each query head must use exactly one K head; with K heads not dividing query heads no grouping exists."
+    forbid: {k_head_sharing: [non_divisor]}
+    source: "axis doc § 3 'Key/value head count, and sharing'; flow doc § 4 rule C"
+
+  - id: D-HEADS-V-DIVIDES
+    kind: definition
+    basis: meaning
+    reason: "Each query head must use exactly one V head; with V heads not dividing query heads no grouping exists."
+    forbid: {v_head_sharing: [non_divisor]}
+    source: "axis doc § 3, § 14 'K heads ≠ V heads'"
+
+  - id: D-DROPOUT-P-RANGE
+    kind: definition
+    basis: meaning
+    reason: "A dropout probability is a probability; a value below 0 or above 1 is not one."
+    forbid: {dropout_probability: [negative, above_one]}
+    source: "axis doc § 7 'Dropout probability'; flow doc § 4 (example 'dropout probability > 1')"
+
+  - id: D-SCALE-FINITE
+    kind: definition
+    basis: meaning
+    reason: "The scale multiplies every score; a NaN or infinite scale gives no defined attention weights, so there is no correct output to compare."
+    forbid: {scale_value: [non_finite]}
+    source: "axis doc § 7 'Scale value'; open-questions.md OQ-04"
+    attribution: "(user, 2026-10-29) \"Shouldn't cases like the scale set to NaN be rejection test cases and not numerical test cases?\" Added 2026-10-29; a negative scale stays valid."
+
+  - id: D-RNG-DUMP-NEEDS-RANDOM
+    kind: definition
+    basis: meaning
+    reason: "rng_dump hands back the keep mask that random dropout drew. A caller-supplied mask draws nothing, so there is no random mask to hand back."
+    forbid: {dropout: [caller_mask], dropout_pattern_output: [requested]}
+    source: "rocm-libraries @ 00d9c566bea projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp:657-664 (the references refuse rng_dump with any dropout other than Philox)"
+    attribution: "(user, 2026-10-29) \"yes\" to the optional rule forbidding a caller mask together with rng_dump."
+
+  - id: D-SCALE-DEFAULT-DZERO
+    kind: definition
+    basis: meaning
+    reason: "The scale 1/√d has no value when the query/key head size d is 0."
+    forbid_any:
+      - {scale_source: [default], head_dim_qk: [zero]}
+      - {scale_value: [inverse_sqrt_d], head_dim_qk: [zero]}
+    source: "axis doc § 3 'Q/K head size', § 7 'Scale source'"
+
+  - id: D-SOFTCAP-ZERO
+    kind: definition
+    basis: meaning
+    reason: "cap · tanh(score / cap) divides by zero when the cap is 0."
+    forbid: {softcap_value: [zero]}
+    source: "axis doc § 6 'Logit soft-capping'"
+
+  - id: D-OUTPUTS-OVERLAP
+    kind: definition
+    basis: meaning
+    reason: "Two different results cannot both be stored in the same memory."
+    forbid: {tensor_overlap: [outputs_overlap]}
+    source: "axis doc § 4 'Overlap between tensors'"
+
+  - id: D-OUTPUT-SELF-ALIAS
+    kind: definition
+    basis: meaning
+    reason: "An output stride pattern that sends two different output elements to one address cannot hold both results."
+    forbid_any:
+      - {strides_o: [zero_broadcast, self_overlapping]}
+      - {strides_stats: [zero_broadcast, self_overlapping]}
+    source: "axis doc § 4 'Strides' (zero stride = broadcast; legal only where reading)"
+
+  - id: D-BIAS-SHAPE
+    kind: definition
+    basis: meaning
+    reason: "A bias that cannot be broadcast to the score shape has no score to add each element to."
+    forbid: {bias_broadcast: [not_broadcastable]}
+    source: "axis doc § 6 'Additive bias' ('every broadcastable shape')"
+
+  - id: D-SEQLEN-WITHIN-STORAGE
+    kind: definition
+    basis: meaning
+    reason: "A sequence length longer than its storage describes tokens that do not exist."
+    forbid_any:
+      - {per_seq_len_q: [exceeds_storage]}
+      - {per_seq_len_kv: [exceeds_storage]}
+    source: "axis doc § 10 'Per-sequence lengths (varlen)' ('each from 0 to the maximum')"
+
+  - id: D-RAGGED-NO-OVERLAP
+    kind: definition
+    basis: meaning
+    reason: "The output shares the ragged packing, so overlapping sequences would write two results to one place."
+    forbid: {ragged_offsets: [overlapping]}
+    source: "axis doc § 10 'Ragged offsets' ('every valid list of starting points')"
+
+  - id: D-PAGES-SUFFICIENT
+    kind: definition
+    basis: meaning
+    reason: "A page table with fewer pages than the key/value length needs cannot address every key and value."
+    forbid: {page_count: [insufficient]}
+    source: "axis doc § 10 'Paged KV cache'"
+
+  - id: D-MAXLEN-NOT-BELOW-ACTUAL
+    kind: definition
+    basis: meaning
+    reason: "A declared maximum key/value length below the actual length contradicts the actual length."
+    forbid: {max_seq_len_kv: [smaller]}
+    source: "axis doc § 14 'Max KV length'"
+
+  # ------------------------------------------------------------------ basis: consistency (rule C)
+  - id: D-REL-SEQ
+    kind: definition
+    basis: consistency
+    reason: "The query-vs-key/value relationship must agree with the two length classes (zero < one < many)."
+    forbid_any:
+      - {seq_q: [zero], seq_kv: [one, many], seq_q_vs_seq_kv: [equal, longer]}
+      - {seq_q: [one], seq_kv: [many], seq_q_vs_seq_kv: [equal, longer]}
+      - {seq_q: [one, many], seq_kv: [zero], seq_q_vs_seq_kv: [shorter, equal]}
+      - {seq_q: [many], seq_kv: [one], seq_q_vs_seq_kv: [shorter, equal]}
+      - {seq_q: [zero], seq_kv: [zero], seq_q_vs_seq_kv: [shorter, longer]}
+      - {seq_q: [one], seq_kv: [one], seq_q_vs_seq_kv: [shorter, longer]}
+    source: "axis doc § 3; flow doc § 4 rule C"
+
+  - id: D-REL-HEAD-DIM
+    kind: definition
+    basis: consistency
+    reason: "The V-vs-Q/K head-size relationship must agree with the two head-size classes (zero < one < many)."
+    forbid_any:
+      - {head_dim_v: [zero], head_dim_qk: [one, many], head_dim_v_vs_qk: [equal, larger]}
+      - {head_dim_v: [one], head_dim_qk: [many], head_dim_v_vs_qk: [equal, larger]}
+      - {head_dim_v: [one, many], head_dim_qk: [zero], head_dim_v_vs_qk: [smaller, equal]}
+      - {head_dim_v: [many], head_dim_qk: [one], head_dim_v_vs_qk: [smaller, equal]}
+      - {head_dim_v: [zero], head_dim_qk: [zero], head_dim_v_vs_qk: [smaller, larger]}
+      - {head_dim_v: [one], head_dim_qk: [one], head_dim_v_vs_qk: [smaller, larger]}
+    source: "axis doc § 3"
+
+  - id: D-REL-HEAD-SHARING
+    kind: definition
+    basis: consistency
+    reason: "With zero or one query head, the only possible K or V head count equals the query head count (MHA)."
+    forbid_any:
+      - {q_heads: [zero, one], k_head_sharing: [gqa, mqa]}
+      - {q_heads: [zero, one], v_head_sharing: [gqa, mqa]}
+    source: "axis doc § 3 'Key/value head count, and sharing'"
+
+  - id: D-REL-K-V-HEADS
+    kind: definition
+    basis: consistency
+    reason: "Whether K and V head counts are equal must agree with their two sharing relationships."
+    forbid_any:
+      - {k_head_sharing: [mha], v_head_sharing: [mha], k_heads_vs_v_heads: [differ]}
+      - {k_head_sharing: [mqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [differ]}
+      - {k_head_sharing: [mha], v_head_sharing: [gqa, mqa], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [gqa, mqa], v_head_sharing: [mha], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [mqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [gqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [equal]}
+    source: "axis doc § 14 'K heads ≠ V heads'"
+
+  - id: D-REL-WINDOW
+    kind: definition
+    basis: consistency
+    reason: "A window that covers some but not all keys needs at least two keys."
+    forbid_any:
+      - {seq_kv: [zero, one], window_left: [partial]}
+      - {seq_kv: [zero, one], window_right: [partial]}
+    source: "axis doc § 5 'Sliding-window size'"
+
+  - id: D-REL-PER-SEQ-LEN
+    kind: definition
+    basis: consistency
+    reason: "Per-sequence length classes must be possible for the batch size and the stored length."
+    forbid_any:
+      - {batch_size: [zero, one], per_seq_len_q: [mixed, some_zero]}
+      - {batch_size: [zero, one], per_seq_len_kv: [mixed, some_zero]}
+      - {seq_q: [zero, one], per_seq_len_q: [all_equal_partial, mixed]}
+      - {seq_kv: [zero, one], per_seq_len_kv: [all_equal_partial, mixed]}
+      - {seq_q: [zero], per_seq_len_q: [some_zero]}
+      - {seq_kv: [zero], per_seq_len_kv: [some_zero]}
+    source: "axis doc § 10 'Per-sequence lengths (varlen)'"
+
+  - id: D-REL-RAGGED-ORDER
+    kind: definition
+    basis: consistency
+    reason: "Out-of-order or overlapping start positions need at least two sequences."
+    forbid: {batch_size: [zero, one], ragged_offsets: [out_of_order, overlapping]}
+    source: "axis doc § 10 'Ragged offsets'"
+
+  - id: D-REL-PAGE-SIZE
+    kind: definition
+    basis: consistency
+    reason: "A page size between one token and a whole sequence needs a key/value length of at least two."
+    forbid: {seq_kv: [zero, one], page_size: [partial]}
+    source: "axis doc § 10 'Paged KV cache'"
+
+  - id: D-REL-MAXLEN
+    kind: definition
+    basis: consistency
+    reason: "No declared maximum can be smaller than a key/value length of zero."
+    forbid: {seq_kv: [zero], max_seq_len_kv: [smaller]}
+    source: "axis doc § 14 'Max KV length'"
+
+  - id: D-REL-SUB-ELEMENT-ALIGNMENT
+    kind: definition
+    basis: consistency
+    reason: "An address cannot be part of a byte, so a 1-byte format cannot start off its element size."
+    forbid_any:
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_q: [sub_element]}
+      - {dtype_k: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_k: [sub_element]}
+      - {dtype_v: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_v: [sub_element]}
+      - {dtype_o: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_o: [sub_element]}
+      - {dtype_stats: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_stats: [sub_element]}
+    source: "byte addressing; added 2026-10-28 (user ruling on model check M2: the rule was in the model only, model/rules.yaml D-REL-SUB-ELEMENT-ALIGNMENT)"
+
+  - id: D-REL-STRIDE-NEEDS-EXTENT
+    kind: definition
+    basis: consistency
+    reason: "A zero, negative or self-overlapping stride needs a dimension with more than one element."
+    forbid_any:
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], head_dim_qk: [zero, one], strides_q: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [zero, one], k_head_sharing: [mqa], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [zero, one], v_head_sharing: [mqa], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], head_dim_v: [zero, one], strides_o: [negative]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], strides_stats: [negative]}
+    source: "a stride on a dimension of extent 0 or 1 is never used"
+    attribution: "Added to Layer 1 2026-10-29 (layers redo): it was in model/rules.yaml only (added there 2026-10-27 while writing the class-to-value table), which the chain check (chain_check.py) reported. Here zero extents count as 'no dimension with more than one element'. Open: runner finding R13 says self_overlapping needs TWO dimensions with extent > 1 (a DECISION for the user; not applied)."
+
+  - id: D-REL-ALIBI-HEAD-COUNT
+    kind: definition
+    basis: consistency
+    reason: "Whether the query head count is a power of two must agree with its size class: one head is 2^0, and zero heads is no power of two."
+    forbid_any:
+      - {q_heads: [one], alibi_head_count: [not_power_of_two]}
+      - {q_heads: [zero], alibi_head_count: [power_of_two]}
+    source: "axis doc § 6 'ALiBi'; L0 alibi_head_count (added 2026-10-29)"
+    attribution: "Agent's proposal, 2026-10-29 (layers redo). Not confirmed by the user."
+
+  - id: D-REL-PAGED-NOT-RAGGED
+    kind: definition
+    basis: consistency
+    reason: "A paged K or V stores its tokens in pages found through a table; the same tensor cannot also be squashed end to end with start positions. Two storage forms for one tensor contradict each other."
+    forbid: {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only, v_only]}
+    source: "axis doc § 1, § 10. Ragged Q over a paged K/V (batch_packing ragged_q_side) stays meaningful."
+    attribution: "Agent's proposal, 2026-10-29 (layers redo). Confirmed by the user 2026-10-29 round b: ragged offsets on the paged K/V storage stay a Layer 1 rule; ragged Q only over paged K/V stays allowed. Seen in the data: every ragged + paged row of the 2026-10-29 escalate run (gfx942 job 68210928) was declined or errored by both references, e.g. lv-6441 'ragged SDPA densify: primary ragged_offset[1] = 2 is not a whole number of tokens'."
+
+# Facts of the definition that Layer 0 already enforces by its SHAPE (one shared axis, or a child
+# axis). They exclude nothing from Layer 0, because Layer 0 cannot state the violation. They are
+# kept so that the API comparison can check whether an API lets a caller state the violation.
+structural:
+  - {id: D-S-BATCH-SHARED, reason: "Q, K, V and O have one batch size; a query sequence attends only to its own keys.", enforced_by: "one axis batch_size", source: "axis doc § 3 'Batch size'"}
+  - {id: D-S-KV-LENGTH-SHARED, reason: "Each key pairs with exactly one value, so K and V have one length.", enforced_by: "one axis seq_kv", source: "axis doc § 3 'Key/value length'"}
+  - {id: D-S-QK-HEAD-DIM-SHARED, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "axis doc § 3 'Q/K head size'"}
+  - {id: D-S-OUTPUT-SHAPE, reason: "O has Q's batch, heads and length and V's head size; Stats has Q's batch, heads and length and one value per row.", enforced_by: "no separate O or Stats size axes", source: "axis doc § 3, § 8"}
+  - {id: D-S-RAGGED-NEEDS-OFFSETS, reason: "Ragged packing without start positions does not say where any sequence is.", enforced_by: "child axis ragged_offsets", source: "axis doc § 10"}
+  - {id: D-S-VARLEN-NEEDS-LENGTHS, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part. (Amended 2026-10-29: the lengths alone, without an API flag, already mean variable lengths; only the flag without lengths is meaningless.)", enforced_by: "child axes per_seq_len_q / per_seq_len_kv", source: "axis doc § 5 'padding mask', § 10; SdpaSemanticsRegister.md SEM-008"}
+  - {id: D-S-ONE-DROPOUT-SOURCE, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern; added to Layer 1 2026-10-29 (it was in model/rules.yaml only; chain check)"}
+  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, reason: "A page table shared by K and V exists only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "axis doc § 10 (added 2026-10-29)"}
+  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axis doc § 14 (added 2026-10-29)"}
+  - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, reason: "A causal mask with seq_q ≠ seq_kv is defined only once a diagonal is chosen.", enforced_by: "child axis causal_alignment", source: "axis doc § 5 'Causal alignment'"}
+  - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, reason: "A sliding window is defined only by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "axis doc § 5"}
+  - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "axis doc § 5"}
+  - {id: D-S-RANDOM-DROPOUT-NEEDS-P, reason: "Random dropout is defined by its probability; a probability without dropout has no effect.", enforced_by: "child axis dropout_probability", source: "axis doc § 7"}
+  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, reason: "Caller-mask dropout is defined by the caller's pattern.", enforced_by: "child axis dropout_mask_pattern", source: "axis doc § 14"}
+  - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "axis doc § 8"}
+  - {id: D-S-STATS-PROPERTIES-NEED-STATS, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "axis doc § 2, § 8"}
+  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "axis doc § 10, § 14"}
+  - {id: D-S-ALIBI-NEEDS-SLOPES, reason: "ALiBi is defined by its per-head slopes.", enforced_by: "child axis alibi_slopes", source: "axis doc § 6"}
+  - {id: D-S-SOFTCAP-NEEDS-CAP, reason: "Soft-capping is defined by its cap.", enforced_by: "child axis softcap_value", source: "axis doc § 6"}
+  - {id: D-S-SCALE-VALUE-NEEDS-SOURCE, reason: "A supplied scale value exists only for a supplied scale; the default scale is 1/√d.", enforced_by: "child axis scale_value", source: "axis doc § 7"}
+  - {id: D-S-BIAS-PROPERTIES-NEED-BIAS, reason: "A bias shape and format exist only for a bias.", enforced_by: "child axes bias_broadcast, bias_dtype", source: "axis doc § 6"}
+
+# Candidate exclusions that FAILED rule B: they are limits of some library, engine, reference,
+# hardware or API, not facts about attention. They stay in Layer 1 as meaningful combinations.
+rejected_candidates:
+  - {candidate: "ALiBi only together with a causal mask", verdict: reference_limit, reason: "ALiBi is defined for any mask (the bidirectional form uses |i − j|); the limit is in the PR #14358 references.", source: "flow doc § 4 rule B example"}
+  - {candidate: "Q, K and V must share one format", verdict: library_limit, reason: "Q·Kᵀ and S·V are defined for mixed formats after conversion to a common precision.", source: "axis doc § 2 'Per-tensor type mixing'"}
+  - {candidate: "Output format must equal the input format", verdict: library_limit, reason: "Rounding the result to any format is defined (mixed precision).", source: "axis doc § 2 'Output number type'"}
+  - {candidate: "Descale/scale factors only for fp8 formats", verdict: convention, reason: "Scaled storage is a multiplication, defined for every format; fp8 needs it in practice. See open-questions.md OQ-09.", source: "axis doc § 9; flow doc § 4 item 3 example"}
+  - {candidate: "amax outputs only for fp8, or only for S and O", verdict: library_limit, reason: "The largest absolute value is defined for every tensor in every format.", source: "axis doc § 8 'fp8 amax outputs'"}
+  - {candidate: "Accumulation precision must be fp32", verdict: library_limit, reason: "Accumulating in fp16 or bf16 is defined and lossy, not undefined.", source: "axis doc § 2 'Internal working precision'"}
+  - {candidate: "Accumulation precision not lower than the input format", verdict: quality_judgement, reason: "Lower precision loses accuracy; the result is still defined.", source: "axis doc § 2"}
+  - {candidate: "Stats format limited to fp32, fp16, bf16", verdict: convention, reason: "Storing the log-sum-exp in fp8 is lossy, not undefined.", source: "axis doc § 2 'Stats / LSE number type'"}
+  - {candidate: "K heads must equal V heads", verdict: library_limit, reason: "Each query head can use its own K group and V group; see open-questions.md OQ-06 for the convention question.", source: "axis doc § 14"}
+  - {candidate: "Head size a multiple of 8, or from a fixed list (64, 128, 192, 256)", verdict: hardware_or_kernel_limit, reason: "Any positive head size defines a dot product; these values are tile and model hazards, kept out until Layer 4.", source: "axis doc § 3 'Q/K head size'; footnotes 1, 3; flow doc § 4 'Keep these OUT'"}
+  - {candidate: "Stats output not together with a mask", verdict: engine_limit, reason: "Log-sum-exp over the visible keys is defined under any mask with at least one visible key.", source: "an engine's C++ refusal"}
+  - {candidate: "Dropout requires a caller-supplied seed", verdict: cross_direction_need, reason: "Forward with an unspecified random state is defined; reproducing it in backward is a cross-direction need set aside by the forward-first scope. See open-questions.md OQ-07.", source: "axis doc § 7; flow doc § 5 item 6, § 9"}
+  - {candidate: "Sequence length 0 forbidden", verdict: api_limit, reason: "An empty query set gives an empty output; an empty key set is the fully-masked question. See open-questions.md OQ-01, OQ-02.", source: "axis doc § 3 'Query length' (0 rejected as a tensor size)"}
+  - {candidate: "Strides must be packed, or non-negative, or non-zero on inputs", verdict: library_limit, reason: "Reading an input through any stride pattern, including broadcast and reversed, is defined. Only OUTPUT aliasing is excluded (D-OUTPUT-SELF-ALIAS).", source: "axis doc § 4 'Strides'"}
+  - {candidate: "Start address aligned to 16 bytes (or to the element size)", verdict: hardware_limit, reason: "Alignment changes how memory is read, not what the values are.", source: "axis doc § 4 'Starting address alignment'"}
+  - {candidate: "Paged KV not with ragged query packing", verdict: library_limit, reason: "Paged storage of K/V and ragged storage of Q describe different tensors; together they are defined (common in serving).", source: "axis doc § 10"}
+  - {candidate: "Bias and ALiBi not together", verdict: library_limit, reason: "Both are additive terms; their sum is defined.", source: "axis doc § 6"}
+  - {candidate: "Causal mask and sliding window not together", verdict: library_limit, reason: "Masks combine by intersection; the result is defined (possibly equal to one of them).", source: "axis doc § 5 ('they can be combined')"}
+  - {candidate: "Negative scale, zero scale, negative ALiBi slope, zero ALiBi slope", verdict: unusual_not_meaningless, reason: "Each gives a defined score; zero gives uniform attention or no penalty.", source: "axis doc § 6, § 7; footnote 4"}
+  - {candidate: "Dropout probability exactly 0", verdict: unusual_not_meaningless, reason: "Identical to no dropout; defined.", source: "axis doc § 7; footnote 4"}
+  - {candidate: "Inputs sharing memory (e.g. Q and K the same buffer)", verdict: unusual_not_meaningless, reason: "Reading the same values twice is defined.", source: "axis doc § 4 'Overlap between tensors'"}
+  # Added 2026-10-29 (layers redo); agent's verdicts, not confirmed by the user.
+  - {candidate: "K and V paged only together, with one page size", verdict: library_limit, reason: "Paging is a storage form of each tensor; K alone, V alone, or different page sizes all address every key and value.", source: "axis doc § 10"}
+  - {candidate: "A shared K/V page table only with equal page sizes", verdict: unusual_not_meaningless, reason: "Slot i of the table then names K's page i and V's page i, which cover different key ranges; every key and value is still addressed.", source: "axis doc § 10"}
+  - {candidate: "Max and Sum_exp only together", verdict: library_convention, reason: "Each is a defined row statistic on its own.", source: "axis doc § 8"}
+  - {candidate: "Descales only per tensor", verdict: library_limit, reason: "Scaling per head, per token or per block is a multiplication by a defined factor for each element.", source: "axis doc § 9"}
+  - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axis doc § 6; CpuFpReferenceSdpa.hpp:941-960 at rocm-libraries 00d9c566bea"}
+  - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axis doc § 1, § 10"}
+
+# Combinations that are meaningful but give the same result as another combination. They are NOT
+# exclusions (rule B). A later choice rule may merge them to save cases.
+equivalences:
+  - "causal_alignment top_left ≡ bottom_right when seq_q_vs_seq_kv = equal (also window_alignment)."
+  - "scale_value inverse_sqrt_d ≡ scale_source default (same number, different source)."
+  - "dropout_probability zero ≡ dropout absent; dropout_mask_pattern keep_all ≡ dropout absent when the rescale factor is 1."
+  - "alibi_slopes zero ≡ alibi absent."
+  - "block_mask_pattern all_open ≡ block_mask absent."
+  - "causal_mask present + sliding_window with window_right ≠ zero ≡ the same window with window_right zero (same diagonal)."
+  - "sequence_lengths variable with per_seq_len all_full ≡ sequence_lengths uniform."
+  - "softcap_value negative ≡ softcap_value positive of the same size."
+  - "page_size whole_sequence ≡ page_size one_token when seq_kv = one."
+  # Added 2026-10-29 (layers redo).
+  - "bias_broadcast batch_only ≡ batch_or_heads when q_heads = one; heads_only ≡ batch_or_heads when batch_size = one (also dropout_mask_broadcast)."
+  - "descale_* per_head ≡ present when batch_size = one and the K/V head count is one, if every factor is the same."
+  - "page_table_sharing shared ≡ separate tables with the same contents."

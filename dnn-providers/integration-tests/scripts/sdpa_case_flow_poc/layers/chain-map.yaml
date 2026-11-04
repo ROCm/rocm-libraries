@@ -1,0 +1,57 @@
+# How the model (test-plans/sdpa-fwd/model.yaml) states each Layer 0 axis when the ids are NOT the same.
+# Read by chain_check.py. Everything not listed here is matched by identical axis id and value id,
+# or by a model value's `class:` field (model value -> the Layer 0 value of that id).
+# Written 2026-10-29 (layers redo, agent); round b entries removed the same day. Every `explained_by` must be a rule id in rules.yaml.
+
+# Model axes that are not Layer 0 axes, and the Layer 0 entry they come from.
+model_axis_sources:
+  dtype_k_vs_q: {l0_axis: dtype_k, explained_by: CH-DTYPE-MIX-RELATIONSHIP,
+                 why: "K's format is carried relative to Q's: same, or one alternative format per Q format"}
+  dtype_v_vs_q: {l0_axis: dtype_v, explained_by: CH-DTYPE-MIX-RELATIONSHIP, why: "as dtype_k_vs_q"}
+  implementation: {l0_set_aside: execution_strategy,
+                   why: "an API hint L0 sets aside 'to Layer 2'; the model carries it as an axis (L2 api_only_settings)"}
+  runtime_shape_override: {l0_set_aside: runtime_shape_overrides,
+                           why: "an API opt-in L0 sets aside 'to Layer 2 API-path variants'; the model carries it as an axis"}
+
+# Layer 0 axes the model does not carry as an axis, value by value.
+l0_axis_fates:
+  dtype_k:
+    all_values: {to_model_axis: dtype_k_vs_q, explained_by: CH-DTYPE-MIX-RELATIONSHIP,
+                 why: "every K format is 'same' or 'differs' relative to Q; the model picks one 'differs' format per Q format"}
+  dtype_v:
+    all_values: {to_model_axis: dtype_v_vs_q, explained_by: CH-DTYPE-MIX-RELATIONSHIP, why: "as dtype_k"}
+  head_dim_v_vs_qk:
+    all_values: {derived_from: [head_dim_qk, head_dim_v], explained_by: CH-HEAD-DIM-LEVELS,
+                 why: "smaller / equal / larger follow from the two head-size levels (e.g. d128 vs d192)"}
+  alibi_slopes:
+    standard_geometric: {folded_into: [alibi, present], explained_by: F-ALIBI-NO-SLOPES,
+                         why: "the API's ALiBi flag is read as the standard slopes (L2 mapping_assumed)"}
+  logit_softcap:
+    absent: {folded_into: null, explained_by: F-NO-SOFTCAP, why: "no API; every case is 'absent'"}
+  kv_cache_append:
+    absent: {folded_into: null, explained_by: F-NO-KV-APPEND, why: "no API; every case is 'absent'"}
+  amax_q:
+    not_requested: {folded_into: null, explained_by: F-NO-AMAX-QKV, why: "no API; never requested"}
+  amax_k:
+    not_requested: {folded_into: null, explained_by: F-NO-AMAX-QKV, why: "no API; never requested"}
+  amax_v:
+    not_requested: {folded_into: null, explained_by: F-NO-AMAX-QKV, why: "no API; never requested"}
+
+# Layer 0 values of an axis the model carries, but which the model omits (and that L1/L2 keep).
+l0_values_not_in_model: {}
+# 2026-10-29 round b: the six values CH-NOT-MODELLED-YET held (batch_packing ragged_q_side / ragged_kv_side,
+# page_size_k_vs_v, page_table_storage, descale_* finer, matmul_input_precision fp8, dropout_mask_broadcast) are model
+# values with the Layer 0 ids, so they need no entry here; CH-NOT-MODELLED-YET is removed from rules.yaml.
+
+# Layer 2 values (meaningful, and the frontend states them) that a policy rule removes from the model:
+# hipDNN should refuse them, so they are rejection-suite cases, not numerical ones. Added 2026-10-30
+# (user, 2026-10-29: "yes, they should be refused"; ALMIOPEN-3114). Every entry names a rules.yaml rule
+# of kind policy. Policy rules that remove only combinations (P-NO-HEAD-DIM-BROADCAST: a zero stride that
+# lands on the head dim) or nothing at all (P-NO-OUTPUT-BROADCAST: covered by D-OUTPUT-SELF-ALIAS, which
+# Layer 1 also holds) remove no single value, so they need no entry.
+l0_values_refused_by_policy:
+  strides_q: {negative: P-NO-NEGATIVE-STRIDE}
+  strides_k: {negative: P-NO-NEGATIVE-STRIDE}
+  strides_v: {negative: P-NO-NEGATIVE-STRIDE}
+  strides_o: {negative: P-NO-NEGATIVE-STRIDE}
+  strides_stats: {negative: P-NO-NEGATIVE-STRIDE}
