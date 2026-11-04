@@ -103,8 +103,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
     // FmhaFwdSplitKVKernel has no name-based fallback (unlike fmha_fwd_kernel.hpp),
     // so both must be declared: V is stepped by {kN0, 0}, which needs the
-    // untransposed (seqlen, hdim_v) view, and the affine flag selects the
-    // unpadded K view and the per-split K/V height cap (tdm_split_seqlen_k).
+    // untransposed (seqlen, hdim_v) view, and the affine flag asks for the
+    // unpadded K/V views this file's TDM loads expect.
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
 

@@ -87,10 +87,12 @@ struct FmhaFwdSplitKVKernel
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    // Set by qr_tdm: native row-major V, unpadded K/V DRAM views (make_k_dram /
-    // make_v_dram) and a per-split K/V height cap (tdm_split_seqlen_k).
+    // V arrives as (seqlen_k, hdim_v) rather than transposed; this also picks
+    // the page navigator's virtual dim.
     static constexpr bool kUsesUntransposedVKernelPath =
         detail::splitkv_uses_untransposed_v_kernel_path_v<FmhaPipeline>;
+    // K/V DRAM views stay unpadded; the TDM box clamp zero-fills whatever falls
+    // outside them.
     static constexpr bool kUsesTdmAffineDramPath =
         detail::splitkv_uses_tdm_affine_dram_path_v<FmhaPipeline>;
 
@@ -822,23 +824,6 @@ struct FmhaFwdSplitKVKernel
             }
         }();
 
-        // A split end is not kN0 aligned, so the last K/V tile's TDM box reaches
-        // into the next split; capping the height here makes the clamp zero-fill
-        // it. The bound is coarse but always >= the range the pipeline walks, and
-        // the pipeline still needs its -inf erase (exp(0) == 1). Not for paged-kv,
-        // whose descriptor spans one page.
-        const index_t tdm_split_seqlen_k = [&, i_split_ = i_split]() {
-            if constexpr(kUsesTdmAffineDramPath && !kIsPagedKV)
-            {
-                const index_t x_per_split =
-                    max(1, integer_divide_ceil(kargs.seqlen_k, kargs.num_splits));
-                return min(kargs.seqlen_k, x_per_split * (i_split_ + 1));
-            }
-            else
-            {
-                return kargs.seqlen_k;
-            }
-        }();
 
         const auto make_k_dram = [&](const KDataType* data, index_t height) {
             const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global>(
@@ -869,7 +854,7 @@ struct FmhaFwdSplitKVKernel
             }
             else
             {
-                return make_k_dram(k_ptr, tdm_split_seqlen_k);
+                return make_k_dram(k_ptr, kargs.seqlen_k);
             }
         }();
 
@@ -926,7 +911,7 @@ struct FmhaFwdSplitKVKernel
             }
             else
             {
-                return make_v_dram(v_ptr, tdm_split_seqlen_k);
+                return make_v_dram(v_ptr, kargs.seqlen_k);
             }
         }();
 
