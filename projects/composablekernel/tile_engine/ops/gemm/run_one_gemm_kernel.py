@@ -21,6 +21,10 @@ With ``host_cache`` (a ``host_cache.HostCache.spec``, also set by the search
 only) a standard kernel's host inputs and fp32 reference come from the search
 run's cache when the problem has an entry there, else they are computed and
 stored: the same values, computed once per problem instead of once per call.
+With ``prepare`` (the search, before a problem's first measure call) the
+worker loads no library: it stores the host data of ``problem`` for the dtype
+and layout of ``kernel_name`` in ``host_cache`` and prints
+``{"ok": true, "stored": <whether the cache holds it now>}``.
 
 Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, "ms": 0.123, "tflops": 456.7, "non_zero": 1, "kernel": "..."}
@@ -83,12 +87,22 @@ def _inputs(problem):
     )
 
 
-def _host_data(runner, problem, spec):
+class _HostCodec(GpuGemmRunner):
+    """``GpuGemmRunner``'s host encoding and reference for ``kernel_name``,
+    without its library or a GPU: what preparing a problem needs. The fp8/bf8
+    format is resolved as for the measure worker's runner (no arch given)."""
+
+    def __init__(self, kernel_name):  # the base __init__ loads the library
+        self._kernel_name, self._use_ocp = kernel_name, None
+
+
+def _host_data(runner, problem, spec, prepare=False):
     """A and B as ``runner``'s kernel reads them, the fp32 reference and its
-    max |ref| (``a``, ``b``, ``ref``, ``denom``), from the host cache ``spec``.
-    The entry's key holds everything they depend on: the problem, the
-    kernel's dtype and layout (its packed strides follow from the layout and
-    the extents), the fp8/bf8 format and the input generator."""
+    max |ref| (``a``, ``b``, ``ref``, ``denom``), from the host cache ``spec``
+    (``prepare``: whether the cache holds them once stored there). The
+    entry's key holds everything they depend on: the problem, the kernel's
+    dtype and layout (its packed strides follow from the layout and the
+    extents), the fp8/bf8 format and the input generator."""
     if _COMMON_DIR not in sys.path:
         sys.path.insert(0, _COMMON_DIR)
     import host_cache
@@ -110,7 +124,19 @@ def _host_data(runner, problem, spec):
         return {"a": a, "b": b, "ref": ref,
                 "denom": np.float64(float(np.max(np.abs(ref))) or 1.0)}
 
-    return host_cache.cached(spec, fields, compute)
+    return (host_cache.prepare if prepare else host_cache.cached)(spec, fields, compute)
+
+
+def _prepare(prob_dict, kernel_name, spec):
+    """Store a problem's host data for ``kernel_name``'s dtype and layout in
+    the host cache ``spec`` and print whether the cache holds it."""
+    try:
+        problem = GemmProblem.from_dict(prob_dict)
+        out = {"ok": True, "stored": _host_data(_HostCodec(kernel_name), problem, spec,
+                                                prepare=True)}
+    except Exception as e:
+        out = {"ok": False, "error": str(e)}
+    print(json.dumps(out), flush=True)
 
 
 def _check(out, output, ref, denom, verify_tol):
@@ -266,6 +292,10 @@ def main():
             flush=True,
         )
         sys.exit(1)
+
+    if d.get("prepare"):
+        _prepare(d.get("problem"), d.get("kernel_name"), d.get("host_cache"))
+        return
 
     verify = bool(d.get("verify", False))
     verify_tol = float(d.get("verify_tol", 2e-2))

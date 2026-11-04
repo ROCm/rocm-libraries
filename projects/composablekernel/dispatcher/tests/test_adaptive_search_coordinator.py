@@ -1458,8 +1458,9 @@ def test_real_strategies_end_to_end(tmp_path, name):
 # ------------------------------------------------------------- host cache
 
 
-def _cache_calls(spec, fields, value=1.0, shape=(3, 4)):
-    """HC.cached(spec, fields, compute) and how many times compute ran."""
+def _cache_calls(spec, fields, value=1.0, shape=(3, 4), fn=None):
+    """``fn`` (HC.cached by default) on (spec, fields, compute), and how many
+    times compute ran."""
     import numpy as np
 
     ran = []
@@ -1468,7 +1469,7 @@ def _cache_calls(spec, fields, value=1.0, shape=(3, 4)):
         ran.append(1)
         return {"x": np.full(shape, value, np.float32), "s": np.float64(value)}
 
-    got = HC.cached(spec, fields, compute)
+    got = (fn or HC.cached)(spec, fields, compute)
     return got, len(ran)
 
 
@@ -1704,6 +1705,128 @@ def test_host_allowance_takes_the_ops_counts_and_rate():
     # flops, its input element count and its seconds per element.
     cases = ((0, 0, 0), (1, 1, 1e-9), (1e11, 0, 1), (5e10, 10**6, 1.5e-6))
     assert [AS.host_allowance_s(*c) for c in cases] == [0, 1, 2, 3]
+
+
+def test_host_cache_prepare_stores_an_entry_the_calls_read(tmp_path):
+    cache = HC.HostCache(tmp_path)
+    f = {"k": 1}
+    assert not HC.stored(cache.spec, f)
+    assert _cache_calls(cache.spec, f, fn=HC.prepare) == (True, 1)
+    assert HC.stored(cache.spec, f) and _entries(cache) == 1
+    # Held already: neither preparing again nor a call computes it.
+    assert _cache_calls(cache.spec, f, fn=HC.prepare) == (True, 0)
+    assert _cache_calls(cache.spec, f, 5.0)[1] == 0
+    # Nothing held: no cache, an entry over the caps, a broken entry.
+    assert _cache_calls(None, f, fn=HC.prepare) == (False, 1)
+    small = {**cache.spec, "max_entry_bytes": 1}
+    assert _cache_calls(small, {"k": 2}, fn=HC.prepare) == (False, 1)
+    assert not HC.stored(cache.spec, {"k": 2}) and _entries(cache) == 1
+    (cache.dir / HC.entry_key(f) / "x.npy").unlink()
+    assert not HC.stored(cache.spec, f)
+    assert _cache_calls(cache.spec, f, fn=HC.prepare) == (False, 1)  # the key has its writer
+    cache.close()
+    assert not HC.stored(cache.spec, {"k": 3})
+
+
+# A preparation worker: reads {"out", "sleep", "exit", "log", "pidfile"} and
+# prints ``out`` after ``sleep`` s; ``log`` gets its start and end times.
+_PREP_JOB = r"""
+import json, os, sys, time
+d = json.loads(sys.stdin.read())
+if "pidfile" in d:
+    with open(d["pidfile"] + ".tmp", "w") as f:
+        f.write(str(os.getpid()))
+    os.replace(d["pidfile"] + ".tmp", d["pidfile"])
+t0 = time.time()
+time.sleep(d.get("sleep", 0))
+if "log" in d:
+    with open(d["log"], "w") as f:
+        f.write(f"{t0} {time.time()}")
+sys.stdout.write(d.get("out", ""))
+sys.stdout.flush()
+os._exit(d.get("exit", 0))
+"""
+
+
+def _prep(jobs, limits=None, width=4, argv=None):
+    payloads = {k: json.dumps(v) for k, v in jobs.items()}
+    return AS.prepare_host_data(argv or [sys.executable, "-c", _PREP_JOB], None,
+                                payloads, limits or {k: 60 for k in jobs}, width,
+                                poll_s=0.02)
+
+
+def test_prepare_host_data_reports_each_workers_outcome():
+    ok = json.dumps({"ok": True, "stored": True})
+    got = _prep({
+        "stored": {"out": ok},
+        "after_noise": {"out": "a warning\n" + ok + "\n"},
+        "refused": {"out": json.dumps({"ok": True, "stored": False})},
+        "error": {"out": json.dumps({"ok": False, "error": "boom"}), "exit": 0},
+        "no_ok": {"out": json.dumps({"ok": 1, "stored": True})},
+        "crash": {"exit": 3},
+        "garbled": {"out": "{"},
+        "not_a_dict": {"out": "[]"},
+        "hang": {"out": ok, "sleep": 30},
+    }, {"hang": 0.5, **{k: 60 for k in ("stored", "after_noise", "refused", "error",
+                                       "no_ok", "crash", "garbled", "not_a_dict")}})
+    assert list(got) == ["stored", "after_noise", "refused", "error", "no_ok", "crash",
+                         "garbled", "not_a_dict", "hang"]
+    brief = {k: (g["ok"], g["stored"], g["error"]) for k, g in got.items()}
+    assert brief == {
+        "stored": (True, True, ""), "after_noise": (True, True, ""),
+        "refused": (True, False, ""), "error": (False, False, "boom"),
+        "no_ok": (False, False, "failed (exit code 0)"),
+        "crash": (False, False, "no result line (exit code 3)"),
+        "garbled": (False, False, "no result line (exit code 0)"),
+        "not_a_dict": (False, False, "no result line (exit code 0)"),
+        "hang": (False, False, "no result in 0.5 s"),
+    }
+    assert 0.5 <= got["hang"]["seconds"] < 10
+    bad = _prep({"k": {}}, argv=[os.devnull + "-missing"])
+    assert not bad["k"]["ok"] and bad["k"]["error"].startswith("could not start")
+
+
+def test_prepare_host_data_runs_at_most_width_workers_at_once(tmp_path):
+    jobs = {f"p{i}": {"out": json.dumps({"ok": True, "stored": True}), "sleep": 0.4,
+                      "log": str(tmp_path / f"p{i}")} for i in range(5)}
+    assert all(g["stored"] for g in _prep(jobs, width=2).values())
+    spans = [tuple(map(float, (tmp_path / k).read_text().split())) for k in jobs]
+    most = max(sum(a <= t < b for a, b in spans) for t, _ in spans)
+    assert most == 2
+
+
+def test_prepare_host_data_kills_its_workers_when_interrupted(tmp_path, monkeypatch):
+    # Ctrl-C or SIGTERM reaches the run as KeyboardInterrupt while it waits.
+    pidfile = tmp_path / "pid"
+
+    def sleep(s):
+        if pidfile.exists():
+            raise KeyboardInterrupt
+        time.sleep(s)
+
+    monkeypatch.setattr(AS, "time", argparse.Namespace(monotonic=time.monotonic,
+                                                       sleep=sleep))
+    t0 = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        _prep({"k": {"pidfile": str(pidfile), "sleep": 60}}, {"k": 120})
+    assert time.monotonic() - t0 < 30  # killed, not waited for
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()), 0)
+
+
+@pytest.mark.parametrize("record, want", [
+    (None, 365),
+    ({"ok": True, "stored": True, "seconds": 339.0}, 365),
+    ({"ok": True, "stored": False, "seconds": 339.0}, 678),
+    ({"ok": True, "stored": False, "seconds": 100.4}, 365),
+    ({"ok": False, "stored": False, "seconds": 3710.0}, 365),
+])
+def test_call_allowance_is_never_below_the_ops_allowance(record, want):
+    # A preparation that stored its entry took its time outside the calls; one
+    # that finished without storing it measured what each call will compute:
+    # the calls get twice that when it is more. A failed one measured nothing.
+    assert AS.call_allowance_s(365, record) == want
+    assert AS.prepare_limit_s(365) == 10 * 365 + 60
 
 
 def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path, monkeypatch):

@@ -23,7 +23,8 @@ them) lives behind ``OperationAdapter``; the GEMM one is
 is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
 ``CallFiles`` (per-call files under rounds/), ``measure_built``,
 ``host_allowance_s`` (a verified call's host time, at the op's rates),
-``source_info``, ``check_search_options`` and ``run_search`` (the driver's
+``prepare_host_data`` (a problem's host cache entry, stored before its first
+call and outside its timeout), ``source_info``, ``check_search_options`` and ``run_search`` (the driver's
 search mode, with its exit code). Importing this module imports neither
 ``ck_search`` nor numpy: the search core is loaded when a search runs.
 """
@@ -39,6 +40,7 @@ import signal
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -1478,6 +1480,101 @@ def host_allowance_s(flops, inputs, s_per_input) -> int:
     binds it with its own counts and rates (the GEMM one:
     ``gemm_search.verify_allowance_s``)."""
     return math.ceil(flops / HOST_REFERENCE_FLOPS + inputs * s_per_input)
+
+
+# With the host cache on, a problem's host data is prepared before its first
+# measure call, in a worker of its own and outside that call's timeout, so a
+# host slower than the op's rates makes the round longer instead of timing the
+# kernel out. The preparation's limit only stops one that hangs:
+# PREPARE_FACTOR times the problem's host allowance, plus PREPARE_START_S for
+# the worker's start. A preparation that finishes without storing the entry
+# (the cache's caps) leaves calls that compute it all: their allowance is at
+# least PREPARE_MARGIN times what it took on this host.
+PREPARE_FACTOR, PREPARE_START_S, PREPARE_MARGIN = 10, 60, 2
+
+
+def prepare_limit_s(allowance_s) -> int:
+    """The limit of a preparation whose problem's host allowance is
+    ``allowance_s`` seconds."""
+    return PREPARE_FACTOR * allowance_s + PREPARE_START_S
+
+
+def call_allowance_s(allowance_s, prepared: Optional[Mapping] = None) -> int:
+    """The host seconds a call's timeout adds for a problem whose host
+    allowance is ``allowance_s`` and whose preparation record (one value of
+    ``prepare_host_data``) is ``prepared``: never less than ``allowance_s``."""
+    took = 0.0
+    if prepared and prepared["ok"] and not prepared["stored"]:
+        took = prepared["seconds"]
+    return max(allowance_s, math.ceil(PREPARE_MARGIN * took))
+
+
+def prepare_host_data(argv, env, payloads: Mapping[str, str],
+                      limits: Mapping[str, float], width: int,
+                      poll_s: float = 0.1) -> Dict[str, dict]:
+    """Run the op's worker ``argv`` once per problem key of ``payloads`` (its
+    JSON payload on stdin) to store that problem's host cache entry, at most
+    ``width`` at a time, each killed after its ``limits`` seconds. The worker
+    prints ``{"ok": true, "stored": <bool>}`` or ``{"ok": false, "error":
+    ...}`` as its last line. Returns ``{key: {"ok", "stored", "seconds",
+    "error"}}`` in the order of ``payloads``; ``ok`` is False for an error, a
+    crash or a kill at the limit. Workers still running when this raises (an
+    interrupt) are killed."""
+    out, todo, running = {}, list(payloads), {}
+    try:
+        while todo or running:
+            while todo and len(running) < max(1, width):
+                key = todo.pop(0)
+                stdout = tempfile.TemporaryFile()
+                try:
+                    with tempfile.TemporaryFile() as stdin:
+                        stdin.write(payloads[key].encode())
+                        stdin.seek(0)
+                        proc = subprocess.Popen(argv, stdin=stdin, stdout=stdout,
+                                                stderr=subprocess.DEVNULL, env=env)
+                except OSError as e:
+                    stdout.close()
+                    out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
+                    continue
+                running[key] = (proc, stdout, time.monotonic())
+            time.sleep(poll_s)
+            for key, (proc, stdout, t0) in list(running.items()):
+                took = time.monotonic() - t0
+                if proc.poll() is None and took < limits[key]:
+                    continue
+                killed = proc.poll() is None
+                if killed:
+                    proc.kill()
+                proc.wait()
+                del running[key]
+                stdout.seek(0)
+                text = stdout.read().decode(errors="replace")
+                stdout.close()
+                out[key] = _prepared(proc.returncode, text, took,
+                                     f"no result in {limits[key]:g} s" if killed else "")
+    finally:
+        for proc, stdout, _ in running.values():
+            proc.kill()
+            proc.wait()
+            stdout.close()
+    return {key: out[key] for key in payloads}
+
+
+def _prepared(code, text, took, error) -> dict:
+    """A preparation's record from its exit ``code``, output ``text`` and
+    ``took`` seconds; ``error`` set when it never got to report."""
+    got = None
+    if not error:
+        try:
+            got = json.loads((text.strip().splitlines() or [""])[-1])
+        except ValueError:
+            got = None
+        if not isinstance(got, dict):
+            error = f"no result line (exit code {code})"
+        elif got.get("ok") is not True:
+            error = str(got.get("error") or f"failed (exit code {code})")
+    return {"ok": not error, "stored": not error and got.get("stored") is True,
+            "seconds": round(took, 1), "error": error}
 
 
 class CallFiles:

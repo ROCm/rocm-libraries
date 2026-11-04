@@ -25,6 +25,7 @@ import json
 import math
 import subprocess
 import sys
+import threading
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -80,6 +81,23 @@ class _Runner:
         return self.run(A_h, B_h, problem)
 
 
+_WORKER_LOCK = threading.Lock()  # sys.stdin and stdout are the process's
+
+
+def _worker(payload: bytes) -> str:
+    """The real worker main()'s output for ``payload``, run in-process (one
+    at a time: device threads may call it at once)."""
+    out = io.StringIO()
+    with _WORKER_LOCK:
+        stdin, sys.stdin = sys.stdin, io.TextIOWrapper(io.BytesIO(payload))
+        try:
+            with contextlib.redirect_stdout(out):
+                worker.main()
+        finally:
+            sys.stdin = stdin
+    return out.getvalue()
+
+
 class _InProcess:
     """subprocess.Popen stand-in running the real worker main() in-process."""
 
@@ -90,15 +108,9 @@ class _InProcess:
 
     def communicate(self, input=None, timeout=None):
         self.tc.payloads.append(json.loads(input))
-        out, stdin = io.StringIO(), sys.stdin
-        sys.stdin = io.TextIOWrapper(io.BytesIO(input))
-        try:
-            with contextlib.redirect_stdout(out):
-                worker.main()
-        finally:
-            sys.stdin = stdin
-        self.tc.outputs.extend(json.loads(ln) for ln in out.getvalue().splitlines())
-        return out.getvalue().encode(), b""
+        out = _worker(input)
+        self.tc.outputs.extend(json.loads(ln) for ln in out.splitlines())
+        return out.encode(), b""
 
     def kill(self):
         pass
@@ -110,7 +122,9 @@ class _InProcess:
 class Toolchain:
     """Fake build + GPU. ``fail``: names whose build fails; ``mislabel``: name
     -> the name its library reports; ``lat``: name -> ms; ``wrong``: names, or
-    (name, M) pairs, whose output is wrong (for every problem, or for M)."""
+    (name, M) pairs, whose output is wrong (for every problem, or for M).
+    Preparations run the real worker in-process too, on the stand-in's codec;
+    ``prepares`` holds each call's payloads, limits and width."""
 
     def __init__(self, tmp_path, monkeypatch, fail=(), mislabel=None, lat=None,
                  wrong=()):
@@ -119,7 +133,10 @@ class Toolchain:
         self.fail, self.mislabel = set(fail), dict(mislabel or {})
         self.lat, self.wrong = dict(lat or {}), set(wrong)
         self.builds, self.payloads, self.outputs, self.loaded = [], [], [], []
+        self.prepares = []
         monkeypatch.setattr(worker, "GpuGemmRunner", self.runner)
+        monkeypatch.setattr(worker, "_HostCodec", lambda name: _Runner(name, 1.0))
+        monkeypatch.setattr(AS, "prepare_host_data", self.prepare)
         monkeypatch.setattr(drv, "subprocess", SimpleNamespace(
             Popen=lambda *a, **kw: _InProcess(self), PIPE=subprocess.PIPE,
             DEVNULL=subprocess.DEVNULL, TimeoutExpired=subprocess.TimeoutExpired))
@@ -141,6 +158,13 @@ class Toolchain:
             lib.write_text(self.mislabel.get(c.name, c.name))
             out.append(lib)
         return out
+
+    def prepare(self, argv, env, payloads, limits, width):
+        """``prepare_host_data`` with each worker run in-process."""
+        self.prepares.append({"payloads": {k: json.loads(p) for k, p in payloads.items()},
+                              "limits": dict(limits), "width": width})
+        return {k: AS._prepared(0, _worker(p.encode()), 0.0, "")
+                for k, p in payloads.items()}
 
     def runner(self, lib_path):
         self.loaded.append(Path(lib_path))
@@ -499,6 +523,72 @@ def test_workers_share_the_host_cache_with_unchanged_outcomes(tmp_path, monkeypa
             assert entries == 0 and specs == [None] * 9
     assert got["plain"] == got["cached"]
     assert [o[0] for o in got["plain"][0]] == ["ok", "ok", "ok", "numeric_fail"] * 2 + ["ok"]
+
+
+def test_first_calls_find_their_problem_prepared(tmp_path, monkeypatch):
+    # With the host cache, each problem is prepared once, before its first
+    # call and outside its timeout (one worker per new problem, at most one
+    # per device at a time): no measure worker generates inputs, and the
+    # call's timeout keeps the per-dtype allowance.
+    made, inputs = [], worker._inputs
+    monkeypatch.setattr(worker, "_inputs", lambda p: made.append(p.M) or inputs(p))
+    tc = Toolchain(tmp_path, monkeypatch)
+    seen = []
+    with HC.HostCache(tmp_path) as cache:
+        def measure(*a, **kw):
+            seen.append((a[4].kernel_timeout, HC.usage(cache.dir)[0], len(made)))
+            return drv.benchmark_on_devices(*a, **kw)
+
+        ad = _adapter(tmp_path, tc.build, measure, devices=("0", "1"), cache=cache)
+        ad.build_missing([ad.cands[n] for n in (A, B)])
+        outs = ad.measure_pairs([_req(K1, A, 1), _req(K1, B, 2)])
+        outs += ad.measure_pairs([_req(K1, A, 3), _req(K2, B, 4)])
+        outs += ad.confirm([_req(K2, A, 5)])
+    assert [o.status for o in outs] == ["ok"] * 5
+    assert seen == [(31, 1, 1), (31, 2, 2), (31, 2, 2)] and made == [64, 32]
+    assert [(list(p["payloads"]), p["limits"], p["width"]) for p in tc.prepares] == [
+        ([K1], {K1: 70}, 2), ([K2], {K2: 70}, 2)]
+    assert tc.prepares[0]["payloads"][K1] == {
+        "prepare": True, "host_cache": cache.spec, "problem": P1, "kernel_name": A}
+    rounds = tmp_path / "out" / "rounds"
+    sides = [json.loads((rounds / n).read_text())["prepared"] for n in (
+        "0002-measure.json", "0003-measure.json", "0004-confirm.json")]
+    rec = {"limit_s": 70, "ok": True, "stored": True, "seconds": 0.0, "error": ""}
+    assert sides == [[{"problem": K1, "kernel": A, **rec}],
+                     [{"problem": K2, "kernel": B, **rec}], []]
+
+
+@pytest.mark.parametrize("case, record, want", [
+    ("cache off", None, 365),
+    ("stored", {"ok": True, "stored": True, "seconds": 339.0, "error": ""}, 365),
+    ("over the caps", {"ok": True, "stored": False, "seconds": 339.0, "error": ""}, 678),
+    ("failed", {"ok": False, "stored": False, "seconds": 3710.0,
+                "error": "no result in 3710 s"}, 365),
+])
+def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
+        tmp_path, monkeypatch, capsys, case, record, want):
+    # fp8 256x768x874159 has a 365 s host allowance; on a host about 2x slower
+    # than the one its rates come from, its host data took 339 s. Prepared,
+    # those 339 s are spent before the call, which keeps 30 + 365 s for loading
+    # the entry and running the kernel. Without an entry (the cache off, or
+    # over its caps) every call computes it all: the allowance stays, or is
+    # twice what the preparation took on this host when that is more. A
+    # problem is prepared once, whatever the outcome.
+    seen, preps = [], []
+    tc = Toolchain(tmp_path, monkeypatch)
+    monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, payloads, limits, w: (
+        preps.append(limits) or {k: dict(record) for k in payloads}))
+    with HC.HostCache(tmp_path) as cache:
+        ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.append(a[4].kernel_timeout),
+                      problems=(P1, SKINNY), dtype="fp8",
+                      cache=None if case == "cache off" else cache)
+        ad.build_missing([ad.cands[A]])
+        for n in (1, 2):
+            ad.measure_pairs([_req("256x768x874159", A, n)])
+    assert seen == [30 + want] * 2
+    assert preps == ([] if case == "cache off" else [{"256x768x874159": 3710}])
+    out = capsys.readouterr().out
+    assert ("not stored" in out) == (case in ("over the caps", "failed"))
 
 
 def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):

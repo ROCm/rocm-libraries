@@ -14,7 +14,10 @@ of the pairs a full run would measure, writes a winners.json the driver's
 Also: get_arch_filter_data no longer grows sys.path on every call.
 
 No GPU or compiler needed: the build and the GPU batch runner are stubbed, the
-real ck_search strategies run. Run: python3 -m pytest -q tests/test_gemm_search_cli.py
+real ck_search strategies run. The host-data preparations report "not run"
+(their problems' calls compute their own, as without them), except in the
+test that runs the real workers for them.
+Run: python3 -m pytest -q tests/test_gemm_search_cli.py
 """
 
 import csv
@@ -31,6 +34,7 @@ GEMM_TE_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(GEMM_TE_DIR))
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+sys.path.insert(0, str(GEMM_TE_DIR.parent / "common"))
 
 import ctypes_utils as cu  # noqa: E402
 import gemm_full_benchmark as drv  # noqa: E402
@@ -55,12 +59,18 @@ def _ms(name):
 
 
 def _main(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
-          devices=("0",), build_kw=None):
+          devices=("0",), build_kw=None, prepare=False):
     """Run the driver with a stub build (real files, so the search can copy
     them) and a stub GPU runner; ``bad`` names fail verification ("*": all),
     ``build_kw`` gets each build call's keyword arguments, plus "fixed": which
-    of its kernels have fixed vector widths.
+    of its kernels have fixed vector widths; ``prepare``: a search's
+    host-data preparations run the real workers.
     Returns (rc, out, built names, calls)."""
+    if "--search-config" in argv and not prepare:
+        import adaptive_search as AS  # only for a search: see the no-search test
+
+        monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a: {
+            k: AS._prepared(None, "", 0.0, "not run") for k in jobs})
     libs = tmp_path / "libs"
     libs.mkdir(exist_ok=True)
     built, calls = [], []
@@ -117,11 +127,12 @@ def _settings(tmp_path, **kw):
 
 
 def _search(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
-            devices=("0",), build_kw=None, **settings):
+            devices=("0",), build_kw=None, prepare=False, **settings):
     out = tmp_path / "run"
     got = _main(monkeypatch, capsys, tmp_path, "--search-config",
                 _settings(tmp_path, **settings), "--search-output-dir", str(out),
-                *argv, bad=bad, problems=problems, devices=devices, build_kw=build_kw)
+                *argv, bad=bad, problems=problems, devices=devices, build_kw=build_kw,
+                prepare=prepare)
     return (*got, out)
 
 
@@ -273,6 +284,35 @@ def test_host_cache_settings_reach_the_workers(monkeypatch, capsys, tmp_path, of
             2**29, 2**31)
     assert _read(out, "run.json")["context"]["measurement"]["host_cache"] == specs[0]
     assert list(where.iterdir()) == []
+
+
+def test_real_workers_prepare_each_problem_before_its_first_call(
+        monkeypatch, capsys, tmp_path):
+    # The driver's worker script, started by the search as a subprocess with
+    # the driver's environment, stores each problem's host data once (no
+    # library, no GPU), before the problem's first measure call: 3 entries.
+    rc, cap, _, calls, out = _search(monkeypatch, capsys, tmp_path, prepare=True,
+                                     devices=("0", "1"))
+    assert rc == 0, cap.out
+    assert "Host cache: 3 entries" in cap.out
+    sides = [json.loads(p.read_text())
+             for p in sorted((out / "rounds").glob("*-measure.json"))]
+    sides += [json.loads(p.read_text())
+              for p in sorted((out / "rounds").glob("*-confirm.json"))]
+    prepared = [r for side in sides for r in side["prepared"]]
+    assert sorted(r["problem"] for r in prepared) == sorted(KEYS)
+    assert all(r["ok"] and r["stored"] and not r["error"] for r in prepared)
+    first = sides[0]
+    assert {r["problem"] for r in first["prepared"]} == {
+        r["problem"] for r in first["requests"]}
+    eligible = _listing(monkeypatch, capsys, tmp_path)
+    assert all(r["kernel"] in eligible[r["problem"]] for r in prepared)
+    assert "preparing the host data of 3 problem(s)" in cap.out
+    assert "3 of 3 stored" in cap.out and "not stored" not in cap.out
+    measurement = _read(out, "run.json")["context"]["measurement"]
+    assert measurement["prepare"].startswith("before a problem's first call")
+    # Calls keep the per-dtype allowance: 30 s + 1 s for these small shapes.
+    assert "(timeout 31s per kernel)" in cap.out
 
 
 def test_interrupted_search_removes_its_host_cache(monkeypatch, capsys, tmp_path):

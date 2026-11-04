@@ -6,7 +6,8 @@ A verified search call runs one kernel in a fresh worker process, which would
 otherwise regenerate the problem's random inputs and recompute its fp32
 reference on every call. A search run keeps them in a temp directory of its
 own (``HostCache``, in the driver) that its workers read from, or write to on
-a miss (``cached``, in the worker):
+a miss (``cached``, in the worker). The search fills a problem's entry before
+its first measure call, in a worker that only does that (``prepare``):
 
 - an entry is a directory ``<dir>/<key>`` of ``.npy`` files and a
   ``meta.json``, written under a temp name and renamed into place, so a reader
@@ -165,8 +166,7 @@ def cached(spec: Optional[Mapping], fields: Mapping,
         return compute()
     import numpy as np
 
-    fields = json.loads(json.dumps(fields))  # as meta.json reads back
-    path = Path(spec["dir"]) / entry_key(fields)
+    fields, path = _entry(spec, fields)
     try:
         meta = json.loads((path / "meta.json").read_text())
         if meta["fields"] == fields:
@@ -180,6 +180,36 @@ def cached(spec: Optional[Mapping], fields: Mapping,
     except Exception:  # noqa: BLE001 - the result does not need the entry
         pass
     return data
+
+
+def prepare(spec: Optional[Mapping], fields: Mapping,
+            compute: Callable[[], Dict[str, object]]) -> bool:
+    """Fill the entry of ``fields`` ahead of the calls that read it (as
+    ``cached`` does on a miss, unless the cache holds it already). Returns
+    whether the cache holds it now: not when ``spec`` is None, the caps
+    refuse it or writing it failed."""
+    if not stored(spec, fields):
+        cached(spec, fields, compute)
+    return stored(spec, fields)
+
+
+def stored(spec: Optional[Mapping], fields: Mapping) -> bool:
+    """Whether the cache ``spec`` holds a complete entry of ``fields``."""
+    if not spec:
+        return False
+    fields, path = _entry(spec, fields)
+    try:
+        meta = json.loads((path / "meta.json").read_text())
+        return meta["fields"] == fields and all(
+            (path / f"{n}.npy").is_file() for n in meta["arrays"])
+    except Exception:  # noqa: BLE001 - no entry, or an unreadable one
+        return False
+
+
+def _entry(spec: Mapping, fields: Mapping) -> Tuple[object, Path]:
+    """``fields`` as meta.json reads them back, and their entry's path."""
+    fields = json.loads(json.dumps(fields))
+    return fields, Path(spec["dir"]) / entry_key(fields)
 
 
 def claims(root) -> Dict[str, int]:

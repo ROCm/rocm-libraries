@@ -267,6 +267,42 @@ def test_host_cache_gives_the_uncached_outcome(gemm_worker, tmp_path, dtype, use
     assert gemm_worker.counts == {"inputs": 2, "reference": 2}
 
 
+@pytest.mark.parametrize("layout", ["rcr", "crr", "rrr", "ccr"])
+@pytest.mark.parametrize("dtype,use_ocp", CASES)
+def test_prepared_entry_gives_the_uncached_outcome(gemm_worker, tmp_path, monkeypatch,
+                                                   capsys, dtype, use_ocp, layout):
+    # The search's preparation loads no library: it encodes with
+    # GpuGemmRunner's own codec and resolves the fp8/bf8 format as the measure
+    # worker's runner does (no arch given: the local GPU's), so it stores the
+    # entry a measure call would, and that call then computes nothing.
+    import gemm_utils
+
+    monkeypatch.setattr(gemm_utils, "_default_use_ocp", lambda: bool(use_ocp))
+    runner = _runner(dtype, None, layout)
+    legacy = gemm_worker(runner)
+
+    def no_library(*a, **kw):
+        raise AssertionError("a preparation loaded a library")
+
+    monkeypatch.setattr(gemm_utils, "GemmDispatcherLib", no_library)
+    with HC.HostCache(tmp_path) as cache:
+        run_one_gemm_kernel._prepare(PROBLEM, runner.kernel_name, cache.spec)
+        assert json.loads(capsys.readouterr().out) == {"ok": True, "stored": True}
+        hit = gemm_worker(runner, host_cache=cache.spec)
+        assert HC.usage(cache.dir)[0] == 1
+    assert hit == legacy and json.loads(hit)["verified"]
+    assert gemm_worker.counts == {"inputs": 2, "reference": 2}  # legacy, preparation
+
+
+def test_preparation_reports_what_it_could_not_store(capsys, tmp_path):
+    name = _runner("bf16", None).kernel_name
+    for args, want in (((PROBLEM, name, None), {"ok": True, "stored": False}),
+                       ((None, name, {"dir": str(tmp_path)}), {"ok": False})):
+        run_one_gemm_kernel._prepare(*args)
+        out = json.loads(capsys.readouterr().out)
+        assert {k: out[k] for k in want} == want
+
+
 def test_host_cache_keeps_dtypes_layouts_and_problems_apart(gemm_worker, tmp_path):
     # One entry per (problem, dtype, layout, fp8 format): a crr kernel handed
     # an rcr entry's buffers (or bf16 an fp16 one's) would fail verification.
