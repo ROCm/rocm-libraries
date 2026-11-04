@@ -384,6 +384,8 @@ class KernelIdentity:
     fxh_dma: int = 0
     # fwd only (ImplicitGemmConvSpec.xh_yring). Left out of the hash at 0.
     xh_yring: int = 0
+    # fwd only (ImplicitGemmConvSpec.xh_pad). Left out of the hash while False.
+    xh_pad: bool = False
     # dgrad only (DgradConvSpec.xh_dlds). Left out of the hash at 0.
     xh_dlds: int = 0
     # dgrad only (DgradConvSpec.xh_epi_lin). Left out of the hash while False.
@@ -633,7 +635,7 @@ class KernelIdentity:
             "epi_store_fast", "split_zero_first", "pp_fetch_deep",
             "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
             "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
-            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc", "xh_dx_wmask",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_pad", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc", "xh_dx_wmask",
         ):
             if not fields[name]:
                 del fields[name]

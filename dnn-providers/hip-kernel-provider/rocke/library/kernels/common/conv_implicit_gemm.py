@@ -796,6 +796,18 @@ class ImplicitGemmConvSpec:
     # chunk groups, warp_n 1; per workgroup Wo * R == tile_m, whole tiles per
     # output plane and Y == 3 (else the plain loop). 0 = off. Tags ``xyr<R>``.
     xh_yring: int = 0
+    # fxh_dma >= 1000 (incl. xh_yring) on a padded problem: the x-halo loop
+    # reads the unpadded input directly instead of falling back to the plain
+    # loop. A wave's staged range is the input row segment of its output row
+    # (wave-uniform d, h); the A buffer base moves down by the pad offset
+    # (pD, pH, pW) so every lane offset stays >= 0, the W columns outside the
+    # input are lanes with an out-of-range offset (fixed per lane, set once),
+    # and a (z, y) step whose input row or plane is outside the input loads
+    # through a zero-size buffer (a scalar select per DMA list), so the LDS
+    # holds the zero halo the halo form reads from memory (per-list z / y
+    # tap bitmasks, built once per tile). Serves any padding (pad 0
+    # included); dilation 1 on D / H (else the plain loop). Tags ``xpd``.
+    xh_pad: bool = False
 
     @property
     def block_size(self) -> int:
@@ -939,6 +951,7 @@ class ImplicitGemmConvSpec:
                 "xsm": self.xh_stride_m,
                 f"fxd{self.fxh_dma}": self.fxh_dma > 0,
                 f"xyr{self.xh_yring}": self.xh_yring > 0,
+                "xpd": self.xh_pad,
                 f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
                 "nopad": self.uk_nopad,
                 f"dpw{self.defer_mfma_per_write}": self.defer_mfma_per_write > 0,
@@ -1295,6 +1308,8 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         and not spec.uk_chunk_group and spec.warp_m % (spec.xh_yring % 10) == 0
     ):
         return "xh_yring (2 or 4 rows, + 10: early reload, + 20: also early ring rows) needs fxh_dma >= 1000, uk_tap_fast without chunk groups, warp_m % rows == 0"
+    if spec.xh_pad and not (spec.uk_xhalo and spec.fxh_dma >= 1000):
+        return "xh_pad masks the wave-private x-halo DMA loop (fxh_dma >= 1000) only"
     if spec.rpf_fetch_late and (
         spec.reg_prefetch != 1 or spec.vmem_interleave or spec.a_direct
     ):
@@ -5538,6 +5553,53 @@ def _build_implicit_gemm_conv_impl(
             assert row_bytes == 64
             A_addr = b.smem_addr_of(A_smem)
             B_addr = b.smem_addr_of(B_smem)
+            _xp = spec.xh_pad
+            if _xp:
+                # xh_pad: A buffer base moved down by the pad offset, so the
+                # wave ranges' lane offsets (from lin_of, no pad term) and the
+                # tap offsets stay >= 0.
+                _bias = b.mul(b.add(b.add(b.mul(p_pD, s_di), b.mul(p_pH, s_hi)),
+                                    b.mul(p_pW, s_wi)), c_eb)
+                _a_ptr_b = b.global_ptr_offset(A, b.sext(b.sub(c0, _bias), I64))
+                _a_nb = b.add(A_bytes, _bias)
+
+            def _tap_mask(org, extent):
+                # bit t set <=> 0 <= org + t < extent (t < 31; dilation 1)
+                c31 = b.const_i32(31)
+                lo = b.smin(b.smax(b.sub(c0, org), c0), c31)
+                hi = b.smin(b.smax(b.sub(extent, org), c0), c31)
+                return b.to_sgpr_u32(b.land(b.sub(b.shl(c1, hi), c1),
+                                            b.xor(b.sub(b.shl(c1, lo), c1), b.const_i32(-1))))
+
+            def _pcoords(m_val):
+                # (z tap mask, y tap mask, input w) of the input row of output
+                # pixel m_val (wave-uniform: m_val is): bit z / y set when tap
+                # z / y of that row is inside the input.
+                q_wo, wo = magic_divmod(b, m_val, params["p_magic_m_Wo_mult"],
+                                        params["p_magic_m_Wo_shift"], p_Wo)
+                q_ho, ho = magic_divmod(b, q_wo, params["p_magic_m_Ho_mult"],
+                                        params["p_magic_m_Ho_shift"], p_Ho)
+                _n, do_ = magic_divmod(b, q_ho, params["p_magic_m_Do_mult"],
+                                       params["p_magic_m_Do_shift"], p_Do)
+                return (_tap_mask(b.sub(b.mul(do_, p_sD), p_pD), p_Di),
+                        _tap_mask(b.sub(b.mul(ho, p_sH), p_pH), p_Hi),
+                        b.to_sgpr_u32(b.sub(wo, p_pW)))
+
+            def _a_rs(pc, st):
+                # A rsrc of a DMA list whose rows are the input row of pc at
+                # step st: zero-size (every load reads 0) when that row's
+                # plane or row is outside the input (tap bit clear).
+                if not _xp:
+                    return a_rsrc
+                _c_t, y_t, z_t = st
+                ok = b.cmp_ne(b.land(b.land(b.lshr(pc[0], z_t), b.lshr(pc[1], y_t)), c1), c0)
+                return b.buffer_rsrc(_a_ptr_b, b.to_sgpr_u32(b.select(ok, _a_nb, c0)))
+
+            def _wmask(pc, rel, voff):
+                # lane of range row rel: input column pc.w + rel outside -> 0
+                if not _xp:
+                    return voff
+                return b.select(b.cmp_ult(b.add(pc[2], rel), p_Wi), voff, c_oob)
 
             def segs(n_seg):
                 # segment s = j * n_waves + wave; the last round's surplus
@@ -5559,6 +5621,7 @@ def _build_implicit_gemm_conv_impl(
                 # input pixels lin(first pixel of the wave) + rel.
                 WR = _fxd_wave_rows(spec)
                 w_m0 = b.add(m0, b.mul(wave_, b.const_i32(spec.tile_m // spec.warp_m)))
+                _pc_w = _pcoords(w_m0) if _xp else None
                 a_base_w = b.mul(lin_of(b, w_m0), s_wi)
                 if grouped:
                     a_base_w = b.add(a_base_w, a_gbase)
@@ -5584,6 +5647,8 @@ def _build_implicit_gemm_conv_impl(
                     if 4 * j + 3 >= hp:
                         voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), b.const_i32(hp)),
                                         voff, c_oob)
+                    if _xp:
+                        voff = _wmask(_pc_w, b.add(rel0, b.const_i32(4 * j)), voff)
                     lds = b.smem_ptr_add(A_addr, b.zext(b.mul(sg, b.const_i32(4 * row_bytes)), I64))
                     a_dma.append((lds, voff))
             for sg in ([] if _wp else segs(-(-R // 4))):
@@ -5658,8 +5723,9 @@ def _build_implicit_gemm_conv_impl(
                 a_off, b_off, _t_ok = xh_uniforms(st)
                 sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
                 sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
+                a_rs = _a_rs(_pc_w, st) if (_xp and _wp) else a_rsrc
                 for lds, voff in a_dma:
-                    b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+                    b.async_buffer_load_lds_addr(a_rs, lds, voff, sa, 1)
                 for lds, voff in b_dma:
                     b.async_buffer_load_lds_addr(b_rsrc, lds, voff, sb, 1)
 
@@ -5739,6 +5805,13 @@ def _build_implicit_gemm_conv_impl(
 
                 # own region (prologue, and the y = 2 step's reload for the next (chunk, z))
                 a_base_w = a_base_of(b.mul(wave_, b.const_i32(WEXT)))
+                # xh_pad: input coordinates of each list's rows (own, ring row R - 1)
+                _pc_own = _pcoords(b.add(m0, b.mul(wave_, b.const_i32(WEXT)))) if _xp else None
+                _pc_ring = ([_pcoords(b.add(m0, b.const_i32(((RR - 1) * QQ + cw) * WEXT)))
+                             for cw in range(QQ)] if _xp else [None] * QQ)
+                # the step validity of a list: (d, h) of its rows; d is the tile's
+                # (whole tiles per plane), shared by every list (fewer live SGPRs)
+                _rs_own = (_pc_ring[0][0], _pc_own[1]) if _xp else None
                 own = []
                 for j in range(NSEG):
                     rel0, o = lp[j % 4]
@@ -5746,6 +5819,8 @@ def _build_implicit_gemm_conv_impl(
                     voff = b.add(o, ub)
                     if 4 * j + 3 >= hp:
                         voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), c_hp), voff, c_oob)
+                    if _xp:
+                        voff = _wmask(_pc_own, b.add(rel0, b.const_i32(4 * j)), voff)
                     own.append((("own", j, None), voff))
                 # ring: the new row's ranges (wave rows RR - 1, column part cw), segments
                 # j = wave + 4i of each, written into the region the row-0 wave read
@@ -5768,6 +5843,8 @@ def _build_implicit_gemm_conv_impl(
                             ok = b.land(b.cmp_lt(j_s, b.const_i32(NSEG)),
                                         b.cmp_lt(b.add(rel_v, b.mul(j_s, b.const_i32(4))), c_hp))
                             voff = b.select(ok, voff, c_oob)
+                        if _xp:
+                            voff = _wmask(_pc_ring[cw], b.add(rel_v, b.mul(j_s, b.const_i32(4))), voff)
                         ring_v.append(voff)
                         ring_seg.append((cw, i, j_s))
                 if _bcheap:
@@ -5792,12 +5869,15 @@ def _build_implicit_gemm_conv_impl(
                     u = b.to_sgpr_u32(b.add(b.mul(b.land(b.add(rw0, b.const_i32(2)), b.const_i32(RR - 1)),
                                                   b.const_i32(QQ)), b.land(wave_, b.const_i32(QQ - 1))))
                     a_base_u = a_base_of(b.mul(u, b.const_i32(WEXT)))
+                    _pc_u = _pcoords(b.add(m0, b.mul(u, b.const_i32(WEXT)))) if _xp else None
                     for j in range(NSEG):
                         rel0, o = lp[j % 4]
                         ub = b.to_sgpr_u32(b.mul(b.add(a_base_u, b.mul(b.const_i32(4 * j), s_wi)), c_eb))
                         voff = b.add(o, ub)
                         if 4 * j + 3 >= hp:
                             voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), c_hp), voff, c_oob)
+                        if _xp:
+                            voff = _wmask(_pc_u, b.add(rel0, b.const_i32(4 * j)), voff)
                         own2.append((("u", j, None), voff))
                 # reads: region-local rows, + the region's base row per y
                 loc = [b.sub(r, b.mul(grid.warp_m_idx, b.const_i32(WR))) for r in base_rows]
@@ -5843,6 +5923,8 @@ def _build_implicit_gemm_conv_impl(
                     # row-0 wave (0, cw = wave): the new row is wave (R - 1, cw)'s range
                     src_eb = b.to_sgpr_u32(b.mul(a_base_of(b.mul(b.add(wave_, b.const_i32((RR - 1) * QQ)),
                                                                  b.const_i32(WEXT))), c_eb))
+                    _pc_er = (_pcoords(b.add(m0, b.mul(b.add(wave_, b.const_i32((RR - 1) * QQ)),
+                                                       b.const_i32(WEXT)))) if _xp else None)
                     row4_eb = b.to_sgpr_u32(b.mul(b.mul(b.const_i32(4), s_wi), c_eb))
 
                 def issue(lst, rsrc, base_addr, soff, z0):
@@ -5879,9 +5961,11 @@ def _build_implicit_gemm_conv_impl(
                     if y == XT - 1:
                         sel = dma_sel(b.cmp_lt(b.add(kv_b, c_block_k), xh_hi), st1, st)
                         a_list = own
+                        a_rs = _a_rs(_rs_own, sel)
                     else:
                         sel = st1
                         a_list = ring[y]
+                        a_rs = _a_rs(_pc_ring[0], sel)  # (also the early ring rows)
                     a_off, b_off, _t = xh_uniforms(sel)
                     sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
                     sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
@@ -5891,7 +5975,7 @@ def _build_implicit_gemm_conv_impl(
                         # own A reads done -> this wave's refill before the barrier
                         b.s_waitcnt(lgkmcnt=XT * mfmas_n)
                         pre, a_list = own2, []
-                        issue(pre, a_rsrc, None, sa, z0)
+                        issue(pre, _a_rs((_pc_ring[0][0], _pc_u[1]) if _xp else None, sel), None, sa, z0)
                     elif early_ring and y < XT - 1:
                         b.s_waitcnt(lgkmcnt=XT * mfmas_n)
                         a_list = []
@@ -5903,13 +5987,15 @@ def _build_implicit_gemm_conv_impl(
                                 if 4 * j + 3 >= hp:
                                     voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), c_hp),
                                                     voff, c_oob)
+                                if _xp:
+                                    voff = _wmask(_pc_er, b.add(rel0, b.const_i32(4 * j)), voff)
                                 seg = b.add(obase, b.const_i32((y % RR) * QQ * NSEG + j))
-                                b.async_buffer_load_lds_addr(a_rsrc, lds_at(seg), voff, sa, 1)
+                                b.async_buffer_load_lds_addr(_a_rs(_pc_ring[0], sel), lds_at(seg), voff, sa, 1)
                     acc_n = run_mf(list(iv_b[:n_acc]), frs, 0, n_pre_mf)
                     hint_interleave(0, len(pre), VMEM_READ, n_pre_mf,
                                     max(1, n_pre_mf // max(1, len(pre))))
                     b.sync_lds_only(fence="compiler")
-                    issue(a_list, a_rsrc, None, sa, z0)
+                    issue(a_list, a_rs, None, sa, z0)
                     issue(b_lazy, b_rsrc, B_addr, sb, z0)
                     acc_n = run_mf(acc_n, frs, n_pre_mf, XT * n_mf)
                     n_post = len(a_list) + len(b_lazy)
@@ -5924,7 +6010,7 @@ def _build_implicit_gemm_conv_impl(
                     a_off0, b_off0, _t0 = xh_uniforms(st0)
                     sa0 = b.to_sgpr_u32(b.mul(a_off0, c_eb))
                     sb0 = b.to_sgpr_u32(b.mul(b_off0, c_eb))
-                    issue(own, a_rsrc, None, sa0, c0)
+                    issue(own, _a_rs(_rs_own, st0), None, sa0, c0)
                     issue(b_lazy, b_rsrc, B_addr, sb0, c0)
                 b.sync()
                 it = [(f"xr_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
@@ -6014,8 +6100,9 @@ def _build_implicit_gemm_conv_impl(
                     a_off, b_off, _t = xh_uniforms(sel)
                     sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
                     sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
+                    a_rs = _a_rs(_pc_w, sel)
                     for lds, voff in a_dma[:na_pre]:
-                        b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+                        b.async_buffer_load_lds_addr(a_rs, lds, voff, sa, 1)
 
                     def run_mf(acc, lo, hi):
                         for x in range(XT):
@@ -6029,7 +6116,7 @@ def _build_implicit_gemm_conv_impl(
                                     max(1, n_pre_mf // max(1, na_pre)))
                     b.sync_lds_only(fence="compiler")
                     for lds, voff in a_dma[na_pre:]:
-                        b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+                        b.async_buffer_load_lds_addr(a_rs, lds, voff, sa, 1)
                     for lds, voff in b_dma:
                         b.async_buffer_load_lds_addr(b_rsrc, lds, voff, sb, 1)
                     acc_n = run_mf(acc_n, n_pre_mf, XT * n_mf)
@@ -6238,13 +6325,19 @@ def _build_implicit_gemm_conv_impl(
             conds = [
                 uk_ok_,
                 b.cmp_le(span, c_R),
-                b.cmp_eq(p_pD, c0), b.cmp_eq(p_pH, c0), b.cmp_eq(p_pW, c0),
+                # xh_pad: the DMA loop masks the padding itself
+                *([] if spec.xh_pad else [b.cmp_eq(p_pD, c0), b.cmp_eq(p_pH, c0), b.cmp_eq(p_pW, c0)]),
                 b.cmp_eq(p_sW, c1), b.cmp_eq(p_dW, c1), b.cmp_eq(p_X, c_XT),
                 # packed input: pixel lin's channel 0 is at lin * s_wi
                 b.cmp_eq(s_hi, b.mul(p_Wi, s_wi)),
                 b.cmp_eq(s_di, b.mul(p_Hi, s_hi)),
                 b.cmp_eq(s_n, b.mul(p_Di, s_di)),
             ]
+            if spec.xh_pad:
+                # the DMA loop's tap masks: dilation 1 on D / H, < 32 taps
+                c32 = b.const_i32(32)
+                conds += [b.cmp_eq(p_dH, c1), b.cmp_eq(p_dD, c1),
+                          b.cmp_lt(p_Y, c32), b.cmp_lt(p_Z, c32)]
             if spec.xh_dpp:
                 # Output row boundaries only at a wave's M extent.
                 conds.append(b.cmp_eq(

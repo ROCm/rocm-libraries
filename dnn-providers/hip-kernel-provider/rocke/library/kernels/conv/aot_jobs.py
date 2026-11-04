@@ -1571,7 +1571,7 @@ def _fwd_sched_variants() -> Tuple[dict, ...]:
 _FWD_KLOOP_KNOBS = ("uk_xhalo", "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier",
                  "rpf_fetch_late", "xh_dpp", "waves_per_eu", "rpf_setprio", "xh_wait_smem",
                  "lds_xor_rowkey", "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m",
-                 "fxh_dma", "xh_yring")
+                 "fxh_dma", "xh_yring", "xh_pad")
 _FWD_KLOOP_SCOPE_RE = re.compile(r"^(\d+)x(\d+)x(\d+)(?:w(\d+)x(\d+))?(?:a(\d+))?$")
 
 
@@ -1758,7 +1758,7 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
         ]
     sched = _fwd_sched_variants()
     if not sched:
-        return _fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops))
+        return _fwd_xpd_k_loops(_fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops)))
     extra = []
     for kl in k_loops:
         rpf1 = kl.get("reg_prefetch") == 1
@@ -1781,7 +1781,7 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
             if kl.get("defer_mfma") and kl.get("reg_prefetch") == 1
             and not kl.get("uk_xhalo") and not kl.get("defer_mfma_per_write")
         ]
-    return _fwd_xyr_k_loops(_fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops + extra)))
+    return _fwd_xpd_k_loops(_fwd_xyr_k_loops(_fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops + extra))))
 
 
 def _fwd_fxd_k_loops(k_loops: List[dict]) -> List[dict]:
@@ -1829,6 +1829,25 @@ def _fwd_xyr_k_loops(k_loops: List[dict]) -> List[dict]:
             if key not in seen:
                 seen.add(key)
                 out.append(nk)
+    return out
+
+
+def _fwd_xpd_k_loops(k_loops: List[dict]) -> List[dict]:
+    """``ROCKE_AOT_FWD_XPD=1``: every wave-private fxd x-halo loop (fxh_dma >=
+    1000, incl. the xh_yring ones) also with the padded-input masking
+    ``xh_pad`` (serves padded problems in the x-halo loop). Adds variants only."""
+    if _os.environ.get("ROCKE_AOT_FWD_XPD", "0") in ("", "0"):
+        return k_loops
+    seen = {tuple(sorted(kl.items())) for kl in k_loops}
+    out = list(k_loops)
+    for kl in k_loops:
+        if not (kl.get("fxh_dma", 0) >= 1000 and not kl.get("xh_pad")):
+            continue
+        nk = dict(kl, xh_pad=True)
+        key = tuple(sorted(nk.items()))
+        if key not in seen:
+            seen.add(key)
+            out.append(nk)
     return out
 
 
