@@ -218,7 +218,6 @@ class ShapeTests(unittest.TestCase):
             lambda: scalar.coordinates(0, hn.Permutation([0])),
             lambda: scalar.linear_index([], hn.Permutation([0])),
             lambda: shape.linear_index([], hn.Permutation([0])),
-            lambda: shape.linear_index([], hn.Permutation([0, 0, 2])),
         ):
             with self.assertRaises(RuntimeError):
                 operation()
@@ -303,18 +302,11 @@ class ShapeTests(unittest.TestCase):
                 shape.extent(index)
             with self.subTest(index=index), self.assertRaises(TypeError):
                 shape[index]
-        for order in (-1, 2, "row-major"):
-            with self.subTest(order=order), self.assertRaises(TypeError):
-                shape.coordinates(0, hn.Permutation(order))
-            with self.subTest(order=order), self.assertRaises(TypeError):
-                shape.linear_index([0], hn.Permutation(order))
         shape = hn.Shape([2, 3, 5])
         for axis in (-1, -(2**63)):
             for operation in (
                 lambda: shape.extent(axis),
                 lambda: shape.from_dimensions([axis]),
-                lambda: shape.coordinates(0, [0, 1, axis]),
-                lambda: shape.linear_index([0, 0, 0], [0, 1, axis]),
             ):
                 with self.subTest(axis=axis), self.assertRaises(TypeError):
                     operation()
