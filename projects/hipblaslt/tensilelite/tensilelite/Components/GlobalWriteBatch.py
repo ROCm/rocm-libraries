@@ -2163,7 +2163,7 @@ class GlobalWriteBatchWriter:
 
         gwvw = 1 if factorDim else self.gwvw
         if isGlobal:
-          vecModule.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.parentWriter.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+          vecModule.add(self.parentWriter.vecSrdNonNullMask(addressStr, self.parentWriter.states.laneSGPRCount))
           for vi2 in range(0, gwvw):
             vecModule.add(VCndMaskB32(
               dst=vgpr(dataScaleVec + vi2), \
