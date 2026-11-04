@@ -646,6 +646,221 @@ class TestSdpaBwdExtendedMath(unittest.TestCase):
 # test skipped, e.g. without PyTorch, does not look like a pass.
 SKIP_EXIT = 77
 
+BUNDLES_DIR = SCRIPTS_DIR.parent / "integration-test-bundles/quick/SdpaBackward"
+RAGGED_TEMPLATE_KINDS = {
+    "Ragged": "ragged_qkv",
+    "RaggedQ": "ragged_q",
+    "MultiTile": "dense",
+    "SqNeSkv": "dense",
+    "D192": "dense",
+    "BroadcastDBias": "dense_dbias",
+}
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdRaggedBundles(unittest.TestCase):
+    """A ragged sweep case must store what the harness reads back: sequences at their
+    offsets, NaN in output gaps, finite poison in input gaps, no aliasing."""
+
+    RB, RH, RSQ, RSKV, RD = 3, 2, 8, 12, 16
+    LENS_Q, LENS_KV = [3, 0, 8], [12, 0, 5]
+    BLOCKS_Q, BLOCKS_KV = [5, 2, 8], [12, 3, 5]
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "generate_sdpa_bwd_golden", SCRIPT_PATH
+        )
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+        cls._tmp = TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _generate(self, name, kind, *extra):
+        sweep_dir = self.root / name
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--write-template",
+                str(sweep_dir),
+                "--template-kind",
+                kind,
+                "--attn-scale",
+                "0.25",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--sweep-bundle-dir",
+                str(sweep_dir),
+                "--case-id",
+                "case_fp16_x",
+                "--forward-base-filename",
+                str(self.root / f"{name}_fwd/Small"),
+                "--q-dims",
+                str(self.RB),
+                str(self.RH),
+                str(self.RSQ),
+                str(self.RD),
+                "--v-dims",
+                str(self.RB),
+                str(self.RH),
+                str(self.RSKV),
+                str(self.RD),
+                "--dtype",
+                "fp16",
+                "--attn-scale",
+                "0.25",
+                "--seq-lens-q",
+                *map(str, self.LENS_Q),
+                "--seq-lens-kv",
+                *map(str, self.LENS_KV),
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return sweep_dir
+
+    def _tensor(self, sweep_dir, uid, dtype):
+        raw = (sweep_dir / f"golden/case_fp16_x/tensor{uid}.bin").read_bytes()
+        torch = self.gen.torch
+        if dtype == "half":
+            return torch.frombuffer(bytearray(raw), dtype=torch.float16)
+        if dtype == "int32":
+            return torch.frombuffer(bytearray(raw), dtype=torch.int32)
+        return torch.frombuffer(bytearray(raw), dtype=torch.float32)
+
+    def test_gaps_are_nan_in_outputs_and_finite_in_inputs(self):
+        sweep_dir = self._generate(
+            "gap",
+            "ragged_qkv",
+            "--ragged-sides",
+            "qkv",
+            "--ragged-blocks",
+            "q=5,2,8",
+            "--ragged-blocks",
+            "dq=5,2,8",
+            "--ragged-blocks",
+            "k=12,3,5",
+            "--ragged-blocks",
+            "dk=12,3,5",
+        )
+        row = self.RH * self.RD
+        gap_q = (sum(self.BLOCKS_Q) - sum(self.LENS_Q)) * row
+        gap_kv = (sum(self.BLOCKS_KV) - sum(self.LENS_KV)) * row
+        torch = self.gen.torch
+        # dQ (4) and dK (3) are outputs; Q (2) and K (0) are inputs.
+        self.assertEqual(
+            int(torch.isnan(self._tensor(sweep_dir, 4, "half")).sum()), gap_q
+        )
+        self.assertEqual(
+            int(torch.isnan(self._tensor(sweep_dir, 3, "half")).sum()), gap_kv
+        )
+        for uid in (0, 2):
+            self.assertTrue(
+                bool(torch.isfinite(self._tensor(sweep_dir, uid, "half")).all())
+            )
+        # O and dV were laid out compact: nothing to be NaN.
+        self.assertEqual(int(torch.isnan(self._tensor(sweep_dir, 1, "half")).sum()), 0)
+
+    def test_verifier_accepts_the_case(self):
+        sweep_dir = self._generate(
+            "verify",
+            "ragged_qkv",
+            "--ragged-sides",
+            "qkv",
+            "--ragged-blocks",
+            "q=5,2,8",
+        )
+        result = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), str(sweep_dir)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_token_offsets_carry_the_sequence_stride_as_multiplier(self):
+        sweep_dir = self._generate(
+            "tokens",
+            "ragged_qkv",
+            "--ragged-sides",
+            "qkv",
+            "--ragged-units",
+            "tokens",
+            "--ragged-blocks",
+            "q=5,2,8",
+        )
+        offsets = self._tensor(sweep_dir, 16, "int32").tolist()
+        self.assertEqual(offsets, [0, 5, 7, 15])
+        case = json.loads((sweep_dir / "sweep.json").read_text())["cases"][0]
+        multipliers = {
+            t["uid"]: t["ragged_offset_multiplier"]
+            for t in case["values"]["tensors"]
+            if "ragged_offset_multiplier" in t
+        }
+        self.assertEqual(multipliers[2], self.RH * self.RD)  # Q
+        self.assertEqual(multipliers[8], self.RH)  # Stats
+
+    def test_q_only_layout_keeps_kv_dense_with_zero_padded_gradients(self):
+        sweep_dir = self._generate(
+            "qonly", "ragged_q", "--ragged-sides", "q", "--ragged-blocks", "q=5,2,8"
+        )
+        torch = self.gen.torch
+        dk = self._tensor(sweep_dir, 3, "half").view(
+            self.RB, self.RH, self.RSKV, self.RD
+        )
+        for b, length in enumerate(self.LENS_KV):
+            self.assertEqual(float(dk[b, :, length:, :].abs().sum()), 0.0)
+        self.assertTrue(bool(torch.isfinite(dk).all()))
+
+    def test_head_major_stats_with_several_heads_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.gen.plan_ragged(
+                [2, 2, 4, 8], [2, 2, 4, 8], [4, 4], [4, 4], "qkv", {}, "elements", "ht"
+            )
+
+    def test_blocks_shorter_than_the_sequence_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.gen.plan_ragged(
+                [2, 1, 4, 8],
+                [2, 1, 4, 8],
+                [4, 4],
+                [4, 4],
+                "q",
+                {"q": [3, 4]},
+                "elements",
+                "th",
+            )
+
+    def test_checked_in_templates_are_what_the_generator_writes(self):
+        for name, kind in RAGGED_TEMPLATE_KINDS.items():
+            template = json.loads(
+                (BUNDLES_DIR / name / "graph.template.json").read_text()
+            )
+            scale = template["nodes"][0]["parameters"]["attn_scale_value"]
+            self.assertEqual(self.gen.build_sweep_template(kind, scale), template, name)
+
+    def test_checked_in_case_ids_keep_the_dtype_token_the_tolerance_filters_key_on(
+        self,
+    ):
+        for name in RAGGED_TEMPLATE_KINDS:
+            for case in json.loads((BUNDLES_DIR / name / "sweep.json").read_text())[
+                "cases"
+            ]:
+                self.assertRegex(case["id"], r"_(fp16|bf16)_", case["id"])
+
+
 if __name__ == "__main__":
     result = unittest.main(exit=False).result
     if not result.wasSuccessful():

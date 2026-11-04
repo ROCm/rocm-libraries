@@ -30,7 +30,7 @@ accumulation (`dQ^T += K^T dS^T`, A = the staged K chunk read as b32 columns) co
 
 Rows of the workgroup past `seqlen_q` read the last valid q row (`row_stats`, `load_resident`) and are not stored; KV rows of the last stage past `seqlen_k`
 are staged as copies of the last valid row (`stage_row_off` clamps) and their P and dS are forced to 0, which adds exactly +0.0 to every accumulator. LSE' and Delta
-are read through the shared `lse_row_addressing` decode, the one the fp32 prep kernel writes with.
+are read from the compact `(z, head, row)` workspace (`fmha.stats_ws_base`) the fp32 prep kernel writes; each tensor starts at its own origin (`fmha.tensor_origin`).
 
 --- Scope ------------------------------------------------------------------------
 
@@ -67,6 +67,9 @@ from kernels.attention_bwd_cdna import (  # noqa: E402
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     exp2_wait_state,
+)  # noqa: E402
+from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
+    pin_sgpr as pin_scalar,
 )  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     ColMask,
@@ -265,6 +268,14 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DQ: fx.Pointer,
+        mul_DQ: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -332,56 +343,49 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
         ops = DeviceOps(lds.buf.ptr, gptrs)
 
         # sequence decode: Q side bits 7:0, K side bits 15:8 (shared helpers; dense = bits 0)
-        q_len, q_row_off, q_batch = fmha.decode_addressing(
+        q_len, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        k_len, k_row_off, k_batch = fmha.decode_addressing(
+        k_len, _, _ = fmha.decode_addressing(
             varlen_bits, 8, max_seqlen_k, seqinfo_k0, seqinfo_k1, z
-        )
-        tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
         )
         q_len = I32(q_len)
         k_len = I32(k_len)
         q_last = (q_len > I32(0)).select(q_len - I32(1), I32(0))
         k_last = (k_len > I32(0)).select(k_len - I32(1), I32(0))
 
-        # slab bases (elements): Q, dO, dQ of this query head; K, V of its KV head
+        # slab bases (elements): Q, dO, dQ of this query head; K, V of its KV head. Every tensor starts at its own origin: `off_t[z] * mul_t` when ragged,
+        # `z * stride_batch` when dense (Q and K reuse seqinfo_q1 / seqinfo_k1 as their offsets)
         kv_head = q_head // (fx.Index(num_head_q) // fx.Index(num_head_k))
         q_base = (
-            I64(q_batch) * stride_q_batch
+            I64(fmha.tensor_origin(seqinfo_q1, mul_Q, z, stride_q_batch, q_len))
             + I64(q_head) * stride_q_head
-            + I64(q_row_off) * stride_q_seq
         )
         do_base = (
-            I64(q_batch) * stride_do_batch
+            I64(fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, q_len))
             + I64(q_head) * stride_do_head
-            + I64(q_row_off) * stride_do_seq
         )
         if const_expr(not HOIST):
             dq_base = (
-                I64(q_batch) * stride_dq_batch
+                I64(fmha.tensor_origin(off_DQ, mul_DQ, z, stride_dq_batch, q_len))
                 + I64(q_head) * stride_dq_head
-                + I64(q_row_off) * stride_dq_seq
             )
         k_base = (
-            I64(k_batch) * stride_k_batch
+            I64(fmha.tensor_origin(seqinfo_k1, mul_K, z, stride_k_batch, k_len))
             + I64(kv_head) * stride_k_head
-            + I64(k_row_off) * stride_k_seq
         )
         v_base = (
-            I64(k_batch) * stride_v_batch
+            I64(fmha.tensor_origin(off_V, mul_V, z, stride_v_batch, k_len))
             + I64(kv_head) * stride_v_head
-            + I64(k_row_off) * stride_v_seq
         )
-        lse_base, lse_pitch = fmha.lse_row_addressing(
-            varlen_bits,
-            q_batch,
-            q_head,
-            fx.Index(num_head_q),
-            fx.Index(tokens),
-            q_row_off,
-        )
+        lse_base = fmha.stats_ws_base(z, q_head, num_head_q, max_seqlen_q)
+        if const_expr(not HOIST):
+            # The bases are loop-invariant and leave the kernel's prologue as opaque scalars, so the kernarg strides, offsets and
+            # multipliers they derive from do not stay live across the KV walk.
+            q_base, do_base, dq_base, k_base, v_base = (
+                I64(pin_scalar(x)) for x in (q_base, do_base, dq_base, k_base, v_base)
+            )
+            lse_base = fx.Index(fx.Int64(pin_scalar(fx.Int64(lse_base))))
 
         # resident Q, dO slices of the lane's q rows (clamped to the last row), LSE' and Delta of the lane's q column
         def q_off(s):
@@ -409,7 +413,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             mq = mv = k_span = v_span = k_rsrc = v_rsrc = None
 
         Q_res, DO_res = layer.load_resident(ops, L, q_off, do_off, mq, mv)
-        lse, dlt = layer.row_stats(ops, L, q0, q_last, lse_base, lse_pitch)
+        lse, dlt = layer.row_stats(ops, L, q0, q_last, lse_base)
         layer.zero_pads(ops, L)
 
         c_scale_log2e = sm_scale * fx.Float32(dualwave._LOG2E)
@@ -443,19 +447,11 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             col_hi = q_row + wr
         if const_expr(BIAS):
             # the bias input is read through its strides (a broadcast dim has stride 0), in Q's batch and row layout
-            b_base = (
-                I64(q_batch) * stride_b_batch
-                + I64(q_head) * stride_b_head
-                + I64(q_row_off) * stride_b_seq_q
-            )
+            b_base = I64(z) * stride_b_batch + I64(q_head) * stride_b_head
             b_row = gaddr(ops, b_base, fx.min(q_row, q_last), stride_b_seq_q, 0)
         if const_expr(STORE_DB):
             # dB = dS, fp32, in Q's batch and row layout; an all-zero stride triple means dB is not wanted (a null DB)
-            db_base = (
-                I64(q_batch) * stride_db_batch
-                + I64(q_head) * stride_db_head
-                + I64(q_row_off) * stride_db_seq_q
-            )
+            db_base = I64(z) * stride_db_batch + I64(q_head) * stride_db_head
             db_row = gaddr(ops, db_base, q_row, stride_db_seq_q, 0)
             db_on = (
                 (stride_db_batch != I64(0))
@@ -601,13 +597,9 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             for i in range_constexpr(NACC)
         ]
         if const_expr(HOIST):
-            _, dq_row_off, dq_batch = fmha.decode_addressing(
-                varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
-            )
             dq_base = (
-                I64(dq_batch) * stride_dq_batch
+                I64(fmha.tensor_origin(off_DQ, mul_DQ, z, stride_dq_batch, q_len))
                 + I64(q_head) * stride_dq_head
-                + I64(dq_row_off) * stride_dq_seq
             )
         layer.store(ops, L, q0, q_len, dq_base, stride_dq_seq, dq, mq)
 
@@ -627,6 +619,14 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DQ: fx.Pointer,
+        mul_DQ: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -694,6 +694,14 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_DO,
+            mul_DO,
+            off_DQ,
+            mul_DQ,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,

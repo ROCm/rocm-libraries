@@ -712,9 +712,9 @@ sel-fp32-t96-d1-pad-plain,selection,fp32,92,92,none,-1,-1,1,none,0,none,4,4,2,25
 unm-f16-causal-win-left0,unmodelled,f16,64,64,causal_tl,0,-1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9b,contract:MW-9b
 unm-f16-dbias-without-bias,unmodelled,f16,64,64,none,-1,-1,0,none,1,none,4,4,2,128,128,64,64,none,declined,,,,,BI-6,contract:BI-6
 unm-f16-gqa-6x4,unmodelled,f16,64,64,none,-1,-1,0,none,0,none,6,4,2,128,128,64,64,none,declined,,,,,DT-6,contract:DT-6
-unm-f16-varlen-packed,unmodelled,f16,64,64,none,-1,-1,0,none,0,packed,4,4,2,128,128,64,64,none,declined,,,,,PV-3,contract:PV-3
-unm-f16-varlen-packed-causal,unmodelled,f16,64,64,causal_tl,-1,-1,0,none,0,packed,4,4,2,128,128,64,64,none,declined,,,,,PV-3,contract:PV-3
 unm-f16-varlen-padded-br-window,unmodelled,f16,64,64,causal_br,32,-1,0,none,0,padded,4,4,2,128,128,64,64,none,declined,,,,,MW-13,contract:MW-13
+unm-f16-varlen-ragged-no-lengths,unmodelled,f16,64,64,none,-1,-1,0,none,0,packed,4,4,2,128,128,64,64,none,declined,,,,,PV-3,contract:PV-3
+unm-f16-varlen-ragged-no-lengths-causal,unmodelled,f16,64,64,causal_tl,-1,-1,0,none,0,packed,4,4,2,128,128,64,64,none,declined,,,,,PV-3,contract:PV-3
 unm-f16-win-left-below-1,unmodelled,f16,64,64,none,-2,8,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-3,contract:MW-3
 unm-f16-win-left0-right0,unmodelled,f16,64,64,none,0,0,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9b,contract:MW-9b
 unm-f16-win-left0-unbounded,unmodelled,f16,64,64,none,0,-1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9c,contract:MW-9c

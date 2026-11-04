@@ -362,14 +362,11 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
 
         **Chosen at runtime on `pitch != 1`**, not at build time on
         `lse_layout_th`; `BwdDkDvSoftmaxHelper.load_row_values` carries the
-        measurement and the reason. The short version is that
-        `lse_row_addressing` decodes the layout from `VarlenBits` at runtime,
-        so a build compiled for one layout and handed the other read the wrong
-        elements with only a host-side wrapper standing in the way -- and that
-        wrapper is not on AOTriton's path.
+        reason. The pitch is the caller's Stats token stride in the merged
+        kernel and 1 in a split one.
 
-        Under `_TH` the four rows are `num_heads` apart, so the `dwordx4` does
-        not apply and it is four scalars. `LSE_STRIDED` is a Python bool: the
+        With a pitch other than 1 the four rows are `pitch` apart, so the
+        `dwordx4` does not apply and it is four scalars. `LSE_STRIDED` is a Python bool: the
         body is traced once per arm and one runtime branch outside the tile
         loop picks a whole body, which is what keeps the wide arm at its
         pre-fix throughput.
@@ -383,7 +380,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
         """
         if const_expr(getattr(self, "GQA_PACK", False)):
             # Packed rows: element i is flat row `base + i`, addressed `g * head_step + q * pitch` and read as a scalar (a run of
-            # four flat rows may straddle two heads). `pitch` is the runtime layout decode, so one body serves both layouts.
+            # four flat rows may straddle two heads). `pitch` is a runtime value (the Stats token stride; 1 for the workspace), so one body serves every layout.
             base = (
                 tile_base
                 + fx.Index((sub // 2) * MFMA16_K + (sub % 2) * 4)

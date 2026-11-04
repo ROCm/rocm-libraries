@@ -186,6 +186,9 @@ struct BwdCase
     /// The value of a RUNTIME_TENSOR scale.
     float runtimeScale = 0.07F;
     BwdLayout layout = BwdLayout::HEAD_MAJOR;
+    /// Also require dQ to be exactly zero (not merely within the tolerance of the reference) in every row no key
+    /// reaches, and the case to have such a row.
+    bool keylessDqExactlyZero = false;
 
     bool padded() const
     {
@@ -1004,6 +1007,39 @@ inline void expectGradient(const char* name,
                                 << ")";
 }
 
+/// dQ (B, Hq, Sq, Dqk) is exactly zero in every row of @p c that no key reaches, and @p c has such a row.
+inline void expectKeylessDqRowsAreZero(const BwdCase& c, const std::vector<double>& dq)
+{
+    int64_t keylessRows = 0;
+    int64_t nonZero = 0;
+    for(int64_t b = 0; b < c.batch; ++b)
+    {
+        for(int64_t row = 0; row < c.validQ(b); ++row)
+        {
+            bool reached = false;
+            for(int64_t j = 0; j < c.seqKv && !reached; ++j)
+            {
+                reached = visible(c, b, row, j);
+            }
+            if(reached)
+            {
+                continue;
+            }
+            keylessRows += c.heads;
+            for(int64_t h = 0; h < c.heads; ++h)
+            {
+                for(int64_t e = 0; e < c.headDim; ++e)
+                {
+                    nonZero += dq[at(b, h, row, e, c.heads, c.seqQ, c.headDim)] != 0.0 ? 1 : 0;
+                }
+            }
+        }
+    }
+    EXPECT_GT(keylessRows, 0) << "the case has no row that no key reaches";
+    EXPECT_EQ(nonZero, 0) << "dQ is not exactly zero in " << nonZero << " element(s) of the "
+                          << keylessRows << " (batch, head, row) triples no key reaches";
+}
+
 /// Which elements of a (B, H, S, D) tensor lie inside each batch's valid length.
 inline std::vector<bool> scopeOf(const BwdCase& c, bool queryAxis, int64_t heads, int64_t width)
 {
@@ -1426,8 +1462,12 @@ void expectEngineMatchesReference(std::string_view engine,
 
     const double tolerance = toleranceOf(c.dtype);
     const auto dqHost = device[views.dq.group]->template download<T>();
-    expectGradient(
-        "dQ", gather(dqHost, views.dq), expected.dq, scopeOf(c, true, c.heads, dqk), tolerance);
+    const auto dqGot = gather(dqHost, views.dq);
+    expectGradient("dQ", dqGot, expected.dq, scopeOf(c, true, c.heads, dqk), tolerance);
+    if(c.keylessDqExactlyZero)
+    {
+        expectKeylessDqRowsAreZero(c, dqGot);
+    }
     const auto dkHost = device[views.dk.group]->template download<T>();
     expectGradient(
         "dK", gather(dkHost, views.dk), expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance);

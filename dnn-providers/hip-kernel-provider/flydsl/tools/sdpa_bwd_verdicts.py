@@ -186,7 +186,7 @@ RULE_CAUSE = {
     "MW-9c": "mask",  # checkMask doc: left_bound 0 with an unbounded right bound declines
     "MW-10": "mask",  # checkBias doc: bias with a mask declines
     "MW-13": "mask",  # checkMask doc: a window with bottom-right alignment under padding_mask declines
-    "PV-3": "varlen",  # checkVarlen doc: a ragged offset on any operand declines (packed varlen)
+    "PV-3": "varlen",  # checkVarlen doc: a ragged tensor without padding_mask and both seq_len tensors declines
     "PV-10": "varlen",  # checkBias doc: bias with padding_mask declines
     "BI-4": "dbias",  # checkBias doc: dBias with a row-broadcast bias declines
     "BI-6": "dbias",  # checkBias doc: dBias without bias declines
@@ -639,9 +639,15 @@ def build_rows():
         dbias=1,
     )
 
-    # (f) unmodelled by the bundle: the matcher's named decline
-    add("unm-f16-varlen-packed", "unmodelled", varlen="packed")
-    add("unm-f16-varlen-packed-causal", "unmodelled", varlen="packed", mask="causal_tl")
+    # (f) unmodelled by the bundle: the matcher's named decline. The two ragged rows set a ragged offset on Q only, with no padding_mask
+    # and no seq_len tensors (PV-3); a ragged graph that carries them is accepted.
+    add("unm-f16-varlen-ragged-no-lengths", "unmodelled", varlen="packed")
+    add(
+        "unm-f16-varlen-ragged-no-lengths-causal",
+        "unmodelled",
+        varlen="packed",
+        mask="causal_tl",
+    )
     add("unm-f16-dbias-without-bias", "unmodelled", dbias=1)
     add("unm-f16-gqa-6x4", "unmodelled", hq=6, hk=4)
     add("unm-f16-win-left0-right0", "unmodelled", window_left=0, window_right=0)

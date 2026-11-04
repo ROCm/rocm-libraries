@@ -449,6 +449,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 RefusesPlanSerialization
         )
     endif()
+    # The host half of the split engine's parity cases checks the gfx11 shard against the
+    # matcher contract and fails, rather than skipping, when the shard holds no gfx11 object.
+    # It is a census suite so that it runs only where gfx11 content is packed: an entry per
+    # gfx11 arch the three slot ops ship for, and none in a configuration without one.
+    set(_hkp_gfx11_split_arches)
+    foreach(_arch IN LISTS _hkp_split_arches)
+        if(_arch MATCHES "^gfx11")
+            list(APPEND _hkp_gfx11_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_gfx11_split_arches)
+        target_sources(hip_kernel_provider_census_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslSdpaBwdParityGraphs.cpp
+        )
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_gfx11_split_arches}
+            SUITES TestFlydslSdpaBwdParityGraphs
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests

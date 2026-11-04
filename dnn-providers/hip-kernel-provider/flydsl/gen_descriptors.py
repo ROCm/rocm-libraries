@@ -66,6 +66,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -91,6 +92,7 @@ from generators._codeobject import (  # noqa: E402
 )
 from generators._flydsl_env import CONTENT_DIR  # noqa: E402
 from generators._manifest import inputs_digest  # noqa: E402
+from generators._sdpa_bwd_spec import Spec, knobs_of  # noqa: E402
 
 # Descriptor schema version, as the loader spells it: UKD_VERSION_MAJOR = 1,
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
@@ -122,8 +124,41 @@ SPLIT_SHARED_WORKSPACE = "ws.bytes"
 # manifest ``companions`` entry) is authored in its own pack, on its own dispatch (RFC 0021: a pack's launch set is
 # uniform). The launches of such a row, in launch order, and the document that names the dispatch.
 SPLIT_REDUCE_OPS = ("sdpa_bwd_dq",)
-REDUCE_LAUNCHES = ("dq", "dbias_reduce")
 REDUCE_SUFFIX = "reduce"
+# The companion roles (the first field of a companion's ``spec``): the standalone dBias reduce of a gfx11 dQ row, and the padded-row
+# zeroing launched after the gradient launches of every dQ and merged row (``generators/gen_sdpa_bwd_tailzero.py``).
+REDUCE_ROLE = "dbias_reduce"
+TAILZERO_ROLE = "tailzero"
+# The launches of a row, in launch order, and the ops whose rows are launched through ``sources``: the op's own object first, then
+# its dBias reduce companion when it has one, then the tail-zero companion. A dQ row without a reduce companion (every gfx950 row, and
+# the gfx11 rows that store no dB) is ``{dq, tailzero}``; a merged row is ``{merged, tailzero}``.
+MAIN_LAUNCH = {"sdpa_bwd_dq": "dq", "sdpa_bwd_merged": "merged"}
+# The packed-tile bound the engines enforce (``PACK_MAX_BLOCK_Q`` in ``FlydslSdpaBwdNativeShared.hpp``), read from the header at
+# generation time. The ops whose ``gqa_pack`` rows carry a resolved ``block_q``, which must be in ``(0, bound]``.
+NATIVE_SHARED_HEADER = (
+    _HERE.parent
+    / "src"
+    / "engines"
+    / "kernel_ingestor_engine"
+    / "packs"
+    / "FlydslSdpaBwdNativeShared.hpp"
+)
+PACKED_TILE_OPS = ("sdpa_bwd_dkdv", "sdpa_bwd_merged")
+
+
+def pack_max_block_q() -> int:
+    """``PACK_MAX_BLOCK_Q`` of the engines' shared header."""
+    text = NATIVE_SHARED_HEADER.read_text(encoding="utf-8")
+    match = re.search(r"\bPACK_MAX_BLOCK_Q\s*=\s*(\d+)\s*;", text)
+    if match is None:
+        raise HkpPackError(f"no PACK_MAX_BLOCK_Q definition in {NATIVE_SHARED_HEADER}")
+    return int(match.group(1))
+
+
+def companion_identity(companion: dict[str, Any]) -> tuple[str, str]:
+    """``(role, dtype)`` of a manifest ``companions`` entry, from its ``spec`` (``<role>,<dtype>[,...][;arch=<arch>]``)."""
+    role, dtype = companion["spec"].split(";")[0].split(",")[:2]
+    return role, dtype
 
 
 def slot_of(op: str) -> str | None:
@@ -292,9 +327,9 @@ class KernelEntry(NamedTuple):
     path: Path
     data: bytes
     record: dict[str, Any]
-    # The standalone reduce object of a row that stores dB through one (its manifest ``companions`` entry
-    # plus the path of the object), else None.
-    companion: dict[str, Any] | None = None
+    # The companion objects the row launches beside its own, by role (``REDUCE_ROLE``, ``TAILZERO_ROLE``): the manifest
+    # ``companions`` entries of the row's dtype plus the path of each object. None for a row with none.
+    companions: dict[str, dict[str, Any]] | None = None
 
 
 def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
@@ -353,7 +388,7 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 f"name, e.g. '{stray[0]}'. Delete them: they are left over from a "
                 "previous generation and would ship unreferenced."
             )
-        by_dtype: dict[str, dict[str, Any]] = {}
+        by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for companion in companions:
             path = manifest_path.parent / companion["file"]
             if not path.is_file():
@@ -371,10 +406,12 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             where = str(path)
             verify_arch(describe(data, where, companion["symbol"]), arch, where)
             verify_generic(data, arch, where)
-            dtype = companion["spec"].split(",")[1]
-            if dtype in by_dtype:
-                raise ValueError(f"{manifest_path}: two companions for dtype {dtype}")
-            by_dtype[dtype] = {**companion, "path": path}
+            key = companion_identity(companion)
+            if key in by_key:
+                raise ValueError(
+                    f"{manifest_path}: two companions for role {key[0]}, dtype {key[1]}"
+                )
+            by_key[key] = {**companion, "path": path}
         for record in manifest["instances"]:
             path = manifest_path.parent / record["file"]
             if not path.is_file():
@@ -394,19 +431,32 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             where = str(path)
             verify_arch(describe(data, where, record["symbol"]), arch, where)
             verify_generic(data, arch, where)
-            companion = None
-            if companions and record["knobs"].get("reduce_symbol"):
-                companion = by_dtype.get(record["dtype"])
+            row_companions = {
+                role: by_key[role, record["dtype"]]
+                for role in (REDUCE_ROLE, TAILZERO_ROLE)
+                if (role, record["dtype"]) in by_key
+            }
+            reduce = row_companions.get(REDUCE_ROLE)
+            if any(role == REDUCE_ROLE for role, _ in by_key) and record["knobs"].get(
+                "reduce_symbol"
+            ):
                 if (
-                    companion is None
-                    or companion["symbol"] != record["knobs"]["reduce_symbol"]
+                    reduce is None
+                    or reduce["symbol"] != record["knobs"]["reduce_symbol"]
                 ):
                     raise ValueError(
                         f"{path}: names reduce symbol {record['knobs']['reduce_symbol']!r}, "
-                        f"the {record['dtype']} companion is "
-                        f"{companion and companion['symbol']!r}"
+                        f"the {record['dtype']} companion is {reduce and reduce['symbol']!r}"
                     )
-            entries.append(KernelEntry(op, path, data, record, companion))
+            else:
+                # A row that stores no dB through a standalone reduce does not launch one.
+                row_companions.pop(REDUCE_ROLE, None)
+            if op in MAIN_LAUNCH and TAILZERO_ROLE not in row_companions:
+                raise ValueError(
+                    f"{path}: {op} rows launch the {TAILZERO_ROLE} companion, but {manifest_path} has none "
+                    f"for dtype {record['dtype']}"
+                )
+            entries.append(KernelEntry(op, path, data, record, row_companions or None))
     return entries
 
 
@@ -437,6 +487,41 @@ def _metadata_value(key: str, value: Any) -> Any:
             )
         return GENERIC_N
     return value
+
+
+def rne_pin_problem(spec: Spec) -> str | None:
+    """Why @p spec may not ship, or None: a bf16 dK/dV or dQ pin of an arch with the ``rne`` knob must spell ``rne=1``.
+
+    Without it the kernel narrows P and dS to bf16 by truncation, which biases the gradients; the shipped rows
+    round to nearest even. This is a shipping rule, not a Spec rule: a sweep may build and measure ``rne=0``
+    objects, but none may be installed (``tools/sdpa_bwd_tables_from_sweep.py``) or described here.
+
+    The rule covers every arch whose knob list (``knobs_of``) has ``rne``: today the generic gfx11 and gfx12 targets.
+    There it also covers the dB output: a dQ row with a bias stores its dS packs as dB, so a truncated dS is a
+    truncated user-visible dB. gfx950 has no ``rne`` knob and is exempt: its bf16 narrowing is the hardware's
+    round-to-nearest-even conversion (``v_cvt_pk_bf16_f32``), the same for every row.
+    """
+    if spec.kernel not in ("dkdv", "dq") or spec.dtype != "bf16":
+        return None
+    if "rne" not in knobs_of(spec.kernel, spec.arch, spec.dtype) or spec.rne == 1:
+        return None
+    return (
+        f"{spec.key()}: a bf16 {spec.kernel} row of {spec.arch} must spell rne=1 "
+        "(without it P and dS are truncated, not rounded)"
+    )
+
+
+def require_rne_pins(entries: list[KernelEntry]) -> None:
+    """Raise ValueError naming every shipped SDPA backward dK/dV or dQ row that ``rne_pin_problem`` refuses."""
+    problems = [
+        f"{entry.path.name}: {problem}"
+        for entry in entries
+        if entry.op in ("sdpa_bwd_dkdv", "sdpa_bwd_dq")
+        and (problem := rne_pin_problem(Spec.parse(entry.record["spec"]))) is not None
+    ]
+    if problems:
+        shown = "; ".join(problems[:3]) + (", ..." if len(problems) > 3 else "")
+        raise ValueError(f"{len(problems)} shipped row(s) break the rne rule: {shown}")
 
 
 class OpDescriptors:
@@ -587,6 +672,27 @@ class OpDescriptors:
         }
 
 
+def _require_packed_tile(entry: KernelEntry, bound: int) -> None:
+    """A packed (``gqa_pack`` 1) dK/dV or merged row carries its resolved ``block_q``, which the engines' packed-span bound covers.
+
+    The engines check the row's ``block_q`` against ``PACK_MAX_BLOCK_Q`` (``FlydslSdpaBwdNativeShared.hpp``) before launching it; a row
+    whose tile is missing, not positive or above the bound would pass a graph check that assumes a smaller tile, so it is refused
+    here, where the row is made. The value reaches the KMD and the KDP as the row's ``block_q`` knob.
+    """
+    if entry.op not in PACKED_TILE_OPS or entry.record["knobs"].get("gqa_pack") != 1:
+        return
+    block_q = entry.record["knobs"].get("block_q")
+    if (
+        isinstance(block_q, bool)
+        or not isinstance(block_q, int)
+        or not 0 < block_q <= bound
+    ):
+        raise HkpPackError(
+            f"{entry.record['name']}: a packed row needs its resolved block_q in (0, {bound}] "
+            f"(PACK_MAX_BLOCK_Q of {NATIVE_SHARED_HEADER.name}), got {block_q!r}"
+        )
+
+
 def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
     """The metadata schema for an op, derived from its instances' knobs.
 
@@ -643,8 +749,10 @@ def _arch_documents(
     # list them all and the packer ships the bytes into each member's shard.
     runs_on = list(families.members(arch))
 
+    bound = pack_max_block_q()
     for entry in entries:
         record = entry.record
+        _require_packed_tile(entry, bound)
         # Named as it was when these were emitted in shipped form, where the
         # string was the archive key, so the id did not change with the form.
         ukd_id = _uuid(f"ukd/{arch}/{entry.op}/{record['file']}")
@@ -659,7 +767,7 @@ def _arch_documents(
             "name": record["name"],
             "arch": runs_on,
         }
-        if entry.companion is None:
+        if entry.companions is None:
             document["kernel_source"] = {
                 "kind": "hsaco",
                 # Beside the KDP: the packer resolves an inline kernel's file
@@ -668,28 +776,37 @@ def _arch_documents(
                 "symbol": record["symbol"],
             }
         else:
-            # A dB-storing row whose dBias reduce is a standalone object: two launches
-            # (`REDUCE_LAUNCHES`), the row's own object and the companion's.
-            if record["knobs"]["reduce_symbol"] != entry.companion["symbol"]:
+            # A row launched through `sources`: its own object, then its dBias reduce companion (a gfx11 dB-storing dQ
+            # row) and its tail-zero companion, in launch order.
+            reduce = entry.companions.get(REDUCE_ROLE)
+            if (
+                reduce is not None
+                and record["knobs"]["reduce_symbol"] != reduce["symbol"]
+            ):
                 raise HkpPackError(
                     f"{record['name']}: reduce_symbol {record['knobs']['reduce_symbol']!r} "
-                    f"is not the symbol {entry.companion['symbol']!r} of its dbias_reduce source"
+                    f"is not the symbol {reduce['symbol']!r} of its dbias_reduce source"
                 )
             document["sources"] = {
-                REDUCE_LAUNCHES[0]: {
+                MAIN_LAUNCH[entry.op]: {
                     "kind": "hsaco",
                     "file": record["file"],
                     "symbol": record["symbol"],
                 },
-                REDUCE_LAUNCHES[1]: {
-                    "kind": "hsaco",
-                    "file": entry.companion["file"],
-                    "symbol": entry.companion["symbol"],
+                **{
+                    role: {
+                        "kind": "hsaco",
+                        "file": entry.companions[role]["file"],
+                        "symbol": entry.companions[role]["symbol"],
+                    }
+                    for role in (REDUCE_ROLE, TAILZERO_ROLE)
+                    if role in entry.companions
                 },
             }
         document["metadata"] = metadata
         document["priority"] = record["priority"]
-        (kernels if entry.companion is None else reduce_kernels).append(document)
+        has_reduce = entry.companions is not None and REDUCE_ROLE in entry.companions
+        (reduce_kernels if has_reduce else kernels).append(document)
 
     def pack(suffix: str, dispatch: str, descriptors: list[dict[str, Any]]):
         kdp = {
@@ -912,6 +1029,7 @@ def main() -> int:
 
     try:
         entries = collect(args.content_dir, args.arch)
+        require_rne_pins(entries)
         folders = build_documents(entries, args.arch)
     except (
         FileNotFoundError,

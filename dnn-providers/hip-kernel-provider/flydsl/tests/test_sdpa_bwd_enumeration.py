@@ -18,6 +18,9 @@ must move with them:
 * merged: ``flydslSdpaBwdMergedKernelMatches`` with ``servesHeadDims`` and ``rungBelow`` in
   ``FlydslSdpaBwdMergedNative.cpp``.
 
+The model covers the packed-tile guard (a ``gqa_pack`` row serves a graph only when its ``block_q`` is in
+``(0, PACK_MAX_BLOCK_Q]``) and the launch-name sets of the rows launched through ``sources`` (``launch_names``).
+
 Launch-grid limits are not modelled. Over the shipped manifests (skipped when the tree has
 no content) the probe graphs are the classes in ``probe_graphs()``; a synthetic catalogue
 that overlaps on purpose always runs.
@@ -42,6 +45,7 @@ ARCH = "gfx950"
 LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)
 FP32_LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 512)
 SLOTS = ("prep", "dkdv", "dq")
+PACK_MAX_BLOCK_Q = gd.pack_max_block_q()
 
 
 def rung_below(tile: int, dtype: str) -> int:
@@ -90,7 +94,7 @@ def serves(op: str, row: dict, graph: dict) -> bool:
     if knobs["has_bias"] != int(graph["cls"] == "bias"):
         return False
     if slot in ("dkdv", "merged") and knobs.get("gqa_pack", -1) == 1:
-        if not graph["gqa"] or knobs.get("block_q", -1) > 64:
+        if not graph["gqa"] or not 0 < knobs.get("block_q", -1) <= PACK_MAX_BLOCK_Q:
             return False
     if slot in ("dq", "merged"):
         if (
@@ -104,6 +108,29 @@ def serves(op: str, row: dict, graph: dict) -> bool:
         if graph["reduces"] and not knobs.get("reduce_symbol"):
             return False
     return True
+
+
+def launch_names(op: str, row: dict) -> tuple[str, ...]:
+    """The launch names the handlers of @p op expect for @p row, in launch order (``()``: the row has a single ``kernel_source``)."""
+    if op not in gd.MAIN_LAUNCH:
+        return ()
+    knobs = row["knobs"]
+    # A standalone dBias reduce is a companion of a gfx11 row that stores dB; every other row reduces inside its own object.
+    standalone = row.get("standalone_reduce", False) and bool(knobs.get("reduce_symbol"))
+    return (
+        gd.MAIN_LAUNCH[op],
+        *((gd.REDUCE_ROLE,) if standalone else ()),
+        gd.TAILZERO_ROLE,
+    )
+
+
+def wrong_launch_sets(op: str, rows: list[dict]) -> list[str]:
+    """The names of the rows whose ``sources`` keys are not their launch-name set."""
+    return [
+        row["name"]
+        for row in rows
+        if tuple(row.get("sources", ())) != launch_names(op, row)
+    ]
 
 
 def probe_graphs() -> list[dict]:
@@ -188,7 +215,7 @@ def unexercised_alternatives(op: str, groups: list[list[dict]]) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def _row(op: str, name: str, **knobs) -> dict:
+def _row(op: str, name: str, standalone_reduce: bool = False, **knobs) -> dict:
     base = dict(
         head_dim=64,
         padded=0,
@@ -202,13 +229,17 @@ def _row(op: str, name: str, **knobs) -> dict:
     if op == "sdpa_bwd_prep":
         base.update(sink=-1)
     if op == "sdpa_bwd_dkdv":
-        base.update(gqa_pack=-1)
+        base.update(gqa_pack=-1, block_q=-1)
     if op == "sdpa_bwd_dq":
         base.update(store_db=-1, bias_stage="auto", reduce_symbol="")
     if op == "sdpa_bwd_merged":
-        base.update(gqa_pack=-1, store_db=-1, reduce_symbol="")
+        base.update(gqa_pack=-1, block_q=-1, store_db=-1, reduce_symbol="")
     base.update(knobs)
-    return {"name": name, "dtype": "bf16", "knobs": base}
+    row = {"name": name, "dtype": "bf16", "knobs": base}
+    if op in gd.MAIN_LAUNCH:
+        row["standalone_reduce"] = standalone_reduce
+        row["sources"] = dict.fromkeys(launch_names(op, row), {})
+    return row
 
 
 def synthetic() -> dict[str, list[dict]]:
@@ -224,13 +255,23 @@ def synthetic() -> dict[str, list[dict]]:
                 _row(op, "bk64d", dropout=1),
             ]
         if op in ("sdpa_bwd_dkdv", "sdpa_bwd_merged"):
-            rows.append(_row(op, "packed64", gqa_pack=1))
+            rows.append(_row(op, "packed64", gqa_pack=1, block_q=64))
+            # Over the bound, or without a resolved tile: never applicable, so never a duplicate of packed64.
+            rows.append(_row(op, "packed128", gqa_pack=1, block_q=128))
+            rows.append(_row(op, "packed_unresolved", gqa_pack=1, block_q=-1))
         if op in ("sdpa_bwd_dq", "sdpa_bwd_merged"):
             rows.append(_row(op, "nostore", has_bias=1, store_db=0))
             rows.append(_row(op, "store", has_bias=1, reduce_symbol="r"))
         if op == "sdpa_bwd_dq":
             rows.append(
-                _row(op, "direct", has_bias=1, bias_stage="direct", reduce_symbol="r")
+                _row(
+                    op,
+                    "direct",
+                    standalone_reduce=True,
+                    has_bias=1,
+                    bias_stage="direct",
+                    reduce_symbol="r",
+                )
             )
         catalogue[op] = rows
     return catalogue
@@ -247,6 +288,27 @@ def test_the_promoted_knobs_keep_overlapping_kernels_distinct(op: str) -> None:
 def test_every_promoted_knob_is_an_alternative_somewhere(op: str) -> None:
     groups = co_applicable(op, synthetic()[op])
     assert unexercised_alternatives(op, groups) == set()
+
+
+@pytest.mark.parametrize("op", sorted(gd.MAIN_LAUNCH))
+def test_the_synthetic_rows_launch_their_own_object_then_tailzero(op: str) -> None:
+    rows = synthetic()[op]
+    assert wrong_launch_sets(op, rows) == []
+    assert {tuple(r["sources"]) for r in rows} <= {
+        (gd.MAIN_LAUNCH[op], gd.TAILZERO_ROLE),
+        (gd.MAIN_LAUNCH[op], gd.REDUCE_ROLE, gd.TAILZERO_ROLE),
+    }
+    broken = {**rows[0], "sources": {gd.MAIN_LAUNCH[op]: {}}}
+    assert wrong_launch_sets(op, [broken]) == [broken["name"]]
+
+
+@pytest.mark.parametrize("op", ["sdpa_bwd_dkdv", "sdpa_bwd_merged"])
+def test_a_packed_row_without_a_tile_in_range_serves_no_graph(op: str) -> None:
+    rows = {r["name"]: r for r in synthetic()[op]}
+    gqa = dict(probe_graphs()[0], gqa=True)
+    assert serves(op, rows["packed64"], {**gqa, "qk": 64, "v": 64})
+    for name in ("packed128", "packed_unresolved"):
+        assert not any(serves(op, rows[name], g) for g in probe_graphs())
 
 
 def test_without_the_promotion_the_synthetic_catalogue_collides(
@@ -299,3 +361,45 @@ def test_every_promoted_knob_of_the_shipped_kernels_is_a_real_alternative(
 ) -> None:
     groups = co_applicable(op, _manifest(op))
     assert unexercised_alternatives(op, groups) == set(), op
+
+
+def _kernel_rows(op: str) -> list[dict]:
+    """The rows of @p op's KDPs as the model reads them: name, dtype, metadata as knobs and the ``sources`` of a multi-launch row."""
+    folder = CONTENT_DIR / op / ARCH
+    paths = sorted(folder.glob("*.kdp.json"))
+    if not paths:
+        pytest.skip(f"no {op} descriptors under {CONTENT_DIR}")
+    rows = []
+    for path in paths:
+        for kernel in json.loads(path.read_text(encoding="utf-8"))["kernelDescriptors"]:
+            metadata = dict(kernel["metadata"])
+            row = {
+                "name": kernel["name"],
+                "dtype": metadata.pop("dtype"),
+                "knobs": metadata,
+                "standalone_reduce": gd.REDUCE_ROLE in kernel.get("sources", {}),
+            }
+            if "sources" in kernel:
+                row["sources"] = kernel["sources"]
+            rows.append(row)
+    return rows
+
+
+@pytest.mark.parametrize("op", ["sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq", "sdpa_bwd_merged"])
+def test_every_shipped_row_launches_its_launch_name_set(op: str) -> None:
+    rows = _kernel_rows(op)
+    assert wrong_launch_sets(op, rows) == []
+    if op not in gd.MAIN_LAUNCH:
+        assert not any("sources" in r for r in rows)
+
+
+@pytest.mark.parametrize("op", ["sdpa_bwd_dkdv", "sdpa_bwd_merged"])
+def test_every_shipped_packed_row_has_a_tile_the_engine_accepts(op: str) -> None:
+    packed = [r for r in _kernel_rows(op) if r["knobs"].get("gqa_pack") == 1]
+    assert packed
+    bad = {
+        r["name"]: r["knobs"].get("block_q")
+        for r in packed
+        if not 0 < r["knobs"].get("block_q", -1) <= PACK_MAX_BLOCK_Q
+    }
+    assert not bad, f"{len(bad)} packed rows, first {list(bad.items())[:3]}"

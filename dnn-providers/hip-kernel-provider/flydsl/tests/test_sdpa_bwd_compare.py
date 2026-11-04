@@ -5,9 +5,8 @@
 
 A five-row fixture stands in for a generator run: one row identical to its pin, and four
 that are not (a changed byte, a changed resource row, an object the generator never
-built, a known-flaky ``dual_object``). The compare is report-only for those, and for a
-``dual_object`` of the dq causal family. Spill findings, ``error`` rows, any other
-``dual_object`` and a reference op with no manifest are red.
+built, a listed ``dual_object``). The compare is report-only for those. Spill findings, ``error`` rows, an
+unlisted ``dual_object`` (the dq causal family included) and a reference op with no manifest are red.
 Pure Python.
 """
 
@@ -25,6 +24,7 @@ FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(FLYDSL / "tools"))
 import sdpa_bwd_compare  # noqa: E402
+from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 from test_sdpa_bwd_gate import (
     MERGED,
@@ -78,10 +78,22 @@ def _build_fixture(
             body = objects[name][0] if name in objects else f"pin {name}".encode()
             (ref_objects / f"{digest}.hsaco").write_bytes(body)
             writer.writerow((digest, key, _sha(body), *RESOURCES.values()))
-    with (tmp_path / "flaky.csv").open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(("hash", "spec", "source"))
-        writer.writerow((Spec.parse(SPECS["flaky"]).hash(), SPECS["flaky"], "bimodal"))
+    spec = Spec.parse(SPECS["flaky"])
+    nondet.write(
+        [
+            nondet.Row(
+                "gfx950",
+                spec.hash(),
+                spec.key(),
+                "dual_object",
+                _sha(b"pin flaky"),
+                (),
+                (),
+                "test",
+            )
+        ],
+        tmp_path / "nondeterministic.csv",
+    )
 
     out = tmp_path / "out"
     by_op: dict[str, list[dict]] = {}
@@ -127,8 +139,8 @@ def _build_fixture(
         str(tmp_path / "ref.csv"),
         str(ref_objects),
         str(out),
-        "--flaky",
-        str(tmp_path / "flaky.csv"),
+        "--nondeterministic",
+        str(tmp_path / "nondeterministic.csv"),
     ]
 
 
@@ -150,11 +162,16 @@ def test_differences_are_reported_and_the_exit_is_zero(tmp_path, capsys) -> None
         "missing": "merged tile=64 cls=plain",
     }
     for kind, where in expected.items():
-        assert any(l.startswith(f"{kind}: {where}") and "flaky=no" in l for l in lines)
+        assert any(
+            l.startswith(f"{kind}: {where}") and "nondeterministic=no" in l
+            for l in lines
+        )
     assert "vgpr 101 != 100" in report
-    flaky = [l for l in lines if "dq tile=64 cls=causal" in l]
+    listed = [l for l in lines if "dq tile=64 cls=causal" in l]
     assert (
-        len(flaky) == 1 and flaky[0].startswith("missing") and "flaky=yes" in flaky[0]
+        len(listed) == 1
+        and listed[0].startswith("missing")
+        and "nondeterministic=yes" in listed[0]
     )
 
 
@@ -177,7 +194,7 @@ def test_differences_are_reported_and_the_exit_is_zero(tmp_path, capsys) -> None
             "RED missing: dkdv tile=64 cls=causal",
         ),
     ],
-    ids=["spill-finding", "error", "dual-object-outside-the-flaky-set"],
+    ids=["spill-finding", "error", "dual-object-outside-the-list"],
 )
 def test_red_rows_exit_nonzero(tmp_path, capsys, row, patch, line) -> None:
     status, lines = _run(_build_fixture(tmp_path, **{row: patch}), capsys)
@@ -189,28 +206,17 @@ def test_red_rows_exit_nonzero(tmp_path, capsys, row, patch, line) -> None:
 DUAL = {"build_status": "dual_object", "file": "", "detail": "dual"}
 
 
-def test_a_dq_causal_dual_object_outside_the_flaky_list_is_known_nondeterministic(
-    tmp_path, capsys
-) -> None:
+def test_a_dq_causal_dual_object_outside_the_list_is_red(tmp_path, capsys) -> None:
     argv = _build_fixture(tmp_path)
-    flaky = tmp_path / "flaky.csv"
-    flaky.write_text("hash,spec,source\n", encoding="utf-8")  # nothing listed
-    spec = Spec.parse(SPECS["flaky"])
-    assert (spec.kernel, spec.cls) == ("dq", "causal")
+    nondet.write([], tmp_path / "nondeterministic.csv")  # nothing listed
     status, lines = _run(argv, capsys)
-    assert status == 0
+    assert status == 1
     (line,) = [l for l in lines if "dq tile=64 cls=causal" in l]
-    assert (
-        line.startswith("known nondeterministic (dq-causal family)")
-        and "flaky=no" in line
-    )
-    assert "RED" not in "\n".join(lines)
+    assert line.startswith("RED missing") and "nondeterministic=no" in line
 
 
 @pytest.mark.parametrize("row", ["byte", "resource"], ids=["dkdv-causal", "dq-plain"])
-def test_a_dual_object_outside_the_dq_causal_family_is_red(
-    tmp_path, capsys, row
-) -> None:
+def test_a_dual_object_of_another_family_is_red(tmp_path, capsys, row) -> None:
     status, lines = _run(_build_fixture(tmp_path, **{row: DUAL}), capsys)
     assert status == 1
     assert sum(l.startswith("RED missing") for l in lines) == 1

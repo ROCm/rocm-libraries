@@ -312,6 +312,163 @@ if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
     echo ""
 fi
 
+# --- Ragged and graph-only bundles ---
+#
+# Ragged cases (cuDNN ragged operands, one INT32 offset tensor and multiplier per
+# tensor) are template sweeps whose graph.template.json this script writes first:
+#   Ragged   every operand ragged, Stats packed with its own offsets
+#   RaggedQ  Q, O, dO, dQ and Stats ragged; K, V, dK and dV dense (padded)
+# Each case carries golden data from PyTorch with an FP64 autograd cross-check of
+# the storage it writes. Layout words in a case id:
+#   compact   blocks equal the sequence lengths
+#   gapped    blocks longer than the lengths (and a non-empty block for a
+#             zero-length sequence)
+#   indep     dQ, dK, dV, O, dO and Stats laid out independently of Q, K and V
+#   tokenmul  token-start offsets with multiplier = each tensor's sequence stride
+# A ragged output's gap rows hold NaN, which the harness skips (RFC 0014 4.11.4) and
+# which is what its sentinel fill leaves there. Stats "ht" is head-major [H, T]; the
+# harness's ragged tensor holds it only with H_q == 1, so those cases are H = 1.
+#
+# The graph-only dirs (MultiTile, SqNeSkv, D192, BroadcastDBias) carry no golden
+# data: the harness fills the inputs and checks the engine against its reference.
+#
+# Regenerate with:  GENERATE_RAGGED=1 bash generate_golden_data.sh none
+write_template() {
+    local topology="$1" kind="$2" scale="$3"
+    mkdir -p "$GOLDEN_ROOT/quick/SdpaBackward/$topology"
+    python3 "$GENERATOR" --write-template "$GOLDEN_ROOT/quick/SdpaBackward/$topology" \
+        --template-kind "$kind" --attn-scale "$scale"
+}
+
+# A graph-only case: no tensors are written, so only the sweep entry changes.
+generate_graph_only_case() {
+    local topology="$1" case_id="$2"
+    shift 2
+    python3 "$GENERATOR" \
+        --sweep-bundle-dir "$GOLDEN_ROOT/quick/SdpaBackward/$topology" \
+        --case-id "$case_id" --graph-only "$@"
+}
+
+if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
+    echo "=== Generating ragged bundles ==="
+
+    RSCALE="0.125"
+    write_template Ragged ragged_qkv "$RSCALE"
+    write_template RaggedQ ragged_q "$RSCALE"
+
+    # Sq != Skv: Q 64 rows, K/V 96 rows; per-side lengths include a zero-length
+    # sequence. Sq == Skv: both 64 rows. Blocks never exceed the row count.
+    MHA_NEQ_D64=(--q-dims 3 2 64 64 --v-dims 3 2 96 64)
+    MHA_NEQ_D128=(--q-dims 3 2 64 128 --v-dims 3 2 96 128)
+    MHA_EQ_D64=(--q-dims 3 2 64 64 --v-dims 3 2 64 64)
+    GQA_NEQ_D64=(--q-dims 3 4 64 64 --v-dims 3 2 96 64)
+    GQA_EQ_D128=(--q-dims 3 4 64 128 --v-dims 3 2 64 128)
+    GQA_NEQ_D128=(--q-dims 3 4 64 128 --v-dims 3 2 96 128)
+    H1_NEQ_D64=(--q-dims 3 1 64 64 --v-dims 3 1 96 64)
+    H1_EQ_D128=(--q-dims 3 1 64 128 --v-dims 3 1 64 128)
+    LENS_NEQ=(--seq-lens-q 17 0 64 --seq-lens-kv 96 0 33)
+    LENS_EQ=(--seq-lens-q 17 0 64 --seq-lens-kv 33 0 64)
+    TL=(--right-bound 0 --diagonal-alignment top_left)
+    COMMON=(--attn-scale "$RSCALE" --ragged-sides qkv)
+    GAP_NEQ=(--ragged-blocks q=24,3,64 --ragged-blocks o=24,3,64
+             --ragged-blocks do=24,3,64 --ragged-blocks dq=24,3,64
+             --ragged-blocks stats=24,3,64
+             --ragged-blocks k=96,2,40 --ragged-blocks v=96,2,40
+             --ragged-blocks dk=96,2,40 --ragged-blocks dv=96,2,40)
+    GAP_EQ=(--ragged-blocks q=24,3,64 --ragged-blocks o=24,3,64
+            --ragged-blocks do=24,3,64 --ragged-blocks dq=24,3,64
+            --ragged-blocks stats=24,3,64
+            --ragged-blocks k=40,2,64 --ragged-blocks v=40,2,64
+            --ragged-blocks dk=40,2,64 --ragged-blocks dv=40,2,64)
+    # Every tensor has its own offsets; the gradients, O, dO and Stats differ from
+    # the inputs they pair with.
+    INDEP_NEQ=(--ragged-blocks q=17,0,64 --ragged-blocks o=20,1,64
+               --ragged-blocks do=17,5,64 --ragged-blocks dq=30,0,64
+               --ragged-blocks stats=22,4,64
+               --ragged-blocks k=96,0,33 --ragged-blocks v=96,3,40
+               --ragged-blocks dk=96,2,33 --ragged-blocks dv=96,0,60)
+
+    generate_sweep_case quick Ragged compact_fp16_mha_d64_nomask_sq_eq_skv_th \
+        --dtype fp16 "${MHA_EQ_D64[@]}" "${LENS_EQ[@]}" "${COMMON[@]}"
+    generate_sweep_case quick Ragged compact_bf16_mha_d128_causal_tl_sq_ne_skv_th \
+        --dtype bf16 "${MHA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}"
+    generate_sweep_case quick Ragged gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_th \
+        --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        "${GAP_NEQ[@]}"
+    generate_sweep_case quick Ragged gapped_bf16_gqa_d128_nomask_sq_eq_skv_th \
+        --dtype bf16 "${GQA_EQ_D128[@]}" "${LENS_EQ[@]}" "${COMMON[@]}" "${GAP_EQ[@]}"
+    generate_sweep_case quick Ragged indep_fp16_mha_d128_causal_tl_sq_ne_skv_th \
+        --dtype fp16 "${MHA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        "${INDEP_NEQ[@]}"
+    generate_sweep_case quick Ragged indep_bf16_gqa_d64_nomask_sq_ne_skv_th \
+        --dtype bf16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" \
+        "${INDEP_NEQ[@]}"
+    generate_sweep_case quick Ragged compact_fp16_h1_d64_causal_tl_sq_ne_skv_ht \
+        --dtype fp16 "${H1_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged gapped_bf16_h1_d128_nomask_sq_eq_skv_ht \
+        --dtype bf16 "${H1_EQ_D128[@]}" "${LENS_EQ[@]}" "${COMMON[@]}" "${GAP_EQ[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged tokenmul_fp16_gqa_d64_causal_tl_sq_ne_skv_th \
+        --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        --ragged-units tokens
+
+    # Q ragged, K/V dense: the dense K/V side keeps its padded rows, which the
+    # engine must leave zero in dK and dV.
+    QCOMMON=(--attn-scale "$RSCALE" --ragged-sides q)
+    GAPQ=(--ragged-blocks q=24,3,64 --ragged-blocks o=24,3,64
+          --ragged-blocks do=24,3,64 --ragged-blocks dq=24,3,64
+          --ragged-blocks stats=24,3,64)
+    generate_sweep_case quick RaggedQ qgapped_fp16_mha_d64_nomask_sq_ne_skv_th \
+        --dtype fp16 "${MHA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${QCOMMON[@]}" "${GAPQ[@]}"
+    generate_sweep_case quick RaggedQ qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th \
+        --dtype bf16 "${GQA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${QCOMMON[@]}" "${TL[@]}"
+
+    echo "=== Generating graph-only bundles ==="
+    SCALE_D64="0.125"
+    write_template MultiTile dense "$SCALE_D128"
+    write_template SqNeSkv dense "$SCALE_D128"
+    write_template D192 dense "$SCALE_D192"
+    write_template BroadcastDBias dense_dbias "$SCALE_D64"
+
+    # More than one tile of keys and queries, with a partial last tile at S = 320.
+    for DTYPE in fp16 bf16; do
+        MT=(--dtype "$DTYPE" --attn-scale "$SCALE_D128")
+        generate_graph_only_case MultiTile "b2_h2_s320_d128_${DTYPE}_nomask" \
+            --q-dims 2 2 320 128 --v-dims 2 2 320 128 "${MT[@]}"
+        generate_graph_only_case MultiTile "b2_h2_s512_d128_${DTYPE}_causal_tl" \
+            --q-dims 2 2 512 128 --v-dims 2 2 512 128 "${MT[@]}" "${TL[@]}"
+        generate_graph_only_case MultiTile "b2_h2_s512_d128_${DTYPE}_causal_br" \
+            --q-dims 2 2 512 128 --v-dims 2 2 512 128 "${MT[@]}" \
+            --right-bound 0 --diagonal-alignment bottom_right
+        # Sq != Skv. Bottom-right with Sq < Skv leaves no query row empty.
+        NE=(--dtype "$DTYPE" --attn-scale "$SCALE_D128")
+        generate_graph_only_case SqNeSkv "b2_h2_q192_kv320_d128_${DTYPE}_nomask" \
+            --q-dims 2 2 192 128 --v-dims 2 2 320 128 "${NE[@]}"
+        generate_graph_only_case SqNeSkv "b2_h2_q192_kv320_d128_${DTYPE}_causal_br" \
+            --q-dims 2 2 192 128 --v-dims 2 2 320 128 "${NE[@]}" \
+            --right-bound 0 --diagonal-alignment bottom_right
+        generate_graph_only_case SqNeSkv "b2_h2_q320_kv192_d128_${DTYPE}_causal_tl" \
+            --q-dims 2 2 320 128 --v-dims 2 2 192 128 "${NE[@]}" "${TL[@]}"
+        # Q/K head dim 192 with V/O head dim 128.
+        D192=(--dtype "$DTYPE" --attn-scale "$SCALE_D192")
+        generate_graph_only_case D192 "b2_h2_s256_d192_${DTYPE}_nomask" \
+            --q-dims 2 2 256 192 --v-dims 2 2 256 128 "${D192[@]}"
+        generate_graph_only_case D192 "b2_h2_s256_d192_${DTYPE}_causal_br" \
+            --q-dims 2 2 256 192 --v-dims 2 2 256 128 "${D192[@]}" \
+            --right-bound 0 --diagonal-alignment bottom_right
+        # dBias [1, 1, Sq, Skv]: reduced over batch and heads.
+        DB=(--dtype "$DTYPE" --attn-scale "$SCALE_D64" --additive-mask --dbias)
+        generate_graph_only_case BroadcastDBias "b2_h4_s128_d64_${DTYPE}_dbias_nomask" \
+            --q-dims 2 4 128 64 --v-dims 2 4 128 64 "${DB[@]}"
+        generate_graph_only_case BroadcastDBias "b2_h4_q128_kv192_d64_${DTYPE}_dbias_causal_br" \
+            --q-dims 2 4 128 64 --v-dims 2 4 192 64 "${DB[@]}" \
+            --right-bound 0 --diagonal-alignment bottom_right
+    done
+
+    echo ""
+fi
+
 echo "=== Done ==="
 echo "Generated bundles:"
 find "$GOLDEN_ROOT" -path "*/SdpaBackward/*" \

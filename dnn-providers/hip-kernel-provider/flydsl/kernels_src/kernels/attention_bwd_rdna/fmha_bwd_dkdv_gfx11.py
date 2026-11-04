@@ -63,7 +63,7 @@ undropped P (the softmax denominator is undropped and baked into LSE'). A GQA gr
 
 GQA / varlen: the workgroup of (kv tile, kv head, sequence) loops over its group's query heads and their Q blocks in one flat
 loop (iteration -> (group member, block)), accumulating dK / dV of the KV head in registers in a fixed order: deterministic, no atomics.
-Q and K sides decode independently (`fmha.decode_addressing`: dense, CUMULATIVE, INDIVIDUAL + ARRAY positions); LSE and Delta are HT or TH.
+The Q and K sides take their lengths from `fmha.decode_addressing`; each tensor starts at its own origin (`fmha.tensor_origin`: `off[z] * mul` when ragged, `z * stride_batch` when dense, Q and K reading their offsets from `seqinfo_q1` / `seqinfo_k1`). LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace the prep writes.
 
 Class `causal` (compile time) takes the mask at run time through `window_left` / `window_right`, the gfx950 ABI's pair: the causal
 sentinels resolve per sequence (`fmha.resolve_window`: top-left wl = Sq, wr = 0; bottom-right wl = Sq, wr = Sk - Sq), and kv column c is
@@ -75,7 +75,7 @@ the sequence is written.
 
 Class `bias` (compile time; mutually exclusive with `causal`, as on gfx950) adds the caller's bias, in natural units, to the scaled
 score: P = exp2((sm_scale S + bias - lse) log2e) with the natural lse. The bias is `(batch, q head, q row, kv col)`
-at `stride_b_batch` / `stride_b_head` / `stride_b_seq_q` (the varlen q token origin rides `stride_b_seq_q`), kv column contiguous; a
+at `stride_b_batch` / `stride_b_head` / `stride_b_seq_q`, kv column contiguous; a
 broadcast dim has stride 0 (`rdna_layout_gfx11.bias_offset`). The lane of S element r reads the bias at (q row `acc_row(r)` of the
 sub-tile, its kv column): 8 scalar loads, each a plain global load at a q row and kv column clamped into the sequence (a row or column
 past it is dead and its P is selected to 0, so the clamped value never reaches the answer). There is no byte bound derived from
@@ -320,6 +320,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1,
         seqinfo_k0,
         seqinfo_k1,
+        mul_Q,
+        mul_K,
+        off_V,
+        mul_V,
+        off_DO,
+        mul_DO,
+        off_DK,
+        mul_DK,
+        off_DV,
+        mul_DV,
         varlen_bits,
         num_seqlens,
         max_seqlen_q,
@@ -386,14 +396,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         # ---- Varlen prologue (the forward's, through the shared decoders) ----
         z_i32 = fx.Int32(gpu.block_idx.z)
-        seqlen_q_i32, q_row_off, q_batch = fmha.decode_addressing(
+        seqlen_q_i32, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z_i32
         )
-        seqlen_k_i32, k_row_off, k_batch = fmha.decode_addressing(
+        seqlen_k_i32, _, _ = fmha.decode_addressing(
             varlen_bits, 8, max_seqlen_k, seqinfo_k0, seqinfo_k1, z_i32
-        )
-        lse_tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
         )
 
         seqlen_q_v = fx.Index(seqlen_q_i32)
@@ -473,10 +480,25 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             fx.Index(stride_dv_seq),
         )
 
-        _q_batch_v = fx.Index(q_batch)
-        _k_batch_v = fx.Index(k_batch)
-        _q_row_off_v = fx.Index(q_row_off)
-        _k_row_off_v = fx.Index(k_row_off)
+        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin`.
+        _q_origin = fmha.tensor_origin(
+            seqinfo_q1, mul_Q, z_i32, stride_q_batch, seqlen_q_i32
+        )
+        _do_origin = fmha.tensor_origin(
+            off_DO, mul_DO, z_i32, stride_do_batch, seqlen_q_i32
+        )
+        _k_origin = fmha.tensor_origin(
+            seqinfo_k1, mul_K, z_i32, stride_k_batch, seqlen_k_i32
+        )
+        _v_origin = fmha.tensor_origin(
+            off_V, mul_V, z_i32, stride_v_batch, seqlen_k_i32
+        )
+        _dk_origin = fmha.tensor_origin(
+            off_DK, mul_DK, z_i32, stride_dk_batch, seqlen_k_i32
+        )
+        _dv_origin = fmha.tensor_origin(
+            off_DV, mul_DV, z_i32, stride_dv_batch, seqlen_k_i32
+        )
 
         sm_log2e = fastmath.mul(sm_scale, fx.Float32(_LOG2E))
 
@@ -596,8 +618,9 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 ir.Type.parse("!llvm.ptr<1>"), fx.as_ir_value(_my_addr)
             ).result
             _my_st = tuple(_a if _role0 else _b for _a, _b in zip(k_st, v_st))
+            _my_origin = _k_origin if _role0 else _v_origin
             my_tbase, my_toff, _ = fmha.make_addr_pair(
-                _my_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw_k
+                _my_st, head_k, _my_origin, **_addr_kw_k
             )
             my_tile_base = my_tbase(_k_start_addr)
             # The role's own head-dim bound: the K role runs to hdim_qk, the V role to hdim_vo.
@@ -631,15 +654,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 ir.Type.parse("!llvm.ptr<1>"), fx.as_ir_value(_out_addr)
             ).result
             _out_st = tuple(_a if _role0 else _b for _a, _b in zip(dk_st, dv_st))
+            _out_origin = _dk_origin if _role0 else _dv_origin
             out_tbase, out_toff, _ = fmha.make_addr_pair(
-                _out_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw_k
+                _out_st, head_k, _out_origin, **_addr_kw_k
             )
         else:
             k_tbase, k_toff, _ = fmha.make_addr_pair(
-                k_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw_k
+                k_st, head_k, _k_origin, **_addr_kw_k
             )
             v_tbase, v_toff, _ = fmha.make_addr_pair(
-                v_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw_k
+                v_st, head_k, _v_origin, **_addr_kw_k
             )
             k_tile_base = k_tbase(_k_start_addr)
             v_tile_base = v_tbase(_k_start_addr)
@@ -828,12 +852,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             _addr_kw_q = dict(
                 seqlen_k=seqlen_q_v, seq_last=q_seq_last, hoist=False, clamp=True
             )
-            _, _, q_addr = fmha.make_addr_pair(
-                q_st, head_q, _q_batch_v, _q_row_off_v, **_addr_kw_q
-            )
-            _, _, do_addr = fmha.make_addr_pair(
-                do_st, head_q, _q_batch_v, _q_row_off_v, **_addr_kw_q
-            )
+            _, _, q_addr = fmha.make_addr_pair(q_st, head_q, _q_origin, **_addr_kw_q)
+            _, _, do_addr = fmha.make_addr_pair(do_st, head_q, _do_origin, **_addr_kw_q)
             _fetch_q = fmha.reader(q_addr, lambda b, o: load_global_f16xN(q_ptr, b, o))(
                 _q_row_start
             )
@@ -899,26 +919,19 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     )
 
             if const_expr(BIAS):
-                # (batch, q head, varlen q token origin) base of the bias plane; the group loop moves the head.
-                _bias_base = (
-                    _q_batch_v * fx.Index(stride_b_batch)
-                    + head_q * fx.Index(stride_b_head)
-                    + _q_row_off_v * fx.Index(stride_b_seq_q)
-                )
+                # (batch, q head) base of the bias plane; the group loop moves the head. A bias is dense: ragged graphs with a bias decline.
+                _bias_base = fx.Index(z_i32) * fx.Index(
+                    stride_b_batch
+                ) + head_q * fx.Index(stride_b_head)
 
-            # LSE (premultiplied by log2 e; natural for a bias object) and Delta of this Q block, once per iteration for every wave.
-            _rowq_base, _rowq_pitch = fmha.lse_row_addressing(
-                varlen_bits, _q_batch_v, head_q, num_head_q, lse_tokens, _q_row_off_v
-            )
+            # LSE' (premultiplied by log2 e; natural for a bias object) and Delta of this Q block, once per iteration for every wave.
+            _rowq_base = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q)
             for _rb in range_constexpr(_ROWQ_BATCHES):
                 _r = fx.Int32(tid) + fx.Int32(_rb * BLOCK_SIZE)
                 if _r < fx.Int32(BLOCK_M):
                     _rr = _q_row_start_i32 + _r
                     _ok = _rr < seqlen_q_i32
-                    _o = (
-                        _rowq_base
-                        + fx.Index(fx.Index(_rr) if _ok else fx.Index(0)) * _rowq_pitch
-                    )
+                    _o = _rowq_base + fx.Index(fx.Index(_rr) if _ok else fx.Index(0))
                     if const_expr(BIAS):
                         fmha.lds_f32_store(
                             _lds_byte_base,
@@ -1357,10 +1370,10 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         else:
             dk_tbase, dk_toff, _ = fmha.make_addr_pair(
-                dk_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw_k
+                dk_st, head_k, _dk_origin, **_addr_kw_k
             )
             dv_tbase, dv_toff, _ = fmha.make_addr_pair(
-                dv_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw_k
+                dv_st, head_k, _dv_origin, **_addr_kw_k
             )
             dk_base = dk_tbase(_k_start_addr)
             dv_base = dv_tbase(_k_start_addr)
@@ -1472,6 +1485,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -1525,6 +1548,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_DO,
+            mul_DO,
+            off_DK,
+            mul_DK,
+            off_DV,
+            mul_DV,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,
@@ -1581,6 +1614,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -1635,6 +1678,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_DO,
+            mul_DO,
+            off_DK,
+            mul_DK,
+            off_DV,
+            mul_DV,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,
@@ -1676,16 +1729,10 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             dump,
         )
 
+    _value_attrs = {"rocdl.waves_per_eu": int(WAVES_PER_EU)} if WAVES_PER_EU else {}
+
     def _run(launcher, stream, num_kv_tiles, num_head_k_idx, nseq_idx):
         ctx = CompilationContext.get_current()
-        if const_expr(WAVES_PER_EU is not None):
-            _wpe = int(WAVES_PER_EU)
-            if const_expr(_wpe >= 1):
-                for op in ctx.gpu_module_body.operations:
-                    if const_expr(getattr(op, "OPERATION_NAME", None) == "gpu.func"):
-                        op.attributes["rocdl.WAVES_PER_EU"] = ir.IntegerAttr.get(
-                            T.i32, _wpe
-                        )
         flat_wg_attr = ir.StringAttr.get(f"{BLOCK_SIZE},{BLOCK_SIZE}")
         for op in ctx.gpu_module_body.operations:
             if const_expr(getattr(op, "OPERATION_NAME", None) == "gpu.func"):
@@ -1733,6 +1780,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -1790,6 +1847,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 seqinfo_q1,
                 seqinfo_k0,
                 seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DK,
+                mul_DK,
+                off_DV,
+                mul_DV,
                 varlen_bits,
                 num_seqlens,
                 max_seqlen_q,
@@ -1828,6 +1895,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 stride_b_head,
                 stride_b_seq_q,
                 rt_flags,
+                value_attrs=_value_attrs,
             ),
             stream,
             num_kv_tiles,
@@ -1851,6 +1919,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -1909,6 +1987,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 seqinfo_q1,
                 seqinfo_k0,
                 seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DK,
+                mul_DK,
+                off_DV,
+                mul_DV,
                 varlen_bits,
                 num_seqlens,
                 max_seqlen_q,
@@ -1948,6 +2036,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 stride_b_seq_q,
                 rt_flags,
                 dump,
+                value_attrs=_value_attrs,
             ),
             stream,
             num_kv_tiles,

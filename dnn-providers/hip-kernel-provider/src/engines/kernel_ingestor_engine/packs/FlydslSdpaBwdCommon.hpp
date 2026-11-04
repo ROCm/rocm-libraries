@@ -65,13 +65,6 @@ enum class SeedWidth : uint8_t
     INT64
 };
 
-/// How the f32 statistics are packed: (B*H, Sq) or (B, Sq, H).
-enum class StatsLayout : uint8_t
-{
-    HT,
-    TH
-};
-
 /// How the dropout seed and offset reach the kernel; they share one form. NONE without
 /// dropout.
 enum class SeedForm : uint8_t
@@ -89,6 +82,40 @@ struct Strides
     int64_t batch = 0;
     int64_t head = 0;
     int64_t seq = 0;
+};
+
+/// The offset tensor of a ragged tensor: the base of batch b is offset[b] * multiplier
+/// elements (cuDNN's Ragged Layout). NO_UID for a tensor that is not ragged, which is
+/// addressed at b * its batch stride.
+struct RaggedOffset
+{
+    int64_t uid = NO_UID;
+    int64_t multiplier = 0;
+
+    bool ragged() const
+    {
+        return uid != NO_UID;
+    }
+};
+
+/// Each tensor's own ragged offset. The stats' offset is in the stats' own units.
+struct RaggedOffsets
+{
+    RaggedOffset q;
+    RaggedOffset k;
+    RaggedOffset v;
+    RaggedOffset o;
+    RaggedOffset dO;
+    RaggedOffset dQ;
+    RaggedOffset dK;
+    RaggedOffset dV;
+    RaggedOffset stats;
+
+    bool any() const
+    {
+        return q.ragged() || k.ragged() || v.ragged() || o.ragged() || dO.ragged() || dQ.ragged()
+               || dK.ragged() || dV.ragged() || stats.ragged();
+    }
 };
 
 /// What an engine opts into when it asks for the match.
@@ -122,6 +149,12 @@ struct SdpaBwdProblem
     Strides dQ;
     Strides dK;
     Strides dV;
+    /// Per operand, its ragged offset; the strides above record 0 on the batch axis of a
+    /// ragged tensor, which is never read.
+    RaggedOffsets ragged;
+    /// The stats' (batch, head, sequence) element strides, 0 on a unit axis and on the
+    /// batch axis of ragged stats.
+    Strides stats;
 
     /// scaleValue is attn_scale_value, or the baked value of a scale tensor that carries one;
     /// 1.0 when the graph states none. scaleUid is NO_UID unless the source is TENSOR.
@@ -162,8 +195,6 @@ struct SdpaBwdProblem
     SeedForm seedForm = SeedForm::NONE;
     int64_t seedUid = NO_UID;
     int64_t offsetUid = NO_UID;
-
-    StatsLayout statsLayout = StatsLayout::HT;
 };
 
 /// Why the graph is not served: a category and the field and value that put it there.
@@ -238,9 +269,11 @@ inline std::optional<int64_t> slabElements(int64_t rows, int64_t rowStride, int6
 }
 
 /// Whether no two elements of @p tensor share an address: its axes of more than one element,
-/// ordered by stride, must each step past everything the axes inside it span. Conservative:
-/// a layout interleaving two axes inside one another's gaps declines too.
-inline bool elementsDoNotOverlap(const Tensor& tensor)
+/// ordered by stride, must each step past everything the axes inside it span. With
+/// @p ignoreBatch the batch axis is left out (a ragged tensor's batches are placed by its
+/// offsets). Conservative: a layout interleaving two axes inside one another's gaps declines
+/// too.
+inline bool elementsDoNotOverlap(const Tensor& tensor, bool ignoreBatch = false)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
@@ -251,7 +284,7 @@ inline bool elementsDoNotOverlap(const Tensor& tensor)
     std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
     for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
     {
-        if(dims->Get(axis) > 1)
+        if(dims->Get(axis) > 1 && !(ignoreBatch && axis == 0))
         {
             axes.emplace_back(strides->Get(axis), dims->Get(axis));
         }
@@ -404,12 +437,13 @@ public:
 
     std::variant<SdpaBwdProblem, Decline> run()
     {
-        const std::array<Verdict (BackwardMatcher::*)(), 13> steps{
+        const std::array<Verdict (BackwardMatcher::*)(), 14> steps{
             &BackwardMatcher::resolveOperands,
             &BackwardMatcher::checkUidAliasing,
             &BackwardMatcher::checkShapes,
             &BackwardMatcher::checkDataTypes,
             &BackwardMatcher::checkHeads,
+            &BackwardMatcher::checkRagged,
             &BackwardMatcher::checkAlignment,
             &BackwardMatcher::checkLayouts,
             &BackwardMatcher::checkStats,
@@ -730,13 +764,14 @@ private:
     }
 
     /// The strides of the (B, H, S) axes of @p operand, 0 on a unit axis.
-    static Strides recordStrides(const Operand& operand)
+    static Strides recordStrides(const Operand& operand, bool ragged = false)
     {
         const auto& dims = dimsOf(operand);
         const auto& strides = stridesOf(operand);
         const auto stride
             = [&](uint32_t axis) { return dims.Get(axis) > 1 ? strides.Get(axis) : int64_t{0}; };
-        return Strides{stride(BATCH_AXIS), stride(HEAD_AXIS), stride(SEQ_AXIS)};
+        return Strides{
+            ragged ? int64_t{0} : stride(BATCH_AXIS), stride(HEAD_AXIS), stride(SEQ_AXIS)};
     }
 
     /// DT-9: whether a per-(batch, head) slab of @p rows + 1 rows at @p rowStride elements, the
@@ -761,7 +796,7 @@ private:
     /// multiple of 8 (4 for FLOAT) needs a smallest stride of at least ceil8(D) (ceil4(D)).
     /// DT-9: the per-head slab
     /// fits. LY-5: output elements do not overlap.
-    Verdict checkTensorLayout(const Operand& operand, int64_t headDim, bool isOutput)
+    Verdict checkTensorLayout(const Operand& operand, int64_t headDim, bool isOutput, bool ragged)
     {
         const auto& dims = dimsOf(operand);
         const auto& strides = stridesOf(operand);
@@ -775,6 +810,11 @@ private:
         for(uint32_t axis = BATCH_AXIS; axis <= SEQ_AXIS; ++axis)
         {
             if(dims.Get(axis) == 1)
+            {
+                continue;
+            }
+            // A ragged tensor's batches sit at offset * multiplier; its batch stride is never read.
+            if(ragged && axis == BATCH_AXIS)
             {
                 continue;
             }
@@ -821,13 +861,92 @@ private:
                                + " rows at stride " + std::to_string(strides.Get(SEQ_AXIS))
                                + " exceeds the 32-bit byte offset limit"};
         }
-        if(isOutput && !elementsDoNotOverlap(*operand.tensor))
+        if(isOutput && !elementsDoNotOverlap(*operand.tensor, ragged))
         {
             return Decline{"layout",
                            describe(operand) + " elements overlap (dims " + listOf(dims)
                                + ", strides " + listOf(strides) + ")"};
         }
         return std::nullopt;
+    }
+
+    std::array<RaggedOffset*, 8> raggedSlots()
+    {
+        return {&_problem.ragged.q,
+                &_problem.ragged.k,
+                &_problem.ragged.v,
+                &_problem.ragged.o,
+                &_problem.ragged.dO,
+                &_problem.ragged.dQ,
+                &_problem.ragged.dK,
+                &_problem.ragged.dV};
+    }
+
+    /// @p owner's ragged offset, when it has one: a device INT32 [B + 1, 1, 1, 1] tensor with
+    /// dense strides and a declared alignment of at least 4 bytes, and a multiplier of at least
+    /// 1. Where the offsets point, their monotonicity and the extent they address are the
+    /// caller's preconditions; the base of batch b is offset[b] * multiplier elements.
+    Verdict checkOffsetTensor(const Operand& owner, RaggedOffset& out)
+    {
+        const auto uid = optionalLong(owner.tensor->ragged_offset_tensor_uid());
+        if(!uid.has_value())
+        {
+            return std::nullopt;
+        }
+        Operand offset{"ragged_offset", *uid};
+        if(auto verdict = resolveOperand(_context, offset, "varlen"))
+        {
+            return verdict;
+        }
+        const std::string of = " of " + describe(owner);
+        if(offset.tensor->data_type() != data_objects::DataType::INT32)
+        {
+            return Decline{"varlen",
+                           describe(offset) + of + " is " + typeName(offset.tensor->data_type())
+                               + ", not INT32"};
+        }
+        const auto* dims = offset.tensor->dims();
+        const auto* strides = offset.tensor->strides();
+        const std::array<int64_t, 4> expected{_problem.batch + 1, 1, 1, 1};
+        if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
+           || strides->size() != SDPA_RANK
+           || !std::equal(dims->begin(), dims->end(), expected.begin()))
+        {
+            return Decline{"varlen",
+                           describe(offset) + of + " dims "
+                               + (dims == nullptr ? std::string("[]") : listOf(*dims))
+                               + " != " + listOf(expected)};
+        }
+        if(auto verdict = checkScalarMemory(offset, INT32_BYTES, "varlen"))
+        {
+            return verdict;
+        }
+        const int64_t multiplier = owner.tensor->ragged_offset_multiplier();
+        if(multiplier < 1)
+        {
+            return Decline{"varlen",
+                           describe(owner) + " ragged_offset_multiplier "
+                               + std::to_string(multiplier) + " is below 1"};
+        }
+        out = RaggedOffset{*uid, multiplier};
+        return std::nullopt;
+    }
+
+    /// PV-3: Q, K, V, O, dO, dQ, dK and dV may each be ragged, with an offset tensor and
+    /// multiplier of its own (checkOffsetTensor); independently of one another, and beside
+    /// dense tensors. PV-8: the stats may carry one too (checkStats pairs it with Q); a ragged
+    /// bias or dBias declines (checkBias). The padding_mask rule is checkVarlen's.
+    Verdict checkRagged()
+    {
+        const auto slots = raggedSlots();
+        for(size_t index = 0; index < _operands.size(); ++index)
+        {
+            if(auto verdict = checkOffsetTensor(_operands[index], *slots[index]))
+            {
+                return verdict;
+            }
+        }
+        return checkOffsetTensor(_stats, _problem.ragged.stats);
     }
 
     /// LY-4: dQ, dK and dV may share one buffer and Q, K and V may be packed views; aliasing
@@ -842,24 +961,33 @@ private:
                                             &_problem.dQ,
                                             &_problem.dK,
                                             &_problem.dV};
+        const auto raggedOf = raggedSlots();
         for(size_t index = 0; index < _operands.size(); ++index)
         {
             const bool isOutput = index == DQ || index == DK || index == DV;
-            if(auto verdict = checkTensorLayout(_operands[index], _headDims[index], isOutput))
+            const bool ragged = raggedOf[index]->ragged();
+            if(auto verdict
+               = checkTensorLayout(_operands[index], _headDims[index], isOutput, ragged))
             {
                 return verdict;
             }
-            *slots[index] = recordStrides(_operands[index]);
+            *slots[index] = recordStrides(_operands[index], ragged);
         }
         return std::nullopt;
     }
 
     /// SS-3: stats declares the 16-byte alignment the kernels assume for every data tensor
-    /// (the forward's check at the f32 element size is weaker). SS-1: stats is packed (B*H, Sq)
-    /// (HT) or packed (B, Sq, H) (TH); the kernels take no stats strides, so any other layout
-    /// declines. Both packed layouts address every element once, so SS-1 already excludes
-    /// overlapping stats. The kernels also address one batch's H*Sq FLOAT rows through a 32-bit
-    /// byte range, so a batch whose stats span exceeds it declines.
+    /// (the forward's check at the f32 element size is weaker). SS-4: stats is ragged exactly
+    /// when Q is. SS-1: dense stats, with a Q tensor that is not ragged, is served through its
+    /// actual (B, H, S) strides: every non-unit axis has a non-negative stride, no two elements
+    /// share an address (a zero stride on an axis of more than one element is such an overlap),
+    /// and one head's rows, Sq * s_token FLOAT elements, lie inside the 32-bit byte range the
+    /// gfx950 merged per-head row descriptor addresses. Padded and non-canonical strides are
+    /// served; unit axes are exempt. SS-5: ragged stats, with its own offset, is packed over
+    /// tokens: HT has sequence stride 1 and a positive head stride (the total token count, a
+    /// caller precondition), TH has head stride 1 and sequence stride H; its batch stride is
+    /// never read. The kernels read the stats through its own strides, so any other ragged
+    /// layout declines.
     Verdict checkStats()
     {
         if(!declaresAlignment(*_stats.tensor, REQUIRED_ALIGNMENT_BYTES))
@@ -869,36 +997,59 @@ private:
                                + std::to_string(_stats.tensor->alignment()) + " bytes, below the "
                                + std::to_string(REQUIRED_ALIGNMENT_BYTES) + " the kernels assume"};
         }
+        const bool statsRagged = _problem.ragged.stats.ragged();
+        if(statsRagged != _problem.ragged.q.ragged())
+        {
+            return Decline{"varlen",
+                           statsRagged ? describe(_stats) + " has a ragged offset but Q does not"
+                                       : describe(_stats)
+                                             + " is dense but Q is ragged: stats must be packed "
+                                               "with its own ragged offset"};
+        }
         const auto& strides = stridesOf(_stats);
-        const int64_t batch = _problem.batch;
         const int64_t heads = _problem.numHeads;
         const int64_t seq = _problem.seqLenQ;
-        const auto packed = checkedProduct({heads, seq});
-        if(packed.has_value() && *packed > INT32_LIMIT / STATS_BYTES_PER_ELEMENT)
+        if(statsRagged)
+        {
+            const int64_t headStride = strides.Get(HEAD_AXIS);
+            const int64_t seqStride = strides.Get(SEQ_AXIS);
+            const bool packedHt = (seq == 1 || seqStride == 1) && (heads == 1 || headStride >= 1);
+            const bool packedTh
+                = (heads == 1 || headStride == 1) && (seq == 1 || seqStride == heads);
+            if(!packedHt && !packedTh)
+            {
+                return Decline{"layout",
+                               describe(_stats) + " strides " + listOf(strides)
+                                   + " are neither packed (H, T) nor packed (T, H)"};
+            }
+            _problem.stats = recordStrides(_stats, true);
+            return std::nullopt;
+        }
+        const auto& dims = dimsOf(_stats);
+        for(const uint32_t axis : {BATCH_AXIS, HEAD_AXIS, SEQ_AXIS})
+        {
+            if(dims.Get(axis) > 1 && strides.Get(axis) < 0)
+            {
+                return Decline{"layout",
+                               describe(_stats) + " strides " + listOf(strides)
+                                   + " have a negative stride on a non-unit axis"};
+            }
+        }
+        if(!elementsDoNotOverlap(*_stats.tensor))
         {
             return Decline{"layout",
-                           describe(_stats) + " spans " + std::to_string(*packed)
-                               + " rows per batch, over the 32-bit byte offset limit"};
+                           describe(_stats) + " elements overlap (dims " + listOf(dims)
+                               + ", strides " + listOf(strides) + ")"};
         }
-        const auto matches = [&](int64_t batchStride, int64_t headStride, int64_t seqStride) {
-            return (batch == 1 || strides.Get(BATCH_AXIS) == batchStride)
-                   && (heads == 1 || strides.Get(HEAD_AXIS) == headStride)
-                   && (seq == 1 || strides.Get(SEQ_AXIS) == seqStride);
-        };
-        if(packed.has_value() && matches(*packed, seq, 1))
-        {
-            _problem.statsLayout = StatsLayout::HT;
-        }
-        else if(packed.has_value() && matches(*packed, 1, heads))
-        {
-            _problem.statsLayout = StatsLayout::TH;
-        }
-        else
+        const Strides recorded = recordStrides(_stats);
+        const auto rowSpan = checkedProduct({seq, recorded.seq, STATS_BYTES_PER_ELEMENT});
+        if(!rowSpan.has_value() || *rowSpan > INT32_LIMIT)
         {
             return Decline{"layout",
                            describe(_stats) + " strides " + listOf(strides)
-                               + " are neither packed (B*H, Sq) nor packed (B, Sq, H)"};
+                               + " put one head's rows beyond the 32-bit byte offset limit"};
         }
+        _problem.stats = recordStrides(_stats);
         return std::nullopt;
     }
 
@@ -1042,22 +1193,12 @@ private:
     }
 
     /// PV-1: padding_mask with both seq_len tensors is accepted. PV-2: the flag without
-    /// tensors, tensors without the flag, or one length tensor decline. PV-3, PV-8: a ragged
-    /// offset on any operand or stats declines.
+    /// tensors, tensors without the flag, or one length tensor decline. PV-3: a ragged tensor
+    /// (checkRagged) needs padding_mask with both seq_len tensors: the lengths are the
+    /// sequences' extents.
     Verdict checkVarlen()
     {
         const auto& a = _attributes;
-        for(const auto& operand : _operands)
-        {
-            if(operand.tensor->ragged_offset_tensor_uid().has_value())
-            {
-                return Decline{"varlen", describe(operand) + " has a ragged offset tensor"};
-            }
-        }
-        if(_stats.tensor->ragged_offset_tensor_uid().has_value())
-        {
-            return Decline{"varlen", describe(_stats) + " has a ragged offset tensor"};
-        }
         const auto lengthQ = optionalLong(a.seq_len_q_tensor_uid());
         const auto lengthKv = optionalLong(a.seq_len_kv_tensor_uid());
         if(lengthQ.has_value() != lengthKv.has_value())
@@ -1072,6 +1213,12 @@ private:
         }
         if(!a.padding_mask())
         {
+            if(_problem.ragged.any())
+            {
+                return Decline{"varlen",
+                               "a tensor has a ragged offset but padding_mask and the seq_len "
+                               "tensors are not set"};
+            }
             return std::nullopt;
         }
         if(auto verdict = checkSeqLen("seq_len_q", *lengthQ))

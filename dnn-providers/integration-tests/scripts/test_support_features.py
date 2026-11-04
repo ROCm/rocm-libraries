@@ -1422,10 +1422,11 @@ class TestSdpaBackwardExtract:
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
 
-    def test_ragged_raises(self) -> None:
+    def test_ragged_layout_ignores_strides(self) -> None:
         # Not counted as its bshd stride order.
-        with pytest.raises(FeatureError, match="ragged q"):
-            self._extract(ragged=True, strides=_bshd_strides)
+        assert (
+            self._group("layout", ragged=True, strides=_bshd_strides) == "layout:ragged"
+        )
 
     def test_optional_ports(self) -> None:
         features = self._extract(
@@ -1443,6 +1444,7 @@ class TestSdpaBackwardExtract:
         reached = set()
         for kwargs in (
             {},
+            {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
             {

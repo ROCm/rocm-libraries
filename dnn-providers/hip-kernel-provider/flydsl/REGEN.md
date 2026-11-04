@@ -123,13 +123,16 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 738 (90 + 63 + 84 + 72 + 33 + 198 + 198; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 2,977 (90 + 63 + 56 + 20 + 24 + 86 + 1,319 + 1,010 + 309) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 2,860 (90 + 63 + 56 + 20 + 24 + 86 + 1,289 + 923 + 309) |
 | `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 
 `sdpa_bwd_dbias_reduce` and `sdpa_bwd_dsink_reduce` ship no content (both reduce kernels ride
 inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
 standalone reduce pins that the S1 gates compare against.
+
+`sdpa_bwd_tailzero` ships no content of its own either: its six objects (gfx950 and gfx11-generic, each f16, bf16, fp32) are
+companions, role `tailzero`, built by the dQ generator and listed by the merged one (§3, *Companions*).
 
 ```bash
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
@@ -151,16 +154,26 @@ done
 
 The four `sdpa_bwd_{prep,dkdv,dq,merged}` generators exit 1 without `--reference-dir`, the
 directory of the sweep's pinned `<hash>.hsaco` objects. They ship their own build, which
-matches the pin byte for byte on every row but the rows of
-`tests/data/sdpa_bwd_pinned_exceptions.csv` (nondeterministic, known-bad or failing rebuilds,
-append-only): those ship the pin, and their `manifest.json` entry and the `Pinned objects`
-table of `<arch>.SOURCE.md` say so. A row outside that list that does not build, or whose
-build spills (R-MIR), stops the run. The backward generators refuse an unrecorded ROCm
+matches the pin byte for byte on every row but the standalone rows of the nondeterministic list
+(`tests/data/sdpa_bwd_nondeterministic.csv`, below) and the rows of `tests/data/sdpa_bwd_pinned_exceptions.csv`
+(known-bad rebuilds, append-only): those ship the pin, and their `manifest.json` entry and the `Pinned objects`
+table of `<arch>.SOURCE.md` say so. A row outside both lists that does not build, whose build is not its pin, or
+whose build spills (R-MIR), stops the run. The backward generators refuse an unrecorded ROCm
 version, so `ROCM_PATH` must be set. `REFERENCE_DIR` is the directory the SDPA backward S1 snapshot
 produces: `python tools/sdpa_bwd_s1.py --sweep-repo <sweep git dir> --ref <git ref>
 --selection selection.toml --out <S1 dir> --reference-dir "$REFERENCE_DIR"` (it fails while
 any member lacks a binary; see that tool's docstring). Every other `OPS` entry takes none, so
-`REFERENCE_DIR` is needed for the `sdpa_bwd_{prep,dkdv,dq,merged}` ops: on `gfx950` it is the gfx950 S1 snapshot's (`REF_GFX950`), on `gfx11-generic` the gfx11 one's (`REF_GFX11`; its `selection.toml`, `tools/sdpa_bwd_tables_from_sweep.py` installs its tables and `tests/data/sdpa_bwd_gfx11_reference.csv`). `selection.toml` comes from the sweep repository's selection policy (an AMD-internal repository); the S1 snapshot records the sweep revision in its `SNAPSHOT.md`, and the generated tables' header names only the tool that wrote them. A gfx11 object is not gated like a gfx950 one: it must be its S1 pin byte for byte, with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
+`REFERENCE_DIR` is needed for the `sdpa_bwd_{prep,dkdv,dq,merged}` ops: on `gfx950` it is the gfx950 S1 snapshot's (`REF_GFX950`), on `gfx11-generic` the gfx11 one's (`REF_GFX11`; its `selection.toml`, `tools/sdpa_bwd_tables_from_sweep.py` installs its tables and `tests/data/sdpa_bwd_gfx11_reference.csv`). `selection.toml` comes from the sweep repository's selection policy (an AMD-internal repository); the S1 snapshot records the sweep revision in its `SNAPSHOT.md`, and the generated tables' header names only the tool that wrote them. A gfx11 object is not gated like a gfx950 one: it must be its S1 pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
+
+`tools/sdpa_bwd_tables_from_sweep.py` installs a pruned catalogue: a pin whose object another pin of the same arch and op also pins, with a Spec equal apart from `floor` and a served head-dim range that contains its own, is not installed (equal ranges keep the smaller hash). The tables and the reference CSV hold the pins that remain, and the tool prints the dropped rows. The tool installs no nondeterministic list.
+
+**Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (both arches; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
+
+- a listed standalone row ships its pin; it is built once, for the manifest, never retried, and a `dual_object` build is no error;
+- a listed combined row (a dB-storing bias row) passes the per-kernel gate on the pin's main function or any of its `variant_function_sha256s` (resources unchanged), and a `dual_object` build is retried up to `_ATTEMPTS`;
+- an unlisted row whose build differs from its pin, or that is still `dual_object` after `_ATTEMPTS`, stops the run: the list is incomplete. Sample the row (N = 6 fresh-process builds under the regeneration conditions) and list it; never retry harder.
+
+Merge a sampling run into the list (union of variants, evidence appended): `cd flydsl && $PY -m generators._sdpa_bwd_nondet merge <nondeterministic-sampled.csv>`.
 
 Then compare every object against the manifests the tree ships:
 
@@ -255,9 +268,8 @@ done
 The SDPA backward ops (prep, dK/dV, dQ and, on gfx950, merged) build with ROCm 10.2.0 (`ROCM_PATH` naming it)
 and take the arch's S1 reference dir (§2, `REF_GFX950` / `REF_GFX11`). A generator writes
 `<op>/<arch>/` under `--out-dir` and requires that directory to be empty, so clear the old one
-first (`dvc checkout` restores it). Run dQ with `FLYDSL_GEN_JOBS=8`: at wider settings the
-nondeterministic dQ rows of `tests/data/sdpa_bwd_pinned_exceptions.csv` and
-`tests/data/sdpa_bwd_known_flaky.csv` are not the only ones that flip, and a flipped row fails the run.
+first (`dvc checkout` restores it). Run dQ with `FLYDSL_GEN_JOBS=8`: at wider settings rows
+outside `tests/data/sdpa_bwd_nondeterministic.csv` flip too, and an unlisted flipped row fails the run.
 
 ```bash
 for ARCH in gfx950 gfx11-generic; do
@@ -275,6 +287,37 @@ for ARCH in gfx950 gfx11-generic; do
   $PY gen_descriptors.py --arch $ARCH --check
 done
 ```
+
+**Companions.** A dQ or merged row launches a tail-zero object after its gradient launches when the graph has a
+`padding_mask` (`generators/gen_sdpa_bwd_tailzero.py`; the kernels are `fmha_bwd_tailzero_gfx950.py` and
+`fmha_bwd_tailzero_gfx11.py`). The dQ generator builds the objects through
+`gen_sdpa_bwd_tailzero.companion_entries(arch, folder)` and lists them under `companions` in the dQ manifest; the merged
+generator builds nothing and lists the dQ manifest's entries (it stops if they or their objects are missing or altered), so
+**generate `sdpa_bwd_dq` before `sdpa_bwd_merged`** into the same content root (the `OPS` order above does); the
+`spec` of an entry is `<role>,<dtype>` (`tailzero,f16`, with `;arch=gfx11-generic` on gfx11), and
+`gen_descriptors.py` keys companions by `(dtype, role)`. Each tail-zero object is kept once, in the dQ arch folder (gfx11
+dQ holds `dbias_reduce` and `tailzero` companions, gfx950 dQ holds `tailzero`); the merged manifest's `tailzero.file`
+points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resolved path. The launch-name sets of the
+rows follow: dQ `{dq, tailzero}`, gfx11 dB-storing dQ `{dq, dbias_reduce, tailzero}`, merged `{merged, tailzero}`;
+`gen_descriptors.py` refuses a dQ or merged row whose dtype has no tail-zero companion.
+
+A tail-zero object has no pin. Its provenance is the generator: each object is built twice in fresh processes and the two
+builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must not be red; the gfx950
+resource row is recorded in the companion entry. The pin steps of `Plans/sdpa-bwd-regen-F.md` §1 (reference rows, pin
+exceptions) apply to every other object and are skipped for tail-zero rows. To build the six objects alone, for inspection:
+
+```bash
+ROCM_PATH=$ROCM_PATH_BWD PYTHONDONTWRITEBYTECODE=1 \
+  $PY -m generators.gen_sdpa_bwd_tailzero --arch gfx950 --out-dir "$SCRATCH"   # also gfx11-generic
+```
+
+The gfx950 dQ op builds at `FLYDSL_GEN_JOBS=8` (K13: wider settings flip nondeterministic dQ rows); the tail-zero objects
+build in the same run, so they inherit the dQ worker count.
+
+**Packed tile.** `gen_descriptors.py` writes the resolved `block_q` of every packed (`gqa_pack` 1) dK/dV and merged row into
+its KMD and KDP and refuses a row whose value is missing or above `PACK_MAX_BLOCK_Q`, which it reads from
+`FlydslSdpaBwdNativeShared.hpp`. The generators write the resolved tile into the row knobs; a tile above the bound is a
+change of the bound and of the engines' packed-span proof, not of a table.
 
 The CDNA kernels take FlyDSL's `fx.Tensor` arguments, so the CDNA generators trace
 each from torch `meta` tensors -- shapes and strides with no storage. No GPU is

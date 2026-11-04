@@ -76,6 +76,11 @@
  * (`ws.*`); the handlers read them at prepare() and check them against the layout they
  * recompute.
  *
+ * The dq slot's launches are the dQ kernel, the dBias reduce when the graph's dBias is
+ * broadcast, and, when the graph has padding_mask and at least one dense gradient output, the
+ * tail-zero launch (`tailzero`): it zeroes the rows of those outputs past `seq_len`, so a
+ * padded dense gradient is zero beyond its lengths.
+ *
  * Launch arguments are a pure function of the plan prepare() resolves and the execute-time
  * buffers (launchArguments()), so one description of each kernel's argument list feeds the
  * launch, the signature the descriptor is checked against, and the tests' dumps.
@@ -108,14 +113,16 @@ constexpr std::string_view DQ_KERNEL_MATCHER_SYMBOL
 constexpr std::string_view PREP_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch";
 constexpr std::string_view DKDV_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch";
 constexpr std::string_view DQ_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch";
-/// The dq slot's multi-launch dispatch: the rows that carry the dQ kernel and the dBias reduce
-/// kernel as separate launches (`sources`).
+/// The dq slot's multi-launch dispatches: every dq row carries its launches as `sources`, the
+/// dQ kernel and the tail-zero kernel, and the rows of the `dq_reduce` dispatch also the dBias
+/// reduce kernel as a separate launch.
 constexpr std::string_view DQ_REDUCE_DISPATCH_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch";
 
-/// The launch names of a `dq_reduce` row's `sources`.
+/// The launch names of a dq row's `sources`.
 constexpr std::string_view DQ_LAUNCH = "dq";
 constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
+constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
 
 // Kernel metadata fields, declared by each slot's KMD. Every slot carries the first group; the
 // rest belong to the slot that names them.
@@ -135,7 +142,7 @@ constexpr std::string_view FLOOR_FIELD = "floor";
 /// prep: 1 is the sink twin, which takes arguments a graph without a sink cannot give.
 constexpr std::string_view SINK_FIELD = "sink";
 /// dkdv: 1 packs the GQA group into the q-tile row axis; -1 leaves it unset. block_q is the
-/// query tile of the dK/dV schedule, -1 where the policy decides.
+/// query tile of the dK/dV schedule; every packed row carries its resolved value.
 constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
 constexpr std::string_view BLOCK_Q_FIELD = "block_q";
 /// dq: -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
@@ -199,14 +206,6 @@ constexpr int64_t CLASS_BIAS = 2;
 constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
 constexpr std::array<int64_t, 9> FP32_LADDER{32, 64, 96, 128, 160, 192, 224, 256, 512};
 
-/// `varlen_bits` names the layout of the LSE: bit 16 is the (B, Sq, H) packing.
-constexpr int32_t VARLEN_LSE_LAYOUT_TH = 1 << 16;
-/// Padded varlen: dense (B, H, S, D) tensors with a length per batch on each side, the
-/// layout's position implied by the batch index (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04, for the
-/// Q side in bits 0..7 and the K side in bits 8..15; the lengths go in `seqinfo_q0` /
-/// `seqinfo_k0`). The prep kernel decodes the Q side only.
-constexpr int32_t VARLEN_LENGTHS_BOTH_SIDES = 0x0404;
-
 /// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
 constexpr int32_t RT_FLAG_PADDED = 1;
 constexpr int32_t RT_FLAG_DROPOUT = 2;
@@ -215,10 +214,6 @@ constexpr int32_t RT_FLAG_DROPOUT = 2;
 constexpr int64_t PREP_BLOCK_THREADS = 256;
 constexpr int64_t PREP_MAX_LANES_PER_ROW = 16;
 constexpr int64_t VECTOR_BYTES = 16;
-
-/// The largest query tile (block_q) of the dK/dV role among the shipped gqa_pack == 1
-/// objects (see packedSpansFit); a row that packs a larger one is not served.
-constexpr int64_t PACK_MAX_BLOCK_Q = 64;
 
 [[noreturn]] void failBadParam(const std::string& message)
 {
@@ -460,6 +455,11 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         logDecline("SP-WS", why);
         return std::nullopt;
     }
+    if(native::tailzeroMaskOf(problem) != 0 && !native::tailzeroGridOf(problem))
+    {
+        logDecline("SP-TZ", "the tail-zero launch grid exceeds its limits");
+        return std::nullopt;
+    }
 
     int64_t graphClass = CLASS_PLAIN;
     if(problem.biasUid != bwd::NO_UID)
@@ -483,7 +483,7 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     // pack object also needs every packed span inside the 32-bit buffer descriptor, else the
     // graph is served by the non-pack objects, which rebase per head.
     bound[std::string(GQA_PACK_TOKEN)]
-        = int64_t{native::packedSpansFit(problem, PACK_MAX_BLOCK_Q) ? 1 : 0};
+        = int64_t{native::packedSpansFit(problem, native::PACK_MAX_BLOCK_Q) ? 1 : 0};
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
     bound[std::string(KV_HEADS_TOKEN)] = problem.numKvHeads;
@@ -865,8 +865,9 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
     if constexpr(SLOT == Slot::DKDV)
     {
         // A packed object serves dense GQA whose packed spans fit, at a query tile the span
-        // bound covers.
-        if(row->gqaPack == 1 && (!facts->gqaPack || row->blockQ > PACK_MAX_BLOCK_Q))
+        // bound covers: a row that records no tile, or one above the bound, serves nothing.
+        if(row->gqaPack == 1
+           && (!facts->gqaPack || row->blockQ <= 0 || row->blockQ > native::PACK_MAX_BLOCK_Q))
         {
             return false;
         }
@@ -931,6 +932,10 @@ struct SplitPlan
     /// The reduce kernel's symbol and launch, when the dq slot's graph has a broadcast dBias.
     std::string reduceSymbol;
     native::ReduceGrid reduceGrid;
+    /// The tail-zero launch of the dq slot: the outputs it zeroes (`mask`, 0 for no launch)
+    /// and its grid.
+    int32_t tailzeroMask = 0;
+    native::TailzeroGrid tailzeroGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
@@ -1019,8 +1024,7 @@ SplitPlan planFor(Slot slot,
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags
         = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = (problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0)
-                      | (problem.paddingMask ? VARLEN_LENGTHS_BOTH_SIDES : 0);
+    plan.varlenBits = native::varlenBitsOf(problem);
 
     plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
 
@@ -1036,6 +1040,19 @@ SplitPlan planFor(Slot slot,
         plan.reduceSymbol = row->reduceSymbol;
         plan.reduceGrid = native::reduceGridOf(problem, reduceVectorOf(problem));
     }
+    if(slot == Slot::DQ)
+    {
+        plan.tailzeroMask = native::tailzeroMaskOf(problem);
+        if(plan.tailzeroMask != 0)
+        {
+            const auto tailzeroGrid = native::tailzeroGridOf(problem);
+            if(!tailzeroGrid)
+            {
+                failBadParam("the tail-zero launch grid exceeds its limits");
+            }
+            plan.tailzeroGrid = *tailzeroGrid;
+        }
+    }
     return plan;
 }
 
@@ -1045,7 +1062,8 @@ SplitPlan planFor(Slot slot,
 
 /**
  * @brief The prep kernel's arguments, in parameter order (`_PARAMS["prep"]` in
- *        `_sdpa_bwd_cdna_build.py`): 18 arguments.
+ *        `_sdpa_bwd_cdna_build.py`): 27 arguments, the offset and statistics arguments after
+ *        `seqinfo_q1`.
  *
  * A pointer is 8 bytes, a count or flag 4 and a stride 8 (i64), each at its natural offset.
  * tie() is the one listing: launch passes it through, the signature reads its types, and the
@@ -1060,6 +1078,9 @@ struct PrepKernargs
     void* delta = nullptr;
     void* seqinfoQ0 = nullptr;
     void* seqinfoQ1 = nullptr;
+    native::OffsetArgs offO;
+    native::OffsetArgs offDO;
+    native::StatsArgs stats;
     int32_t varlenBits = 0;
     int32_t numSeqlens = 0;
     int32_t maxSeqlenQ = 0;
@@ -1077,6 +1098,15 @@ struct PrepKernargs
                         delta,
                         seqinfoQ0,
                         seqinfoQ1,
+                        offO.offset,
+                        offO.multiplier,
+                        offDO.offset,
+                        offDO.multiplier,
+                        stats.offset.offset,
+                        stats.offset.multiplier,
+                        stats.strides.batch,
+                        stats.strides.head,
+                        stats.strides.seq,
                         varlenBits,
                         numSeqlens,
                         maxSeqlenQ,
@@ -1091,7 +1121,8 @@ struct PrepKernargs
     }
 };
 
-/// The dK/dV kernel's arguments (`_PARAMS["dkdv"]`): 51 arguments.
+/// The dK/dV kernel's arguments (`_PARAMS["dkdv"]`): 61 arguments, the offset arguments after
+/// `seqinfo_k1`.
 struct DkdvKernargs
 {
     void* q = nullptr;
@@ -1107,6 +1138,12 @@ struct DkdvKernargs
     void* seqinfoQ1 = nullptr;
     void* seqinfoK0 = nullptr;
     void* seqinfoK1 = nullptr;
+    int64_t mulQ = 0;
+    int64_t mulK = 0;
+    native::OffsetArgs offV;
+    native::OffsetArgs offDO;
+    native::OffsetArgs offDK;
+    native::OffsetArgs offDV;
     int32_t varlenBits = 0;
     int32_t numSeqlens = 0;
     int32_t maxSeqlenQ = 0;
@@ -1147,6 +1184,16 @@ struct DkdvKernargs
                         seqinfoQ1,
                         seqinfoK0,
                         seqinfoK1,
+                        mulQ,
+                        mulK,
+                        offV.offset,
+                        offV.multiplier,
+                        offDO.offset,
+                        offDO.multiplier,
+                        offDK.offset,
+                        offDK.multiplier,
+                        offDV.offset,
+                        offDV.multiplier,
                         varlenBits,
                         numSeqlens,
                         maxSeqlenQ,
@@ -1188,7 +1235,8 @@ struct DkdvKernargs
     }
 };
 
-/// The dQ kernel's arguments (`_PARAMS["dq"]`): 51 arguments.
+/// The dQ kernel's arguments (`_PARAMS["dq"]`): 59 arguments, the offset arguments after
+/// `seqinfo_k1`.
 struct DqKernargs
 {
     void* q = nullptr;
@@ -1204,6 +1252,11 @@ struct DqKernargs
     void* seqinfoQ1 = nullptr;
     void* seqinfoK0 = nullptr;
     void* seqinfoK1 = nullptr;
+    int64_t mulQ = 0;
+    int64_t mulK = 0;
+    native::OffsetArgs offV;
+    native::OffsetArgs offDO;
+    native::OffsetArgs offDQ;
     int32_t varlenBits = 0;
     int32_t numSeqlens = 0;
     int32_t maxSeqlenQ = 0;
@@ -1244,6 +1297,14 @@ struct DqKernargs
                         seqinfoQ1,
                         seqinfoK0,
                         seqinfoK1,
+                        mulQ,
+                        mulK,
+                        offV.offset,
+                        offV.multiplier,
+                        offDO.offset,
+                        offDO.multiplier,
+                        offDQ.offset,
+                        offDQ.multiplier,
                         varlenBits,
                         numSeqlens,
                         maxSeqlenQ,
@@ -1307,6 +1368,9 @@ struct LaunchArguments
     std::optional<native::ReduceKernargs> reduce;
     /// Set on the prep launch only: it writes the seed region the other slots read.
     std::optional<native::SeedUpload> seedUpload;
+    /// Set on the dq launch when the graph needs the tail-zero launch after the kernel and
+    /// the reduce.
+    std::optional<native::TailzeroKernargs> tailzero;
 };
 
 /// Every argument of the launch, from the plan and the execute-time buffers; touches no
@@ -1345,9 +1409,13 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         prep.lseWs = lseWorkspace;
         prep.delta = delta;
         // Unread slots stay O, as the harness passes them; a padded graph's lengths are its
-        // `seq_len_q` / `seq_len_kv` tensors, and nothing is packed (num_seqlens stays 0).
+        // `seq_len_q` / `seq_len_kv` tensors, and nothing is packed (num_seqlens stays 0). A
+        // dense tensor passes a null offset array and multiplier 0.
         prep.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
-        prep.seqinfoQ1 = unused;
+        prep.seqinfoQ1 = native::offsetArgsOf(problem.ragged.q, buffer).offset;
+        prep.offO = native::offsetArgsOf(problem.ragged.o, buffer);
+        prep.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
+        prep.stats = native::statsArgsOf(problem, buffer);
         prep.varlenBits = plan.varlenBits;
         prep.numSeqlens = 0;
         prep.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -1390,7 +1458,14 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         d.delta = delta;
         d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
         d.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : unused;
-        d.seqinfoQ1 = d.seqinfoK1 = unused;
+        d.seqinfoQ1 = native::offsetArgsOf(problem.ragged.q, buffer).offset;
+        d.seqinfoK1 = native::offsetArgsOf(problem.ragged.k, buffer).offset;
+        d.mulQ = problem.ragged.q.multiplier;
+        d.mulK = problem.ragged.k.multiplier;
+        d.offV = native::offsetArgsOf(problem.ragged.v, buffer);
+        d.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
+        d.offDK = native::offsetArgsOf(problem.ragged.dK, buffer);
+        d.offDV = native::offsetArgsOf(problem.ragged.dV, buffer);
         d.varlenBits = plan.varlenBits;
         d.numSeqlens = 0;
         d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -1430,7 +1505,13 @@ LaunchArguments launchArguments(const SplitPlan& plan,
     d.delta = delta;
     d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
     d.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : unused;
-    d.seqinfoQ1 = d.seqinfoK1 = unused;
+    d.seqinfoQ1 = native::offsetArgsOf(problem.ragged.q, buffer).offset;
+    d.seqinfoK1 = native::offsetArgsOf(problem.ragged.k, buffer).offset;
+    d.mulQ = problem.ragged.q.multiplier;
+    d.mulK = problem.ragged.k.multiplier;
+    d.offV = native::offsetArgsOf(problem.ragged.v, buffer);
+    d.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
+    d.offDQ = native::offsetArgsOf(problem.ragged.dQ, buffer);
     d.varlenBits = plan.varlenBits;
     d.numSeqlens = 0;
     d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -1480,6 +1561,15 @@ LaunchArguments launchArguments(const SplitPlan& plan,
             }
         }
     }
+    if(plan.tailzeroMask != 0)
+    {
+        arguments.tailzero = native::tailzeroKernargsOf(problem,
+                                                        buffer(plan.uids.dQ),
+                                                        buffer(plan.uids.dK),
+                                                        buffer(plan.uids.dV),
+                                                        buffer(problem.seqLenQUid),
+                                                        buffer(problem.seqLenKvUid));
+    }
     arguments.kernel = d;
     return arguments;
 }
@@ -1494,10 +1584,12 @@ class PreparedFlydslSdpaBwdSplit : public PreparedDispatch
 public:
     PreparedFlydslSdpaBwdSplit(SplitPlan plan,
                                IngestorKernelCode code,
-                               std::optional<IngestorKernelCode> reduceCode)
+                               std::optional<IngestorKernelCode> reduceCode,
+                               std::optional<IngestorKernelCode> tailzeroCode)
         : _plan(std::move(plan))
         , _code(std::move(code))
         , _reduce(std::move(reduceCode))
+        , _tailzero(std::move(tailzeroCode))
     {
     }
 
@@ -1516,10 +1608,16 @@ public:
         return _reduce->kernelForStream(stream);
     }
 
+    compilation::IRunnableKernel& tailzeroForStream(hipStream_t stream) const
+    {
+        return _tailzero->kernelForStream(stream);
+    }
+
 private:
     SplitPlan _plan;
     IngestorKernelCode _code;
     std::optional<IngestorKernelCode> _reduce;
+    std::optional<IngestorKernelCode> _tailzero;
 };
 
 /**
@@ -1549,9 +1647,14 @@ public:
 
     std::set<std::string> launchNames() const override
     {
-        if constexpr(SOURCES)
+        if constexpr(SLOT == Slot::DQ)
         {
-            return {std::string(DQ_LAUNCH), std::string(REDUCE_LAUNCH)};
+            std::set<std::string> names{std::string(DQ_LAUNCH), std::string(TAILZERO_LAUNCH)};
+            if constexpr(SOURCES)
+            {
+                names.insert(std::string(REDUCE_LAUNCH));
+            }
+            return names;
         }
         return {};
     }
@@ -1576,31 +1679,45 @@ public:
     {
         auto plan = planFor(SLOT, context, bound, kernel);
 
-        // Every launch's definition is resolved, and the reduce launch's argument list
-        // checked, before any code object loads, so a row that lacks a launch or disagrees on
-        // the reduce ABI fails on the host whatever the state of the archive.
-        const bool reduces = !plan.reduceSymbol.empty();
+        // Every launch's definition is resolved, and the reduce and tail-zero launches'
+        // argument lists checked, before any code object loads, so a row that lacks a launch
+        // or disagrees on an ABI fails on the host whatever the state of the archive.
+        [[maybe_unused]] const bool reduces = !plan.reduceSymbol.empty();
+        [[maybe_unused]] const bool zeroesTails = plan.tailzeroMask != 0;
         std::optional<KernelDefinition> dqLaunch;
         std::optional<KernelDefinition> reduceKernel;
-        if constexpr(SOURCES)
+        std::optional<KernelDefinition> tailzeroKernel;
+        if constexpr(SLOT == Slot::DQ)
         {
             dqLaunch = launchKernelDefinition(kernel, std::string(DQ_LAUNCH));
-            if(reduces)
+            if constexpr(SOURCES)
             {
-                reduceKernel = launchKernelDefinition(kernel, std::string(REDUCE_LAUNCH));
-                requireSignatureMatch(reduceKernel->source.signature,
-                                      native::reduceSignature(),
-                                      reduceKernel->source.symbol,
+                if(reduces)
+                {
+                    reduceKernel = launchKernelDefinition(kernel, std::string(REDUCE_LAUNCH));
+                    requireSignatureMatch(
+                        reduceKernel->source.signature,
+                        native::reduceSignature(),
+                        reduceKernel->source.symbol,
+                        describeDescriptor("kernel", kernel.name, kernel.kernelId));
+                }
+            }
+            else if(reduces)
+            {
+                // The reduce kernel is the same code object under another symbol: the dq
+                // launch's archive entry, with that symbol and its own argument list.
+                reduceKernel = dqLaunch;
+                reduceKernel->source.symbol = plan.reduceSymbol;
+                reduceKernel->source.signature = native::reduceSignature();
+            }
+            if(zeroesTails)
+            {
+                tailzeroKernel = launchKernelDefinition(kernel, std::string(TAILZERO_LAUNCH));
+                requireSignatureMatch(tailzeroKernel->source.signature,
+                                      native::tailzeroSignature(),
+                                      tailzeroKernel->source.symbol,
                                       describeDescriptor("kernel", kernel.name, kernel.kernelId));
             }
-        }
-        else if(reduces)
-        {
-            // The reduce kernel is the same code object under another symbol: the same
-            // archive entry, with that symbol and its own argument list.
-            reduceKernel = kernel;
-            reduceKernel->source.symbol = plan.reduceSymbol;
-            reduceKernel->source.signature = native::reduceSignature();
         }
         const KernelDefinition& slotKernel = dqLaunch.has_value() ? *dqLaunch : kernel;
 
@@ -1623,8 +1740,20 @@ public:
             reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
             reduceCode->setGridSize(plan.reduceGrid.x, plan.reduceGrid.y, 1);
         }
+        std::optional<IngestorKernelCode> tailzeroCode;
+        if(tailzeroKernel.has_value())
+        {
+            tailzeroCode.emplace(buildIngestorKernelCode(_kernelCompiler,
+                                                         _kpackLoader,
+                                                         context,
+                                                         *tailzeroKernel,
+                                                         options,
+                                                         native::tailzeroSignature()));
+            tailzeroCode->setBlockSize(native::TAILZERO_THREADS, 1, 1);
+            tailzeroCode->setGridSize(plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1);
+        }
         return std::make_unique<PreparedFlydslSdpaBwdSplit>(
-            std::move(plan), std::move(code), std::move(reduceCode));
+            std::move(plan), std::move(code), std::move(reduceCode), std::move(tailzeroCode));
     }
 
     void launch(const Handle& handle,
@@ -1660,6 +1789,14 @@ public:
                     preparedSplit.reduceForStream(stream).launch(stream, argument...);
                 },
                 arguments.reduce->tie());
+        }
+        if(arguments.tailzero.has_value())
+        {
+            std::apply(
+                [&](const auto&... argument) {
+                    preparedSplit.tailzeroForStream(stream).launch(stream, argument...);
+                },
+                arguments.tailzero->tie());
         }
     }
 
@@ -1734,6 +1871,13 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
         dump.reduceKernarg = native::kernargImage(*arguments.reduce);
         dump.reduceBlock = native::REDUCE_THREADS;
         dump.reduceGrid = {plan.reduceGrid.x, plan.reduceGrid.y, 1};
+    }
+    if(arguments.tailzero.has_value())
+    {
+        dump.tailzero = true;
+        dump.tailzeroKernarg = native::kernargImage(*arguments.tailzero);
+        dump.tailzeroBlock = native::TAILZERO_THREADS;
+        dump.tailzeroGrid = {plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1};
     }
     if(arguments.seedUpload.has_value())
     {

@@ -17,6 +17,7 @@ import pytest
 
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL))
+from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._instances import (  # noqa: E402
     PRIORITY_SPECIALIZED,
     SDPA_BWD_REDUCE_SYMBOL,
@@ -138,21 +139,15 @@ def test_merged_grid_knobs_are_positive_ints(name: str) -> None:
         Spec.parse("merged,bf16,128,plain,bk,0,0,tail,0,1;grid=2")
 
 
-def _flaky() -> set[str]:
-    path = FLYDSL / "tests" / "data" / "sdpa_bwd_known_flaky.csv"
-    with path.open(newline="", encoding="utf-8") as handle:
-        return {row["hash"] for row in csv.DictReader(handle)}
-
-
 @pytest.mark.parametrize("kind", ["prep", "dkdv", "dq"])
 def test_policy_default_split_rows_outrank_the_rest(kind: str) -> None:
-    """A split row that sets no perf knob and is not known-flaky is one priority above every other row of its op."""
-    flaky = _flaky()
+    """A split row that sets no perf knob and is not in the nondeterministic list is one priority above every other row of its op."""
+    listed = nondet.read(arch="gfx950").keys()
     rows = instances_for(f"sdpa_bwd_{kind}", "gfx950")
     ranks = {}
     for row in rows:
         spec = to_spec(row)
-        policy_default = not spec.knobs and spec.hash() not in flaky
+        policy_default = not spec.knobs and spec.hash() not in listed
         assert row.priority == PRIORITY_SPECIALIZED + policy_default
         ranks[policy_default] = ranks.get(policy_default, 0) + 1
     assert set(ranks) == {True, False}

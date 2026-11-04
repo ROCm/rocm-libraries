@@ -70,6 +70,17 @@ GFX11 = "gfx11-generic"
 GFX11_REDUCE = "fmha_bwd_dbias_reduce_gfx11_kernel_0"
 
 
+def _tailzero(arch: str, dtype: str = "bf16", file: str = "tz.hsaco") -> dict:
+    return {
+        "hash": "a3287842cb25",
+        "spec": f"tailzero,{dtype}" + ("" if arch == ARCH else f";arch={arch}"),
+        "file": file,
+        "symbol": f"fmha_bwd_tailzero_{arch[:6].rstrip('-')}_kernel_0",
+        "sha256": "1" * 64,
+        "path": Path("unused"),
+    }
+
+
 def _gfx11_rows() -> list[gd.KernelEntry]:
     """gfx11 rows: every slot has a plain row, and the dq op has a bias row whose reduce is a companion object."""
     rows = [_entry(op, f"{op}_a", grid="g", has_bias=0) for op in SLOT_OPS]
@@ -96,7 +107,7 @@ def _gfx11_rows() -> list[gd.KernelEntry]:
                 has_bias=1,
                 reduce_symbol=GFX11_REDUCE,
             ).record,
-            companion=companion,
+            companions={"dbias_reduce": companion, "tailzero": _tailzero(GFX11)},
         )
     )
     return rows
@@ -417,17 +428,16 @@ def test_a_dq_row_with_a_companion_ships_in_its_own_pack_on_the_reduce_dispatch(
     assert "kernel_source" in single and "sources" not in single
     (multi,) = reduce["kernelDescriptors"]
     assert "kernel_source" not in multi
-    assert multi["sources"] == {
-        "dq": {
-            "kind": "hsaco",
-            "file": "sdpa_bwd_dq_bias.hsaco",
-            "symbol": "sym_sdpa_bwd_dq_bias",
-        },
-        "dbias_reduce": {
-            "kind": "hsaco",
-            "file": "aa5ed4007ca3.hsaco",
-            "symbol": GFX11_REDUCE,
-        },
+    assert list(multi["sources"]) == ["dq", "dbias_reduce", "tailzero"]
+    assert multi["sources"]["dq"] == {
+        "kind": "hsaco",
+        "file": "sdpa_bwd_dq_bias.hsaco",
+        "symbol": "sym_sdpa_bwd_dq_bias",
+    }
+    assert multi["sources"]["dbias_reduce"] == {
+        "kind": "hsaco",
+        "file": "aa5ed4007ca3.hsaco",
+        "symbol": GFX11_REDUCE,
     }
     assert (
         multi["metadata"]["reduce_symbol"] == multi["sources"]["dbias_reduce"]["symbol"]
@@ -457,3 +467,81 @@ def test_every_arch_run_of_the_dq_op_authors_the_shared_reduce_dispatch() -> Non
     gfx11 = gd.build_documents(_gfx11_rows(), GFX11)[Path("sdpa_bwd_dq")]
     name = "flydsl_sdpa_bwd_dq_reduce.udd.json"
     assert gfx950[name] == gfx11[name]
+
+
+def _with_companions(row: gd.KernelEntry, companions: dict) -> gd.KernelEntry:
+    return row._replace(companions=companions)
+
+
+def test_a_dq_row_with_only_a_tailzero_companion_is_dq_then_tailzero_on_the_plain_dispatch() -> (
+    None
+):
+    """Every gfx950 dQ row and every gfx11 dQ row without a standalone reduce: ``{dq, tailzero}`` on the plain dQ dispatch."""
+    rows = _rows()
+    rows[5] = _with_companions(rows[5], {"tailzero": _tailzero(ARCH)})
+    folders = _split(rows)
+    pack = folders[Path("sdpa_bwd_dq") / ARCH]
+    assert sorted(pack) == ["flydsl_sdpa_bwd_dq.kdp.json"]
+    plain = pack["flydsl_sdpa_bwd_dq.kdp.json"]
+    assert plain["dispatch"] == folders[Path("sdpa_bwd_dq")]["flydsl_sdpa_bwd_dq.udd.json"]["id"]
+    (tailed,) = [k for k in plain["kernelDescriptors"] if "sources" in k]
+    assert list(tailed["sources"]) == ["dq", "tailzero"]
+    assert tailed["sources"]["tailzero"]["file"] == "tz.hsaco"
+    # The row's reduce symbol stays a symbol of its own object.
+    assert tailed["metadata"]["reduce_symbol"] == REDUCE
+
+
+def test_a_merged_row_launches_merged_then_tailzero_across_folders() -> None:
+    row = _entry("sdpa_bwd_merged", "sdpa_bwd_merged_a", gqa_pack=0, block_q=-1)
+    crossing = _tailzero(ARCH, file="../../sdpa_bwd_dq/gfx950/tz.hsaco")
+    folders = gd.build_documents(
+        [_with_companions(row, {"tailzero": crossing})], ARCH
+    )
+    (kernel,) = folders[Path("sdpa_bwd_merged") / ARCH][
+        "flydsl_sdpa_bwd_merged.kdp.json"
+    ]["kernelDescriptors"]
+    assert list(kernel["sources"]) == ["merged", "tailzero"]
+    assert kernel["sources"]["tailzero"]["file"] == "../../sdpa_bwd_dq/gfx950/tz.hsaco"
+    assert "kernel_source" not in kernel
+
+
+@pytest.mark.parametrize("block_q", [None, 0, -1, 65, 128])
+@pytest.mark.parametrize("op", ["sdpa_bwd_dkdv", "sdpa_bwd_merged"])
+def test_a_packed_row_without_a_valid_block_q_is_refused(op: str, block_q) -> None:
+    knobs = {} if block_q is None else {"block_q": block_q}
+    rows = [_entry(op, f"{op}_packed", gqa_pack=1, **knobs)]
+    with pytest.raises(gd.HkpPackError, match="block_q"):
+        gd.build_documents(rows, ARCH)
+
+
+@pytest.mark.parametrize("block_q", [1, 32, 64])
+def test_a_packed_row_with_a_block_q_up_to_the_bound_carries_it(block_q: int) -> None:
+    rows = _rows()
+    rows[2] = _entry(
+        "sdpa_bwd_dkdv", "sdpa_bwd_dkdv_packed", gqa_pack=1, block_q=block_q
+    )
+    rows[3] = _entry(
+        "sdpa_bwd_dkdv", "sdpa_bwd_dkdv_plain", gqa_pack=0, block_q=-1, dtype="f16"
+    )
+    folders = _split(rows)
+    kmd = folders[Path("sdpa_bwd_dkdv")]["flydsl_sdpa_bwd_dkdv.kmd.json"]
+    assert {"name": "block_q", "type": "int"} in kmd["fields"]
+    packed = next(
+        k
+        for k in _kdp(folders, "sdpa_bwd_dkdv")["kernelDescriptors"]
+        if k["metadata"].get("gqa_pack") == 1
+    )
+    assert packed["metadata"]["block_q"] == block_q
+
+
+def test_an_unpacked_row_keeps_its_own_block_q() -> None:
+    rows = _rows()
+    rows[2] = _entry("sdpa_bwd_dkdv", "sdpa_bwd_dkdv_plain", gqa_pack=0, block_q=-1)
+    rows[3] = _entry(
+        "sdpa_bwd_dkdv", "sdpa_bwd_dkdv_plain2", gqa_pack=0, block_q=64, dtype="f16"
+    )
+    _split(rows)
+
+
+def test_the_bound_is_the_engines_header_definition() -> None:
+    assert gd.pack_max_block_q() == 64

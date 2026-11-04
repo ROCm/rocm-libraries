@@ -197,3 +197,50 @@ def test_a_two_kernel_object_needs_a_named_kernel() -> None:
         analyze._kernel({"amdhsa.kernels": [{".name": MERGED}]}, None)[".name"]
         == MERGED
     )
+
+
+ALT_CODE = bytes(range(250)) * 8
+THIRD_CODE = bytes(range(249)) * 8
+
+
+def _fn(code: bytes) -> str:
+    return hashlib.sha256(code).hexdigest()
+
+
+def _variant_verdict(code: bytes, variants: tuple[str, ...], row=ROW) -> dict:
+    blob = _elf({MERGED: code, REDUCE: REDUCE_CODE})
+    kernels = _facts(blob, {MERGED: row, REDUCE: REDUCE_ROW})
+    return sdpa_bwd_gate.pin_gate(
+        kernels, MERGED, REDUCE, MERGED_PIN, REDUCE_PIN, variants
+    )
+
+
+@pytest.mark.parametrize("code", [MERGED_CODE, ALT_CODE], ids=["pin", "variant"])
+def test_a_listed_row_passes_on_the_pin_or_any_recorded_function_variant(
+    code: bytes,
+) -> None:
+    verdict = _variant_verdict(code, (_fn(THIRD_CODE), _fn(ALT_CODE)))
+    assert verdict["verdict"] == "ok" and verdict["merged_function_equal"]
+    assert verdict["merged_function_variant"] == (code == ALT_CODE)
+
+
+def test_a_listed_row_fails_on_an_unrecorded_function_sha() -> None:
+    verdict = _variant_verdict(THIRD_CODE, (_fn(ALT_CODE),))
+    assert verdict["verdict"] == "red"
+    assert verdict["problems"] == [
+        "merged function bytes differ from the pin 33d3a5c694cc and from its recorded variants"
+    ]
+
+
+def test_an_unlisted_row_fails_on_other_function_bytes() -> None:
+    assert _variant_verdict(ALT_CODE, ())["verdict"] == "red"
+
+
+def test_a_recorded_variant_does_not_excuse_a_changed_resource_row() -> None:
+    verdict = _variant_verdict(
+        ALT_CODE, (_fn(ALT_CODE),), row={**ROW, "sgpr_spill": 152}
+    )
+    assert verdict["verdict"] == "red"
+    assert verdict["problems"] == [
+        "merged resource row differs from the pin 33d3a5c694cc: sgpr_spill 152 != 151"
+    ]

@@ -2,8 +2,8 @@
 """FlyDSL dSink reduction for the split backward (gfx950): the per-head sum of the prep twin's sink term.
 
 The prep twin (`fmha_bwd_prep_gfx950`, `sink=1`) writes `t[b, h, i] = -exp(sink_h - LSE_i) * Delta_i` to an fp32 workspace `SinkTerm`
-([B, Hq, Sq], addressed like LSE and Delta through `fmha.lse_row_addressing` / `lse_token_pitch`: dense, CUMULATIVE and
-INDIVIDUAL+ARRAY varlen, HT / TH; zero-filled by the caller, rows past a sequence never read). dSink is the sum over every batch and row:
+([B, Hq, Sq_max], compact `(z, head, row)` like the LSE' and Delta workspaces, `fmha.stats_ws_base`; the sequence lengths come
+from the same decode as the prep kernel; zero-filled by the caller, rows past a sequence never read). dSink is the sum over every batch and row:
 
     dSink[h] = round_to_io_dtype( sum_b sum_i t[b, h, i] )                       fp32 accumulation, one rounding (RNE)
 
@@ -87,24 +87,14 @@ def build_fmha_bwd_dsink_reduce_gfx950_module_primary(dtype_str):
         tid = fx.Int32(fx.thread_idx.x)
         head = fx.Index(fx.block_idx.x)
         nseq = fx.Index((num_seqlens != fx.Int32(0)).select(num_seqlens, batch_size))
-        tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
-        )
         st_p = fx.recast_iter(_ptr_ty(fx.Float32, 4), SinkTerm)
 
         init_args = [fx.Float32(0.0)]
         for z, z_args in range(fx.Index(0), nseq, fx.Index(1), init=init_args):
-            seqlen, row_off, batch = fmha.decode_addressing(
+            seqlen, _, _ = fmha.decode_addressing(
                 varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, fx.Int32(z)
             )
-            base, pitch = fmha.lse_row_addressing(
-                varlen_bits,
-                batch,
-                head,
-                fx.Index(num_head_q),
-                fx.Index(tokens),
-                row_off,
-            )
+            base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
             sl = fx.Index(seqlen)
             nchunk = (sl + fx.Index(UNROLL - 1)) // fx.Index(UNROLL)
             for c, c_args in range(fx.Index(0), nchunk, fx.Index(1), init=z_args):
@@ -114,7 +104,7 @@ def build_fmha_bwd_dsink_reduce_gfx950_module_primary(dtype_str):
                     r = r0 + fx.Index(u)
                     ok = r < sl
                     rc = ok.select(r, fx.Index(0))
-                    v = fx.ptr_load(st_p + fx.Int64(base + rc * pitch), fx.Float32)
+                    v = fx.ptr_load(st_p + fx.Int64(base + rc), fx.Float32)
                     acc = acc + ok.select(v, fx.Float32(0.0))
                 c_results = yield [acc]
             z_results = yield c_results

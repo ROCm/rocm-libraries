@@ -6,6 +6,7 @@
 // reads a staged shard nothing produced.
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -41,14 +42,16 @@
  * (HIPDNN_TEST_EXPECTED_ARCH) and which selects the inventory below; the descriptors never
  * choose their own expectation.
  *
- * - gfx950: 86 prep (34 bf16, 34 f16, 18 fp32), 1319 dkdv (535, 472, 312) and 1010 dq (350,
- *   348, 312) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins. The 320
+ * - gfx950: 86 prep (34 bf16, 34 f16, 18 fp32), 1289 dkdv (535, 472, 282) and 923 dq (350,
+ *   348, 225) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins. The 293
  *   dq rows that serve a dB-storing bias name the dBias reduce kernel by symbol, a second
- *   entry point of the same code object.
+ *   entry point of the same code object. Every dq row is a multi-launch pack: its `sources`
+ *   hold the dQ kernel and the tail-zero kernel, one of three tail-zero objects shared by dtype.
  * - gfx11-generic (every gfx11 member's shard): 33 prep, 198 dkdv and 198 dq rows (11 rungs
  *   16..256 times three dtypes, bk form only, no sink). The 66 dq rows that serve a dB-storing
- *   bias are a multi-launch pack: its `sources` hold the dQ kernel and the dBias reduce kernel
- *   as two code objects, the reduce one of three companions shared by dtype.
+ *   bias carry `sources` of the dQ kernel, the dBias reduce kernel and the tail-zero kernel as
+ *   code objects, the reduce one of three companions shared by dtype; the other dq rows carry
+ *   the dQ and tail-zero kernels, the latter one of three companions shared by dtype.
  *
  * Two cases hold the gfx11 shard to the verdict table (flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv):
  * every row's graph is run through graph_match and every slot's kernel_match over the installed
@@ -77,6 +80,7 @@ constexpr const char* DQ_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch
 constexpr const char* DQ_REDUCE_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch";
 constexpr const char* DQ_LAUNCH = "dq";
 constexpr const char* REDUCE_LAUNCH = "dbias_reduce";
+constexpr const char* TAILZERO_LAUNCH = "tailzero";
 
 /// The rows one slot ships, per dtype, as the generators emit them.
 struct SlotCount
@@ -117,23 +121,30 @@ struct SplitContent
     /// The content directory name of the verdict table's arch family (the manifests the table's
     /// hashes name); nullptr where the table does not apply.
     const char* verdictContent;
+    /// Tail-zero companion entries the dq rows' `sources` name (one per dtype; entries of two
+    /// dtypes may resolve to the same object, whose bytes do not depend on the dtype), and the
+    /// kernel symbol they carry.
+    size_t tailzeroEntries;
+    const char* tailzeroSymbol;
 };
 
 const SplitContent GFX950_CONTENT{
-    {{{"prep", 86, 34, 34, 18}, {"dkdv", 1319, 535, 472, 312}, {"dq", 1010, 350, 348, 312}}},
+    {{{"prep", 86, 34, 34, 18}, {"dkdv", 1289, 535, 472, 282}, {"dq", 923, 350, 348, 225}}},
     {32, 64, 96, 128, 160, 192, 224, 256, 384, 512},
     {"rt", "bk"},
     32,
     {-1, 1},
     {-1, 1},
-    320,
+    293,
     false,
     "fmha_bwd_dbias_reduce_gfx950_kernel_1",
     "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
     0,
     "kheads_by_kvblocks_by_seqs",
     false,
-    nullptr};
+    nullptr,
+    3,
+    "fmha_bwd_tailzero_gfx950_kernel_0"};
 
 const SplitContent GFX11_CONTENT{
     {{{"prep", 33, 11, 11, 11}, {"dkdv", 198, 66, 66, 66}, {"dq", 198, 66, 66, 66}}},
@@ -149,7 +160,9 @@ const SplitContent GFX11_CONTENT{
     3,
     "kvblocks_by_kheads_by_seqs",
     true,
-    "gfx11-generic"};
+    "gfx11-generic",
+    3,
+    "fmha_bwd_tailzero_gfx11_kernel_0"};
 
 /// The inventory for the architecture the census entry names; the architecture is never read
 /// from the descriptors being counted. nullptr for an architecture the engine has no
@@ -291,6 +304,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     size_t reduceRows = 0;
     size_t sourcesRows = 0;
     std::set<std::string> companions;
+    std::map<std::string, std::set<std::string>> tailzeroByDtype;
     for(const auto& expected : content().slots)
     {
         SCOPED_TRACE(expected.slot);
@@ -373,38 +387,49 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     EXPECT_EQ(reduce, expectedSymbol) << kernel.name;
                     reduceRows += reduce.empty() ? 0 : 1;
 
+                    // Every dq row is a multi-launch pack: the dQ kernel, the tail-zero
+                    // kernel and, on a pack that carries the reduce kernel as a launch, the
+                    // dBias reduce kernel of a dB-storing bias row.
+                    EXPECT_TRUE(multiLaunch) << kernel.name;
+                    const bool reduceLaunch = content().reduceInSources && hasBias;
                     if(content().reduceInSources)
                     {
-                        // The reduce pack: bias rows only, each storing dBias and staging none.
-                        EXPECT_EQ(multiLaunch, hasBias) << kernel.name;
+                        // The reduce pack: bias rows storing dBias and staging none.
                         EXPECT_EQ(storeDb, hasBias ? 1 : -1) << kernel.name;
                         EXPECT_EQ(stage, hasBias ? "none" : "auto") << kernel.name;
-                        if(multiLaunch)
-                        {
-                            ++sourcesRows;
-                            EXPECT_EQ(kernel.sources.size(), 2U) << kernel.name;
-                            EXPECT_EQ(kernel.source.kind, KernelSourceKind::EMBEDDED_SOURCE)
-                                << kernel.name << ": `source` is left default beside `sources`";
-                            for(const char* launch : {DQ_LAUNCH, REDUCE_LAUNCH})
-                            {
-                                const auto entry = kernel.sources.find(launch);
-                                ASSERT_NE(entry, kernel.sources.end())
-                                    << kernel.name << " lacks the launch " << launch;
-                                EXPECT_EQ(entry->second.kind, KernelSourceKind::KPACK)
-                                    << kernel.name << " " << launch;
-                                EXPECT_FALSE(entry->second.sha256.empty())
-                                    << kernel.name << " " << launch;
-                            }
-                            const auto& reduceEntry = kernel.sources.at(REDUCE_LAUNCH);
-                            EXPECT_EQ(reduceEntry.symbol, reduce) << kernel.name;
-                            companions.insert(reduceEntry.sha256);
-                        }
                     }
                     else
                     {
                         EXPECT_TRUE(stage == "auto" || stage == "direct") << kernel.name;
                         EXPECT_TRUE(storeDb == -1 || storeDb == 0) << kernel.name;
                     }
+                    std::vector<const char*> launches{DQ_LAUNCH, TAILZERO_LAUNCH};
+                    if(reduceLaunch)
+                    {
+                        launches.push_back(REDUCE_LAUNCH);
+                    }
+                    ++sourcesRows;
+                    EXPECT_EQ(kernel.sources.size(), launches.size()) << kernel.name;
+                    EXPECT_EQ(kernel.source.kind, KernelSourceKind::EMBEDDED_SOURCE)
+                        << kernel.name << ": `source` is left default beside `sources`";
+                    for(const char* launch : launches)
+                    {
+                        const auto entry = kernel.sources.find(launch);
+                        ASSERT_NE(entry, kernel.sources.end())
+                            << kernel.name << " lacks the launch " << launch;
+                        EXPECT_EQ(entry->second.kind, KernelSourceKind::KPACK)
+                            << kernel.name << " " << launch;
+                        EXPECT_FALSE(entry->second.sha256.empty()) << kernel.name << " " << launch;
+                    }
+                    if(reduceLaunch)
+                    {
+                        const auto& reduceEntry = kernel.sources.at(REDUCE_LAUNCH);
+                        EXPECT_EQ(reduceEntry.symbol, reduce) << kernel.name;
+                        companions.insert(reduceEntry.sha256);
+                    }
+                    const auto& zeroEntry = kernel.sources.at(TAILZERO_LAUNCH);
+                    EXPECT_EQ(zeroEntry.symbol, content().tailzeroSymbol) << kernel.name;
+                    tailzeroByDtype[dtype].insert(zeroEntry.sha256);
                 }
                 if(kernel.sources.empty())
                 {
@@ -423,8 +448,14 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     EXPECT_EQ(names.size(), total) << "a name is shipped twice";
     EXPECT_EQ(ids.size(), total) << "a kernel id is shipped twice or in two slots";
     EXPECT_EQ(reduceRows, content().reduceRows);
-    EXPECT_EQ(sourcesRows, content().reduceInSources ? content().reduceRows : size_t{0});
+    EXPECT_EQ(sourcesRows, content().slots[2].rows);
     EXPECT_EQ(companions.size(), content().companions);
+    EXPECT_EQ(tailzeroByDtype.size(), content().tailzeroEntries);
+    for(const auto& [dtype, objects] : tailzeroByDtype)
+    {
+        EXPECT_EQ(objects.size(), 1U) << dtype << ": one tail-zero object per dtype entry";
+        EXPECT_EQ(objects.count(std::string()), 0U) << dtype << ": the entry names no object";
+    }
 }
 
 TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
@@ -451,25 +482,52 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
         return slots;
     };
 
-    // `_PARAMS["prep"]`: seven pointers (O DO LSE LSE_ws Delta seqinfo_q0 seqinfo_q1), five i32,
-    // six i64 strides: 18 arguments. The sink twin adds the `sink` and `sinkterm` pointers.
-    const auto prep = expand({{"global_buffer", 8, 7}, {"by_value", 4, 5}, {"by_value", 8, 6}});
-    const auto prepSink = expand(
-        {{"global_buffer", 8, 7}, {"by_value", 4, 5}, {"by_value", 8, 6}, {"global_buffer", 8, 2}});
-    // `_PARAMS["dkdv"]` and `_PARAMS["dq"]`: nine pointers and four seqinfo pointers, six i32
-    // (varlen_bits .. window_right), the two philox pointers, the i64 offset, i32 threshold, f32
-    // scale, four i32 (heads, head dims), f32 sm_scale, twenty-one i64 strides and i32
-    // rt_flags: 51 arguments each.
-    const auto attention = expand({{"global_buffer", 8, 13},
-                                   {"by_value", 4, 6},
-                                   {"global_buffer", 8, 2},
-                                   {"by_value", 8, 1},
-                                   {"by_value", 4, 1},
-                                   {"by_value", 4, 1},
-                                   {"by_value", 4, 4},
-                                   {"by_value", 4, 1},
-                                   {"by_value", 8, 21},
-                                   {"by_value", 4, 1}});
+    // The offset arguments follow the seqinfo pointers: an i64 multiplier for Q and K, then an
+    // (offset pointer, i64 multiplier) pair for each other tensor the kernel addresses.
+    const auto pairs = [](size_t count) {
+        std::vector<Run> runs;
+        for(size_t index = 0; index < count; ++index)
+        {
+            runs.push_back({"global_buffer", 8, 1});
+            runs.push_back({"by_value", 8, 1});
+        }
+        return runs;
+    };
+    const auto join = [](std::vector<Run> head, const std::vector<Run>& tail) {
+        head.insert(head.end(), tail.begin(), tail.end());
+        return head;
+    };
+    // `_PARAMS["prep"]`: seven pointers (O DO LSE LSE_ws Delta seqinfo_q0 seqinfo_q1), the
+    // offset pairs of O and dO, the stats' offset pointer, multiplier and three i64 strides,
+    // five i32, six i64 strides: 27 arguments. The sink twin adds the `sink` and `sinkterm`
+    // pointers.
+    const auto prepRuns = join(
+        join({{"global_buffer", 8, 7}}, pairs(2)),
+        {{"global_buffer", 8, 1}, {"by_value", 8, 4}, {"by_value", 4, 5}, {"by_value", 8, 6}});
+    const auto prep = expand(prepRuns);
+    const auto prepSink = expand(join(prepRuns, {{"global_buffer", 8, 2}}));
+    // `_PARAMS["dkdv"]` and `_PARAMS["dq"]`: nine pointers and four seqinfo pointers, the Q and
+    // K multipliers, the offset pairs, six i32 (varlen_bits .. window_right), the two philox
+    // pointers, the i64 offset, i32 threshold, f32 scale, four i32 (heads, head dims), f32
+    // sm_scale, twenty-one i64 strides and i32 rt_flags. dkdv adds the pairs of V, dO, dK and
+    // dV (61 arguments), dq those of V, dO and dQ (59).
+    const auto attentionTail = std::vector<Run>{{"by_value", 4, 6},
+                                                {"global_buffer", 8, 2},
+                                                {"by_value", 8, 1},
+                                                {"by_value", 4, 1},
+                                                {"by_value", 4, 1},
+                                                {"by_value", 4, 4},
+                                                {"by_value", 4, 1},
+                                                {"by_value", 8, 21},
+                                                {"by_value", 4, 1}};
+    const auto dkdv = expand(
+        join(join({{"global_buffer", 8, 13}, {"by_value", 8, 2}}, pairs(4)), attentionTail));
+    const auto dq = expand(
+        join(join({{"global_buffer", 8, 13}, {"by_value", 8, 2}}, pairs(3)), attentionTail));
+    // `_PARAMS["tailzero"]`: the dQ, dK and dV pointers, the two length pointers, seven i32
+    // extents, nine i64 strides and the i32 mask.
+    const auto tailzero = expand(
+        {{"global_buffer", 8, 5}, {"by_value", 4, 7}, {"by_value", 8, 9}, {"by_value", 4, 1}});
 
     const auto offsetsOf = [](const Signature& slots) {
         std::vector<uint32_t> offsets;
@@ -514,7 +572,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
                 const auto* sink = tryGetMetadataField<int64_t>(kernel.metadata, "sink");
                 const bool twin = slotName == "prep" && sink != nullptr && *sink == 1;
                 sinkTwins += twin ? 1 : 0;
-                const Signature* expectedSlots = &attention;
+                const Signature* expectedSlots = slotName == "dkdv" ? &dkdv : &dq;
                 if(slotName == "prep")
                 {
                     expectedSlots = twin ? &prepSink : &prep;
@@ -524,8 +582,15 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
                     expectSignature(kernel.name, kernel.source, *expectedSlots);
                     continue;
                 }
-                // A multi-launch kernel: the dQ launch has the dq slot's argument list.
+                // A multi-launch kernel: the dQ launch has the dq slot's argument list, the
+                // tail-zero launch the tail-zero kernel's.
                 expectSignature(kernel.name, kernel.sources.at(DQ_LAUNCH), *expectedSlots);
+                expectSignature(
+                    kernel.name + " tailzero", kernel.sources.at(TAILZERO_LAUNCH), tailzero);
+                if(kernel.sources.count(REDUCE_LAUNCH) == 0)
+                {
+                    continue;
+                }
                 std::string shape;
                 for(const auto& argument : kernel.sources.at(REDUCE_LAUNCH).signature)
                 {
@@ -702,6 +767,18 @@ std::string namesOf(const std::vector<const KernelDefinition*>& kernels, size_t 
     return kernels.size() > limit ? text + ", ..." : text;
 }
 
+/// The kernel the engine selects among @p matched: the highest priority, then the lowest
+/// descriptor id (the kernel ranking when a pack ships no heuristic), or nullptr for none.
+const KernelDefinition* selectedOf(const std::vector<const KernelDefinition*>& matched)
+{
+    const auto best
+        = std::min_element(matched.begin(), matched.end(), [](const auto* lhs, const auto* rhs) {
+              return lhs->priority != rhs->priority ? lhs->priority > rhs->priority
+                                                    : lhs->kernelId < rhs->kernelId;
+          });
+    return best == matched.end() ? nullptr : *best;
+}
+
 /// Why the engine's verdict on @p row disagrees with the table, or nullopt when it agrees.
 std::optional<std::string>
     verdictDisagreement(const VerdictRow& row, const RowMatch& match, const ManifestHashes& hashes)
@@ -722,20 +799,20 @@ std::optional<std::string>
             {
                 return slotLabel + " hash " + *expected[slot] + " is not in the manifest";
             }
-            const auto serving
-                = std::find_if(match.matched[slot].begin(),
-                               match.matched[slot].end(),
-                               [&](const auto* kernel) { return kernel->name == name->second; });
-            if(serving == match.matched[slot].end())
+            // The expected row must be the one the engine selects, not merely one that matches.
+            const auto* selected = selectedOf(match.matched[slot]);
+            if(selected == nullptr || selected->name != name->second)
             {
-                return slotLabel + " " + *expected[slot] + " (" + name->second + ") is not served; "
-                       + std::to_string(match.matched[slot].size())
+                return slotLabel + " " + *expected[slot] + " (" + name->second
+                       + ") is not the selected row; "
+                       + (selected == nullptr ? std::string("none") : selected->name)
+                       + " is selected of " + std::to_string(match.matched[slot].size())
                        + " matched: " + namesOf(match.matched[slot]);
             }
             if(slotLabel == "dq" && !row.reduce.empty())
             {
-                const auto companion = (*serving)->sources.find(REDUCE_LAUNCH);
-                if(companion == (*serving)->sources.end())
+                const auto companion = selected->sources.find(REDUCE_LAUNCH);
+                if(companion == selected->sources.end())
                 {
                     return "dq " + name->second + " has no " + REDUCE_LAUNCH
                            + " launch for the reduce companion " + row.reduce;

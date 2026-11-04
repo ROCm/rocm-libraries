@@ -72,7 +72,6 @@ from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import _fmul, _fsub
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (  # ParityKernelContext documents the base this rides on
     ParityKernelContext,  # noqa: F401
     _ds_read_tr_v4f16_imm,
-    _slab_span_elems,
     exp2_wait_state,
     mfma_operand_wait_state,
 )
@@ -731,21 +730,9 @@ class M16DqStore:
         self.ctx = ctx
         self.traits = ctx.traits
         self.oob = ctx.dq_oob_off
-        # `hdim_qk`, not `hdim_vo`: dQ is Q-shaped, as `store` says again.
-        span = _slab_span_elems(ctx.seqlen_q_v, ctx.stride_dq_seq, ctx.hdim_qk)
-        self.rsrc = buffer_ops.create_buffer_resource(
-            ctx.DQ,
-            max_size=False,
-            num_records_bytes=as_mlir_value(span * fx.Index(self.traits.BF16_BYTES)),
-            base_byte_offset=as_mlir_value(
-                ctx._slab_byte_base(
-                    ctx.stride_dq_batch,
-                    ctx.stride_dq_head,
-                    ctx.stride_dq_seq,
-                    ctx.q_row_off,
-                    ctx.q_head_idx,
-                )
-            ),
+        # The context's dQ slab: `hdim_qk` wide (dQ is Q-shaped, as `store` says again), its anchor and extent come from the context.
+        self.rsrc = ctx.anchored_rsrc(
+            ctx.dq_anchor, fx.Index(0), ctx.dq_span * fx.Index(self.traits.BF16_BYTES)
         )
 
     def store(self, v_dq, q_row, lane):

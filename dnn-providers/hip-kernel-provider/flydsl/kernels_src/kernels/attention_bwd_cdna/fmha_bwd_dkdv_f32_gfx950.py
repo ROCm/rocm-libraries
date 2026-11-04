@@ -38,8 +38,8 @@ and both accumulations use unchanged.
     dK *= sm_scale                                  once, after the last tile: dS is the gradient of the *scaled* logits, so the scale belongs to dK only
 
 Rows of the last tile past `seqlen_q` are staged as copies of the last valid row (`stage_row_off` clamps); P and dS of those rows are forced to 0, which adds exactly
-+0.0 to every accumulator. KV rows of the last block past `seqlen_k` read the last valid row and are not stored. LSE' and Delta are read through the shared
-`lse_row_addressing` decode, the one the fp32 prep kernel writes with.
++0.0 to every accumulator. KV rows of the last block past `seqlen_k` read the last valid row and are not stored. LSE' and Delta are read from the compact
+`(z, head, row)` workspace (`fmha.stats_ws_base`) the fp32 prep kernel writes; each tensor starts at its own `off_t[z] * mul_t` or `z * stride_batch` (`fmha.tensor_origin`).
 
 --- Scope ------------------------------------------------------------------------
 
@@ -63,6 +63,9 @@ documented wave order and `+inf` LSE' must survive to `exp2`.
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     exp2_wait_state,
+)  # noqa: E402
+from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
+    pin_sgpr as pin_scalar,
 )  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     ColMask,
@@ -222,12 +225,7 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         The plain exact objects (t64, t512) are built without it."""
         if not PIN:
             return value
-        ir_val = as_mlir_value(value)
-        return fx.Int64(
-            dualwave.llvm.inline_asm(
-                ir_val.type, [ir_val], "", "=s,0", has_side_effects=True
-            )
-        )
+        return fx.Int64(pin_scalar(value))
 
     def exchange(ops, L, S, Pd):
         return (S, Pd) if PW else layer.exchange(ops, L, S, Pd)
@@ -305,6 +303,16 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -352,6 +360,10 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         L = Lane.of(lane, wave)
         kv_head = fx.Index(fx.block_idx.x)
         kv0 = I32(fx.block_idx.y) * I32(BLOCK_KV)
+        if PIN:
+            # The KV block start outlives the whole kernel. Left as the work-group id register it is spilled as a physical register,
+            # whose lane the R-MIR scan cannot attribute to a definition; an opaque copy is an ordinary virtual register.
+            kv0 = I32(pin_scalar(kv0))
         z = I32(fx.block_idx.z)
 
         lds = fx.SharedAllocator().allocate(SharedStorage).peek()
@@ -370,14 +382,11 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         ops = DeviceOps(lds.buf.ptr, gptrs)
 
         # sequence decode: Q side bits 7:0, K side bits 15:8 (shared helpers; dense = bits 0)
-        q_len, q_row_off, q_batch = fmha.decode_addressing(
+        q_len, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        k_len, k_row_off, k_batch = fmha.decode_addressing(
+        k_len, _, _ = fmha.decode_addressing(
             varlen_bits, 8, max_seqlen_k, seqinfo_k0, seqinfo_k1, z
-        )
-        tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
         )
         q_len = I32(q_len)
         k_len = I32(k_len)
@@ -395,16 +404,18 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         q_last = (q_len > I32(0)).select(q_len - I32(1), I32(0))
         k_last = (k_len > I32(0)).select(k_len - I32(1), I32(0))
 
+        # Every tensor starts at its own origin: `off_t[z] * mul_t` when ragged, `z * stride_batch` when dense (K reuses seqinfo_k1 as its offsets)
         # KV side: slab bases (elements) of K, V, dK, dV for this KV head
-        def kv_base(s_batch, s_head, s_seq):
+        def kv_base(off, mul, s_batch, s_head):
             return (
-                I64(k_batch) * s_batch + I64(kv_head) * s_head + I64(k_row_off) * s_seq
+                I64(fmha.tensor_origin(off, mul, z, s_batch, k_len))
+                + I64(kv_head) * s_head
             )
 
-        k_base = pin_sgpr(kv_base(stride_k_batch, stride_k_head, stride_k_seq))
-        v_base = pin_sgpr(kv_base(stride_v_batch, stride_v_head, stride_v_seq))
-        dk_base = pin_sgpr(kv_base(stride_dk_batch, stride_dk_head, stride_dk_seq))
-        dv_base = pin_sgpr(kv_base(stride_dv_batch, stride_dv_head, stride_dv_seq))
+        k_base = pin_sgpr(kv_base(seqinfo_k1, mul_K, stride_k_batch, stride_k_head))
+        v_base = pin_sgpr(kv_base(off_V, mul_V, stride_v_batch, stride_v_head))
+        dk_base = pin_sgpr(kv_base(off_DK, mul_DK, stride_dk_batch, stride_dk_head))
+        dv_base = pin_sgpr(kv_base(off_DV, mul_DV, stride_dv_batch, stride_dv_head))
 
         # resident K, V of the lane's KV row (clamped to the last row): this wave's 16 rows (per-wave) or the workgroup's 16 rows (D-split)
         kv_row0 = kv0 + L.wave * I32(16) if PW else kv0
@@ -442,47 +453,24 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
             fmha.philox_offset_base(philox_offset1, philox_offset2) if DROPOUT else None
         )
         slot = kv_col % I32(rng.randoms_per_offset) if DROPOUT else None
-        # the loop-invariant part of the query-side bases (batch and row origin), computed here and not sunk into the group loop
-        q_pre = (
-            pin_sgpr(I64(q_batch) * stride_q_batch + I64(q_row_off) * stride_q_seq)
-            if PIN
-            else None
-        )
-        do_pre = (
-            pin_sgpr(I64(q_batch) * stride_do_batch + I64(q_row_off) * stride_do_seq)
-            if PIN
-            else None
-        )
-        b_pre = (
-            pin_sgpr(I64(q_batch) * stride_b_batch + I64(q_row_off) * stride_b_seq_q)
-            if BIAS
-            else None
-        )
-        # LSE / Delta addressing of the group's first query head and its per-head step: the decode (varlen bits, batch, token pitch) is computed once here, not per head in the loop
+        # the loop-invariant part of the query-side bases (each tensor's own origin), computed here and not sunk into the group loop
+        q_org = I64(fmha.tensor_origin(seqinfo_q1, mul_Q, z, stride_q_batch, q_len))
+        do_org = I64(fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, q_len))
+        q_pre = pin_sgpr(q_org) if PIN else None
+        do_pre = pin_sgpr(do_org) if PIN else None
+        b_pre = pin_sgpr(I64(z) * stride_b_batch) if BIAS else None
+        # LSE' / Delta workspace addressing of the group's first query head and its per-head step, computed once here, not per head in the loop
         group0 = kv_head * (fx.Index(num_head_q) // fx.Index(num_head_k))
-        lse_b0, lse_pitch0 = (
-            fmha.lse_row_addressing(
-                varlen_bits,
-                q_batch,
-                group0,
-                fx.Index(num_head_q),
-                fx.Index(tokens),
-                q_row_off,
-            )
-            if PIN
-            else (None, None)
-        )
-        lse_base0 = fx.Index(pin_sgpr(fx.Int64(lse_b0))) if PIN else None
-        lse_pitch0 = fx.Index(pin_sgpr(fx.Int64(lse_pitch0))) if PIN else None
-        lse_step = (
+        lse_base0 = (
             fx.Index(
                 pin_sgpr(
-                    fx.Int64(fmha.lse_row_step_per_head(varlen_bits, fx.Index(tokens)))
+                    fx.Int64(fmha.stats_ws_base(z, group0, num_head_q, max_seqlen_q))
                 )
             )
             if PIN
             else None
         )
+        lse_step = fx.Index(pin_sgpr(fx.Int64(max_seqlen_q))) if PIN else None
         group = fx.Index(num_head_q) // fx.Index(num_head_k)
 
         init_args = [ops.zero(4) for _ in range_constexpr(2 * DSU)]
@@ -493,11 +481,9 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
             q_base = (
                 (q_pre + I64(q_head) * stride_q_head)
                 if PIN
-                else I64(q_batch) * stride_q_batch
-                + I64(q_head) * stride_q_head
-                + I64(q_row_off) * stride_q_seq
+                else q_org + I64(q_head) * stride_q_head
             )
-            # the bias row (q_batch, q_head, q row 0 of the sequence) and the Philox plane (sequence, q head) move with the query head
+            # the bias row (z, q_head, q row 0 of the sequence) and the Philox plane (sequence, q head) move with the query head
             b_base = b_pre + I64(q_head) * stride_b_head if BIAS else None
             plane_base, row_stride = (
                 rng.grid_plane(
@@ -512,21 +498,12 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
             do_base = (
                 (do_pre + I64(q_head) * stride_do_head)
                 if PIN
-                else I64(q_batch) * stride_do_batch
-                + I64(q_head) * stride_do_head
-                + I64(q_row_off) * stride_do_seq
+                else do_org + I64(q_head) * stride_do_head
             )
-            lse_base, lse_pitch = (
-                (lse_base0 + g * lse_step, lse_pitch0)
+            lse_base = (
+                (lse_base0 + g * lse_step)
                 if PIN
-                else fmha.lse_row_addressing(
-                    varlen_bits,
-                    q_batch,
-                    q_head,
-                    fx.Index(num_head_q),
-                    fx.Index(tokens),
-                    q_row_off,
-                )
+                else fmha.stats_ws_base(z, q_head, num_head_q, max_seqlen_q)
             )
             loop_results = group_args
             for it, st in range(fx.Index(0), ntile, fx.Index(1), init=group_args):
@@ -558,7 +535,7 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 ]
                 offs = [
                     [
-                        lse_base + fx.Index(fx.min(rows[s][i], q_last)) * lse_pitch
+                        lse_base + fx.Index(fx.min(rows[s][i], q_last))
                         for i in range_constexpr(4)
                     ]
                     for s in range_constexpr(RB)
@@ -714,6 +691,16 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -774,6 +761,16 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_DO,
+            mul_DO,
+            off_DK,
+            mul_DK,
+            off_DV,
+            mul_DV,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,

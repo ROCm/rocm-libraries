@@ -27,6 +27,12 @@ ADVISORY_LAYOUT_ERROR = (
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{case\.([A-Za-z0-9_.]+)\}$")
 TEMPLATE_TENSOR_FIELDS = ("dims", "strides", "data_type")
+# Fields a template tensor may also carry, as a literal or a placeholder: the ragged
+# binding that sizes the tensor's payload (RFC 0014).
+OPTIONAL_TEMPLATE_TENSOR_FIELDS = (
+    "ragged_offset_tensor_uid",
+    "ragged_offset_multiplier",
+)
 
 # Node types whose real hipDNN JSON schema declares output tensor uids as flat
 # scalar fields directly on the node, instead of nesting them under an `outputs`
@@ -1075,8 +1081,10 @@ def parse_template_tensors(
 
         placeholder_fields: set[str] = set()
         literal_spec: dict[str, object] = {}
-        for field_name in TEMPLATE_TENSOR_FIELDS:
+        for field_name in TEMPLATE_TENSOR_FIELDS + OPTIONAL_TEMPLATE_TENSOR_FIELDS:
             field_value = tensor.get(field_name)
+            if field_value is None and field_name in OPTIONAL_TEMPLATE_TENSOR_FIELDS:
+                continue
             placeholder = extract_placeholder(field_value)
             if placeholder is not None:
                 if placeholder != field_name:
@@ -1144,7 +1152,7 @@ def resolve_case_tensor_specs(
 
         required_fields = tensor_placeholder_fields.get(uid, set())
         spec: dict[str, object] = dict(literal_tensor_specs.get(uid, {}))
-        for field_name in TEMPLATE_TENSOR_FIELDS:
+        for field_name in TEMPLATE_TENSOR_FIELDS + OPTIONAL_TEMPLATE_TENSOR_FIELDS:
             if field_name in required_fields:
                 if field_name not in tensor:
                     result.error(
@@ -1237,6 +1245,16 @@ def validate_case_tensor_shapes(
             "strides": strides,
             "data_type": data_type,
         }
+        for field_name in OPTIONAL_TEMPLATE_TENSOR_FIELDS:
+            if spec.get(field_name) is not None:
+                validated_specs[uid][field_name] = spec[field_name]
+        multiplier = spec.get("ragged_offset_multiplier", 1)
+        if not is_integer(multiplier) or multiplier < 1:
+            result.error(
+                sweep_path,
+                f"case '{case_label}' ragged_offset_multiplier must be an integer >= 1",
+                uid,
+            )
 
     return validated_specs
 

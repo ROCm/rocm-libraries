@@ -113,6 +113,12 @@ struct FlydslSdpaBwdMergedLaunchDump
     std::vector<unsigned char> reduceKernarg;
     std::array<unsigned int, 3> reduceGrid{};
     unsigned int reduceBlock = 0;
+    /// Set when the graph needs the padded-row tail-zero launch after the kernel (and the
+    /// reduce): its arguments and launch.
+    bool tailzero = false;
+    std::vector<unsigned char> tailzeroKernarg;
+    std::array<unsigned int, 3> tailzeroGrid{};
+    unsigned int tailzeroBlock = 0;
     size_t workspaceBytes = 0;
     /// Set when the seed and offset are written into the workspace ahead of the launch: either
     /// as the four words in seedWords (seed low, seed high, offset low, offset high), or, with
@@ -162,6 +168,12 @@ struct FlydslSdpaBwdSplitLaunchDump
     std::vector<unsigned char> reduceKernarg;
     std::array<unsigned int, 3> reduceGrid{};
     unsigned int reduceBlock = 0;
+    /// Set on the dq slot when the graph needs the padded-row tail-zero launch after the
+    /// kernel (and the reduce): its arguments and launch.
+    bool tailzero = false;
+    std::vector<unsigned char> tailzeroKernarg;
+    std::array<unsigned int, 3> tailzeroGrid{};
+    unsigned int tailzeroBlock = 0;
     /// The slot handler's workspaceBytes(): the scratch this slot needs, shared region excluded.
     size_t scratchBytes = 0;
     /// Set when the launch writes the seed and offset into the shared region ahead of the

@@ -90,6 +90,37 @@ def _fmax(a, b, fm):
     return arith.MaxNumFOp(as_mlir_value(a), as_mlir_value(b), fastmath=fm).result
 
 
+def pin_sgpr(value):
+    """An opaque scalar copy of `value`, so it is computed where it is written -- the prologue -- and not sunk to its use.
+
+    A value derived from kernargs and used after the tile walk (an output's descriptor, a loop-invariant base) otherwise
+    keeps the `s_load_dwordx16` tuples it derives from live across the whole walk. The backend lane-spills such a tuple,
+    and a spill that splits it can lose a staging copy (ROCm/FlyDSL#1087, `rmRedundantSpills`): the stale lanes then build
+    a descriptor base. A side-effecting inline asm cannot be sunk, so the tuple dies in the prologue.
+
+    `value` is wave-uniform but the backend may hold it in VGPRs (a per-sequence origin read from an offset array is a vector
+    load). The `=s,0` tie does not move a VGPR source into the SGPR result: the result keeps whatever the register held. The
+    explicit `readfirstlane` makes the source scalar first.
+    """
+    ir_val = as_mlir_value(value)
+    ir_val = rocdl.readfirstlane(ir_val.type, ir_val)
+    return dualwave.llvm.inline_asm(
+        ir_val.type, [ir_val], "", "=s,0", has_side_effects=True
+    )
+
+
+class SlabAnchor:
+    """Where a slab's descriptor starts: a byte address `addr` plus a byte offset `off` (zero when the base is folded into `addr`)."""
+
+    def __init__(self, addr, off):
+        self.addr, self.off = addr, off
+
+
+def pin_index(value):
+    """`pin_sgpr` of an `Index` (a 64-bit scalar)."""
+    return fx.Index(fx.Int64(pin_sgpr(fx.Int64(value))))
+
+
 # Elements touched by one D-axis access. Every load and store on that axis is
 # `DMA_BYTES` wide, which is the whole content of the 8xD input contract
 # (`_check_8x_d_contract` states it in the same two numbers); `_slab_span_elems`
@@ -104,6 +135,8 @@ __all__ = [
     "ParityQLoader",
     "ParitySoftmaxHelper",
     "ParityStoreHelper",
+    "pin_index",
+    "pin_sgpr",
     "traits_cache_key",
     "wire_ptr",
     "wire_view",
@@ -228,7 +261,7 @@ def wire_view(ptr):
 
     `flash_attn_utils.py` is imported and never edited, and two of its methods
     reach a tensor operand through `fx.get_iter(...)`: `init_descriptors`, for
-    the four dense Q/K/V/O views, and `_store_lse_row`, for LSE's base address.
+    the four dense Q/K/V/O views, and the row-stat resources, for the base address of LSE.
     `fx.get_iter` rejects a pointer outright -- *"GetIterOp: expected
     TensorLikeType"* -- so a pointer operand cannot be handed to either
     directly. This wraps it back into something they accept.
@@ -238,7 +271,7 @@ def wire_view(ptr):
     those call sites gets the address it wanted and none of them is affected by
     what `L` says -- all four of `init_descriptors`' views are rebased and
     re-bounded by `ParityKernelContext.init_descriptors` immediately afterwards,
-    and `_store_lse_row` uses only `ptrtoint`. The value is verified to survive
+    and the row-stat resources use only `ptrtoint`. The value is verified to survive
     the round trip bit-exactly, and the ISA is unchanged by the wrapping.
 
     **What is therefore not safe is reading a size back off one of these.**
@@ -1049,6 +1082,8 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         window_left=None,
         window_right=None,
         seqinfo=(None, None, None, None),
+        ragged=None,
+        stats=None,
         varlen_bits=0,
         num_seqlens=0,
         Bias=None,
@@ -1104,6 +1139,15 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         # **null pointers**, which is safe only because the decoder branches
         # rather than selects -- see `fmha.cond_load`.
         self.seqinfo_q0, self.seqinfo_q1, self.seqinfo_k0, self.seqinfo_k1 = seqinfo
+        # Per-tensor ragged bases: `{name: (offsets, multiplier)}` for each tensor
+        # the kernel addresses, `offsets` the INT32 `[B+1]` pointer (null for a
+        # dense tensor). Q and K reuse `seqinfo_q1` / `seqinfo_k1`. See `tensor_origin`.
+        self.ragged = {} if ragged is None else ragged
+        self._origins = {}
+        # `(offsets, multiplier, stride_batch, stride_head, stride_token)` of the
+        # caller's Stats, read by the kernels that take it as input; None where
+        # the row stats come from the workspace. See `row_stats_addressing`.
+        self.stats = stats
         self.varlen_bits_arg = varlen_bits
         self.num_seqlens_arg = num_seqlens
         # The bias matrix and its (batch, head, seqlen_q) strides. Slot 3
@@ -1251,29 +1295,20 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
 
         Four things about the shape of this:
 
-        - **`z` is not `batch_idx`.** The workgroup's `z` selects a *sequence*;
-          the decode says which *batch slice* that sequence lives in, which is
-          `z` for a batched layout and 0 for a packed one. Overwriting
-          `batch_idx` here is what keeps `_slab_byte_base` correct without a
-          varlen branch inside it.
-        - **`z` outlives that overwrite**, as `seq_idx_i32`. Anything indexed by
-          *sequence* rather than by batch slice needs it, and after this method
-          runs there is nowhere else to get it: `init_philox` is the caller that
-          found this out the hard way.
+        - **Only the lengths come from the decode.** `z` selects a *sequence*,
+          kept as `seq_idx_i32`; where a tensor starts is `tensor_origin`'s
+          answer, per tensor, from that tensor's own offsets and multiplier or
+          from `z * stride_batch`. The decode's row offset and batch index
+          place nothing here.
         - **The reads are scalar.** `z` is workgroup-uniform, so these land in
           SGPRs and cost nothing against the VGPR budget.
-        - **Row offsets stay separate from the batch index.** A packed tensor
-          has `batch = 0` and a large `row_off`; a padded one has a real batch
-          and `row_off = 0`. Both go through the same
-          `batch * s_batch + row_off * s_seq`, which is why the descriptors
-          need no varlen case at all.
         """
         z = fx.Int32(self.batch_idx)
         self.seq_idx_i32 = z
-        q_len, q_row, q_batch = fmha.decode_addressing(
+        q_len, _, _ = fmha.decode_addressing(
             self.varlen_bits_arg, 0, self.seq_len_v, self.seqinfo_q0, self.seqinfo_q1, z
         )
-        k_len, k_row, k_batch = fmha.decode_addressing(
+        k_len, _, _ = fmha.decode_addressing(
             self.varlen_bits_arg,
             8,
             self.seq_len_kv_v,
@@ -1281,25 +1316,7 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
             self.seqinfo_k1,
             z,
         )
-        self.lse_tokens_i32 = fmha.lse_token_pitch(
-            self.varlen_bits_arg,
-            0,
-            self.seq_len_v,
-            self.seqinfo_q0,
-            self.seqinfo_q1,
-            self.num_seqlens_arg,
-        )
-        # **Each side owns its own batch index**, and this is not pedantry:
-        # `0x040B` -- packed Q against `seqused_k` on a BHSD cache -- has Q
-        # stacked (batch 0, large row offset) and K batched (batch z, no row
-        # offset) in the *same call*. Reusing Q's index for K reads batch 0 of
-        # the cache for every sequence, which returns a wrong answer. Measured before the split: correct for the four
-        # configurations where both sides agree, wrong for the one that does
-        # not.
-        self.batch_idx = fx.Index(q_batch)
-        self.kv_batch_idx = fx.Index(k_batch)
-        self.varlen_q_row_off = fx.Index(q_row)
-        self.varlen_kv_row_off = fx.Index(k_row)
+        self.q_len_i32 = q_len
         self.seqlen_q_v = fx.Index(q_len)
         self.seqlen_kv_v = fx.Index(k_len)
         self.seqlen_kv_i32 = fx.Int32(k_len)
@@ -1328,14 +1345,9 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         random. That is a constraint on the tuner, not
         just a property of today's code.
 
-        **The plane is indexed by the grid's sequence, not by `batch_idx`.**
-        Those two differ exactly when they matter: `init_sequence_lengths`
-        resolves `batch_idx` to the *batch slice* a sequence lives in, and a
-        stacked layout puts every sequence in slice 0. Reading it here would
-        give a whole packed batch one plane, so N sequences would draw the same
-        mask -- finite, self-consistent between the forward and the backward,
-        and statistically wrong in a way no allclose can see. `seq_idx_i32` is
-        the raw `z`, which is what gfx1201 uses.
+        **The plane is indexed by the grid's sequence `seq_idx_i32`**, the raw
+        `z`, which is what gfx1201 uses: every sequence of a packed batch draws
+        its own mask.
         """
         if const_expr(not self.traits.ENABLE_DROPOUT):
             return
@@ -1437,51 +1449,107 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         self.stride_q_n_v = self.stride_q_seq_v
         self.stride_kv_n_v = self.stride_k_seq_v
 
-    def _slab_byte_base(self, s0, s1, s2, row_off, head_idx, batch_idx=None):
-        """Byte offset of this workgroup's (batch, head) slab.
+    _Q_SIDE = frozenset(("Q", "O", "DO", "DQ"))
 
-        Both axes are workgroup-uniform, so folding them into the descriptor
-        costs scalar arithmetic once instead of a per-access add.
+    def tensor_origin(self, name, s_batch):
+        """Element origin of this workgroup's sequence in tensor `name`, as an `Index`.
 
-        **`row_off` is the varlen token origin, not the batch's.** The
-        production kernel's `q_tok_base` is `batch * seqlen` in dense mode,
-        because there the batch axis *is* a token offset into one flat
-        allocation. Here the batch has its own stride, so passing `q_tok_base`
-        would count it twice. Dense passes 0; varlen will pass the cumulative
-        offset with `stride_0` set to 0, which is the same decomposition
-        `fmha.decode_addressing` produces on gfx1201.
+        `name` is one of Q, K, V, O, DO, DQ, DK, DV; `self.ragged[name]` holds
+        its offsets and multiplier. Cached: the descriptors and the staging
+        paths of one kernel ask for the same origin many times. See
+        `fmha.tensor_origin` for the arithmetic and the empty-sequence clamp.
         """
-        if batch_idx is None:
-            batch_idx = self.batch_idx
-        elems = (
-            batch_idx * fx.Index(s0) + head_idx * fx.Index(s1) + row_off * fx.Index(s2)
-        )
+        origin = self._origins.get(name)
+        if origin is None:
+            off, mul = self.ragged[name]
+            seqlen = self.q_len_i32 if name in self._Q_SIDE else self.seqlen_kv_i32
+            origin = fmha.tensor_origin(off, mul, self.seq_idx_i32, s_batch, seqlen)
+            self._origins[name] = origin
+        return origin
+
+    def bias_origin(self, s_batch):
+        """Element origin of this sequence in Bias or dBias: `z * stride_batch`. Neither is ever ragged."""
+        return fx.Index(self.seq_idx_i32) * fx.Index(s_batch)
+
+    def row_stats_addressing(self, head):
+        """`(base, pitch, head_step)` of the f32 row stats LSE (and Delta), in elements.
+
+        The element for in-sequence row `r` of `head` is at `base + r * pitch`;
+        `head_step` is the distance between consecutive heads. Two sources:
+
+        - the workspace (`stats is None`): compact `(z, head, row)`, pitch 1,
+          one `max_seqlen_q` extent per head (`fmha.stats_ws_base`);
+        - the caller's Stats (merged kernels): origin from its own offsets and
+          multiplier or `z * stride_batch`, then the declared head and token
+          strides. Its layout is whatever the strides say.
+        """
+        if const_expr(self.stats is None):
+            return (
+                fmha.stats_ws_base(
+                    self.seq_idx_i32, head, self.num_head_q, self.seq_len_v
+                ),
+                fx.Index(1),
+                fx.Index(self.seq_len_v),
+            )
+        off, mul, s_batch, s_head, s_token = self.stats
+        origin = fmha.tensor_origin(off, mul, self.seq_idx_i32, s_batch, self.q_len_i32)
+        return origin + head * fx.Index(s_head), fx.Index(s_token), fx.Index(s_head)
+
+    def _slab_byte_base(self, s_head, origin, head_idx):
+        """Byte offset of this workgroup's (sequence, head) slab.
+
+        `origin` is the tensor's element origin for this sequence
+        (`tensor_origin`). Both terms are workgroup-uniform, so folding them
+        into the descriptor costs scalar arithmetic once instead of a per-access
+        add.
+        """
+        elems = origin + head_idx * fx.Index(s_head)
         return elems * fx.Index(self.traits.BF16_BYTES)
 
-    def _slab_view(
-        self, tensor, s0, s1, s2, row_off, head_idx, rows, hdim, batch_idx=None
-    ):
-        """A buffer view over one (batch, head) slab, bounded at its last element.
+    def _slab_view(self, tensor, s_head, s_seq, origin, head_idx, rows, hdim):
+        """A buffer view over one (sequence, head) slab, bounded at its last element.
 
         A row past the sequence is out of the descriptor and reads as zero
         rather than faulting -- the same mechanism the production kernel uses
         for its ragged tail, restated over a stride the caller chose.
 
-        `hdim` is the row's real extent, `s2` the distance between rows; see
+        `hdim` is the row's real extent, `s_seq` the distance between rows; see
         `_slab_span_elems` for why the second is not a bound for the first.
         """
         # Span first, then base -- the order the body had before the split, and
         # the order the emitted MLIR therefore still has. Reversing it is
         # semantically free and cost 230 lines of scheduling churn in every
         # forward binary when this was first written the other way round.
-        span_elems = _slab_span_elems(rows, s2, hdim)
-        base_bytes = self._slab_byte_base(
-            s0, s1, s2, row_off, head_idx, batch_idx=batch_idx
-        )
+        span_elems = _slab_span_elems(rows, s_seq, hdim)
+        base_bytes = self._slab_byte_base(s_head, origin, head_idx)
         return self._slab_view_at(tensor, base_bytes, span_elems)
 
-    def _slab_view_at(self, tensor, base_bytes, span_elems):
+    # Whether the prologue folds descriptor bases and loop-invariant steps into opaque scalars (`pin_sgpr`). The merged kernel
+    # runs two roles in one function: it leaves them unpinned, since each role's pinned values would stay live across the other's.
+    PIN_BASES = True
+
+    def pin_index(self, value):
+        """`value` as an opaque scalar in the prologue when `PIN_BASES`, else unchanged."""
+        return pin_index(value) if self.PIN_BASES else value
+
+    def slab_anchor(self, tensor, base_bytes):
+        """`SlabAnchor` of `tensor` at `base_bytes`: with `PIN_BASES` the pointer and the base fold into one opaque address, else
+        the address is the pointer and the base stays a separate offset."""
+        addr = fx.Int64(fx.ptrtoint(fx.get_iter(tensor)))
+        if self.PIN_BASES:
+            return SlabAnchor(
+                fx.Int64(pin_sgpr(addr + fx.Int64(base_bytes))), fx.Index(0)
+            )
+        return SlabAnchor(addr, base_bytes)
+
+    def anchored_rsrc(self, anchor, extra_bytes, nrec_bytes):
+        """A raw buffer resource over `anchor` plus `extra_bytes`, bounded at `nrec_bytes`."""
+        return dualwave._make_ws_rsrc(anchor.addr, anchor.off + extra_bytes, nrec_bytes)
+
+    def _slab_view_at(self, tensor, base_bytes, span_elems, anchor=None):
         """`_slab_view` over a base and an extent the caller already computed.
+
+        With `anchor` (from `slab_anchor`) the view is based at the anchor plus `base_bytes`, and `tensor` supplies only the type.
 
         Split out so a caller that rebinds one slab to a *different head* can
         hoist everything that does not move with the head. `_slab_byte_base` is
@@ -1495,8 +1563,12 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         `BwdDkDvKernelContext._init_q_head_invariants` is the caller this exists
         for, and carries the measurements.
         """
+        base_iter = fx.get_iter(tensor)
+        if anchor is not None:
+            base_iter = fx.inttoptr(base_iter.type, anchor.addr)
+            base_bytes = anchor.off + base_bytes
         return dualwave._make_rebased_view(
-            fx.get_iter(tensor),
+            base_iter,
             base_bytes,
             span_elems * fx.Index(self.traits.BF16_BYTES),
             fx.make_layout(fx.Int32(span_elems), fx.Int32(1)),
@@ -1504,15 +1576,16 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
             _elem_ir=self.elem_ir,
         )
 
-    def q_row_slab(self, tensor, s0, s1, s2, hdim):
+    def q_row_slab(self, tensor, name, s_batch, s_head, s_seq, hdim):
         """A Q-row-shaped output slab, with the sentinel that suppresses stores.
 
         Returns `(view, oob_off)`. The three kernels' per-Q-row outputs -- the
         forward's O and the backward's dQ -- are all indexed
-        (batch, head, q row, d) over this workgroup's own q head and row
-        origin, so they differ only in the tensor, its three strides and its
-        row extent. Those are the arguments; nothing else varies, and none of
-        them is guessed from another tensor's.
+        (batch, head, q row, d) over this workgroup's own q head and sequence
+        origin, so they differ only in the tensor (`name`, for its ragged
+        origin), its three strides and its row extent. Those are the
+        arguments; nothing else varies, and none of them is guessed from
+        another tensor's.
 
         `oob_off` is the first element past the *untightened* span, so a store
         redirected there is dropped by the hardware bound -- which is how
@@ -1526,9 +1599,15 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         is out of range and always has been.
         """
         view = self._slab_view(
-            tensor, s0, s1, s2, self.q_row_off, self.q_head_idx, self.seqlen_q_v, hdim
+            tensor,
+            s_head,
+            s_seq,
+            self.tensor_origin(name, s_batch),
+            self.q_head_idx,
+            self.seqlen_q_v,
+            hdim,
         )
-        return view, self.seqlen_q_v * fx.Index(s2)
+        return view, self.seqlen_q_v * fx.Index(s_seq)
 
     def init_descriptors(self, **kwargs):
         """Rebuild Q/K/V/O over arbitrary strides; everything else stays.
@@ -1549,15 +1628,8 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
             o_tensor=self.Q if self.O is None else self.O, **kwargs
         )
 
-        # Token origins, straight from the decode. Dense is not a case here:
-        # `decode_addressing` returns a zero row offset at `varlen_bits == 0`,
-        # which is the same 0 a dense branch would have written. The pairing
-        # with `batch_idx` is what makes one expression serve every mode -- a
-        # packed tensor gets `batch = 0` with a large `row_off`, a padded one a
-        # real batch with `row_off = 0` -- and the batch axis has a real stride
-        # here, so it must not also be spent as a token offset.
-        self.q_row_off = self.varlen_q_row_off
-        self.kv_row_off = self.varlen_kv_row_off
+        # Every tensor's origin is its own (`tensor_origin`): dense is not a
+        # case here, it is the null-offsets arm of the same expression.
 
         # Head folded into the base, so what remains per access is `s * stride`.
         self.q_gmem_elem_offset = self.q_start * self.stride_q_seq_v
@@ -1565,9 +1637,9 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
 
         if const_expr(traits.BIAS_TYPE):
             # Same slab shape as Q, which is the point: bias is indexed by
-            # (batch, head, q_row, kv_col), so the varlen row origin and the
-            # head fold into the base exactly as Q's do, and what remains per
-            # access is `q_row * stride_b_seq_q + col`.
+            # (batch, head, q_row, kv_col), so the batch origin and the head
+            # fold into the base, and what remains per access is
+            # `q_row * stride_b_seq_q + col`. Bias is never ragged.
             #
             # A raw resource rather than a `_slab_view`: the reads here are
             # per-lane vectors of 4 or 8 elements at an address the lane
@@ -1590,20 +1662,17 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
                 ),
                 base_byte_offset=as_mlir_value(
                     self._slab_byte_base(
-                        self.stride_b_batch,
                         self.stride_b_head,
-                        self.stride_b_seq_q,
-                        self.q_row_off,
+                        self.bias_origin(self.stride_b_batch),
                         self.q_head_idx,
                     )
                 ),
             )
         self.q_div = self._slab_view(
             self.Q,
-            self.stride_q_batch,
             self.stride_q_head,
             self.stride_q_seq,
-            self.q_row_off,
+            self.tensor_origin("Q", self.stride_q_batch),
             self.q_head_idx,
             self.seqlen_q_v,
             self.hdim_qk,
@@ -1611,6 +1680,7 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         if self.O is not None:
             self.o_div, self.o_oob_off = self.q_row_slab(
                 self.O,
+                "O",
                 self.stride_o_batch,
                 self.stride_o_head,
                 self.stride_o_seq,
@@ -1619,25 +1689,21 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         if const_expr(not traits.PAGED):
             self.k_div = self._slab_view(
                 self.K,
-                self.stride_k_batch,
                 self.stride_k_head,
                 self.stride_k_seq,
-                self.kv_row_off,
+                self.tensor_origin("K", self.stride_k_batch),
                 self.kv_head_idx,
                 self.seqlen_kv_v,
                 self.hdim_qk,
-                batch_idx=self.kv_batch_idx,
             )
             self.v_div = self._slab_view(
                 self.V,
-                self.stride_v_batch,
                 self.stride_v_head,
                 self.stride_v_seq,
-                self.kv_row_off,
+                self.tensor_origin("V", self.stride_v_batch),
                 self.kv_head_idx,
                 self.seqlen_kv_v,
                 self.hdim_vo,
-                batch_idx=self.kv_batch_idx,
             )
 
 
@@ -2360,204 +2426,6 @@ class ParityStoreHelper(dualwave.DualwaveStoreHelper):
 
     def _final_o_base(self, q_row):
         return q_row * self.stride_o_seq_v + self.lane_div_32 * 8
-
-    def zero_o_block_if_needed(self, causal_end_raw_i32=None):
-        """The inherited O zeroing, plus the LSE those same rows need.
-
-        A Q block whose every row attends nothing never enters the kernel body
-        -- `active` is `causal_end_raw > 0` -- so this method is the *only*
-        writer for it. The vendored version writes O and stops, which leaves LSE holding whatever the caller
-        allocated. That is a wrong answer for any caller who will run a
-        backward, and an unreadable one for a test harness: AOTriton's fills L
-        with NaN, so the rows come back NaN and read as a store that faulted.
-
-        `l = 0` is the whole of the addition, because `_store_lse_row_unguarded`
-        already turns a zero `l` into the `+inf` those rows are contractually
-        owed -- see there. Passing it rather than the value keeps one expression
-        of "this row attended nothing" in the kernel instead of two.
-
-        Not folded into the inherited `scf.if`: `super()` owns that region and
-        is imported, never edited. Two regions on the same wave-uniform scalar
-        compare is what an override can spell, and the second is entered only by
-        blocks that took the early exit, which do no other work at all.
-
-        **Deletable on the next flydsl bump.** Upstream has since grown the same
-        store inside its own `zero_o_block_if_needed`, passing exactly this
-        `m = 0, l = 0` pair (plus a `sink_log2` this build has no knob for), so
-        when the pin moves past it this override becomes a duplicate store and
-        should go. The `+inf` select it depends on must stay either way: upstream
-        spells the value `m * ln2 + log(l)`, which is `-inf` at best.
-        """
-        super().zero_o_block_if_needed(causal_end_raw_i32)
-        if const_expr(not self.traits.RETURN_LSE):
-            return
-        if causal_end_raw_i32 is None:
-            causal_end_raw_i32 = self.causal_end_raw_i32
-        # Rebuilt here rather than captured, so the address arithmetic stays
-        # inside the branch for the blocks that skip it. This is `self.q_row`'s
-        # own definition, and the inherited O store above uses it too: one row
-        # mapping for both tensors and for both the early exit and the body.
-        q_start = self.q_start
-        wave_q_offset = self.wave_q_offset
-        lane_mod_32 = self.lane_mod_32
-        zero = self.c_zero_f
-        store = self._store_lse_row
-
-        @flyc.jit
-        def _store_masked_lse_block():
-            if causal_end_raw_i32 <= fx.Int32(0):
-                store(zero, zero, q_start + wave_q_offset + lane_mod_32)
-
-        _store_masked_lse_block()
-
-    def _store_lse_row(self, m_row, l_row, q_row):
-        """`_store_lse_row_unguarded`, skipped entirely when `LSE` is null.
-
-        LSE is an **optional** output. `attn_fwd_params::L` is declared "Can be
-        `T2::get_null_tensor()`" (include/aotriton/flash.h), and an inference
-        caller that will never run a backward passes exactly that. The Triton
-        kernel spells the contract as `L_not_null` -- *"Allows null L for
-        training=False"*, modules/flash/kernel/fwd_kernel.py -- and gfx1201's
-        FlyDSL kernel spells it as `_l_valid`
-        (flash_attn_func_gfx1201_aiw.py). The gfx950 path had neither: a null
-        `L` reached `_make_ws_rsrc` as a descriptor based at address 0 and the
-        store faulted.
-
-        So the optionality is a **runtime** property, not a build-time one.
-        `RETURN_LSE` is a compile-time knob that deletes the store outright,
-        which is the wrong instrument for it twice over: one AOT binary has to
-        serve both kinds of caller, and a build with the store deleted is not
-        "LSE optional", it is "LSE never written". `RETURN_LSE` therefore stays
-        pinned on for AOT (modules/flash/aot/flyc_attn_fwd.py) and the null
-        case is decided here, per launch.
-
-        The condition is wave-uniform, so this is a scalar branch. Everything
-        the store needs -- the log, the scale, the addressing -- stays inside
-        it, for the reason gfx1201's kernel records at its own guard: hoisting
-        that arithmetic out cost 8% at head_dim 256 even with the store still
-        predicated, because the values then stay live across the epilogue for
-        every wave, including the ones with nothing to store.
-        """
-        store = self._store_lse_row_unguarded
-        lse_not_null = fx.Int64(fx.ptrtoint(fx.get_iter(self.LSE))) != fx.Int64(0)
-
-        @flyc.jit
-        def _store_lse_if_l_not_null():
-            if lse_not_null:
-                store(m_row, l_row, q_row)
-
-        _store_lse_if_l_not_null()
-
-    def _store_lse_row_unguarded(self, m_row, l_row, q_row):
-        """LSE addressed through `VarlenBits`, which decides three things here.
-
-        LSE is always **compact** -- it is the one tensor whose strides are not
-        a free variable but a function of the bits, the head count and the
-        token count, which is why no `lse_stride` is passed.
-        Compact is not the same as fixed, though, and the production formula
-        `q_head_idx * seq_len_v + q_row` pins all three of the things that
-        vary:
-
-        - **the token pitch.** `seq_len_v` is `max_seqlen_q`, which is right
-          for a batched layout that pads every row-group to the longest
-          sequence. A stacked Q side runs to the *batch total* instead, which
-          is what `lse_token_pitch` decoded into `lse_tokens_i32`.
-        - **the row origin.** A packed sequence starts at `q_row_off`, not 0.
-        - **the layout.** Bits 17:16 choose `_HT` -- `(H, T)`, T contiguous,
-          AOTriton's -- or `_TH`, which is Transformer Engine's. The production
-          formula is `_HT` written out, so `_TH` was silently ignored.
-
-        `fmha.lse_row_addressing` is gfx1201's and returns `(base, pitch)` so
-        the per-row part stays a multiply-add. It is called with **batch 0**
-        because the descriptor below already folds the batch in, and the two
-        must not both count it; that works for either layout because a batch's
-        rows are contiguous in both, `H * tokens` of them.
-
-        The production row expression `q_head_idx * seq_len_v + q_row` is not a
-        second case to keep: it is what this form *is* at `varlen_bits == 0`,
-        `row_off == 0` and `tokens == seq_len_v`. One term in the descriptor is
-        **not** the production one, though: the head count.
-
-        Upstream's `_store_lse_row` sizes the per-batch slice with
-        `traits.NUM_HEADS_Q`, a compile-time trait, because upstream compiles a
-        kernel per shape. AOT cannot: one binary serves every head count, so
-        `modules/flash/aot/flyc_attn_fwd.py` pins `num_heads=1` and the real
-        count arrives as the `num_head_q` kernarg. With the trait, the
-        descriptor covers `1 * tokens` rows, the batch stride advances by one
-        head instead of `H`, and the hardware bound silently drops every head
-        but the first -- `L` comes back written for `h == 0` and untouched
-        (NaN) for the rest. So the count here is `self.num_head_q`, which is
-        also what gfx1201 feeds `lse_row_addressing`. Two scalar ops; the
-        stores are unchanged.
-        """
-        # The runtime head count, NOT `traits.NUM_HEADS_Q` -- see above.
-        num_heads_q = fx.Index(self.num_head_q)
-        tokens = fx.Index(self.lse_tokens_i32)
-        per_batch = num_heads_q * tokens
-        per_batch_bytes = per_batch * fx.Index(4)
-        rsrc = dualwave._make_ws_rsrc(
-            fx.Int64(fx.ptrtoint(fx.get_iter(self.LSE))),
-            self.batch_idx * per_batch_bytes,
-            per_batch_bytes,
-        )
-        lse_val = _fadd(
-            _fmul(m_row, self.c_ln2_f, self.fm_fast),
-            fmath.log(as_mlir_value(l_row), fastmath=self.fm_fast),
-            self.fm_fast,
-        )
-        # A Q block that attends nothing gets **+inf**, and the formula above
-        # does not produce it. Two separate things are wrong without this
-        # select.
-        #
-        # *The sign.* The backward pass subtracts LSE from `qk`, so `+inf` is
-        # what makes `exp(qk - lse)` zero for exactly the rows that must
-        # contribute nothing. `-inf` would make it `+inf` instead. This is the
-        # convention `fwd_kernel.py` writes at its fully-masked early exit,
-        # naming that reason, and gfx1201's FlyDSL kernel writes at its LSE
-        # store; gfx950 was the only forward with neither.
-        #
-        # *The value.* `l == 0` makes the `log` above `-inf`, but `fm_fast` is
-        # `fastmath<fast>`, which carries `ninf`, so InstSimplify folds an
-        # infinite operand of the `fadd` to **poison** -- and a store of poison
-        # is one InstCombine may delete. Measured: the fully-masked rows came
-        # back holding the harness's own NaN fill, so the defect reads as "LSE
-        # was never written" rather than as a sign error.
-        #
-        # `l` is bit-exact 0 there and at least 1 on any live row -- the running
-        # max contributes `exp2(0)` -- so test the bit pattern; integer compares
-        # lower predictably under fast math, where a float compare against a
-        # value the flags promise cannot exist does not.
-        #
-        # **This is wider than Triton's rule, deliberately, and it matches
-        # gfx1201.** Triton writes `+inf` only for a whole masked *block*; a
-        # masked row inside a live block falls through its ordinary epilogue,
-        # which starts `l_i` at 1.0 and `m_i` at `-FLT_MAX` and so writes about
-        # -2.36e38 -- Triton fixes up `Out` for those rows and leaves their LSE
-        # alone. The predicate below cannot separate the two cases and does not
-        # try, exactly as gfx1201's does not. `l` starting at 0 here rather than
-        # at 1.0 is what makes the predicate meaningful at all.
-        #
-        # Both LSE writers come through here. The other is
-        # `zero_o_block_if_needed`, the whole-block early exit taken when
-        # `causal_end_raw <= 0`, which passes a literal `l = 0.0`: the compare
-        # folds and this costs that path nothing.
-        lse_val = (fmha.bitcast_i32(fx.Float32(l_row)) != fx.Int32(0)).select(
-            fx.Float32(lse_val), fx.Float32(float("inf"))
-        )
-        base, pitch = fmha.lse_row_addressing(
-            self.varlen_bits_arg,
-            fx.Index(0),
-            self.q_head_idx,
-            num_heads_q,
-            tokens,
-            self.q_row_off,
-        )
-        lse_local = base + q_row * pitch
-        # One writer per row: low half-wave, in-bounds row; everything else is
-        # redirected to the sentinel the buffer bound drops.
-        off_row = (q_row < self.seqlen_q_v).select(lse_local, per_batch)
-        off = fx.Index((self.lane < fx.Index(32)).select(off_row, per_batch))
-        dualwave._ws_store_f32(lse_val, off, rsrc)
 
     def _final_o_global(self, o_base, dc, g):
         """The store's element offset, redirected out of the buffer if past `hdim_vo`.

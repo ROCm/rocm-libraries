@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -43,6 +44,7 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
@@ -58,13 +60,17 @@
  * head axes, as a second symbol of the same code object; it runs only when the graph's
  * dBias is broadcast.
  *
+ * Every row's `sources` name the launches `merged` (the kernel) and `tailzero`. After the
+ * kernel and the reduce, a graph with padding_mask and at least one dense gradient output also
+ * launches the tail-zero kernel, which zeroes the rows of those outputs past `seq_len`.
+ *
  * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp). The merged
  * engine adds what only it knows: a row serves the head sizes its
  * tile covers, every bias object stages the bias through LDS, and `gqa_pack` rows serve only
  * grouped-query graphs.
  *
  * Launch arguments are a pure function of the plan prepare() resolves and the execute-time
- * buffers (launchArguments()), so one description of the 452-byte merged kernarg list feeds
+ * buffers (launchArguments()), so one description of the merged kernarg list feeds
  * the launch, the signature the descriptor is checked against, and the tests' golden dumps.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -89,6 +95,10 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.flydsl_sdpa_bwd_me
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.dispatch";
 
+/// The launch names of a merged row's `sources`.
+constexpr std::string_view MERGED_LAUNCH = "merged";
+constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
+
 // Kernel metadata fields, declared by the KMD this pack's KDP points at.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 /// The head-dim tile the object is built at.
@@ -102,6 +112,9 @@ constexpr std::string_view PADDED_FIELD = "padded";
 constexpr std::string_view STORE_DB_FIELD = "store_db";
 /// 1 packs the GQA group into the dK/dV role's q-tile row axis; -1 leaves it unset.
 constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
+/// The query tile of the dK/dV role; a packed row carries its resolved value, -1 leaves it
+/// unset.
+constexpr std::string_view BLOCK_Q_FIELD = "block_q";
 /// The launch geometry of the build: threads per block, and the key and query tile heights.
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
 constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
@@ -134,13 +147,6 @@ constexpr int64_t CLASS_BIAS = 2;
 /// The head-dim tiles `_sdpa_bwd_spec.LADDER` builds objects at.
 constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
 
-/// `varlen_bits` names the layout of the LSE: bit 16 is the (B, Sq, H) packing.
-constexpr int32_t VARLEN_LSE_LAYOUT_TH = 1 << 16;
-/// Padded varlen: dense (B, H, S, D) tensors with a length per batch on each side, the
-/// layout's position implied by the batch index (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04, for the
-/// Q side in bits 0..7 and the K side in bits 8..15; the lengths go in `seqinfo_q0` / `seqinfo_k0`).
-constexpr int32_t VARLEN_LENGTHS_BOTH_SIDES = 0x0404;
-
 /// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
 constexpr int32_t RT_FLAG_PADDED = 1;
 constexpr int32_t RT_FLAG_DROPOUT = 2;
@@ -169,6 +175,7 @@ struct Row
     int64_t blockThreads = 0;
     int64_t blockKv = 0;
     int64_t blockM = 0;
+    int64_t blockQ = -1;
 };
 
 /// The record of @p kernel, or nullopt for one that lacks a field or holds it as another
@@ -202,7 +209,8 @@ std::optional<Row> readRow(const KernelDefinition& kernel)
                *gqaPack,
                *blockThreads,
                *blockKv,
-               *blockM};
+               *blockM,
+               integerMetadata(kernel, BLOCK_Q_FIELD).value_or(-1)};
 }
 
 int64_t rungBelow(int64_t tile)
@@ -286,12 +294,6 @@ void logDecline(std::string_view cause, const std::string& detail)
     HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME << " declined the graph [" << cause << "]: " << detail);
 }
 
-/// The largest query tile (block_q) of the dK/dV role among the shipped gqa_pack == 1 merged
-/// objects: 64 at head dims 32 to 160 and 32 at 192, from resolving each object's dK/dV
-/// knobs through the descriptor generator's build policy. It is not a descriptor field, so
-/// the pack_split bound uses this graph-level maximum.
-constexpr int64_t PACK_MAX_BLOCK_Q = 64;
-
 /**
  * @brief Graph-scoped applicability: the shared backward matcher's contract, with what
  *        kernel_match needs bound.
@@ -338,6 +340,11 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
                    "whole 16-byte chunk)");
         return std::nullopt;
     }
+    if(native::tailzeroMaskOf(problem) != 0 && !native::tailzeroGridOf(problem))
+    {
+        logDecline("SP-TZ", "the tail-zero launch grid exceeds its limits");
+        return std::nullopt;
+    }
 
     const auto dtype = flydsl_sdpa::kernelDataTypeName(problem.dtype);
     if(!dtype.has_value())
@@ -366,7 +373,7 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     // pack object also needs every packed span inside the 32-bit buffer descriptor, else the
     // graph is served by the non-pack objects, which rebase per head.
     bound[std::string(GQA_PACK_TOKEN)]
-        = int64_t{native::packedSpansFit(problem, PACK_MAX_BLOCK_Q) ? 1 : 0};
+        = int64_t{native::packedSpansFit(problem, native::PACK_MAX_BLOCK_Q) ? 1 : 0};
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
     bound[std::string(KV_HEADS_TOKEN)] = problem.numKvHeads;
@@ -466,7 +473,10 @@ bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
     {
         return false;
     }
-    if(row->gqaPack == 1 && !facts->gqaPack)
+    // A packed row serves dense GQA whose packed spans fit, at a query tile the span bound
+    // covers: a row that records no tile, or one above the bound, serves nothing.
+    if(row->gqaPack == 1
+       && (!facts->gqaPack || row->blockQ <= 0 || row->blockQ > native::PACK_MAX_BLOCK_Q))
     {
         return false;
     }
@@ -529,6 +539,9 @@ struct MergedPlan
     /// The reduce kernel's symbol and launch, when the graph's dBias is broadcast.
     std::string reduceSymbol;
     native::ReduceGrid reduceGrid;
+    /// The tail-zero launch: the outputs it zeroes (`mask`, 0 for no launch) and its grid.
+    int32_t tailzeroMask = 0;
+    native::TailzeroGrid tailzeroGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
@@ -588,8 +601,7 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags
         = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = (problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0)
-                      | (problem.paddingMask ? VARLEN_LENGTHS_BOTH_SIDES : 0);
+    plan.varlenBits = native::varlenBitsOf(problem);
 
     plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
 
@@ -606,6 +618,16 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
         }
         plan.reduceGrid = native::reduceGridOf(problem);
     }
+    plan.tailzeroMask = native::tailzeroMaskOf(problem);
+    if(plan.tailzeroMask != 0)
+    {
+        const auto tailzeroGrid = native::tailzeroGridOf(problem);
+        if(!tailzeroGrid)
+        {
+            failBadParam("the tail-zero launch grid exceeds its limits");
+        }
+        plan.tailzeroGrid = *tailzeroGrid;
+    }
     return plan;
 }
 
@@ -617,8 +639,9 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
  * @brief The merged kernel's arguments, in parameter order (`_PARAMS["merged"]` in
  *        `_sdpa_bwd_cdna_build.py`).
  *
- * A pointer is 8 bytes, a count or flag 4 (i32, f32) and a stride or offset 8 (i64), each at
- * its natural offset: 63 arguments, 452 bytes. tie() is the one listing: launch passes it
+ * A pointer is 8 bytes, a count or flag 4 (i32, f32) and a stride, offset or multiplier 8 (i64),
+ * each at its natural offset: 82 arguments, the offset and statistics arguments after
+ * `seqinfo_k1`. tie() is the one listing: launch passes it
  * through, mergedSignature() reads its types, and the tests' golden dumps serialize it.
  */
 struct MergedKernargs
@@ -639,6 +662,15 @@ struct MergedKernargs
     void* seqinfoQ1 = nullptr;
     void* seqinfoK0 = nullptr;
     void* seqinfoK1 = nullptr;
+    int64_t mulQ = 0;
+    int64_t mulK = 0;
+    native::OffsetArgs offV;
+    native::OffsetArgs offO;
+    native::OffsetArgs offDO;
+    native::OffsetArgs offDQ;
+    native::OffsetArgs offDK;
+    native::OffsetArgs offDV;
+    native::StatsArgs stats;
     int32_t varlenBits = 0;
     int32_t numSeqlens = 0;
     int32_t maxSeqlenQ = 0;
@@ -685,6 +717,25 @@ struct MergedKernargs
                         seqinfoQ1,
                         seqinfoK0,
                         seqinfoK1,
+                        mulQ,
+                        mulK,
+                        offV.offset,
+                        offV.multiplier,
+                        offO.offset,
+                        offO.multiplier,
+                        offDO.offset,
+                        offDO.multiplier,
+                        offDQ.offset,
+                        offDQ.multiplier,
+                        offDK.offset,
+                        offDK.multiplier,
+                        offDV.offset,
+                        offDV.multiplier,
+                        stats.offset.offset,
+                        stats.offset.multiplier,
+                        stats.strides.batch,
+                        stats.strides.head,
+                        stats.strides.seq,
                         varlenBits,
                         numSeqlens,
                         maxSeqlenQ,
@@ -749,6 +800,8 @@ struct LaunchArguments
 {
     MergedKernargs merged;
     std::optional<native::ReduceKernargs> reduce;
+    /// Set when the graph needs the tail-zero launch after the kernel and the reduce.
+    std::optional<native::TailzeroKernargs> tailzero;
     std::optional<native::SeedUpload> seedUpload;
 };
 
@@ -783,11 +836,21 @@ LaunchArguments launchArguments(const MergedPlan& plan,
 
     m.batchSize = toInt32(problem.batch, "batch");
     // Unread slots stay O, as the harness passes them; a padded graph's lengths are its
-    // `seq_len_q` / `seq_len_kv` tensors, and nothing is packed (num_seqlens stays 0).
+    // `seq_len_q` / `seq_len_kv` tensors, and nothing is packed (num_seqlens stays 0). A
+    // dense tensor passes a null offset array and multiplier 0.
     m.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : m.o;
-    m.seqinfoQ1 = m.o;
+    m.seqinfoQ1 = native::offsetArgsOf(problem.ragged.q, buffer).offset;
     m.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : m.o;
-    m.seqinfoK1 = m.o;
+    m.seqinfoK1 = native::offsetArgsOf(problem.ragged.k, buffer).offset;
+    m.mulQ = problem.ragged.q.multiplier;
+    m.mulK = problem.ragged.k.multiplier;
+    m.offV = native::offsetArgsOf(problem.ragged.v, buffer);
+    m.offO = native::offsetArgsOf(problem.ragged.o, buffer);
+    m.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
+    m.offDQ = native::offsetArgsOf(problem.ragged.dQ, buffer);
+    m.offDK = native::offsetArgsOf(problem.ragged.dK, buffer);
+    m.offDV = native::offsetArgsOf(problem.ragged.dV, buffer);
+    m.stats = native::statsArgsOf(problem, buffer);
     m.varlenBits = plan.varlenBits;
     m.numSeqlens = 0;
     m.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -850,6 +913,15 @@ LaunchArguments launchArguments(const MergedPlan& plan,
             }
         }
     }
+    if(plan.tailzeroMask != 0)
+    {
+        arguments.tailzero = native::tailzeroKernargsOf(problem,
+                                                        buffer(plan.uids.dQ),
+                                                        buffer(plan.uids.dK),
+                                                        buffer(plan.uids.dV),
+                                                        buffer(problem.seqLenQUid),
+                                                        buffer(problem.seqLenKvUid));
+    }
     m.rtFlags = plan.runtimeFlags;
     return arguments;
 }
@@ -864,10 +936,12 @@ class PreparedFlydslSdpaBwdMerged : public PreparedDispatch
 public:
     PreparedFlydslSdpaBwdMerged(MergedPlan plan,
                                 IngestorKernelCode mergedCode,
-                                std::optional<IngestorKernelCode> reduceCode)
+                                std::optional<IngestorKernelCode> reduceCode,
+                                std::optional<IngestorKernelCode> tailzeroCode)
         : _plan(std::move(plan))
         , _merged(std::move(mergedCode))
         , _reduce(std::move(reduceCode))
+        , _tailzero(std::move(tailzeroCode))
     {
     }
 
@@ -886,10 +960,16 @@ public:
         return _reduce->kernelForStream(stream);
     }
 
+    compilation::IRunnableKernel& tailzeroForStream(hipStream_t stream) const
+    {
+        return _tailzero->kernelForStream(stream);
+    }
+
 private:
     MergedPlan _plan;
     IngestorKernelCode _merged;
     std::optional<IngestorKernelCode> _reduce;
+    std::optional<IngestorKernelCode> _tailzero;
 };
 
 /**
@@ -906,6 +986,11 @@ public:
     {
     }
 
+    std::set<std::string> launchNames() const override
+    {
+        return {std::string(MERGED_LAUNCH), std::string(TAILZERO_LAUNCH)};
+    }
+
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -919,19 +1004,33 @@ public:
     {
         auto plan = planFor(context, kernel);
 
+        // Every launch's definition and the tail-zero argument list are resolved before any
+        // code object loads, so a row that lacks a launch or disagrees on the ABI fails on the
+        // host whatever the state of the archive.
+        const auto mergedKernel = launchKernelDefinition(kernel, std::string(MERGED_LAUNCH));
+        std::optional<KernelDefinition> tailzeroKernel;
+        if(plan.tailzeroMask != 0)
+        {
+            tailzeroKernel = launchKernelDefinition(kernel, std::string(TAILZERO_LAUNCH));
+            requireSignatureMatch(tailzeroKernel->source.signature,
+                                  native::tailzeroSignature(),
+                                  tailzeroKernel->source.symbol,
+                                  describeDescriptor("kernel", kernel.name, kernel.kernelId));
+        }
+
         // Built from the arch alone; see FlydslRmsNormNative.cpp's prepare().
         const compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         auto mergedCode = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, mergedSignature());
+            _kernelCompiler, _kpackLoader, context, mergedKernel, options, mergedSignature());
         mergedCode.setBlockSize(plan.blockThreads, 1, 1);
         mergedCode.setGridSize(plan.gridBlocks, 1, 1);
 
-        // The reduce kernel is the same code object under another symbol: the same archive
-        // entry, with that symbol and its own argument list.
+        // The reduce kernel is the same code object under another symbol: the merged
+        // launch's archive entry, with that symbol and its own argument list.
         std::optional<IngestorKernelCode> reduceCode;
         if(plan.workspace.reduces)
         {
-            KernelDefinition reduceKernel = kernel;
+            KernelDefinition reduceKernel = mergedKernel;
             reduceKernel.source.symbol = plan.reduceSymbol;
             reduceKernel.source.signature = native::reduceSignature();
             reduceCode.emplace(buildIngestorKernelCode(_kernelCompiler,
@@ -943,8 +1042,20 @@ public:
             reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
             reduceCode->setGridSize(plan.reduceGrid.x, plan.reduceGrid.y, 1);
         }
+        std::optional<IngestorKernelCode> tailzeroCode;
+        if(tailzeroKernel.has_value())
+        {
+            tailzeroCode.emplace(buildIngestorKernelCode(_kernelCompiler,
+                                                         _kpackLoader,
+                                                         context,
+                                                         *tailzeroKernel,
+                                                         options,
+                                                         native::tailzeroSignature()));
+            tailzeroCode->setBlockSize(native::TAILZERO_THREADS, 1, 1);
+            tailzeroCode->setGridSize(plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1);
+        }
         return std::make_unique<PreparedFlydslSdpaBwdMerged>(
-            std::move(plan), std::move(mergedCode), std::move(reduceCode));
+            std::move(plan), std::move(mergedCode), std::move(reduceCode), std::move(tailzeroCode));
     }
 
     void launch(const Handle& handle,
@@ -976,6 +1087,14 @@ public:
                     preparedBwd.reduceForStream(stream).launch(stream, argument...);
                 },
                 arguments.reduce->tie());
+        }
+        if(arguments.tailzero.has_value())
+        {
+            std::apply(
+                [&](const auto&... argument) {
+                    preparedBwd.tailzeroForStream(stream).launch(stream, argument...);
+                },
+                arguments.tailzero->tie());
         }
     }
 
@@ -1039,6 +1158,13 @@ FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
         dump.reduceKernarg = native::kernargImage(*arguments.reduce);
         dump.reduceBlock = native::REDUCE_THREADS;
         dump.reduceGrid = {plan.reduceGrid.x, plan.reduceGrid.y, 1};
+    }
+    if(arguments.tailzero.has_value())
+    {
+        dump.tailzero = true;
+        dump.tailzeroKernarg = native::kernargImage(*arguments.tailzero);
+        dump.tailzeroBlock = native::TAILZERO_THREADS;
+        dump.tailzeroGrid = {plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1};
     }
     if(arguments.seedUpload.has_value())
     {

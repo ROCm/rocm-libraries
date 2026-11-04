@@ -167,6 +167,8 @@ def _dot8(ctx, a, b, acc):
 class MergedDkDvContext(dkdv.BwdDkDvKernelContext):
     """The dK/dV context with a decoded program id, the shared arena and O (a raw bounded resource per query head)."""
 
+    PIN_BASES = False
+
     def __init__(self, traits, *, arena, pid_xyz, O, o_strides, **kwargs):
         super().__init__(traits, **kwargs)
         self.arena, self.pid_xyz, self.O_ptr = arena, pid_xyz, O
@@ -192,15 +194,16 @@ class MergedDkDvContext(dkdv.BwdDkDvKernelContext):
         self.o_slab_span_elems = _slab_span_elems(
             self.seqlen_q_v, self.stride_o_seq, self.hdim_vo
         )
-        self.o_slab_base0_bytes = self._slab_byte_base(
-            self.stride_o_batch,
-            self.stride_o_head,
-            self.stride_o_seq,
-            self.q_row_off,
-            self.gqa_q_head_base,
+        self.o_anchor = self.slab_anchor(
+            self.O_ptr,
+            self._slab_byte_base(
+                self.stride_o_head,
+                self.tensor_origin("O", self.stride_o_batch),
+                self.gqa_q_head_base,
+            ),
         )
-        self.o_head_step_bytes = fx.Index(self.stride_o_head) * fx.Index(
-            self.traits.BF16_BYTES
+        self.o_head_step_bytes = self.pin_index(
+            fx.Index(self.stride_o_head) * fx.Index(self.traits.BF16_BYTES)
         )
         if const_expr(self.GQA_PACK):
             # As the q/dO descriptors: the packed axis addresses the whole group from head 0's base; a row past the group is
@@ -212,9 +215,9 @@ class MergedDkDvContext(dkdv.BwdDkDvKernelContext):
 
     def bind_q_head(self, g):
         super().bind_q_head(g)
-        self.o_rsrc = dualwave._make_ws_rsrc(
-            fx.Int64(fx.ptrtoint(fx.get_iter(self.O_ptr))),
-            self.o_slab_base0_bytes + g * self.o_head_step_bytes,
+        self.o_rsrc = self.anchored_rsrc(
+            self.o_anchor,
+            g * self.o_head_step_bytes,
             self.o_slab_span_elems * fx.Index(self.traits.BF16_BYTES),
         )
 
@@ -341,6 +344,8 @@ MERGED_DKDV_PARTS = dkdv.DkDvParts(
 class MergedDqContext(dq.BwdDqKernelContext):
     """The dQ context with a decoded program id, the shared arena, O, -inf -> +inf LSE and Delta computed from O and dO."""
 
+    PIN_BASES = False
+
     def __init__(self, traits, *, arena, pid_xyz, O, o_strides, **kwargs):
         super().__init__(traits, **kwargs)
         self.arena, self.pid_xyz, self.O_ptr = arena, pid_xyz, O
@@ -373,10 +378,9 @@ class MergedDqContext(dq.BwdDqKernelContext):
         super().init_descriptors(**kwargs)
         self.o_div = self._slab_view(
             self.O_ptr,
-            self.stride_o_batch,
             self.stride_o_head,
             self.stride_o_seq,
-            self.q_row_off,
+            self.tensor_origin("O", self.stride_o_batch),
             self.q_head_idx,
             self.seqlen_q_v,
             self.hdim_vo,
@@ -494,6 +498,25 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_O: fx.Pointer,
+        mul_O: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DQ: fx.Pointer,
+        mul_DQ: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
+        off_Stats: fx.Pointer,
+        mul_Stats: fx.Int64,
+        stride_stats_batch: fx.Int64,
+        stride_stats_head: fx.Int64,
+        stride_stats_token: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -544,6 +567,14 @@ def build_fmha_bwd_merged_gfx950_module_primary(
     ):
         arena = fx.SharedAllocator().allocate(Arena).peek()
         O = wire_view(O)
+        # The caller's Stats, which both roles read LSE from through their own strides and offsets.
+        stats = (
+            off_Stats,
+            mul_Stats,
+            stride_stats_batch,
+            stride_stats_head,
+            stride_stats_token,
+        )
 
         # ---- program id -> role and (head, block, batch). Index arithmetic, workgroup-uniform.
         pid = fx.Index(gpu.block_idx.x)
@@ -592,6 +623,16 @@ def build_fmha_bwd_merged_gfx950_module_primary(
                         seqinfo_q1=seqinfo_q1,
                         seqinfo_k0=seqinfo_k0,
                         seqinfo_k1=seqinfo_k1,
+                        mul_Q=mul_Q,
+                        mul_K=mul_K,
+                        off_V=off_V,
+                        mul_V=mul_V,
+                        off_DO=off_DO,
+                        mul_DO=mul_DO,
+                        off_DK=off_DK,
+                        mul_DK=mul_DK,
+                        off_DV=off_DV,
+                        mul_DV=mul_DV,
                         varlen_bits=varlen_bits,
                         num_seqlens=num_seqlens,
                         max_seqlen_q=max_seqlen_q,
@@ -637,6 +678,8 @@ def build_fmha_bwd_merged_gfx950_module_primary(
                         pid_xyz=dk_pid,
                         O=O,
                         o_strides=(stride_o_batch, stride_o_head, stride_o_seq),
+                        ragged_extra={"O": (off_O, mul_O)},
+                        stats=stats,
                     ),
                 )
             else:
@@ -655,6 +698,14 @@ def build_fmha_bwd_merged_gfx950_module_primary(
                         seqinfo_q1=seqinfo_q1,
                         seqinfo_k0=seqinfo_k0,
                         seqinfo_k1=seqinfo_k1,
+                        mul_Q=mul_Q,
+                        mul_K=mul_K,
+                        off_V=off_V,
+                        mul_V=mul_V,
+                        off_DO=off_DO,
+                        mul_DO=mul_DO,
+                        off_DQ=off_DQ,
+                        mul_DQ=mul_DQ,
                         varlen_bits=varlen_bits,
                         num_seqlens=num_seqlens,
                         max_seqlen_q=max_seqlen_q,
@@ -700,6 +751,8 @@ def build_fmha_bwd_merged_gfx950_module_primary(
                         pid_xyz=dq_pid,
                         O=O,
                         o_strides=(stride_o_batch, stride_o_head, stride_o_seq),
+                        ragged_extra={"O": (off_O, mul_O)},
+                        stats=stats,
                     ),
                 )
 
@@ -723,6 +776,25 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_O: fx.Pointer,
+        mul_O: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DQ: fx.Pointer,
+        mul_DQ: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
+        off_Stats: fx.Pointer,
+        mul_Stats: fx.Int64,
+        stride_stats_batch: fx.Int64,
+        stride_stats_head: fx.Int64,
+        stride_stats_token: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -818,6 +890,25 @@ def build_fmha_bwd_merged_gfx950_module_primary(
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_O,
+            mul_O,
+            off_DO,
+            mul_DO,
+            off_DQ,
+            mul_DQ,
+            off_DK,
+            mul_DK,
+            off_DV,
+            mul_DV,
+            off_Stats,
+            mul_Stats,
+            stride_stats_batch,
+            stride_stats_head,
+            stride_stats_token,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,

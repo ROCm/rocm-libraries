@@ -61,6 +61,16 @@ inline constexpr int64_t OFFSET = 16;
 inline constexpr int64_t DROPOUT_MASK = 17;
 inline constexpr int64_t DROPOUT_SCALE = 18;
 inline constexpr int64_t DROPOUT_SCALE_INV = 19;
+/// The uids addRagged assigns the offset tensors of q, k, v, o, do, dq, dk, dv and stats.
+inline constexpr int64_t RAGGED_OFFSET_Q = 20;
+inline constexpr int64_t RAGGED_OFFSET_K = 21;
+inline constexpr int64_t RAGGED_OFFSET_V = 22;
+inline constexpr int64_t RAGGED_OFFSET_O = 23;
+inline constexpr int64_t RAGGED_OFFSET_DO = 24;
+inline constexpr int64_t RAGGED_OFFSET_DQ = 25;
+inline constexpr int64_t RAGGED_OFFSET_DK = 26;
+inline constexpr int64_t RAGGED_OFFSET_DV = 27;
+inline constexpr int64_t RAGGED_OFFSET_STATS = 28;
 } // namespace sdpa_bwd_uid
 
 /// A pass-by-value tensor's baked value; monostate for a tensor that has none.
@@ -79,6 +89,7 @@ struct SdpaBwdTensor
     SdpaBwdTensorValue value;
     std::optional<int64_t> raggedOffsetUid;
     int64_t alignment = 16;
+    int64_t raggedOffsetMultiplier = 1;
 };
 
 /// Every SdpaBackwardAttributes field.
@@ -325,6 +336,41 @@ inline void addSeqLens(SdpaBwdGraph& graph)
     graph.attributes.paddingMask = true;
 }
 
+/// Makes the tensor named @p name ragged: an INT32 [B + 1, 1, 1, 1] device offset tensor with
+/// the uid of its role (sdpa_bwd_uid::RAGGED_OFFSET_*) and a multiplier of @p multiplier.
+inline void addRagged(SdpaBwdGraph& graph, std::string_view name, int64_t multiplier = 1)
+{
+    namespace uid = sdpa_bwd_uid;
+    const std::pair<std::string_view, int64_t> roles[] = {{"q", uid::RAGGED_OFFSET_Q},
+                                                          {"k", uid::RAGGED_OFFSET_K},
+                                                          {"v", uid::RAGGED_OFFSET_V},
+                                                          {"o", uid::RAGGED_OFFSET_O},
+                                                          {"do", uid::RAGGED_OFFSET_DO},
+                                                          {"dq", uid::RAGGED_OFFSET_DQ},
+                                                          {"dk", uid::RAGGED_OFFSET_DK},
+                                                          {"dv", uid::RAGGED_OFFSET_DV},
+                                                          {"stats", uid::RAGGED_OFFSET_STATS}};
+    for(const auto& [role, id] : roles)
+    {
+        if(role != name)
+        {
+            continue;
+        }
+        SdpaBwdTensor offsets;
+        offsets.uid = id;
+        offsets.name = std::string(name) + "_offset";
+        offsets.dtype = hipdnn_flatbuffers_sdk::data_objects::DataType::INT32;
+        offsets.dims = {graph.batch + 1, 1, 1, 1};
+        offsets.strides = {1, 1, 1, 1};
+        graph.tensors.push_back(std::move(offsets));
+        auto& owner = graph.tensor(name);
+        owner.raggedOffsetUid = id;
+        owner.raggedOffsetMultiplier = multiplier;
+        return;
+    }
+    throw std::out_of_range("addRagged: no ragged role named " + std::string(name));
+}
+
 /// Sets dropout probability @p probability with INT32 or INT64 seed and offset tensors
 /// (1, 1, 1, 1), device or, with @p passByValue, carrying a baked value.
 inline void addDropout(SdpaBwdGraph& graph,
@@ -505,7 +551,8 @@ inline flatbuffers::FlatBufferBuilder buildSdpaBwdGraph(const SdpaBwdSpec& spec)
             value,
             tensor.runtimePassByValue,
             detail::toFlatOptional(tensor.raggedOffsetUid),
-            tensor.alignment));
+            tensor.alignment,
+            tensor.raggedOffsetMultiplier));
     }
 
     const auto& a = graph.attributes;

@@ -18,11 +18,14 @@ hold one shipped UKD per manifest instance, and each must
   the packer computed from the bytes it put in the archive, and the one the
   runtime verifies at load.
 
-A multi-launch UKD (a dQ row whose dBias reduce is a standalone object) lists its
-objects under ``sources`` and carries, in its provenance, ``origin_kind`` ``hsaco``
-and ``sources``: per launch the packed ``file``, ``sha256`` and ``symbol``. Each
-launch must be the checked-in object it names: the row's own for ``dq``, the manifest's
-companion of the row's reduce symbol and dtype for ``dbias_reduce``.
+A dQ or merged row is a multi-launch UKD: it lists its objects under ``sources`` and
+carries, in its provenance, ``origin_kind`` ``hsaco`` and ``sources``: per launch the
+packed ``file``, ``sha256`` and ``symbol``. The launches are the row's own (``dq`` or
+``merged``), the manifest's ``dbias_reduce`` companion of the row's dtype when the row
+names a reduce symbol and the manifest lists one (a gfx11 dQ row that stores dB), and the
+manifest's ``tailzero`` companion of the row's dtype when it lists one (``gen_descriptors.py``
+refuses a dQ or merged manifest without it; this tool checks what the pack shipped against the manifest it is given). Each must be the checked-in object
+it names; a companion kept in another op's folder is resolved relative to the row's own.
 
 So for a generic target, every member's shard is shown to ship the one shared
 object set, byte for byte, and no member is left without it.
@@ -32,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import sys
 from pathlib import Path
 
@@ -55,32 +59,64 @@ def _manifests(content_dir: Path) -> list[tuple[str, str, dict]]:
     return found
 
 
-# The launches of a multi-launch row: the row's own object, then its standalone reduce object.
-OWN_LAUNCH = "dq"
-REDUCE_LAUNCH = "dbias_reduce"
+# The launches of a multi-launch row, as ``gen_descriptors.py`` packs them: the op's own object, then its dBias reduce companion
+# when the manifest lists one for the row (a gfx11 dQ row that stores dB; a gfx950 combined row holds the reduce in its own
+# object and has none), then the tail-zero companion that every dQ and merged row launches.
+MAIN_LAUNCH = {"sdpa_bwd_dq": "dq", "sdpa_bwd_merged": "merged"}
+REDUCE_ROLE = "dbias_reduce"
+TAILZERO_ROLE = "tailzero"
 
 
-def _launch_problems(where, name, document, record, companions, want_dir) -> list[str]:
+def _companions_of(companions: list[dict], role: str) -> list[dict]:
+    """The manifest ``companions`` entries of @p role (the first field of their ``spec``)."""
+    return [c for c in companions if c["spec"].split(";")[0].split(",")[0] == role]
+
+
+def _companion_of(companions: list[dict], role: str, dtype: str) -> dict | None:
+    """The companion of @p role for @p dtype (the second field of its ``spec``), or None."""
+    return next(
+        (
+            c
+            for c in _companions_of(companions, role)
+            if c["spec"].split(";")[0].split(",")[1] == dtype
+        ),
+        None,
+    )
+
+
+def _launches_companions(companions: list[dict], record: dict) -> bool:
+    """Whether the manifest gives the row @p record a companion launch (a reduce it names, or a tail-zero of its dtype)."""
+    reduce_symbol = record["knobs"].get("reduce_symbol", "")
+    return bool(
+        reduce_symbol
+        and _companions_of(companions, REDUCE_ROLE)
+        or _companion_of(companions, TAILZERO_ROLE, record["dtype"])
+    )
+
+
+def _launch_problems(
+    where, name, document, record, companions, want_dir, main_launch
+) -> list[str]:
     """What is wrong with the ``sources`` UKD @p document of the manifest row @p record."""
     provenance = document.get("provenance", {})
     if provenance.get("origin_kind") != "hsaco":
         return [f"{where}: {name} was not packed from an hsaco"]
+    wanted = {main_launch: (record["file"], record["sha256"], record["symbol"])}
     reduce_symbol = record["knobs"].get("reduce_symbol", "")
-    companion = next(
-        (
-            c
-            for c in companions
-            if c["symbol"] == reduce_symbol
-            and c["spec"].split(",")[1] == record["dtype"]
-        ),
-        None,
-    )
-    if companion is None:
-        return [f"{where}: {name} has no companion for reduce symbol {reduce_symbol!r}"]
-    wanted = {
-        OWN_LAUNCH: (record["file"], record["sha256"], record["symbol"]),
-        REDUCE_LAUNCH: (companion["file"], companion["sha256"], companion["symbol"]),
-    }
+    if reduce_symbol and _companions_of(companions, REDUCE_ROLE):
+        reduce = _companion_of(companions, REDUCE_ROLE, record["dtype"])
+        if reduce is None or reduce["symbol"] != reduce_symbol:
+            return [
+                f"{where}: {name} has no {REDUCE_ROLE} companion for reduce symbol {reduce_symbol!r}"
+            ]
+        wanted[REDUCE_ROLE] = (reduce["file"], reduce["sha256"], reduce["symbol"])
+    tailzero = _companion_of(companions, TAILZERO_ROLE, record["dtype"])
+    if tailzero is not None:
+        wanted[TAILZERO_ROLE] = (
+            tailzero["file"],
+            tailzero["sha256"],
+            tailzero["symbol"],
+        )
     problems = []
     packed = provenance.get("sources", {})
     if set(packed) != set(wanted) or set(document.get("sources", {})) != set(wanted):
@@ -90,10 +126,12 @@ def _launch_problems(where, name, document, record, companions, want_dir) -> lis
     for launch, (file, digest, symbol) in wanted.items():
         entry = packed[launch]
         shipped = document["sources"][launch]
-        if entry.get("file") != f"{want_dir}/{file}":
+        # A companion kept in another op's folder (the merged tail-zero) is named relative to this one.
+        want_file = posixpath.normpath(f"{want_dir}/{file}")
+        if entry.get("file") != want_file:
             problems.append(
                 f"{where}: {name} launch {launch} was packed from {entry.get('file')!r}, "
-                f"not {want_dir + '/' + file!r}"
+                f"not {want_file!r}"
             )
         if entry.get("sha256") != digest or shipped.get("sha256") != digest:
             problems.append(
@@ -145,6 +183,11 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
                     problems.append(
                         f"{where}: {name} lists arch {document.get('arch')}"
                     )
+                if "sources" in document and op not in MAIN_LAUNCH:
+                    problems.append(
+                        f"{where}: {name} ships launches, but {op} rows have one"
+                    )
+                    continue
                 if "sources" in document:
                     problems += _launch_problems(
                         where,
@@ -153,11 +196,12 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
                         record,
                         manifest.get("companions", []),
                         want_dir,
+                        MAIN_LAUNCH[op],
                     )
                     continue
-                if manifest.get("companions") and record["knobs"].get("reduce_symbol"):
+                if _launches_companions(manifest.get("companions", []), record):
                     problems.append(
-                        f"{where}: {name} stores dB through a standalone reduce object "
+                        f"{where}: {name} launches companion objects "
                         "but ships as one launch"
                     )
                 if provenance.get("origin_kind") != "hsaco":

@@ -553,9 +553,10 @@ class BwdDkDvInputMetadata:
     # scalar loads.
     #
     # **This is a tuning record, not a build axis, and it does not reach
-    # emitted code.** The kernel decodes the layout from `VarlenBits` at
-    # runtime (`lse_row_addressing`) and picks one of two row-read arms once,
-    # outside the tile loop, so one build serves either layout. The choice sits
+    # emitted code.** The merged kernel reads the caller's Stats through their
+    # token stride at runtime and picks one of two row-read arms once, outside
+    # the tile loop, so one build serves either layout; the split kernels read
+    # the pitch-1 workspace. The choice sits
     # outside the loop because a branch *inside* the row read is a scheduling
     # barrier the loads cannot be hoisted across. The field is kept here and in
     # the cache key so a build records which layout it was tuned against;
