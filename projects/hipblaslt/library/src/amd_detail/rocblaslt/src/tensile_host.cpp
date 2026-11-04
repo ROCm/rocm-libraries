@@ -50,6 +50,7 @@
 #include "rocroller_host.hpp"
 #endif
 #include "include/mx_scale_setup.hpp"
+#include "include/rocroller_kernel_select.hpp"
 #include "include/rocroller_selected.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
