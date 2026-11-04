@@ -205,8 +205,8 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
 // structs is null-safe and leaves size == 0 with every device pointer null.
 TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 {
-    _rocsparse_adaptive_info adaptive;
-    _rocsparse_lrb_info      lrb;
+    _rocsparse_adaptive_info       adaptive;
+    _rocsparse_lrb_info            lrb;
     _rocsparse_csrmv_nnzsplit_info nnzsplit;
 
     adaptive.clear();

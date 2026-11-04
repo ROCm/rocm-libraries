@@ -36,8 +36,8 @@
  *******************************************************************************/
 typedef struct _rocsparse_csrmv_info
 {
-    _rocsparse_adaptive_info adaptive{};
-    _rocsparse_lrb_info      lrb{};
+    _rocsparse_adaptive_info       adaptive{};
+    _rocsparse_lrb_info            lrb{};
     _rocsparse_csrmv_nnzsplit_info nnzsplit{};
 
     // some data to verify correct execution
