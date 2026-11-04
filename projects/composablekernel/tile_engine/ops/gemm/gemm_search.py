@@ -12,9 +12,11 @@ driver's own build and measure functions, which the driver passes in as
   among those);
 - builds: ``setup_multiple_gemm_dispatchers`` on the round's missing kernels,
   verbose like a full run's, with the search's limit per build step
-  (``build_timeout_s``, else ``SEARCH_BUILD_TIMEOUT_S``); each built .so goes
-  into the run's ``ArtifactStore`` as ``<out>/artifacts/<name>.so``, and each
-  call's full build errors go to ``<out>/rounds/NNNN-build.json``;
+  (``build_timeout_s``; else ``SEARCH_BUILD_TIMEOUT_S`` when they are all
+  native, and the build function's own limits when one has fixed vector
+  widths); each built .so goes into the run's ``ArtifactStore`` as
+  ``<out>/artifacts/<name>.so``, and each call's limit and full build errors
+  go to ``<out>/rounds/NNNN-build.json``;
 - measurements: ``benchmark_on_devices`` with --verify on, one kernel per worker
   and one problem entry per request, so every row and failure record belongs to
   exactly one request; the worker also checks that the library reports the
@@ -97,10 +99,13 @@ RUN_STATUS = {
 VERIFY_HOST_FLOPS = 5e10
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # A search round measures once all its builds end, so a kernel that never
-# builds holds the round for the whole limit (a full run keeps 300 s per
-# step). 180 s per step: 1.6x the slowest gfx950 fp16 build outside the one
-# slow-compiling class (warp tile 4x64x16), see "Build timeout" in README.md;
-# ``build_timeout_s`` overrides it.
+# builds holds the round for its whole limit (a full run keeps the build
+# function's: 300 s per step, 1200 s to compile a fixed-vector-width kernel).
+# 180 s per step: 1.6x the slowest gfx950 fp16 native build outside the one
+# slow-compiling class (warp tile 4x64x16), see "Build timeout" in README.md.
+# It applies to a round of native kernels only: fixed-width compile times were
+# not measured, and a round that builds one waits for its longer limit anyway.
+# ``build_timeout_s`` replaces it, for every kernel.
 SEARCH_BUILD_TIMEOUT_S = 180
 
 
@@ -206,12 +211,12 @@ class GemmSearchAdapter:
     ``eligible[i]`` lists the kernel names ``problems[i]`` may run, in order;
     ``worker`` is the driver's ``(worker_path, base_env)``; ``context`` adds
     the driver's build context (arch, layout, variant, configs) to run.json;
-    ``build_timeout`` (seconds) limits each step of a kernel's build.
+    ``build_timeout`` (seconds) limits each step of every kernel's build, and
+    ``None`` means the search default (``_build_timeout_for``).
     """
 
     def __init__(self, args, hooks: DriverHooks, problems, configs, eligible,
-                 devices, worker, out_dir, context=None,
-                 build_timeout=SEARCH_BUILD_TIMEOUT_S):
+                 devices, worker, out_dir, context=None, build_timeout=None):
         if len(problems) != len(eligible):
             raise ValueError(f"{len(problems)} problems, {len(eligible)} pair lists")
         self.args = args
@@ -254,8 +259,9 @@ class GemmSearchAdapter:
         domain = {k: [c.kernel_name for c in v] for k, v in self.eligible.items()}
         notes = ["candidates are the pairs a full run measures when every kernel builds"]
         if not a.no_vector_fallback:
-            notes.append("the fixed-vector-width kernels a full run falls back to "
-                         "when a native kernel fails to build are not candidates")
+            notes.append("fixed-vector-width kernels are candidates where a full run "
+                         "pairs them; one a full run measures only because its native "
+                         "kernel failed to build is not")
         if a.pairs:
             notes.append(f"--pairs {a.pairs} restricts the problems to its keys and "
                          "the candidates to its pairs")
@@ -277,7 +283,11 @@ class GemmSearchAdapter:
                             "timeout_s": "kernel_timeout + ceil(2*M*N*K / "
                                          f"{VERIFY_HOST_FLOPS:g}) per call",
                             "check_identity": True},
-            "build": {"workers": a.workers, "build_timeout": self.build_timeout},
+            "build": {"workers": a.workers,
+                      "build_timeout": self.build_timeout or SEARCH_BUILD_TIMEOUT_S,
+                      "build_timeout_applies_to": "every kernel" if self.build_timeout
+                      else "rounds of native kernels only; a round with a fixed-vector-"
+                           "width kernel keeps the build function's limits"},
             **source_info(files, domain),
             "domain_notes": notes,
         }
@@ -285,18 +295,27 @@ class GemmSearchAdapter:
     def enumerate_eligible(self) -> Dict[str, List[Candidate]]:
         return {k: list(v) for k, v in self.eligible.items()}
 
+    def _build_timeout_for(self, cands: Sequence[Candidate]) -> Optional[int]:
+        """The limit per build step of one build call over ``cands``: the
+        given ``build_timeout``; else SEARCH_BUILD_TIMEOUT_S when every kernel
+        is native, and None (the build function's own limits, as in a full
+        run) when one has fixed vector widths."""
+        fixed = any(any(c.original_config.vector_sizes) for c in cands)
+        return self.build_timeout or (None if fixed else SEARCH_BUILD_TIMEOUT_S)
+
     def build_missing(self, cands: Sequence[Candidate]) -> Dict[str, BuildResult]:
         errors: Dict[str, str] = {}
+        limit = self._build_timeout_for(cands)
         paths = self.hooks.build(
             [c.original_config for c in cands], verbose=True,
-            max_workers=self.args.workers, errors=errors,
-            build_timeout=self.build_timeout,
+            max_workers=self.args.workers, errors=errors, build_timeout=limit,
         )
         if len(paths) != len(cands):
             raise RuntimeError(f"build returned {len(paths)} paths for {len(cands)} kernels")
         log = self.calls.new("build", ".json")
         self.calls.write_json(log, {
             "kernels": [c.kernel_name for c in cands],
+            "build_timeout": limit,
             "errors": {c.kernel_name: str(errors.get(c.kernel_name, ""))[:BUILD_ERROR_CHARS]
                        for c, lib in zip(cands, paths) if lib is None},
         })
@@ -372,7 +391,7 @@ def run_gemm_search(args, settings: SearchSettings, hooks: DriverHooks, *,
     """The driver's search mode (``adaptive_search.run_search``): its exit code."""
     adapter = GemmSearchAdapter(args, hooks, problems, configs, eligible, devices,
                                 worker, args.search_output_dir, context,
-                                settings.build_timeout_s or SEARCH_BUILD_TIMEOUT_S)
+                                settings.build_timeout_s)
     return adaptive_search.run_search(adapter, settings, args.search_output_dir,
                                       devices, pair_loader=hooks.load_pairs,
                                       prior_loader=read_ranked_csv)

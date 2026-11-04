@@ -158,10 +158,10 @@ def _hooks(build, measure=drv.benchmark_on_devices):
 
 
 def _adapter(tmp_path, build, measure=drv.benchmark_on_devices, problems=(P1, P2),
-             eligible=None, devices=("0",), timeout=None, **args):
+             eligible=None, devices=("0",), timeout=None, configs=CFGS, **args):
     eligible = eligible or [[A, B, C, D]] * len(problems)
     return GS.GemmSearchAdapter(
-        _args(**args), _hooks(build, measure), list(problems), CFGS, eligible,
+        _args(**args), _hooks(build, measure), list(problems), configs, eligible,
         list(devices), (Path("worker.py"), {}), tmp_path / "out", {"arch": "gfx950"},
         **({} if timeout is None else {"build_timeout": timeout}),
     )
@@ -317,15 +317,37 @@ def test_build_gets_the_driver_options_and_reports_one_line(
     res = ad.build_missing([ad.cands[n] for n in (A, B)])
     assert tc.builds == [{"names": [A, B], "verbose": True, "max_workers": 5,
                           "build_timeout": used}]
-    assert ad.context()["build"] == {"workers": 5, "build_timeout": used}
+    build = ad.context()["build"]
+    assert (build["workers"], build["build_timeout"]) == (5, used)
+    assert build["build_timeout_applies_to"].startswith(
+        "every kernel" if timeout else "rounds of native kernels only")
     assert res[B] == AS.BuildResult(None, "Compile failed: k.cpp:1:2: error: boom")
     # The one-line reason goes to the events; the full error is kept on disk.
     log = json.loads((tmp_path / "out" / "rounds" / "0001-build.json").read_text())
-    assert log == {"kernels": [A, B],
+    assert log == {"kernels": [A, B], "build_timeout": used,
                    "errors": {B: "Compile failed: k.cpp:1:2: error: boom\nmore"}}
     art = tmp_path / "out" / "artifacts" / f"{A}.so"
     assert res[A] == AS.BuildResult(str(art), digest=hashlib.sha256(
         A.encode()).hexdigest())
+
+
+@pytest.mark.parametrize("timeout, used", [(None, [180, None, None]), (900, [900] * 3)])
+def test_fixed_width_kernels_keep_the_build_functions_limits(
+    tmp_path, monkeypatch, timeout, used
+):
+    # The search's default was derived from native kernels only: a build call
+    # holding a fixed-vector-width kernel passes no limit, so the build
+    # function keeps its own (1200 s to compile that kernel, as in a full run).
+    # A given build_timeout_s applies to every kernel.
+    fixed = replace(CFGS[0], vector_size_a=4, vector_size_b=4, vector_size_c=4)
+    tc = Toolchain(tmp_path, monkeypatch)
+    ad = _adapter(tmp_path, tc.build, problems=(P1,), eligible=[[A, B, fixed.name]],
+                  configs=CFGS + [fixed], timeout=timeout)
+    for names in ([A], [fixed.name], [B, fixed.name]):
+        ad.build_missing([ad.cands[n] for n in names])
+    assert [b["build_timeout"] for b in tc.builds] == used
+    logs = sorted((tmp_path / "out" / "rounds").glob("*-build.json"))
+    assert [json.loads(p.read_text())["build_timeout"] for p in logs] == used
 
 
 def test_build_returning_the_wrong_number_of_paths_is_refused(tmp_path, monkeypatch):

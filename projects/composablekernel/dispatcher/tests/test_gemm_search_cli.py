@@ -58,7 +58,8 @@ def _main(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
           devices=("0",), build_kw=None):
     """Run the driver with a stub build (real files, so the search can copy
     them) and a stub GPU runner; ``bad`` names fail verification ("*": all),
-    ``build_kw`` gets each build call's keyword arguments.
+    ``build_kw`` gets each build call's keyword arguments, plus "fixed": which
+    of its kernels have fixed vector widths.
     Returns (rc, out, built names, calls)."""
     libs = tmp_path / "libs"
     libs.mkdir(exist_ok=True)
@@ -66,7 +67,7 @@ def _main(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
 
     def build(cfgs, **kw):
         if build_kw is not None:
-            build_kw.append(kw)
+            build_kw.append({**kw, "fixed": [any(c.vector_sizes) for c in cfgs]})
         built.extend(c.name for c in cfgs)
         for c in cfgs:
             (libs / f"lib{c.name}.so").write_text(c.name)
@@ -250,17 +251,25 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
         (p["M"], p["N"], p["K"], winners[k][0]) for k, p in zip(KEYS, PROBLEMS)}
 
 
-@pytest.mark.parametrize("extra, want", [({}, 180), ({"build_timeout_s": 600}, 600)])
-def test_search_has_its_own_build_timeout(monkeypatch, capsys, tmp_path, extra, want):
+@pytest.mark.parametrize("problems", [PROBLEMS, [MISALIGNED], PROBLEMS[:1] + [MISALIGNED]],
+                         ids=["aligned", "misaligned", "mixed"])
+@pytest.mark.parametrize("extra", [{}, {"build_timeout_s": 600}], ids=["default", "set"])
+def test_search_has_its_own_build_timeout(monkeypatch, capsys, tmp_path, extra, problems):
     # A round measures once all its builds end: the search limits each build
-    # step itself (180 s by default, or build_timeout_s); a full run's build
-    # call is unchanged (the 300 s limits of the build function).
+    # step itself. Its 180 s default comes from native kernels, so a build call
+    # with a fixed-vector-width kernel (the only kind MISALIGNED pairs with)
+    # keeps the build function's limits (None: 1200 s for that compile, as in a
+    # full run); build_timeout_s applies to every kernel. A full run's build
+    # call is unchanged.
     kws = []
     rc, cap, built, _, out = _search(monkeypatch, capsys, tmp_path, build_kw=kws,
-                                     **extra)
+                                     problems=problems, **extra)
     assert rc == 0 and built and kws, cap.out
-    assert all(k["build_timeout"] == want for k in kws)
-    assert _read(out, "run.json")["context"]["build"]["build_timeout"] == want
+    assert any(any(k["fixed"]) for k in kws) == (MISALIGNED in problems)
+    given = extra.get("build_timeout_s")
+    assert [k["build_timeout"] for k in kws] == [
+        given or (None if any(k["fixed"]) else 180) for k in kws]
+    assert _read(out, "run.json")["context"]["build"]["build_timeout"] == (given or 180)
     kws.clear()
     rc, _, built, _ = _main(monkeypatch, capsys, tmp_path, build_kw=kws)
     assert rc == 0 and built and kws and all("build_timeout" not in k for k in kws)

@@ -194,7 +194,7 @@ python gemm_full_benchmark.py configs/default_config.json --variant gemm_univers
 | `deadline_s` | none | seconds after which no trial is admitted; the round in flight and the confirmation still finish. Without it the trial and build budgets bound the run |
 | `batch_per_problem` | `4` | trials a problem may propose per round |
 | `max_stall_rounds` | `8` | rounds in a row without a new result before the run stops |
-| `build_timeout_s` | `180` | limit for each kernel's codegen, compile and link step in the search (a full run's `--build-timeout` default is 300 s); a kernel whose step times out is a `compile_error`. See "Build timeout" below |
+| `build_timeout_s` | `180`, native kernels only | limit for each codegen, compile and link step of a kernel's build in the search; when given, it applies to every kernel. Without it, a round that builds a fixed-vector-width kernel keeps the build function's limits, as a full run does (300 s per step, 1200 s to compile a fixed-width kernel). A kernel whose step times out is a `compile_error`. See "Build timeout" below |
 | `warm_start.pairs_file`, `top_k` | none, `5` | a `--pairs` file (e.g. from `select_kernels.py --out_pairs`): the first `top_k` listed kernels of a problem are tried first |
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
@@ -245,12 +245,16 @@ Option rules:
   the search to the problems it lists, and is not a warm start. A listed
   problem none of whose listed kernels pair with it stays unresolved. A
   problem with fewer candidates than `trials_per_problem` is measured
-  exhaustively. The fixed-vector-width kernels a full run falls back to when a
-  native kernel fails to build are not candidates.
+  exhaustively. Fixed-vector-width kernels are candidates where a full run
+  pairs them: they are the only candidates of a problem whose extents the
+  native widths do not divide, and with `--tune-c-vector-width` the narrower C
+  widths join every problem's list. Not a candidate: a fixed-width kernel that
+  a full run measures on a problem only because its native kernel failed to
+  build.
 
 Build timeout: a round measures its kernels once all its builds have ended,
 so one kernel that never builds holds the whole round for the full limit.
-Per-kernel compile times of the 5520 gfx950 fp16 `rcr` kernels of
+Per-kernel compile times of the 5520 gfx950 fp16 `rcr` native kernels of
 `default_config.json`, measured with 64 compiling at once (an upper bound for
 a search round, which builds fewer at a time): the median was 30 s, and every
 kernel outside warp tile `4x64x16` built in at most 111 s. That one class holds
@@ -258,10 +262,19 @@ every slower build and all 118 kernels (2.1%) that did not build in 300 s. The
 search's default of 180 s per step keeps 1.6x headroom over 111 s and shortens
 each wait for a kernel that never builds by 120 s; the price is the 2.2% of
 kernels (all `4x64x16`) that build in 180-300 s, which become
-`compile_error`. Raise `build_timeout_s` when those kernels matter, or on a
-host that compiles much slower. A timed-out step leaves its compiler running
-until it ends (the build function stops only `hipcc`), so a run with many
-timeouts loads the host for a while longer.
+`compile_error`. The default applies to a round of native kernels only. A
+round that builds a fixed-vector-width kernel keeps the build function's
+limits, as a full run does: 300 s per step and 1200 s to compile a fixed-width
+kernel. Fixed-width compile times were not measured, and such a round waits
+for the longer limit anyway. Such rounds are the rule in a run with a problem
+the native widths do not fit (its padded fixed-width kernels also pair with
+other problems where a native tile does not divide) or with
+`--tune-c-vector-width`, so those runs keep a full run's limits. A
+`build_timeout_s` in the settings applies to every kernel of every round.
+Raise it when the slow native kernels matter, or on a host that compiles much
+slower. A timed-out step
+leaves its compiler running until it ends (the build function stops only
+`hipcc`), so a run with many timeouts loads the host for a while longer.
 
 Outputs, in a directory that must not hold an earlier run (a path that is, or
 lies under, an existing file, or whose nearest existing directory is not
@@ -274,7 +287,7 @@ writable, is refused up front with exit status `2`):
 | `run.json` | settings, build context, sources (commit, sha256 of the config and problem files), per-problem candidates, strategy and seed |
 | `trials.jsonl` | one event per trial, build, result, confirmation call, re-queue, cancel and error (with its traceback) |
 | `rounds/NNNN-measure.csv`, `rounds/NNNN-confirm.csv` | the usual results CSV of each measure call; the `.json` next to it maps `problem_idx` to the request and holds the call's failure records |
-| `rounds/NNNN-build.json` | the kernels of each build call and the full error of each that failed (`trials.jsonl` keeps its first line) |
+| `rounds/NNNN-build.json` | the kernels of each build call, its limit per step (`null`: the build function's own) and the full error of each that failed (`trials.jsonl` keeps its first line) |
 | `artifacts/<kernel>.so` | the run's copy of each built kernel; only these copies are loaded, and one that changed since its build is refused |
 
 Exit status: `0` when every problem has a confirmed winner, `1` when any has
