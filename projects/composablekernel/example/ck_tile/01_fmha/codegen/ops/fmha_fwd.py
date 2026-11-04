@@ -1832,16 +1832,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (512, 512) : [FmhaFwdTileSize( 64, 128, 512, 512, 128,  512,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_MXFP8:
-            # The MX scale operand exists only on the K128 WMMA, so MX keeps the fp8 qr_tdm tiles
-            # whose gemm0 is K128: d96 (padded to 128), d128, d256 and d512.
+            # MX runs on the fp8 qr_tdm tiles (one gemm0 K slice: bk0 == bk0max). A K64 gemm0
+            # (d32, d64, d160, d192) pairs its K steps into the K128 scaled WMMA.
             fp8_tiles = cls.get_hdim_tile_size_dict("fp8")
             return {
-                hdims: [
-                    tile
-                    for tile in fp8_tiles[hdims]
-                    if tile.F_wk0 == 128 and tile.F_bk0 == tile.F_bk0max
-                ]
-                for hdims in ((96, 96), (128, 128), (256, 256), (512, 512))
+                hdims: [tile for tile in tiles if tile.F_bk0 == tile.F_bk0max]
+                for hdims, tiles in fp8_tiles.items()
             }
         elif dtype in cls._DT_FP8FP32:
             return {

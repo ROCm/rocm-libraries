@@ -830,6 +830,94 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         });
     }
 
+    // MX gemm0 on a K64 warp tile for one N iteration: s_acc(m, NIter) += q(m) * k(KN) with E8M0
+    // scales. K64 has no scaled WMMA, but a 16x128 8-bit operand is two 16x64 ones in consecutive
+    // VGPRs (CDNA5 ISA 7.12), so K steps 2p and 2p + 1 form K128 step p; an odd last step is
+    // zero-padded. KN is the N index into k (0 for a K fragment); scales are (m, p) and (n, p).
+    template <typename Problem,
+              typename SAcc,
+              typename QTile,
+              typename KTile,
+              index_t NIter,
+              index_t KN,
+              typename QScale,
+              typename KScale>
+    CK_TILE_DEVICE static void RunQKMxNIter(SAcc& s_acc,
+                                            const QTile& q_tile,
+                                            const KTile& k_tile,
+                                            number<NIter>,
+                                            number<KN>,
+                                            const QScale& q_scale,
+                                            const KScale& k_scale)
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        using ScaledGemm =
+            WarpGemmDispatcher<typename Problem::QDataType,
+                               typename Problem::KDataType,
+                               typename Problem::SaccDataType,
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
+                               128,
+                               true>;
+        using Half = int32_t __attribute__((ext_vector_type(8)));
+        static_assert(WarpGemm::kK == 64 && BlockGemm::NWarp == 1 &&
+                          WarpGemm::AWarpTensor::get_thread_buffer_size() == sizeof(Half) &&
+                          WarpGemm::BWarpTensor::get_thread_buffer_size() == sizeof(Half),
+                      "MX K64 gemm0: 8-bit K64 operands of 8 dwords, one N warp");
+        constexpr index_t kKIter = BlockGemm::KIterPerWarp;
+
+        using AWarpDstr       = typename WarpGemm::AWarpDstr;
+        using BWarpDstr       = typename WarpGemm::BWarpDstr;
+        using CWarpDstr       = typename WarpGemm::CWarpDstr;
+        constexpr auto a_len  = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_len  = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_len  = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_zero = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_zero = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_zero = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        // K step k of an operand as 8 dwords; past the last step, zeros.
+        auto a_half = [&](auto i_m, auto i_k) {
+            if constexpr(decltype(i_k)::value < kKIter)
+                return bit_cast<Half>(q_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<decltype(i_m)::value, decltype(i_k)::value>{}, a_zero),
+                    merge_sequences(sequence<1, 1>{}, a_len)));
+            else
+                return Half{};
+        };
+        auto b_half = [&](auto i_k) {
+            if constexpr(decltype(i_k)::value < kKIter)
+                return bit_cast<Half>(k_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<KN, decltype(i_k)::value>{}, b_zero),
+                    merge_sequences(sequence<1, 1>{}, b_len)));
+            else
+                return Half{};
+        };
+
+        static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            constexpr index_t m = decltype(i_m)::value;
+            typename ScaledGemm::CWarpTensor c;
+            c.get_thread_buffer() =
+                s_acc.get_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                               merge_sequences(sequence<1, 1>{}, c_len));
+            static_for<0, integer_divide_ceil(kKIter, 2), 1>{}([&](auto i_p) {
+                constexpr index_t k = 2 * decltype(i_p)::value;
+                typename ScaledGemm::AWarpTensor a;
+                typename ScaledGemm::BWarpTensor b;
+                a.get_thread_buffer().template set_as<Half>(number<0>{}, a_half(i_m, number<k>{}));
+                a.get_thread_buffer().template set_as<Half>(number<1>{},
+                                                            a_half(i_m, number<k + 1>{}));
+                b.get_thread_buffer().template set_as<Half>(number<0>{}, b_half(number<k>{}));
+                b.get_thread_buffer().template set_as<Half>(number<1>{}, b_half(number<k + 1>{}));
+                ScaledGemm{}(c, a, b, q_scale(i_m, i_p), k_scale(number<NIter>{}, i_p));
+            });
+            s_acc.set_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                           merge_sequences(sequence<1, 1>{}, c_len),
+                                           c.get_thread_buffer());
+        });
+    }
+
     // gemm1 (P * V) for one 16-column V fragment: o_acc(m, n) += p(m) * v_frag for every M
     // iteration, the PV block gemm's KMN step at a single nIter = NIter. scales is (P scale, V
     // scale), each a scale functor or the block gemm's no_scale.
@@ -1113,11 +1201,12 @@ struct QrTdmLdsArenaLayout
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
     // MX: the TDM-loaded E8M0 scales of a KV tile, one byte per 32 K elements, ping-ponged like
-    // K / V: K as [kN0][kK0 / 32], V as [kN1][kK1 / 32]. Q's scales borrow K0's scale region.
+    // K / V: K as [kN0][4 per K128 step] (a K64 head dim pads its row to one step), V as
+    // [kN1][kK1 / 32]. Q's scales borrow K0's scale region.
     static constexpr bool kMx = Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX;
     static constexpr index_t kMxScaleGranularity = 32;
     static constexpr index_t kMxKScaleBytes =
-        kMx ? Shape::kN0 * Shape::kK0 / kMxScaleGranularity : 0;
+        kMx ? Shape::kN0 * integer_divide_ceil(Shape::kK0, 4 * kMxScaleGranularity) * 4 : 0;
     static constexpr index_t kMxVScaleBytes =
         kMx ? Shape::kN1 * Shape::kK1 / kMxScaleGranularity : 0;
     static constexpr index_t kMxKScale0Offset =
