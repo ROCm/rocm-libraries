@@ -540,6 +540,82 @@ def test_an_also_section_must_cross_the_same_cell_fields(probe):
     assert _run_probe(probe, manifest) == 2
 
 
+# ---------------------------------------------------------------------------
+# enumerate.also spec_overrides: twins of the primary's kernels with one spec field
+# the registry never selects (e.g. an LSE output) set on
+# ---------------------------------------------------------------------------
+
+
+def _twin_section(**overrides) -> dict:
+    """The primary's own pin and cells, one kernel per cell (no free fields), with
+    ``order`` overridden and a template of its own."""
+    section = {
+        "pin": {"algorithm": "probe", "spec_id": "grid"},
+        "fixed": {"arch": synth.ARCH, "dtype": "bf16"},
+        "cells": copy.deepcopy(synth.probe_manifest("unused")["enumerate"]["cells"]),
+        "free_fields": [],
+        "spec_overrides": {"order": "col"},
+        "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}_col",
+    }
+    section.update(overrides)
+    return section
+
+
+def _with_twins(probe, **overrides) -> dict:
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["also"] = [_twin_section(**overrides)]
+    return manifest
+
+
+def test_spec_overrides_add_twins_and_leave_the_primary_unchanged(probe):
+    """One twin per cell, named by the section's template and built with the
+    override; every primary kernel keeps its name, spec and default marker."""
+    assert _run_probe(probe) == 0
+    primary = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    both = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert both[: len(primary)] == primary
+    twins = both[len(primary) :]
+    assert len(twins) == 4
+    assert all(k["name"].endswith("_col") for k in twins)
+    assert all(k["kernel_source"]["spec"]["order"] == "col" for k in twins)
+
+
+def test_a_twin_section_keeps_its_own_default_floor(probe):
+    """The twins are their own (cell, overrides) group, so each cell's twin is a
+    default that variant reduction keeps, beside the primary's default."""
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    twins = [k for k in kernels if k["name"].endswith("_col")]
+    assert all(k.get("default") for k in twins)
+    assert sum(1 for k in kernels if k.get("default")) == 2 * len(twins)
+
+
+def test_an_override_ships_even_when_spec_fields_omit_it(probe):
+    """The override is what sets the twin apart, so its spec always carries it."""
+    manifest = _with_twins(probe, spec_fields=["dtype", "tile_m", "tile_n", "causal"])
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert kernels[-1]["kernel_source"]["spec"]["order"] == "col"
+
+
+def test_twins_without_their_own_template_collide(probe):
+    """The primary's template renders no override slot here, so twin names repeat
+    primary names: refused rather than shipped as duplicates."""
+    manifest = _with_twins(probe)
+    del manifest["enumerate"]["also"][0]["kernel_name_template"]
+    assert _run_probe(probe, manifest) == 2
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"no_such_field": 1}, {}, ["order"], {"order": ["col"]}],
+    ids=["unknown-field", "empty", "not-a-mapping", "non-scalar"],
+)
+def test_bad_spec_overrides_are_refused(probe, overrides):
+    assert _run_probe(probe, _with_twins(probe, spec_overrides=overrides)) == 2
+
+
 def _full(manifest: dict) -> dict:
     """``manifest`` as a full space: ``tile_n`` a performance knob, ``order`` resolved
     by its accessor, every other varying field held."""
