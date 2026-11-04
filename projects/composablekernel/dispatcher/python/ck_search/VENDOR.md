@@ -70,7 +70,8 @@ above), `db.py`, `driver.py`, `measure.py`, `halving.py`, `knobspace.py`,
   `options["members"]`, and there is no fidelity ladder (only the
   multi-fidelity strategies, not vendored, use it). Behaviour difference:
   with more distinct warm starts than DE's `pop_size`, upstream drops the
-  extra ones; here the first population grows to hold them all, so every
+  extra ones; here DE's population size (the size of every generation, not
+  only the first) grows to the number of distinct warm starts, so every
   requested warm start is measured before DE evolves. On a config list
   (`SearchSpace.from_configs`), `exhaustive` asks the same trials in the same
   order as upstream but steps through the sorted listed genomes instead of
