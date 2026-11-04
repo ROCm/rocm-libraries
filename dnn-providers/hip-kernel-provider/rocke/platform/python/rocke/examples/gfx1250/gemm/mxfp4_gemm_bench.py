@@ -5,8 +5,10 @@
 Every configuration is the cartesian product of the ``--tile``,
 ``--wave-group``, ``--cluster`` and tuning options (each takes a comma
 list). For each one: compile, report code-object resources (VGPR, SGPR,
-spills, scratch, LDS) and the WMMA count, require bit-exact output at
-``beta = 0`` and ``beta = 0.5``, then time the ``beta = 0`` path as
+spills, scratch, LDS) and the WMMA count, require bit-exact output at ``beta = 0``
+and ``beta = 0.5`` on two input sets (``--check-data``: FP4 0 / +1 over all
+of K, and all E2M1 values in a few K-steps), then time the ``beta = 0`` path,
+on hipBLASLt's MAF benchmark data by default (``--timing-inputs``), as
 ``mxfp4_tdm_gemm_variants_bench`` does (batched enqueues and the median of
 event-timed launches). ``--base`` also times the Step 6.14 kernel of
 ``mxfp4_tdm_gemm`` on the same problem before and after the configurations,
@@ -32,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ....examples.common.scaled_gemm_reference import decode_e8m0
+from ....examples.common.scaled_gemm_reference import decode_e8m0, pack_fp4_codes
 from ....helpers.compile import compile_kernel
 from ....instances.gfx1250.mxfp4_gemm import (
     LdsPad,
@@ -57,9 +59,18 @@ from .mxfp4_tdm_gemm_variants_bench import _resources, tensile_timing_inputs
 BASE_VARIANT = "step6_14_mxfp4_gemm"
 YAML_PROBLEM = (4096, 4096, 65536)
 SMOKE_PROBLEM = (1024, 1024, 2048)
-_FP4_ONE = 2
-_FP4_MINUS_ONE = 10
 _FP8_MAX = 448.0
+_E2M1 = np.array(
+    [0, 0.5, 1, 1.5, 2, 3, 4, 6, -0.0, -0.5, -1, -1.5, -2, -3, -4, -6],
+    dtype=np.float32,
+)
+_WMMA_K = 128
+CHECK_DATA = ("exact", "sparse")
+# 128-K steps that hold data in the sparse check. Products are multiples of
+# 2^-6 (E2M1 0.5, E8M0 2^-2) up to 144 (6 * 6 * 2 * 2), so every FP32
+# partial sum is exact while SPARSE_STEPS * 128 * 144 * 2^6 < 2^24.
+SPARSE_STEPS = 12
+SPARSE_ALPHA = 2.0**-6
 
 FIELDS = [
     "config",
@@ -97,6 +108,52 @@ def check_inputs(spec: MxFp4GemmSpec, *, signed: bool = False):
     return tuple(inputs)
 
 
+def sparse_steps(spec: MxFp4GemmSpec) -> np.ndarray:
+    """The 128-K steps of the sparse check: the first and last, both sides
+    of the first and last tile boundaries, then random steps up to
+    ``SPARSE_STEPS``."""
+    steps = -(-spec.K // _WMMA_K)
+    per_tile = spec.tile_k // _WMMA_K
+    last_tile = (steps - 1) // per_tile * per_tile
+    fixed = {0, steps - 1, per_tile - 1, per_tile, last_tile - 1, last_tile}
+    chosen = sorted(s for s in fixed if 0 <= s < steps)
+    rest = np.setdiff1d(np.arange(steps), chosen)
+    extra = max(0, min(SPARSE_STEPS - len(chosen), len(rest)))
+    rng = np.random.default_rng(0x5BA5)
+    return np.union1d(chosen, rng.choice(rest, size=extra, replace=False))
+
+
+def sparse_inputs(spec: MxFp4GemmSpec):
+    """Random codes of all 16 E2M1 values and E8M0 scales 2^-2..2^1 in the
+    ``sparse_steps`` K-steps, zero elsewhere; C uniform in [-2, 2]. The FP32
+    sums are exact in any order, so the check stays bit-exact at any K.
+    ``make_inputs``' layout: packed A, B, scales, C, then the codes."""
+    rng = np.random.default_rng(0x5BA6)
+    k_index = np.concatenate(
+        [
+            np.arange(s * _WMMA_K, min(spec.K, (s + 1) * _WMMA_K))
+            for s in sparse_steps(spec)
+        ]
+    )
+    codes = []
+    for rows in (spec.M, spec.N):
+        full = np.zeros((rows, spec.K), dtype=np.uint8)
+        full[:, k_index] = rng.integers(0, 16, (rows, len(k_index)), dtype=np.uint8)
+        codes.append(full)
+    groups = spec.K // spec.block_k
+    a_scale = rng.integers(125, 129, (spec.M, groups), dtype=np.uint8)
+    b_scale = rng.integers(125, 129, (groups, spec.N), dtype=np.uint8)
+    c = rng.uniform(-2.0, 2.0, (spec.M, spec.N)).astype(np.float32)
+    return (
+        pack_fp4_codes(codes[0]),
+        pack_fp4_codes(codes[1]),
+        a_scale,
+        b_scale,
+        c.astype(_out_numpy_dtype(spec.out_dtype)),
+        *codes,
+    )
+
+
 def _pad_scale_groups(scales_mn_k: np.ndarray) -> np.ndarray:
     """Zero-pad ``[MN][K/32]`` scales to whole 128-K steps, as hipBLASLt's
     ``preSwizzleScalesGFX1250`` does when 128 does not divide K."""
@@ -120,7 +177,9 @@ def reference(
     spec: MxFp4GemmSpec, inputs, *, alpha, beta, rows=None, cols=None
 ) -> np.ndarray:
     """FP32 grouped-scale reference rounded to ``spec.out_dtype`` the way the
-    kernel stores it (FP8 saturating, FP16/BF16 round to nearest even).
+    kernel stores it (FP8 saturating, FP16/BF16 round to nearest even). It is
+    exact for ``check_inputs`` and ``sparse_inputs``: their FP32 partial sums
+    are exact. All-zero K groups of A are skipped.
 
     ``rows`` and ``cols`` (index arrays) restrict it to that block of D."""
     _, _, a_scale, b_scale, c, a_codes, b_codes = inputs
@@ -128,15 +187,16 @@ def reference(
         a_codes, a_scale, c = a_codes[rows], a_scale[rows], c[rows]
     if cols is not None:
         b_codes, b_scale, c = b_codes[cols], b_scale[:, cols], c[:, cols]
-    a = (a_codes == _FP4_ONE).astype(np.float32) - (a_codes == _FP4_MINUS_ONE)
-    b = (b_codes == _FP4_ONE).astype(np.float32) - (b_codes == _FP4_MINUS_ONE)
     sa = decode_e8m0(a_scale).astype(np.float32)
     sb = decode_e8m0(b_scale).astype(np.float32)
-    out = np.zeros((a.shape[0], b.shape[0]), dtype=np.float32)
+    out = np.zeros((a_codes.shape[0], b_codes.shape[0]), dtype=np.float32)
     for group in range(spec.K // spec.block_k):
         begin, end = group * spec.block_k, (group + 1) * spec.block_k
-        out += (a[:, begin:end] * sa[:, group, None]) @ (
-            b[:, begin:end] * sb[group, :, None]
+        a_group = a_codes[:, begin:end]
+        if not a_group.any():
+            continue
+        out += (_E2M1[a_group] * sa[:, group, None]) @ (
+            _E2M1[b_codes[:, begin:end]] * sb[group, :, None]
         ).T
     out = np.float32(alpha) * out + np.float32(beta) * c.astype(np.float32)
     if spec.out_dtype == "fp8e4m3":
@@ -311,19 +371,29 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
         rows, cols = verify_block(spec, args.samples)
     try:
         failed = []
-        for beta in args.check_betas:
-            launcher.launch(launcher.arguments(m, n, k, alpha, beta))
-            got = np.frombuffer(launcher.output(), dtype=np.uint8).reshape(m, n, -1)
-            expected = reference(
-                spec, inputs, alpha=alpha, beta=beta, rows=rows, cols=cols
-            )
-            if rows is not None:
-                got = got[np.ix_(rows, cols)]
-            expected = expected.view(np.uint8).reshape(got.shape)
-            if not _check(
-                spec, got, expected, verify=args.verify, samples=args.samples
-            ):
-                failed.append(f"beta={beta:g}")
+        for kind in args.check_data:
+            data, data_alpha = inputs, alpha
+            if kind == "sparse":
+                data, data_alpha = sparse_inputs(spec), np.float32(SPARSE_ALPHA)
+                for index, array in enumerate(device_inputs(data)):
+                    launcher.upload(index, array)
+            for beta in args.check_betas:
+                launcher.launch(launcher.arguments(m, n, k, data_alpha, beta))
+                got = np.frombuffer(launcher.output(), dtype=np.uint8)
+                got = got.reshape(m, n, -1)
+                expected = reference(
+                    spec, data, alpha=data_alpha, beta=beta, rows=rows, cols=cols
+                )
+                if rows is not None:
+                    got = got[np.ix_(rows, cols)]
+                expected = expected.view(np.uint8).reshape(got.shape)
+                if not _check(
+                    spec, got, expected, verify=args.verify, samples=args.samples
+                ):
+                    failed.append(f"{kind} beta={beta:g}")
+            if kind == "sparse":
+                for index, array in enumerate(device_inputs(inputs)):
+                    launcher.upload(index, array)
         if failed:
             return "FAIL:" + ",".join(failed), None, None
         if args.check_only:
@@ -344,7 +414,8 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
 
 def run_case(spec: MxFp4GemmSpec, *, betas=(0.0, 0.5)) -> str:
     """Compile and launch ``spec`` on visible device 0 (gfx1250) and require
-    bit-exact output at each beta. Returns the kernel name."""
+    bit-exact output on both ``--check-data`` input sets at each beta. Returns the kernel name.
+    """
     from ....runtime.hip_module import Runtime, get_device_arch
 
     reason = validate(spec)
@@ -355,7 +426,11 @@ def run_case(spec: MxFp4GemmSpec, *, betas=(0.0, 0.5)) -> str:
         raise RuntimeError(f"visible HIP device 0 must be gfx1250, got {arch!r}")
     artifact = compile_kernel(build_mxfp4_gemm(spec), arch=arch, backend="python")
     args = argparse.Namespace(
-        check_betas=list(betas), verify="full", samples=0, check_only=True
+        check_betas=list(betas),
+        check_data=CHECK_DATA,
+        verify="full",
+        samples=0,
+        check_only=True,
     )
     check, _, _ = _run(
         spec,
@@ -472,6 +547,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", action="store_true", help=f"time {BASE_VARIANT} too")
     parser.add_argument("--check-betas", default="0,0.5")
     parser.add_argument(
+        "--check-data",
+        default=",".join(CHECK_DATA),
+        help="comma list: exact (FP4 0 / +1 over all of K), sparse (all E2M1 "
+        f"values, E8M0 2^-2..2^1, in up to {SPARSE_STEPS} 128-K steps); both "
+        "bit-exact",
+    )
+    parser.add_argument(
         "--verify",
         choices=("full", "sampled", "block"),
         default=None,
@@ -504,6 +586,9 @@ def main(argv: list[str] | None = None) -> int:
     m, n, k = args.m or m, args.n or n, args.k or k
     args.verify = args.verify or ("full" if args.shape == "smoke" else "sampled")
     args.check_betas = [float(x) for x in args.check_betas.split(",") if x.strip()]
+    args.check_data = [x.strip() for x in args.check_data.split(",") if x.strip()]
+    if not args.check_data or set(args.check_data) - set(CHECK_DATA):
+        parser.error(f"--check-data must be a comma list of {CHECK_DATA}")
 
     runtime = None
     arch = "gfx1250"

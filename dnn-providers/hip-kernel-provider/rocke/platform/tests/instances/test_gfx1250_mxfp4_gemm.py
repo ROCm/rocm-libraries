@@ -11,12 +11,18 @@ import unittest
 
 import numpy as np
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.examples.common.scaled_gemm_reference import decode_e8m0
 from rocke.examples.gfx1250.gemm.mxfp4_gemm_bench import (
+    _E2M1,
+    SPARSE_ALPHA,
+    SPARSE_STEPS,
     check_inputs,
     device_inputs,
     loop_scratch_ops,
     reference,
     run_case,
+    sparse_inputs,
+    sparse_steps,
     verify_block,
 )
 from rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm import YAML_TILE
@@ -565,6 +571,77 @@ class MxFp4GemmBenchReferenceTest(unittest.TestCase):
             self.assertTrue((swizzled[4, :, 3] == 0).all())
             self.assertTrue(np.array_equal(swizzled[4, :, :3], canonical[:, 16:19]))
             self.assertTrue(np.array_equal(swizzled[0], canonical[:, :4]))
+
+
+class MxFp4GemmSparseCheckTest(unittest.TestCase):
+    """All E2M1 values in a few K-steps: exact FP32 sums at any K."""
+
+    def _values(self, spec, data):
+        """Float64 A and B with their scales applied."""
+        _, _, a_scale, b_scale, _, a_codes, b_codes = data
+        e2m1 = _E2M1.astype(np.float64)
+        x = e2m1[a_codes] * np.repeat(decode_e8m0(a_scale), spec.block_k, axis=1)
+        y = e2m1[b_codes] * np.repeat(decode_e8m0(b_scale).T, spec.block_k, axis=1)
+        return x, y
+
+    def test_steps_hold_the_k_edges_and_tile_boundaries(self):
+        spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128)
+        steps = sparse_steps(spec)
+        self.assertEqual(len(steps), SPARSE_STEPS)
+        self.assertTrue({0, 3, 4, 15, 16} <= set(steps.tolist()))
+        self.assertEqual(sparse_steps(_spec(64, 48, 256, tile_k=128)).tolist(), [0, 1])
+
+    def test_inputs_cover_all_codes_and_are_zero_elsewhere(self):
+        spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128)
+        data = sparse_inputs(spec)
+        active = np.zeros(spec.K, dtype=bool)
+        for step in sparse_steps(spec):
+            active[step * 128 : (step + 1) * 128] = True
+        for codes in data[5:]:
+            self.assertEqual(set(np.unique(codes[:, active])), set(range(16)))
+            self.assertFalse(codes[:, ~active].any())
+        self.assertEqual(
+            set(np.unique(data[2])) | set(np.unique(data[3])), {125, 126, 127, 128}
+        )
+
+    def test_fp32_sums_are_exact_in_any_order(self):
+        self.assertLess(SPARSE_STEPS * 128 * 144 * 2**6, 2**24)
+        spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128)
+        x, y = self._values(spec, sparse_inputs(spec))
+        exact = x @ y.T
+        for order in (1, -1):
+            total = np.zeros(exact.shape, dtype=np.float32)
+            for j in range(spec.K)[::order]:
+                total += np.outer(x[:, j], y[:, j]).astype(np.float32)
+            with self.subTest(order=order):
+                self.assertTrue(np.array_equal(total, exact))
+
+    def test_reference_is_the_exact_result_rounded(self):
+        for out_dtype, beta in itertools.product(OUT_DTYPES, (0.0, 0.5)):
+            spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128, out_dtype=out_dtype)
+            data = sparse_inputs(spec)
+            x, y = self._values(spec, data)
+            alpha = np.float32(SPARSE_ALPHA)
+            value = (alpha * (x @ y.T)).astype(np.float32) + np.float32(beta) * data[
+                4
+            ].astype(np.float32)
+            if out_dtype == "fp8e4m3":
+                value = np.clip(value, -448, 448)
+            expected = value.astype(reference(spec, data, alpha=alpha, beta=beta).dtype)
+            with self.subTest(out_dtype=out_dtype, beta=beta):
+                got = reference(spec, data, alpha=alpha, beta=beta)
+                self.assertEqual(got.tobytes(), expected.tobytes())
+
+    def test_a_dropped_last_step_changes_most_outputs_at_large_k(self):
+        """U8's K (109760, last step 64 wide), bf16 out."""
+        spec = _spec(64, 48, 109760, out_dtype="bf16")
+        data = list(sparse_inputs(spec))
+        alpha = np.float32(SPARSE_ALPHA)
+        good = reference(spec, data, alpha=alpha, beta=0.0)
+        data[5] = data[5].copy()
+        data[5][:, (spec.K - 1) // 128 * 128 :] = 0
+        bad = reference(spec, data, alpha=alpha, beta=0.0)
+        self.assertGreater(np.mean(good.view(np.uint16) != bad.view(np.uint16)), 0.9)
 
 
 @unittest.skipIf(shutil.which("llvm-objdump") is None, "needs llvm-objdump")
