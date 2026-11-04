@@ -189,11 +189,6 @@ documentation:
   - any-glob-to-all-files:
     - '{**/*.md,**/*.rst,**/docs/**/*,**/.readthedocs.yaml}'
 
-External CI:
-- changed-files:
-  - any-glob-to-any-file:
-    - .azuredevops/**/*
-
 github actions:
 - changed-files:
   - any-glob-to-any-file:
