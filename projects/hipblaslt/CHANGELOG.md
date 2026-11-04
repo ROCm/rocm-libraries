@@ -96,6 +96,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.
 * The logger's destructor called `close()` on the log file, which throws out of a destructor and terminates the process at exit when the log file has failed, for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a failing `HIPBLASLT_LOG_FILE`.
 * `hipblasLtMatmul` with no `algo` could return success for a GEMM that never launched. Its status already held the result of choosing the algorithm, and an exception thrown after that returned it unchanged instead of an error.
+* `hipblasLtMatmul` crashed with extended-profile logging enabled (`HIPBLASLT_LOG_MASK` bit 128) when the `algo` held a solution index the library does not have. The log looked up the kernel and solution names and dereferenced the null result. The call now returns its error status whatever the log mask is.
 
 ## hipBLASLt 1.4.1 for ROCm 7.14
 
