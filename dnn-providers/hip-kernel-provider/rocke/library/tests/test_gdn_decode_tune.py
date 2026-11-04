@@ -47,7 +47,7 @@ def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, cap
     def fake_results(request):
         return () if request.num_k_heads == 16 and request.batch == 2 else (object(),)
 
-    monkeypatch.setattr(tune, "dispatch_gdn_decode_all", fake_results)
+    monkeypatch.setattr(tune, "dispatch_gdn_decode_bases", fake_results)
     monkeypatch.setattr(
         tune,
         "sweep_registry_batch",
@@ -81,9 +81,11 @@ def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
     monkeypatch.setattr(tune, "device_is_visible", lambda: True)
     monkeypatch.setattr(
         tune,
-        "dispatch_gdn_decode_all",
+        "dispatch_gdn_decode_bases",
         lambda request: (object(), object(), object()),
     )
+    # Synthetic fixture timings, not measurements: no kernel runs here. They
+    # only need to differ, so each printed label must come from its own row.
     monkeypatch.setattr(
         tune,
         "sweep_registry_batch",
@@ -105,16 +107,20 @@ def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
 
     assert tune.main() == 0
     output = capsys.readouterr().out
-    assert "dispatcher default: 6.100us  default tile=(2, 16, 8) rank=2/3" in output
+    assert (
+        "auto tile (base configuration): 6.100us  default tile=(2, 16, 8) rank=2/3"
+        in output
+    )
     assert "fastest legal candidate: 5.000us  fast tile=(4, 16, 8)" in output
-    assert "default / fastest = 1.220x" in output
-    assert "consider DEFAULT_TILE = (4, 16, 8)" in output
+    assert "auto tile base / fastest = 1.220x" in output
+    assert "not a basis for changing AUTO_DEFAULTS" in output
+    assert "consider" not in output
 
 
 def test_main_reports_missing_gdn_default_and_continues(monkeypatch, capsys):
     monkeypatch.setattr(tune, "device_is_visible", lambda: True)
     monkeypatch.setattr(
-        tune, "dispatch_gdn_decode_all", lambda request: (object(), object())
+        tune, "dispatch_gdn_decode_bases", lambda request: (object(), object())
     )
     # Batch 1: the default failed correctness, so it never reached the rows.
     rows = {
@@ -135,28 +141,26 @@ def test_main_reports_missing_gdn_default_and_continues(monkeypatch, capsys):
 
     assert tune.main() == 1
     output = capsys.readouterr().out
-    assert (
-        "dispatcher default 'default' is NOT in the correct-and-timeable set" in output
-    )
+    assert "auto tile 'default' is NOT in the correct-and-timeable set" in output
     assert "=== Hk16/Hv32 batch 2" in output
-    assert "manual review: retain DEFAULT_TILE" in output
+    assert "not a basis for changing AUTO_DEFAULTS" in output
 
 
 def test_report_gdn_dispatcher_default_keeps_fastest_default(capsys):
     tune.report_gdn_dispatcher_default([(5.0, (2, 16, 8), "default", 0.0)], "default")
 
     assert capsys.readouterr().out.splitlines() == [
-        "  dispatcher default: 5.000us  default tile=(2, 16, 8) rank=1/1",
+        "  auto tile (base configuration): 5.000us  default tile=(2, 16, 8) rank=1/1",
         "  fastest legal candidate: 5.000us  default tile=(2, 16, 8)",
-        "  default / fastest = 1.000x",
-        "  manual review: retain DEFAULT_TILE",
+        "  auto tile base / fastest = 1.000x",
+        "  base configurations only; not a basis for changing AUTO_DEFAULTS "
+        "(ALGORITHM.md section 4.6)",
     ]
 
 
-def test_main_flags_kda_cells_with_equal_work_and_different_best_tiles(
-    monkeypatch, capsys
-):
-    """Equal batch * Hv must pick one tile, or the work-keyed table is invalid."""
+def test_main_flags_kda_cells_where_the_auto_tile_was_not_measured(monkeypatch, capsys):
+    """A KDA cell whose correct, timed rows miss the auto tile says so, and
+    the run continues with the other cells."""
     shipped = (4, 16, 4)
     monkeypatch.setattr(tune, "device_is_visible", lambda: True)
     monkeypatch.setattr(
@@ -164,10 +168,12 @@ def test_main_flags_kda_cells_with_equal_work_and_different_best_tiles(
         "dispatch_gdn_decode",
         lambda request: SimpleNamespace(
             spec=SimpleNamespace(
-                num_warps=shipped[0],
-                warp_threads_k=shipped[1],
-                blocks_per_v_dim=shipped[2],
-                num_v_heads=request.num_v_heads,
+                kernel_spec=SimpleNamespace(
+                    num_warps=shipped[0],
+                    warp_threads_k=shipped[1],
+                    blocks_per_v_dim=shipped[2],
+                    num_v_heads=request.num_v_heads,
+                )
             )
         ),
     )
@@ -196,16 +202,28 @@ def test_main_flags_kda_cells_with_equal_work_and_different_best_tiles(
 
     assert tune.main() == 0
     lines = capsys.readouterr().out.splitlines()
-    # work 128 = 4x32 (shipped wins) and 8x16 (other tile wins).
-    work_128 = next(line for line in lines if line.lstrip().startswith("128 "))
-    assert "4x32 8x16" in work_128
-    assert "TILES DISAGREE" in work_128
-    # work 64 (4x16) and 256 (8x32) each have a single cell, so no flag.
-    assert sum("TILES DISAGREE" in line for line in lines) == 1
-    assert "WARNING: work alone did not fix the best tile at 1 work value(s)." in (
-        "\n".join(lines)
+    assert sum("auto tile (4, 16, 4) is NOT in the" in line for line in lines) == 2
+
+
+def test_main_sweeps_kda_tiles_at_their_base_configuration(monkeypatch):
+    """The KDA study starts from the dispatched tile with every knob off, not
+    from ``auto``'s knob stack, so every tile is timed at its base."""
+    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
+    bases = []
+    monkeypatch.setattr(tune, "legal_configs", lambda base: bases.append(base) or [])
+    monkeypatch.setattr(tune, "sweep_batch", lambda base, batch, configs: [])
+    monkeypatch.setattr(
+        "sys.argv", ["tune.py", "--gate-kind", "kda", "--batches", "16"]
     )
-    assert (
-        sum("dispatcher default (4, 16, 4) is NOT in the" in line for line in lines)
-        == 2
+
+    tune.main()
+    (base,) = bases
+    assert base == dc.replace(
+        GdnDecodeSpec(),
+        gate_kind="kda",
+        num_k_heads=16,
+        num_v_heads=32,
+        num_warps=1,
+        warp_threads_k=16,
+        blocks_per_v_dim=8,
     )

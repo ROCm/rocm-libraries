@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -38,8 +39,11 @@
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 
 /**
  * @file Gfx950AttentionDenseNative.cpp
@@ -355,29 +359,14 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
     return std::nullopt;
 }
 
-/// The tensor uids and derived scalars a matched dense-attention graph binds.
-struct AttentionDenseBinding
+// The kernel takes the row max on unscaled scores (valid only for scale > 0), folds the
+// scale into an fma whose rounding residue grows with the scale, and masks raw scores
+// with a power-of-two sentinel. Mirrors run_attention_dense_torch's [2^-64, 2^4] range.
+// NaN and ±inf are outside the range.
+bool isSupportedAttentionScale(float scale)
 {
-    int64_t q = 0;
-    int64_t k = 0;
-    int64_t v = 0;
-    int64_t o = 0;
-    int64_t causal = 0;
-    int64_t slidingWindow = 0;
-    float scale = 0.0F;
-};
-
-/// The graph facts the matcher and prepare() both need, derived once from the tensors.
-struct AttentionDenseProblem
-{
-    int64_t batch = 0;
-    int64_t seqLenQ = 0;
-    int64_t seqLenKv = 0;
-    int64_t numQueryHeads = 0;
-    int64_t numKvHeads = 0;
-    int64_t headSize = 0;
-    data_objects::DataType dataType = data_objects::DataType::UNSET;
-};
+    return !std::isnan(scale) && scale >= 0x1p-64F && scale <= 0x1p4F;
+}
 
 /// The graph's shape, read from Q and K. Callers must have validated both operands.
 AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
@@ -721,12 +710,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // cuDNN's default: its SDPA node multiplies by attn_scale only when one is set. It is
     // resolved here, once, and prepare() launches with the bound value.
     const float scale = attributes.attn_scale_value().value_or(1.0F);
-    // The kernel takes the row max on unscaled scores (valid only for scale > 0), folds the
-    // scale into an fma whose rounding residue grows with the scale, and masks raw scores
-    // with a power-of-two sentinel. Mirrors run_attention_dense_torch's [2^-64, 2^4] range.
-    // NaN compares false with both bounds, so it needs its own check; the bounds decline
-    // +-inf.
-    if(std::isnan(scale) || scale < 0x1p-64F || scale > 0x1p4F)
+    if(!isSupportedAttentionScale(scale))
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"scale"} << "attn_scale " << scale
                                                  << " is outside the supported [2^-64, 2^4]");
@@ -835,9 +819,11 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
  * boundary tiles on-chip; this catalog ships none, and one arriving from elsewhere is
  * declined even at its authored shape rather than matched on metadata equality.
  *
- * A served candidate receives batch/seqlen_q/seqlen_kv as runtime kernel arguments, so
- * one binary serves any valid shape for the same head/dtype/mask configuration; the
- * metadata's shape fields are canonical build inputs and are not compared.
+ * A served candidate receives batch/seqlen_q/seqlen_kv and num_query_heads/num_kv_heads
+ * as runtime kernel arguments, so one binary serves any valid shape; the metadata's
+ * shape fields are canonical build inputs and are not compared. The head counts are
+ * still compared below because the catalog lists each head configuration as its own
+ * entry.
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
@@ -968,8 +954,10 @@ double scoreKernel(const MatchContext& /*context*/,
 /// divergence here fails every dispatch rather than silently weakening the check.
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one instead of eight
+/// mismatch diagnostic prints the real layout beside the recorded one instead of ten
 /// zeroes that read as data.
+///
+/// This is the dispatch.v2 form, which every kernel in the catalog takes.
 std::vector<KernelArgument> attentionDenseKernelSignature()
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
@@ -983,21 +971,62 @@ std::vector<KernelArgument> attentionDenseKernelSignature()
             KernelArgument{"by_value", F32, 32, "scale"},
             KernelArgument{"by_value", I32, 36, "batch"},
             KernelArgument{"by_value", I32, 40, "seqlen_q"},
-            KernelArgument{"by_value", I32, 44, "seqlen_kv"}};
+            KernelArgument{"by_value", I32, 44, "seqlen_kv"},
+            KernelArgument{"by_value", I32, 48, "num_query_heads"},
+            KernelArgument{"by_value", I32, 52, "num_kv_heads"}};
+}
+
+/// The dispatch.v1 form: the v2 list without the two trailing head counts. Kernels built
+/// before the head counts became runtime arguments take it, and only a plan saved under
+/// v1 still carries one.
+std::vector<KernelArgument> attentionDenseKernelSignatureV1()
+{
+    auto signature = attentionDenseKernelSignature();
+    signature.resize(signature.size() - 2);
+    return signature;
+}
+
+/// The launch contract a dispatch handler serves. The two versions share their launch
+/// values and differ only in whether the launch passes the head counts.
+enum class AttentionDenseContract
+{
+    V1,
+    V2
+};
+
+std::string_view contractSymbol(AttentionDenseContract contract)
+{
+    return contract == AttentionDenseContract::V1 ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+                                                  : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+}
+
+std::vector<KernelArgument> contractSignature(AttentionDenseContract contract)
+{
+    return contract == AttentionDenseContract::V1 ? attentionDenseKernelSignatureV1()
+                                                  : attentionDenseKernelSignature();
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
 /// into the MatchContext or BoundTokens it came from.
-class PreparedGfx950AttentionDense : public PreparedDispatch
+class PreparedGfx950AttentionDense : public IngestorPreparedDispatch
 {
 public:
     PreparedGfx950AttentionDense(IngestorKernelCode code,
                                  AttentionDenseBinding binding,
-                                 AttentionDenseProblem problem)
+                                 AttentionDenseProblem problem,
+                                 int64_t blockM,
+                                 AttentionDenseContract contract)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
+        , _blockM(blockM)
+        , _contract(contract)
     {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _code;
     }
 
     compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
@@ -1015,25 +1044,69 @@ public:
         return _problem;
     }
 
+    int64_t blockM() const
+    {
+        return _blockM;
+    }
+
+    /// The contract the code object was checked against, so launch() passes the kernel
+    /// arguments that code object takes.
+    AttentionDenseContract contract() const
+    {
+        return _contract;
+    }
+
 private:
     IngestorKernelCode _code;
     AttentionDenseBinding _binding;
     AttentionDenseProblem _problem;
+    int64_t _blockM;
+    AttentionDenseContract _contract;
 };
 
+// Applies the launch geometry to `code` and builds the prepared dispatch. A plan built
+// from a graph and a plan restored from a saved payload both come through here.
+// `kernelName` is only for the diagnostic.
+//
+// Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from descriptor
+// shape metadata: that carries canonical build inputs (B=1, Sq=Skv=512), not runtime
+// constraints. block_n does not enter the launch.
+std::unique_ptr<PreparedDispatch>
+    makePreparedGfx950AttentionDense(IngestorKernelCode code,
+                                     const Gfx950AttentionDenseLaunchInputs& launch,
+                                     const std::string& kernelName,
+                                     AttentionDenseContract contract)
+{
+    const auto& problem = launch.problem;
+    const auto geometry = gfx950AttentionDenseGeometry(
+        launch.blockM, problem.seqLenQ, problem.numQueryHeads, problem.batch, kernelName);
+
+    code.setBlockSize(geometry.blockX, 1, 1);
+    code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+
+    return std::make_unique<PreparedGfx950AttentionDense>(
+        std::move(code), launch.binding, problem, launch.blockM, contract);
+}
+
 /**
- * @brief The native dispatch behind this engine's UDD.
+ * @brief The native dispatch behind this engine's UDD, for one launch contract.
+ *
+ * The v2 handler serves the catalog and saves new plans. The v1 handler is registered only
+ * under the v1 name, so a plan saved before the head counts became runtime arguments
+ * restores with its own 8-argument code object and launches it with 8 arguments.
  */
 class Gfx950AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    explicit Gfx950AttentionDenseDispatchHandler(const compilation::KpackKernelLoader& kpackLoader)
+    Gfx950AttentionDenseDispatchHandler(const compilation::KpackKernelLoader& kpackLoader,
+                                        AttentionDenseContract contract)
         : _kpackLoader(kpackLoader)
+        , _contract(contract)
     {
     }
 
     /// Zero: the kernel's only scratch is LDS and registers; no global scratch,
-    /// and the 8-arg ABI has no workspace pointer.
+    /// and neither contract's ABI has a workspace pointer.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -1072,26 +1145,50 @@ public:
                     + "' declares no supported block_m/block_n tile");
         }
 
-        auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, attentionDenseKernelSignature());
+        auto code
+            = buildIngestorKernelCode(_kpackLoader, context, kernel, contractSignature(_contract));
 
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
 
-        // Grid from the SELECTED CANDIDATE'S block_m and the GRAPH PROBLEM, not from
-        // descriptor shape metadata: that carries canonical build inputs (B=1,
-        // Sq=Skv=512), not runtime constraints. block_n does not enter the launch.
-        const auto geometry = gfx950AttentionDenseGeometry(tile->blockM,
-                                                           problem.seqLenQ,
-                                                           problem.numQueryHeads,
-                                                           problem.batch,
-                                                           toString(kernel.kernelId));
+        return makePreparedGfx950AttentionDense(
+            std::move(code),
+            Gfx950AttentionDenseLaunchInputs{binding, problem, tile->blockM},
+            toString(kernel.kernelId),
+            _contract);
+    }
 
-        code.setBlockSize(geometry.blockX, 1, 1);
-        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        const std::string kernelName = toString(code.kernelId);
+        // The saved code object must take this contract's arguments (checked first, inside
+        // restoreIngestorLaunch), and its values must be saved under this contract's name.
+        const auto readThisContract = [this](const SavedLaunchInputs& saved) {
+            requireLaunchContract(saved, contractSymbol(_contract));
+            return readGfx950AttentionDenseLaunchInputs(saved);
+        };
+        auto restored = restoreIngestorLaunch<Gfx950AttentionDenseLaunchInputs>(
+            inputs, std::move(code), contractSignature(_contract), readThisContract, deviceOrdinal);
+        return makePreparedGfx950AttentionDense(
+            std::move(restored.code), restored.launch, kernelName, _contract);
+    }
 
-        return std::make_unique<PreparedGfx950AttentionDense>(std::move(code), binding, problem);
+    std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& prepared) const override
+    {
+        const auto& preparedDense = dynamic_cast<const PreparedGfx950AttentionDense&>(prepared);
+        return SavedLaunchInputs{std::string(contractSymbol(preparedDense.contract())),
+                                 gfx950AttentionDenseLaunchValues(preparedDense.binding(),
+                                                                  preparedDense.problem(),
+                                                                  preparedDense.blockM())};
+    }
+
+    bool supportsSaving() const override
+    {
+        return true;
     }
 
     void launch(const Handle& handle,
@@ -1113,23 +1210,205 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
         const auto& p = preparedDense.problem();
-        preparedDense.kernelForStream(handle.getStream())
-            .launch(handle.getStream(),
-                    q.ptr,
-                    k.ptr,
-                    v.ptr,
-                    o.ptr,
-                    binding.scale,
-                    static_cast<int32_t>(p.batch),
-                    static_cast<int32_t>(p.seqLenQ),
-                    static_cast<int32_t>(p.seqLenKv));
+        auto& kernel = preparedDense.kernelForStream(handle.getStream());
+        // Exactly the arguments the code object was checked against: v1 code objects bake
+        // the head counts, v2 code objects read them as the two trailing arguments.
+        if(preparedDense.contract() == AttentionDenseContract::V1)
+        {
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          static_cast<int32_t>(p.batch),
+                          static_cast<int32_t>(p.seqLenQ),
+                          static_cast<int32_t>(p.seqLenKv));
+            return;
+        }
+        kernel.launch(handle.getStream(),
+                      q.ptr,
+                      k.ptr,
+                      v.ptr,
+                      o.ptr,
+                      binding.scale,
+                      static_cast<int32_t>(p.batch),
+                      static_cast<int32_t>(p.seqLenQ),
+                      static_cast<int32_t>(p.seqLenKv),
+                      static_cast<int32_t>(p.numQueryHeads),
+                      static_cast<int32_t>(p.numKvHeads));
     }
 
 private:
     const compilation::KpackKernelLoader& _kpackLoader;
+    AttentionDenseContract _contract;
 };
 
 } // namespace
+
+MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
+                                                const AttentionDenseProblem& problem,
+                                                int64_t blockM)
+{
+    return {{std::string(GFX950_ATTENTION_DENSE_Q_UID_VALUE), binding.q},
+            {std::string(GFX950_ATTENTION_DENSE_K_UID_VALUE), binding.k},
+            {std::string(GFX950_ATTENTION_DENSE_V_UID_VALUE), binding.v},
+            {std::string(GFX950_ATTENTION_DENSE_O_UID_VALUE), binding.o},
+            {std::string(GFX950_ATTENTION_DENSE_CAUSAL_VALUE), binding.causal},
+            {std::string(GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE), binding.slidingWindow},
+            {std::string(GFX950_ATTENTION_DENSE_BATCH_VALUE), problem.batch},
+            {std::string(GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE), problem.seqLenQ},
+            {std::string(GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE), problem.seqLenKv},
+            {std::string(GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE), problem.numQueryHeads},
+            {std::string(GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE), problem.numKvHeads},
+            {std::string(GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE), problem.headSize},
+            {std::string(GFX950_ATTENTION_DENSE_BLOCK_M_VALUE), blockM},
+            {std::string(GFX950_ATTENTION_DENSE_SCALE_VALUE), static_cast<double>(binding.scale)},
+            {std::string(GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE),
+             std::string(data_objects::EnumNameDataType(problem.dataType))},
+            {std::string(GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE),
+             std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)}};
+}
+
+namespace
+{
+
+// Refuses a saved launch value of the dense-attention contract.
+[[noreturn]] void refuseAttentionDenseLaunchValue(const SavedLaunchInputs& inputs,
+                                                  std::string_view name,
+                                                  const std::string& reason)
+{
+    serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                                      "launch value '" + std::string(name) + "' of dispatch '"
+                                          + inputs.dispatchSymbol + "' " + reason);
+}
+
+} // namespace
+
+Gfx950AttentionDenseLaunchInputs
+    readGfx950AttentionDenseLaunchInputs(const SavedLaunchInputs& inputs)
+{
+    // v1 and v2 share this value set; anything else, including the unversioned name, is
+    // refused against v2, the current contract.
+    requireLaunchContract(inputs,
+                          inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+                              ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+                              : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    requireOnlyLaunchValues(inputs,
+                            {GFX950_ATTENTION_DENSE_Q_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_K_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_V_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_O_UID_VALUE,
+                             GFX950_ATTENTION_DENSE_CAUSAL_VALUE,
+                             GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE,
+                             GFX950_ATTENTION_DENSE_BATCH_VALUE,
+                             GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE,
+                             GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE,
+                             GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE,
+                             GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE,
+                             GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE,
+                             GFX950_ATTENTION_DENSE_BLOCK_M_VALUE,
+                             GFX950_ATTENTION_DENSE_SCALE_VALUE,
+                             GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE,
+                             GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE});
+
+    constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
+
+    Gfx950AttentionDenseLaunchInputs launch;
+    auto& binding = launch.binding;
+    auto& problem = launch.problem;
+    binding.q = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_Q_UID_VALUE);
+    binding.k = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_K_UID_VALUE);
+    binding.v = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_V_UID_VALUE);
+    binding.o = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_O_UID_VALUE);
+    binding.causal = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_CAUSAL_VALUE);
+    binding.slidingWindow = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE);
+
+    // The kernel takes these three as int32_t arguments.
+    problem.batch = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BATCH_VALUE, 1, INT32_LIMIT);
+    problem.seqLenQ
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE, 1, INT32_LIMIT);
+    problem.seqLenKv
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE, 1, INT32_LIMIT);
+    // num_query_heads is a grid dimension.
+    problem.numQueryHeads
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE, 1, INT32_LIMIT);
+    problem.numKvHeads
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE, 1, INT32_LIMIT);
+    problem.headSize
+        = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE, 1, INT32_LIMIT);
+    launch.blockM = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BLOCK_M_VALUE);
+
+    // The kernel takes the scale as a float. A double that a float cannot hold exactly was
+    // not written from one.
+    const double scale = requireLaunchDouble(inputs, GFX950_ATTENTION_DENSE_SCALE_VALUE);
+    if(!std::isfinite(scale)
+       || std::fabs(scale) > static_cast<double>(std::numeric_limits<float>::max())
+       || static_cast<double>(static_cast<float>(scale)) != scale)
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GFX950_ATTENTION_DENSE_SCALE_VALUE,
+                                        "must be a finite double that a float holds exactly");
+    }
+    binding.scale = static_cast<float>(scale);
+    if(!isSupportedAttentionScale(binding.scale))
+    {
+        refuseAttentionDenseLaunchValue(
+            inputs, GFX950_ATTENTION_DENSE_SCALE_VALUE, "is outside the supported [2^-64, 2^4]");
+    }
+
+    const std::string dataTypeName
+        = requireLaunchString(inputs, GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE);
+    bool dataTypeFound = false;
+    for(const auto dataType : data_objects::EnumValuesDataType())
+    {
+        if(dataTypeName == data_objects::EnumNameDataType(dataType))
+        {
+            problem.dataType = dataType;
+            dataTypeFound = true;
+            break;
+        }
+    }
+    if(!dataTypeFound || !supportedDataTypeName(problem.dataType).has_value())
+    {
+        refuseAttentionDenseLaunchValue(
+            inputs,
+            GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE,
+            "must name a data type the kernel is built for (BFLOAT16 or HALF); the plan "
+            "holds '"
+                + dataTypeName + "'");
+    }
+
+    // The kernel takes no stride arguments and reads every operand as dense BSHD.
+    const std::string strideLayout
+        = requireLaunchString(inputs, GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE);
+    if(strideLayout != GFX950_ATTENTION_DENSE_BSHD_LAYOUT)
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE,
+                                        "must be '"
+                                            + std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)
+                                            + "'; the plan holds '" + strideLayout + "'");
+    }
+
+    try
+    {
+        static_cast<void>(gfx950AttentionDenseGeometry(
+            launch.blockM, problem.seqLenQ, problem.numQueryHeads, problem.batch, "saved plan"));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+        {
+            throw;
+        }
+        refuseAttentionDenseLaunchValue(inputs,
+                                        GFX950_ATTENTION_DENSE_BLOCK_M_VALUE,
+                                        "is not a tile the kernel is built with: "
+                                            + error.getMessage());
+    }
+    return launch;
+}
 
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache()
 {
@@ -1145,13 +1424,18 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler, process-lifetime.
-const Gfx950AttentionDenseDispatchHandler& gfx950AttentionDenseDispatchHandler()
+/// This engine's dispatch handler for one contract, process-lifetime. Both share one
+/// module cache and loader.
+const Gfx950AttentionDenseDispatchHandler&
+    gfx950AttentionDenseDispatchHandler(AttentionDenseContract contract)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
         gfx950AttentionDenseKpackModuleCache());
-    static const Gfx950AttentionDenseDispatchHandler s_dispatchHandler(s_kpackLoader);
-    return s_dispatchHandler;
+    static const Gfx950AttentionDenseDispatchHandler s_v1(s_kpackLoader,
+                                                          AttentionDenseContract::V1);
+    static const Gfx950AttentionDenseDispatchHandler s_v2(s_kpackLoader,
+                                                          AttentionDenseContract::V2);
+    return contract == AttentionDenseContract::V1 ? s_v1 : s_v2;
 }
 
 } // namespace
@@ -1161,7 +1445,14 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler());
+    // The UDD's unversioned name dispatches the catalog, all of which takes v2.
+    scope.add(std::string(DISPATCH_SYMBOL),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
+    // Kept so plans saved under v1 still load and launch their 8-argument code object.
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V1));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

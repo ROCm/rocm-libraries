@@ -50,6 +50,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace stinkytofu {
 
@@ -122,6 +123,10 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
 
     void setBaseSgpr(int baseSgpr) {
         m_baseSgpr = baseSgpr;
+    }
+
+    void setAfterSgprCompact(bool on) {
+        m_afterSgprCompact = on;
     }
 
     int getBaseSgpr() const {
@@ -225,11 +230,14 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     /// Conservative one-shot shift: an UPPER BOUND on the bytes inserted BEFORE the
     /// boundary (cover <=52 + ladder <=~244). Adding it to the pre-insertion boundary offset makes
     /// the computed coverN never under-cover (over-cover <= 1 block), with NO fixed-point
-    /// iteration. +16 when the XNACK wait is on: up to 4 pre-boundary s_wait_xcnt 0 (1 cover burst
-    /// + 3 ladder arms, all laid out before the CP boundary) x 4 B. Reverts to 320 when off, so
-    /// coverN is bit-identical to before (the +16 stays within the same 4 KiB floor bucket except
-    /// in the rare boundary-straddle case, where the extra block is genuinely needed).
-    static constexpr int64_t kCpCoverInsertUpperBoundBytes = 320 + 4 * kSwPrefetchXnackWaitBytes;
+    /// iteration. +16 where the XNACK wait is emitted: up to 4 pre-boundary s_wait_xcnt 0 (1 cover
+    /// burst + 3 ladder arms, all laid out before the CP boundary) x 4 B. Without it this is 320,
+    /// the same arithmetic as before the wait existed (the +16 stays within the same 4 KiB floor
+    /// bucket except in the rare boundary-straddle case, where the extra block is genuinely
+    /// needed).
+    static int64_t cpCoverInsertUpperBoundBytes(bool emitXnackWait) {
+        return 320 + (emitXnackWait ? 4 * kSwPrefetchXnackWaitBytes : 0);
+    }
     /// Target label anchored (post-insertion) at the final-layout CP boundary (offset <= P(0)).
     static constexpr const char* kCpBoundaryLabel = "label_SW_PrefetchAbs_CpBoundary";
 
@@ -323,10 +331,10 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     /// resident (<= P(0)); else the INCLUSIVE hint count `floor((boundary + INSERT_UB -
     /// P0)/4096)+1` (conservative one-shot: no iteration, never under-covers), clamped to `budget -
     /// armFloor`.
-    static int computeCoverN(int64_t boundary) {
+    static int computeCoverN(int64_t boundary, bool emitXnackWait) {
         // kCpWindowBytes >= 0, so `boundary <= kCpWindowBytes` already covers negatives.
         if (boundary <= kCpWindowBytes) return 0;
-        const int64_t gap = boundary + kCpCoverInsertUpperBoundBytes - kCpWindowBytes;
+        const int64_t gap = boundary + cpCoverInsertUpperBoundBytes(emitXnackWait) - kCpWindowBytes;
         int raw = static_cast<int>(gap / kSwPrefetchSpacingBytes) + 1;  // floor+1 (gap > 0)
         const int maxCover = kPostCpHintBudget - kCpBoundaryArmFloor;   // = 4
         if (raw < 0) raw = 0;
@@ -481,8 +489,11 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // boundary (label_TailLoopBegin* / OptNLL_End / shallowest GW_*>P0). `armN` (below, once we
         // know the cover will actually emit) then splits the 8-block post-CP I-cache budget as
         // coverN + armN <= 8 (armFloor=4). coverN==0 => no cover emitted.
+        // XNACK replay is what the drain before each burst guards against; where the driver has
+        // it off there is nothing to replay and nothing to pay for.
+        const bool emitXnackWait = passCtx.getAsmCapsConfig().enableXnackReplay;
         const int64_t coverBoundary = computeCoverBoundary(labelOff);
-        const int coverN = computeCoverN(coverBoundary);
+        const int coverN = computeCoverN(coverBoundary, emitXnackWait);
 
         // Stream-K bails BOTH the ladder and the CP cover: its abs base triple is NOT reserved
         // to label_MultiGemmEnd (the Tensile checkIn is immediate for Stream-K), so emitting
@@ -590,9 +601,20 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         constexpr int kGsuMask = 0x3fff;
 
         AsmIRBuilder b(*siteBB, archId);
-        const uint32_t lo = static_cast<uint32_t>(m_baseSgpr);
-        const uint32_t hi = static_cast<uint32_t>(m_baseSgpr + 1);
-        const uint32_t tmp = static_cast<uint32_t>(m_baseSgpr + 2);
+
+        // Which SGPRs each site may write. Without compact both use the Tensile
+        // triple, reserved across this window as well as the prolog. After compact
+        // that reservation means nothing: the cover sits at kernel entry, where
+        // nothing has run, so it reuses a block inside the kernel's range for free,
+        // while the ladder is mid-kernel, where an allocated register may still hold
+        // a value, so it has to stay above everything named. Both resolve before
+        // either emits, so neither sees the other's registers in the high-water mark.
+        const int coverBase =
+            m_afterSgprCompact ? static_cast<int>(absPrefetchEntrySgprBase(func)) : m_baseSgpr;
+        const int ladderBase = m_afterSgprCompact
+                                   ? static_cast<int>(nextEvenRegisterBase(func, RegType::S))
+                                   : m_baseSgpr;
+        const uint32_t tmp = static_cast<uint32_t>(ladderBase + 2);
         static const HwInstDesc labelMCID{
             GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
@@ -616,8 +638,11 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // begin()==end(), so the cover is never silently skipped (an earlier create-before-anchor
         // form needed a non-null anchor and skipped empty stubs). Inserting successive nodes before
         // a fixed `at` preserves order (each lands just ahead of `at`).
-        auto emitBurst = [&](BasicBlock& bb, IRList::iterator at, const std::string& target,
-                             int n = kFixedPrefetchN) {
+        auto emitBurst = [&](BasicBlock& bb, IRList::iterator at, const std::string& target, int n,
+                             int base) {
+            const uint32_t lo = static_cast<uint32_t>(base);
+            const uint32_t hi = static_cast<uint32_t>(base + 1);
+            const uint32_t scratch = static_cast<uint32_t>(base + 2);
             auto ins = [&](const HwInstDesc* d) {
                 StinkyInstruction* x = IRBase::createIR<StinkyInstruction>(d);
                 bb.insertIR(at, x);
@@ -626,22 +651,23 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             StinkyInstruction* g = ins(dGetpc);
             g->addDestReg(StinkyRegister("s", lo, 2));
             StinkyInstruction* a0 = ins(dAddI);
-            a0->addDestReg(StinkyRegister("s", tmp, 1));
+            a0->addDestReg(StinkyRegister("s", scratch, 1));
             a0->addSrcReg(StinkyRegister(target));
             a0->addSrcReg(StinkyRegister(4));
             StinkyInstruction* a1 = ins(dAddU);
             a1->addDestReg(StinkyRegister("s", lo, 1));
             a1->addSrcReg(StinkyRegister("s", lo, 1));
-            a1->addSrcReg(StinkyRegister("s", tmp, 1));
+            a1->addSrcReg(StinkyRegister("s", scratch, 1));
             StinkyInstruction* a2 = ins(dAddC);
             a2->addDestReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister(0));
             // XNACK safety: one s_wait_xcnt 0 before this burst's contiguous prefetch group.
             // emitBurst is shared by the CP cover + all 3 ladder arms + the fallback, so this one
-            // spot gates every group. No-op when the toggle is off or the opcode is unavailable;
-            // the bytes of the pre-boundary waits are bounded by kCpCoverInsertUpperBoundBytes.
-            if (kSwPrefetchEmitXnackWait && dXcnt != nullptr) {
+            // spot gates every group. No-op where XNACK replay is off or the opcode is
+            // unavailable; the bytes of the pre-boundary waits are bounded by
+            // cpCoverInsertUpperBoundBytes().
+            if (emitXnackWait && dXcnt != nullptr) {
                 StinkyInstruction* w = ins(dXcnt);
                 w->addSrcReg(StinkyRegister(0));  // xcnt = 0
             }
@@ -677,7 +703,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             // preserved) when no prologue is present.
             auto [coverBB, coverAt] = entryBurstInsertPoint(func);
             if (coverBB != nullptr) {
-                emitBurst(*coverBB, coverAt, std::string(kCpBoundaryLabel), coverN);
+                emitBurst(*coverBB, coverAt, std::string(kCpBoundaryLabel), coverN, coverBase);
                 coverEmitted = true;
             } else if (m_debug) {
                 *m_debugStream << "[" << getName() << "] CP cover skip: no entry BB\n";
@@ -710,20 +736,20 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             cBeta->addSrcReg(StinkyRegister("s", tmp, 1));
             cBeta->addModifier<CommentData>(CommentData{"Beta == 0 ?"});
             emitBranch(dBr0, kCaseC);  // Beta != 0 (scc0) -> Case C (B1_GSU1)
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), kB,
-                      armN);  // fall-through: Beta == 0 -> Case B (B0_GSU1)
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), kB, armN,
+                      ladderBase);  // fall-through: Beta == 0 -> Case B (B0_GSU1)
             emitBranch(dBr, kEnd);
             emitLabel(kCaseA);
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), kA, armN);
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), kA, armN, ladderBase);
             emitBranch(dBr, kEnd);
             emitLabel(kCaseC);
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), kC, armN);
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), kC, armN, ladderBase);
             emitLabel(kEnd);
             ladderEmitted = true;
         } else if (emitLadder) {
             // Non-3-arm shape (rare): unconditionally prefetch the default hot target.
             emitLabel(kSel);
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), hasC ? kC : kB, armN);
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), hasC ? kC : kB, armN, ladderBase);
             ladderEmitted = true;
         }
 
@@ -771,7 +797,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
 
         if (m_debug)
             *m_debugStream << "[" << getName() << "] D1 emitted after label_MultiGemmEnd"
-                           << " baseSgpr=" << m_baseSgpr << " armN=" << armN
+                           << " coverBaseSgpr=" << coverBase << " ladderBaseSgpr=" << ladderBase
+                           << " armN=" << armN
                            << (ladderEmitted ? (hasA && hasC ? " ladder(3-arm)" : " ladder(uncond)")
                                              : " ladder(none)")
                            << (coverEmitted ? " +CPcover(coverN=" + std::to_string(coverN) +
@@ -782,6 +809,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     }
 
     int m_baseSgpr = -1;
+    bool m_afterSgprCompact = false;
     bool m_cpBoundaryCover = false;  // CP-range-extend cover (default off; staged rollout)
     std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;
@@ -794,9 +822,11 @@ char SwInstructionPrefetchAbsDynamicPass::ID = 0;
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(int baseSgpr,
                                                                 const std::string& debugOutputPath,
-                                                                bool cpBoundaryCover) {
+                                                                bool cpBoundaryCover,
+                                                                bool afterSgprCompact) {
     auto p = std::make_unique<SwInstructionPrefetchAbsDynamicPass>();
     p->setBaseSgpr(baseSgpr);
+    p->setAfterSgprCompact(afterSgprCompact);
     p->setCpBoundaryCoverEnabled(cpBoundaryCover);
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
@@ -805,11 +835,11 @@ std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(int baseSgpr,
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(StinkyAsmModule& module) {
     auto p = std::make_unique<SwInstructionPrefetchAbsDynamicPass>();
-    // Reserved even-aligned SGPR pair + scratch (base, base+1, base+2), auto-allocated in
-    // Tensile KernelWriter._initKernel and passed via the module option (same source the abs
-    // static pass reads). -1 ⇒ emission no-ops (analysis-only); the static pass owns the
-    // burst in that case.
+    // Tensile reserves a 3-SGPR triple and passes the base here (-1 = off).
+    // After SGPR compact that triple may already hold other values, so the pass
+    // then picks its own blocks per emit site.
     p->setBaseSgpr(module.getModuleOptions().SwInstructionPrefetchAbsBaseSgpr);
+    p->setAfterSgprCompact(module.getModuleOptions().sgprsCompacted());
     // CP-range-extend cover: ENABLED in production for the dynamic regime (unconditional
     // near-boundary burst of DYNAMIC width coverN, sized to the fast-path boundary and clamped to
     // coverN <= 4 via armFloor=4). Covers [P(0), P(0)+coverN*4096) — the once-through fast path the

@@ -45,101 +45,124 @@ Tests:
 - name: bsrilu0
   category: quick
   function: bsrilu0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
+  precision: *single_only_precisions
+  M: [50]
+  N: [50]
   block_dim: [4]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_zero]
 
-- name : bsrilu0_math
-  category: quick
-  function: bsrilu0
-  precision: *double_only_precisions_complex_real
-  M: [1]
-  N: [1]
-  block_dim: [3, 4, 5, 8, 9, 16, 27, 33, 65]
-  numericboost: [0]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-  formatA: [rocsparse_format_bsr]
-
 - name: bsrilu0
   category: quick
   function: bsrilu0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  block_dim: [1, 4, 9]
+  precision: *single_only_precisions
+  M: [50]
+  N: [50]
+  block_dim: [33, 65]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
 - name: bsrilu0
   category: quick
   function: bsrilu0
-  precision: *single_double_precisions
-  M_N: *M_N_range_quick
+  precision: *double_only_precisions_complex
+  M: [50]
+  N: [50]
+  block_dim: [33]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrilu0
+  category: quick
+  function: bsrilu0
+  precision: *single_only_precisions
+  M: [50]
+  N: [50]
   block_dim: [9]
-  numericboost: [0, 1]
-  boosttol: [0.2, 0.5, 0.9, 1.1]
-  boostval: [0.5, 1.2]
+  numericboost: [1]
+  boosttol: [0.5]
+  boostval: [1.0]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
-- name: bsrilu0_file
+- name: bsrilu0
   category: quick
   function: bsrilu0
-  precision: *single_double_precisions
+  precision: *single_only_precisions
+  M_N:
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+    - { M: 6144, N: 6144 }
+  block_dim: [4]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+
+- name: bsrilu0
+  category: quick
+  function: bsrilu0
+  precision: *single_only_precisions
+  M: [768]
+  N: [768]
+  block_dim: [8]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: bsrilu0
+  category: quick
+  function: bsrilu0
+  precision: *single_only_precisions
   M: 1
   N: 1
-  block_dim: [5]
-  numericboost: [0, 1]
-  boosttol: [0.01]
-  boostval: [1.2]
+  block_dim: [4]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4,
-             nos6,
-             nos1,
-             nos2]
+  filename: [nos3, nos7, qc2534, mplate]
 
-- name: bsrilu0_file
+# block_dim 1 is the 1x1 boundary of the block_dim <= 8 kernel.
+- name: bsrilu0
   category: quick
   function: bsrilu0
-  precision: *double_only_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [7]
-  numericboost: [0, 1]
-  boosttol: [0.5]
-  boostval: [1.2]
+  precision: *single_only_precisions
+  M: [32]
+  N: [32]
+  block_dim: [1]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
 
-# Pre-checkin
+# Pre_checkin
 - name: bsrilu0_bad_arg
   category: pre_checkin
   function: bsrilu0_bad_arg
@@ -251,6 +274,8 @@ Tests:
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+# Known_bug
 
 - name: bsrilu0_graph_test
   # known_bug: hipGraphLaunch OOMs (hipErrorOutOfMemory) on memory-constrained

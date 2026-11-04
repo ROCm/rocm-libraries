@@ -93,7 +93,14 @@ objects:
 `f` (double), `b` (bool), `s` (string), `l` (list of nested attr maps), mirroring
 `rocke_attr_kind_t`. The importer never infers a type from JSON syntax — an
 untagged `1` is ambiguous between an int and a bool, and that ambiguity is
-exactly the kind of drift this path exists to prevent. Attr keys are sorted for
+exactly the kind of drift this path exists to prevent. Double attrs preserve
+IEEE non-finite values using Python `json.dumps` spellings (`NaN`, `Infinity`,
+and `-Infinity`), which both native JSON decoders accept. Integer-valued fields
+consumed by the native JSON and CBOR paths are currently limited to the safe
+integer range `[-(2^53 - 1), 2^53 - 1]`: both native DOMs store numbers as
+doubles, and reject values outside that range rather than silently rounding an
+adjacent integer spelling. Supporting the full int64 wire domain requires an
+integer-preserving DOM representation and is deferred. Attr keys are sorted for
 diff-stable artifacts.
 
 **Ops and regions.** An op carries `opcode`, `operands`, `results`, `attrs`, and
@@ -151,10 +158,12 @@ induction variables and spec-derived integers), and IR-value registers holding
 | `static_if` | `pred: <intexpr>`, `then`, `else?` | compile-time branch |
 | `scf_for` | `iv`, `lo`, `hi`, `step`, `iter`, `results`, `body` | runtime loop |
 | `scf_if` | `cond`, `then` | runtime branch |
+| `scf_if_else` | `cond`, `then`, `else` | runtime if/else converging at one join block (`scf.if_else`); recipe ABI level 3 |
 | `ret` | — | `rocke_b_ret` |
 
 `static_for` and `static_if` are the compile-time layer: they run in the VM and
-leave no trace in the emitted IR. `scf_for` and `scf_if` emit real control flow.
+leave no trace in the emitted IR. `scf_for`, `scf_if` and `scf_if_else` emit real
+control flow.
 
 **Integer expressions.** Anywhere a size or constant appears:
 

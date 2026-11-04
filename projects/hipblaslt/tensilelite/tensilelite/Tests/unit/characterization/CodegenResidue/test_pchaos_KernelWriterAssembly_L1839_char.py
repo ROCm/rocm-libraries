@@ -33,7 +33,7 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# Predicate semantics (pure; no Tensile import required)
+# Predicate semantics (pure; no TensileLite import required)
 # ---------------------------------------------------------------------------
 
 def _pred(enable_matrix_instruction: bool) -> bool:

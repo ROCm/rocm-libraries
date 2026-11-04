@@ -6,6 +6,8 @@ import os
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _PKG_PARENT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir)
 )
@@ -27,7 +29,7 @@ def _stinkytofu_available() -> bool:
 
 
 @unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
-class TestGetCapsDynamic(unittest.TestCase):
+class TestGetCapsDynamic(AdaptorTestCase):
     def test_gfx1250_shape(self):
         asm, arch, reg, bugs = caps.getCaps(_GFX1250)
         self.assertIsInstance(asm, dict)
@@ -71,7 +73,7 @@ class TestGetCapsDynamic(unittest.TestCase):
 
 
 @unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
-class TestStinkyTofuArchProbes(unittest.TestCase):
+class TestStinkyTofuArchProbes(AdaptorTestCase):
     def test_has_backend_when_binding_present(self):
         self.assertTrue(rocisa.hasStinkyTofuBackend())
 
@@ -91,6 +93,33 @@ class TestStinkyTofuArchProbes(unittest.TestCase):
             stinkytofu.getRegisteredArchKeys(),
         )
         self.assertIn("gfx1250", rocisa.getRegisteredArchKeys())
+
+
+@unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
+class TestParseRegisterAllocationConfig(AdaptorTestCase):
+    def test_mode_only(self):
+        self.assertEqual(rocisa.parseRegisterAllocationConfig(0), ("0", 0))
+        self.assertEqual(rocisa.parseRegisterAllocationConfig(2), ("2", 2))
+        self.assertEqual(rocisa.parseRegisterAllocationConfig("apply"), ("2", 2))
+
+    def test_nondefault_classes_stay_in_the_canonical_spelling(self):
+        self.assertEqual(
+            rocisa.parseRegisterAllocationConfig("2,classes=s"),
+            ("2,classes=s", 2),
+        )
+
+    def test_matches_stinkytofu_api(self):
+        import stinkytofu
+
+        for value in (0, "apply,classes=vs", "shadow"):
+            self.assertEqual(
+                rocisa.parseRegisterAllocationConfig(value),
+                stinkytofu.parseRegisterAllocationConfig(value),
+            )
+
+    def test_bad_value_is_value_error(self):
+        with self.assertRaises(ValueError):
+            rocisa.parseRegisterAllocationConfig("bogus")
 
 
 if __name__ == "__main__":

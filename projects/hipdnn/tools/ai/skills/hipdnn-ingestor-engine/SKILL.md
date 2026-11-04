@@ -12,7 +12,7 @@ pages supply contracts, not alternate procedures:
 
 | Reference | Owns |
 |---|---|
-| [extend.md](extend.md) | Existing identities and addition-only splices |
+| [extend.md](extend.md) | Existing identities (id reuse, `--new-ids`, sibling bundles) and addition-only splices |
 | [graph-contract.md](graph-contract.md) | Graph semantics, UID edges, fields and reference capability |
 | [rocke-mining.md](rocke-mining.md) | Applicability, specialization, layout, geometry and ABI |
 | [native-pack.md](native-pack.md) | Native hooks, ownership, registration and census scope |
@@ -23,7 +23,7 @@ pages supply contracts, not alternate procedures:
 
 Record create/extend, source revision, target architecture, exact UED engine name,
 source/builder (for rocKE, its registry candidate) and requested scope. Extensions also
-record the known-good installed baseline and retained identities. Missing source,
+record the known-good installed baseline (whose ids `generate.py` reuses) and retained identities. Missing source,
 dependencies, representability or a capable numerical reference blocks the corresponding
 gate; scope changes require explicit approval. Keep local scheduling and experiment
 artifacts outside product source.
@@ -61,7 +61,7 @@ Completion requires:
 - Every RUNBOOK user checkpoint (corpus, ground truth, knobs, build and sweep plan)
   asked and its answer recorded.
 - Implemented referenced hooks, no reachable placeholders, applied source/test/CMake
-  splices, and preserved extension identities and unchanged inventory.
+  splices, and preserved extension identities (ids reused, not reminted) and unchanged inventory.
 - Separately stated structural, applicable compiler/artifact, real native-loading and
   census results, under RUNBOOK stage 4's rules. Tests built OFF or an empty `SUITES` is
   absence of evidence; a green embedded-source verification is not reachability evidence

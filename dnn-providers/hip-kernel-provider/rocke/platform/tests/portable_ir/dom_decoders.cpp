@@ -19,9 +19,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
+#include "rocke/ir_import.h"
 #include "rocke/json_dom.h"
 
 namespace
@@ -160,6 +162,82 @@ void test_json_cbor_equivalence(rocke_arena_t* a)
     check(jd_equal(cv, jv), "CBOR DOM == JSON DOM");
 }
 
+void test_nonfinite_json_numbers(rocke_arena_t* a)
+{
+    char err[128];
+    const jd_val_t* values = rocke_json_parse("[NaN, Infinity, -Infinity]", a, err, sizeof err);
+    check(values && values->kind == JD_ARR && values->arr_len == 3, "non-finite JSON number array");
+    if(values && values->kind == JD_ARR && values->arr_len == 3)
+    {
+        double nan = 0.0, pos_inf = 0.0, neg_inf = 0.0;
+        check(rocke_jnum(values->arr[0], &nan) && std::isnan(nan), "JSON NaN");
+        check(rocke_jnum(values->arr[1], &pos_inf) && std::isinf(pos_inf) && pos_inf > 0,
+              "JSON Infinity");
+        check(rocke_jnum(values->arr[2], &neg_inf) && std::isinf(neg_inf) && neg_inf < 0,
+              "JSON -Infinity");
+    }
+}
+
+void test_concrete_importer_preserves_nonfinite_float_attrs()
+{
+    const char* artifact = R"json({
+        "schema": "rocke.ir/v1",
+        "kernel": {
+            "name": "nonfinite_float_attrs",
+            "attrs": {
+                "nan": {"t": "f", "v": NaN},
+                "pos_inf": {"t": "f", "v": Infinity},
+                "neg_inf": {"t": "f", "v": -Infinity}
+            },
+            "params": [],
+            "body": {"label": "entry", "ops": []}
+        }
+    })json";
+    rocke_ir_builder_t builder;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[128];
+    const rocke_status_t status
+        = rocke_import_kernel_from_json(artifact, nullptr, &builder, &kernel, err, sizeof err);
+    check(status == ROCKE_OK && kernel != nullptr, "concrete non-finite attr import");
+    if(status == ROCKE_OK && kernel)
+    {
+        double nan = 0.0, pos_inf = 0.0, neg_inf = 0.0;
+        check(rocke_attr_get_float(&kernel->attrs, "nan", &nan) && std::isnan(nan),
+              "concrete attr NaN");
+        check(rocke_attr_get_float(&kernel->attrs, "pos_inf", &pos_inf) && std::isinf(pos_inf)
+                  && pos_inf > 0,
+              "concrete attr Infinity");
+        check(rocke_attr_get_float(&kernel->attrs, "neg_inf", &neg_inf) && std::isinf(neg_inf)
+                  && neg_inf < 0,
+              "concrete attr -Infinity");
+    }
+    if(status == ROCKE_OK)
+    {
+        rocke_ir_builder_free(&builder);
+    }
+}
+
+void test_concrete_importer_rejects_invalid_integer_attrs()
+{
+    for(const char* spelling : {"NaN", "Infinity", "-Infinity", "9007199254740993"})
+    {
+        char artifact[512];
+        std::snprintf(
+            artifact,
+            sizeof artifact,
+            R"json({"schema":"rocke.ir/v1","kernel":{"name":"bad_int_attr","attrs":{"bad":{"t":"i","v":%s}},"params":[],"body":{"label":"entry","ops":[]}}})json",
+            spelling);
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[128] = {};
+        const rocke_status_t status
+            = rocke_import_kernel_from_json(artifact, nullptr, &builder, &kernel, err, sizeof err);
+        check(status != ROCKE_OK && kernel == nullptr, "concrete invalid integer attr is rejected");
+        check(std::strstr(err, "not an integer") != nullptr,
+              "concrete invalid integer attr has a diagnostic");
+    }
+}
+
 void test_malformed_input_is_rejected(rocke_arena_t* a)
 {
     char err[128];
@@ -211,6 +289,9 @@ int main()
     test_scalars(&a);
     test_array(&a);
     test_json_cbor_equivalence(&a);
+    test_nonfinite_json_numbers(&a);
+    test_concrete_importer_preserves_nonfinite_float_attrs();
+    test_concrete_importer_rejects_invalid_integer_attrs();
     test_malformed_input_is_rejected(&a);
     test_recipe_shaped_map(&a);
     rocke_arena_destroy(&a);

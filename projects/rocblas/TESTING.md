@@ -331,6 +331,7 @@ Performance YAML lives under `scripts/performance/`. HPA and mixed-precision GEM
 | `ROCBLAS_LAYER` / `ROCBLAS_CHECK_NUMERICS` | Logging and internal numerics checks |
 | `GTEST_LISTENER=PASS_LINE_IN_LOG` | Log each passing test |
 | `OMP_NUM_THREADS` | Host reference thread count |
+| `ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN` | Case-insensitive regex. When set, `rtest.py` fails if an output line matches. |
 
 ## CI integration
 

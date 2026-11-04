@@ -229,7 +229,9 @@ from .grid import (
     chiplet_aware_super_tile_dynamic,
     chiplet_transform_chunked,
     chiplet_transform_chunked_dynamic,
+    chiplet_transform_chunked_runtime,
     python_chiplet_transform_chunked,
+    python_chiplet_transform_chunked_runtime,
     python_super_tile_swizzle,
     super_tile_swizzle,
     super_tile_swizzle_dynamic,
@@ -317,8 +319,16 @@ from .i4_dequant import (
     unpack_i4_byte_to_pair_i8,
 )
 from .mx_scale import (
+    BF8_E5M2_FNUZ,
+    BF8_E5M2_OCP,
+    FP8_E4M3_FNUZ,
+    FP8_E4M3_OCP,
+    MxElementFormat,
+    MxScaleSplit,
     apply_mx_scale,
     decode_mx_scale_e8m0,
+    exact_mx_scale_split,
+    fma_with_mx_scale_pair,
     load_and_decode_mx_scale_byte,
 )
 from .preshuffle import (
@@ -479,7 +489,9 @@ __all__ = [
     "chiplet_aware_super_tile_dynamic",
     "chiplet_transform_chunked",
     "chiplet_transform_chunked_dynamic",
+    "chiplet_transform_chunked_runtime",
     "python_chiplet_transform_chunked",
+    "python_chiplet_transform_chunked_runtime",
     "python_super_tile_swizzle",
     "super_tile_swizzle",
     "super_tile_swizzle_dynamic",
@@ -662,8 +674,16 @@ __all__ = [
     "unpack_i4_byte_to_pair_i32",
     "unpack_i4_byte_to_pair_i8",
     # MX (microscaling) shared-exponent helpers
+    "BF8_E5M2_FNUZ",
+    "BF8_E5M2_OCP",
+    "FP8_E4M3_FNUZ",
+    "FP8_E4M3_OCP",
+    "MxElementFormat",
+    "MxScaleSplit",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
+    "exact_mx_scale_split",
+    "fma_with_mx_scale_pair",
     "load_and_decode_mx_scale_byte",
     # preshuffled-B layout
     "PreshuffleBSpec",

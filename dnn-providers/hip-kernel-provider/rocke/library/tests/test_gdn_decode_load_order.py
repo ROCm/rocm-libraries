@@ -22,13 +22,13 @@ before the first float op and some after it. The no-new-spill check of the
 tiles that load first and the exempt tile's zero-scratch contract are in
 ``test_gdn_decode_fused.py``.
 
-Reachability: the registered GDN tiles come from dispatch. The KDA tuned tiles
-at every state dtype, the raw-gate and no-L2-norm variants, the fused modes
-and the knobs are built as specs directly. Dispatch does not route f32 state
-or the fused modes today (``tests/dispatch/gdn/test_gfx950_wiring.py``,
-``TestDeferredSpecFieldsAreUnreachable``) and sets no knob, so those cases
-guard direct ``build_gdn_decode`` callers and the paths dispatch will route
-later.
+Reachability: the registered GDN tiles come from dispatch, at their base
+configuration (``dispatch_gdn_decode_bases``). The KDA auto tiles at every
+state dtype, the raw-gate and no-L2-norm variants, the fused modes and the
+knob stacks are built as specs directly here. Dispatch reaches each of those
+knob stacks by pin (``spec_id`` with ``tuning_knobs`` or ``tuning_id``,
+ALGORITHM.md §4.6), so the knob cases guard dispatched configurations as well
+as direct ``build_gdn_decode`` callers.
 
 Builds IR only: no lowering, no GPU, no comgr.
 """
@@ -45,8 +45,9 @@ _LIB_ROOT = str(Path(__file__).resolve().parent.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
-from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all  # noqa: E402
-from dispatch.gdn.gfx950 import _TUNED_TILES_KDA  # noqa: E402
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases  # noqa: E402
+from dispatch.gdn.axes import AUTO_DEFAULTS  # noqa: E402
+from dispatch.gdn.gfx950 import spec_id_for  # noqa: E402
 from kernels.gfx950.gdn_decode import (  # noqa: E402
     GdnDecodeSpec,
     build_gdn_decode,
@@ -105,10 +106,13 @@ _TILE_KNOBS = dict(
 def _specs():
     """(checked, exempt): specs that must load first, and the exempt tiles."""
     out, exempt = {}, {}
-    for result in dispatch_gdn_decode_all(GdnDecodeRequest(batch=16, arch=_ARCH)):
-        out[f"registered_{result.candidate.spec_id}"] = result.spec
+    for result in dispatch_gdn_decode_bases(GdnDecodeRequest(batch=16, arch=_ARCH)):
+        out[f"registered_{result.candidate.spec_id}"] = result.spec.kernel_spec
     base = GdnDecodeSpec()
-    for _, tile, spec_id in _TUNED_TILES_KDA:
+    # Every KDA auto tile, on the plain path (the fused paths are below).
+    kda_tiles = {d.tile for (gate, _, _), d in AUTO_DEFAULTS.items() if gate == "kda"}
+    for tile in sorted(kda_tiles):
+        spec_id = spec_id_for(tile, "kda")
         for state_dtype in ("bf16", "f16", "f32"):
             spec = dc.replace(
                 base,
@@ -118,8 +122,8 @@ def _specs():
                 warp_threads_k=tile[1],
                 blocks_per_v_dim=tile[2],
             )
-            out[f"tuned_{spec_id}_st{state_dtype}"] = spec
-            out[f"tuned_{spec_id}_st{state_dtype}_knobs"] = dc.replace(
+            out[f"auto_tile_{spec_id}_st{state_dtype}"] = spec
+            out[f"auto_tile_{spec_id}_st{state_dtype}_knobs"] = dc.replace(
                 spec, **_TILE_KNOBS
             )
     out["kda_raw_gate"] = dc.replace(base, gate_kind="kda", fuse_gate=False)

@@ -23,6 +23,8 @@
 
 #include "helper.hpp"
 
+#include <cstdlib>
+
 // This file includes platform specific helpers that differ between POSIX and
 // Windows. The alternatives are switched at a whole-file level. Please do
 // not use inline/fine-grained ifdefs.
@@ -69,22 +71,26 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
     State state;
 
     // Windows implementation using CreateProcess and pipes.
+    // run() is called from several threads at once (rocIsa::initMany), and
+    // CreateProcess hands each child every inheritable handle in the process.
+    // So the pipes start non-inheritable and only the child's ends are made
+    // inheritable: if a parent end were ever inheritable, another thread's
+    // child could hold this child's stdin open, and it would never see EOF.
     SECURITY_ATTRIBUTES saAttr;
     saAttr.nLength              = sizeof(SECURITY_ATTRIBUTES);
-    saAttr.bInheritHandle       = TRUE;
+    saAttr.bInheritHandle       = FALSE;
     saAttr.lpSecurityDescriptor = NULL;
 
     // Create a pipe for the child process's STDOUT.
     if(!CreatePipe(&state.hChildStd_OUT_Rd, &state.hChildStd_OUT_Wr, &saAttr, 0))
         throw std::runtime_error("Stdout pipe creation failed");
-    // Ensure the read handle is NOT inherited.
-    if(!SetHandleInformation(state.hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0))
+    if(!SetHandleInformation(state.hChildStd_OUT_Wr, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
         throw std::runtime_error("Stdout SetHandleInformation failed");
 
     // Create a pipe for the child process's STDIN.
     if(!CreatePipe(&state.hChildStd_IN_Rd, &state.hChildStd_IN_Wr, &saAttr, 0))
         throw std::runtime_error("Stdin pipe creation failed");
-    if(!SetHandleInformation(state.hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0))
+    if(!SetHandleInformation(state.hChildStd_IN_Rd, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
         throw std::runtime_error("Stdin SetHandleInformation failed");
 
     // Build a command-line string from the vector of arguments.

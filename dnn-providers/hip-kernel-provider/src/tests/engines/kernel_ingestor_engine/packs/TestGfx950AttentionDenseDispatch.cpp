@@ -45,11 +45,10 @@
  *
  * The launch geometry is not reachable here. prepare() calls
  * gfx950AttentionDenseGeometry() after buildIngestorKernelCode has loaded the code object,
- * and applies the result onto a PreparedDispatch subclass in the pack's own anonymous
- * namespace whose base class declares nothing but a destructor, so a prepared dispatch is
- * opaque to a test even where one can be produced. TestGfx950AttentionDenseGeometry.cpp
- * pins what the function computes; what prepare() passes it needs a real archive and a
- * real gfx950.
+ * and applies the result to the kernel code it keeps. No accessor exposes that geometry.
+ * TestGfx950AttentionDenseGeometry.cpp pins what the function computes; what prepare()
+ * passes it needs a real archive and a real gfx950. The launch values a save stores are
+ * tested through gfx950AttentionDenseLaunchValues() in TestPackLaunchValues.cpp.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -305,7 +304,9 @@ std::vector<KernelArgument> recordedSignature()
             KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
             KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
             KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"}};
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, carrying the
