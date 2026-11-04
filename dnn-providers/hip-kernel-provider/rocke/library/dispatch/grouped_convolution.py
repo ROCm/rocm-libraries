@@ -741,6 +741,24 @@ class ConvLaunchPlan:
         )
 
 
+def direct_dgrad_kernarg_direction(algorithm: str) -> str:
+    """Which problem orientation and :class:`ConvArgs` direction a direct dgrad
+    instance's kernargs come from: ``"fwd"``, over the transposed problem, for a
+    FPROP_SINGLE algorithm (``direct_grouped_dgrad_4c``/``_fused``: a forward pass
+    over the transposed problem with no weight-transform helpers to gate on, reading
+    the original weights itself -- see ``_signature()``'s matching branch);
+    ``"dgrad"`` otherwise.
+
+    The one place :func:`launch_plan_for` and the AOT adapter
+    (``builders.common.convolution_backward_data``) both read, so the two cannot
+    independently drift on which orientation an instance's kernargs are built
+    from -- the two already agreed only by coincidence once (cpg == kpg for every
+    registered row), until a correction (f192e4c8) made the AOT adapter's copy of
+    this same decision agree by hand.
+    """
+    return "fwd" if algorithm in DIRECT_DGRAD_FPROP_SINGLE else "dgrad"
+
+
 def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaunchPlan:
     """How to run the admitted instance ``spec`` on ``req``.
 
@@ -783,14 +801,10 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         )
     problem, _ = _direct_problem(req)
     if not spec.helpers:
-        # FPROP_SINGLE dgrad (direct_grouped_dgrad_4c / _fused) is a forward
-        # pass over the transposed problem too, with no weight-transform
-        # helpers to gate on -- see _signature()'s matching branch. Its
-        # kernargs must come from the transposed problem (as the AOT run path
-        # and direct_kernel_sweep.plan_for do), not the original: they agree
-        # only when cpg == kpg (every registered row today), so using
-        # ``problem`` here is silently wrong once cpg != kpg is registered.
-        if ident.algorithm in DIRECT_DGRAD_FPROP_SINGLE:
+        # See direct_dgrad_kernarg_direction: which problem orientation a
+        # FPROP_SINGLE instance's kernargs come from must agree with the AOT
+        # adapter's copy of this same decision.
+        if direct_dgrad_kernarg_direction(ident.algorithm) == "fwd":
             launch_spec, _ = _direct_launch_spec(ident, req)
             args = ConvArgs.from_problem(launch_spec.problem, direction="fwd")
         else:
