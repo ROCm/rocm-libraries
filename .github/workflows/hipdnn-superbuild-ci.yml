@@ -262,6 +262,11 @@ jobs:
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
 
+      # These contracts need source CMake files, which installed CI cannot supply.
+      - name: Check rocKE source asset contracts
+        run: |
+          "$VENV_PYTHON" -I dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -537,6 +542,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
+
+      # These contracts need source CMake files, which installed CI cannot supply.
+      - name: Check rocKE source asset contracts
+        run: |
+          "$VENV_PYTHON" -I dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py
 
       - name: Configure superbuild
         run: |

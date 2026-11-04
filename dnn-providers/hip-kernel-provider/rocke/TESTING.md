@@ -497,6 +497,7 @@ performing comparisons**:
 | Execution class | Environment and oracle | Verdict |
 |---|---|---|
 | **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. `--only`, `--only-ir`, and `--pytest-target` are focused iteration selectors and do not produce this complete verdict. |
+| **Source asset-contract CI** | The existing Linux/Windows hipDNN source-superbuild jobs run the provider's `tests/run_rocke_asset_source_contracts.py` after Python setup and before configure. It collects SDK staging, provider discovery and runner-contract tests, and rejects skipped or uncollected modules | Failure stops the source job; this adds no new workflow, runner or branch-protection status. Installed CI cannot reconstruct these source/CMake contracts. |
 | **Installed host CI** | Selected CTests from the relocated provider artifact, including platform and explicitly enrolled library pytest cohorts | Blocking when selected. Registration alone is not enrollment. |
 | **Installed pinned-reference GPU CI** | One independently qualified reference CTest per published operation/architecture pair | Blocking on its matching required lane; missing hardware, qualification, bundle, or comparisons fails. Other processors' entries skip. |
 | **Legacy/manual GPU numeric** | Live NumPy/Torch reference tests and diagnostic harnesses not covered by a required pinned lane | Opt-in or capability-skipped; a skip proves no kernel correctness. |
@@ -505,7 +506,7 @@ performing comparisons**:
 **Two entrypoints with different environments and selection.** [`run_all.py`](platform/tests/run_all.py) is
 the **developer** runner (guard → byte identity → IR validity → arch-domain
 warning gate → platform pytest → differential pytest when `rocke_engine` is
-importable → CTest). **CI does not run
+importable → CTest). **Installed artifact CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
@@ -518,6 +519,12 @@ remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
+
+The source-superbuild asset step uses this same checkout and its configured Python:
+`python -I dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py`
+from the repository root. It reuses source, dependencies and runners already needed
+by those jobs; it does not enroll these source-only tests in a source-less artifact.
+The standalone SDK developer runner still collects its staging tests normally.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform

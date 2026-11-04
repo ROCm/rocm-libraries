@@ -23,6 +23,17 @@ ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 ```
 
+Provider source CI also runs, from the repository root:
+
+```text
+python -I dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py
+```
+
+This collects the SDK asset-staging and provider-discovery contracts before CMake
+configuration, including the runner's own coverage controls. Skipped tests or an
+uncollected required module fail the step; those source-only checks are not
+substituted by an installed pytest run without the CMake sources.
+
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`. That `sys.path` change belongs only to the
