@@ -4,9 +4,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -29,6 +31,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp"
 
 /**
  * @file TestGfx942AttentionDenseMatchers.cpp
@@ -369,6 +372,13 @@ struct KernelSpec
     std::string nonpersistDecode = "qb_minor";
     int64_t ldsNumBuffers = 1;
     int64_t vRegPrefetch = 0;
+    /// The body levers at their policy for bf16 D128 on the one-CTA-per-block grid.
+    int64_t causalDiagSplit = 0;
+    int64_t oStoreWidth = 4;
+    std::string pvLoopOrder = "d_major";
+    int64_t useCfvst = 1;
+    int64_t useExp2Fast = 0;
+    int64_t ldsKGroupPad = 8;
 };
 
 KernelDefinition makeKernel(const KernelSpec& spec)
@@ -398,6 +408,12 @@ KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("nonpersist_decode"), spec.nonpersistDecode},
         {std::string("lds_num_buffers"), spec.ldsNumBuffers},
         {std::string("v_reg_prefetch"), spec.vRegPrefetch},
+        {std::string("causal_diag_split"), spec.causalDiagSplit},
+        {std::string("o_store_width"), spec.oStoreWidth},
+        {std::string("pv_loop_order"), spec.pvLoopOrder},
+        {std::string("use_cfvst"), spec.useCfvst},
+        {std::string("use_exp2_fast"), spec.useExp2Fast},
+        {std::string("lds_k_group_pad"), spec.ldsKGroupPad},
     };
     return kernel;
 }
@@ -442,12 +458,83 @@ GraphSpec windowGraph(int64_t leftBound)
     return spec;
 }
 
-/// A D128 candidate on the persistent grid at @p decode, 304 CTAs.
+/// A D128 candidate on the persistent grid at @p decode, 304 CTAs, with the
+/// single-instruction exp2 the persistent grid's policy turns on.
 KernelSpec persistentKernel(const std::string& decode)
 {
     KernelSpec spec;
     spec.persistent = 1;
     spec.persistDecode = decode;
+    spec.useExp2Fast = 1;
+    return spec;
+}
+
+/// One row of POLICY_GOLDENS: what rocKE resolves an unset use_cfvst / use_exp2_fast to.
+struct PolicyGolden
+{
+    const char* dtype;
+    int64_t headSize;
+    bool persistent;
+    bool useCfvst;
+    bool useExp2Fast;
+};
+
+/// One kernel of the manifest's full enumeration (SCORE_GOLDENS), as its KMD record
+/// carries it, and whether it is its cell's policy arm on either grid kind.
+struct ScoreGolden
+{
+    int cell;
+    const char* dtype;
+    int64_t headSize;
+    int64_t causal;
+    int64_t slidingWindow;
+    int64_t emitLse;
+    int64_t blockM;
+    int64_t blockN;
+    int64_t ldsRowPad;
+    int64_t pvPriority;
+    int64_t persistent;
+    int64_t numPersistent;
+    const char* persistDecode;
+    const char* nonpersistDecode;
+    int64_t ldsNumBuffers;
+    int64_t vRegPrefetch;
+    int64_t causalDiagSplit;
+    int64_t oStoreWidth;
+    const char* pvLoopOrder;
+    int64_t useCfvst;
+    int64_t useExp2Fast;
+    int64_t ldsKGroupPad;
+    bool gridPolicy;
+    bool persistentPolicy;
+};
+
+#include "TestGfx942AttentionDenseScoreGoldens.inc"
+
+KernelSpec kernelSpecOf(const ScoreGolden& golden)
+{
+    KernelSpec spec;
+    spec.dtype = golden.dtype;
+    spec.headSize = golden.headSize;
+    spec.causal = golden.causal;
+    spec.slidingWindow = golden.slidingWindow;
+    spec.emitLse = golden.emitLse;
+    spec.blockM = golden.blockM;
+    spec.blockN = golden.blockN;
+    spec.ldsRowPad = golden.ldsRowPad;
+    spec.pvPriority = golden.pvPriority;
+    spec.persistent = golden.persistent;
+    spec.numPersistent = golden.numPersistent;
+    spec.persistDecode = golden.persistDecode;
+    spec.nonpersistDecode = golden.nonpersistDecode;
+    spec.ldsNumBuffers = golden.ldsNumBuffers;
+    spec.vRegPrefetch = golden.vRegPrefetch;
+    spec.causalDiagSplit = golden.causalDiagSplit;
+    spec.oStoreWidth = golden.oStoreWidth;
+    spec.pvLoopOrder = golden.pvLoopOrder;
+    spec.useCfvst = golden.useCfvst;
+    spec.useExp2Fast = golden.useExp2Fast;
+    spec.ldsKGroupPad = golden.ldsKGroupPad;
     return spec;
 }
 
@@ -1234,6 +1321,139 @@ TEST(TestGfx942AttentionDenseScore, AnUnlaunchableRecordScoresZero)
     KernelSpec badTile;
     badTile.blockN = 48;
     EXPECT_EQ(scoreOf(badTile), 0.0);
+}
+
+// The body levers' policies restate rocKE's _use_cfvst and _use_exp2_fast per dtype, head
+// size and grid kind (TestGfx942AttentionDenseScoreGoldens.inc).
+TEST(TestGfx942AttentionDenseScore, TheBodyPoliciesRestateThePython)
+{
+    for(const auto& golden : POLICY_GOLDENS)
+    {
+        EXPECT_EQ(gfx942AttentionDenseCfvstPolicy(golden.dtype, golden.headSize), golden.useCfvst)
+            << golden.dtype << " D" << golden.headSize;
+        EXPECT_EQ(
+            gfx942AttentionDenseExp2FastPolicy(golden.dtype, golden.headSize, golden.persistent),
+            golden.useExp2Fast)
+            << golden.dtype << " D" << golden.headSize << " persistent " << golden.persistent;
+    }
+}
+
+// Each body lever ranks its policy arm first and every alternative after the levers before
+// it in the lexicographic order: one alternative of a later lever outranks one of an earlier.
+TEST(TestGfx942AttentionDenseScore, EveryBodyLeverPlacesItsPolicyArmFirst)
+{
+    const double policy = scoreOf(KernelSpec{});
+    KernelSpec diagSplit;
+    diagSplit.causalDiagSplit = 1;
+    KernelSpec narrowStore;
+    narrowStore.oStoreWidth = 2;
+    KernelSpec narrowestStore;
+    narrowestStore.oStoreWidth = 1;
+    KernelSpec kMajor;
+    kMajor.pvLoopOrder = "k_major";
+    KernelSpec noCfvst;
+    noCfvst.useCfvst = 0;
+    KernelSpec exp2Fast;
+    exp2Fast.useExp2Fast = 1;
+    // In order: diag split, O store (its alternatives ascending: 1 ahead of 2, so 2 is the
+    // worse), PV loop order, cfvst, exp2_fast.
+    const std::vector<KernelSpec> alternatives{
+        diagSplit, narrowStore, narrowestStore, kMajor, noCfvst, exp2Fast};
+    for(std::size_t i = 0; i < alternatives.size(); ++i)
+    {
+        EXPECT_GT(policy, scoreOf(alternatives[i])) << i;
+        if(i + 1 < alternatives.size())
+        {
+            EXPECT_LT(scoreOf(alternatives[i]), scoreOf(alternatives[i + 1])) << i;
+        }
+    }
+    // The K-group pad, last, at D64 where it is a real lever: 8 first, then 0, 16, 24, 32.
+    GraphSpec d64Graph;
+    d64Graph.headSize = 64;
+    KernelSpec d64;
+    d64.headSize = 64;
+    d64.useCfvst = 0;
+    d64.useExp2Fast = 1;
+    double previous = scoreOf(d64, 0, d64Graph);
+    for(const int64_t pad : {0, 16, 24, 32})
+    {
+        auto spec = d64;
+        spec.ldsKGroupPad = pad;
+        const double score = scoreOf(spec, 0, d64Graph);
+        EXPECT_LT(score, previous) << pad;
+        previous = score;
+    }
+    // The exp2_fast policy follows the grid: on the persistent grid exp2_fast on leads.
+    auto persistentOff = persistentKernel("bt_hkv_minor");
+    persistentOff.useExp2Fast = 0;
+    EXPECT_GT(scoreOf(persistentKernel("bt_hkv_minor"), 304), scoreOf(persistentOff, 304));
+}
+
+TEST(TestGfx942AttentionDenseScore, AMalformedBodyLeverScoresZero)
+{
+    KernelSpec unknownOrder;
+    unknownOrder.pvLoopOrder = "auto";
+    KernelSpec badCfvst;
+    badCfvst.useCfvst = 2;
+    KernelSpec badExp2Fast;
+    badExp2Fast.useExp2Fast = -1;
+    KernelSpec badStore;
+    badStore.oStoreWidth = 0;
+    KernelSpec badPad;
+    badPad.ldsKGroupPad = -8;
+    for(const auto& spec : {unknownOrder, badCfvst, badExp2Fast, badStore, badPad})
+    {
+        EXPECT_EQ(scoreOf(spec), 0.0);
+    }
+    auto missing = makeKernel(KernelSpec{});
+    missing.metadata.erase("use_exp2_fast");
+    const Graph graph(GraphSpec{});
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL))(
+                  graph.context(), BoundTokens{}, missing),
+              0.0);
+}
+
+// E2 over the manifest's full enumeration (SCORE_GOLDENS): in every cell each kernel scores
+// distinctly and positively, and the cell's policy arm scores strictly highest -- the
+// persistent base arm where persistent leads (D128 with no window or one wider than 256 keys,
+// 304 % CUs == 0), the cell default elsewhere.
+TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumeration)
+{
+    const auto score
+        = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
+    for(const int cus : {304, 228})
+    {
+        const Graph graph(GraphSpec{}, cus);
+        std::map<int, std::vector<std::pair<double, const ScoreGolden*>>> cells;
+        for(const auto& golden : SCORE_GOLDENS)
+        {
+            cells[golden.cell].emplace_back(
+                score(graph.context(), BoundTokens{}, makeKernel(kernelSpecOf(golden))), &golden);
+        }
+        EXPECT_EQ(cells.size(), 48U);
+        for(const auto& [cell, scored] : cells)
+        {
+            std::set<double> distinct;
+            const auto* best = scored.front().second;
+            double bestScore = scored.front().first;
+            for(const auto& [value, golden] : scored)
+            {
+                EXPECT_GT(value, 0.0) << cell;
+                distinct.insert(value);
+                if(value > bestScore)
+                {
+                    bestScore = value;
+                    best = golden;
+                }
+            }
+            EXPECT_EQ(distinct.size(), scored.size()) << "cell " << cell << " CUs " << cus;
+            const bool persistentLeads = cus == 304 && best->headSize == 128
+                                         && (best->slidingWindow == 0 || best->slidingWindow > 256);
+            EXPECT_TRUE(persistentLeads ? best->persistentPolicy : best->gridPolicy)
+                << "cell " << cell << " CUs " << cus << ": the best arm is block " << best->blockM
+                << "/" << best->blockN << " persistent " << best->persistent;
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

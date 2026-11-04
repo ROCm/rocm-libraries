@@ -19,6 +19,12 @@
     "persist_decode",
     "nonpersist_decode",
     "lds_num_buffers",
-    "v_reg_prefetch"
+    "v_reg_prefetch",
+    "causal_diag_split",
+    "o_store_width",
+    "pv_loop_order",
+    "use_cfvst",
+    "use_exp2_fast",
+    "lds_k_group_pad"
   ]
 }

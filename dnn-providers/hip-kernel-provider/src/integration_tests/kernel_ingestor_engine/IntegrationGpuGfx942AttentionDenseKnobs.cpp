@@ -81,9 +81,10 @@ using namespace hip_kernel_provider::test_utilities;
  * offered an hq_minor_swz kernel, which would drop and repeat work items there.
  *
  * Each expected kernel id is resolved at run time from the production descriptors: the
- * one kernel of the class and grid whose lds_row_pad, pv_priority, lds_num_buffers and
- * v_reg_prefetch are the policy arms, which the engine's score ranks first among the arms
- * sharing a tile and grid.
+ * one kernel of the class and grid whose lds_row_pad, pv_priority, lds_num_buffers,
+ * v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, use_cfvst,
+ * use_exp2_fast and lds_k_group_pad are the policy arms, which the engine's score ranks
+ * first among the arms sharing a tile and grid.
  *
  * A saved plan of one case, and of its LSE twin, is loaded with a new handle in both save
  * forms and must compute the original graph's CPU reference without selecting a kernel
@@ -113,6 +114,25 @@ constexpr int64_t NARROW_WINDOW = 256;
 /// The policy arms of the two knobs the engine does not expose (the score's first rank).
 constexpr int64_t POLICY_LDS_ROW_PAD = 8;
 constexpr int64_t POLICY_PV_PRIORITY = 0;
+
+/// The policy arms of the body levers no case forces: no diagonal split, the 4-element O
+/// store, the d_major PV loop and the default K-group pad. use_cfvst and use_exp2_fast
+/// resolve per dtype, head size and grid (rocKE's _use_cfvst / _use_exp2_fast).
+constexpr int64_t POLICY_CAUSAL_DIAG_SPLIT = 0;
+constexpr int64_t POLICY_O_STORE_WIDTH = 4;
+constexpr const char* POLICY_PV_LOOP_ORDER = "d_major";
+constexpr int64_t POLICY_LDS_K_GROUP_PAD = 8;
+constexpr int64_t CFVST_HEAD_SIZE = 128;
+
+int64_t policyUseCfvst(int64_t headSize)
+{
+    return headSize == CFVST_HEAD_SIZE ? 1 : 0;
+}
+
+int64_t policyUseExp2Fast(bool bf16, int64_t headSize, bool persistent)
+{
+    return bf16 && headSize == CFVST_HEAD_SIZE && !persistent ? 0 : 1;
+}
 
 /// The heuristic path's selection line (GenericPlanBuilder::buildPlan), which names the
 /// kernel id as the kdp spells it: lowercase, hyphenated.
@@ -763,6 +783,13 @@ std::optional<std::string>
         {grid.persistent ? "persist_decode" : "nonpersist_decode", grid.order},
         {"lds_num_buffers", int64_t{1}},
         {"v_reg_prefetch", int64_t{0}},
+        {"causal_diag_split", POLICY_CAUSAL_DIAG_SPLIT},
+        {"o_store_width", POLICY_O_STORE_WIDTH},
+        {"pv_loop_order", std::string(POLICY_PV_LOOP_ORDER)},
+        {"lds_k_group_pad", POLICY_LDS_K_GROUP_PAD},
+        {"use_cfvst", policyUseCfvst(shape.headSize)},
+        {"use_exp2_fast",
+         policyUseExp2Fast(shape.dataType != DataType::HALF, shape.headSize, grid.persistent)},
     };
 
     std::vector<std::string> ids;

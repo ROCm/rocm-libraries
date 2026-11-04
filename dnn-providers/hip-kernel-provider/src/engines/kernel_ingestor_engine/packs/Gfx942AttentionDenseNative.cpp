@@ -6,11 +6,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -61,16 +63,17 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx942_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_dense.dispatch";
 
-// The KMD fields only this engine's schema carries (21 fields; the shared ones are read in
+// The KMD fields only this engine's schema carries (27 fields; the shared ones are read in
 // AttentionDenseNative.cpp). The cold ranking reads lds_row_pad and pv_priority to order
 // arms; they do not enter the launch. emit_lse selects the candidates of a graph that
 // binds a stats output, and the launch's trailing lse_ptr. persistent, num_persistent,
 // persist_decode and nonpersist_decode are the launch grid: its CTA count and order, and
-// the persistent grid's fast-division kernargs. lds_num_buffers and v_reg_prefetch are
-// body-only and enter only the cold ranking. waves_per_eu and the other gfx942 levers are
-// absent: every shipped variant holds them at the kernel's own policy. A variant that moved
-// any of them would have to add it to the KMD first, or the candidates collide on the
-// catalog key and the loader drops one.
+// the persistent grid's fast-division kernargs. lds_num_buffers, v_reg_prefetch,
+// causal_diag_split, o_store_width, pv_loop_order, use_cfvst, use_exp2_fast and
+// lds_k_group_pad are body-only and enter only the cold ranking. waves_per_eu and the other
+// gfx942 levers are absent: every catalog variant holds them at the kernel's own policy. A
+// variant that moved any of them would have to add it to the KMD first, or the candidates
+// collide on the catalog key and the loader drops one.
 constexpr std::string_view LDS_ROW_PAD_FIELD = "lds_row_pad";
 constexpr std::string_view PV_PRIORITY_FIELD = "pv_priority";
 constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
@@ -84,15 +87,31 @@ constexpr std::string_view PERSIST_DECODE_FIELD = "persist_decode";
 constexpr std::string_view NONPERSIST_DECODE_FIELD = "nonpersist_decode";
 constexpr std::string_view LDS_NUM_BUFFERS_FIELD = "lds_num_buffers";
 constexpr std::string_view V_REG_PREFETCH_FIELD = "v_reg_prefetch";
+constexpr std::string_view DTYPE_FIELD = "dtype";
+constexpr std::string_view CAUSAL_DIAG_SPLIT_FIELD = "causal_diag_split";
+constexpr std::string_view O_STORE_WIDTH_FIELD = "o_store_width";
+constexpr std::string_view PV_LOOP_ORDER_FIELD = "pv_loop_order";
+constexpr std::string_view USE_CFVST_FIELD = "use_cfvst";
+constexpr std::string_view USE_EXP2_FAST_FIELD = "use_exp2_fast";
+constexpr std::string_view LDS_K_GROUP_PAD_FIELD = "lds_k_group_pad";
 
 /// The policy arms cold selection prefers: the 256/64 tile, the spec's default K row pad
-/// (`_DEFAULT_LDS_ROW_PAD`) and the default PV priority.
+/// (`_DEFAULT_LDS_ROW_PAD`), the default PV priority, one K buffer, no V prefetch, no
+/// diagonal split, the 4-element O store (`_DEFAULT_O_STORE_WIDTH`), the d_major PV loop
+/// (`_DEFAULT_PV_LOOP_ORDER`) and the default K-group pad (AttentionDenseSpec). use_cfvst
+/// and use_exp2_fast have no fixed policy value: gfx942AttentionDenseCfvstPolicy and
+/// gfx942AttentionDenseExp2FastPolicy give it per dtype, head size and grid.
 constexpr int64_t BASELINE_BLOCK_M = 256;
 constexpr int64_t BASELINE_BLOCK_N = 64;
 constexpr int64_t BASELINE_LDS_ROW_PAD = 8;
 constexpr int64_t BASELINE_PV_PRIORITY = 0;
 constexpr int64_t BASELINE_LDS_NUM_BUFFERS = 1;
 constexpr int64_t BASELINE_V_REG_PREFETCH = 0;
+constexpr int64_t BASELINE_CAUSAL_DIAG_SPLIT = 0;
+constexpr int64_t BASELINE_O_STORE_WIDTH = 4;
+constexpr std::string_view BASELINE_PV_LOOP_ORDER = "d_major";
+constexpr std::string_view ALTERNATIVE_PV_LOOP_ORDER = "k_major";
+constexpr int64_t BASELINE_LDS_K_GROUP_PAD = 8;
 
 /// Persistent is the cold choice only at this head size, measured ahead of the grid at D128
 /// for every batch and mask (dispatch/attention/gfx942_dense.py _base_spec)...
@@ -234,7 +253,7 @@ bool kernelMatches(const MatchContext& context,
 constexpr double UNSUPPORTED_SCORE = 0.0;
 /// Exceeds every rank a legal record produces, so every legal score stays positive.
 /// Powers of two keep every score exactly representable.
-constexpr int64_t RANK_SPAN = int64_t{1} << 25;
+constexpr int64_t RANK_SPAN = int64_t{1} << 32;
 
 /**
  * @brief An arm's position in its knob's cold order: 0 for the policy value, otherwise
@@ -294,16 +313,50 @@ int64_t gridRank(const attention_dense::AttentionDenseGrid& grid,
 }
 
 /**
+ * @brief A 0/1 body switch's rank: 0 at its policy value, 1 at the other; nullopt for a
+ *        missing value or one other than 0 or 1.
+ */
+std::optional<int64_t> switchRank(std::optional<int64_t> value, bool policy)
+{
+    if(!value.has_value() || (*value != 0 && *value != 1))
+    {
+        return std::nullopt;
+    }
+    return (*value == 1) == policy ? 0 : 1;
+}
+
+/**
+ * @brief The PV loop order's rank: 0 at d_major, 1 at k_major; nullopt for a missing or
+ *        unknown order.
+ */
+std::optional<int64_t> pvLoopOrderRank(const KernelDefinition& kernel)
+{
+    const auto order = attention_dense::stringMetadata(kernel, PV_LOOP_ORDER_FIELD);
+    if(order == BASELINE_PV_LOOP_ORDER)
+    {
+        return 0;
+    }
+    if(order == ALTERNATIVE_PV_LOOP_ORDER)
+    {
+        return 1;
+    }
+    return std::nullopt;
+}
+
+/**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
  * A stable fallback order for cold selection, not a performance model. The rank is
  * lexicographic over (grid, tile, lds_row_pad, pv_priority, lds_num_buffers,
- * v_reg_prefetch), and each knob places its policy arm first (gridRank; the 256/64 tile,
- * lds_row_pad 8, pv_priority 0, one K buffer, no V prefetch) and its alternatives in
- * ascending order. Every distinct knob combination gets a distinct score, so the
- * selector's descriptor-id tie-break never decides between two arms. emit_lse is not
- * ranked: kernelMatches admits the LSE twins of a graph that binds stats and the others
- * of one that does not, so a twin and its partner never compete.
+ * v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, use_cfvst,
+ * use_exp2_fast, lds_k_group_pad), and each knob places its policy arm first (gridRank; the
+ * 256/64 tile, lds_row_pad 8, pv_priority 0, one K buffer, no V prefetch, no diagonal split,
+ * the 4-element O store, d_major, the cfvst and exp2_fast policies of the candidate's
+ * dtype, head size and grid, K-group pad 8) and its alternatives in ascending order. Every
+ * distinct knob combination gets a distinct score, so the selector's descriptor-id
+ * tie-break never decides between two arms. emit_lse is not ranked: kernelMatches admits
+ * the LSE twins of a graph that binds stats and the others of one that does not, so a twin
+ * and its partner never compete.
  */
 double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -315,9 +368,27 @@ double scoreKernel(const MatchContext& context,
     const auto pvPriority = attention_dense::integerMetadata(kernel, PV_PRIORITY_FIELD);
     const auto ldsNumBuffers = attention_dense::integerMetadata(kernel, LDS_NUM_BUFFERS_FIELD);
     const auto vRegPrefetch = attention_dense::integerMetadata(kernel, V_REG_PREFETCH_FIELD);
+    const auto diagSplit = attention_dense::integerMetadata(kernel, CAUSAL_DIAG_SPLIT_FIELD);
+    const auto oStoreWidth = attention_dense::integerMetadata(kernel, O_STORE_WIDTH_FIELD);
+    const auto kGroupPad = attention_dense::integerMetadata(kernel, LDS_K_GROUP_PAD_FIELD);
+    const auto loopOrderRank = pvLoopOrderRank(kernel);
     if(!tile.has_value() || !grid.has_value() || !ldsRowPad.has_value() || !pvPriority.has_value()
-       || !ldsNumBuffers.has_value() || !vRegPrefetch.has_value() || *ldsRowPad < 0
-       || *pvPriority < 0 || *ldsNumBuffers < 1 || *vRegPrefetch < 0)
+       || !ldsNumBuffers.has_value() || !vRegPrefetch.has_value() || !diagSplit.has_value()
+       || !oStoreWidth.has_value() || !kGroupPad.has_value() || !loopOrderRank.has_value()
+       || *ldsRowPad < 0 || *pvPriority < 0 || *ldsNumBuffers < 1 || *vRegPrefetch < 0
+       || *diagSplit < 0 || *oStoreWidth < 1 || *kGroupPad < 0)
+    {
+        return UNSUPPORTED_SCORE;
+    }
+    const std::string dtype
+        = attention_dense::stringMetadata(kernel, DTYPE_FIELD).value_or(std::string());
+    const int64_t headSize = attention_dense::integerMetadata(kernel, HEAD_SIZE_FIELD).value_or(0);
+    const auto cfvstRank = switchRank(attention_dense::integerMetadata(kernel, USE_CFVST_FIELD),
+                                      gfx942AttentionDenseCfvstPolicy(dtype, headSize));
+    const auto exp2FastRank
+        = switchRank(attention_dense::integerMetadata(kernel, USE_EXP2_FAST_FIELD),
+                     gfx942AttentionDenseExp2FastPolicy(dtype, headSize, grid->persistent()));
+    if(!cfvstRank.has_value() || !exp2FastRank.has_value())
     {
         return UNSUPPORTED_SCORE;
     }
@@ -329,6 +400,9 @@ double scoreKernel(const MatchContext& context,
     constexpr int64_t PRIORITY_SPAN = 8;
     constexpr int64_t BUFFERS_SPAN = 2;
     constexpr int64_t PREFETCH_SPAN = 2;
+    constexpr int64_t SWITCH_SPAN = 2;
+    constexpr int64_t O_STORE_SPAN = 4;
+    constexpr int64_t K_GROUP_PAD_SPAN = 8;
     const bool baselineTile = tile->blockM == BASELINE_BLOCK_M && tile->blockN == BASELINE_BLOCK_N;
     const int64_t tileRank = baselineTile
                                  ? 0
@@ -340,14 +414,26 @@ double scoreKernel(const MatchContext& context,
     const int64_t priorityRank = armRank(*pvPriority, BASELINE_PV_PRIORITY, 1, PRIORITY_SPAN);
     const int64_t buffersRank = armRank(*ldsNumBuffers, BASELINE_LDS_NUM_BUFFERS, 1, BUFFERS_SPAN);
     const int64_t prefetchRank = armRank(*vRegPrefetch, BASELINE_V_REG_PREFETCH, 1, PREFETCH_SPAN);
-    const int64_t rank
-        = ((((gridRankValue * TILE_SPAN + std::min(tileRank, TILE_SPAN - 1)) * PAD_SPAN + padRank)
-                * PRIORITY_SPAN
-            + priorityRank)
-               * BUFFERS_SPAN
-           + buffersRank)
-              * PREFETCH_SPAN
-          + prefetchRank;
+    const int64_t diagSplitRank = armRank(*diagSplit, BASELINE_CAUSAL_DIAG_SPLIT, 1, SWITCH_SPAN);
+    const int64_t oStoreRank = armRank(*oStoreWidth, BASELINE_O_STORE_WIDTH, 1, O_STORE_SPAN);
+    const int64_t kGroupPadRank
+        = armRank(*kGroupPad, BASELINE_LDS_K_GROUP_PAD, 8, K_GROUP_PAD_SPAN);
+    // Each step multiplies the rank so far by the next knob's span and adds its arm.
+    int64_t rank = gridRankValue;
+    for(const auto& [armRankValue, span] : {std::pair{std::min(tileRank, TILE_SPAN - 1), TILE_SPAN},
+                                            std::pair{padRank, PAD_SPAN},
+                                            std::pair{priorityRank, PRIORITY_SPAN},
+                                            std::pair{buffersRank, BUFFERS_SPAN},
+                                            std::pair{prefetchRank, PREFETCH_SPAN},
+                                            std::pair{diagSplitRank, SWITCH_SPAN},
+                                            std::pair{oStoreRank, O_STORE_SPAN},
+                                            std::pair{*loopOrderRank, SWITCH_SPAN},
+                                            std::pair{*cfvstRank, SWITCH_SPAN},
+                                            std::pair{*exp2FastRank, SWITCH_SPAN},
+                                            std::pair{kGroupPadRank, K_GROUP_PAD_SPAN}})
+    {
+        rank = rank * span + armRankValue;
+    }
     return static_cast<double>(RANK_SPAN - rank);
 }
 

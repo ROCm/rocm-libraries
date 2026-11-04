@@ -14,13 +14,17 @@ checks the C++ against:
 
     cd dnn-providers/hip-kernel-provider/rocke
     PYTHONPATH=$PWD/platform/python:$PWD/library python \\
-        ../src/tests/engines/kernel_ingestor_engine/packs/gen_attention_dense_persistent_goldens.py
+        ../src/tests/engines/kernel_ingestor_engine/packs/gen_attention_dense_persistent_goldens.py [--check]
+
+--check writes nothing and exits 1 when the checked-in table differs from the rendered one;
+IngestorGenerator's tests/test_attention_dense_goldens.py runs the same comparison.
 """
 
 from __future__ import annotations
 
 import itertools
 import random
+import sys
 from pathlib import Path
 
 from kernels.gfx942.attention_dense import (
@@ -162,7 +166,8 @@ def verdict(grid, shape):
     return True, attention_dense_grid(s), pairs
 
 
-def main():
+def render() -> str:
+    """The .inc text for the current rocKE launch-grid helpers."""
     lines = [
         "// Copyright © Advanced Micro Devices, Inc., or its affiliates.",
         "// SPDX-License-Identifier:  MIT",
@@ -203,9 +208,22 @@ def main():
             f"{{{', '.join(str(v) for v in padded)}}}}},"
         )
     lines += ["}};", "", "// clang-format on", ""]
-    OUT.write_text("\n".join(lines), encoding="utf-8")
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    check = "--check" in (sys.argv[1:] if argv is None else argv)
+    text = render()
+    if check:
+        if OUT.read_text(encoding="utf-8") != text:
+            print(f"{OUT.name} is stale; rerun {Path(__file__).name}", file=sys.stderr)
+            return 1
+        print(f"{OUT.name} is current")
+        return 0
+    OUT.write_text(text, encoding="utf-8")
     print(f"wrote {OUT}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

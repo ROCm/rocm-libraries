@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -184,6 +185,42 @@ inline Gfx942AttentionDenseGeometry gfx942AttentionDenseGeometry(int64_t blockM,
     geometry.gridY = static_cast<unsigned>(numQueryHeads);
     geometry.gridZ = static_cast<unsigned>(batch);
     return geometry;
+}
+
+/**
+ * @brief The body policy `_use_cfvst` resolves an unset `use_cfvst` to: the conflict-free
+ *        V store where one async-DMA instruction moves one K/V row (head size 128), either
+ *        dtype, and the naive V path at 64.
+ *
+ * Read by the cold score only, which places the policy arm of each body knob first. The
+ * Python is `rocke/library/kernels/gfx942/attention_dense.py:_use_cfvst`; the table in
+ * TestGfx942AttentionDenseScoreGoldens.inc is generated from it.
+ *
+ * @param dtype The KMD dtype ("BF16" or "FP16").
+ */
+inline bool gfx942AttentionDenseCfvstPolicy(std::string_view dtype, int64_t headSize)
+{
+    static_cast<void>(dtype); // both 2-byte dtypes take the same transposed-V path
+    // One K/V row per async-DMA instruction (_rows_per_instr(head_size) == 1).
+    return headSize > 0 && GFX942_DMA_ELEMENTS_PER_INSTRUCTION / headSize == 1;
+}
+
+/**
+ * @brief The body policy `_use_exp2_fast` resolves an unset `use_exp2_fast` to: the
+ *        single-instruction exp2 everywhere except bf16 at head size 128 on a
+ *        one-CTA-per-block grid, where it measured slower.
+ *
+ * Read by the cold score only. The Python is
+ * `rocke/library/kernels/gfx942/attention_dense.py:_use_exp2_fast`; the table in
+ * TestGfx942AttentionDenseScoreGoldens.inc is generated from it.
+ *
+ * @param dtype The KMD dtype ("BF16" or "FP16").
+ * @param persistent Whether the candidate is built for the persistent grid.
+ */
+inline bool
+    gfx942AttentionDenseExp2FastPolicy(std::string_view dtype, int64_t headSize, bool persistent)
+{
+    return dtype != "BF16" || headSize != 128 || persistent;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

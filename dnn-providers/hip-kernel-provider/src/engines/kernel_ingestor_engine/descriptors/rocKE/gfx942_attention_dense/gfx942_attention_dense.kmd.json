@@ -106,6 +106,34 @@
       "name": "v_reg_prefetch",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "causal_diag_split",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "o_store_width",
+      "type": "int",
+      "default_value": 4
+    },
+    {
+      "name": "pv_loop_order",
+      "type": "string",
+      "default_value": "d_major"
+    },
+    {
+      "name": "lds_k_group_pad",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "use_cfvst",
+      "type": "int"
+    },
+    {
+      "name": "use_exp2_fast",
+      "type": "int"
     }
   ]
 }

@@ -31,10 +31,21 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   decode only where its fast-division dividends stay below 2^30. The cold score prefers
   the persistent grid at D128 without a narrow window when 304 is a multiple of the
   device's CU count, and the `qb_minor` grid otherwise.
+- Body levers (KMD fields, no launch change): `lds_row_pad`, `pv_priority`,
+  `lds_num_buffers`, `v_reg_prefetch`, `causal_diag_split`, `o_store_width`,
+  `pv_loop_order`, `use_cfvst`, `use_exp2_fast` and `lds_k_group_pad`. `use_cfvst` and
+  `use_exp2_fast` carry the value the kernel resolves (its policy depends on dtype, head
+  size and grid), so they have no KMD default. The shipped selection holds every body
+  lever at its policy except `lds_row_pad`, `pv_priority`, `lds_num_buffers` and
+  `v_reg_prefetch`; the manifest's full enumeration (the sweep catalog) moves all of
+  them. `window_wave_skip` and the narrow-window tile stay at their defaults: window cells
+  are floor-only.
 - Knobs: `block_m`, `block_n`, `lds_row_pad`, `pv_priority`, `persistent`,
-  `persist_decode`, `nonpersist_decode`, `lds_num_buffers` and `v_reg_prefetch` (the
-  UED's; the string ones are pinned by ordinal), every field that varies within a cell;
-  the native score ranks all of them.
+  `persist_decode`, `nonpersist_decode`, `lds_num_buffers`, `v_reg_prefetch`,
+  `causal_diag_split`, `o_store_width`, `pv_loop_order`, `use_cfvst`, `use_exp2_fast` and
+  `lds_k_group_pad` (the UED's; the string ones are pinned by ordinal), every field that
+  varies within a cell of the full enumeration; the native score ranks all of them, the
+  policy arm of each first.
 - Batch, sequence lengths and both head counts are runtime kernel arguments, so every
   variant serves any shape its tile divides. Each variant is built at batch 1,
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
@@ -49,7 +60,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 | `artifacts/gfx942_attention_dense.kdp.json` | DVC | the variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx942_attention_dense.kmd.json` | git | variant fields |
 | `gfx942_attention_dense.udd.json` | git | dispatch symbol |
-| `gfx942_attention_dense.ued.json` | git | engine, knobs `block_m`, `block_n`, `lds_row_pad`, `pv_priority`, `persistent`, `persist_decode`, `nonpersist_decode`, `lds_num_buffers`, `v_reg_prefetch` |
+| `gfx942_attention_dense.ued.json` | git | engine, knobs `block_m`, `block_n`, `lds_row_pad`, `pv_priority`, `persistent`, `persist_decode`, `nonpersist_decode`, `lds_num_buffers`, `v_reg_prefetch`, `causal_diag_split`, `o_store_width`, `pv_loop_order`, `use_cfvst`, `use_exp2_fast`, `lds_k_group_pad` |
 | `gfx942_attention_dense.uhd.json` | git | native selector |
 | `kernel_dtype_matches_graph.umd.json` | git | dtype matcher |
 

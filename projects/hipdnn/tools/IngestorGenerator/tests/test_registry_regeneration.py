@@ -308,6 +308,21 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     assert rc == 0, report.out + report.err
 
 
+def _knob_clashes(features, knobs, kernels) -> list:
+    """Names of the kernels sharing one engine-knob tuple inside one cell, per clash.
+    `kernels` is `(metadata, name)` pairs."""
+    cells = collections.defaultdict(list)
+    for metadata, name in kernels:
+        cell = tuple(metadata.get(f) for f in features)
+        cells[cell].append((tuple(metadata.get(k) for k in knobs), name))
+    return [
+        names
+        for entries in cells.values()
+        for names in _group_names(entries).values()
+        if len(names) > 1
+    ]
+
+
 def test_g5_every_cell_is_addressable_by_the_engine_knobs(selection):
     """hipDNN pages a graph's candidates by their engine-knob tuple and refuses a page in
     which two candidates share one ("Ambiguous enrolled knob tuple"). A graph's candidates
@@ -315,20 +330,67 @@ def test_g5_every_cell_is_addressable_by_the_engine_knobs(selection):
     kernel's tuple of engine knobs must be unique."""
     features = list(selection.reduction["fields"]["feature"])
     knobs = list(selection.engine.knobs)
-    cells = collections.defaultdict(list)
-    for kernel in _selection_kernels(selection):
-        cell = tuple(kernel.metadata.get(f) for f in features)
-        cells[cell].append((tuple(kernel.metadata.get(k) for k in knobs), kernel.name))
-    clashes = [
-        names
-        for entries in cells.values()
-        for names in _group_names(entries).values()
-        if len(names) > 1
-    ]
+    clashes = _knob_clashes(
+        features,
+        knobs,
+        [(k.metadata, k.name) for k in _selection_kernels(selection)],
+    )
     assert not clashes, (
         f"engine knobs {knobs} do not tell these kernels apart within a cell; "
         f"add the KMD field that differs to engine.knobs: {clashes[:3]}"
     )
+
+
+# Bundles whose whole enumeration is a catalog a sweep installs: every kernel a reduction
+# may keep must already page and load without a collision, before any is chosen.
+_SWEPT_WHOLE = frozenset({"gfx942_attention_dense"})
+
+
+@pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))
+def test_g5_the_whole_enumeration_pages_and_loads_without_a_collision(name):
+    """g5 over the manifest's full enumeration, not only the shipped selection: the swept
+    catalog is the enumeration, so every field that varies inside a cell must be an engine
+    knob (else enumerateCandidates refuses the page), and every kernel's metadata completed
+    with the KMD defaults -- the loader's catalog key -- must be unique (else the loader
+    keeps one and drops the other)."""
+    if not _ROCKE_LIBRARY.is_dir():
+        pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
+    manifest = enumerator.load_manifest(str(_Engine(name, reduced=True).manifest))
+    enumerator.bind_provider(manifest.get("provider_root"))
+    registry_config = enumerator.build_config(
+        manifest, enumerator.Registry(manifest), warn=lambda _: None, strict=True
+    )
+    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    features = list(manifest["reduction"]["fields"]["feature"])
+    knobs = list(registry_config["engine"]["knobs"])
+    clashes = _knob_clashes(
+        features, knobs, [(k["metadata"], k["name"]) for k in kernels]
+    )
+    assert not clashes, (
+        f"engine knobs {knobs} do not tell these enumerated kernels apart within a cell: "
+        f"{clashes[:3]}"
+    )
+    varying = {
+        f
+        for f in {name for k in kernels for name in k["metadata"]}
+        if len({tuple(k["metadata"].get(x) for x in features + [f]) for k in kernels})
+        > len({tuple(k["metadata"].get(x) for x in features) for k in kernels})
+    }
+    assert varying <= set(knobs), (
+        f"KMD fields {sorted(varying - set(knobs))} vary inside a cell but are not "
+        f"engine knobs"
+    )
+    fields = registry_config["kmd_fields"]
+    keys = collections.Counter(
+        tuple(
+            json.dumps(k["metadata"].get(f["name"], f.get("default_value")))
+            for f in fields
+        )
+        for k in kernels
+    )
+    repeated = [key for key, count in keys.items() if count > 1]
+    assert not repeated, f"{len(repeated)} catalog keys repeat, e.g. {repeated[:2]}"
+    assert len(keys) == len(kernels)
 
 
 def _group_names(entries):
