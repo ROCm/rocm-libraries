@@ -52,8 +52,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
   from the build tree without an install.
 * [Conv] The bundled AI heuristic models (`*.tn.model` and `*.ktn.model`) are now Keras 3 exports
-  and require frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Older frugally-deep
-  versions cannot load them, and MIOpen then silently falls back to the non-AI heuristic.
+  for frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Builds against
+  frugally-deep 0.15.x install temporary Keras 2 copies of the same models instead. Configuring
+  against frugally-deep 0.16 to 0.20, which can load neither set, is an error.
 
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
