@@ -27,10 +27,10 @@ from typing import Any, Optional
 import pytest
 from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
-from Tensile.Components.CMSValidator import (
+from tensilelite.Components.CMSValidator import (
     add_local_read_constraints, add_pack_constraints, isValid,
 )
-from Tensile.Components.CustomSchedule import ScheduleInfo
+from tensilelite.Components.CustomSchedule import ScheduleInfo
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidatePackBF16(CMSValidationTestBase):

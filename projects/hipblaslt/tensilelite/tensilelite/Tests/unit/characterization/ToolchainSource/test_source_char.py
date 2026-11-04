@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Toolchain.Source``: the pure code-object
+"""Characterization tests for ``tensilelite.Toolchain.Source``: the pure code-object
 filename computation and ``buildSourceCodeObjectFiles`` orchestration (driven
 with stub compiler/bundler + the helper cache disabled — no real compilation)."""
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Toolchain.Source import (
+from tensilelite.Toolchain.Source import (
     _computeSourceCodeObjectFilename,
     buildSourceCodeObjectFiles,
     makeSourceToolchain,
@@ -57,6 +57,11 @@ class _StubCompiler:
         self.version = v
         self.rocm_version = v
         self.default_args = []
+        # It also names its output dirs through compilerTargetOf(a, compiler.path).
+        # None means "no compiler to ask", which still resolves build aliases but
+        # leaves every other spec alone -- no subprocess, and the same names
+        # these snapshots were taken with.
+        self.path = None
 
     def __call__(self, includeDir, archs, kernelPath, objPath):
         self.calls.append((includeDir, tuple(archs), kernelPath, objPath))

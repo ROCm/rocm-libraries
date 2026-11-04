@@ -159,9 +159,7 @@ namespace rocsparse
             {
             case rocsparse_diag_type_non_unit:
             {
-                // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-                // LCOV_EXCL_STOP
             }
             case rocsparse_diag_type_unit:
             {
@@ -223,19 +221,21 @@ rocsparse_status rocsparse::csxsldu_preprocess_template(rocsparse_handle     han
                                  : buffer)
               : uptr_;
 
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemcpyAsync(lptr, &lbase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemcpyAsync(uptr, &ubase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
+
     switch(dir_)
     {
     case rocsparse_direction_row:
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-            lptr, &lbase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-            uptr, &ubase, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
         J    nblocks = (m_ - 1) / nthreads_per_block + 1;
         dim3 blocks(nblocks);
-        rocsparse::csxtril_count_kernel_dispatch<nthreads_per_block, I, J>(
-            handle_, blocks, threads, ldiag_, udiag_, m_, ptr_, ind_, base_, lptr, uptr);
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csxtril_count_kernel_dispatch<nthreads_per_block, I, J>(
+                handle_, blocks, threads, ldiag_, udiag_, m_, ptr_, ind_, base_, lptr, uptr)));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::inclusive_scan(handle_, m_, lptr));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::inclusive_scan(handle_, m_, uptr));
         break;
@@ -245,18 +245,20 @@ rocsparse_status rocsparse::csxsldu_preprocess_template(rocsparse_handle     han
     {
         J    nblocks = (n_ - 1) / nthreads_per_block + 1;
         dim3 blocks(nblocks);
-        rocsparse::csxtril_count_kernel_dispatch<nthreads_per_block, I, J>(
-            handle_, blocks, threads, udiag_, ldiag_, n_, ptr_, ind_, base_, uptr, lptr);
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csxtril_count_kernel_dispatch<nthreads_per_block, I, J>(
+                handle_, blocks, threads, udiag_, ldiag_, n_, ptr_, ind_, base_, uptr, lptr)));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::inclusive_scan(handle_, n_, lptr));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::inclusive_scan(handle_, n_, uptr));
         break;
     }
     }
 
+    const J nseq = (dir_ == rocsparse_direction_row) ? m_ : n_;
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        host_lnnz_, &lptr[m_], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
+        host_lnnz_, &lptr[nseq], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        host_unnz_, &uptr[m_], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
+        host_unnz_, &uptr[nseq], sizeof(I), hipMemcpyDeviceToHost, handle_->stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
     host_lnnz_[0] -= lbase;

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.LibraryLogic import (
+from tensilelite.LibraryLogic import (
     LogicAnalyzer,
     customKernelTile,
     isCustomKernelSolution,

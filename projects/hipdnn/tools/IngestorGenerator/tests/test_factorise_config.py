@@ -142,6 +142,47 @@ class TestRoundTrip:
         with pytest.raises(factorise_config.FactoriseError, match="round trip"):
             factorise_config._round_trip(SAMPLE, broken)
 
+    def test_constant_launches_survive_the_compaction(self, tmp_path):
+        long_form = copy.deepcopy(SAMPLE)
+        launches = {"segment": {}, "reduce": {"role": "reduce"}}
+        for kernel in long_form["packs"][0]["kernels"]:
+            kernel["kernel_source"]["launches"] = copy.deepcopy(launches)
+        compact = _compact(long_form)
+        assert compact["packs"][0]["kernel_defaults"]["launches"] == launches
+        factorise_config._round_trip(long_form, compact)
+        for kernel in _expand(tmp_path, compact):
+            assert list(kernel.kernel_source.launches) == ["segment", "reduce"]
+            assert kernel.kernel_source.launches["reduce"].role == "reduce"
+
+    def test_launches_the_compact_form_cannot_carry_are_refused(self):
+        """Every kernel names the same launches but one states a different override,
+        so the launches are not constant across the set and the compact form would
+        give every kernel the same launches (or none); the round trip must not let
+        that ship."""
+        long_form = copy.deepcopy(SAMPLE)
+        for index, kernel in enumerate(long_form["packs"][0]["kernels"]):
+            kernel["kernel_source"]["launches"] = {
+                "segment": {},
+                "reduce": {
+                    "role": "reduce",
+                    **({"builder": "build_x"} if not index else {}),
+                },
+            }
+        compact = _compact(long_form)
+        with pytest.raises(factorise_config.FactoriseError, match="launches"):
+            factorise_config._round_trip(long_form, compact)
+
+    def test_launches_differing_only_in_a_role_are_refused(self):
+        long_form = copy.deepcopy(SAMPLE)
+        for index, kernel in enumerate(long_form["packs"][0]["kernels"]):
+            kernel["kernel_source"]["launches"] = {
+                "segment": {},
+                "reduce": {"role": "reduce" if index else "merge"},
+            }
+        compact = _compact(long_form)
+        with pytest.raises(factorise_config.FactoriseError, match="launches"):
+            factorise_config._round_trip(long_form, compact)
+
 
 class TestHoisting:
     def test_constant_kernel_source_keys_move_to_kernel_defaults(self):

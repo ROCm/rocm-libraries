@@ -49,7 +49,7 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/rocalution
-# -c → BUILD_CLIENTS_SAMPLES + TESTS + BENCHMARKS; -d fetches dependencies (incl. googletest)
+# -c → BUILD_CLIENTS_SAMPLES + TESTS + BENCHMARKS; -d installs distro packages (GoogleTest must already be installed)
 ./install.sh -dc
 # host-only (no GPU), OpenMP on:            ./install.sh -c --host
 # MPI multi-node build:                     ./install.sh -c --host --mpi=on --no-openmp
@@ -102,7 +102,8 @@ binary (there is no `clients/unittests/` split like rocSPARSE) and use a mix of 
 
 There are no `TYPED_TEST` suites.
 
-**Framework:** GoogleTest (`find_package(GTest REQUIRED)`). `main` at
+**Framework:** GoogleTest (`find_package(GTest)`; if it isn't installed, it is built from
+`FETCHCONTENT_SOURCE_DIR_GOOGLETEST` or, with `-DALLOW_FETCH_DEPS=ON`, downloaded). `main` at
 `clients/tests/rocalution_host_gtest_main.cpp`, which calls `init_rocalution()` before
 `RUN_ALL_TESTS()` and accepts `--device <id>` / `--version`.
 
@@ -141,7 +142,7 @@ transfers and multi-node communication behave as expected.
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
 | Structures (GPU) | `local_matrix` ops / conversions / multicoloring / itsolve / solve, `local_vector`, `local_stencil` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
-| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager` |
+| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup) |
 
 **Tiers (environment-variable driven, mapped to CTest categories when built inside the monorepo with
 `shared/ctest/`):**
@@ -166,6 +167,16 @@ suites.
 
 **What requires MPI:** the
 `global_*` and `parallel_manager` suites (`SUPPORT_MPI`).
+
+**What requires an MPI launcher:** the `global_matrix/*` and `global_amg/*` parameterized cases call
+MPI and skip themselves unless `mpirun` started the process; `global_amg/*` and the `ghost_order`
+cases of `global_matrix/*` also skip unless they run on exactly 2 ranks. All ranks must run the same
+tests in the same order, so start them with a filter. CTest registers this run as
+`rocalution-test-mpi-np2`, with the `standard`, `comprehensive` and `full` labels:
+
+```bash
+mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'
+```
 
 **Managed-memory (HMM) cases:** on gfx90a, run with `HSA_XNACK=0` and `HSA_XNACK=1`.
 

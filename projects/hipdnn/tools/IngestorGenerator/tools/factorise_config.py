@@ -617,6 +617,12 @@ def _round_trip(original: dict, compact: dict) -> None:
             ("build", a.kernel_source.build, b.kernel_source.build),
             ("file", a.kernel_source.file, b.kernel_source.file),
             ("symbol", a.kernel_source.symbol, b.kernel_source.symbol),
+            ("launches", a.kernel_source.launches, b.kernel_source.launches),
+            (
+                "launch order",
+                list(a.kernel_source.launches),
+                list(b.kernel_source.launches),
+            ),
             ("arch", a.arch, b.arch),
             ("priority", a.priority, b.priority),
             ("default", a.default, b.default),

@@ -326,6 +326,20 @@ def gen_shape_combinations(M: List, N: List, K: List) -> Tuple[List, List, List]
     problem_sizes = list(product(M, N, K))
     return tuple(tuple(s[i] for s in problem_sizes) for i in range(len(problem_sizes[0])))
 
+def char_array_bytes(name, value, ctype):
+    """Encode a string for a fixed-size char array, keeping room for its terminator.
+
+    ctypes silently stores a value that exactly fills the array with no NUL, and the
+    C++ side then reads past the field, so reject that as well as anything longer.
+    """
+    data = bytes(value, 'utf_8')
+    size = ctypes.sizeof(ctype)
+    if len(data) >= size:
+        sys.exit(f"{name} '{value}' is {len(data)} bytes, but the field holds at most "
+                 f"{size - 1} plus its terminator\n")
+    return data
+
+
 def write_test(test):
     """Write the test case out to the binary file if not seen already"""
 
@@ -339,7 +353,7 @@ def write_test(test):
         try:
             if issubclass(ctype, ctypes.Array):
                 if issubclass(ctype._type_, ctypes.c_char):
-                    arg.append(bytes(test[name], 'utf_8'))
+                    arg.append(char_array_bytes(name, test[name], ctype))
                 else:
                     try:
                         arg.append(ctype(*test[name]))

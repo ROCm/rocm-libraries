@@ -48,6 +48,7 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `Tiling(atom_shape=, order=, mac_prio=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK", mac_prio=0 (setprio off; §5d) |
 | `CanonicalStyle()` / `InterleavedStyle()` | the operand-layout profile (`style=`) | no | default canonical; interleaved = wide free-contiguous loads |
 | `InstrClass` / `derive_sched_group_counts(plan, ...)` | `sched_group_barrier` scheduling — class masks + per-trip counts | no (`InstrClass` int mask; verb IR-free) | scheduling cadence is a perf KNOB, off by default (§5d) |
+| `tensor_transforms`: `make_transform_graph` + kind builders, `emit_accesses` | coordinate graph (loop coordinates -> tensor coordinates), split element address + derived bound checks | graph: no; `emit_accesses`: yes (b-first) | checks derived from ranges vs the tensor's lengths; import from `rocke.helpers.tiling.tensor_transforms` (sec 3b) |
 
 Free `make_*` factories over thin value objects (`TensorDesc`/`TensorWindow` in `descriptors.py`;
 `TileDesc` in `fragments.py`) and one register carrier (`Fragment`); three verbs (`emit.py`); one
@@ -235,6 +236,18 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
 
 ### Reserved (post-M1)
 - per-load `coherency=` (param exists on the verbs; ignored in M1).
+
+---
+
+## 3b. Coordinate graphs -- `tensor_transforms`
+
+When a tensor is not a plain strided view of the loop coordinates (an implicit-GEMM convolution's
+`k -> (y, x, c)` with a halo, an LDS swizzle), describe the mapping as a coordinate graph and let
+`emit_accesses` give each access's split element address and exactly the bound checks that can fail. The
+graph holds no tensor and no bound: the `TensorDesc` above stays the one home of lengths and strides. Import
+it from `rocke.helpers.tiling.tensor_transforms`. The API (units, kinds, rules, every error) is
+[`tensor_transforms_api.md`](tensor_transforms_api.md); worked examples are
+[`tensor_transforms_guide.md`](tensor_transforms_guide.md).
 
 ---
 

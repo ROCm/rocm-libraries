@@ -16,6 +16,7 @@ from rocke.helpers.tiling import (
     load_fragment,
     make_fragment,
     make_tensor_desc,
+    make_tile_desc,
     make_window,
 )
 from rocke.helpers.tiling.analysis import analyze_coalescing
@@ -25,8 +26,9 @@ from rocke.helpers.tiling.coalescing_probe import (
     line_bytes_for,
     report_for_transaction,
 )
-from rocke.helpers.tiling.tiling_recorder import record_build
+from rocke.helpers.tiling.tiling_recorder import PipelineTransaction, record_build
 from rocke.helpers.tiling.transforms import interleave_idx
+from rocke.tests.arch_marks import arch_specific
 
 
 def _native_c():
@@ -149,3 +151,41 @@ def test_report_names_b_axes_in_gemm_order():
     )
     assert a_report.dims == ("M", "K") and a_report.stride1_axis == "K"
     assert b_report.dims == ("N", "K") and b_report.stride1_axis == "K"
+
+
+def _load_transaction(dtype_name):
+    """A recorded global load of a 16 x 16 tile (4 contiguous elements per lane) of ``dtype_name``."""
+    tile = make_tile_desc(
+        shape=[16, 16], thread_tile=[1, 4], thread_dist=[16, 4], wave_size=64
+    )
+    return PipelineTransaction(
+        kind="load",
+        seq=0,
+        space="global",
+        space_id=0,
+        space_name="A",
+        tile_desc=tile,
+        dtype_name=dtype_name,
+        strides=(16, 1),
+        lengths=(16, 16),
+        origin=(0, 0),
+        register_count=tile.register_count,
+        vw=4,
+        swizzle=False,
+    )
+
+
+@arch_specific(
+    ("gfx942",),
+    reason="ARCH_LINE_BYTES has no gfx950 entry; the probe forbids assuming another arch's line size",
+)
+@pytest.mark.parametrize(
+    "dtype_name,bits",
+    [("f16", 16), ("f32", 32), ("fp8e4m3", 8), ("fp6e3m2", 6), ("fp4e2m1", 4)],
+)
+def test_report_takes_the_element_width_from_the_dtype(dtype_name, bits):
+    # The width comes from the dtype table, for every format the IR has (sub-byte included).
+    report = report_for_transaction(
+        _load_transaction(dtype_name), arch="gfx942", dims=("M", "K")
+    )
+    assert report.dtype_bits == bits

@@ -201,6 +201,44 @@ namespace TensileLite
             }
         };
 
+        struct World : public Property_CRTP<World, ContractionProblemGemm>
+        {
+            enum
+            {
+                HasIndex = false,
+                HasValue = false
+            };
+
+            static std::string Type()
+            {
+                return "World";
+            }
+
+            virtual size_t operator()(ContractionProblemGemm const& problem) const
+            {
+                return problem.world();
+            }
+        };
+
+        struct FusedA2AExtent : public Property_CRTP<FusedA2AExtent, ContractionProblemGemm>
+        {
+            enum
+            {
+                HasIndex = false,
+                HasValue = false
+            };
+
+            static std::string Type()
+            {
+                return "FusedA2AExtent";
+            }
+
+            virtual size_t operator()(ContractionProblemGemm const& problem) const
+            {
+                return problem.fusedA2AExtent();
+            }
+        };
+
         struct OperationIdentifier
             : public Property_CRTP<OperationIdentifier, ContractionProblemGemm, std::string>
         {

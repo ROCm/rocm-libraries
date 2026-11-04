@@ -120,10 +120,6 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
-option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar dense vector descriptor helper rocsparse_dnvec_descr_create_scalar" ON)
-option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
-option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
-option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
 option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
 option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 
@@ -417,16 +413,18 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocsparse-coverage_%m.profraw" ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocsparse-coverage_integration_%m.profraw" ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
     # Also fold in the standalone unit-test binaries so their host-side coverage
     # of librocsparse is counted. The %m module hash keeps profraw names distinct
-    # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
+    # per binary. The integration (rocsparse-test) and unit-test files use different
+    # prefixes so coverage_split can report them separately; all of them still match
+    # the rocsparse-coverage_*.profraw merge glob below.
     # make exports GTEST_FILTER into the recipe environment and gtest honors it,
     # which previously selected 0 host tests and 6 device tests. These binaries
     # are not categorized that way, so run each suite in full. || true keeps a
     # unit-test failure from aborting the coverage upload.
-    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test --gtest_filter='*' || true"
-    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device --gtest_filter='*' || true"
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_unit_%m.profraw ./clients/staging/rocsparse-unit-test --gtest_filter='*' || true"
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_unit_%m.profraw ./clients/staging/rocsparse-unit-test-device --gtest_filter='*' || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
@@ -514,11 +512,41 @@ if(BUILD_CODE_COVERAGE)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
+  # Report the unit tests and the rocsparse-test (integration) client separately,
+  # from the profiles that coverage_analysis already wrote. This does not run any
+  # test. It only merges and exports subsets of the same profraw files.
+  # > make coverage_split (after make coverage)
+  # writes coverage-report/coverage-unit.info and coverage-integration.info.
+  foreach(_split unit integration)
+    if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+      set(_split_filter_${_split}
+        COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ./coverage-report/coverage-${_split}-raw.info ./coverage-report/coverage-${_split}.info)
+    else()
+      set(_split_filter_${_split}
+        COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-${_split}-raw.info ./coverage-report/coverage-${_split}.info)
+    endif()
+  endforeach()
+
+  add_custom_target(
+    coverage_split
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_unit_*.profraw -o ./coverage-report/unit.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata -format=lcov > ./coverage-report/coverage-unit-raw.info
+    ${_split_filter_unit}
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_integration_*.profraw -o ./coverage-report/integration.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata -format=lcov > ./coverage-report/coverage-integration-raw.info
+    ${_split_filter_integration}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
   #
   # Coverage cleanup
   #
   add_custom_target(coverage_cleanup
     COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E rm -f ./coverage-report/rocsparse.profdata ./coverage-report/unit.profdata ./coverage-report/integration.profdata
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()

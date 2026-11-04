@@ -140,7 +140,7 @@ def production_variants(
             head_v_dim=head_dim,
         )
     )
-    fused = result.spec
+    fused = result.spec.kernel_spec
     variants = {}
     for name in names:
         if name == "fused":
@@ -296,9 +296,10 @@ def run_default(
                 head_dim=head_dim,
                 names=names,
             )
-            raw_inputs = make_inputs(result.spec, batch)
+            fused = result.spec.kernel_spec
+            raw_inputs = make_inputs(fused, batch)
             for name, spec in variants.items():
-                inp = inputs_for_variant(name, result.spec, raw_inputs)
+                inp = inputs_for_variant(name, fused, raw_inputs)
                 error = correctness_error(spec, inp, batch)
                 if error > TOL:
                     message = (

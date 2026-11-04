@@ -21,7 +21,6 @@
 #   python3 -m unittest rocke.portable_ir.tests.test_launch
 
 import os
-import tempfile
 import unittest
 
 from rocke.portable_ir.examples import recipe_toy
@@ -205,13 +204,9 @@ class TestCluster(unittest.TestCase):
 
 
 def _online_lib():
-    for cand in (
-        os.environ.get("ROCKE_ONLINE_LIB"),
-        os.path.join(tempfile.gettempdir(), "rocke_online", "librocke.so"),
-    ):
-        if cand and os.path.exists(cand):
-            return cand
-    return None
+    from rocke.portable_ir.src import online
+
+    return online.resolve_library_path(build=False)
 
 
 @unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
@@ -253,17 +248,23 @@ class TestCEngineAgrees(unittest.TestCase):
         self.assertEqual(c["kernel_name"], "rocke_recipe_toy_d4_f32")
 
     def test_plan_from_a_bundle(self):
-        bundle = cbor_encode(
-            build_bundle([{"key": "toy", "arch": "gfx950", "recipe": toy()}])
-        )
-        c = self.online.plan_launch(
-            bundle, "toy", arch="gfx950", ints={"D": 256}, strs={"dtype": "f32"}
-        )
-        self.assertEqual(c["geometry"]["grid"], (4, 1, 1))
-        with self.assertRaises(KeyError):
-            self.online.plan_launch(
-                bundle, "nope", arch="gfx950", ints={"D": 256}, strs={"dtype": "f32"}
-            )
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                bundle = cbor_encode(
+                    build_bundle([{"key": "toy", "arch": arch, "recipe": toy()}])
+                )
+                c = self.online.plan_launch(
+                    bundle, "toy", arch=arch, ints={"D": 256}, strs={"dtype": "f32"}
+                )
+                self.assertEqual(c["geometry"]["grid"], (4, 1, 1))
+                with self.assertRaises(KeyError):
+                    self.online.plan_launch(
+                        bundle,
+                        "nope",
+                        arch=arch,
+                        ints={"D": 256},
+                        strs={"dtype": "f32"},
+                    )
 
     def test_nonpositive_extent_refused_by_c_too(self):
         r = launch.attach_launch(

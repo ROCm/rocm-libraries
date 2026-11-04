@@ -9,7 +9,10 @@
 # (platform/tests/instances/parity/*_emit.py): for each, it pulls `_spec(0)` and the
 # production `build_*` function, records the build via record_kernel(), and
 # asserts the live recording matches an independent post-hoc walk of the same
-# KernelDef. Pure Python -- no device / comgr.
+# KernelDef. It also records the first config that brings in each region-bearing
+# op (scf.for / scf.if / scf.if_else) the first config lacks, so a construct
+# that only alternate configs use is still covered. Pure Python -- no device /
+# comgr.
 #
 # Per kernel: PASS (recorded faithfully), SKIP (emitter not in the reusable
 # spec+build shape), or FAIL (recorder gap -> needs attention).
@@ -80,7 +83,7 @@ def _find_build_fn(mod):
 def _count(prog):
     n = 0
     for i in prog:
-        if i.get("op") in ("emit", "scf_for", "scf_if", "ret"):
+        if i.get("op") in ("emit", "scf_for", "scf_if", "scf_if_else", "ret"):
             n += 1
         for key in ("body", "then", "else"):
             if key in i:
@@ -150,6 +153,65 @@ def _kernel_thunks(mod):
             yield (lambda spec=s: build_fn(spec))
 
 
+#: Region-bearing ops the recorder models. The first buildable config of an
+#: emitter often avoids some of them (e.g. scf.if_else only appears in a
+#: kernel's alternate configs), so coverage also takes the first config that
+#: brings in each one the first config lacks.
+REGION_OPS = ("scf.for", "scf.if", "scf.if_else")
+
+
+def region_ops(kernel):
+    """The REGION_OPS names used anywhere in `kernel`."""
+    found = set()
+    stack = [kernel.body]
+    while stack:
+        for op in stack.pop().ops:
+            if op.name in REGION_OPS:
+                found.add(op.name)
+            stack.extend(op.regions)
+    return found
+
+
+def coverage_thunks(mod):
+    """-> [(tag, thunk)]: the first buildable config (tag ""), then, for each
+    region-bearing op it does not use, the first later config that does (tag =
+    the op name). Configs are probed with a plain build, so a recorder gap
+    cannot hide a config from the scan."""
+    picked = []
+    covered = set()
+    for thunk in _kernel_thunks(mod):
+        try:
+            kernel = thunk()
+        except (Exception, SystemExit):  # noqa: BLE001 - a bad config, try the next
+            continue
+        if not picked:
+            picked.append(("", thunk))
+            covered = region_ops(kernel)
+            continue
+        new = sorted(region_ops(kernel) - covered)
+        if new:
+            picked.append(("+".join(new), thunk))
+            covered.update(new)
+        if covered >= set(REGION_OPS):
+            break
+    return picked
+
+
+def _record_thunk(thunk):
+    """-> (status, detail, recorded-or-None) for one config."""
+    try:
+        kernel, recorded = record_kernel(thunk)
+    except NotImplementedError as e:
+        return "FAIL", f"recorder gap: {e}", None
+    except SystemExit as e:
+        return "SKIP", f"SystemExit: {e}", None
+    except Exception as e:  # noqa: BLE001 - a bad config
+        return "SKIP", f"{type(e).__name__}: {e}", None
+    if recorded != kernel_to_recipe(kernel):
+        return "FAIL", "live recording != post-hoc walk", None
+    return "PASS", "", recorded
+
+
 def _record_one(mod):
     """-> (status, detail). status in {PASS, SKIP, FAIL}."""
     thunks = list(_kernel_thunks(mod))
@@ -157,20 +219,22 @@ def _record_one(mod):
         return "SKIP", "no recognized spec/build entry"
     last = None
     for thunk in thunks:
-        try:
-            kernel, recorded = record_kernel(thunk)
-        except NotImplementedError as e:
-            return "FAIL", f"recorder gap: {e}"
-        except SystemExit as e:
-            last = f"SystemExit: {e}"
+        status, why, recorded = _record_thunk(thunk)
+        if status == "FAIL":
+            return status, why
+        if status == "SKIP":
+            last = why
             continue
-        except Exception as e:  # noqa: BLE001 - a bad config, try the next one
-            last = f"{type(e).__name__}: {e}"
-            continue
-        if recorded != kernel_to_recipe(kernel):
-            return "FAIL", "live recording != post-hoc walk"
         nops = _count([i for i in recorded["program"] if i.get("op") != "param"])
-        return "PASS", f"{nops} ops"
+        detail = f"{nops} ops"
+        # Also record the configs that bring in region ops the first lacks.
+        for tag, extra in coverage_thunks(mod)[1:]:
+            status, why, _ = _record_thunk(extra)
+            if status == "FAIL":
+                return status, f"[{tag} config] {why}"
+            if status == "PASS":
+                detail += f" (+{tag} config)"
+        return "PASS", detail
     return "SKIP", f"no buildable config (last: {last})"
 
 

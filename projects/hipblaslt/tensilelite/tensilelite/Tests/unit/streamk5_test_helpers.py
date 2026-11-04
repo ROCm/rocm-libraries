@@ -7,10 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Components.StreamK import StreamKHybrid
-from Tensile.Components.WorkAssignment import Hybrid
-from Tensile.ExecutionPolicy import normalize_execution_policy
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.StreamK import StreamKHybrid
+from tensilelite.Components.WorkAssignment import Hybrid
+from tensilelite.ExecutionPolicy import normalize_execution_policy
 
 from rocisa.code import Module, RegSet
 

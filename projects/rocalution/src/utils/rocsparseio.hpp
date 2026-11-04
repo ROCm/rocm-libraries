@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -187,7 +187,7 @@ namespace rocsparseio
         {
             return this->value;
         }
-        inline constexpr format_t(){};
+        inline constexpr format_t() {};
         inline constexpr format_t(rocsparseio_format_t ival_)
             : value((value_type)ival_)
         {
@@ -325,7 +325,7 @@ namespace rocsparseio
         {
             return (rocsparseio_direction)this->value;
         }
-        inline constexpr direction_t(){};
+        inline constexpr direction_t() {};
         inline constexpr direction_t(rocsparseio_direction_t ival_)
             : value((value_type)ival_)
         {
@@ -385,9 +385,9 @@ namespace rocsparseio
         {
             return (rocsparseio_type)this->value;
         };
-        constexpr type_t(){};
+        constexpr type_t() {};
         constexpr type_t(rocsparseio_type_t ival_)
-            : value((value_type)ival_){};
+            : value((value_type)ival_) {};
 
         template <typename T>
         static constexpr type_t convert();
@@ -479,9 +479,9 @@ namespace rocsparseio
         {
             return (rocsparseio_index_base)this->value;
         };
-        constexpr index_base_t(){};
+        constexpr index_base_t() {};
         constexpr index_base_t(rocsparseio_index_base_t ival_)
-            : value((value_index_base)ival_){};
+            : value((value_index_base)ival_) {};
 
         template <typename T>
         static constexpr index_base_t convert();
@@ -2135,12 +2135,17 @@ namespace rocsparseio
     inline status_t close(rocsparseio_handle handle_)
     {
         ROCSPARSEIO_CHECK_ARG(!handle_, status_t::invalid_handle);
+        status_t status = status_t::success;
         if(handle_->f != nullptr)
         {
-            fclose(handle_->f);
+            // fclose flushes buffered data, so a failed write may only be reported here
+            if(fclose(handle_->f) != 0)
+            {
+                status = status_t::invalid_file_operation;
+            }
         }
         delete handle_;
-        return status_t::success;
+        return status;
     }
 
     template <typename... Ts>
