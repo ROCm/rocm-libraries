@@ -17,6 +17,7 @@ from rocisa.container import ContinuousRegister
 from tensilelite.Common import IsaVersion
 from tensilelite.Common.Capabilities import makeIsaInfoMap
 from tensilelite.Common.DataType import DataType
+from tensilelite.Common.ValidParameters import makeValidWorkGroups
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -112,16 +113,21 @@ def test_amax_interwave_each_slot_written_once(target):
     # One barrier per iteration orders its stores before its loads, but not iteration i's loads before
     # iteration i+1's stores: a slot reused across iterations can be overwritten before it is read (WAR).
     writer, kernel = target
-    assembly = str(KernelWriterAssembly.amax_inter_wave_reduction(writer, kernel))
-    upper = assembly[assembly.index("label_wave_upper:") : assembly.index("label_wave_lower:")]
-    lower = assembly[assembly.index("label_wave_lower:") : assembly.index("label_wave_empty:")]
-    # upper wave w stores slot w; lower wave w loads slot w + Offset
-    assert "sgprOffset" not in upper
-    assert re.search(r"v_add\w*_u32 v\[vgprTmp\], s\[sgprOffset\], v\[vgprWidx\]", lower)
-    for num_waves in (2, 4, 8, 16):
+    wave = kernel["WavefrontSize"]
+    valid_waves = {sg0 * sg1 * nsg // wave for sg0, sg1, nsg in makeValidWorkGroups() if sg0 * sg1 * nsg % wave == 0}
+    # The tree halves Offset each iteration, so it only reduces power-of-two wave counts.
+    for num_waves in sorted(n for n in valid_waves if n & (n - 1) == 0):
+        k = {**kernel, "NumThreads": num_waves * wave}
+        assembly = str(KernelWriterAssembly.amax_inter_wave_reduction(writer, k))
+        assert f"s_mov_b32 s[sgprOffset], {num_waves}" in assembly
+        upper = assembly[assembly.index("label_wave_upper:") : assembly.index("label_wave_lower:")]
+        lower = assembly[assembly.index("label_wave_lower:") : assembly.index("label_wave_empty:")]
+        # upper wave w stores slot w; lower wave w loads slot w + Offset
+        assert "sgprOffset" not in upper
+        assert re.search(r"v_add\w*_u32 v\[vgprTmp\], s\[sgprOffset\], v\[vgprWidx\]", lower)
         steps = _interwave_schedule(num_waves, lambda w, o: w, lambda w, o: w + o)
-        stored = [s for st, _ in steps for s in st]
-        assert len(stored) == len(set(stored)) and 0 not in stored  # slot 0 is left to the broadcast
+        stored = sorted(s for st, _ in steps for s in st)
+        assert stored == list(range(1, num_waves))  # each wave but 0 stores once; slot 0 is left to the broadcast
         assert all(ld == st for st, ld in steps)
 
 
