@@ -143,30 +143,6 @@ def test_pap_is_off_when_its_own_flag_is_off_whatever_rap_says():
 # Toolchain fixtures (real gfx1250 caps + assembler)
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
     from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
@@ -547,9 +523,13 @@ def test_tail_folding_sees_the_asem_the_fp4_override_leaves(
         # TDM moves a tile-major B only with the transposing LDS read.
         pytest.param({"ProblemType": {"TransposeB": True}, "LDSTrInst": True},
                      id="tile_major_b"),
-        # PAP rejects every TDMFuse other than 0 on its own, so ask without it.
-        pytest.param({"ProblemType": dict(_MX_PROBLEM_TYPE), "TDMFuse": 1,
-                      "PrefetchAcrossPersistent": 0}, id="tdmfuse_1"),
+        # The same tile-major B under TDMFuse=1, which splits the one set above
+        # into a set each for A and B. B still keeps no K field, so the clamp
+        # cannot track it either way; what differs is the grouping that gets
+        # there. PAP rejects every TDMFuse other than 0 on its own, so ask
+        # without it.
+        pytest.param({"ProblemType": {"TransposeB": True}, "LDSTrInst": True,
+                      "TDMFuse": 1, "PrefetchAcrossPersistent": 0}, id="tdmfuse_1"),
     ],
 )
 def test_rap_rejects_a_k_remainder_its_descriptors_cannot_clamp(
@@ -570,16 +550,21 @@ def test_rap_rejects_a_k_remainder_its_descriptors_cannot_clamp(
 def test_rap_checks_the_k_remainder_against_the_final_asem(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    """FP4 overrides ASEM after RAP's other checks have run.
+    """The FP4 ASEM override lands after RAP's other checks have run.
 
-    Asked for 256, an FP4 kernel still ends up at 32, so it carries a remainder
-    whatever the config said. Checked against the config's value, this grouping
-    would pass derivation and fail in codegen instead.
+    Asked for 256 -- a clean multiple of DepthU -- an FP4 kernel still ends up
+    at 8, so it carries a remainder whatever the config said. Checked against
+    the config's value this grouping would pass derivation and fail in codegen
+    instead. test_tail_folding_sees_the_asem_the_fp4_override_leaves pins the
+    same ordering on the accepting side; this one pins it on the rejecting side,
+    so it needs a grouping the clamp cannot track -- a tile-major B, which keeps
+    no K field at all.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=256,
-                       TDMFuse=1, PrefetchAcrossPersistent=0,
-                       ProblemType=dict(_MX_PROBLEM_TYPE, MacDataTypeB="F4"))
-    assert sol["AssertSummationElementMultiple"] == 32
+                       PrefetchAcrossPersistent=0,
+                       ProblemType={"TransposeB": True, "MacDataTypeB": "F4"},
+                       LDSTrInst=True)
+    assert sol["AssertSummationElementMultiple"] == 8
     assert sol.get("Valid") is False, "the remainder check saw the config's ASEM"
     assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
 
