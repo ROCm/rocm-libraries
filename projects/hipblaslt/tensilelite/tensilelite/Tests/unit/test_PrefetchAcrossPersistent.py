@@ -2111,9 +2111,15 @@ def test_rap_with_shadow_init_emits_each_label_once(_gp_gfx1250, gfx1250_iim, as
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     """Without MX scales A has its own set on every wave, so keeping A resident nulls that set on
-    every wave; the reuse copy keeps its own shadow-init labels here too."""
+    every wave; the reuse copy keeps its own shadow-init labels here too.
+
+    Taken with PrefetchAcrossPersistent on. RAP holds one A buffer set per resident k-tile, and an
+    A on every wave needs twice the registers TDMFuse=0's half-wave share does; at PAP=0 this tile
+    runs out of VGPRs and codegen emits nothing, which would assert nothing about the null.
+    """
     with _stinkyTofuInputs() as inputs:
-        _, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=fuse, **_RAP_NO_MX)
+        _, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=fuse,
+                           PrefetchAcrossPersistent=1, **_RAP_NO_MX)
     out = capsys.readouterr().out
     assert [_labelsDefinedTwice(text) for text in inputs] == [[]]
     assert asm, "rejected or not emitted: %r" % out
@@ -2126,10 +2132,12 @@ def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, a
 @pytest.mark.parametrize("pap", [0, 1], ids=["rap", "paprap"])
 @pytest.mark.parametrize("fuse", [2, 3])
 def test_rap_rejects_a_shared_scale_set(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap):
-    """RAP silences A by wave parity, which the shared-scale rows do not give it.
+    """RAP silences one descriptor set per owner, which the shared-scale rows outgrow.
 
-    TDMFuse 2/3 with both scales seat A on part of the waves, so Solution rejects
-    ReuseAcrossPersistent there rather than letting the parity null reach the writer."""
+    TDMFuse 2/3 with both scales put A and a scale on one owner's set, so the single
+    even-wave null cannot silence every tensor RAP holds resident: at 2 the low half of
+    A's block share survives, at 3 MXSA sits on B's set, which the null never writes.
+    Solution rejects them rather than letting the parity null reach the writer."""
     extra = dict(PrefetchAcrossPersistent=1) if pap else {}
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, mi=_MI_W2,
                        ReuseAcrossPersistent=1, AssertSummationElementMultiple=256, **extra)

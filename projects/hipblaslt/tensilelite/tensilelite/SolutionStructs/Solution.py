@@ -7870,26 +7870,32 @@ class Solution(collections.abc.Mapping):
       if not (state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1):
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires wave-separated TDM (TDMInst = 3 and NumWaves > 1)")
         return
-      # The RAP null writes that parity assumption into the kernel: it silences A
-      # on even waves (KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves).
-      # That is right for TDMFuse=0's aliased set, and for the every-wave pair
-      # TDMFuse 1-3 give A and B when the problem carries no MX scales. With MX
-      # scales the grouping gives one of the pair only part of the waves --
-      # TDMFuse=2 seats A on waves 0..NumWaves/2-1 of a block set, TDMFuse=3
-      # leaves A on every wave and splits B instead -- and the parity null
-      # silences the wrong waves. The message names whichever tensor is split.
+      # The RAP null writes that parity assumption into the kernel: it zeroes the
+      # even waves of a descriptor set's enable word
+      # (KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves), once per set
+      # owner. RAP holds both A and its scale resident, so both have to be
+      # silenced. TDMFuse=0 gives each its own set on exactly the even waves and
+      # both are, and without MX scales TDMFuse 1-3 give A and B a set each on
+      # every wave, which the null's every-wave arm handles. With MX scales a
+      # scale shares its data tensor's set, so one owner carries both and the
+      # single null cannot cover them: TDMFuse=1 seats A on the even waves but
+      # leaves MXSA on the odd ones, TDMFuse=2 seats A on the low half of a block
+      # set so half of it survives, and TDMFuse=3 leaves A on every wave with
+      # MXSA on B's set, which this null never writes. A resident tensor that
+      # goes on loading moves data into an LDS buffer the reuse copy does not
+      # read, so the row is refused rather than left to waste the bandwidth.
       if state.get("TDMFuse", 0) and not tdmPairOnEveryWave(state, "A", "B"):
         reject(state, printRejectionReason,
                "ReuseAcrossPersistent is not implemented with TDMFuse=%d and MX scales on %s: it "
-               "silences A by wave parity, which holds for TDMFuse=0 and for TDMFuse 1-3 without "
-               "MX scales, where A and B each ride every wave of a set of their own. Under the %s "
-               "grouping the scales share a data tensor's set, so %s takes only part of the waves "
-               "and the parity null silences the wrong ones. Use TDMFuse=0, put the MX scales on "
-               "neither tensor, or use ReuseAcrossPersistent=0"
+               "silences the even waves of one descriptor set per owner, which covers A and its "
+               "scale for TDMFuse=0, and A and B for TDMFuse 1-3 without MX scales, where each "
+               "rides every wave of a set of its own. Under the %s grouping a scale shares a data "
+               "tensor's set, so the null cannot silence every resident member and the ones it "
+               "misses keep loading into an LDS buffer the reuse copy never reads. Use TDMFuse=0, "
+               "put the MX scales on neither tensor, or use ReuseAcrossPersistent=0"
                % (state["TDMFuse"],
                   " and ".join(tdmLiveScales(state)),
-                  tdmGroupingName(state),
-                  "B" if state["TDMFuse"] == 3 else "A"))
+                  tdmGroupingName(state)))
         return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
