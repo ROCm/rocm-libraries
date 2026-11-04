@@ -264,6 +264,10 @@ int arch_wave_size(const char* arch);
  * atom string; a malformed one raises ValueError with Python's IndexError /
  * int() text. (_attention_bwd_sched's _atom_k maps an int atom instead.) */
 int atom_k_of(const char* atom);
+/* Python's a // b and a % b on ints (both floor); b == 0 raises ValueError
+ * "integer division or modulo by zero" (Python's ZeroDivisionError). */
+long long py_floordiv(long long a, long long b);
+long long py_mod(long long a, long long b);
 } // namespace rocke_attn_bwd
 #endif
 

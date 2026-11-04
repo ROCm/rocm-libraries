@@ -400,6 +400,11 @@ void policy_init(rocke_attn_bwd_mask_policy_t* self,
 
 } // namespace
 
+Value* rocke_attn_bwd_band_floor_div(Builder* b, Value* a, int m)
+{
+    return floor_div(b, a, m);
+}
+
 rocke_status_t rocke_attn_bwd_band_q_tile_range(Builder* b,
                                                 rocke_band_emitter_t* band,
                                                 Value* k0,

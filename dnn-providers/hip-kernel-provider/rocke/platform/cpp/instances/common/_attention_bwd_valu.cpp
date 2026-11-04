@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "rocke/helper_rocke.helpers.attention_band.h" /* ROCKE_ATTN_I32_FAR */
+#include "rocke/helper_rocke.instances.common._attention_bwd_caps.h" /* py_floordiv */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 const char* const ROCKE_ATTN_BWD_BF16_CASTS[ROCKE_ATTN_BWD_BF16_CASTS_N]
@@ -131,15 +132,6 @@ rocke_value_t* rocke_attn_bwd_softmax_p(rocke_ir_builder_t* b,
  * Host-integer evaluation of a lane map (Python eval_layout / IntLaneBuilder)
  * ====================================================================== */
 
-/* py: a // b and a % b (floor semantics) */
-static int64_t floor_div(int64_t a, int64_t b)
-{
-    int64_t q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        q -= 1;
-    return q;
-}
-
 /* Interpret the integer-arithmetic ops a catalog lane map emits on a scratch
  * builder (const_i32, add, sub, mul, div, mod, xor, shl, lshr, land). false on anything else. */
 static bool eval_int(const rocke_value_t* v, int64_t* out)
@@ -169,12 +161,12 @@ static bool eval_int(const rocke_value_t* v, int64_t* out)
     case ROCKE_OP_ARITH_DIV:
         if(y == 0)
             return false;
-        *out = floor_div(x, y);
+        *out = rocke_attn_bwd::py_floordiv(x, y);
         return true;
     case ROCKE_OP_ARITH_MOD:
         if(y == 0)
             return false;
-        *out = x - floor_div(x, y) * y;
+        *out = rocke_attn_bwd::py_mod(x, y);
         return true;
     case ROCKE_OP_ARITH_XOR:
         *out = x ^ y;

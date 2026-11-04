@@ -8,7 +8,7 @@
  *
  * Every Python raise is one ckc::Error throw with the same message (a Python
  * set in a message prints in ascending order here); the C
- * entry points catch it. Python's // and % floor; fdiv / fmod do the same.
+ * entry points catch it. Python's // and % floor; so do py_floordiv / py_mod (_attention_bwd_caps).
  */
 #include "rocke/helper_rocke.instances.common._attention_bwd_ring.h"
 
@@ -28,30 +28,15 @@ namespace rocke_attn_bwd
 namespace
 {
 
-long long fdiv(long long a, long long b)
-{
-    if(b == 0)
-        throw ckc::ValueError("integer division or modulo by zero");
-    long long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
-
-long long fmod_(long long a, long long b)
-{
-    return a - fdiv(a, b) * b;
-}
-
 void dma_batch_check(const rocke_attn_bwd_dma_batch_t& d)
 {
     long long nbytes = (long long)d.block_m * d.head_size * d.elem_bytes;
     if(d.wave_size != 64)
         throw ckc::ValueError("the LDS DMA ring is wave64 only");
-    if(fmod_(nbytes, ROCKE_ATTN_BWD_DMA_PIECE_BYTES))
+    if(py_mod(nbytes, ROCKE_ATTN_BWD_DMA_PIECE_BYTES))
         throw ckc::ValueError("a " + std::to_string(d.block_m) + " x " + std::to_string(d.head_size)
                               + " tile is not whole 1 KiB DMA pieces");
-    if(d.block_m > d.wave_size || fmod_(d.block_m, 16))
+    if(d.block_m > d.wave_size || py_mod(d.block_m, 16))
         throw ckc::ValueError("the stats DMA needs block_m <= 64, a multiple of 16");
     if(d.waves < 1)
         throw ckc::ValueError("waves must be positive");
@@ -62,7 +47,7 @@ int of_wave_count(const rocke_attn_bwd_dma_batch_t& d, int wave, int* out, int c
     int n = 0;
     int total = rocke_attn_bwd_dma_batch_n_instructions(&d);
     for(int k = 0; k < total; ++k)
-        if(fmod_(k, d.waves) == wave)
+        if(py_mod(k, d.waves) == wave)
         {
             if(out != NULL && n < cap)
                 out[n] = k;
@@ -103,8 +88,8 @@ rocke_status_t rocke_attn_bwd_dma_batch_init(rocke_attn_bwd_dma_batch_t* out,
 
 int rocke_attn_bwd_dma_batch_pieces(const rocke_attn_bwd_dma_batch_t* d)
 {
-    return (int)fdiv((long long)d->block_m * d->head_size * d->elem_bytes,
-                     ROCKE_ATTN_BWD_DMA_PIECE_BYTES);
+    return (int)py_floordiv((long long)d->block_m * d->head_size * d->elem_bytes,
+                            ROCKE_ATTN_BWD_DMA_PIECE_BYTES);
 }
 
 int rocke_attn_bwd_dma_batch_n_instructions(const rocke_attn_bwd_dma_batch_t* d)
@@ -344,8 +329,8 @@ void lane_source_host(
     if(row_bytes >= ROCKE_ATTN_BWD_LDS_LINE_BYTES)
     {
         int line_elems = ROCKE_ATTN_BWD_LDS_LINE_BYTES / eb;
-        int r_j = (int)fmod_((long long)lines * piece, layout->rows);
-        int c_j = (int)fdiv((long long)lines * piece, layout->rows) * line_elems;
+        int r_j = (int)py_mod((long long)lines * piece, layout->rows);
+        int c_j = (int)py_floordiv((long long)lines * piece, layout->rows) * line_elems;
         *row = l_line + r_j;
         *col = chunk * chunk_elems + c_j;
         return;
@@ -375,8 +360,8 @@ void lane_source(
     if(row_bytes >= ROCKE_ATTN_BWD_LDS_LINE_BYTES)
     {
         int line_elems = ROCKE_ATTN_BWD_LDS_LINE_BYTES / eb;
-        int r_j = (int)fmod_((long long)lines * piece, layout->rows);
-        int c_j = (int)fdiv((long long)lines * piece, layout->rows) * line_elems;
+        int r_j = (int)py_mod((long long)lines * piece, layout->rows);
+        int c_j = (int)py_floordiv((long long)lines * piece, layout->rows) * line_elems;
         V r = l_line;
         if(r_j)
         {

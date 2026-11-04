@@ -7,7 +7,7 @@
  * rocke/helper_rocke.instances.common._attention_bwd_sched.h for the mapping.
  *
  * Every Python raise is one ckc::Error throw with the same message (str(exc));
- * the C entry points catch it. Python's // and % floor (fdiv / fmod below),
+ * the C entry points catch it. Python's // and % floor (py_floordiv / py_mod from _attention_bwd_caps),
  * and ceil_div is -(-a // b). Each method recomputes what Python recomputes,
  * in Python's order, so a raise surfaces at the same point.
  */
@@ -173,24 +173,9 @@ std::string hex_repr(long long m)
     return buf;
 }
 
-long long fdiv(long long a, long long b)
-{
-    if(b == 0)
-        throw ckc::ValueError("integer division or modulo by zero");
-    long long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
-
-long long fmod_(long long a, long long b)
-{
-    return a - fdiv(a, b) * b;
-}
-
 long long cdiv(long long a, long long b)
 {
-    return -fdiv(-a, b);
+    return -py_floordiv(-a, b);
 }
 
 int I(long long v)
@@ -360,7 +345,7 @@ int instruction_k(const char* arch, int atom_k, const char* dtype)
     int best = 0;
     bool any = false;
     for(int k : ks)
-        if(fmod_(atom_k, k) == 0)
+        if(py_mod(atom_k, k) == 0)
         {
             if(!any || k > best)
                 best = k;
@@ -424,7 +409,7 @@ Pairs interleave_groups(int mfma, const Pairs& mem, const ODict& lead, const ODi
             long long j = (long long)i - (mfma - span);
             if(j < 0)
                 return 0;
-            return I(fdiv((j + 1) * c, span) - fdiv(j * c, span));
+            return I(py_floordiv((j + 1) * c, span) - py_floordiv(j * c, span));
         };
         for(int i = 0; i < mfma; ++i)
         {
@@ -640,7 +625,7 @@ void post_init(Table& t)
             gr.g[1] = gr.natural[1];
         }
     long long w02 = (long long)t.grid_g02[0] * t.grid_g02[1];
-    if(w02 < 1 || fmod_(w, w02))
+    if(w02 < 1 || py_mod(w, w02))
         throw ckc::ValueError("warp grid G0 " + grid_repr(t.grid_g02)
                               + " does not divide the waves");
     if((long long)t.grid_g13[0] * t.grid_g13[1] != w)
@@ -692,26 +677,26 @@ void post_init(Table& t)
     const std::string D = std::to_string(d), M0 = std::to_string(m0), N0 = std::to_string(n0);
     /* the tuple is built first (every % runs), then checked in order */
     const std::pair<bool, std::string> checks[] = {
-        {!cnt || fmod_(n0, 16LL * w) == 0, "kN0 " + N0 + " % (16 * waves " + W + ") != 0"},
-        {fmod_(m0, 16) == 0, "kM0 " + M0 + " % 16 != 0"},
-        {fmod_(d, 16LL * g4c) == 0, "D " + D + " % (16 * g4c " + std::to_string(g4c) + ") != 0"},
-        {fmod_(m0, 16LL * g4r) == 0,
+        {!cnt || py_mod(n0, 16LL * w) == 0, "kN0 " + N0 + " % (16 * waves " + W + ") != 0"},
+        {py_mod(m0, 16) == 0, "kM0 " + M0 + " % 16 != 0"},
+        {py_mod(d, 16LL * g4c) == 0, "D " + D + " % (16 * g4c " + std::to_string(g4c) + ") != 0"},
+        {py_mod(m0, 16LL * g4r) == 0,
          "kM0 " + M0 + " % (16 * g4r " + std::to_string(g4r) + ") != 0"},
-        {fmod_(n0, k4) == 0, "kN0 " + N0 + " % kK4 " + std::to_string(k4) + " != 0"},
-        {fmod_(k4, t.atom_g4) == 0,
+        {py_mod(n0, k4) == 0, "kN0 " + N0 + " % kK4 " + std::to_string(k4) + " != 0"},
+        {py_mod(k4, t.atom_g4) == 0,
          "kK4 " + std::to_string(k4) + " % atom_g4 K " + std::to_string(t.atom_g4) + " != 0"},
-        {fmod_(d, t.atom_g02) == 0,
+        {py_mod(d, t.atom_g02) == 0,
          "D " + D + " % atom_g02 K " + std::to_string(t.atom_g02) + " != 0"},
-        {fmod_(m0, t.atom_g13) == 0,
+        {py_mod(m0, t.atom_g13) == 0,
          "kM0 " + M0 + " % atom_g13 K " + std::to_string(t.atom_g13) + " != 0"},
         {t.atom_g13 != 32 || m0 >= 32, "atom_g13 K = 32 needs kM0 >= 32"},
-        {fmod_(m0, 16LL * g0r) == 0,
+        {py_mod(m0, 16LL * g0r) == 0,
          "kM0 " + M0 + " % (16 * g0r " + std::to_string(g0r) + ") != 0"},
-        {fmod_(n0, 16LL * g0c) == 0,
+        {py_mod(n0, 16LL * g0c) == 0,
          "kN0 " + N0 + " % (16 * g0c " + std::to_string(g0c) + ") != 0"},
-        {fmod_(n0, 16LL * g1r) == 0,
+        {py_mod(n0, 16LL * g1r) == 0,
          "kN0 " + N0 + " % (16 * g1r " + std::to_string(g1r) + ") != 0"},
-        {fmod_(d, 16LL * g1c) == 0, "D " + D + " % (16 * g1c " + std::to_string(g1c) + ") != 0"},
+        {py_mod(d, 16LL * g1c) == 0, "D " + D + " % (16 * g1c " + std::to_string(g1c) + ") != 0"},
     };
     for(const auto& c : checks)
         if(!c.first)
@@ -769,11 +754,13 @@ rocke_attn_bwd_gemm_counts_t mfma(const Table& t)
     const int g4r = t.grid_g4[0], g4c = t.grid_g4[1];
     InstrK k = instr_k(t);
     long long w02 = (long long)t.grid_g02[0] * t.grid_g02[1];
-    long long g0 = fdiv(fdiv(m0, 16) * fdiv(n0, 16), w02) * fdiv(d, k.g[0]);
-    long long g1 = fdiv(fdiv(n0, 16) * fdiv(d, 16), w) * fdiv(m0, k.g[1]);
+    long long g0
+        = py_floordiv(py_floordiv(m0, 16) * py_floordiv(n0, 16), w02) * py_floordiv(d, k.g[0]);
+    long long g1
+        = py_floordiv(py_floordiv(n0, 16) * py_floordiv(d, 16), w) * py_floordiv(m0, k.g[1]);
     long long g4 = 0;
     if(eq(t.dq_mode, "atomic"))
-        g4 = fdiv(m0, 16LL * g4r) * fdiv(d, 16LL * g4c) * fdiv(n0, k.g[4]);
+        g4 = py_floordiv(m0, 16LL * g4r) * py_floordiv(d, 16LL * g4c) * py_floordiv(n0, k.g[4]);
     return rocke_attn_bwd_gemm_counts_t{I(g0), I(g1), I(g0), I(g1), I(g4)};
 }
 
@@ -781,7 +768,7 @@ int dq_atomics_per_lane(const Table& t)
 {
     if(!eq(t.dq_mode, "atomic"))
         return 0;
-    return I(fdiv((long long)t.k_m0 * t.head_size, (long long)t.waves * wave_size(t)));
+    return I(py_floordiv((long long)t.k_m0 * t.head_size, (long long)t.waves * wave_size(t)));
 }
 
 int reads_per_frag(const Table& t, const char* gemm, const char* source)
@@ -832,7 +819,7 @@ int next_tile_lds_writes(const Table& t)
 
 int ds_tile_writes(const Table& t)
 {
-    long long tiles = fdiv(t.k_m0, 16) * fdiv(t.k_n0, 16LL * t.waves);
+    long long tiles = py_floordiv(t.k_m0, 16) * py_floordiv(t.k_n0, 16LL * t.waves);
     int per_tile = wave_size(t) == 64 ? 1 : c_frag_len(t);
     return I(tiles * per_tile);
 }
@@ -842,7 +829,7 @@ int kv_frag_reads(const Table& t, const char* gemm)
     if(!eq(t.kv_residency, "lds"))
         return 0;
     int k = instr_k(t).at(gemm);
-    long long frags = fdiv(t.k_n0, 16LL * t.waves) * fdiv(t.head_size, k);
+    long long frags = py_floordiv(t.k_n0, 16LL * t.waves) * py_floordiv(t.head_size, k);
     return I(frags * reads_per_frag(t, gemm, "contig"));
 }
 
@@ -850,7 +837,7 @@ int acc_rmw(const Table& t)
 {
     if(!t.acc_in_lds)
         return 0;
-    long long tiles = fdiv(t.k_n0, 16LL * t.waves) * fdiv(t.head_size, 16);
+    long long tiles = py_floordiv(t.k_n0, 16LL * t.waves) * py_floordiv(t.head_size, 16);
     return I(tiles * c_frag_len(t));
 }
 
@@ -881,9 +868,9 @@ int align(const Table& t, const char* buf)
     std::string sw = swizzle_of(t.lds_swizzle, buf);
     if(starts_with(sw, "pad"))
     {
-        long long pitch = 16 + fdiv(py_int(sw.substr(3)), ELEM_BYTES);
+        long long pitch = 16 + py_floordiv(py_int(sw.substr(3)), ELEM_BYTES);
         int a = 8;
-        while(a > 1 && fmod_(pitch, a))
+        while(a > 1 && py_mod(pitch, a))
             a /= 2;
         return a;
     }
@@ -900,7 +887,7 @@ int transposed_reads(const Table& t, const char* gemm)
 {
     int n = frag_len(t, gemm);
     if(eq(t.transpose_source, "tr_read"))
-        return I(fdiv(n, 4));
+        return I(py_floordiv(n, 4));
     if(eq(t.transpose_source, "xt_lds"))
         return I(cdiv((long long)n * ELEM_BYTES, 16));
     return n;
@@ -918,15 +905,15 @@ Frags frags(const Table& t, const char* gemm)
     if(eq(gemm, "g0") || eq(gemm, "g2"))
     {
         int r = t.grid_g02[0], c = t.grid_g02[1];
-        return Frags{fdiv(m0, 16LL * r), fdiv(n0, 16LL * c), fdiv(d, k.g[0])};
+        return Frags{py_floordiv(m0, 16LL * r), py_floordiv(n0, 16LL * c), py_floordiv(d, k.g[0])};
     }
     if(eq(gemm, "g1") || eq(gemm, "g3"))
     {
         int r = t.grid_g13[0], c = t.grid_g13[1];
-        return Frags{fdiv(n0, 16LL * r), fdiv(d, 16LL * c), fdiv(m0, k.g[1])};
+        return Frags{py_floordiv(n0, 16LL * r), py_floordiv(d, 16LL * c), py_floordiv(m0, k.g[1])};
     }
     int r = t.grid_g4[0], c = t.grid_g4[1];
-    return Frags{fdiv(m0, 16LL * r), fdiv(d, 16LL * c), fdiv(n0, k.g[4])};
+    return Frags{py_floordiv(m0, 16LL * r), py_floordiv(d, 16LL * c), py_floordiv(n0, k.g[4])};
 }
 
 struct Three
@@ -988,9 +975,9 @@ int chunk_stores(const Table& t, const char* buf)
 
 std::pair<int, bool> ring_reg_chunks(const Table& t)
 {
-    long long total = fdiv((long long)t.k_m0 * t.head_size, 8);
+    long long total = py_floordiv((long long)t.k_m0 * t.head_size, 8);
     long long threads = threads_of(t);
-    bool joint = !t.head_pack && total < threads && fmod_(total, wave_size(t)) == 0;
+    bool joint = !t.head_pack && total < threads && py_mod(total, wave_size(t)) == 0;
     return {joint ? 1 : I(2 * cdiv(total, threads)), joint};
 }
 
@@ -1038,7 +1025,7 @@ rocke_attn_bwd_ring_prefetch_t ring_prefetch(const Table& t)
             stores = 1;
         else
         {
-            long long half = fdiv(chunks, 2);
+            long long half = py_floordiv(chunks, 2);
             int q = chunk_stores(t, "q");
             int dd = chunk_stores(t, "do");
             stores = half * (q + dd);
@@ -1049,7 +1036,7 @@ rocke_attn_bwd_ring_prefetch_t ring_prefetch(const Table& t)
         pf.ds_write = I(stores + stats_stores);
         return pf;
     }
-    long long per_tensor = cdiv(fdiv((long long)t.k_m0 * t.head_size, 8), threads_of(t));
+    long long per_tensor = cdiv(py_floordiv((long long)t.k_m0 * t.head_size, 8), threads_of(t));
     bool late = eq(t.ring_issue, "late");
     pf.issue = "merged";
     pf.where = late ? "barrier" : (table ? "A" : "top");
@@ -1066,7 +1053,7 @@ rocke_attn_bwd_counted_terms_t counted_terms(const Table& t)
     memset(&c, 0, sizeof(c));
     if(!counted(t))
         return c;
-    long long chunks = cdiv(fdiv((long long)t.k_m0 * t.head_size, 8), threads_of(t));
+    long long chunks = cdiv(py_floordiv((long long)t.k_m0 * t.head_size, 8), threads_of(t));
     c.present = true;
     c.issue = t.counted_issue;
     c.loads = I(stats_loads(t) + 2 * chunks * chunk_loads(t));
@@ -1187,13 +1174,14 @@ std::vector<Counts> ck_stages(const Table& t, bool prefetch, bool prev_atomics)
     const char* ts = tsrc(t);
     const bool g4_on = eq(t.dq_mode, "atomic");
 
-    long long bt_frags = fdiv(d, 16) * fdiv(m0, k.g[1]);
+    long long bt_frags = py_floordiv(d, 16) * py_floordiv(m0, k.g[1]);
     long long bt_reads = bt_frags * reads_per_frag(t, "g1", ts);
-    long long next_a_reads = fdiv(m0, 16) * fdiv(d, k.g[0]) * reads_per_frag(t, "g0", "contig");
-    long long stats_reads = fdiv(m0, 16);
-    long long slice_reads
-        = fdiv(m0, 16LL * g4r) * fdiv(kk4, k.g[4]) * reads_per_frag(t, "g4", "contig");
-    long long n_slices = g4_on ? fdiv(n0, kk4) : 0;
+    long long next_a_reads
+        = py_floordiv(m0, 16) * py_floordiv(d, k.g[0]) * reads_per_frag(t, "g0", "contig");
+    long long stats_reads = py_floordiv(m0, 16);
+    long long slice_reads = py_floordiv(m0, 16LL * g4r) * py_floordiv(kk4, k.g[4])
+                            * reads_per_frag(t, "g4", "contig");
+    long long n_slices = g4_on ? py_floordiv(n0, kk4) : 0;
 
     long long a_vmem = prefetch ? prefetch_loads(t) : 0;
     long long a_vmem_w
@@ -1205,14 +1193,15 @@ std::vector<Counts> ck_stages(const Table& t, bool prefetch, bool prev_atomics)
     if(eq(t.pt_route, "lds"))
     {
         a_ds_w += ds_tile_writes(t);
-        long long pt_frags = fdiv(n0, 16 * w) * fdiv(m0, k.g[1]);
+        long long pt_frags = py_floordiv(n0, 16 * w) * py_floordiv(m0, k.g[1]);
         b_ds_r += pt_frags * reads_per_frag(t, "g1", "contig");
     }
     long long c_ds_w = (g4_on || eq(t.pt_route, "lds")) ? ds_tile_writes(t) : 0;
     long long c_slices = (n_slices && eq(t.g4_slicing, "slice_db_g3")) ? 1 : 0;
     long long c_ds_r = c_slices * slice_reads + (prefetch ? next_a_reads + stats_reads : 0);
     if(eq(t.pt_route, "lds"))
-        c_ds_r += fdiv(n0, 16 * w) * fdiv(m0, k.g[3]) * reads_per_frag(t, "g3", "contig");
+        c_ds_r += py_floordiv(n0, 16 * w) * py_floordiv(m0, k.g[3])
+                  * reads_per_frag(t, "g3", "contig");
     a_ds_r += kv_frag_reads(t, "g0");
     b_ds_r += kv_frag_reads(t, "g2");
     b_ds_r += acc_rmw(t);
@@ -1222,7 +1211,7 @@ std::vector<Counts> ck_stages(const Table& t, bool prefetch, bool prev_atomics)
     long long d_ds_r = (n_slices - c_slices) * slice_reads;
     if(g4_on && eq(t.kt_source, "lds"))
     {
-        long long kt_frags = fdiv(d, 16LL * g4c) * fdiv(n0, k.g[4]);
+        long long kt_frags = py_floordiv(d, 16LL * g4c) * py_floordiv(n0, k.g[4]);
         d_ds_r += kt_frags * reads_per_frag(t, "g4", ts);
     }
     if(prefetch)
@@ -1588,12 +1577,12 @@ void dq_post_init(const DqTable& t)
     const std::string W = std::to_string(w), D = std::to_string(d), M0 = std::to_string(m0),
                       N0 = std::to_string(n0);
     const std::pair<bool, std::string> checks[] = {
-        {fmod_(m0, 16 * w) == 0, "kM0 " + M0 + " % (16 * waves " + W + ") != 0"},
-        {fmod_(n0, 16) == 0, "kN0 " + N0 + " % 16 != 0"},
-        {fmod_(d, 16) == 0, "D " + D + " % 16 != 0"},
-        {fmod_(d, t.atom_g02) == 0,
+        {py_mod(m0, 16 * w) == 0, "kM0 " + M0 + " % (16 * waves " + W + ") != 0"},
+        {py_mod(n0, 16) == 0, "kN0 " + N0 + " % 16 != 0"},
+        {py_mod(d, 16) == 0, "D " + D + " % 16 != 0"},
+        {py_mod(d, t.atom_g02) == 0,
          "D " + D + " % atom_g02 K " + std::to_string(t.atom_g02) + " != 0"},
-        {fmod_(n0, t.atom_g4) == 0,
+        {py_mod(n0, t.atom_g4) == 0,
          "kN0 " + N0 + " % atom_g4 K " + std::to_string(t.atom_g4) + " != 0"},
     };
     for(const auto& c : checks)
@@ -1634,9 +1623,9 @@ int dq_frag_len(const DqTable& t, int atom_k)
 
 int dq_kv_align(const DqTable& t)
 {
-    long long pitch = (long long)t.head_size + fdiv(t.kv_pad, ELEM_BYTES);
+    long long pitch = (long long)t.head_size + py_floordiv(t.kv_pad, ELEM_BYTES);
     int a = 8;
-    while(a > 1 && fmod_(pitch, a))
+    while(a > 1 && py_mod(pitch, a))
         a /= 2;
     return a;
 }
@@ -1646,8 +1635,8 @@ rocke_attn_bwd_dq_mfma_t dq_mfma(const DqTable& t)
     const long long w = t.waves, d = t.head_size, m0 = t.k_m0, n0 = t.k_n0;
     int k02 = instruction_k(t.arch, t.atom_g02, t.dtype);
     int k4 = instruction_k(t.arch, t.atom_g4, t.dtype);
-    long long g0 = fdiv(n0, 16) * fdiv(m0, 16 * w) * fdiv(d, k02);
-    long long g4 = fdiv(m0, 16 * w) * fdiv(d, 16) * fdiv(n0, k4);
+    long long g0 = py_floordiv(n0, 16) * py_floordiv(m0, 16 * w) * py_floordiv(d, k02);
+    long long g4 = py_floordiv(m0, 16 * w) * py_floordiv(d, 16) * py_floordiv(n0, k4);
     return rocke_attn_bwd_dq_mfma_t{I(g0), I(g0), I(g4)};
 }
 
@@ -1656,17 +1645,17 @@ std::pair<long long, long long> dq_kv_reads(const DqTable& t)
     int k02 = instruction_k(t.arch, t.atom_g02, t.dtype);
     int n = dq_frag_len(t, t.atom_g02);
     long long per = cdiv(n, std::min(8, dq_kv_align(t)));
-    long long first = fdiv(t.k_n0, 16) * per;
-    return {fdiv(t.head_size, k02) * first, first};
+    long long first = py_floordiv(t.k_n0, 16) * per;
+    return {py_floordiv(t.head_size, k02) * first, first};
 }
 
 std::pair<long long, long long> dq_kt_reads(const DqTable& t)
 {
     int k4 = instruction_k(t.arch, t.atom_g4, t.dtype);
     int n = dq_frag_len(t, t.atom_g4);
-    long long per = eq(t.transpose_source, "tr_read") ? fdiv(n, 4) : n;
-    long long first = fdiv(t.head_size, 16) * per;
-    return {fdiv(t.k_n0, k4) * first, first};
+    long long per = eq(t.transpose_source, "tr_read") ? py_floordiv(n, 4) : n;
+    long long first = py_floordiv(t.head_size, 16) * per;
+    return {py_floordiv(t.k_n0, k4) * first, first};
 }
 
 rocke_attn_bwd_dq_prefetch_t dq_prefetch(const DqTable& t)
@@ -1675,7 +1664,7 @@ rocke_attn_bwd_dq_prefetch_t dq_prefetch(const DqTable& t)
     if(!t.kv_prefetch)
         return p;
     long long threads = (long long)t.waves * dq_wave_size(t);
-    long long chunks = cdiv(fdiv((long long)t.k_n0 * t.head_size, 8), threads);
+    long long chunks = cdiv(py_floordiv((long long)t.k_n0 * t.head_size, 8), threads);
     long long loads = t.stage_vec == 8 ? 1 : 8;
     long long stores = cdiv(8, std::min(8, dq_kv_align(t)));
     p.present = true;

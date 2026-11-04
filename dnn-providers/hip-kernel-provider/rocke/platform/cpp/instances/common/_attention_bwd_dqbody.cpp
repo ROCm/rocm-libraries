@@ -161,19 +161,10 @@ int KS(const rocke_attn_bwd_block_gemm_t* g)
     return rocke_attn_bwd_block_gemm_k_steps(g);
 }
 
-/* _floor_div(b, a, m): floor(a / m) for a signed i32 a, positive constant m. */
+/* _floor_div(b, a, m), imported from _attention_bwd_band like Python. */
 V floor_div(B* b, V a, int m)
 {
-    V cm = ci(b, m);
-    V zero0 = ci(b, 0);
-    V m1 = ci(b, (int64_t)m - 1);
-    V sh = rocke_b_sub(b, m1, a);
-    V q = rocke_b_div(b, sh, cm);
-    V neg = rocke_b_sub(b, zero0, q);
-    V zero1 = ci(b, 0);
-    V is_neg = rocke_b_cmp_lt(b, a, zero1);
-    V pos = rocke_b_div(b, a, cm);
-    return needv(b, rocke_b_select(b, is_neg, neg, pos));
+    return needv(b, rocke_attn_bwd_band_floor_div(b, a, m));
 }
 
 /* ----------------------------------------------------- the key range */

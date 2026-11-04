@@ -188,12 +188,7 @@ static std::string repr_opt_bool(int v)
 
 static int floordiv(int a, int b)
 {
-    if(b == 0) /* Python's ZeroDivisionError; ckc has no twin, so a ValueError */
-        throw ckc::ValueError("integer division or modulo by zero");
-    int q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
+    return (int)py_floordiv(a, b);
 }
 
 /* _check_in(name, value, allowed) */

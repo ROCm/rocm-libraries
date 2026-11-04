@@ -708,4 +708,19 @@ int atom_k_of(const char* atom)
     return (int)v;
 }
 
+long long py_floordiv(long long a, long long b)
+{
+    if(b == 0) /* Python's ZeroDivisionError; ckc has no twin, so a ValueError */
+        throw ckc::ValueError("integer division or modulo by zero");
+    long long q = a / b;
+    if((a % b != 0) && ((a < 0) != (b < 0)))
+        --q;
+    return q;
+}
+
+long long py_mod(long long a, long long b)
+{
+    return a - py_floordiv(a, b) * b;
+}
+
 } // namespace rocke_attn_bwd

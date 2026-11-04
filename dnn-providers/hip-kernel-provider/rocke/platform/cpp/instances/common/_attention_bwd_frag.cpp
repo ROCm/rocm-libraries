@@ -17,27 +17,15 @@
 #include <map>
 #include <vector>
 
+#include "rocke/helper_rocke.instances.common._attention_bwd_caps.h" /* py_floordiv */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ====================================================================== *
  * Host integer helpers (Python semantics)
  * ====================================================================== */
 
-static int64_t py_floordiv(int64_t a, int64_t b)
-{
-    int64_t q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
-
-static int64_t py_mod(int64_t a, int64_t b)
-{
-    int64_t r = a % b;
-    if(r != 0 && ((r < 0) != (b < 0)))
-        r += b;
-    return r;
-}
+using rocke_attn_bwd::py_floordiv;
+using rocke_attn_bwd::py_mod;
 
 static int64_t py_gcd(int64_t a, int64_t b)
 {
