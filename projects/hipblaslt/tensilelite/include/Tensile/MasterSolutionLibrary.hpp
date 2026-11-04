@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <iterator>
@@ -36,6 +37,7 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -158,9 +160,13 @@ namespace TensileLite
             indexLoadedLibraries;
 
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
-        mutable SolutionMap<MySolution>                         solutions;
-        std::string                                             version;
-        mutable std::mutex                                      solutionsGuard;
+        // Entries are never erased or replaced; resolvedSolutions relies on it.
+        mutable SolutionMap<MySolution> solutions;
+        std::string                     version;
+        mutable std::mutex              solutionsGuard;
+        // Indices resolveSolutionByIndex has returned, read without
+        // solutionsGuard; written under it. Holds the objects `solutions` holds.
+        mutable ReadMostlyMap<int, std::shared_ptr<MySolution>> resolvedSolutions;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
         // `solutionSources` collects the caches of lazily loaded shards, keyed by
@@ -323,6 +329,12 @@ namespace TensileLite
                 return localLibrary ? localLibrary->lookupIndex(index)
                                     : std::shared_ptr<MySolution>();
 #endif
+            if(auto const* resolved = resolvedSolutions.find(index))
+            {
+                assert(resolvedMatchesSolutions(index, *resolved));
+                return *resolved;
+            }
+
             // Idempotent, and a no-op unless this is a lazy-loading master.
             loadLibrary(index);
 
@@ -330,7 +342,11 @@ namespace TensileLite
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 auto                        iter = solutions.find(index);
                 if(iter != solutions.end())
+                {
+                    if(iter->second)
+                        resolvedSolutions.insert(index, iter->second);
                     return iter->second;
+                }
             }
 
             std::shared_ptr<MySolution> solution;
@@ -361,7 +377,10 @@ namespace TensileLite
             // Publish so the workspace fixups below run once per solution and
             // later lookups take the map hit.
             std::lock_guard<std::mutex> lock(solutionsGuard);
-            return solutions.emplace(index, solution).first->second;
+            auto const& published = solutions.emplace(index, solution).first->second;
+            if(published)
+                resolvedSolutions.insert(index, published);
+            return published;
         }
 
         /// Parses every solution this library can serve and publishes it into
@@ -656,6 +675,14 @@ namespace TensileLite
                                         int                           numSolutions) const override
         {
             return library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+        }
+
+    private:
+        bool resolvedMatchesSolutions(int index, std::shared_ptr<MySolution> const& resolved) const
+        {
+            std::lock_guard<std::mutex> lock(solutionsGuard);
+            auto                        iter = solutions.find(index);
+            return iter != solutions.end() && iter->second == resolved;
         }
     };
 
