@@ -2473,10 +2473,21 @@ def splitArchs():
                     archs += [gfxName(arch)]
                     cmdlineArchs += [gfxName(arch)]
     else:
-        for arch in wantedArchs:
-            archs += [re.sub(":", "-", arch)]
-            cmdlineArchs += [arch]
+        archs, cmdlineArchs = splitNamedArchs(globalParameters["Architecture"])
     return archs, cmdlineArchs
+
+
+def splitNamedArchs(architecture: str) -> Tuple[list, list]:
+    """splitArchs for an explicit target list (not "all").
+
+    The result depends only on the given names, not on assembler caps, so it can be
+    called before assignGlobalParameters probes the assembler.
+
+    Returns (archs with ':' replaced by '-', archs as given on the command line).
+    """
+    delimiter = ";" if ";" in architecture else "_"
+    cmdlineArchs = architecture.split(delimiter)
+    return [re.sub(":", "-", arch) for arch in cmdlineArchs], cmdlineArchs
 
 
 class _DisabledAsmCaps(dict):
