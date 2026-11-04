@@ -5081,3 +5081,40 @@ class TestPartitionZeroIssueOrder:
             modules)
         assert [inst.comment for _, inst in ordered] == [
             "early-m0", "early-load", "late-m0", "late-load", "srd"]
+
+    def test_current_cell_reads_stay_ahead_of_the_wait(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _splitPartitionZeroPrefetch,
+        )
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+
+        def lr(tensor, target):
+            return LRPlacement(
+                tensor=tensor, mtIteration=0,
+                tiles=MFMATileRange(0, 1, 0, 1),
+                subIterK_slot=0, partition=0, targetPartition=target)
+
+        scale = self._read("SA tile 0")
+        current = self._read("A current")
+        prefetch = self._read("A next")
+        wait = SWaitCnt(dscnt=-1, comment="Wait for LR to complete")
+        barrier = SBarrier(comment="Barrier")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[scale], source=lr("SA", 0),
+                          instructionMetadata=[(0, 1)]),
+            EmittedModule(moduleId=1, instructions=[current], source=lr("A", 0),
+                          instructionMetadata=[(0, 1)]),
+            EmittedModule(moduleId=2, instructions=[prefetch], source=lr("A", 1),
+                          instructionMetadata=[(1, 1)]),
+            EmittedModule(moduleId=3, instructions=[wait], source=WaitLROp()),
+            EmittedModule(moduleId=4, instructions=[barrier], source=SyncOp()),
+        ]
+        split = _splitPartitionZeroPrefetch([list(range(5))], modules)
+        assert split is not None
+        _order, prefix, payload_order, payload, _sync = split
+        assert [inst.comment for _, inst in prefix] == [
+            "SA tile 0", "A current", "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert wait.dscnt == 0
+        assert payload_order == [2]
+        assert [inst.comment for _, inst in payload] == ["A next"]
