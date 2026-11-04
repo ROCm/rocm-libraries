@@ -372,6 +372,8 @@ struct TransformConvBwdWeightToGemmV2
         const auto in_grid_desc  = make_in_grid_desc<NDim>(N, Wi, C, input_strides);
         const auto wei_grid_desc = make_wei_grid_desc<NDim>(K, X, C, weights_strides);
 
+        const auto splitk_tdm = split_k_offset_hack ? GemmKBatch : 1;
+
         if constexpr(ConvBackwardWeightSpecialization ==
                      device::ConvolutionBackwardWeightSpecialization::Filter1x1Stride1Pad0)
         {
@@ -399,8 +401,9 @@ struct TransformConvBwdWeightToGemmV2
                 {
                     const auto WoStride = output_strides[3];
                     const auto KStride  = NumberType<1>{};
-                    return make_naive_tensor_descriptor(make_tuple(K, N * Wo), // GemmM, GemmK
-                                                        make_tuple(KStride, WoStride));
+                    return make_naive_tensor_descriptor(
+                        make_tuple(K, N * Wo / splitk_tdm), // GemmM, GemmK
+                        make_tuple(KStride, WoStride));
                 }
             };
 
@@ -460,8 +463,9 @@ struct TransformConvBwdWeightToGemmV2
                 {
                     const auto WoStride = output_strides[3];
                     const auto KStride  = NumberType<1>{};
-                    return make_naive_tensor_descriptor(make_tuple(K, N * Wo), // GemmM, GemmK
-                                                        make_tuple(KStride, WoStride));
+                    return make_naive_tensor_descriptor(
+                        make_tuple(K, N * Wo / splitk_tdm), // GemmM, GemmK
+                        make_tuple(KStride, WoStride));
                 }
             };
             const auto out_gemmkbatch_gemmk0_gemmm_gemmk1_grid_desc = get_a_desc();
@@ -584,6 +588,8 @@ struct TransformConvBwdWeightToGemmV2
         const auto in_grid_desc  = make_in_grid_desc<NDim>(N, Hi, Wi, C, input_strides);
         const auto wei_grid_desc = make_wei_grid_desc<NDim>(K, Y, X, C, weights_strides);
 
+        const auto splitk_tdm = split_k_offset_hack ? GemmKBatch : 1;
+
         if constexpr(ConvBackwardWeightSpecialization ==
                      device::ConvolutionBackwardWeightSpecialization::Filter1x1Stride1Pad0)
         {
@@ -612,7 +618,7 @@ struct TransformConvBwdWeightToGemmV2
                     const auto WoStride = output_strides[4];
                     const auto KStride  = NumberType<1>{};
                     return make_naive_tensor_descriptor(
-                        make_tuple(K, (N * Ho * Wo)), // GemmM, GemmK
+                        make_tuple(K, (N * Ho * Wo / splitk_tdm)), // GemmM, GemmK
                         make_tuple(KStride, WoStride));
                 }
             };
@@ -674,7 +680,7 @@ struct TransformConvBwdWeightToGemmV2
                     const auto WoStride = output_strides[4];
                     const auto KStride  = NumberType<1>{};
                     return make_naive_tensor_descriptor(
-                        make_tuple(K, (N * Ho * Wo)), // GemmM, GemmK
+                        make_tuple(K, (N * Ho * Wo / splitk_tdm)), // GemmM, GemmK
                         make_tuple(KStride, WoStride));
                 }
             };
@@ -814,6 +820,8 @@ struct TransformConvBwdWeightToGemmV2
         const auto in_grid_desc  = make_in_grid_desc<NDim>(N, Di, Hi, Wi, C, input_strides);
         const auto wei_grid_desc = make_wei_grid_desc<NDim>(K, Z, Y, X, C, weights_strides);
 
+        const auto splitk_tdm = split_k_offset_hack ? GemmKBatch : 1;
+
         if constexpr(ConvBackwardWeightSpecialization ==
                      device::ConvolutionBackwardWeightSpecialization::Filter1x1Stride1Pad0)
         {
@@ -842,7 +850,7 @@ struct TransformConvBwdWeightToGemmV2
                     const auto WoStride = output_strides[5];
                     const auto KStride  = NumberType<1>{};
                     return make_naive_tensor_descriptor(
-                        make_tuple(K, N * Do * Ho * Wo), // GemmM, GemmK
+                        make_tuple(K, N * Do * Ho * Wo / splitk_tdm), // GemmM, GemmK
                         make_tuple(KStride, WoStride));
                 }
             };
@@ -904,7 +912,7 @@ struct TransformConvBwdWeightToGemmV2
                     const auto WoStride = output_strides[5];
                     const auto KStride  = NumberType<1>{};
                     return make_naive_tensor_descriptor(
-                        make_tuple(K, N * Do * Ho * Wo), // GemmM, GemmK
+                        make_tuple(K, N * Do * Ho * Wo / splitk_tdm), // GemmM, GemmK
                         make_tuple(KStride, WoStride));
                 }
             };
