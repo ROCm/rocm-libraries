@@ -1266,27 +1266,25 @@ private:
             }
             unknownValue("block_mask_pattern", pattern);
         };
-        std::vector<int64_t> contents;
-        contents.reserve(static_cast<size_t>(_b * _hq * rowTiles * bytes));
-        for(int64_t bh = 0; bh < _b * _hq; ++bh)
+        // Every (batch, head) pair has the same tiles, so one [rowTiles, bytes] slice repeats.
+        std::vector<int64_t> slice;
+        slice.reserve(static_cast<size_t>(rowTiles * bytes));
+        for(int64_t r = 0; r < rowTiles; ++r)
         {
-            for(int64_t r = 0; r < rowTiles; ++r)
+            for(int64_t byte = 0; byte < bytes; ++byte)
             {
-                for(int64_t byte = 0; byte < bytes; ++byte)
+                int64_t value = 0;
+                for(int64_t bit = 0; bit < 8 && byte * 8 + bit < keyTiles; ++bit)
                 {
-                    int64_t value = 0;
-                    for(int64_t bit = 0; bit < 8 && byte * 8 + bit < keyTiles; ++bit)
+                    if(allowed(r, byte * 8 + bit))
                     {
-                        if(allowed(r, byte * 8 + bit))
-                        {
-                            value |= int64_t{1} << bit;
-                        }
+                        value |= int64_t{1} << bit;
                     }
-                    contents.push_back(value);
                 }
+                slice.push_back(value);
             }
         }
-        _contents["block_mask"] = integerContents(std::move(contents), false);
+        _contents["block_mask"] = integerContents(std::move(slice), _b * _hq > 1);
     }
 
     Dims biasDims() const
@@ -2125,11 +2123,18 @@ private:
             }
         }
 
+        // Under a dims override the mask holds the B x H_q slices in order, then bytes of 1.
         const auto mask = _contents.find("block_mask");
-        if(mask != _contents.end())
+        if(mask != _contents.end() && _ov.tensorDims.count("block_mask") != 0)
         {
-            auto& values = std::get<std::vector<int64_t>>(mask->second.values);
+            const auto slice = std::get<std::vector<int64_t>>(mask->second.values);
+            std::vector<int64_t> values;
+            for(int64_t bh = 0; bh < _b * _hq; ++bh)
+            {
+                values.insert(values.end(), slice.begin(), slice.end());
+            }
             values.resize(static_cast<size_t>(elementCount(_named.at("block_mask")->get_dim())), 1);
+            mask->second = integerContents(std::move(values), false);
         }
 
         // A repeated list holds at most one value per element of its tensor.

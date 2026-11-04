@@ -2,8 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstdint>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -43,7 +45,7 @@ constexpr const char* CLASS_VALUES_JSON = R"json({
   "quantisation_factors": {"descale_q": 0.5, "descale_k": 0.25, "descale_v": 2.0, "other": 1.0},
   "descale_lists": {
     "per_head": {"descale_q": [0.5, 1.0], "descale_k": [0.25, 0.5], "descale_v": [2.0, 4.0]},
-    "finer": {"descale_q": [0.5, 1.0], "descale_k": [0.25, 0.5], "descale_v": [2.0, 4.0]}},
+    "finer": {"descale_q": [0.5, 1.0, 2.0], "descale_k": [0.25, 0.125], "descale_v": [4.0, 2.0]}},
   "ragged_tensors": {"padded": [], "ragged": ["Q", "K", "V", "O"], "ragged_q_side": ["Q", "O"],
                      "ragged_kv_side": ["K", "V"]},
   "ragged_stats": {"dense": [], "packed_with_q": ["Stats"]},
@@ -499,6 +501,130 @@ TEST(TestCaseGraph, RepeatedListIsCutToItsTensor)
     z.b = 2;
     const auto twoElements = contentsOf(build(row, z), "descale_k");
     EXPECT_EQ(std::get<std::vector<double>>(twoElements.values), (std::vector<double>{0.25, 0.5}));
+}
+
+// A per-head descale is [B, H_kv, 1, 1] (descale_q too); a finer one is [B, H, S, 1] of its own
+// tensor.
+TEST(TestCaseGraph, DescaleListsRepeatTheirFactorCycle)
+{
+    const std::map<std::string, std::map<std::string, std::vector<double>>> cycles = {
+        {"per_head",
+         {{"descale_q", {0.5, 1.0}}, {"descale_k", {0.25, 0.5}}, {"descale_v", {2.0, 4.0}}}},
+        {"finer",
+         {{"descale_q", {0.5, 1.0, 2.0}}, {"descale_k", {0.25, 0.125}}, {"descale_v", {4.0, 2.0}}}},
+    };
+    for(const int64_t heads : {2, 4})
+    {
+        auto z = sizes(2, 64, 32);
+        z.hq = 2 * heads;
+        z.hk = heads;
+        z.hv = heads;
+        for(const auto& [granularity, lists] : cycles)
+        {
+            auto row = baseRow();
+            for(const auto& entry : lists)
+            {
+                row[entry.first] = granularity;
+            }
+            const auto built = build(row, z);
+            for(const auto& [name, cycle] : lists)
+            {
+                SCOPED_TRACE(name + " " + granularity + " H_kv " + std::to_string(heads));
+                const auto& contents = contentsOf(built, name);
+                EXPECT_EQ(std::get<std::vector<double>>(contents.values), cycle);
+                EXPECT_TRUE(contents.repeat);
+                const bool perHead = granularity == "per_head";
+                const bool query = name == "descale_q";
+                const std::vector<int64_t> dims
+                    = perHead
+                          ? std::vector<int64_t>{2, heads, 1, 1}
+                          : std::vector<int64_t>{2, query ? 2 * heads : heads, query ? 64 : 32, 1};
+                EXPECT_EQ(built.graph->getTensorsByName().at(name)->get_dim(), dims);
+            }
+        }
+    }
+}
+
+TEST(TestCaseGraph, CallerDropoutMaskRepeatsItsPatternCycle)
+{
+    auto row = baseRow();
+    row["dropout"] = "caller_mask";
+    row["dropout_mask_pattern"] = "mixed";
+    row["dropout_pattern_output"] = "not_requested";
+    for(const auto& [broadcast, dims] : std::vector<std::pair<std::string, std::vector<int64_t>>>{
+            {"none", {2, 8, 64, 32}}, {"batch_and_heads", {1, 1, 64, 32}}})
+    {
+        SCOPED_TRACE(broadcast);
+        row["dropout_mask_broadcast"] = broadcast;
+        const auto built = build(row, sizes(2, 64, 32));
+        const auto& contents = contentsOf(built, "dropout_mask");
+        EXPECT_EQ(std::get<std::vector<double>>(contents.values), (std::vector<double>{1.0, 0.0}));
+        EXPECT_TRUE(contents.repeat);
+        EXPECT_EQ(built.graph->getTensorsByName().at("dropout_mask")->get_dim(), dims);
+    }
+}
+
+// The mixed pattern allows key tile 0 and every tile whose row and key tile numbers sum to an
+// even number.
+TEST(TestCaseGraph, BlockMaskIsOneSliceRepeatedOverBatchAndHeads)
+{
+    struct Size
+    {
+        int64_t sq;
+        int64_t skv;
+        std::vector<int64_t> slice;
+        std::vector<int64_t> dims;
+    };
+    const std::vector<Size> cases = {
+        {128, 128, {1}, {2, 8, 1, 1}},
+        {129, 129, {1, 3}, {2, 8, 2, 1}},
+        {128, 1025, {85, 1}, {2, 8, 1, 2}},
+    };
+    auto row = baseRow();
+    row["block_mask"] = "present";
+    row["block_mask_pattern"] = "mixed";
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE("Sq " + std::to_string(c.sq) + " Skv " + std::to_string(c.skv));
+        const auto built = build(row, sizes(2, c.sq, c.skv));
+        const auto& contents = contentsOf(built, "block_mask");
+        EXPECT_EQ(integersOf(built, "block_mask"), c.slice);
+        EXPECT_TRUE(contents.repeat);
+        EXPECT_EQ(built.graph->getTensorsByName().at("block_mask")->get_dim(), c.dims);
+    }
+}
+
+TEST(TestCaseGraph, BlockMaskOfOneBatchAndHeadIsTheFullList)
+{
+    auto row = baseRow();
+    row["block_mask"] = "present";
+    row["block_mask_pattern"] = "some_rows_blocked";
+    auto z = sizes(1, 129, 129);
+    z.hq = 1;
+    z.hk = 1;
+    z.hv = 1;
+    const auto built = build(row, z);
+    EXPECT_EQ(integersOf(built, "block_mask"), (std::vector<int64_t>{3, 0}));
+    EXPECT_FALSE(contentsOf(built, "block_mask").repeat);
+}
+
+TEST(TestCaseGraph, BlockMaskDimsOverrideFillsSlicesThenOnes)
+{
+    auto row = baseRow();
+    row["block_mask"] = "present";
+    row["block_mask_pattern"] = "all_blocked";
+    const CaseContext context{classValues(), DescaleForm::BY_VALUE, "gfx942", sizes(1, 128, 128)};
+    const auto built = sdpa_case_flow::buildCaseGraph(row, {"block_mask_dims=1x8x1x2"}, context);
+    const auto& contents = contentsOf(built, "block_mask");
+    EXPECT_EQ(integersOf(built, "block_mask"),
+              (std::vector<int64_t>{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1}));
+    EXPECT_FALSE(contents.repeat);
+}
+
+TEST(TestCaseGraph, MaskPatternAxesAreRealised)
+{
+    EXPECT_TRUE(sdpa_case_flow::isRealisedContentAxis("block_mask_pattern"));
+    EXPECT_TRUE(sdpa_case_flow::isRealisedContentAxis("dropout_mask_pattern"));
 }
 
 TEST(TestCaseGraph, LengthAndOffsetAxesAreRealised)

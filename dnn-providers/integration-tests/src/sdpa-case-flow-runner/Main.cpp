@@ -1999,11 +1999,25 @@ constexpr const char* EXPORT_REFERENCE_SOURCE
     = "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in "
       "test-plans/sdpa-fwd/cases.csv";
 
-// The contents a bundle carries for these graphs: a fixed attn_scale and the sequence lengths.
-// Every other content keeps the row out of bundles.
-bool isBundleContent(const std::string& name)
+// The contents a bundle carries for these graphs: a fixed attn_scale, integer sequence lengths and
+// block masks, and real descale lists and dropout masks. Every other content keeps the row out of
+// bundles.
+bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& contents)
 {
-    return name == FIXED_CONTENT_NAME || name == "seq_len_q" || name == "seq_len_kv";
+    const auto* reals = std::get_if<std::vector<double>>(&contents.values);
+    if(name == FIXED_CONTENT_NAME)
+    {
+        return reals != nullptr && reals->size() == 1;
+    }
+    if(name == "seq_len_q" || name == "seq_len_kv" || name == "block_mask")
+    {
+        return reals == nullptr;
+    }
+    if(name == "descale_q" || name == "descale_k" || name == "descale_v" || name == "dropout_mask")
+    {
+        return reals != nullptr;
+    }
+    return false;
 }
 
 struct ExportResult
@@ -2061,9 +2075,7 @@ ExportResult exportCase(const CaseInput& input,
             const size_t count = reals != nullptr
                                      ? reals->size()
                                      : std::get<std::vector<int64_t>>(contents.values).size();
-            const bool fixedScale = name == FIXED_CONTENT_NAME && reals != nullptr && count == 1;
-            const bool lengths = name != FIXED_CONTENT_NAME && reals == nullptr;
-            if(!isBundleContent(name) || !(fixedScale || lengths))
+            if(!isBundleContent(name, contents))
             {
                 notExpressible.push_back(
                     name + "(" + std::to_string(count)

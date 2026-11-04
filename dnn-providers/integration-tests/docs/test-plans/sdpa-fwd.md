@@ -500,10 +500,7 @@ yet. It stays in the generated CSV, and the selection step
 | Reason | Why a bundle cannot express it | Rows |
 |---|---|---|
 | `page_table_contents` | Page tables are tensor contents. | 1,702 |
-| `block_mask_bits` | The block-mask bits are tensor contents. | 1,449 |
-| `dropout_mask_cycle` | A caller-supplied dropout mask is tensor contents. | 1,213 |
 | `ragged_offsets` | Ragged offsets are tensor contents. | 1,082 |
-| `descale_lists` | A per-head or finer descale is a list of factors in device memory. | 950 |
 | `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 540 |
 | `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 323 |
 | `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 182 (6 otherwise expressible) |
@@ -726,8 +723,8 @@ case has.
    entry for that defect's ticket, with the rules of section 10.3.
 
 Some known defects need a setting that no bundle can express, for example a
-caller-supplied dropout mask. Rows with such a setting are excluded
-(section 9.1), so these defects need no skip.
+packed page table. Rows with such a setting are excluded (section 9.1), so
+these defects need no skip.
 
 ## 11. Limits and what comes next
 

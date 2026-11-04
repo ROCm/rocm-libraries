@@ -57,27 +57,24 @@ EXPECTED = {
     "content_reasons": {
         "ragged_offsets": 2517,
         "page_table_contents": 1951,
-        "block_mask_bits": 1641,
-        "dropout_mask_cycle": 1415,
         "tensor_overlap": 1206,
-        "descale_lists": 1086,
         "arch_dtype": 359,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 686,
+        "zero_stride_needs_pr14709": 814,
         "dropout_without_rng_dump": 8,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1612, 879, 32, 75, 317, 8, 30.6, 23.7),
-        "standard": (9206, 5735, 123, 270, 1826, 3, 323.9, 241.5),
-        "comprehensive": (4377, 2442, 87, 174, 794, 19, 940.9, 669.0),
-        "full": (7177, 4249, 130, 278, 1273, 19, 2122.1, 1517.9),
+        "quick": (1612, 1049, 72, 127, 317, 29, 36.0, 27.9),
+        "standard": (9206, 6954, 218, 410, 1826, 17, 392.0, 292.4),
+        "comprehensive": (4377, 3049, 167, 291, 794, 48, 1189.5, 846.2),
+        "full": (7177, 5073, 228, 421, 1273, 48, 2471.9, 1768.6),
     },
-    "bundle_rows": 13305,
-    "sweeps": 372,
-    "sweeps_alignment_split": 797,
+    "bundle_rows": 16125,
+    "sweeps": 685,
+    "sweeps_alignment_split": 1249,
 }
 
 
@@ -217,16 +214,8 @@ def content_reasons(row):
     why = []
     if active(row, "ragged_offsets"):
         why.append("ragged_offsets")
-    if row["block_mask"] == "present":
-        why.append("block_mask_bits")
-    if row["dropout"] == "caller_mask":
-        why.append("dropout_mask_cycle")
     if row["paged_kv"] != "absent":
         why.append("page_table_contents")
-    if any(
-        row[n] in ("per_head", "finer") for n in ("descale_q", "descale_k", "descale_v")
-    ):
-        why.append("descale_lists")
     if row["tensor_overlap"] != "separate":
         why.append("tensor_overlap")
     if (
