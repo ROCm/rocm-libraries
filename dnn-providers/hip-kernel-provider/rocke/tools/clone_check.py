@@ -343,7 +343,6 @@ def collect_diffs(
         "--text",
         "--submodule=short",
         "--inter-hunk-context=0",
-        "--ignore-cr-at-eol",
         "-l1000",
     ]
     revisions = [base] if head is None else [base, head]
@@ -1137,7 +1136,7 @@ def _code_lines(source: bytes, start: int, end: int) -> tuple[str, ...]:
     """Non-blank, non-comment source lines ``start..end`` (1-based), with the
     common leading indent removed and relative indentation kept, so that
     different control flow never compares equal."""
-    text = source.decode(errors="replace").split("\n")[start - 1 : end]
+    text = source.decode("utf-8-sig", errors="replace").split("\n")[start - 1 : end]
     lines = [t.rstrip() for t in text if t.strip() and not t.lstrip().startswith("#")]
     indent = min((len(t) - len(t.lstrip()) for t in lines), default=0)
     return tuple(t[indent:] for t in lines)
