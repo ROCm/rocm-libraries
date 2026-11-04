@@ -247,6 +247,23 @@ class TestAttentionMaskType(unittest.TestCase):
                     dispatch_attention(_attn(mask_type=value))
 
 
+class TestAttentionPublicSurface(unittest.TestCase):
+    def test_every_all_entry_resolves(self):
+        import dispatch.attention as attention
+
+        missing = [n for n in attention.__all__ if not hasattr(attention, n)]
+        self.assertEqual(missing, [])
+        self.assertEqual(len(attention.__all__), len(set(attention.__all__)))
+
+    def test_star_import_succeeds(self):
+        namespace: dict = {}
+        exec("from dispatch.attention import *", namespace)
+        import dispatch.attention as attention
+
+        for name in attention.__all__:
+            self.assertIn(name, namespace)
+
+
 class TestAttentionBottomRightRouting(unittest.TestCase):
     def test_moving_bottom_right_is_a_distinct_request_feature(self):
         moving = _attn(

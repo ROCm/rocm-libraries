@@ -24,7 +24,6 @@ torch = pytest.importorskip("torch")
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
 from dispatch.sdpa.bind_unified import (
-    _lengths,
     _LaunchPlan,
     sdpa_unified_admits,
     sdpa_unified_bind,
@@ -169,15 +168,6 @@ def test_invalid_seq_len_is_refused_before_launch(key, values, match):
     tensors[key] = torch.tensor(values, dtype=torch.int32)
     with pytest.raises(ValueError, match=match):
         sdpa_unified_bind(req, tensors)
-
-
-def test_seq_len_past_the_ragged_lengths_is_refused():
-    class RaggedK:
-        lengths = [8, 16]
-
-    lens = {"seq_len_kv": torch.tensor([16, 16], dtype=torch.int32)}
-    with pytest.raises(ValueError, match="exceeds the ragged lengths"):
-        _lengths(object(), lens, "seq_len_kv", RaggedK(), 2, 16)
 
 
 def test_a_tensor_that_disagrees_with_the_request_is_refused():

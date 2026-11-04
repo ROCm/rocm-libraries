@@ -241,19 +241,24 @@ def sdpa_unified_candidates(req: SdpaRequest) -> tuple[str, ...]:
 # --- binding -------------------------------------------------------------------
 
 
-def _lengths(req_tensor, tensors, key: str, operand: Operand, batch: int, extent: int):
-    """Per-batch lengths: ``seq_len_*`` when set, else ragged, else the extent.
+def _host_lengths(req_tensor, tensors, key: str) -> list[int] | None:
+    return None if req_tensor is None else host_ints(tensors[key])
+
+
+def _lengths(
+    given: list[int] | None, key: str, operand: Operand, batch: int, extent: int
+):
+    """Per-batch lengths: the host ``seq_len_*`` values ``given`` (``None`` when
+    the request has none), else ragged, else the extent.
 
     The range/dtype/count check is ``kernels.common._sdpa_seqlen``'s host-side
     adapter (:func:`validate_lengths`), shared with ``sdpa_seqlens`` /
     ``sdpa_cu_seqlens`` so the rule lives in one place and is covered torch-free
     in ``tests/test_sdpa_seqlen.py``.
     """
-    if req_tensor is None:
+    if given is None:
         return list(operand.lengths) if operand.lengths else [extent] * batch
-    values = validate_lengths(
-        host_ints(tensors[key]), batch=batch, s_max=extent, name=key
-    ).tolist()
+    values = validate_lengths(given, batch=batch, s_max=extent, name=key).tolist()
     if operand.lengths and any(n > r for n, r in zip(values, operand.lengths)):
         raise ValueError(f"{key} {values} exceeds the ragged lengths {operand.lengths}")
     return values
@@ -302,10 +307,18 @@ class _LaunchPlan:
 
         batch = req.batch
         self.q_len = _lengths(
-            req.seq_len_q, tensors, "seq_len_q", self.q, batch, req.s_q
+            _host_lengths(req.seq_len_q, tensors, "seq_len_q"),
+            "seq_len_q",
+            self.q,
+            batch,
+            req.s_q,
         )
         self.kv_len = _lengths(
-            req.seq_len_kv, tensors, "seq_len_kv", self.k, batch, req.s_kv
+            _host_lengths(req.seq_len_kv, tensors, "seq_len_kv"),
+            "seq_len_kv",
+            self.k,
+            batch,
+            req.s_kv,
         )
         cu = [0]
         for n in self.q_len:

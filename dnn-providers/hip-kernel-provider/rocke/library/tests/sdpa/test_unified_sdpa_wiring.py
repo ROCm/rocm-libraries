@@ -19,6 +19,7 @@ import pytest
 from dispatch.sdpa.bind_shared import kept_keys
 from dispatch.sdpa.bind_unified import (
     _DECLINED,
+    _lengths,
     SDPA_UNIFIED_FEATURES,
     sdpa_unified_admits,
     sdpa_unified_candidates,
@@ -274,28 +275,71 @@ def test_lse_is_admitted_on_a_prefill_shape_via_tiled_2d():
     assert sdpa_unified_candidates(req) == ("attention_unified_2d",)
 
 
-# --- hipDNN's left_bound (#14483) ---------------------------------------------
+# --- seq_len_* host validation (torch-free, so CI runs it) ----------------------
+# ``seq_len_q`` / ``seq_len_kv`` become cu_seqlens_q / seqused_k, which bound the
+# kernel's Q and K/V reads; ``_lengths`` reaches ``validate_lengths`` before any
+# launch. The range/count rule itself is covered in ``tests/test_sdpa_seqlen.py``.
+
+
+class _Plain:
+    lengths = None
+
+
+@pytest.mark.parametrize(
+    "key,given,extent,match",
+    [
+        ("seq_len_q", [2, 1], 1, r"every length must satisfy 0 <= len <= 1"),
+        ("seq_len_q", [-1, 1], 1, "every length must be >= 0"),
+        ("seq_len_q", [1, 1, 1], 1, "expected 2 per-batch lengths, got 3"),
+        ("seq_len_kv", [17, 16], 16, r"every length must satisfy 0 <= len <= 16"),
+        ("seq_len_kv", [-1, 16], 16, "every length must be >= 0"),
+        ("seq_len_kv", [16], 16, "expected 2 per-batch lengths, got 1"),
+    ],
+)
+def test_invalid_seq_len_is_refused(key, given, extent, match):
+    with pytest.raises(ValueError, match=f"{key}: .*{match}|{key}: {match}"):
+        _lengths(given, key, _Plain(), 2, extent)
+
+
+def test_valid_seq_len_and_defaults():
+    assert _lengths([1, 3], "seq_len_q", _Plain(), 2, 4) == [1, 3]
+    assert _lengths(None, "seq_len_q", _Plain(), 2, 4) == [4, 4]
+
+
+def test_seq_len_past_the_ragged_lengths_is_refused():
+    class RaggedK:
+        lengths = [8, 16]
+
+    with pytest.raises(ValueError, match="exceeds the ragged lengths"):
+        _lengths([16, 16], "seq_len_kv", RaggedK(), 2, 16)
+
+
+# --- hipDNN's left_bound ------------------------------------------------------
 
 
 @pytest.mark.parametrize("left_bound", (1, 4, 63, 64))
 def test_sliding_window_keeps_exactly_left_bound_keys(left_bound):
     """hipDNN's ``left_bound = L`` keeps exactly the L keys ending at the
-    diagonal -- NOT FlashAttention's ``window = W`` keeping W + 1 (the
-    off-by-one #14483 fixed). ``kept_keys`` must agree with the reference
-    oracle's own conversion (``hipdnn_left_to_window``) at these L values, or
-    a reintroduced ``+ 1`` here would silently admit one extra key.
+    diagonal, not FlashAttention's ``window = W`` keeping W + 1. The request
+    translation must hand the attention candidates that same L, so a
+    reintroduced ``+ 1`` there fails here (the oracle's own conversion alone
+    would not notice).
     """
+    from dispatch.sdpa.bind_shared import to_attention_request
     from rocke.numeric.sdpa_reference import hipdnn_left_to_window, keep
 
     s_kv = 128
+    req = _unified_request(
+        s_q=1, s_kv=s_kv, left_bound=left_bound, right_bound=0, diagonal="bottom_right"
+    )
     window = hipdnn_left_to_window(left_bound)
-    first, last = kept_keys(s_q=1, s_kv=s_kv, top_left=False, left=window, right=0)
-    reference_kept = [
+    oracle_kept = [
         k for k in range(s_kv) if keep(0, k, 1, s_kv, "bottom_right", window, 0)
     ]
-    assert reference_kept
-    assert (first[0], last[0]) == (reference_kept[0], reference_kept[-1])
-    assert last[0] - first[0] + 1 == left_bound
+    assert len(oracle_kept) == left_bound
+    assert to_attention_request(req).sliding_window == left_bound
+    first, last = kept_keys(s_q=1, s_kv=s_kv, top_left=False, left=window, right=0)
+    assert (first[0], last[0]) == (oracle_kept[0], oracle_kept[-1])
 
 
 # --- band faithfulness -------------------------------------------------------
