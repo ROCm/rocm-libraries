@@ -134,9 +134,11 @@ struct Gfx942AttentionDenseGeometry
 /**
  * @brief The launch geometry for one selected candidate over one graph.
  *
- * Mirrors the non-persistent branch of `attention_dense_grid` at the qb_minor order:
+ * Mirrors `attention_dense_grid` off the persistent grid at the qb_minor decode
+ * (`NonpersistQbMinor.grid`) and kv_segments 1, which kernelMatches requires, so the
+ * decode's x extent is not multiplied:
  *
- *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
+ *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m      # _spec_nqb
  *     return (nqb, spec.num_query_heads, spec.batch)
  *
  * and `attention_dense_block`, `(spec.num_waves * 64, 1, 1)`.
@@ -145,8 +147,9 @@ struct Gfx942AttentionDenseGeometry
  * @p numQueryHeads and @p batch are the graph's, since the binary takes its shape at
  * runtime and its metadata carries only canonical build inputs.
  *
- * The other block orders and the persistent grid, `(spec.num_persistent, 1, 1)`, are
- * AttentionDensePersistent.hpp's gridDims; the block is this one's on every grid.
+ * The other block orders (also at kv_segments 1) and the persistent grid,
+ * `(spec.num_persistent, 1, 1)`, are AttentionDensePersistent.hpp's gridDims; the block is
+ * this one's on every grid.
  *
  * Throws instead of returning a degenerate grid: an empty or negative launch returns
  * cleanly having written nothing, and prepare() is the last place a named failure is
@@ -174,7 +177,9 @@ inline Gfx942AttentionDenseGeometry gfx942AttentionDenseGeometry(int64_t blockM,
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "gfx942 attention_dense: kernel '" + kernelName
-                + "' declares a non-positive seqlen_q, num_query_heads or batch");
+                + "' cannot launch over a graph with a non-positive extent: seqlen_q "
+                + std::to_string(seqLenQ) + ", num_query_heads " + std::to_string(numQueryHeads)
+                + ", batch " + std::to_string(batch));
     }
 
     Gfx942AttentionDenseGeometry geometry;

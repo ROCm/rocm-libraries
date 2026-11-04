@@ -49,9 +49,28 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - Batch, sequence lengths and both head counts are runtime kernel arguments, so every
   variant serves any shape its tile divides. Each variant is built at batch 1,
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
-- Fixed in every variant: not ragged, not varlen, not paged, no sinks, one KV segment.
-  Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
+- Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
   `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` and `gfx942_dense_persist_aot`.
+- Not covered by this engine (follow-ups). Each is declined with an INFO log line naming
+  the cause.
+  - Not yet supported by this pack; the gfx942 kernel builds it, no variant ships it:
+    - Attention sinks (`use_sinks`; gpt-oss). When this work started, hipDNN's SDPA
+      references could not validate sinks; #14358 added that on 2026-11-02. gpt-oss's W=128
+      layers need sink variants of the shipped W=128 cells.
+    - Bottom-right causal with seqlen_q != seqlen_kv (`causal_bottom_right`).
+    - Split KV (`kv_segments` > 1; needs a workspace and a combine launch).
+    - Window rows that see no key (seqlen_q - seqlen_kv >= W); the kernel zeroes them only
+      with `emit_lse`.
+  - Not in the catalog: sliding windows other than 128, 512, 1024 and 2048 keys (W is a
+    compile-time parameter). W=4096 (Mistral-7B-v0.1, StarCoder2, Command R7B, OLMo 3,
+    EXAONE 4.0; all D128) is the first to add.
+  - Not implemented in the gfx942 kernel: sequence lengths no shipped tile divides (no
+    partial-tile path), varlen, ragged (packed) tensors and paged K/V (other rocKE kernels
+    serve them), bottom-right windows, non-causal bands (`right_bound` > 0), head sizes
+    other than 64 and 128, FP32 and FP8 data types, dropout, additive / ALiBi / block
+    masks, scale tensors, and the Max and Sum_exp outputs.
+  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets).
+  - Design limit: FLOAT accumulation, so a DOUBLE compute type is declined.
 
 ## Files
 

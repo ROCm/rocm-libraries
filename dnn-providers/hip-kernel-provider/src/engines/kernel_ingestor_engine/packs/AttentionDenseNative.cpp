@@ -56,7 +56,8 @@
  * `Gfx9xxAttentionDenseNative.cpp` binds these functions to its AttentionDenseArch and
  * registers them under its own symbols.
  *
- * Every KMD field read here is one both engine manifests declare.
+ * Every KMD field read here is one both engine manifests declare, except kv_segments,
+ * which a record may omit (KV_SEGMENTS_FIELD).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::attention_dense
 {
@@ -80,6 +81,10 @@ constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
+// A split-KV build multiplies the grid's x extent by kv_segments and takes a workspace and
+// a combine launch this dispatch does not make. Neither KMD declares it yet, so an absent
+// field reads as 1, the one value served.
+constexpr std::string_view KV_SEGMENTS_FIELD = "kv_segments";
 
 // The graph-reading helpers every single-node SDPA-forward pack shares.
 using sdpa_graph::BATCH_AXIS;
@@ -273,8 +278,10 @@ struct AttentionDenseMask
  * `q - left_bound < k <= q + right_bound` (SEM-001), so a causal window of left_bound L
  * is the kernel's sliding_window L. resolveDiagonalBand hands back L - 1, the keys left of
  * the diagonal, and rejects L == 0. Bottom-right alignment coincides with top-left exactly
- * when seqlen_q == seqlen_kv, and is declined otherwise. A band with a right bound other
- * than 0 is not causal; the kernel computes no lookahead and no non-causal window.
+ * when seqlen_q == seqlen_kv, and is declined otherwise: the kernels build a bottom-right
+ * causal mask (causal_bottom_right), but no shipped variant carries one, and neither
+ * builds a bottom-right window. A band with a right bound other than 0 is not causal and
+ * is declined; this pack ships no lookahead or non-causal window.
  *
  * An arch that serves no window (servesSlidingWindow() false) declines every windowed
  * band: its catalog carries no non-zero sliding_window.
@@ -321,7 +328,8 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask")
                                    << "bottom-right causal needs seqlen_q == seqlen_kv, got "
                                    << problem.seqLenQ << " and " << problem.seqLenKv
-                                   << "; the kernel's causal mask is top-left");
+                                   << "; not yet supported by this pack, whose variants are "
+                                      "all top-left");
             return std::nullopt;
         }
         return AttentionDenseMask{1, 0};
@@ -341,8 +349,8 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask")
                                    << "left_bound " << band.leftBound << ", right_bound "
                                    << band.rightBound
-                                   << " is not a causal window; the kernel serves windows "
-                                      "with right_bound 0 only");
+                                   << " is not a causal window; not yet supported by this "
+                                      "pack, which serves windows with right_bound 0 only");
             return std::nullopt;
         }
         if(bottomRight && !sameLengths)
@@ -350,7 +358,7 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask")
                                    << "a bottom-right window needs seqlen_q == seqlen_kv, got "
                                    << problem.seqLenQ << " and " << problem.seqLenKv
-                                   << "; the kernel's window is top-left");
+                                   << "; the kernel builds top-left windows only");
             return std::nullopt;
         }
         const int64_t window = band.leftBound + 1;
@@ -359,8 +367,9 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask")
                                    << "a " << window << "-key window over seqlen_q "
                                    << problem.seqLenQ << " and seqlen_kv " << problem.seqLenKv
-                                   << " leaves the last query rows no key; the kernel has no "
-                                      "empty-row path");
+                                   << " leaves the last query rows no key; not yet supported "
+                                      "by this pack (only the kernel's LSE path zeroes such "
+                                      "rows)");
             return std::nullopt;
         }
         return AttentionDenseMask{1, window};
@@ -642,7 +651,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "varlen")
                                << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not supported");
+                                  "not yet supported by this pack");
         return std::nullopt;
     }
     // Dropout.
@@ -660,7 +669,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
        || attributes.max_seq_len_kv().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "paged_kv")
-                               << "paged K/V (page tables or max_seq_len_kv) is not supported");
+                               << "paged K/V (page tables or max_seq_len_kv) is not yet "
+                                  "supported by this pack");
         return std::nullopt;
     }
     // Block-sparse, and attention SINKS.
@@ -672,7 +682,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
     if(attributes.sink_token_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "sinks")
-                               << "attention sinks (sink_token tensor) are not supported");
+                               << "attention sinks (sink_token tensor) are not yet supported "
+                                  "by this pack (a follow-up)");
         return std::nullopt;
     }
     // FP8 quantization.
@@ -735,6 +746,20 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mma_core_mode")
                                << "mma_core_mode " << mmaCoreMode
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
+        return std::nullopt;
+    }
+    // The kernel accumulates and keeps the softmax statistics in FLOAT: at least the
+    // precision FLOAT, HALF or BFLOAT16 asks for, and UNSET leaves it to the provider.
+    // DOUBLE asks for more, and an integer or FP8 compute type for another computation.
+    // The FlyDSL SDPA packs' computesInFloat rule.
+    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
+    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
+       && computeType != data_objects::DataType::HALF
+       && computeType != data_objects::DataType::BFLOAT16)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "compute_data_type")
+                               << "compute data type " << computeType
+                               << " is not supported; the kernel accumulates in FLOAT");
         return std::nullopt;
     }
     // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.
@@ -879,7 +904,9 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
 /**
  * Only shape-generic candidates are served. A ragged build bakes its exact shape and pads
  * boundary tiles on-chip; neither catalog ships one, and one arriving from elsewhere is
- * declined even at its authored shape rather than matched on metadata equality.
+ * declined even at its authored shape rather than matched on metadata equality. So is a
+ * split-KV build (kv_segments other than 1), whose grid and combine launch dispatch does
+ * not reproduce.
  *
  * A served candidate receives batch, both sequence lengths and both head counts as
  * runtime kernel arguments, so one binary serves any valid shape for the same
@@ -932,6 +959,16 @@ bool kernelMatches(const MatchContext& context,
     if(!ragged.has_value() || *ragged != 0)
     {
         return false;
+    }
+
+    const auto kvSegments = kernel.metadata.find(std::string(KV_SEGMENTS_FIELD));
+    if(kvSegments != kernel.metadata.end())
+    {
+        const auto* segments = std::get_if<int64_t>(&kvSegments->second);
+        if(segments == nullptr || *segments != 1)
+        {
+            return false;
+        }
     }
 
     const auto dataTypeName = supportedDataTypeName(problem.dataType);
