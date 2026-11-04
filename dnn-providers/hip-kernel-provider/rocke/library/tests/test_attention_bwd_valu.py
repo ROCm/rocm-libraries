@@ -66,6 +66,8 @@ from kernels.common.attention_bwd_plan import (
 from ._attention_bwd_int_eval import TV, IntEvalBuilder
 from .sdpa.bwd_kernel_cases import config_knobs
 
+pytestmark = pytest.mark.exhaustive
+
 LEVERS = {
     "bf16_cast": BF16_CASTS,
     "bwd_exp2": BWD_EXP2S,

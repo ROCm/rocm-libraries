@@ -69,6 +69,8 @@ from kernels.common._attention_bwd_lds import (
 )
 from ._attention_bwd_test_utils import device_arch
 
+pytestmark = pytest.mark.exhaustive
+
 THREADS = 256
 REPS = 64
 GRID = 1024

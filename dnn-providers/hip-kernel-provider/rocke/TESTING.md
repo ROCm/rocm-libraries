@@ -559,13 +559,30 @@ these current targets, not a counted-kernel code-object lane. Exact installed
 CTest names and scopes live in the
 [rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
 
-[`library/tests/run_all.py`](library/tests/run_all.py) runs library unit pytest
-and its explicit gates; pass `--require-compiler-gate` for a complete required
-host verdict. An unavailable optional compiler gate reports `INCOMPLETE` with a
-zero exit status for local iteration, not plain `GREEN`.
+[`library/tests/run_all.py`](library/tests/run_all.py) runs the affordable
+library pytest lane and its explicit gates. The unit lane first records the
+files owning selected items, then runs up to eight host-only files concurrently
+in fresh Python processes. GPU-inclusive modes default to one file at a time so
+independent processes do not contend for one device; an explicit `--jobs` can
+override that policy. Process exit bounds module-local kernel/IR caches; live
+progress reports each file's elapsed time, and `--file-timeout` names and stops
+a pathological file instead of hiding it in an hour-long tail. The default is
+60 seconds, or 600 seconds when GPU tests or `--exhaustive` are selected.
+`--jobs 0` selects one traditional pytest process for focused debugging and for
+suite-wide pytest outputs such as
+JUnit XML. Legacy structural matrix modules marked `exhaustive` are excluded
+from this affordable lane and can be included with `--exhaustive`. That marker
+split reduces execution cost but is transitional: those modules are still
+imported and parameterized during collection, so G9 remains open until each
+cohort moves behind a non-discovered explicit gate like counted sync. Pass
+`--require-compiler-gate` for a complete
+required host verdict. An unavailable optional compiler gate reports
+`INCOMPLETE` with a zero exit status for local iteration, not plain `GREEN`.
 [`tools/run_checks.py`](tools/run_checks.py) coordinates selected
-checks from both trees, including the required library gates, but does not
-replace the platform runner's emitted-IR-validity and arch-domain stages.
+checks from both trees: platform pytest runs directly, while library units and
+the required library gates delegate to the library runner so tier and process
+policy have one owner. It does not replace the platform runner's
+emitted-IR-validity and arch-domain stages.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -886,7 +903,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 |---|---|---|---|
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
-| G9 | **Legacy discovered pytest contains resource-bound work** | `library/tests -m "not gpu"` still imports exhaustive matrices and includes COMGR/disassembly checks, so marker deselection and `--unit-only` do not yet guarantee fast, resource-free discovery | Apply the §5.0.1 split pattern cohort by cohort; keep exact coverage in named structural/compiler CTests |
+| G9 | **Legacy discovered pytest contains resource-bound work** | The affordable library runner now deselects the largest legacy `exhaustive` matrices and runs file-scoped workers, but pytest still imports and parameterizes those modules before marker deselection; additional unmarked structural/compiler cohorts remain in discovery | Apply the §5.0.1 split pattern cohort by cohort; keep exact coverage in named structural/compiler CTests and remove the transitional module markers as each migration lands |
 
 ### 7.3 What "green" does and does not mean today
 

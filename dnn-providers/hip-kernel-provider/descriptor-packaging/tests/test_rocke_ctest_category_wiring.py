@@ -25,6 +25,13 @@ def test_late_staging_drain_applies_provider_and_rocke_categories():
     assert block.count("apply_ctest_category_labels(") == 2
 
 
+def test_runner_contract_has_independent_installed_and_tier_owners():
+    cmake = _ROCKE_CMAKE.read_text(encoding="utf-8")
+    categories = _ROCKE_CATEGORIES.read_text(encoding="utf-8")
+    assert "add_test(rocke_library_runner_contract_pytest" in cmake
+    assert categories.count('"rocke_library_runner_contract_pytest"') == 2
+
+
 def test_counted_gates_have_installed_and_tier_owners():
     cmake = _ROCKE_CMAKE.read_text(encoding="utf-8")
     categories = _ROCKE_CATEGORIES.read_text(encoding="utf-8")

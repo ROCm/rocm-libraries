@@ -110,6 +110,8 @@ from ._attention_bwd_lds_model import (
 from ._attention_bwd_test_utils import distinct_configs, kernel_signature
 from .sdpa.bwd_kernel_cases import config_knobs
 
+pytestmark = pytest.mark.exhaustive
+
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 FLAVORS = ("llvm20", "llvm22", "llvm23")
 DTYPES = ("fp16", "bf16")

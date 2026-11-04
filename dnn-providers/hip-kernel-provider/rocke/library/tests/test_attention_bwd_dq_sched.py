@@ -64,6 +64,8 @@ from .test_attention_bwd_dq import VARIANTS as DQ_VARIANTS
 from .test_attention_bwd_dq import _walk
 from .test_attention_bwd_sched_body import _census, _hint_seq
 
+pytestmark = pytest.mark.exhaustive
+
 VALUES = DQ_SCHEDS[1:]
 _HINTS = (
     "tile.sched_barrier",

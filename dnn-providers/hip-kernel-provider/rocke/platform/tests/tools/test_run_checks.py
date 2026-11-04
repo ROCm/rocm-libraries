@@ -120,6 +120,57 @@ def test_runner_uses_every_qualified_compiler_lane(runner):
     assert "llvm24" in runner.FLAVORS
 
 
+def test_pytest_stage_delegates_library_tier_policy_to_library_runner(
+    runner, monkeypatch
+):
+    calls = []
+
+    def run(label, command, env, cwd=None):
+        calls.append((label, command, cwd))
+        return 0
+
+    monkeypatch.setattr(runner, "_run", run)
+    monkeypatch.setattr(
+        runner,
+        "_discover_pytest_dirs",
+        lambda: [runner.PLATFORM / "tests", runner.LIBRARY / "tests"],
+    )
+    monkeypatch.setattr(runner.sys, "argv", ["run_checks.py", "--steps", "pytest"])
+    assert runner.main() == 0
+
+    by_label = {label: (command, cwd) for label, command, cwd in calls}
+    platform, _ = by_label["pytest [platform units]"]
+    assert str(runner.PLATFORM / "tests") in platform
+    assert str(runner.LIBRARY / "tests") not in platform
+
+    library, library_cwd = by_label["pytest [library units]"]
+    assert Path(library[1]) == runner.LIBRARY / "tests" / "run_all.py"
+    assert "--unit-only" in library
+    assert library_cwd == runner.LIBRARY
+    assert "--gpu" not in library
+    assert "pytest [library explicit gates]" in by_label
+
+
+def test_pytest_stage_includes_library_gpu_files_when_a_device_is_visible(
+    runner, monkeypatch
+):
+    calls = []
+
+    def run(label, command, env, cwd=None):
+        calls.append((label, command))
+        return 0
+
+    monkeypatch.setattr(runner, "_run", run)
+    monkeypatch.setattr(runner, "_has_gpu", lambda: True)
+    monkeypatch.setattr(
+        runner, "_discover_pytest_dirs", lambda: [runner.LIBRARY / "tests"]
+    )
+    monkeypatch.setattr(runner.sys, "argv", ["run_checks.py", "--steps", "pytest"])
+    assert runner.main() == 0
+    library = next(command for label, command in calls if label == "pytest [library units]")
+    assert "--gpu" in library
+
+
 def test_default_runs_every_host_validation_gate_once(runner, monkeypatch):
     rc, calls = _run_default(runner, monkeypatch)
     assert rc == 0

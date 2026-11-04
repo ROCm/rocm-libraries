@@ -64,6 +64,8 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+pytestmark = pytest.mark.exhaustive
+
 _INT = IntLaneBuilder()
 TILES = [(m, d) for m in (16, 32, 64) for d in (32, 64, 128)]
 

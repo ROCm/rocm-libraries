@@ -57,6 +57,8 @@ from kernels.common.attention_bwd_dq import (
 from ._attention_bwd_test_utils import kernel_signature
 from ._attention_bwd_int_eval import IntEvalBuilder
 
+pytestmark = pytest.mark.exhaustive
+
 ARCHS = ("gfx942", "gfx950")
 HEADS = (32, 64, 128)
 DTYPES = ("fp16", "bf16")

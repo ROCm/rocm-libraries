@@ -98,6 +98,8 @@ from .test_attention_bwd_sched_body import (
 )
 from .sdpa.bwd_kernel_cases import config_knobs
 
+pytestmark = pytest.mark.exhaustive
+
 # The rings: name -> (archs, spec knobs).
 RINGS = {
     "dma1": (("gfx950",), dict(global_path="dma", ring_depth=1)),

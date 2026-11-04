@@ -19,8 +19,8 @@
 #   arch-domain    -- check corpus demands against every committed domain column
 #   reproduction  -- regenerate this host flavor through its dedicated CTest
 #   parity         -- platform instance .py/.c parity emitters
-#   pytest         -- auto-globs platform/tests + library/tests; the pinned GPU
-#                     reference suites run separately and report when skipped
+#   pytest         -- platform pytest plus the library's bounded file runner;
+#                     pinned GPU references run separately and report when skipped
 #   numeric        -- on-GPU numeric correctness (needs a HIP device)
 #
 # --steps picks a subset, e.g. `--steps numeric` (just the correctness lane) or
@@ -220,10 +220,21 @@ def main() -> int:
             )
         else:
             print("  platform parity: skip")
-        pt = ", ".join(str(d.relative_to(ROCKE)) for d in pytest_dirs) or "NONE FOUND"
-        print(
-            f"  pytest dirs  : {pt + (f' (-k {op})' if op else '') if 'pytest' in steps else 'skip'}"
-        )
+        platform_present = (PLATFORM / "tests") in pytest_dirs
+        library_present = (LIBRARY / "tests") in pytest_dirs
+        if "pytest" in steps:
+            platform_plan = "platform/tests" if platform_present else "NONE FOUND"
+            library_plan = (
+                "library/tests/run_all.py --unit-only"
+                if library_present
+                else "NONE FOUND"
+            )
+            suffix = f" (-k/--only {op})" if op else ""
+            print(f"  platform pytest: {platform_plan}{suffix}")
+            print(f"  library units : {library_plan}{suffix}")
+        else:
+            print("  platform pytest: skip")
+            print("  library units : skip")
         print(
             "  library gates: "
             + (
@@ -362,17 +373,35 @@ def main() -> int:
                 cwd=PLATFORM,
             )
 
-    # pytest -- auto-discovered dirs; GPU-only tests inside self-skip without a device
+    # pytest -- platform units run directly; the library runner owns its unit
+    # markers, fresh-process isolation, and per-file timeout policy.
     unexercised: list[str] = []
     if "pytest" in steps:
-        if pytest_dirs:
-            base = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+        platform_present = (PLATFORM / "tests") in pytest_dirs
+        library_present = (LIBRARY / "tests") in pytest_dirs
+        base = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+        if platform_present:
             cmd = list(base)
             if op:
                 cmd += ["-k", op]
-            cmd += [f"--ignore={p}" for p in pinned_tests]
-            cmd += [str(d) for d in pytest_dirs]
-            status |= _run("pytest", cmd, env, cwd=ROCKE)
+            cmd += [str(PLATFORM / "tests")]
+            status |= _run("pytest [platform units]", cmd, env, cwd=ROCKE)
+        else:
+            print("\n== pytest [platform units]: NO test dir discovered ==")
+
+        if library_present:
+            cmd = [
+                sys.executable,
+                str(LIBRARY / "tests" / "run_all.py"),
+                "--unit-only",
+            ]
+            if gpu:
+                cmd.append("--gpu")
+            if op:
+                cmd += ["--only", op]
+            cmd += ["--", "-q", "-p", "no:cacheprovider"]
+            cmd += [f"--ignore={path}" for path in pinned_tests]
+            status |= _run("pytest [library units]", cmd, env, cwd=LIBRARY)
             if op:
                 print(
                     f"\n== library explicit gates: SKIPPED (--op {op}; focused unit iteration) =="
@@ -396,18 +425,17 @@ def main() -> int:
                     env,
                     cwd=LIBRARY,
                 )
-            # pinned GPU references -- never -k scoped; -rs prints why they skipped
-            if pinned_tests:
-                with tempfile.TemporaryDirectory() as tmp:
-                    junit = Path(tmp) / "pinned.xml"
-                    cmd = base + ["-rs", f"--junitxml={junit}"]
-                    cmd += [str(p) for p in pinned_tests]
-                    status |= _run(
-                        "pytest [pinned GPU references]", cmd, env, cwd=ROCKE
-                    )
-                    unexercised = _unexercised_pinned(junit, pinned_tests)
         else:
-            print("\n== pytest: NO test dirs discovered ==")
+            print("\n== pytest [library units]: NO test dir discovered ==")
+
+        # Pinned GPU references are never -k scoped; -rs prints why they skipped.
+        if pinned_tests:
+            with tempfile.TemporaryDirectory() as tmp:
+                junit = Path(tmp) / "pinned.xml"
+                cmd = base + ["-rs", f"--junitxml={junit}"]
+                cmd += [str(path) for path in pinned_tests]
+                status |= _run("pytest [pinned GPU references]", cmd, env, cwd=ROCKE)
+                unexercised = _unexercised_pinned(junit, pinned_tests)
 
     # numeric -- on-GPU numeric correctness (honors --op via the harness's --only)
     if "numeric" in steps:

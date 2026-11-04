@@ -61,6 +61,8 @@ from kernels.common.attention_bwd_run import _BUILDERS, pack_attn_bwd_args
 from ._attention_bwd_test_utils import fake_bench_ok
 from .sdpa.bwd_kernel_cases import config_knobs, custom_rules
 
+pytestmark = pytest.mark.exhaustive
+
 ARCHS = SPLIT_DQ_ARCHS
 FULL = AttnBwdPolicy(declared_groups=frozenset(FEATURE_GROUPS), waive_unverified=True)
 

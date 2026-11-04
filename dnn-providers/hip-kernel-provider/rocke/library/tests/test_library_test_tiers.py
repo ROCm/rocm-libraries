@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from . import _file_manifest_plugin as manifest_plugin
 from . import run_all
 from ._attention_bwd_counted_cases import (
     require_explicit_gate_entrypoint,
@@ -51,6 +52,7 @@ def test_explicit_gates_are_enrolled_but_not_default_pytest_modules():
         ["--collect-only"],
         ["--setup-plan"],
         ["--stepwise"],
+        ["gate.py::test_one_row"],
     ],
 )
 def test_gate_selection_arguments_are_partial(arguments):
@@ -209,6 +211,195 @@ def test_compiler_preflight_has_one_gate_level_outcome(monkeypatch):
     assert required.value.returncode == 1
 
 
+@pytest.mark.parametrize(
+    "arguments, marker",
+    [
+        (["--unit-only"], "not gpu and not exhaustive"),
+        (["--unit-only", "--exhaustive"], "not gpu"),
+        (["--unit-only", "--gpu"], "gpu or not exhaustive"),
+        (["--gpu-only"], "gpu"),
+        (["--gpu-only", "--exhaustive"], "gpu"),
+    ],
+)
+def test_source_runner_keeps_exhaustive_matrices_out_of_the_affordable_lane(
+    arguments, marker, monkeypatch
+):
+    calls = []
+
+    def pass_stage(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_all.subprocess, "run", pass_stage)
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", *arguments, "--jobs", "0"])
+    assert run_all.main() == 0
+    assert len(calls) == 1
+    assert calls[0][-2:] == ["-m", marker]
+
+
+def test_source_runner_zero_jobs_uses_one_traditional_pytest_process(monkeypatch):
+    calls = []
+
+    def pass_stage(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_all.subprocess, "run", pass_stage)
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--unit-only", "--jobs", "0"]
+    )
+    assert run_all.main() == 0
+    assert len(calls) == 1
+    assert calls[0][0:4] == [sys.executable, "-m", "pytest", str(run_all.TESTS)]
+
+
+def test_source_runner_positive_jobs_use_fresh_file_processes(monkeypatch):
+    calls = []
+
+    def pass_files(**kwargs):
+        calls.append(kwargs)
+        return run_all._StageResult(0)
+
+    monkeypatch.setattr(run_all, "_run_unit_file_stage", pass_files)
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--unit-only", "--jobs", "3"]
+    )
+    assert run_all.main() == 0
+    assert calls == [
+        {
+            "marker": "not gpu and not exhaustive",
+            "only": "",
+            "extra": [],
+            "jobs": 3,
+            "timeout": 60.0,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments, expected_jobs, expected_timeout",
+    [
+        (["--unit-only"], min(8, os.cpu_count() or 1), 60.0),
+        (["--gpu-only"], 1, 600.0),
+        (["--unit-only", "--", "-m", "gpu"], 1, 600.0),
+        (["--unit-only", "--exhaustive"], min(8, os.cpu_count() or 1), 600.0),
+    ],
+)
+def test_source_runner_defaults_match_resource_class(
+    arguments, expected_jobs, expected_timeout, monkeypatch
+):
+    calls = []
+
+    def pass_files(**kwargs):
+        calls.append(kwargs)
+        return run_all._StageResult(0)
+
+    monkeypatch.setattr(run_all, "_run_unit_file_stage", pass_files)
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", *arguments])
+    assert run_all.main() == 0
+    assert calls[0]["jobs"] == expected_jobs
+    assert calls[0]["timeout"] == expected_timeout
+
+
+def test_inherited_gpu_marker_uses_gpu_resource_defaults(monkeypatch):
+    calls = []
+
+    def pass_files(**kwargs):
+        calls.append(kwargs)
+        return run_all._StageResult(0)
+
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-m gpu")
+    monkeypatch.setattr(run_all, "_run_unit_file_stage", pass_files)
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--unit-only"])
+    assert run_all.main() == 0
+    assert calls[0]["jobs"] == 1
+    assert calls[0]["timeout"] == 600.0
+
+
+def test_inherited_shared_output_requires_one_pytest_process(monkeypatch):
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--log-file=shared.log")
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--unit-only"])
+    with pytest.raises(SystemExit) as error:
+        run_all.main()
+    assert error.value.code == 2
+
+
+def test_file_manifest_records_each_selected_file_once(tmp_path):
+    output = tmp_path / "manifest.txt"
+    config = SimpleNamespace(getoption=lambda option: output)
+    session = SimpleNamespace(
+        config=config,
+        items=[
+            SimpleNamespace(path=tmp_path / "a.py"),
+            SimpleNamespace(path=tmp_path / "a.py"),
+            SimpleNamespace(path=tmp_path / "b.py"),
+        ],
+    )
+    manifest_plugin.pytest_collection_finish(session)
+    assert output.read_text().splitlines() == [
+        str(tmp_path / "a.py"),
+        str(tmp_path / "b.py"),
+    ]
+
+
+def test_fresh_file_timeout_names_the_file(tmp_path, monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 3)
+
+    monkeypatch.setattr(run_all.subprocess, "run", timeout)
+    test_file = tmp_path / "test_slow.py"
+    log = tmp_path / "slow.log"
+    result = run_all._run_unit_file(test_file, None, "", [], 3, log)
+    assert result.code == 124
+    assert result.timed_out
+    assert result.path == test_file
+    assert "TIMEOUT: exceeded 3s" in log.read_text()
+
+
+def test_source_runner_rejects_nested_xdist(monkeypatch):
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--unit-only", "--jobs", "3", "--", "-n", "2"],
+    )
+    with pytest.raises(SystemExit) as error:
+        run_all.main()
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "pytest_args",
+    [
+        ["test_one.py::test_case"],
+        ["tests/dispatch"],
+        ["--junitxml=report.xml"],
+        ["--log-file=combined.log"],
+        ["--basetemp", "shared-temp"],
+        ["--maxfail", "1"],
+    ],
+)
+def test_file_workers_reject_arguments_with_suite_wide_semantics(
+    pytest_args, monkeypatch
+):
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--unit-only", "--jobs", "3", "--", *pytest_args],
+    )
+    with pytest.raises(SystemExit) as error:
+        run_all.main()
+    assert error.value.code == 2
+
+
+def test_source_runner_rejects_negative_jobs(monkeypatch):
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--unit-only", "--jobs", "-1"]
+    )
+    with pytest.raises(SystemExit) as error:
+        run_all.main()
+    assert error.value.code == 2
+
+
 def test_source_runner_stops_before_resource_gates_after_unit_failure(monkeypatch):
     calls = []
 
@@ -217,7 +408,7 @@ def test_source_runner_stops_before_resource_gates_after_unit_failure(monkeypatc
         return SimpleNamespace(returncode=1)
 
     monkeypatch.setattr(run_all.subprocess, "run", fail_units)
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py"])
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
     assert run_all.main() == 1
     assert len(calls) == 1
 
@@ -231,7 +422,9 @@ def test_source_runner_keep_going_runs_resource_gates_after_unit_failure(monkeyp
         return SimpleNamespace(returncode=next(results))
 
     monkeypatch.setattr(run_all.subprocess, "run", run_all_stages)
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--keep-going"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--keep-going", "--jobs", "0"]
+    )
     assert run_all.main() == 1
     assert len(calls) == 3
 
@@ -255,6 +448,6 @@ def test_source_runner_reports_incomplete_when_optional_gate_skips(monkeypatch, 
         "run",
         lambda *args, **kwargs: SimpleNamespace(returncode=next(results)),
     )
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py"])
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
     assert run_all.main() == 0
     assert "RESULT: INCOMPLETE" in capsys.readouterr().out

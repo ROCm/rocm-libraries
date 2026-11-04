@@ -75,6 +75,8 @@ from .test_attention_bwd_ir import (
 )
 from .sdpa.bwd_kernel_cases import config_knobs
 
+pytestmark = pytest.mark.exhaustive
+
 SCHED_PAIRS = (
     ("iglp0", False),
     ("iglp1", False),
