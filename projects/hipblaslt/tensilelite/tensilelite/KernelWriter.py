@@ -42,7 +42,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, TensorStoreFromLds, SCMovB32, SCMovB64, t16
 from rocisa.instruction import SSchedulingFence
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
@@ -11821,12 +11821,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return isinstance(labelName, str) and "OptNLL_End" in labelName
 
     def _classifyTokenAccess(inst: Instruction):
-      # tensor_load / ds_write => write, ds_read => read
+      # tensor_load / ds_write => write, ds_read / tensor_store_from_lds => read
       if isinstance(inst, DSStoreInstruction):
         return "write"
       if isinstance(inst, TensorLoadToLds):
         return "write"
-      if isinstance(inst, DSLoadInstruction):
+      if isinstance(inst, (DSLoadInstruction, TensorStoreFromLds)):
         return "read"
       return None
 
