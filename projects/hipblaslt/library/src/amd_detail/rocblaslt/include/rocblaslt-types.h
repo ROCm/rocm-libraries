@@ -496,6 +496,14 @@ typedef struct _rocblaslt_matrix_transform_desc
 }
 #endif
 
+namespace rocblaslt
+{
+    namespace adaptive_sm
+    {
+        class Launch;
+    }
+}
+
 /********************************************************************
  * RocblasltContractionProblem captures the arguments for a GEMM-like *
  * contraction problem, to be passed to runContractionProblem.      *
@@ -646,6 +654,13 @@ struct RocblasltContractionProblem
     // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
     // by tensile_host.cpp.
     int32_t uniform_summation_order = 0;
+    // The C API launch's adaptive state (null: none), set post-construction.
+    // runContractionProblem forwards its probe target into
+    // ContractionProblemParameters::setOccupancyProbe, re-selects a tagged
+    // heuristic algo under its hint and sets its `probed`.
+    rocblaslt::adaptive_sm::Launch* adaptive_launch = nullptr;
+    // sm_count_target came from the adaptive estimator rather than the user.
+    bool adaptive_sm_count = false;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // The four below are set post-construction, not through the constructor.
