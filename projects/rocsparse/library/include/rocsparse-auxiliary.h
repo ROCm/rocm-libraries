@@ -1268,7 +1268,7 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *                number of blocks stored per block row. Must not exceed \p cols.
  *  @param[in]
  *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length
- *                \p ceil(rows/ell_block_dim)*ell_cols/ell_block_dim.
+ *                \p (rows+ell_block_dim-1)/ell_block_dim*ell_cols/ell_block_dim.
  *  @param[in]
  *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_cols.
  *  @param[in]
@@ -2586,7 +2586,7 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
  *                number of blocks stored per block row.
  *  @param[out]
  *  ell_col_ind   column indices of the blocked ELL matrix, an array of length
- *                \p ceil(rows/ell_block_dim)*ell_cols/ell_block_dim.
+ *                \p (rows+ell_block_dim-1)/ell_block_dim*ell_cols/ell_block_dim.
  *  @param[out]
  *  ell_val       values of the blocked ELL matrix, an array of length \p rows*ell_cols.
  *  @param[out]
