@@ -37,7 +37,8 @@ refusals do not yet share with the Python engine's exception type.
 
 ``hip_outcomes_of_both_engines`` returns each engine's HIP source, or its
 refusal as a ``HipRefusal`` (error type and message), for a test that accepts
-either as long as the two agree.
+either as long as the two agree. ``REFUSAL_ERROR_TYPES`` are the exception types
+that stand for a refusal in both engines.
 
 A test that loops over the engines itself, rather than through ``pytest``
 parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
@@ -68,6 +69,7 @@ __all__ = [
     "ENGINES",
     "Engine",
     "HipRefusal",
+    "REFUSAL_ERROR_TYPES",
     "all_engines_backend",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
@@ -93,6 +95,10 @@ _NATIVE_STATUS: dict[type[Exception], int] = {
     KeyError: 3,
     NotImplementedError: 5,
 }
+
+#: The exception types a lowerer or builder raises to refuse a kernel: those a
+#: C++ engine status code stands for. Any other exception is a failure.
+REFUSAL_ERROR_TYPES: tuple[type[Exception], ...] = tuple(_NATIVE_STATUS)
 
 # The binding's refusal text: "<entry point>: lower failed for arch '<gfx>'
 # (status <code>): <message>".
