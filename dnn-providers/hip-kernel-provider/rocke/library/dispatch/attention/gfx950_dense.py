@@ -203,7 +203,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         raise ValueError(
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
         )
-    use_bias = bool(req.use_attn_bias)
+    use_bias = req.use_attn_bias  # a bool: AttentionRequest refuses anything else
     if use_bias and req.attn_bias_dtype.strip().lower() != "f32":
         raise ValueError(
             "gfx950 dense: the additive bias must be fp32, got "

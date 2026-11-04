@@ -197,6 +197,7 @@ def validate_dense_lse(
     block_tables=None,
     kv_lens=None,
     sinks=None,
+    additive_bias=None,
 ):
     """Validate only the new output contract; disabled callers keep their path."""
     if not spec.emit_lse:
@@ -225,6 +226,7 @@ def validate_dense_lse(
             "block_tables": block_tables,
             "kv_lens": kv_lens,
             "sinks": sinks,
+            "additive_bias": additive_bias,
         },
     )
 
@@ -250,6 +252,7 @@ def validate_dense_lse(
         cu_seqlens_kv,
         q_tokens=q.shape[0],
         kv_tokens=k.shape[0],
+        device=q.device,
     )
 
 
@@ -260,10 +263,12 @@ def validate_dense_varlen_offsets(
     *,
     q_tokens: int,
     kv_tokens: int,
+    device: Any,
 ) -> None:
-    """Check packed varlen offsets against ``spec``: int32 [batch+1], spanning the
-    packed tensors, each length monotone, tile-aligned and within the spec maxima,
-    and no KV sequence empty. Reads the offsets to host: a device sync.
+    """Check packed varlen offsets against ``spec``: on ``device`` (the launch's Q
+    device; the kernel dereferences them), int32 [batch+1], spanning the packed
+    tensors, each length monotone, tile-aligned and within the spec maxima, and no
+    KV sequence empty. Reads the offsets to host: a device sync.
 
     The packed dense body has no per-sequence load-tail handling, and the paths
     that read per-sequence state (LSE, the additive bias) index it by in-sequence
@@ -283,6 +288,11 @@ def validate_dense_varlen_offsets(
             False,
         ),
     ):
+        if tensor.device != device:
+            raise ValueError(
+                f"{name} must be on the same device as q, got "
+                f"{tensor.device} vs {device}"
+            )
         if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
             spec.batch + 1,
         ):

@@ -3388,8 +3388,9 @@ def run_attention_dense_torch(
     the hipDNN reference's answer for a row whose every score is -inf. A row whose
     keys are all finite but below about -1.1e29 (e.g. ``finfo(float32).min``
     padding) gets the same zeros, where PyTorch would give it the uniform softmax.
-    Varlen offsets are checked as for LSE (a device sync; no KV sequence may be
-    empty). ``ValueError`` for a
+    Varlen offsets are checked as for LSE (on q's device, a device sync, no KV
+    sequence empty). With LSE on, the LSE buffer may not overlap the bias.
+    ``ValueError`` for a
     missing, unexpected or malformed bias, ``NotImplementedError`` when its
     largest element index reaches 2**31 (the kernel indexes it in i32)."""
     ok, why = supports_attention_dense(spec, arch=arch)
@@ -3507,6 +3508,7 @@ def run_attention_dense_torch(
         block_tables=block_tables,
         kv_lens=kv_lens,
         sinks=sinks,
+        additive_bias=additive_bias,
     )
     # After the LSE presence checks, which must fail before any input is touched.
     _check_head_dims(spec, q=q, k=k, v=v, out=out)
@@ -3519,6 +3521,7 @@ def run_attention_dense_torch(
             cu_seqlens_kv,
             q_tokens=q.shape[0],
             kv_tokens=k.shape[0],
+            device=q.device,
         )
 
     from rocke.helpers.compile import compile_kernel

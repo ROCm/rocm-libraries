@@ -607,6 +607,49 @@ def test_varlen_indexes_the_bias_by_in_sequence_position(
         assert np.abs(got - lse_ref).max() < _tolerance(dtype)
 
 
+def test_an_lse_buffer_overlapping_the_bias_is_refused(tile):
+    """The kernel writes LSE while other workgroups still read the bias, so an LSE
+    buffer sharing storage with it is refused before launch. The alias is otherwise
+    a valid key-row bias (fp32, contiguous along Skv), so only the overlap check
+    can refuse it."""
+    dtype, d, hq, hkv, sq, skv = "fp16", 128, 4, 1, 256, 256
+    spec = _spec(
+        dtype, d, hq, hkv, batch=1, sq=sq, skv=skv, mask="top_left", tile=tile, lse=True
+    )
+    q, k, v, _ = _inputs(dtype, d, hq, hkv, 1, sq, skv, (1, 1, 1, skv))
+    lse_elems = hq * sq
+    storage = torch.zeros(lse_elems + skv, device="cuda", dtype=torch.float32)
+    lse = storage[:lse_elems].view(1, hq, sq, 1)
+    # The bias starts on the last LSE element.
+    bias = storage[lse_elems - 1 : lse_elems - 1 + skv].view(1, 1, 1, skv)
+    with pytest.raises(ValueError, match="lse overlaps additive_bias"):
+        _run(spec, q, k, v, bias, 1.0 / math.sqrt(d), lse=lse)
+
+
+@pytest.mark.parametrize("name", ["cu_seqlens_q", "cu_seqlens_kv"])
+def test_host_varlen_offsets_are_refused_without_lse(name, tile):
+    """With LSE off nothing else checks the offsets' device; the kernel would
+    dereference a host pointer."""
+    dtype, d, hq, hkv = "fp16", 128, 4, 1
+    q_offsets, k_offsets = [0, 256, 768], [0, 128, 384]
+    base = _spec(
+        dtype, d, hq, hkv, batch=2, sq=512, skv=256, mask="top_left", tile=tile
+    )
+    spec = replace(base, varlen=True, ragged=False)
+    tdt = _TORCH_DT[dtype]
+    q = torch.randn(q_offsets[-1], hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(k_offsets[-1], hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn_like(k)
+    bias = torch.zeros(1, 1, 1, 256, device="cuda", dtype=torch.float32)
+    offsets = {
+        "cu_seqlens_q": torch.tensor(q_offsets, device="cuda", dtype=torch.int32),
+        "cu_seqlens_kv": torch.tensor(k_offsets, device="cuda", dtype=torch.int32),
+    }
+    offsets[name] = offsets[name].cpu()
+    with pytest.raises(ValueError, match=rf"{name} must be on the same device as q"):
+        _run(spec, q, k, v, bias, 1.0 / math.sqrt(d), **offsets)
+
+
 def test_dispatcher_binding_passes_the_bias(tile):
     """``dispatch_attention(...).bind_torch`` hands ``tensors['attn_bias']`` to the
     runner; leaving it out is refused rather than launched with a null pointer."""

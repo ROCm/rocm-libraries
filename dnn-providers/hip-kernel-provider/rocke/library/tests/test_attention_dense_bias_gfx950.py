@@ -380,21 +380,73 @@ def test_runner_refuses_varlen_offsets_the_bias_cannot_serve(case):
     offsets are checked as for LSE (here with LSE off) before any compile."""
     torch = pytest.importorskip("torch", reason="the offsets are torch tensors")
     cu_q, cu_kv, match = _BAD_OFFSETS[case]
-    spec = _bias({"varlen": True})
-    q = SimpleNamespace(device="cpu", shape=(1024, _H, 128))
-    kv = SimpleNamespace(device="cpu", shape=(1280, 2, 128))
     with pytest.raises(ValueError, match=match):
-        run_attention_dense_torch(
-            spec=spec,
-            q=q,
-            k=kv,
-            v=kv,
-            out=q,
-            scale=0.125,
-            additive_bias=_fake_packed((_B, _H, _SQ, _SKV)),
-            cu_seqlens_q=torch.tensor(cu_q, dtype=torch.int32),
-            cu_seqlens_kv=torch.tensor(cu_kv, dtype=torch.int32),
+        _run_varlen_bias(
+            torch.tensor(cu_q, dtype=torch.int32),
+            torch.tensor(cu_kv, dtype=torch.int32),
         )
+
+
+def _run_varlen_bias(cu_seqlens_q, cu_seqlens_kv):
+    """A varlen bias launch with LSE off; q, k, v, out and the bias are on the CPU
+    (torch devices compare unequal to the string "cpu")."""
+    import torch
+
+    cpu = torch.device("cpu")
+    q = SimpleNamespace(device=cpu, shape=(1024, _H, 128))
+    kv = SimpleNamespace(device=cpu, shape=(1280, 2, 128))
+    run_attention_dense_torch(
+        spec=_bias({"varlen": True}),
+        q=q,
+        k=kv,
+        v=kv,
+        out=q,
+        scale=0.125,
+        additive_bias=_fake_packed((_B, _H, _SQ, _SKV), device=cpu),
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_kv=cu_seqlens_kv,
+    )
+
+
+@pytest.mark.parametrize("name", ["cu_seqlens_q", "cu_seqlens_kv"])
+def test_runner_refuses_varlen_offsets_off_q_device(name):
+    """The kernel dereferences the offsets, so they must be on q's device. With LSE
+    on, the LSE buffer check already requires it; this is the LSE-off path. A
+    meta tensor stands in for any other device (no GPU needed)."""
+    torch = pytest.importorskip("torch", reason="the offsets are torch tensors")
+    offsets = {
+        "cu_seqlens_q": torch.tensor([0, 512, 1024], dtype=torch.int32),
+        "cu_seqlens_kv": torch.tensor([0, 640, 1280], dtype=torch.int32),
+    }
+    offsets[name] = offsets[name].to("meta")
+    with pytest.raises(ValueError, match=rf"{name} must be on the same device as q"):
+        _run_varlen_bias(offsets["cu_seqlens_q"], offsets["cu_seqlens_kv"])
+
+
+def test_the_lse_overlap_check_sees_the_bias(monkeypatch):
+    """The LSE buffer may not overlap any input the kernel reads, the bias included.
+    The check itself needs GPU tensors (the numeric suite runs it for real); here
+    the inputs it receives are captured."""
+    import kernels.common._lse_store as lse_store
+
+    seen = {}
+
+    def capture(lse, q, expected, inputs):
+        seen.update(inputs)
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(lse_store, "_check_lse_buffer", capture)
+    bias = _fake_packed((_B, _H, _SQ, _SKV))
+    operands = _fake_operands()
+    operands["q"] = SimpleNamespace(device="cpu", shape=(_B, _SQ, _H, 128))
+    with pytest.raises(RuntimeError, match="captured"):
+        run_attention_dense_torch(
+            spec=_bias({"emit_lse": True}),
+            additive_bias=bias,
+            lse=object(),
+            **operands,
+        )
+    assert seen["additive_bias"] is bias
 
 
 _DIMS = dict(batch=_B, num_query_heads=_H, seqlen_q=_SQ, seqlen_kv=_SKV, device=None)
@@ -554,6 +606,19 @@ def test_a_q_dtype_bias_is_refused():
         PinRefused, match=r"additive bias must be fp32, got attn_bias_dtype='q'"
     ):
         attention_tuning_spec(_request(attn_bias_dtype="q"), "gfx950_dense_grid")
+
+
+@pytest.mark.parametrize("value", ["false", None, 1, 0])
+def test_a_non_bool_use_attn_bias_is_refused(value):
+    # bool("false") is True: coercing would enable the bias the caller turned off.
+    # The request refuses it on construction, before any cache: 1 == True and
+    # hashes alike, so a request selected earlier with True would otherwise
+    # serve a request with 1 from the candidate's spec cache.
+    from dispatch.attention import attention_tuning_spec
+
+    attention_tuning_spec(_request(use_attn_bias=bool(value)), "gfx950_dense_grid")
+    with pytest.raises(ValueError, match=r"use_attn_bias must be a bool"):
+        _request(use_attn_bias=value)
 
 
 def test_the_binding_hands_attn_bias_to_the_runner(monkeypatch):
