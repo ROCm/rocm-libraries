@@ -36,6 +36,7 @@
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +50,7 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
+from rocke.portable_ir.drivers.roll_hsaco_parity import alpha_norm  # noqa: E402
 from rocke.tests.arch_marks import COVERED_ARCHES  # noqa: E402
 from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 
@@ -198,6 +200,104 @@ json.dump(shas, open(out + "/shas.json", "w"))
             f"tile_n={v} ({held}): standalone replay of the rolled recipe "
             f"diverged from the Python lowerer"
         )
+
+
+# The fan below is rolled on its lane count L from these samples and replayed at
+# the held-out counts too, so the recipe must generalise rather than replay.
+_FAN_SAMPLES = (2, 3)
+_FAN_HOLDOUTS = (5, 8)
+
+
+@pytest.fixture(scope="module")
+def fan_recipe(tmp_path_factory):
+    """Roll the 2-D-named loop-carry fan once and lower it for every arch.
+
+    The recipe does not depend on the arch (only lowering does), so one child
+    process authors it and writes Python's .ll for each arch in ARCHS; the
+    per-arch tests then only run the replay CLI. Returns (directory, flavor).
+    """
+    out_dir = tmp_path_factory.mktemp("fan")
+    flavor = os.environ.get("ROCKE_LLVM_FLAVOR", "llvm20")
+    author = f"""
+import sys
+from rocke.core.ir import I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.src import recipe_bundle
+from rocke.portable_ir.src.roll import roll
+
+def build_fan(lanes):
+    builder = IRBuilder(f"fan2d_{{lanes}}")
+    out_ptr = builder.param("C", PtrType(I32, "global"), writeonly=True, align=16)
+    trip_count = builder.param("n", I32)
+    tid = builder.thread_id_x()
+    zero = builder.const_i32(0)
+    carried = [(f"acc_m{{lane}}_n0", zero) for lane in range(lanes)]
+    loop = builder.scf_for_iter(zero, trip_count, builder.const_i32(1), carried, iv_name="k")
+    with loop as (k, accs):
+        builder.scf_yield(
+            *[builder.add(accs[lane], builder.mul(k, builder.const_i32(lane))) for lane in range(lanes)]
+        )
+    builder.global_store(out_ptr, tid, loop.results[0], align=4)
+    builder.ret()
+    return builder.kernel
+
+out, flavor = sys.argv[1], sys.argv[2]
+rolled = roll(
+    build_fan, axis="L", sample_points={list(_FAN_SAMPLES)}, holdout_points={list(_FAN_HOLDOUTS)}
+)
+if not rolled.ok:
+    raise SystemExit("roll failed: " + str(rolled.reason))
+open(out + "/fan.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(rolled.recipe))
+for arch in {list(ARCHS)}:
+    for lanes in {list(_FAN_SAMPLES + _FAN_HOLDOUTS)}:
+        ll = lower_kernel_to_llvm(build_fan(lanes), llvm_flavor=flavor, arch=arch)
+        open(out + "/py_%s_%d.ll" % (arch, lanes), "w").write(ll)
+"""
+    authored = _run([sys.executable, "-c", author, str(out_dir), flavor])
+    assert authored.returncode == 0, authored.stdout[-4000:] + authored.stderr[-4000:]
+    return out_dir, flavor
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_standalone_cli_replays_a_fan_with_synthetic_lane_names(fan_recipe, arch):
+    """The C VM replays a loop-carry fan whose names the roller had to invent.
+
+    The roller carries Python's iter-arg names through only when lane `i` is
+    named `<prefix><i>`. A 2-D style name such as `acc_m<i>_n0` is not, so the
+    roller names the fan's iter-args itself. Those names reach the C builder as
+    loop-carried value names, where a name ending in `_` and digits is refused,
+    so the replay must succeed at sampled and held-out lane counts and match
+    Python's .ll once value names are renumbered (the names differ by design;
+    the code must not).
+    """
+    cli = _replay_cli()
+    recipe_dir, flavor = fan_recipe
+    for lanes in _FAN_SAMPLES + _FAN_HOLDOUTS:
+        got = subprocess.run(
+            [
+                cli,
+                "--recipe",
+                str(recipe_dir / "fan.recipe.cbor"),
+                "--cbor",
+                "--int",
+                f"L={lanes}",
+                "--arch",
+                arch,
+                "--flavor",
+                flavor,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert got.returncode == 0, f"L={lanes}: {got.stderr[-2000:]}"
+        assert re.search(r"%__fa\d+_l\d+\b", got.stdout), (
+            f"L={lanes}: the replay carries none of the roller's own fan names, so "
+            "this fan no longer exercises them"
+        )
+        want = (recipe_dir / f"py_{arch}_{lanes}.ll").read_text()
+        same_code = alpha_norm(got.stdout) == alpha_norm(want)
+        assert same_code, f"L={lanes}: the replay differs from Python beyond names"
 
 
 # --------------------------------------------------------------------------
