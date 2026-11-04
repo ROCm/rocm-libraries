@@ -26,30 +26,29 @@
 #include "rocsparse_nnzsplit_info.hpp"
 #include "rocsparse_utility.hpp"
 
-_rocsparse_nnzsplit_info::~_rocsparse_nnzsplit_info()
-{
-    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
-
-    // starting_block_ids aliases the starting_ids allocation (one past its end unless
-    // use_starting_block_ids), so only starting_ids is freed.
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
-
-    this->starting_ids           = nullptr;
-    this->starting_block_ids     = nullptr;
-    this->size                   = 0;
-    this->use_starting_block_ids = false;
-}
-
 void _rocsparse_nnzsplit_info::clear()
 {
     WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
-    // starting_block_ids aliases the starting_ids allocation (one past its end unless
-    // use_starting_block_ids), so only starting_ids is freed.
-    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->id_buffer));
 
-    this->starting_ids           = nullptr;
-    this->starting_block_ids     = nullptr;
+    this->id_buffer              = nullptr;
     this->size                   = 0;
     this->use_starting_block_ids = false;
+}
+
+rocsparse_status _rocsparse_nnzsplit_info::allocate_id_buffer(size_t      size,
+                                                              bool        use_starting_block_ids,
+                                                              size_t      index_size,
+                                                              hipStream_t stream)
+{
+    const size_t buffer_size = index_size * (use_starting_block_ids ? 2 : 1) * (size + 1);
+
+    this->size                   = size;
+    this->use_starting_block_ids = use_starting_block_ids;
+
+    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->id_buffer, buffer_size, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(this->id_buffer, 0, buffer_size, stream));
+
+    return rocsparse_status_success;
 }

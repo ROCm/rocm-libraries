@@ -24,18 +24,28 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
+
 #include <cstdint>
+#include <hip/hip_runtime_api.h>
 
 typedef struct _rocsparse_nnzsplit_info
 {
-
+protected:
     bool use_starting_block_ids{};
 
     size_t size{};
 
-    void* starting_ids{};
-    void* starting_block_ids{};
+    // starting_ids (size + 1 entries), followed by starting_block_ids (size + 1
+    // entries) if use_starting_block_ids.
+    void* id_buffer{};
 
+    rocsparse_status allocate_id_buffer(size_t      size,
+                                        bool        use_starting_block_ids,
+                                        size_t      index_size,
+                                        hipStream_t stream);
+
+public:
     // Launch tuning chosen at analysis time and replayed verbatim at compute
     // time so the two phases always agree (the block layout of starting_ids /
     // starting_block_ids depends on both).
@@ -43,7 +53,39 @@ typedef struct _rocsparse_nnzsplit_info
     uint32_t nnz_per_thread{}; // nnz-per-thread granularity (1 / 4 / 8)
     int64_t  max_row_nnz{}; // longest row length (row-skew signal)
 
-public:
-    ~_rocsparse_nnzsplit_info();
+    _rocsparse_nnzsplit_info()                                = default;
+    _rocsparse_nnzsplit_info(const _rocsparse_nnzsplit_info&) = delete;
+    _rocsparse_nnzsplit_info& operator=(const _rocsparse_nnzsplit_info&) = delete;
+
+    // Does not free the id buffer: clear() must be called before end of life.
     void clear();
+
+    template <typename J>
+    rocsparse_status allocate_ids(size_t size, bool use_starting_block_ids, hipStream_t stream)
+    {
+        return this->allocate_id_buffer(size, use_starting_block_ids, sizeof(J), stream);
+    }
+
+    size_t get_size() const
+    {
+        return this->size;
+    }
+
+    bool get_use_starting_block_ids() const
+    {
+        return this->use_starting_block_ids;
+    }
+
+    template <typename J>
+    J* get_starting_ids() const
+    {
+        return reinterpret_cast<J*>(this->id_buffer);
+    }
+
+    template <typename J>
+    J* get_starting_block_ids() const
+    {
+        return this->use_starting_block_ids ? this->get_starting_ids<J>() + (this->size + 1)
+                                            : nullptr;
+    }
 } * rocsparse_nnzsplit_info;

@@ -160,8 +160,8 @@ TEST(internal_infostructs, numeric_boost_copy)
 // _rocsparse_csrmv_info::clear (+ adaptive/lrb/nnzsplit clear)
 // ===========================================================================
 // _rocsparse_csrmv_info::clear resets every scalar bookkeeping field to its zero
-// default, nulls the CSR pointers, and clears the adaptive/lrb/nnzsplit sub-info
-// sizes (freeing only null device pointers here, which is safe).
+// default, nulls the CSR pointers, clears the adaptive/lrb sub-info sizes and
+// frees the nnzsplit id buffer.
 TEST(internal_infostructs, csrmv_info_clear_resets_fields)
 {
     _rocsparse_csrmv_info info;
@@ -173,11 +173,14 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
     info.nnz      = 42;
     info.max_rows = 3;
 
-    // Dirty the sub-info sizes (device pointers stay null -> clear() only frees
-    // nullptrs, which is safe).
+    // Dirty the adaptive/lrb sizes (their device pointers stay null).
     info.adaptive.size = 9;
     info.lrb.size      = 10;
-    info.nnzsplit.size = 11;
+
+    ASSERT_EQ(info.nnzsplit.allocate_ids<int32_t>(11, true, nullptr), rocsparse_status_success);
+    ASSERT_NE(info.nnzsplit.get_starting_ids<int32_t>(), nullptr);
+    EXPECT_EQ(info.nnzsplit.get_starting_block_ids<int32_t>(),
+              info.nnzsplit.get_starting_ids<int32_t>() + 12);
 
     info.clear();
 
@@ -192,7 +195,10 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
     EXPECT_EQ(info.adaptive.size, 0u);
     EXPECT_EQ(info.adaptive.row_blocks, nullptr);
     EXPECT_EQ(info.lrb.size, 0u);
-    EXPECT_EQ(info.nnzsplit.size, 0u);
+    EXPECT_EQ(info.nnzsplit.get_size(), 0u);
+    EXPECT_FALSE(info.nnzsplit.get_use_starting_block_ids());
+    EXPECT_EQ(info.nnzsplit.get_starting_ids<int32_t>(), nullptr);
+    EXPECT_EQ(info.nnzsplit.get_starting_block_ids<int32_t>(), nullptr);
 }
 
 // adaptive/lrb/nnzsplit sub-info clear() on freshly constructed (null-pointer)
@@ -216,9 +222,9 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
     EXPECT_EQ(lrb.wg_flags, nullptr);
     EXPECT_EQ(lrb.rows_bins, nullptr);
 
-    EXPECT_EQ(nnzsplit.size, 0u);
-    EXPECT_EQ(nnzsplit.starting_ids, nullptr);
-    EXPECT_EQ(nnzsplit.starting_block_ids, nullptr);
+    EXPECT_EQ(nnzsplit.get_size(), 0u);
+    EXPECT_EQ(nnzsplit.get_starting_ids<int32_t>(), nullptr);
+    EXPECT_EQ(nnzsplit.get_starting_block_ids<int32_t>(), nullptr);
 }
 
 // ===========================================================================
@@ -260,7 +266,7 @@ namespace
 }
 
 // Preprocessing through rocsparse_spmv with rocsparse_spmv_alg_csr_nnzsplit
-// allocates nnzsplit.starting_ids with hipMallocAsync; destroying the matrix
+// allocates the nnzsplit id buffer with hipMallocAsync; destroying the matrix
 // descriptor must return it to the device memory pool (rocm-libraries#6595).
 class CsrmvNnzsplitInfo : public HandleTest
 {
