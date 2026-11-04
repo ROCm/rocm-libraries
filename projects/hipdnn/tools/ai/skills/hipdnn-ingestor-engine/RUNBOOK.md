@@ -390,7 +390,7 @@ appears:
 | `add_external_integration_test_target(TARGET_NAME hip_kernel_provider_<engine>_gpu_ref_integration_tests … ENGINE_NAME … REFERENCE_EXECUTOR gpu GTEST_FILTER …)` in the arch's census shard (`hkp_reserve_census_shard`) | `$PROVIDER/src/integration_tests/CMakeLists.txt` | The engine-pinned bundle run stage 5 executes |
 | `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard; the same TOML also goes to `hkp_reserve_census_shard(... FILES <toml>)` | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites. Without `FILES`, configuration fails; the `hkp_reserve_census_shard` header in `HkpPackaging.cmake` says why |
 | Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
-| New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
+| `hipkernel_<Family>_test_categories_integration.yaml` and `config/hipkernel_<Family>.toml`: new files for a new family, or the existing pair when the engine joins one (the gfx950 attention engines share `hipkernel_Gfx950Attention_*`) | `$PROVIDER/` | Tier patterns and the family's test config |
 | Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
 
 Census registration is one `hkp_register_census_tests()` call per packed target, in

@@ -31,8 +31,11 @@ dnn-providers/integration-tests/
 
 dnn-providers/<provider>/
   config/<ENGINE_NAME>.toml                 # per-engine tolerances, validator overrides, skips
+                                            #   (engines of one family may share one, e.g.
+                                            #   hipkernel_Gfx950Attention.toml)
   test_categories_integration.yaml          # CTest tiers for the lane (hip-kernel-provider: one
-                                            #   <ENGINE_NAME>_test_categories_integration.yaml per engine)
+                                            #   <NAME>_test_categories_integration.yaml per engine
+                                            #   or engine family, e.g. hipkernel_Gfx950Attention_*)
 ```
 
 Terms (full list in the [index](README.md#terms)):
