@@ -161,7 +161,7 @@ U validate(const U& in, const std::string& arch, rocke_attn_bwd_spec_t* g_out)
      * misspelled page_mode would otherwise build as "direct"). */
     U spec = in;
     post_init(spec);
-    rocke_attn_bwd_spec_t g = validate_spec(general_spec(spec), arch);
+    rocke_attn_bwd_spec_t g = validate_spec(general_spec(spec), arch, false);
     U s = spec;
     s.knobs = g;
     const rocke_attn_bwd_spec_t& k = s.knobs;

@@ -13,10 +13,9 @@
  * A Python raise is a ckc::Error throw with the same message; the entry point
  * catches it under ckc::guard_builder.
  *
- * This mirrors _emit_main(spec, arch, main_kernel_refusals=False): the
- * recorded resource-gate refusals stay Python-only, so the C entry accepts
- * the RESOURCE_REFUSED specs that Python's public build_attn_bwd_main
- * refuses. _kv_tile, the plumbing and the types it shares with the dense
+ * This mirrors _emit_main(spec, arch, main_kernel_refusals=...): with true
+ * the C entry refuses the RESOURCE_REFUSED specs, as Python's public
+ * build_attn_bwd_main does. _kv_tile, the plumbing and the types it shares with the dense
  * backward shell (_attention_dense_bwd_shell.cpp) and the unified main kernel
  * (attention_bwd_unified.cpp) are declared in
  * rocke/instance_attention_bwd_main_internal.h, with _kv_tile's duck-typed
@@ -2062,8 +2061,8 @@ void check_not_built(const rocke_attn_bwd_spec_t& s)
             "dkv_sink='last_cta'");
 }
 
-/* _emit_main(spec, arch, main_kernel_refusals=False) after validation, on
- * the initialised builder. */
+/* _emit_main(spec, arch, main_kernel_refusals=...) after validation, on the
+ * initialised builder. */
 rocke_kernel_def_t* emit_main(Main& m)
 {
     B* b = m.b;
@@ -2145,7 +2144,8 @@ extern "C" {
 
 rocke_kernel_def_t* rocke_build_attn_bwd_main_new(rocke_ir_builder_t* b,
                                                   const rocke_attn_bwd_spec_t* spec,
-                                                  const char* arch)
+                                                  const char* arch,
+                                                  bool main_kernel_refusals)
 {
     if(b == NULL)
         return NULL;
@@ -2161,7 +2161,7 @@ rocke_kernel_def_t* rocke_build_attn_bwd_main_new(rocke_ir_builder_t* b,
         if(spec == NULL)
             throw ckc::ValueError("spec must not be NULL");
         m->arch = arch ? arch : "";
-        m->s = validate_spec(*spec, m->arch);
+        m->s = validate_spec(*spec, m->arch, main_kernel_refusals);
         name = kernel_name(m->s, "main");
     }
     catch(const ckc::Error& e)

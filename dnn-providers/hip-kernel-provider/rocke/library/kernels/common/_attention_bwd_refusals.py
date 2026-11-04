@@ -3,7 +3,9 @@
 
 """Resource refusals of the attention backward main kernel.
 
-Family glue (Python-only, no C++ twin). A few default-off knob combinations
+Family glue. The C++ twin is platform/cpp/instances/common/
+_attention_bwd_refusals.cpp; its table is generated from the dicts here (see
+library/tests/parity/attention_bwd_refusals_emit.py). A few default-off knob combinations
 compile, on the production compiler, to a code object that fails the
 backward resource gate (scratch, VGPR or SGPR spills, or AGPR copies in a
 hot q loop above the ceiling), or crash the code-object compiler itself.

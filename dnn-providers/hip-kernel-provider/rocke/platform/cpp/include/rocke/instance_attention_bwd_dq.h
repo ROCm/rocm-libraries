@@ -28,20 +28,19 @@
  * ROCKE_ATTN_BWD_NONE for None (an explicit 0 stays distinct); agpr_alloc is
  * the caps header's rocke_attn_bwd_agpr_alloc_t.
  *
- * Refusals: validate (and so the builder) refuses the plain-tuple
- * resource-gate tables DQ_SPILLING_COMBOS and DQ_SCHED_SPILLING
- * (attention_bwd_dq.py) as Python does. DQ_RESOURCE_REFUSED, keyed through
- * _attention_bwd_refusals.spec_digest, stays Python: the C builder emits the
- * kernel of a spec that table refuses, so a caller that launches it must
- * consult Python's validate_attn_bwd_dq_spec first.
+ * Refusals: validate (and so the builder) refuses the resource-gate tables
+ * DQ_SPILLING_COMBOS, DQ_RESOURCE_REFUSED (keyed through
+ * _attention_bwd_refusals.spec_digest; generated, see
+ * rocke/instance_attention_bwd.h) and DQ_SCHED_SPILLING (attention_bwd_dq.py)
+ * as Python does, in its order.
  *
  * Errors: the spec entry points take a rocke_attn_bwd_err_t out-parameter
  * and return rocke_status_t (the Python ValueError message); the builder
  * records it on b (ROCKE_ERR_VALUE) and returns NULL.
  *
  * Not ported (host-only): dq_rows_per_head and attn_bwd_dq_grid (launch
- * geometry), DQ_TUNING_FIELDS / DQ_PROBLEM_FIELDS (plan bookkeeping) and
- * DQ_RESOURCE_REFUSED. _emit_dq's sentinel=False (negative-control tests
+ * geometry) and DQ_TUNING_FIELDS / DQ_PROBLEM_FIELDS (plan bookkeeping).
+ * _emit_dq's sentinel=False (negative-control tests
  * only) is not exposed: the builder always emits the dead-row term.
  */
 #ifndef ROCKE_INSTANCE_ATTENTION_BWD_DQ_H
@@ -170,9 +169,8 @@ rocke_status_t rocke_attn_bwd_dq_register_estimates(const rocke_attn_bwd_dq_spec
                                                     int* agpr,
                                                     rocke_attn_bwd_err_t* err);
 
-/* validate_attn_bwd_dq_spec(spec, arch) without the Python-only refusal
- * tables (see the header comment): the resolved spec into *out (out may
- * alias spec). */
+/* validate_attn_bwd_dq_spec(spec, arch): the resolved spec into *out (out
+ * may alias spec). */
 rocke_status_t rocke_attn_bwd_validate_dq_spec(const rocke_attn_bwd_dq_spec_t* spec,
                                                const char* arch,
                                                rocke_attn_bwd_dq_spec_t* out,
@@ -183,6 +181,18 @@ rocke_status_t rocke_attn_bwd_validate_dq_spec(const rocke_attn_bwd_dq_spec_t* s
  * have passed rocke_attn_bwd_dq_spec_init. A spec the validator refuses is
  * ROCKE_ERR_VALUE (b initialised with a placeholder name). NULL and the
  * builder's sticky error on any failure. */
+/* spec_digest(spec, arch) of a dQ spec (see rocke_attn_bwd_spec_digest) and
+ * DQ_RESOURCE_REFUSED.get((arch, spec_digest(spec, arch))) of a resolved dQ
+ * spec (a static string, or NULL) into *reason. */
+rocke_status_t rocke_attn_bwd_dq_spec_digest(const rocke_attn_bwd_dq_spec_t* spec,
+                                             const char* arch,
+                                             char out[ROCKE_ATTN_BWD_DIGEST_CAP],
+                                             rocke_attn_bwd_err_t* err);
+rocke_status_t rocke_attn_bwd_dq_resource_refusal(const rocke_attn_bwd_dq_spec_t* spec,
+                                                  const char* arch,
+                                                  const char** reason,
+                                                  rocke_attn_bwd_err_t* err);
+
 rocke_kernel_def_t* rocke_build_attn_bwd_dq_new(rocke_ir_builder_t* b,
                                                 const rocke_attn_bwd_dq_spec_t* spec,
                                                 const char* arch);
@@ -203,6 +213,9 @@ namespace rocke_attn_bwd
  * order. */
 std::vector<std::pair<std::string, std::string>>
     dq_non_default_fields(const rocke_attn_bwd_dq_spec_t& spec);
+/* spec_digest of a dQ spec and its DQ_RESOURCE_REFUSED record (or NULL). */
+std::string dq_spec_digest(const rocke_attn_bwd_dq_spec_t& spec, const std::string& arch);
+const char* dq_resource_refusal(const rocke_attn_bwd_dq_spec_t& spec, const std::string& arch);
 } // namespace rocke_attn_bwd
 #endif
 

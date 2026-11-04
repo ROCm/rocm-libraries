@@ -1988,7 +1988,9 @@ static bool layout_spills(const rocke_attn_bwd_spec_t& s, const std::string& arc
     return false;
 }
 
-rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std::string& arch)
+rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec,
+                                    const std::string& arch,
+                                    bool main_kernel_refusals)
 {
     const rocke_attn_bwd_arch_facts_t& facts = arch_facts(arch);
     rocke_attn_bwd_spec_t s = resolved(spec, arch);
@@ -2341,7 +2343,10 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
         Geom g = geometry_check(s, arch);
         check_stats_vec_layout(g.g0.op, s.stats_vec);
     }
-    /* resource_refusal(s, arch): Python-only (main_kernel_refusals=False) */
+    const char* refused = main_kernel_refusals ? resource_refusal(s, arch) : NULL;
+    if(refused != NULL)
+        throw ckc::ValueError("resource gate: this resolved spec fails on " + arch + " (" + refused
+                              + "; RESOURCE_REFUSED)");
     return s;
 }
 
@@ -2758,13 +2763,33 @@ rocke_status_t rocke_attn_bwd_check_counted_sync(const rocke_attn_bwd_spec_t* sp
 
 rocke_status_t rocke_attn_bwd_validate_spec(const rocke_attn_bwd_spec_t* spec,
                                             const char* arch,
+                                            bool main_kernel_refusals,
                                             rocke_attn_bwd_spec_t* out,
                                             rocke_attn_bwd_err_t* err)
 {
     return spec_boundary(err, [&] {
-        rocke_attn_bwd_spec_t r = validate_spec(*spec, arch ? arch : "");
+        rocke_attn_bwd_spec_t r = validate_spec(*spec, arch ? arch : "", main_kernel_refusals);
         *out = r;
     });
+}
+
+rocke_status_t rocke_attn_bwd_spec_digest(const rocke_attn_bwd_spec_t* spec,
+                                          const char* arch,
+                                          char out[ROCKE_ATTN_BWD_DIGEST_CAP],
+                                          rocke_attn_bwd_err_t* err)
+{
+    return spec_boundary(err, [&] {
+        std::string d = spec_digest(*spec, arch ? arch : "");
+        memcpy(out, d.c_str(), d.size() + 1);
+    });
+}
+
+rocke_status_t rocke_attn_bwd_resource_refusal(const rocke_attn_bwd_spec_t* spec,
+                                               const char* arch,
+                                               const char** reason,
+                                               rocke_attn_bwd_err_t* err)
+{
+    return spec_boundary(err, [&] { *reason = resource_refusal(*spec, arch ? arch : ""); });
 }
 
 rocke_status_t rocke_attn_bwd_tile_geometry_check(const rocke_attn_bwd_spec_t* spec,

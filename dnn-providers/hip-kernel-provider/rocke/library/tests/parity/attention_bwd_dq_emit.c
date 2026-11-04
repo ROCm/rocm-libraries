@@ -34,6 +34,10 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+/* attention_bwd_refusals_emit.c defines its own CONFIGS and includes this
+ * file with ROCKE_ATTN_BWD_DQ_EMIT_CONFIGS and ROCKE_ATTN_BWD_DQ_EMIT_PARSE_ONLY
+ * set, which keep the dQ config parser (dq_config_spec) and drop main. */
+#ifndef ROCKE_ATTN_BWD_DQ_EMIT_CONFIGS
 static const char* const CONFIGS[] = {
     /* case general/gfx950/tuned11 */
     "gfx950|head_size:64;dtype:bf16;mask_class:none;waves:4;block_m:128;block_n:64;atom_g02:"
@@ -310,6 +314,7 @@ static const char* const CONFIGS[] = {
     "gfx942|head_size:128;waves:4;block_m:64;block_n:64;kv_prefetch:True;head_loop:single;edge_"
     "tiles:False;kv_pad:0;transpose_source:lds_plain;sched:iglp0",
 };
+#endif /* ROCKE_ATTN_BWD_DQ_EMIT_CONFIGS */
 
 #define ROCKE_ATTN_BWD_SPEC_EMIT_CONFIGS 1
 #define ROCKE_ATTN_BWD_SPEC_EMIT_PARSE_ONLY 1
@@ -485,6 +490,7 @@ static int dq_config_spec(const char* config,
     return 0;
 }
 
+#ifndef ROCKE_ATTN_BWD_DQ_EMIT_PARSE_ONLY
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -579,3 +585,4 @@ int main(int argc, char** argv)
     rocke_ir_builder_free(&b);
     return ret;
 }
+#endif /* ROCKE_ATTN_BWD_DQ_EMIT_PARSE_ONLY */

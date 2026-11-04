@@ -524,7 +524,7 @@ std::pair<int, int> dq_register_estimates(const Spec& s, const std::string& arch
     return raw_estimates(s, arch, agpr_form);
 }
 
-/* validate_attn_bwd_dq_spec(spec, arch) without the refusal tables. */
+/* validate_attn_bwd_dq_spec(spec, arch). */
 /* DQ_SPILLING_COMBOS (attention_bwd_dq.py): lever combinations the
  * production compiler spills to scratch. (arch, head_size, waves, block_m,
  * block_n, kv_prefetch, head_loop, edge_tiles). */
@@ -650,9 +650,8 @@ Spec validate_dq_spec(const Spec& spec, const std::string& arch)
                               + "estimate " + std::to_string(vg + ag) + " exceeds "
                               + std::to_string((facts.arch_vgprs + facts.agprs) / per_wg)
                               + " per wave");
-    /* DQ_SPILLING_COMBOS and DQ_SCHED_SPILLING, in Python's order. Between
-     * them Python checks DQ_RESOURCE_REFUSED, keyed by spec_digest, which
-     * stays Python-only (see the header). */
+    /* DQ_SPILLING_COMBOS, DQ_RESOURCE_REFUSED and DQ_SCHED_SPILLING, in
+     * Python's order. */
     for(const DqSpillCombo& c : DQ_SPILLING_COMBOS)
         if(arch == c.arch && d == c.d && w == c.w && km == c.km && kn == c.kn
            && s.kv_prefetch == c.kv_prefetch && eq(s.head_loop, c.head_loop)
@@ -663,6 +662,10 @@ Spec validate_dq_spec(const Spec& spec, const std::string& arch)
                                   + ", block_n=" + std::to_string(kn) + ") on " + arch
                                   + " spills VGPRs to scratch on the production compiler "
                                     "(not built)");
+    const char* refused = dq_resource_refusal(s, arch);
+    if(refused != NULL)
+        throw ckc::ValueError("resource gate: this resolved dQ spec fails on " + arch + " ("
+                              + refused + "; DQ_RESOURCE_REFUSED)");
     for(const DqSchedSpill& c : DQ_SCHED_SPILLING)
         if(arch == c.arch && d == c.d && w == c.w && km == c.km && kn == c.kn
            && s.kv_prefetch == c.kv_prefetch && eq(s.head_loop, c.head_loop)
@@ -1322,6 +1325,25 @@ rocke_status_t rocke_attn_bwd_validate_dq_spec(const rocke_attn_bwd_dq_spec_t* s
                                                rocke_attn_bwd_err_t* err)
 {
     return boundary(err, [&] { *out = validate_dq_spec(*spec, arch ? arch : ""); });
+}
+
+rocke_status_t rocke_attn_bwd_dq_spec_digest(const rocke_attn_bwd_dq_spec_t* spec,
+                                             const char* arch,
+                                             char out[ROCKE_ATTN_BWD_DIGEST_CAP],
+                                             rocke_attn_bwd_err_t* err)
+{
+    return boundary(err, [&] {
+        std::string d = dq_spec_digest(*spec, arch ? arch : "");
+        memcpy(out, d.c_str(), d.size() + 1);
+    });
+}
+
+rocke_status_t rocke_attn_bwd_dq_resource_refusal(const rocke_attn_bwd_dq_spec_t* spec,
+                                                  const char* arch,
+                                                  const char** reason,
+                                                  rocke_attn_bwd_err_t* err)
+{
+    return boundary(err, [&] { *reason = dq_resource_refusal(*spec, arch ? arch : ""); });
 }
 
 rocke_kernel_def_t* rocke_build_attn_bwd_dq_new(rocke_ir_builder_t* b,

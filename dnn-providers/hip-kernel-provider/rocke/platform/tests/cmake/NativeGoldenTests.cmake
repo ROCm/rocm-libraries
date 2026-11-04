@@ -29,6 +29,7 @@ set(_ROCKE_NATIVE_GOLDEN_FAMILIES
     attention_bwd_lds
     attention_bwd_main
     attention_bwd_paged
+    attention_bwd_refusals
     attention_bwd_sched
     attention_bwd_sched_ir
     attention_bwd_sched_params

@@ -785,7 +785,7 @@ int main(int argc, char** argv)
     }
 
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = rocke_build_attn_bwd_main_new(&b, &spec, arch.c_str());
+    rocke_kernel_def_t* kernel = rocke_build_attn_bwd_main_new(&b, &spec, arch.c_str(), false);
     if(kernel == NULL || !rocke_ir_builder_ok(&b))
     {
         const char* msg = rocke_ir_builder_error(&b);

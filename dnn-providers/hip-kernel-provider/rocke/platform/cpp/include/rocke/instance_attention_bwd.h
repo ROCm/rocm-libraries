@@ -26,6 +26,9 @@
  *   agpr_copy_budget                     rocke_attn_bwd_agpr_copy_budget
  *   check_counted_sync                   rocke_attn_bwd_check_counted_sync
  *   validate_attn_bwd_spec               rocke_attn_bwd_validate_spec
+ *   _attention_bwd_refusals: spec_digest rocke_attn_bwd_spec_digest
+ *     / resource_refusal                 / rocke_attn_bwd_resource_refusal
+ *                                        (_attention_bwd_refusals.cpp)
  *   static_unit_mults                    rocke_attn_bwd_static_unit_mults
  *   attn_bwd_params / KERNARG_FORMATS    rocke_attn_bwd_params
  *   build_attn_bwd_main (_declare_main   rocke_build_attn_bwd_main_new
@@ -42,10 +45,18 @@
  * ROCKE_ATTN_BWD_SWIZZLE_CAP characters or more. Python's type errors (a
  * non-bool flag, a non-int count) have no C spelling.
  *
- * Validation trusts the specs Python already validated for the parts that
- * stay in Python: the recorded resource-gate refusals (_attention_bwd_refusals,
- * Python-only) are not consulted, i.e. this mirrors
- * validate_attn_bwd_spec(spec, arch, main_kernel_refusals=False).
+ * Resource refusals. The recorded resource-gate failures of the main kernel
+ * (RESOURCE_REFUSED, keyed by spec_digest) are ported: the table is generated
+ * from the Python dict (_attention_bwd_refusals_table.inc, written by
+ * library/tests/parity/attention_bwd_refusals_emit.py --print-c-table and
+ * checked against the dict by test_attention_bwd_refusals_cpp_table.py), and
+ * the attention_bwd_refusals parity pair checks the digest and the verdicts.
+ * rocke_attn_bwd_validate_spec and rocke_build_attn_bwd_main_new take
+ * main_kernel_refusals as Python's validate_attn_bwd_spec and _emit_main do;
+ * true (Python's default, and its public build_attn_bwd_main) refuses those
+ * specs with Python's ValueError. Only a shell that builds another kernel
+ * around the same body (dense, unified) or a test of the emitted IR passes
+ * false.
  *
  * BwdTileGeometry.from_spec(...).check() (body unit) is mirrored inside
  * validate, where Python calls it (loop_sync = "counted", dkv_cell_vec != 1,
@@ -71,11 +82,9 @@
  * keeps no copies of its own.
  *
  * The main builder (rocke_build_attn_bwd_main_new) builds the kernel of
- * _emit_main(spec, arch, main_kernel_refusals=False): the recorded
- * resource-gate refusals stay in Python, so it builds the RESOURCE_REFUSED
- * specs that Python's public build_attn_bwd_main (main_kernel_refusals=True)
- * refuses; a caller that launches the kernel must consult Python's
- * resource_refusal first. _kv_tile's dense-shell hooks (mask.static_runs and
+ * _emit_main(spec, arch, main_kernel_refusals=...): with true it refuses the
+ * RESOURCE_REFUSED specs as Python's public build_attn_bwd_main does.
+ * _kv_tile's dense-shell hooks (mask.static_runs and
  * the epilogue= callback) are in instance_attention_bwd_main_internal.h.
  * Also, _not_built's one refusal
  * (dkv_sink="last_cta" in atomic mode) is the same NotImplementedError
@@ -313,12 +322,29 @@ rocke_status_t rocke_attn_bwd_check_counted_sync(const rocke_attn_bwd_spec_t* sp
                                                  const char* arch,
                                                  rocke_attn_bwd_err_t* err);
 
-/* validate_attn_bwd_spec(spec, arch, main_kernel_refusals=False): the
- * resolved spec into *out (out may alias spec). */
+/* validate_attn_bwd_spec(spec, arch, main_kernel_refusals=...): the
+ * resolved spec into *out (out may alias spec). main_kernel_refusals true
+ * (Python's default) refuses the RESOURCE_REFUSED specs. */
 rocke_status_t rocke_attn_bwd_validate_spec(const rocke_attn_bwd_spec_t* spec,
                                             const char* arch,
+                                            bool main_kernel_refusals,
                                             rocke_attn_bwd_spec_t* out,
                                             rocke_attn_bwd_err_t* err);
+
+/* _attention_bwd_refusals.spec_digest(spec, arch): 16 lower-case hex digits
+ * and a NUL into out (the spec as given; the table keys resolved specs). */
+#define ROCKE_ATTN_BWD_DIGEST_CAP 17
+rocke_status_t rocke_attn_bwd_spec_digest(const rocke_attn_bwd_spec_t* spec,
+                                          const char* arch,
+                                          char out[ROCKE_ATTN_BWD_DIGEST_CAP],
+                                          rocke_attn_bwd_err_t* err);
+
+/* resource_refusal(spec, arch): the RESOURCE_REFUSED record of a resolved
+ * spec (a static string), or NULL, into *reason. */
+rocke_status_t rocke_attn_bwd_resource_refusal(const rocke_attn_bwd_spec_t* spec,
+                                               const char* arch,
+                                               const char** reason,
+                                               rocke_attn_bwd_err_t* err);
 
 /* BwdTileGeometry.from_spec(spec, arch).check() of a resolved spec (body
  * unit), without its lane-map proofs (atom_facts, the C-to-A relabel plan
@@ -348,8 +374,9 @@ rocke_status_t rocke_attn_bwd_params(const char* stage,
                                      int* n_out,
                                      rocke_attn_bwd_err_t* err);
 
-/* _emit_main(spec, arch, main_kernel_refusals=False), NOT the public
- * build_attn_bwd_main: RESOURCE_REFUSED specs build here. The
+/* _emit_main(spec, arch, main_kernel_refusals=...): with true (Python's
+ * default, and its public build_attn_bwd_main) a RESOURCE_REFUSED spec is
+ * refused; false builds it (tests of the emitted IR only). The
  * layout-general backward main kernel (rocke.attn_bwd.v3) into b, which this
  * initialises with the validated spec's kernel_name("main"). spec must have
  * passed rocke_attn_bwd_spec_init (Python's builder takes a constructed
@@ -358,7 +385,8 @@ rocke_status_t rocke_attn_bwd_params(const char* stage,
  * name). NULL and the builder's sticky error on any failure. */
 rocke_kernel_def_t* rocke_build_attn_bwd_main_new(rocke_ir_builder_t* b,
                                                   const rocke_attn_bwd_spec_t* spec,
-                                                  const char* arch);
+                                                  const char* arch,
+                                                  bool main_kernel_refusals);
 
 #ifdef __cplusplus
 }
@@ -393,7 +421,17 @@ RegEstimate register_estimates(const rocke_attn_bwd_spec_t& spec, const std::str
 int lds_footprint_bytes(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
 void spec_init(rocke_attn_bwd_spec_t& spec);
 rocke_attn_bwd_spec_t resolved(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
-rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
+/* validate_attn_bwd_spec(spec, arch, main_kernel_refusals=...): no default,
+ * so every caller chooses whether the RESOURCE_REFUSED table applies. */
+rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec,
+                                    const std::string& arch,
+                                    bool main_kernel_refusals);
+/* SHA-256 of a byte string, lower-case hex (spec_digest's hash). */
+std::string sha256_hex(const std::string& msg);
+/* _attention_bwd_refusals.spec_digest(spec, arch) and resource_refusal (the
+ * RESOURCE_REFUSED record of a resolved spec, or NULL). */
+std::string spec_digest(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
+const char* resource_refusal(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
 std::string kernel_name(const rocke_attn_bwd_spec_t& spec, const std::string& stage);
 /* non_default_fields(spec, skip=("head_size", "name")): (name, repr(value))
  * of every field that differs from its declared default, in field order. */

@@ -16,13 +16,13 @@
 # value is an int, True / False, None, "RxC" for a warp grid / agpr_alloc
 # pair, or a string). The dump prints the spec's __post_init__ verdict, its
 # kernel names, the default geometry of its problem, the resolved spec field
-# by field, the validate verdict (with main_kernel_refusals=False: the
-# resource-gate table stays in Python), and, for the resolved spec, the LDS
-# request and plan (every buffer, layout and ring stride), the register
-# estimates, the AGPR copy budget, the counted-sync check, the occupancy,
-# the AGPR policy, the static unit multipliers and the aux kernel names. An
-# exception prints as "<type>: <str(exc)>", so both engines must refuse at
-# the same rule with the same message.
+# by field, the validate verdict (with main_kernel_refusals=False:
+# attention_bwd_refusals_emit checks the resource-gate table), and, for the
+# resolved spec, the LDS request and plan (every buffer, layout and ring
+# stride), the register estimates, the AGPR copy budget, the counted-sync
+# check, the occupancy, the AGPR policy, the static unit multipliers and
+# the aux kernel names. An exception prints as "<type>: <str(exc)>", so
+# both engines must refuse at the same rule with the same message.
 #
 # Configs: the shipped defaults on gfx942 / gfx950 (and the RDNA targets),
 # every general tuned-table entry of dispatch/attention_bwd on gfx942 /
