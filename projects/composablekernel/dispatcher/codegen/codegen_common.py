@@ -1134,7 +1134,8 @@ def resolve_gemm_vector_sizes(
 
     ``reduction_strategy`` only matters for ``variant="stream_k"``; see
     ``streamk_c_reject_reason``. None defers the strategy-dependent check to the
-    caller, which applies it per strategy.
+    caller, which applies it per strategy. Widths that resolve to native return
+    before the Stream-K C check, so callers (codegen, ``with_vector_sizes``) apply it.
     """
     native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
         dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
