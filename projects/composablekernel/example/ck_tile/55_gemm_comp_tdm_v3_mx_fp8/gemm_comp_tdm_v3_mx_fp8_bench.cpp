@@ -5,8 +5,8 @@
 // for any M x N x K with K a multiple of 128.
 //
 // fp8 (e4m3) A row-major and B column-major, one E8M0 scale per 32 K elements of every A row and
-// every B column, fp32 accumulate, C row-major in fp16 (-c fp16) or bf16 (-c bf16). Warp tile
-// 16x16x128, the scaled WMMA. Instances, chosen at run time:
+// every B column, fp32 accumulate, C row-major in fp16 (-c_dtype=fp16) or bf16 (-c_dtype=bf16).
+// Warp tile 16x16x128, the scaled WMMA. Instances, chosen at run time:
 //   -tile     32x256x256 | 32x128x256 | 32x64x256 | 64x256x256    4 waves (warps 2x2x1)
 //             16x512x256 | 16x256x256 | 16x128x256 | 16x64x256    4 waves (warps 1x4x1)
 //             256x256x256                             16 waves (warps 4x4x1)
@@ -637,7 +637,7 @@ int dispatch_epilogue(const ck_tile::ArgParser& arg, const std::string& name)
 
 int dispatch(const ck_tile::ArgParser& arg)
 {
-    const std::string c    = arg.get_str("c");
+    const std::string c    = arg.get_str("c_dtype");
     const std::string name = "ck_comp_tdm_v3_mxfp8_e8m0x32_rcr_c" + c + "_" + arg.get_str("tile") +
                              "_wt16x16x128_" + arg.get_str("epilogue") +
                              (arg.get_int("k_batch") > 1 ? "_kb" + arg.get_str("k_batch") : "");
@@ -645,7 +645,7 @@ int dispatch(const ck_tile::ArgParser& arg)
         return dispatch_epilogue<ck_tile::half_t>(arg, name);
     if(c == "bf16")
         return dispatch_epilogue<ck_tile::bf16_t>(arg, name);
-    std::printf("unknown -c=%s (fp16, bf16)\n", c.c_str());
+    std::printf("unknown -c_dtype=%s (fp16, bf16)\n", c.c_str());
     return 2;
 }
 
@@ -657,7 +657,7 @@ int main(int argc, char* argv[])
     arg.insert("m", "16", "M")
         .insert("n", "49152", "N")
         .insert("k", "32768", "K (a multiple of 128)")
-        .insert("c", "fp16", "C type: fp16 | bf16")
+        .insert("c_dtype", "fp16", "C data type: fp16 | bf16")
         .insert("epilogue", "tdm", "tdm | cshuffle (padded; split-K)")
         .insert("tile",
                 "32x256x256",
