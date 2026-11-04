@@ -221,7 +221,8 @@ All attributes are of type ``int32_t``:
        * ``HIPBLAS_EMULATION_STRATEGY_EAGER`` (2): always emulate.
    * - ``HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT``
      - The precision target in mantissa bits: 1 to 52 for FP64, 1 to 23 for
-       FP32. ``0`` uses the environment variable setting (default).
+       FP32. For an FP32 matmul, values above 23 are clamped to 23. ``0`` uses
+       the environment variable setting (default).
    * - ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
      - The Inf and NaN detection bitmask: ``0``, ``1``, ``2``, or ``3``.
        The default, ``0xFFFF``, detects both.

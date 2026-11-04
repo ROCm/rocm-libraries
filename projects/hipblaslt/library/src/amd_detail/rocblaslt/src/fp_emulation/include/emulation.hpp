@@ -13,7 +13,8 @@
  * Environment variables:
  *   HIPBLAS_EMULATE_DOUBLE_PRECISION=0|1  enables FP64 emulation.
  *   HIPBLAS_EMULATE_SINGLE_PRECISION=0|1  enables FP32 emulation.
- *   HIPBLASLT_EMULATION_NUM_MODULI=N        post-ADP testing override [2..20].
+ *   HIPBLASLT_EMULATION_NUM_MODULI=N        post-ADP testing override
+ *     [2..20] for FP64, [2..12] for FP32.
  *     After ADP selects the minimum sufficient s, this env var overrides it.
  *     Useful for testing specific moduli counts; accuracy is not guaranteed
  *     for all inputs when set below the ADP-selected value.
@@ -73,10 +74,21 @@ struct FixedPointEmulationEnvValue
 FixedPointEmulationEnvValue fixedPointEmulationParseEnabledEnv(const char* value);
 FixedPointEmulationEnvValue fixedPointEmulationParseStrategyEnv(const char* value);
 FixedPointEmulationEnvValue fixedPointEmulationParseSpecialValuesMaskEnv(const char* value);
-FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* value);
+/* Maximum ADP precision targets (full IEEE 754 mantissa widths). */
+constexpr int FP64_MAX_MANTISSA_BITS = 52;
+constexpr int FP32_MAX_MANTISSA_BITS = 23;
+
+/* Parser for HIPBLASLT_EMULATION_NUM_MODULI.
+ * Accepts decimal integers in [2..max_s]; max_s is 20 for FP64 and 12 for
+ * FP32 (and is never allowed to exceed the table size S_MAX).             */
+FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* value,
+                                                                 unsigned    max_s = 20u);
 /* Parser for HIPBLAS_FIXEDPOINT_EMULATION_FP{32,64}_MANTISSA_BIT_COUNT.
- * Accepts decimal integers in [1..52]; returns INVALID for out-of-range.  */
-FixedPointEmulationEnvValue fixedPointEmulationParseMantissaBitCountEnv(const char* value);
+ * Accepts decimal integers in [1..max_bits] (52 for FP64, 23 for FP32);
+ * returns INVALID for out-of-range.                                       */
+FixedPointEmulationEnvValue
+    fixedPointEmulationParseMantissaBitCountEnv(const char* value,
+                                                unsigned    max_bits = FP64_MAX_MANTISSA_BITS);
 
 /* Forward declarations -- callers already include handle.h which provides
  * the full definitions.  Declared here so the functions below can use them. */
@@ -181,12 +193,13 @@ FixedPointEmulationPolicy fixedPointEmulationPolicy(const FixedPointEmulationDev
 uint32_t fixedPointEmulationSpecialValuesMask();
 
 /* Returns the post-ADP testing override from HIPBLASLT_EMULATION_NUM_MODULI
- * [2..S_MAX], or 0 if the env var is absent or invalid.
+ * for the given input type, or 0 if the env var is absent or invalid.
+ * Valid range: [2..20] for FP64, [2..12] for FP32 (max_num_moduli(type_a)).
+ * An out-of-range value is ignored with a one-time warning.
  * When non-zero, emulated_gemm_impl applies this as an override AFTER ADP
  * selects the minimum sufficient s.  Accuracy is not guaranteed for all
- * inputs when set below the ADP-selected value.
- * Maximum supported: 20 moduli (~155 bits of CRT capacity).               */
-unsigned fixedPointEmulationNumModuli();
+ * inputs when set below the ADP-selected value.                           */
+unsigned fixedPointEmulationNumModuli(hipDataType type_a);
 
 /* Returns the ADP target mantissa-bit count for the given input type.
  *   type_a == HIP_R_64F:

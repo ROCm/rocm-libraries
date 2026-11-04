@@ -215,8 +215,8 @@ match the `hipblasComputeType_t` enumerators.
 | `HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK` | hex bitmask, default `0x3` | Bit 0 = detect Inf, bit 1 = detect NaN. `0` skips detection (unsupported values silently corrupt the output). |
 | `HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | ADP precision target for FP64. Fewer bits mean fewer moduli and faster execution. Takes precedence over the generic variable below. |
 | `HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | Same as the FP64 variable, used only when that one is unset; FP64 only. CUDA-compatible name (`CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT`), but sets the ADP target rather than a fixed bit count. |
-| `HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT` | `1`..`23`, default `23` | ADP precision target for FP32. |
-| `HIPBLASLT_EMULATION_NUM_MODULI` | `2`..`20` | **Testing only.** Overrides the ADP-selected moduli count; accuracy is not guaranteed below the ADP choice. |
+| `HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT` | `1`..`23`, default `23` | ADP precision target for FP32. Values above 23 are ignored with a warning. |
+| `HIPBLASLT_EMULATION_NUM_MODULI` | `2`..`20` for FP64, `2`..`12` for FP32 | **Testing only.** Overrides the ADP-selected moduli count; accuracy is not guaranteed below the ADP choice. Out-of-range values are ignored with a warning. |
 | `HIPBLASLT_EMULATION_INT_RESIDUES` | `0` / `1` | **Testing only.** Forces the FP64 (`0`) or the integer (`1`) residue arithmetic of stages 4 and 6 on every device. Unset: the per-device choice. |
 | `HIPBLASLT_EMULATION_PROFILE` | file path | Append per-call profiling CSV rows to this file. |
 

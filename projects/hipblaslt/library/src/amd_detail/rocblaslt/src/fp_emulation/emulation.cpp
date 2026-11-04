@@ -1721,7 +1721,8 @@ namespace FixedPointEmulation
                  * ADP analysis says no standard s is sufficient (accuracy is not
                  * guaranteed, but the computation will run rather than returning
                  * invalid_value).                                                 */
-                const unsigned override_s_adp = fixedPointEmulationNumModuli();
+                const unsigned override_s_adp = fixedPointEmulationNumModuli(
+                    std::is_same_v<T, double> ? HIP_R_64F : HIP_R_32F);
                 if(override_s_adp >= 2u && override_s_adp <= num_moduli)
                 {
                     effective_s = override_s_adp;
@@ -1759,7 +1760,8 @@ namespace FixedPointEmulation
         /* Post-ADP testing override: HIPBLASLT_EMULATION_NUM_MODULI overrides the
          * ADP-selected s.  Only for testing; accuracy is not guaranteed below ADP value. */
         {
-            const unsigned override_s = fixedPointEmulationNumModuli();
+            const unsigned override_s = fixedPointEmulationNumModuli(
+                std::is_same_v<T, double> ? HIP_R_64F : HIP_R_32F);
             if(override_s >= 2u && override_s <= num_moduli)
                 effective_s = override_s;
         }
@@ -2103,14 +2105,16 @@ FixedPointEmulationEnvValue fixedPointEmulationParseSpecialValuesMaskEnv(const c
     return {FIXED_POINT_EMULATION_ENV_VALID, static_cast<unsigned>(v)};
 }
 
-FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* value)
+FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* value, unsigned max_s)
 {
     using namespace FixedPointEmulation;
     if(value == nullptr)
         return {FIXED_POINT_EMULATION_ENV_UNSET, 0u};
-    char*      endp = nullptr;
-    const long n    = std::strtol(value, &endp, 10);
-    if(endp == value || *endp != '\0' || n < 2 || n > static_cast<long>(S_MAX))
+    /* Never accept more moduli than the tables provide. */
+    const long limit = static_cast<long>(std::min(max_s, S_MAX));
+    char*      endp  = nullptr;
+    const long n     = std::strtol(value, &endp, 10);
+    if(endp == value || *endp != '\0' || n < 2 || n > limit)
         return {FIXED_POINT_EMULATION_ENV_INVALID, 0u};
     return {FIXED_POINT_EMULATION_ENV_VALID, static_cast<unsigned>(n)};
 }
@@ -2182,9 +2186,22 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
         result.sv_support = ed->emulation_sv_support;
 
     /* ADP target precision.
-     * Priority: desc->emulation_fixedpoint_max_mantissa_bits (> 0) > type-specific env var. */
+     * Priority: desc->emulation_fixedpoint_max_mantissa_bits (> 0) > type-specific env var.
+     * The descriptor accepts 0..52 because its data type is unknown when the
+     * attribute is set; for FP32 the value is clamped here to 23 bits.      */
     {
-        const int desc_bits = ed ? ed->emulation_fixedpoint_max_mantissa_bits : 0;
+        int desc_bits = ed ? ed->emulation_fixedpoint_max_mantissa_bits : 0;
+        if(type_a == HIP_R_32F && desc_bits > FP32_MAX_MANTISSA_BITS)
+        {
+            static std::atomic<bool> s_warned{false};
+            if(!s_warned.exchange(true))
+                hipblaslt_cerr << "[hipBLASLt FP32 emulation] WARNING: "
+                                  "HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT="
+                               << desc_bits << " exceeds the FP32 maximum of "
+                               << FP32_MAX_MANTISSA_BITS << "; using "
+                               << FP32_MAX_MANTISSA_BITS << "." << std::endl;
+            desc_bits = FP32_MAX_MANTISSA_BITS;
+        }
         result.adp_mantissa_bits
             = (desc_bits > 0) ? desc_bits : fixedPointEmulationAdpMantissaBits(type_a);
     }
@@ -2266,14 +2283,30 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
     return std::min(optimal, decision.workspace_bytes);
 }
 
-unsigned fixedPointEmulationNumModuli()
+unsigned fixedPointEmulationNumModuli(hipDataType type_a)
 {
+    using namespace FixedPointEmulation;
     /* Re-read on every call (no static cache) so that test code can use
      * setenv("HIPBLASLT_EMULATION_NUM_MODULI", "8", 1) between runs.
      * Returns 0 when the env var is absent or invalid (pure ADP mode).
-     * Returns [2..S_MAX] when the env var specifies a post-ADP override. */
-    const auto parsed
-        = fixedPointEmulationParseNumModuliEnv(std::getenv("HIPBLASLT_EMULATION_NUM_MODULI"));
+     * Returns [2..max_num_moduli(type_a)] when the env var specifies a
+     * post-ADP override: [2..20] for FP64, [2..12] for FP32.             */
+    const unsigned type_max = max_num_moduli(type_a);
+    const unsigned max_s    = type_max ? type_max : S_MAX_FP64;
+    const char*    env      = std::getenv("HIPBLASLT_EMULATION_NUM_MODULI");
+    const auto     parsed   = fixedPointEmulationParseNumModuliEnv(env, max_s);
+    if(parsed.state == FIXED_POINT_EMULATION_ENV_INVALID)
+    {
+        /* Warn once per type; the value is ignored and ADP selects s. */
+        static std::atomic<bool> s_warned_fp32{false};
+        static std::atomic<bool> s_warned_fp64{false};
+        std::atomic<bool>&       warned = (type_a == HIP_R_32F) ? s_warned_fp32 : s_warned_fp64;
+        if(!warned.exchange(true))
+            hipblaslt_cerr << "[hipBLASLt " << ((type_a == HIP_R_32F) ? "FP32" : "FP64")
+                           << " emulation] WARNING: HIPBLASLT_EMULATION_NUM_MODULI=" << env
+                           << " is outside the supported range [2.." << max_s
+                           << "]; ignoring it." << std::endl;
+    }
     return (parsed.state == FIXED_POINT_EMULATION_ENV_VALID) ? parsed.value : 0u;
 }
 
@@ -2522,15 +2555,17 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
 }
 
 /* Parser for HIPBLAS_FIXEDPOINT_EMULATION_FP{32,64}_MANTISSA_BIT_COUNT.
- * Accepts decimal integers in [1..52]; values outside that range return INVALID. */
-FixedPointEmulationEnvValue fixedPointEmulationParseMantissaBitCountEnv(const char* value)
+ * Accepts decimal integers in [1..max_bits] (52 for FP64, 23 for FP32);
+ * values outside that range return INVALID.                               */
+FixedPointEmulationEnvValue fixedPointEmulationParseMantissaBitCountEnv(const char* value,
+                                                                        unsigned    max_bits)
 {
     using namespace FixedPointEmulation;
     if(value == nullptr)
         return {FIXED_POINT_EMULATION_ENV_UNSET, 0u};
     char*      endp = nullptr;
     const long n    = std::strtol(value, &endp, 10);
-    if(endp == value || *endp != '\0' || n < 1 || n > 52)
+    if(endp == value || *endp != '\0' || n < 1 || n > static_cast<long>(max_bits))
         return {FIXED_POINT_EMULATION_ENV_INVALID, 0u};
     return {FIXED_POINT_EMULATION_ENV_VALID, static_cast<unsigned>(n)};
 }
@@ -2576,13 +2611,15 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
         static const int v = []() -> int {
             /* 1. FP64-specific bit-count env var. */
             const auto p = fixedPointEmulationParseMantissaBitCountEnv(
-                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT"));
+                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT"),
+                FP64_MAX_MANTISSA_BITS);
             if(p.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(p.value);
             /* 2. Generic bit-count env var (CUDA-compatible name; FP64 only, like
              *    cuBLAS, where fixed-point emulation is only used for FP64). */
             const auto g = fixedPointEmulationParseMantissaBitCountEnv(
-                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"));
+                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"),
+                FP64_MAX_MANTISSA_BITS);
             if(g.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(g.value);
             /* 3. Default: full IEEE 754 FP64 precision = 52 mantissa bits. */
@@ -2593,13 +2630,19 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
     if(type_a == HIP_R_32F)
     {
         static const int v = []() -> int {
-            /* 1. Per-type bit-count env var. */
-            const auto p = fixedPointEmulationParseMantissaBitCountEnv(
-                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT"));
+            /* 1. Per-type bit-count env var, limited to [1..23]. */
+            const char* env = std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT");
+            const auto  p = fixedPointEmulationParseMantissaBitCountEnv(env, FP32_MAX_MANTISSA_BITS);
             if(p.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(p.value);
+            if(p.state == FIXED_POINT_EMULATION_ENV_INVALID)
+                hipblaslt_cerr << "[hipBLASLt FP32 emulation] WARNING: "
+                                  "HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT="
+                               << env << " is outside the supported range [1.."
+                               << FP32_MAX_MANTISSA_BITS << "]; using the default of "
+                               << FP32_MAX_MANTISSA_BITS << "." << std::endl;
             /* 2. Default: full IEEE 754 FP32 precision = 23 mantissa bits. */
-            return 23;
+            return FP32_MAX_MANTISSA_BITS;
         }();
         return v;
     }

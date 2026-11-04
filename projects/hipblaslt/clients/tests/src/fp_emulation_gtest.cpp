@@ -96,9 +96,39 @@ namespace
     // Default/env-derived moduli count must stay within the supported range.
     TEST_F(FixedPointEmulationHostTest, NumModuliInValidRange)
     {
-        const unsigned s = fixedPointEmulationNumModuli();
-        // 0 = env var absent → ADP mode (no fixed count); [2..20] = fixed count
-        EXPECT_TRUE(s == 0u || (s >= 2u && s <= 20u));
+        // 0 = env var absent → ADP mode (no fixed count);
+        // [2..20] = fixed count for FP64, [2..12] for FP32.
+        const unsigned s64 = fixedPointEmulationNumModuli(HIP_R_64F);
+        EXPECT_TRUE(s64 == 0u || (s64 >= 2u && s64 <= 20u));
+        const unsigned s32 = fixedPointEmulationNumModuli(HIP_R_32F);
+        EXPECT_TRUE(s32 == 0u || (s32 >= 2u && s32 <= 12u));
+    }
+
+    TEST_F(FixedPointEmulationHostTest, ParseNumModuliEnvPerTypeLimit)
+    {
+        // FP64 limit (default): 2..20.
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv(nullptr).state,
+                  FIXED_POINT_EMULATION_ENV_UNSET);
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("1").state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("2").state, FIXED_POINT_EMULATION_ENV_VALID);
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("20").state,
+                  FIXED_POINT_EMULATION_ENV_VALID);
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("21").state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+
+        // FP32 limit: 2..12.
+        auto v12 = fixedPointEmulationParseNumModuliEnv("12", 12u);
+        EXPECT_EQ(v12.state, FIXED_POINT_EMULATION_ENV_VALID);
+        EXPECT_EQ(v12.value, 12u);
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("13", 12u).state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("20", 12u).state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+
+        // A limit above the table size is capped at the table size (20).
+        EXPECT_EQ(fixedPointEmulationParseNumModuliEnv("21", 64u).state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
     }
 
     TEST_F(FixedPointEmulationHostTest, ParseEnabledEnv)
@@ -2946,6 +2976,22 @@ namespace
         EXPECT_EQ(fixedPointEmulationParseMantissaBitCountEnv("-1").state,
                   FIXED_POINT_EMULATION_ENV_INVALID);
         EXPECT_EQ(fixedPointEmulationParseMantissaBitCountEnv("abc").state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+    }
+
+    TEST(FixedPointEmulationFp32EnvVar, ParseMantissaBitCountFp32Limit)
+    {
+        /* FP32 accepts 1..23 only. */
+        auto v23 = fixedPointEmulationParseMantissaBitCountEnv("23", FP32_MAX_MANTISSA_BITS);
+        EXPECT_EQ(v23.state, FIXED_POINT_EMULATION_ENV_VALID);
+        EXPECT_EQ(v23.value, 23u);
+        auto v1 = fixedPointEmulationParseMantissaBitCountEnv("1", FP32_MAX_MANTISSA_BITS);
+        EXPECT_EQ(v1.state, FIXED_POINT_EMULATION_ENV_VALID);
+        EXPECT_EQ(fixedPointEmulationParseMantissaBitCountEnv("24", FP32_MAX_MANTISSA_BITS).state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fixedPointEmulationParseMantissaBitCountEnv("52", FP32_MAX_MANTISSA_BITS).state,
+                  FIXED_POINT_EMULATION_ENV_INVALID);
+        EXPECT_EQ(fixedPointEmulationParseMantissaBitCountEnv("0", FP32_MAX_MANTISSA_BITS).state,
                   FIXED_POINT_EMULATION_ENV_INVALID);
     }
 

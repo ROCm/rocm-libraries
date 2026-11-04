@@ -55,7 +55,7 @@ values and uses the default instead.
         | Lower values need fewer moduli and run faster.
         | No CUDA equivalent: cuBLAS emulates FP32 with BF16x9, not fixed-point
           emulation.
-      - | 1 to 23
+      - | 1 to 23 (values above 23 are ignored with a warning)
         | Default: 23 (full FP32 precision)
 
     * - | ``HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``
@@ -75,7 +75,8 @@ values and uses the default instead.
         | Bypasses the adaptive precision check, so accuracy is not assured.
         | Leave this unset unless you are investigating a specific problem.
         | hipBLASLt-specific; no CUDA equivalent.
-      - | 2 to 20
+      - | 2 to 20 for FP64
+        | 2 to 12 for FP32 (larger values are ignored with a warning)
         | Default: unset (Automatic Dynamic Precision)
 
     * - | ``HIPBLASLT_EMULATION_PROFILE``
