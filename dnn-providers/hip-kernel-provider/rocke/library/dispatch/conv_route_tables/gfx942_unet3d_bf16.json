@@ -375,14 +375,51 @@
     "fwd_s2_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-mb32-xsm-fxd2016-wave64-gfx942-llvm22"
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 0
+      },
+      "wtv": 4
+     }
     },
     "fwd_s2_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-mb32-xsm-fxd2016-wave64-gfx942-llvm22"
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 4
+     }
     },
     "fwd_s3_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
@@ -601,27 +638,8 @@
     "fwd_s8_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "winograd",
-     "winograd": {
-      "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
-       "ksplit": 4,
-       "bps": 1,
-       "bps_halo": 1
-      },
-      "wtv": 4
-     }
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-mch2-nopad-vmi5-kprd-cg2-pp5-lxrk-sapl-psf10-fbse-shy16-sdet3-wave64-gfx942-llvm22 @split_k=228"
     },
     "fwd_s9_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
