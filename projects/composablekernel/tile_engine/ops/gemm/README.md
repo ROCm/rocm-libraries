@@ -168,21 +168,55 @@ exports only the confirmed winners. The coordinator is
 `tile_engine/ops/common/adaptive_search.py`; the strategies are a vendored copy
 of the ROCKE search core in `dispatcher/python/ck_search` (see its `VENDOR.md`).
 
+Recommended starting point: `tpe` with `seed_policy` `shared`, warm-started
+from the heuristic's top 5 kernels per problem (`select_kernels.py
+--out_pairs`, `top_k` 5):
+
 ```bash
+H=../../../dispatcher/heuristics
+RUN="configs/default_config.json --variant gemm_universal --arch gfx950 \
+    --dtype fp16 --layout rcr --problems problems.json"
+# the candidates, then the heuristic model's top 5 per problem (a --pairs file)
+python gemm_full_benchmark.py $RUN --list-pairs candidates.json
+python $H/select_kernels.py --candidates candidates.json \
+    --model_dir $H/models/gemm_universal_fp16_gfx950 --top_k 5 --out_pairs picks.json
 cat > search.json <<'EOF'
-{"schema_version": 1, "strategy": "tpe", "seed": 7,
- "trials_per_problem": 60, "new_builds_per_run": 400,
- "confirm": {"finalists": 2, "fresh_calls": 3}}
+{"schema_version": 1, "strategy": "tpe", "seed": 0, "seed_policy": "shared",
+ "trials_per_problem": 100, "batch_per_problem": 8, "new_builds_per_run": 1200,
+ "warm_start": {"pairs_file": "picks.json", "top_k": 5}}
 EOF
-python gemm_full_benchmark.py configs/default_config.json --variant gemm_universal \
-    --arch gfx950 --dtype fp16 --layout rcr --problems problems.json --devices 0, \
+python gemm_full_benchmark.py $RUN --devices 0, \
     --search-config search.json --search-output-dir runs/search-001
 
 # winners.json is a --pairs file: re-check the winners with a plain run
-python gemm_full_benchmark.py configs/default_config.json --variant gemm_universal \
-    --arch gfx950 --dtype fp16 --layout rcr --problems problems.json \
-    --pairs runs/search-001/winners.json --verify --devices 0, --csv recheck.csv
+python gemm_full_benchmark.py $RUN --pairs runs/search-001/winners.json \
+    --verify --devices 0, --csv recheck.csv
 ```
+
+The warm start needs a heuristic model trained for the run's dtype and arch
+(`select_kernels.py` refuses another; `dispatcher/heuristics/models` has
+gfx950 `gemm_universal` fp16 and fp8 models). Any `--pairs` file of good kernels
+per problem, such as an earlier run's `winners.json`, can serve instead.
+Without a warm start the result depends on the seed.
+
+Evidence: an oracle replay of this coordinator (the real driver, adapter,
+coordinator and strategies; builds and GPU calls answered from an exhaustive
+sweep with calibrated timing noise) on MI350X (gfx950), fp16 `rcr`, 8
+problems with 5520 candidates each, 100 seeds per setting, the settings above.
+The figure is the geometric mean over the problems of the confirmed winner's
+speed relative to the best kernel's.
+
+| Setting | Mean | p10 | Min | Builds (8 problems) |
+|---|---|---|---|---|
+| `tpe`, `shared`, no warm start | 89% | 70% | 62% | 346 |
+| `tpe`, `shared`, warm start top 5 | 99.6% | 99.1% | 96% | 355 |
+
+With the warm start, the best kernel among each problem's first 50, 75 and
+100 trials reached 94%, 98.6% and 99.7% on average (81%, 86% and 89% without
+it). The heuristic's own top 5 never held the best kernel (best of 5: 79%): the
+warm start moves the search into good regions rather than handing it the
+answer. `per_problem` seeds without a warm start did not help (88%, at 616
+builds).
 
 | Setting | Default | Meaning |
 |---|---|---|
