@@ -35,20 +35,54 @@ void _rocsparse_csrmv_nnzsplit_info::clear()
     this->id_buffer              = nullptr;
     this->size                   = 0;
     this->use_starting_block_ids = false;
+    this->indextype              = deprecated_rocsparse_indextype_u16;
 }
 
-rocsparse_status _rocsparse_csrmv_nnzsplit_info::allocate_id_buffer(size_t size,
-                                                                    bool   use_starting_block_ids,
-                                                                    size_t index_size,
-                                                                    hipStream_t stream)
+rocsparse_status _rocsparse_csrmv_nnzsplit_info::allocate(size_t size,
+                                                          bool   use_starting_block_ids,
+                                                          rocsparse_indextype indextype,
+                                                          hipStream_t         stream)
 {
-    const size_t buffer_size = index_size * (use_starting_block_ids ? 2 : 1) * (size + 1);
+    const size_t buffer_size
+        = rocsparse::indextype_sizeof(indextype) * (use_starting_block_ids ? 2 : 1) * (size + 1);
 
     this->size                   = size;
     this->use_starting_block_ids = use_starting_block_ids;
+    this->indextype              = indextype;
 
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->id_buffer, buffer_size, stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(this->id_buffer, 0, buffer_size, stream));
 
     return rocsparse_status_success;
+}
+
+size_t _rocsparse_csrmv_nnzsplit_info::get_size() const
+{
+    return this->size;
+}
+
+bool _rocsparse_csrmv_nnzsplit_info::get_use_starting_block_ids() const
+{
+    return this->use_starting_block_ids;
+}
+
+rocsparse_indextype _rocsparse_csrmv_nnzsplit_info::get_indextype() const
+{
+    return this->indextype;
+}
+
+void* _rocsparse_csrmv_nnzsplit_info::get_starting_ids() const
+{
+    return this->id_buffer;
+}
+
+void* _rocsparse_csrmv_nnzsplit_info::get_starting_block_ids() const
+{
+    if(!this->use_starting_block_ids)
+    {
+        return nullptr;
+    }
+
+    return static_cast<char*>(this->id_buffer)
+           + rocsparse::indextype_sizeof(this->indextype) * (this->size + 1);
 }

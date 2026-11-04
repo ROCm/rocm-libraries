@@ -177,10 +177,19 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
     info.adaptive.size = 9;
     info.lrb.size      = 10;
 
-    ASSERT_EQ(info.nnzsplit.allocate_ids<int32_t>(11, true, nullptr), rocsparse_status_success);
+    ASSERT_EQ(info.nnzsplit.allocate(11, true, rocsparse_indextype_i32, nullptr),
+              rocsparse_status_success);
+    EXPECT_EQ(info.nnzsplit.get_indextype(), rocsparse_indextype_i32);
     ASSERT_NE(info.nnzsplit.get_starting_ids<int32_t>(), nullptr);
     EXPECT_EQ(info.nnzsplit.get_starting_block_ids<int32_t>(),
               info.nnzsplit.get_starting_ids<int32_t>() + 12);
+
+    info.nnzsplit.clear();
+    ASSERT_EQ(info.nnzsplit.allocate(11, true, rocsparse_indextype_i64, nullptr),
+              rocsparse_status_success);
+    EXPECT_EQ(info.nnzsplit.get_indextype(), rocsparse_indextype_i64);
+    EXPECT_EQ(info.nnzsplit.get_starting_block_ids<int64_t>(),
+              info.nnzsplit.get_starting_ids<int64_t>() + 12);
 
     info.clear();
 
@@ -197,6 +206,7 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
     EXPECT_EQ(info.lrb.size, 0u);
     EXPECT_EQ(info.nnzsplit.get_size(), 0u);
     EXPECT_FALSE(info.nnzsplit.get_use_starting_block_ids());
+    EXPECT_EQ(info.nnzsplit.get_indextype(), deprecated_rocsparse_indextype_u16);
     EXPECT_EQ(info.nnzsplit.get_starting_ids<int32_t>(), nullptr);
     EXPECT_EQ(info.nnzsplit.get_starting_block_ids<int32_t>(), nullptr);
 }

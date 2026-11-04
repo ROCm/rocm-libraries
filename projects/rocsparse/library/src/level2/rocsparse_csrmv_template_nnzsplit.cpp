@@ -27,6 +27,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_envariables.hpp"
+#include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -376,8 +377,8 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
     dim3 csrmv_threads(BLOCKSIZE);
     dim3 csrmv_phase_1((rocsparse::max(m + 1, n) + BLOCKSIZE - 1) / BLOCKSIZE);
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        csrmv_info->nnzsplit.allocate_ids<J>(requiredBlocks, use_starting_block_ids, stream));
+    RETURN_IF_ROCSPARSE_ERROR(csrmv_info->nnzsplit.allocate(
+        requiredBlocks, use_starting_block_ids, rocsparse::get_indextype<J>(), stream));
     J* starting_ids       = csrmv_info->nnzsplit.get_starting_ids<J>();
     J* starting_block_ids = csrmv_info->nnzsplit.get_starting_block_ids<J>();
 
@@ -651,6 +652,15 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
             return rocsparse_status_invalid_value;
             // LCOV_EXCL_STOP
         }
+    }
+
+    if(csrmv_info->nnzsplit.get_indextype() != rocsparse::get_indextype<J>())
+    {
+        // LCOV_EXCL_START
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_internal_error,
+            "the nnz-split analysis was run with a different column index type");
+        // LCOV_EXCL_STOP
     }
 
     const J ysize = (trans == rocsparse_operation_none) ? m : n;

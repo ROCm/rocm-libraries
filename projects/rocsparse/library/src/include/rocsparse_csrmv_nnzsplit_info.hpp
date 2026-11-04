@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse-types.h"
+#include "rocsparse_indextype_utils.hpp"
 
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
@@ -36,14 +37,11 @@ protected:
 
     size_t size{};
 
+    rocsparse_indextype indextype{deprecated_rocsparse_indextype_u16};
+
     // starting_ids (size + 1 entries), followed by starting_block_ids (size + 1
     // entries) if use_starting_block_ids.
     void* id_buffer{};
-
-    rocsparse_status allocate_id_buffer(size_t      size,
-                                        bool        use_starting_block_ids,
-                                        size_t      index_size,
-                                        hipStream_t stream);
 
 public:
     // Launch tuning chosen at analysis time and replayed verbatim at compute
@@ -60,32 +58,26 @@ public:
     // Does not free the id buffer: clear() must be called before end of life.
     void clear();
 
-    template <typename J>
-    rocsparse_status allocate_ids(size_t size, bool use_starting_block_ids, hipStream_t stream)
-    {
-        return this->allocate_id_buffer(size, use_starting_block_ids, sizeof(J), stream);
-    }
+    rocsparse_status allocate(size_t              size,
+                              bool                use_starting_block_ids,
+                              rocsparse_indextype indextype,
+                              hipStream_t         stream);
 
-    size_t get_size() const
-    {
-        return this->size;
-    }
-
-    bool get_use_starting_block_ids() const
-    {
-        return this->use_starting_block_ids;
-    }
+    size_t              get_size() const;
+    bool                get_use_starting_block_ids() const;
+    rocsparse_indextype get_indextype() const;
+    void*               get_starting_ids() const;
+    void*               get_starting_block_ids() const;
 
     template <typename J>
     J* get_starting_ids() const
     {
-        return reinterpret_cast<J*>(this->id_buffer);
+        return static_cast<J*>(this->get_starting_ids());
     }
 
     template <typename J>
     J* get_starting_block_ids() const
     {
-        return this->use_starting_block_ids ? this->get_starting_ids<J>() + (this->size + 1)
-                                            : nullptr;
+        return static_cast<J*>(this->get_starting_block_ids());
     }
 } * rocsparse_csrmv_nnzsplit_info;
