@@ -335,7 +335,20 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
     using T = typename TypeParam::value_type;
     REQUIRE_DEFINED("Amax");
 
-    auto equal_magnitude_checks = [this] {
+    // std::abs of a complex value may differ in the last bit between the library
+    // and the test
+    auto expect_magnitude = [](const T& value, const T& entry) {
+        if constexpr(is_complex_v<T>)
+        {
+            expect_near(value, magnitude(entry));
+        }
+        else
+        {
+            EXPECT_EQ(value, magnitude(entry));
+        }
+    };
+
+    auto equal_magnitude_checks = [this, expect_magnitude] {
         std::vector<T> equal_magnitudes(8);
         for(size_t i = 0; i < equal_magnitudes.size(); ++i)
         {
@@ -345,10 +358,10 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
         int64_t index = this->vec(equal_magnitudes)->Amax(value);
         EXPECT_GE(index, 0);
         EXPECT_LT(index, 8);
-        EXPECT_EQ(value, magnitude(from_int<T>(7)));
+        expect_magnitude(value, from_int<T>(7));
     };
 
-    auto position_checks = [this] {
+    auto position_checks = [this, expect_magnitude] {
         for(int position : {0, 5, 11})
         {
             for(int sign : {1, -1})
@@ -362,7 +375,7 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
                 T       value = T(0);
                 int64_t index = this->vec(a)->Amax(value);
                 EXPECT_EQ(index, position);
-                EXPECT_EQ(value, magnitude(a[position]));
+                expect_magnitude(value, a[position]);
             }
         }
     };
