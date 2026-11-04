@@ -61,6 +61,11 @@ def test_no_dropped_kernel_source_is_shipped():
     assert not back, f"dropped rocRoller kernels are back in {_KERNELS}: {back}"
 
 
+@pytest.mark.skipif(
+    not _LOGIC.is_dir(),
+    reason=f"source-tree check: no hipBLASLt logic tree at {_LOGIC}; the installed "
+    "test payload does not ship it",
+)
 def test_no_logic_file_names_a_dropped_kernel():
     logic = sorted(_LOGIC.rglob("GridBased/*.yaml"))
     assert logic, f"no GridBased logic under {_LOGIC}"
