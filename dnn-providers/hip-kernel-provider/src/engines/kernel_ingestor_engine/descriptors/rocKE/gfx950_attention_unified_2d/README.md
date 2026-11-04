@@ -11,10 +11,14 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 ## Coverage
 
 - Architecture: gfx950 only.
-- Variants: 222 (all `kernel_source.kind = rocke`, compiled at pack time): every one of the
-  198 cells at the default geometry, plus 24 variants of two other geometries in the D128
-  (and one D64) cells where an MI355X sweep measured them winning. The selection is
-  `variant_reduce`'s cut of the 792-variant full space (198 cells at four geometries).
+- Variants: 420 (all `kernel_source.kind = rocke`, compiled at pack time):
+  - 222 without LSE: every one of the 198 cells at the default geometry, plus 24 variants of
+    two other geometries in the D128 (and one D64) cells where an MI355X sweep measured them
+    winning. This is `variant_reduce`'s cut of the 792-variant full space (198 cells at four
+    geometries).
+  - 198 LSE-on twins (`*_lsehm`, KMD `emit_lse` 1): each cell's default-geometry kernel, which
+    also writes the SDPA stats output head-major ([B, Hq, S, 1], `lse_layout` head_major). A
+    graph that asks for stats matches only these; any other graph matches only the rest.
 - dtype: bf16, fp16. head_size: 64, 128 (D256 prefill is deferred).
 - mask: no mask, top-left causal, bottom-right causal (KMD `mask_type` 0, 1, 2).
 - Query heads 4 to 128 and KV heads 1 to 128, varying per variant (group of 1 to 16).
@@ -37,7 +41,7 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.29 MB, the 222 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.58 MB, the 420 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_2d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_2d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp`, `use_mfma_32x32`, `use_transposed_qk_32x32` |

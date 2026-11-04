@@ -15,10 +15,14 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 
 - Architecture: gfx950 only.
 - Decode only: one query token per sequence (every kernel is built with the decode grid).
-- Variants: 123 (all `kind = rocke` multi-launch kernels, compiled at pack time): every one of
-  the 116 cells at 16 segments, plus 7 variants at 32 or 64 segments in the 5 cells where an
-  MI355X sweep measured them winning. The selection is `variant_reduce`'s cut of the 348-variant full space
-  (116 cells at three segment counts).
+- Variants: 239 (all `kind = rocke` multi-launch kernels, compiled at pack time):
+  - 123 without LSE: every one of the 116 cells at 16 segments, plus 7 variants at 32 or 64
+    segments in the 5 cells where an MI355X sweep measured them winning. This is
+    `variant_reduce`'s cut of the 348-variant full space (116 cells at three segment counts).
+  - 116 LSE-on twins (`*_lse`, KMD `emit_lse` 1): each cell's 16-segment kernel, whose reduce
+    also writes the SDPA stats output. At decode its token-major LSE is the head-major
+    [B, Hq, 1, 1] stats layout. A graph that asks for stats matches only these; any other
+    graph matches only the rest.
 - dtype: bf16, fp16. head_size: 64, 128 (the bf16 D256 decode cohort is deferred).
 - mask: top-left causal and bottom-right causal (KMD `mask_type` 1, 2). A no-mask decode graph is
   served by the bottom-right causal kernel: with one query row the two admit the same keys, and
@@ -35,7 +39,7 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_3d.kdp.json` | DVC | 0.26 MB, the 123 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_3d.kdp.json` | DVC | 0.52 MB, the 239 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_3d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_3d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_3d.ued.json` | git | engine, knob `num_segments` |

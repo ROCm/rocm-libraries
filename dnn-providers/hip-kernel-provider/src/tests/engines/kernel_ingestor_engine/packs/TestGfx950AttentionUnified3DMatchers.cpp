@@ -437,6 +437,64 @@ TEST(TestGfx950AttentionUnified3DMatchers, ScoresAnUnlaunchableRecordZero)
     EXPECT_EQ(scoreOf(GraphSpec{}, noReduce), 0.0);
 }
 
+// =============================================================================
+// stats (generate_stats): served only by the LSE-on kernels
+// =============================================================================
+
+/// The pack's NO_STATS: the bound stats uid of a graph that asks for none.
+constexpr int64_t NO_STATS_UID = -1;
+
+/// At decode (Sq 1) head-major [B, Hq, 1, 1] and token-major [B, 1, Hq, 1] are the same
+/// memory, and the reduce writes it: both spellings are served, and the uid bound.
+TEST(TestGfx950AttentionUnified3DMatchers, BindsADecodeStatsOutputInEitherSpelling)
+{
+    for(const bool tokenMajor : {false, true})
+    {
+        GraphSpec spec;
+        spec.stats = true;
+        spec.statsTokenMajor = tokenMajor;
+        const auto bound = matchGraph(spec);
+        ASSERT_TRUE(bound.has_value()) << "token-major " << tokenMajor;
+        EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, STATS_TOKEN), STATS_UID);
+    }
+    const auto plain = matchGraph(GraphSpec{});
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*plain, STATS_TOKEN), NO_STATS_UID);
+}
+
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAStatsOutputTheReduceCannotWrite)
+{
+    GraphSpec half;
+    half.stats = true;
+    half.statsDataType = data_objects::DataType::HALF;
+    EXPECT_FALSE(matchGraph(half).has_value());
+
+    GraphSpec heads;
+    heads.stats = true;
+    heads.statsHeads = 4;
+    EXPECT_FALSE(matchGraph(heads).has_value());
+
+    GraphSpec maxOutput;
+    maxOutput.stats = true;
+    maxOutput.extra = [](auto& b) { b.add_max_tensor_uid(EXTRA_UID); };
+    EXPECT_FALSE(matchGraph(maxOutput).has_value());
+}
+
+/// Only an LSE-on kernel serves a graph that asks for stats, and it serves no other: its
+/// reduce's kernarg list ends in lse_ptr.
+TEST(TestGfx950AttentionUnified3DMatchers, PairsTheLseOnKernelWithTheStatsGraph)
+{
+    GraphSpec stats;
+    stats.stats = true;
+    KernelSpec lse;
+    lse.emitLse = 1;
+
+    EXPECT_TRUE(matchesKernel(stats, lse));
+    EXPECT_FALSE(matchesKernel(stats, KernelSpec{}));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, lse));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
