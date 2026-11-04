@@ -1402,6 +1402,7 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
                                          void*                   C,
                                          hipblasLtMatrixLayout_t Cdesc,
                                          hipStream_t             stream)
+try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatrixTransform");
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matrix_transform(
@@ -1418,6 +1419,10 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
         stream));
     rocblaslt::Debug::Instance().markerStop();
     return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
 }
 
 // Other Utilities

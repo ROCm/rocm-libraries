@@ -66,6 +66,7 @@ extern "C" {
  *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p n is greater than 256.
  *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p dim is not 1 or \p datatype is not HIP_R_32F.
+ *  \retval HIPBLAS_STATUS_ARCH_MISMATCH If no ExtOp kernels are available for the current device.
  */
 HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
                                                      uint32_t    m,
@@ -118,6 +119,7 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
  *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p m is greater than 4096.
  *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not HIP_R_32F.
+ *  \retval HIPBLAS_STATUS_ARCH_MISMATCH If no ExtOp kernels are available for the current device.
  */
 HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
                                                        void*       output,
@@ -162,6 +164,7 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
  *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p m or n is 0, or input or output is nullptr.
  *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not HIP_R_32F or HIP_R_16F.
+ *  \retval HIPBLAS_STATUS_ARCH_MISMATCH If no ExtOp kernels are available for the current device.
  */
 HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
                                                   const hipDataType outDatatype,

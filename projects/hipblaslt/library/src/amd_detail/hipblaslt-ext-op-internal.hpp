@@ -680,6 +680,11 @@ namespace hipblaslt_ext
             load(libPath);
         }
 
+        bool hasArchitecture(const std::string& archName) const
+        {
+            return libraries.count(archName) != 0;
+        }
+
         const ExtOpLibraryPtr& getLibrary(const std::string& archName,
                                           const std::string& opName,
                                           const std::string& typeName) const
