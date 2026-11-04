@@ -199,6 +199,17 @@ that links with a hand-written ``-lMIOpen`` and uses functions that aren't decla
 Building with this option doesn't turn forwarding on. To turn it on, see
 :doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.
 
+If you change ``include/miopen/miopen.h``, for example to add a function, regenerate the wrapper's
+derived source files and commit the result. Run this from the repository root:
+
+.. code:: shell
+
+   python3 projects/miopen/script/generate_wrapper_sources.py
+
+These files are committed whether or not you build with this option. A pre-commit hook and
+MIOpen's CI fail when one is out of date or was edited by hand. For details, see the
+"Wrapper sources are generated" section of ``test/gtest/README.md``.
+
 Changing the CMake configuration
 --------------------------------------------------------------------------------------------------------
 

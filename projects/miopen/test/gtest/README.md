@@ -104,15 +104,21 @@ accepted for now (see "Known divergences" below).
 A change that adds an entry point to `kForwardingEntries` needs all of these, and reviewers
 should check each one:
 
-1. A test in the shim surface (suite name contains `HipdnnShim`) that reaches the entry point
+1. A hipDNN implementation of the entry point. Until it has one, its generated stub in
+   `wrapper_passthrough.cpp` sends a forwarded call to `hipdnn::ForwardingNotImplemented`, which
+   fails with `miopenStatusNotImplemented` instead of running MIOpen. To add the implementation,
+   move the stub into `wrapper.cpp`, replace its dispatch line with a `MIOPEN_WRAPPER_FORWARD`
+   call to the new function (as the convolution stubs do), and rerun the generator (see
+   "Wrapper sources are generated" below).
+2. A test in the shim surface (suite name contains `HipdnnShim`) that reaches the entry point
    through the public `miopen.h` API, checks against a CPU or analytically-known reference
    within tolerance, and checks that the call was actually served. See "hipDNN shim surface"
    above for what qualifies.
-2. A tolerance note for the new operation family in "Tolerances" above, if its data or
+3. A tolerance note for the new operation family in "Tolerances" above, if its data or
    accumulation differs from the families listed there.
-3. An update to `DefaultSetIsTheConvolutionFamily` in `wrapper_routing.cpp`. It makes the
-   addition deliberate; it does not check that item 1 exists.
-4. A `known_forwarding_divergences.txt` line for any case where forwarding serves a call that
+4. An update to `DefaultSetIsTheConvolutionFamily` in `wrapper_routing.cpp`. It makes the
+   addition deliberate; it does not check that item 2 exists.
+5. A `known_forwarding_divergences.txt` line for any case where forwarding serves a call that
    MIOpen declines, or the reverse.
 
 Why it is set up this way:
@@ -216,6 +222,34 @@ To add one, run the harness, copy the failing line's test name, the device it ra
 outcomes into the file, and write down the reason. The list's own rules are covered by
 `test_forwarding_parity_scripts`, or by hand with
 `python3 -m unittest test_compare_forwarding_runs` from `script/`; neither needs a build or GPU.
+
+## Wrapper sources are generated
+
+`include/miopen/miopen.h` is the only place a public entry point is written by hand. Four files
+copy its list of entry points, and `script/generate_wrapper_sources.py` writes them:
+`src/private/miopen_private_rename.h`, `src/private/miopen_impl.h`,
+`src/private/wrapper_passthrough.cpp`, and the provider's `MiopenApiPrivateRename.hpp`. They are
+committed, so a change to the public API shows up in the PR diff. Do not edit them by hand.
+
+After you change `miopen.h`, run this from the repository root and commit the files it changes:
+
+```shell
+python3 projects/miopen/script/generate_wrapper_sources.py
+```
+
+If the pinned `clang-format` release is not installed, run
+`pre-commit run --hook-stage manual miopen-wrapper-sources-regenerate --all-files` instead. It
+installs that release for you.
+
+- `generate_wrapper_sources.py --check` (a pre-commit hook, and a step in MIOpen's component CI)
+  fails when a generated file was edited by hand or is out of date.
+- `check_public_abi.py check-headers` covers the parts that are still written by hand: the stubs in
+  `wrapper.cpp`, the wrapper's own functions in `include_wrapper/miopen/hipdnn_forwarding.h`, and
+  the provider's declarations of the three `miopenConvolution*GetWorkSpaceSizeRange` functions.
+- The generator exits with an error naming the line instead of skipping a declaration it cannot
+  read exactly, such as an entry point inside an `#if`, or an unnamed or array parameter.
+- `wrapper.cpp` holds the stubs that do more than pass a call through. The generator skips every
+  entry point defined there, and refuses one whose signature differs from `miopen.h`.
 
 ## Forwarding failure modes
 

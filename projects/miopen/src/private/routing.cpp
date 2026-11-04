@@ -37,11 +37,15 @@ constexpr int kInfo2LogLevel   = 6;
 //
 // To add one:
 //   1. List it here and bump the array size.
-//   2. Add a HipdnnShim test (suite name contains HipdnnShim) that reaches the entry
+//   2. Give it a hipDNN implementation. Until then its generated stub fails with
+//      miopenStatusNotImplemented. Move the stub from wrapper_passthrough.cpp to
+//      wrapper.cpp and call the new function through MIOPEN_WRAPPER_FORWARD, as the
+//      convolution stubs do, then rerun script/generate_wrapper_sources.py.
+//   3. Add a HipdnnShim test (suite name contains HipdnnShim) that reaches the entry
 //      point through the public miopen.h API only and checks the result against a CPU
 //      reference (see "hipDNN shim surface" in test/gtest/README.md). Without one, the
 //      parity run replays nothing for it, so a swap that changes results goes unnoticed.
-//   3. Update DefaultSetIsTheConvolutionFamily in test/gtest/wrapper_routing.cpp.
+//   4. Update DefaultSetIsTheConvolutionFamily in test/gtest/wrapper_routing.cpp.
 //
 // The forwarding parity tests (script/run_forwarding_parity.py) run the shim
 // tests once with forwarding disabled and once enabled and require the two runs
