@@ -201,6 +201,31 @@ def test_wgrad_refusal_bases_are_valid(base):
 # The refusals of a boolean flag: the message itself names the value.
 _FLAG_CASES = frozenset({"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"})
 
+# The refusals that state the offending value inside the sentence, mostly a
+# measured size against its limit, rather than in a "(got ...)" tail: the
+# value text each one must carry. Every other refusal ends with "(got ...)".
+_INLINE_VALUE_CASES = {
+    "img_ldsepi_bytes": "903168 B",
+    "img_tdm_waves": "got 4 waves",
+    "img_vgpr_budget": "~1344 VGPRs",
+    "sc_mfma_k": "got mfma_k=16",
+    "sc_acc_budget": "160 VGPRs",
+    "dw_dtype": "'fp32'",
+    "dw_channels": "channels 66",
+    "dw_acc_budget": "392 VGPRs",
+    "dw_wave_arch": "wave_size 32",
+    "dw_threads": "threads_per_block 2048",
+    "dw_lds": "LDS 702464 B",
+}
+_GOT_TAIL = re.compile(r" \(got [^()]+\)$")
+
+
+def test_wgrad_refusal_value_tables_name_cases():
+    ids = {c[0] for c in _CASES}
+    assert _FLAG_CASES <= ids
+    assert set(_INLINE_VALUE_CASES) <= ids
+    assert not _FLAG_CASES & set(_INLINE_VALUE_CASES)
+
 
 @pytest.mark.parametrize(
     "case_id, base, spec_kw, prob_kw, arch",
@@ -208,10 +233,15 @@ _FLAG_CASES = frozenset({"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channe
     ids=[c[0] for c in _CASES if c[0] not in _FLAG_CASES],
 )
 def test_wgrad_refusal_names_the_offending_value(case_id, base, spec_kw, prob_kw, arch):
-    """Every refusal of a numeric knob or the arch says what it got."""
+    """Every refusal of a numeric knob or the arch says what it got: in a
+    "(got ...)" tail, or for the inline-value cases in the sentence itself."""
     ok, why = _check(_spec(base, spec_kw, prob_kw), arch)
     assert not ok
-    assert re.search(r"\d", why), f"{case_id}: {why!r} has no value"
+    if case_id in _INLINE_VALUE_CASES:
+        value = _INLINE_VALUE_CASES[case_id]
+        assert value in why, f"{case_id}: {why!r} does not state {value!r}"
+    else:
+        assert _GOT_TAIL.search(why), f"{case_id}: {why!r} has no (got ...) tail"
 
 
 def test_wgrad_refusal_case_ids_are_unique():

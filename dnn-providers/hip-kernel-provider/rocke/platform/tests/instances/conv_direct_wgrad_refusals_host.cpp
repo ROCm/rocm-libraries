@@ -405,10 +405,49 @@ static void expect_refused(const char* id, bool ok, const char* why, const char*
     }
 }
 
-/* The refusals of a boolean flag: the message itself names the value. Every
- * other refusal says what it got (test_wgrad_refusal_names_the_offending_value). */
+/* The refusals of a boolean flag: the message itself names the value. */
 static const char* const k_flag_cases[]
     = {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"};
+
+/* The refusals that state the offending value inside the sentence, mostly a
+ * measured size against its limit, rather than in a "(got ...)" tail: the
+ * value text each one must carry. Every other refusal ends with "(got ...)"
+ * (test_wgrad_refusal_names_the_offending_value). */
+static const struct
+{
+    const char* id;
+    const char* value;
+} k_inline_value_cases[] = {
+    {"img_ldsepi_bytes", "903168 B"},
+    {"img_tdm_waves", "got 4 waves"},
+    {"img_vgpr_budget", "~1344 VGPRs"},
+    {"sc_mfma_k", "got mfma_k=16"},
+    {"sc_acc_budget", "160 VGPRs"},
+    {"dw_dtype", "'fp32'"},
+    {"dw_channels", "channels 66"},
+    {"dw_acc_budget", "392 VGPRs"},
+    {"dw_wave_arch", "wave_size 32"},
+    {"dw_threads", "threads_per_block 2048"},
+    {"dw_lds", "LDS 702464 B"},
+};
+
+/* True when why ends with " (got ...)" and the tail holds no parenthesis. */
+static bool ends_with_got(const char* why)
+{
+    const char* tail = NULL;
+    const char* p;
+    for(p = strstr(why, " (got "); p != NULL; p = strstr(p + 1, " (got "))
+        tail = p;
+    if(tail == NULL)
+        return false;
+    p = tail + strlen(" (got ");
+    if(*p == ')' || strlen(p) < 2)
+        return false;
+    for(; p[1] != '\0'; ++p)
+        if(*p == '(' || *p == ')')
+            return false;
+    return *p == ')';
+}
 
 static void expect_names_value(const char* id, const char* why)
 {
@@ -416,9 +455,24 @@ static void expect_names_value(const char* id, const char* why)
     for(i = 0; i < sizeof k_flag_cases / sizeof k_flag_cases[0]; ++i)
         if(strcmp(id, k_flag_cases[i]) == 0)
             return;
-    if(strpbrk(why, "0123456789") == NULL)
+    for(i = 0; i < sizeof k_inline_value_cases / sizeof k_inline_value_cases[0]; ++i)
     {
-        fprintf(stderr, "FAIL %s: reason \"%s\" has no value\n", id, why);
+        if(strcmp(id, k_inline_value_cases[i].id) != 0)
+            continue;
+        if(strstr(why, k_inline_value_cases[i].value) == NULL)
+        {
+            fprintf(stderr,
+                    "FAIL %s: reason \"%s\" does not state \"%s\"\n",
+                    id,
+                    why,
+                    k_inline_value_cases[i].value);
+            ++g_failures;
+        }
+        return;
+    }
+    if(!ends_with_got(why))
+    {
+        fprintf(stderr, "FAIL %s: reason \"%s\" has no (got ...) tail\n", id, why);
         ++g_failures;
     }
 }
