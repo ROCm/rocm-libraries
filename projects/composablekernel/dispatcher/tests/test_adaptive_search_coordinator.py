@@ -22,6 +22,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -843,17 +844,97 @@ def test_interrupt_writes_the_summary_and_exits_130(tmp_path, when):
     assert ad.confirmed == [] or when == "confirmation"
 
 
-def test_run_search_turns_sigterm_into_an_interrupt(tmp_path, capsys):
+@pytest.mark.parametrize("sigint", [signal.default_int_handler, signal.SIG_IGN],
+                         ids=["sigint_default", "sigint_ignored"])
+def test_run_search_turns_sigterm_into_an_interrupt(tmp_path, capsys, sigint):
+    seen = []
+
     class Terminated(FakeAdapter):
         def measure_pairs(self, requests):
+            seen.append([signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)])
             os.kill(os.getpid(), signal.SIGTERM)  # a batch system's time limit
             return super().measure_pairs(requests)
 
-    before = signal.getsignal(signal.SIGTERM)
-    rc = AS.run_search(Terminated({"P1": ABCD}), settings(), tmp_path / "out", ["0"])
-    assert rc == 130 and signal.getsignal(signal.SIGTERM) is before
+    old = signal.signal(signal.SIGINT, sigint)
+    try:
+        before = [signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)]
+        rc = AS.run_search(Terminated({"P1": ABCD}), settings(), tmp_path / "out", ["0"])
+        after = [signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)]
+    finally:
+        signal.signal(signal.SIGINT, old)
+    assert rc == 130 and after == before
     assert strict(tmp_path / "out" / "summary.json")["stop_reason"] == "interrupted"
     assert "SEARCH NO_WINNER" in capsys.readouterr().out
+    # Ctrl-C takes the same handler, unless SIGINT is ignored (a background job).
+    (term, intr), = seen
+    assert intr is (term if sigint is signal.default_int_handler else signal.SIG_IGN)
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs fork")
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_interrupt_handler_ends_a_forked_child(sig):
+    # A forked build worker inherits the handler: there the signal ends the
+    # process (as by default) instead of raising in the job it runs.
+    handler = AS._interrupt_handler(os.getpid())
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - the child
+        try:
+            handler(sig, None)
+        finally:
+            os._exit(3)  # reached only if the handler returned or raised
+    _, status = os.waitpid(pid, 0)
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == sig
+    with pytest.raises(KeyboardInterrupt):
+        handler(sig, None)
+
+
+_POOL_RUN = """
+import os, sys, time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+sys.path.insert(0, sys.argv[1])
+from test_adaptive_search_coordinator import ABCD, AS, FakeAdapter, settings
+
+def build(marker):  # one build: say it started, then compile for a while
+    open(marker, "w").close()
+    time.sleep(60)
+
+class Pool(FakeAdapter):  # builds like setup_multiple_gemm_dispatchers
+    def build_missing(self, cands):
+        with ProcessPoolExecutor(1) as ex:  # one worker: the second build waits
+            futs = [ex.submit(build, sys.argv[2] + "/started-" + c.canonical_key)
+                    for c in cands]
+            for fut in as_completed(futs):
+                fut.result()
+        return super().build_missing(cands)
+
+sys.exit(AS.run_search(Pool({"P1": ABCD}), settings(), sys.argv[2] + "/out", ["0"]))
+"""
+
+
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="needs process groups")
+def test_sigterm_to_the_process_group_does_not_wait_for_queued_builds(tmp_path):
+    # A batch system's time limit sends SIGTERM to every process of the job.
+    # The build worker dies, the pool breaks and the summary is written at
+    # once; a worker that turned it into one job's error would start the
+    # queued build (a second marker) and the summary would wait for it.
+    proc = subprocess.Popen([sys.executable, "-c", _POOL_RUN, str(Path(__file__).parent),
+                             str(tmp_path)], start_new_session=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        for _ in range(600):
+            if list(tmp_path.glob("started-*")) or proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGTERM)
+        rc = proc.wait(timeout=20)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+    assert rc == 130, proc.stderr.read().decode()
+    assert len(list(tmp_path.glob("started-*"))) == 1
+    assert strict(tmp_path / "out" / "summary.json")["stop_reason"] == "interrupted"
 
 
 def _ended_by_error(tmp_path, s, message):

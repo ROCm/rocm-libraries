@@ -1429,20 +1429,39 @@ def check_search_options(args, variant: str, conflicts=()) -> SearchSettings:
     return settings
 
 
-def _raise_interrupt(signum, frame):
-    raise KeyboardInterrupt(f"signal {signum}")
+def _interrupt_handler(pid: int):
+    """A signal handler raising KeyboardInterrupt in process ``pid`` only. A
+    process forked from it (a build pool's worker) inherits the handler; there
+    the signal ends the process as by default, so a pool whose workers get it
+    breaks at once instead of turning it into one job's error and taking the
+    next queued build."""
+    def handler(signum, frame):
+        if os.getpid() != pid:
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+            return
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    return handler
 
 
 def _run_terminable(coordinator: SearchCoordinator) -> RunSummary:
     """``coordinator.run()`` with SIGTERM (a batch system's time limit) raised
-    as KeyboardInterrupt, like Ctrl-C: the run still writes its summary."""
+    as KeyboardInterrupt, like Ctrl-C: the run still writes its summary. Both
+    go through ``_interrupt_handler`` (SIGINT only while it has Python's
+    default handler), so a forked build worker that gets them stops."""
     if threading.current_thread() is not threading.main_thread():
         return coordinator.run()
-    old = signal.signal(signal.SIGTERM, _raise_interrupt)
+    sigs = [signal.SIGTERM]
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        sigs.append(signal.SIGINT)
+    handler = _interrupt_handler(os.getpid())
+    old = {sig: signal.signal(sig, handler) for sig in sigs}
     try:
         return coordinator.run()
     finally:
-        signal.signal(signal.SIGTERM, signal.SIG_DFL if old is None else old)
+        for sig, h in old.items():
+            signal.signal(sig, signal.SIG_DFL if h is None else h)
 
 
 def run_search(adapter: OperationAdapter, settings: SearchSettings, out_dir,

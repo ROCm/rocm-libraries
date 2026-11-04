@@ -266,7 +266,10 @@ writes: nothing more is confirmed or logged to `trials.jsonl`, but
 can be written) holds the error. `130`: the run was interrupted (Ctrl-C, or
 SIGTERM such as a batch system's time limit); nothing is confirmed and
 `winners.json` is empty, but `summary.json` is written, with each problem's
-best discovery result.
+best discovery result. A build worker that gets the signal too (the batch
+system and Ctrl-C signal the whole process group) stops at once, so the
+summary does not wait for queued builds; a SIGTERM sent only to the driver's
+pid (`kill <pid>`) lets the round's builds finish first.
 
 Only a verified row of the requested kernel and problem with a finite positive
 latency counts as a result. A verification failure is `numeric_fail`; a blank
