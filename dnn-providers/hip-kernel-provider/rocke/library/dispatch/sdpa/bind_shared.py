@@ -218,9 +218,11 @@ def declined_table(
     all -- it carries that feature instead).
     """
     return {
-        feature: overrides[feature]
-        if feature in overrides
-        else f"{feature}: {_SHARED_DECLINE_REASONS[feature].format(family=family)}"
+        feature: (
+            overrides[feature]
+            if feature in overrides
+            else f"{feature}: {_SHARED_DECLINE_REASONS[feature].format(family=family)}"
+        )
         for feature in order
     }
 
