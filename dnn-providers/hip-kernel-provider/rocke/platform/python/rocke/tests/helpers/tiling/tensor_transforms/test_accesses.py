@@ -18,7 +18,10 @@ import ast
 import inspect
 import itertools
 import re
+from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 from rocke.core.ir import F16, F32, I32, I64, IRBuilder, Value
 from rocke.helpers.tiling import tensor_transforms as tt
@@ -42,6 +45,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     _required_checks,
 )
 from rocke.tests.gpu import current_device_arch
+from rocke.tests.source_tree import require_dsl_docs, require_library_tree
 
 from ._harness import (
     WAVE,
@@ -57,7 +61,12 @@ from .test_emit import _conv, _ConvAccess, _guarded, _halo_xor_case, _run
 
 ROCKE_DIR = Path(__file__).resolve().parents[4]
 TILING_DIR = ROCKE_DIR / "helpers" / "tiling"
-LIBRARY_DIR = ROCKE_DIR.parents[2] / "library"
+
+
+def _package_tree() -> Path:
+    """The ``rocke`` package these tests run from, in a source checkout or installed: a
+    callable, so the scans below take it beside the source-tree helpers."""
+    return ROCKE_DIR
 
 
 def _c(b: IRBuilder, value: int) -> Value:
@@ -145,7 +154,7 @@ def test_buffer_checked_sides_drop_exactly_the_named_sides_and_refuse_any_other(
 
 
 def _imports_of(path: Path, name: str) -> bool:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and any(a.name == name for a in node.names):
             return True
@@ -343,7 +352,7 @@ _MARKER_CALLERS = {"gpu_checked_value", "exit_if_tile_outside", "slice_tensor"}
 
 
 def _unchecked_marker_calls(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     found = []
 
     def visit(node: ast.AST, function: str | None) -> None:
@@ -363,21 +372,30 @@ def _unchecked_marker_calls(path: Path) -> list[str]:
     return found
 
 
-def test_the_range_marker_is_stated_only_by_its_checked_callers():
+# The trees the source scans below read: the rocke package, which every layout has, and a
+# source-only tree, which skips where this layout does not ship it.
+_PACKAGE = pytest.param(_package_tree, id="package")
+
+
+@pytest.mark.parametrize(
+    "tree", [_PACKAGE, pytest.param(require_library_tree, id="library")]
+)
+def test_the_range_marker_is_stated_only_by_its_checked_callers(
+    tree: Callable[[], Path],
+):
+    root = tree()
     allowed_tests = (
         ROCKE_DIR / "tests" / "core",
         ROCKE_DIR.parent.parent / "tests" / "core",
         Path(__file__).parent,
     )
-    roots = [ROCKE_DIR, LIBRARY_DIR]
     unchecked = []
-    for root in roots:
-        for path in sorted(root.rglob("*.py")):
-            if any(path.is_relative_to(t) for t in allowed_tests):
-                continue
-            if "tmp" in path.relative_to(root).parts:
-                continue
-            unchecked.extend(_unchecked_marker_calls(path))
+    for path in sorted(root.rglob("*.py")):
+        if any(path.is_relative_to(t) for t in allowed_tests):
+            continue
+        if "tmp" in path.relative_to(root).parts:
+            continue
+        unchecked.extend(_unchecked_marker_calls(path))
     assert not unchecked, unchecked
 
 
@@ -389,21 +407,18 @@ _REMOVED_NAMES = re.compile(
 )
 
 
-def test_the_removed_runtime_length_wrapper_is_named_nowhere():
-    roots = [ROCKE_DIR, ROCKE_DIR.parents[1] / "dsl_docs"]
+@pytest.mark.parametrize(
+    "tree", [_PACKAGE, pytest.param(require_dsl_docs, id="dsl_docs")]
+)
+def test_the_removed_runtime_length_wrapper_is_named_nowhere(tree: Callable[[], Path]):
+    root = tree()
     named = []
-    for root in roots:
-        for path in sorted(root.rglob("*")):
-            if (
-                path.suffix not in (".py", ".md")
-                or "tmp" in path.relative_to(root).parts
-            ):
-                continue
-            for lineno, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), 1
-            ):
-                if _REMOVED_NAMES.search(line):
-                    named.append(f"{path}:{lineno}")
+    for path in sorted(root.rglob("*")):
+        if path.suffix not in (".py", ".md") or "tmp" in path.relative_to(root).parts:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if _REMOVED_NAMES.search(line):
+                named.append(f"{path}:{lineno}")
     assert not named, named
 
 

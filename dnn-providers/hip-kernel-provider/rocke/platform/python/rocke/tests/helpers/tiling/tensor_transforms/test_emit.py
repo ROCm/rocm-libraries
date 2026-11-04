@@ -888,7 +888,9 @@ GOLDEN_CASES = {
 @pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
 def test_emitted_ir_text_matches_its_reviewed_golden(case):
     b, _ = GOLDEN_CASES[case]()
-    assert print_ir(b.kernel) + "\n" == (GOLDEN_DIR / f"emit_{case}.txt").read_text()
+    assert print_ir(b.kernel) + "\n" == (GOLDEN_DIR / f"emit_{case}.txt").read_text(
+        encoding="utf-8"
+    )
 
 
 def _store_parts(b: IRBuilder, addresses: tuple[tt.ElementAddress, ...]) -> int:
