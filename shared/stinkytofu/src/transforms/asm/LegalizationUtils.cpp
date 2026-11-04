@@ -266,6 +266,7 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
     const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
+    const GirActionData* girActionMod = inst->getModifier<GirActionData>();
 
     auto createBarrier = [&](GFX opcode) {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
@@ -282,6 +283,10 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     } else {
         firstInst = createBarrier(GFX::s_barrier_signal);
         lastInst = createBarrier(GFX::s_barrier_wait);
+    }
+    if (girActionMod) {
+        firstInst->addModifier<GirActionData>(*girActionMod);
+        if (lastInst != firstInst) lastInst->addModifier<GirActionData>(*girActionMod);
     }
 
     if (!comment.empty()) lastInst->addModifier<CommentData>(CommentData{comment});
