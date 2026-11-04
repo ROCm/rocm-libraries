@@ -1373,6 +1373,14 @@ _ORPHAN_YIELD_ERROR = (
     "scf.if_else with results"
 )
 
+# The refusal for an scf.for body with an scf.yield before its last op: the loop
+# takes its carried values only from the yield that ends its body. The C++
+# engine's rocke_i_scf_for_error reports the same text.
+_LOOP_EARLY_YIELD_ERROR = (
+    "scf.for body yields before its last op; a loop takes its values only from "
+    "the scf.yield that ends its body"
+)
+
 # The ops whose regions take the scf.yield ops directly in them: an scf.for
 # carries its body's yield into the next trip, and an scf.if_else applies its own
 # rule (_if_else_yields) to its branches. Every other region, the kernel body
@@ -1413,20 +1421,90 @@ def _orphan_yield(ops: Sequence[Op]) -> Op | None:
     return None
 
 
+def _scf_for_carried_count_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when its counts of carried values
+    disagree, or None when they agree.
+
+    The ``num_iter_args`` attr (0 when absent) gives the count; the init
+    operands (the operands after lower, upper and step), the ``iter_args``
+    metadata list (empty when absent) and the results each hold one entry per
+    carried value.
+    """
+    count = op.attrs.get("num_iter_args", 0)
+    metadata = op.attrs.get("iter_args", [])
+    if not isinstance(metadata, list):
+        return "scf.for iter_args metadata must be a list"
+    for what, actual in (
+        ("init operands", len(op.operands[3:])),
+        ("metadata entries", len(metadata)),
+        ("results", len(op.results)),
+    ):
+        if actual != count:
+            return f"scf.for declares {count} iter_args but has {actual} {what}"
+    return None
+
+
+def _scf_for_yield_error(op: Op) -> str | None:
+    """The refusal for the ``scf.yield`` ops directly in the body of the
+    ``scf.for`` ``op``, whose carried-value counts agree
+    (:func:`_scf_for_carried_count_error`), or None when they are sound.
+
+    The loop takes its carried values from the one ``scf.yield`` that ends its
+    body, so the body yields only at its end; it ends in a yield of one value
+    per init operand, of that operand's type, whenever the loop carries any. A
+    loop that carries none may end in an empty yield or in none.
+    """
+    if not op.regions:
+        return None
+    body_ops = op.regions[0].ops
+    carried = op.operands[3:]
+    count = len(carried)
+    if any(body_op.name == "scf.yield" for body_op in body_ops[:-1]):
+        return _LOOP_EARLY_YIELD_ERROR
+    if not body_ops or body_ops[-1].name != "scf.yield":
+        if not count:
+            return None
+        return (
+            f"scf.for carries {count} values, so its body must end in scf.yield "
+            f"of {count} values"
+        )
+    yielded = body_ops[-1].operands
+    if len(yielded) != count:
+        return (
+            f"scf.for carries {count} values, but its body yields {len(yielded)} values"
+        )
+    for index, (init, value) in enumerate(zip(carried, yielded)):
+        if value.type != init.type:
+            return (
+                f"scf.for iter_arg {index} is {init.type.name}, but its body "
+                f"yields {value.type.name}"
+            )
+    return None
+
+
 def _scf_for_error(op: Op) -> str | None:
     """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
 
-    A loop cannot carry a buffer descriptor
-    (:func:`_scf_for_carried_descriptor_error`), and it takes only the yields
-    directly in its body, so its body nests none in a region that takes no
-    yields (an ``scf.if`` in the body, say; :data:`_ORPHAN_YIELD_ERROR`). It
-    accepts any region count, as serialized IR reaches the verifier and the
-    lowerings without passing the builder. The verifier and every lowering of
-    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``).
+    A loop's counts of carried values agree
+    (:func:`_scf_for_carried_count_error`); it cannot carry a buffer
+    descriptor (:func:`_scf_for_carried_descriptor_error`); its body yields
+    once, at its end, the values it carries (:func:`_scf_for_yield_error`); and
+    it takes only the yields directly in its body, so its body nests none in a
+    region that takes no yields (an ``scf.if`` in the body, say;
+    :data:`_ORPHAN_YIELD_ERROR`). It accepts any operand and region count, as
+    serialized IR reaches the verifier and the lowerings without passing the
+    builder. The verifier and every lowering of ``scf.for`` use it, in both
+    engines (``rocke_i_scf_for_error``).
     """
-    descriptor_error = _scf_for_carried_descriptor_error(op)
-    if descriptor_error is not None:
-        return descriptor_error
+    error = _scf_for_carried_count_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_carried_descriptor_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_yield_error(op)
+    if error is not None:
+        return error
     if not op.regions:
         return None
     body = op.regions[0]

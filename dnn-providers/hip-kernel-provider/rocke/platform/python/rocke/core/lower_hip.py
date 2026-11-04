@@ -3056,19 +3056,13 @@ class _Lowerer:
 
     def _op_scf_yield(self, op: Op) -> None:
         # Map each yielded value to the corresponding iter_arg variable.
-        # We find the enclosing scf.for by walking up the lowering's region
-        # stack; here we just rely on positional order in the for op's
-        # iter_args attr captured at parent time. To make this robust, the
-        # builder records iter_args; the lowering matches them positionally.
-        # In practice we assume scf.yield is the last op in the for body.
+        # The lowering matches the yielded values to the for op's iter_args
+        # attr positionally; _scf_for_error has checked that this yield ends
+        # the loop body and gives one value per iter_args entry.
         parent_for = _find_enclosing_for(self.kernel.body, op)
         if parent_for is None:
             raise ValueError(_ORPHAN_YIELD_ERROR)
         meta = parent_for.attrs.get("iter_args", [])
-        if len(op.operands) != len(meta):
-            raise RuntimeError(
-                f"scf.yield: {len(op.operands)} values vs {len(meta)} iter_args"
-            )
         for m, v in zip(meta, op.operands):
             self._emit(f"{m['name'][1:]} = {_name(v)};")
 

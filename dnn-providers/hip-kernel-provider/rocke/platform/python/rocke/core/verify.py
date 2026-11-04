@@ -17,13 +17,14 @@ Checks performed:
 * **Type consistency** — for the op classes whose contract the IR fixes
   (elementwise arith with matching operand/result types, vector ops over
   vector types, ``vector.extract`` element typing, ``scf.for`` iter-arg /
-  result / yield typing).
+  result typing).
 * **Arity / result counts** — per-opcode operand and result counts where the
   builder guarantees them (binary arith, ``cf.return``, ``scf.yield``, etc.).
 * **Region well-formedness** — ``scf.for`` / ``scf.if`` carry their required
   regions; loop-carried values are typed; the kernel body ends in a terminator;
   every ``scf.yield`` is directly in an ``scf.for`` body or a branch of an
-  ``scf.if_else`` with results.
+  ``scf.if_else`` with results; a loop's carried-value counts agree and its
+  body yields them once, at its end, with their types (``_scf_for_error``).
 * **Attr maps** — required keys present per opcode; enum-valued attrs legal.
 * **Vector / smem / addrspace sanity** — vector widths > 0, smem shapes
   positive, pointer address spaces from the known set.
@@ -547,27 +548,16 @@ class _Verifier:
                 break
 
         iter_meta = op.attrs.get("iter_args", []) or []
-        if isinstance(iter_meta, list):
-            if len(iter_meta) != len(iter_inits):
+        # result types must match init types
+        for res, init in zip(op.results, iter_inits):
+            if res.type != init.type:
                 self.err(
-                    f"scf.for: {len(iter_meta)} iter_args declared but "
-                    f"{len(iter_inits)} init operands",
+                    f"scf.for: result type {res.type.name} != iter init "
+                    f"type {init.type.name}",
                     op,
                 )
-            if len(op.results) != len(iter_inits):
-                self.err(
-                    f"scf.for: {len(op.results)} results but {len(iter_inits)} "
-                    f"iter-args",
-                    op,
-                )
-            # result types must match init types
-            for res, init in zip(op.results, iter_inits):
-                if res.type != init.type:
-                    self.err(
-                        f"scf.for: result type {res.type.name} != iter init "
-                        f"type {init.type.name}",
-                        op,
-                    )
+        # The counts of carried values and the body's yields: one rule for the
+        # verifier and every lowering.
         loop_error = _scf_for_error(op)
         if loop_error is not None:
             self.err(loop_error, op)
@@ -600,27 +590,6 @@ class _Verifier:
         self._enclosing_loop_names = enclosing + tuple(loop_names)
         self._check_region(body, body_scope)
         self._enclosing_loop_names = enclosing
-
-        # body should end in scf.yield matching iter-arg types (if any iter-args)
-        if iter_inits:
-            if not body.ops or body.ops[-1].name != "scf.yield":
-                self.err("scf.for with iter-args: body must end in scf.yield", op)
-            else:
-                yld = body.ops[-1]
-                if len(yld.operands) != len(iter_inits):
-                    self.err(
-                        f"scf.yield yields {len(yld.operands)} values but loop "
-                        f"carries {len(iter_inits)} iter-args",
-                        yld,
-                    )
-                else:
-                    for yv, init in zip(yld.operands, iter_inits):
-                        if yv.type != init.type:
-                            self.err(
-                                f"scf.yield type {yv.type.name} != iter-arg type "
-                                f"{init.type.name}",
-                                yld,
-                            )
 
     # ---- scf.if ----
 

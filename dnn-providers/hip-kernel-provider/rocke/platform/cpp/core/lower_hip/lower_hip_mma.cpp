@@ -2018,9 +2018,7 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
 /* def _op_scf_yield(self, op):
  *     parent_for = _find_enclosing_for(self.kernel.body, op)
  *     if parent_for is None: raise ValueError(_ORPHAN_YIELD_ERROR)
- *     meta = parent_for.attrs.get("iter_args", [])
- *     if len(op.operands) != len(meta):
- *         raise RuntimeError(f"scf.yield: {len(op.operands)} values vs {len(meta)} iter_args")
+ *     meta = parent_for.attrs.get("iter_args", [])  # one entry per yielded value
  *     for m, v in zip(meta, op.operands):
  *         self._emit(f"{m['name'][1:]} = {_name(v)};")
  *
@@ -2098,11 +2096,8 @@ static rocke_status_t rocke_h_op_scf_yield(rocke_h_lowerer_t* lw, const rocke_op
         items = meta->u.list.items;
         meta_n = meta->u.list.count;
     }
-    if(op->num_operands != meta_n)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "scf.yield: %d values vs %d iter_args", op->num_operands, meta_n);
-    }
+    /* rocke_i_scf_for_error has checked that this yield ends the loop body and
+     * gives one value per iter_args entry. */
     for(i = 0; i < meta_n; i++)
     {
         const char* mname = rocke_attr_get_str(items[i], "name");

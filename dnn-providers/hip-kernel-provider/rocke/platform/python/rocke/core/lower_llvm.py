@@ -1286,25 +1286,12 @@ def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
 
 
 def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
-    """Validate serialized loop metadata and render the real carry types."""
+    """Validate each serialized loop metadata entry and render the real carry
+    types."""
+    # _scf_for_error has checked that num_iter, the init operands, the
+    # metadata list and the results agree.
     iter_inits = op.operands[3:]
     iter_meta = op.attrs.get("iter_args", [])
-    if not isinstance(iter_meta, list):
-        raise ValueError("scf.for iter_args metadata must be a list")
-    if len(iter_inits) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has "
-            f"{len(iter_inits)} init operands"
-        )
-    if len(iter_meta) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has "
-            f"{len(iter_meta)} metadata entries"
-        )
-    if len(op.results) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has {len(op.results)} results"
-        )
 
     llvm_types: List[str] = []
     for index, (meta, init, result) in enumerate(
@@ -7237,11 +7224,8 @@ class _Lowerer:
         last_body.emit(f"  br label %{latch.label}")
         last_body.terminated = True
 
+        # The body yields num_iter values, once: _scf_for_error checked it.
         yielded = self._yield_stack.pop()
-        if len(yielded) != num_iter:
-            raise RuntimeError(
-                f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
-            )
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
@@ -7384,12 +7368,6 @@ class _Lowerer:
 
             # Clear elision marker
             self._unroll_elide_sync_op = None
-
-            # Verify yield count
-            if len(yielded) != num_iter:
-                raise RuntimeError(
-                    f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
-                )
 
             # Update iteration variables with yielded values for next iteration
             for meta, yld in zip(iter_meta, yielded):

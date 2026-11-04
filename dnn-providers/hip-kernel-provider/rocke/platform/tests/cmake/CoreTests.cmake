@@ -472,21 +472,21 @@ if(BUILD_TESTING)
                  rocke_global_load_index_width)
   endif()
 
-  # The C++ verifier, if/else rule and both lowerings refuse a misplaced
-  # scf.yield and a malformed if/else, and check a result's type packed-only
-  # first.
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_if_else_yield_rule.cpp")
-    add_executable(rocke_if_else_yield_rule core/test_if_else_yield_rule.cpp)
-    target_link_libraries(rocke_if_else_yield_rule PRIVATE rocke_core)
-    add_test(NAME rocke_if_else_yield_rule COMMAND rocke_if_else_yield_rule)
-    set_tests_properties(rocke_if_else_yield_rule PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name rocke_if_else_yield_rule)
-    set_target_properties(rocke_if_else_yield_rule
+  # The C++ verifier, if/else and loop rules and both lowerings refuse a
+  # misplaced scf.yield, a malformed if/else and a malformed loop body, and
+  # check an if/else result's type packed-only first.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_yield_rules.cpp")
+    add_executable(rocke_yield_rules core/test_yield_rules.cpp)
+    target_link_libraries(rocke_yield_rules PRIVATE rocke_core)
+    add_test(NAME rocke_yield_rules COMMAND rocke_yield_rules)
+    set_tests_properties(rocke_yield_rules PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_yield_rules)
+    set_target_properties(rocke_yield_rules
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
-    install(TARGETS rocke_if_else_yield_rule
+    install(TARGETS rocke_yield_rules
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-                 rocke_if_else_yield_rule)
+                 rocke_yield_rules)
   endif()
 
   # Fenced barriers (fence attr of tile.sync / sync_lds_only / s_barrier_bare).

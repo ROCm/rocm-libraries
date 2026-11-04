@@ -346,11 +346,14 @@ extern const char* const ROCKE_ORPHAN_YIELD_ERROR;
 const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops);
 
 /* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
- * is sound (Python core/ir.py::_scf_for_error, same text): a loop carries no
- * buffer descriptor (rocke_i_scf_for_carried_descriptor_error), and takes only
- * the yields directly in its body, so the body nests none in a region that
- * takes no yields (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand / region
- * counts. The verifier and both lowerings use it. */
+ * is sound (Python core/ir.py::_scf_for_error, same text): its num_iter_args,
+ * init operands, iter_args metadata list and results agree in count; it
+ * carries no buffer descriptor (rocke_i_scf_for_carried_descriptor_error); its
+ * body yields only at its end, one value per init operand, of that operand's
+ * type, and ends in that yield whenever the loop carries any value; and it
+ * takes only the yields directly in its body, so the body nests none in a
+ * region that takes no yields (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand /
+ * region counts. The verifier and both lowerings use it. */
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else

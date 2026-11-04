@@ -41,6 +41,12 @@ run can drive. The installed wheel has no ``rocke_engine`` binding, so such a
 test runs the Python engine alone there and both engines wherever the binding
 is supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
 same engines through ``compile_kernel`` and similar entry points.
+
+Every engine this run can drive, plus the verifier:
+``assert_refused_everywhere`` and ``assert_accepted_everywhere`` run the Python
+verifier and the LLVM and HIP lowerings of each engine in
+``available_engines()``. Unlike the both-engine helpers they do not skip without
+the binding, so a run without it (installed CI) still checks the Python engine.
 """
 
 from __future__ import annotations
@@ -57,15 +63,18 @@ from rocke.core.ir import KernelDef
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.verify import verify
 
 __all__ = [
     "ENGINES",
     "Engine",
     "all_engines_backend",
+    "assert_accepted_everywhere",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
     "assert_engine_rejects",
     "assert_engine_rejects_hip",
+    "assert_refused_everywhere",
     "available_engines",
     "lower_hip_with_both_engines",
     "lower_hip_with_engine",
@@ -292,3 +301,42 @@ def assert_both_engines_reject_hip(
         lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
     )
     _assert_native_rejects(lambda: _native_hip(kernel, arch), message, None)
+
+
+def assert_refused_everywhere(
+    kernel: KernelDef,
+    arch: str,
+    error_type: type[Exception],
+    message: str,
+    llvm_flavor: str | None = None,
+) -> None:
+    """Assert that the Python verifier reports ``message`` for ``kernel`` and
+    that the LLVM and HIP lowerings of every engine in ``available_engines()``
+    refuse it as :func:`assert_engine_rejects` and
+    :func:`assert_engine_rejects_hip` check. The C++ verifier is not reached
+    through the binding; the native tests check it."""
+    assert message in [diagnostic.message for diagnostic in verify(kernel)]
+    for engine in available_engines():
+        assert_engine_rejects(
+            kernel,
+            arch,
+            engine=engine,
+            error_type=error_type,
+            message=message,
+            llvm_flavor=llvm_flavor,
+        )
+        assert_engine_rejects_hip(
+            kernel, arch, engine=engine, error_type=error_type, message=message
+        )
+
+
+def assert_accepted_everywhere(
+    kernel: KernelDef, arch: str, llvm_flavor: str | None = None
+) -> None:
+    """Assert that the Python verifier reports nothing for ``kernel`` and that
+    the LLVM and HIP lowerings of every engine in ``available_engines()`` accept
+    it, the two engines emitting the same text where both run."""
+    assert verify(kernel) == []
+    for engine in available_engines():
+        lower_with_engine(kernel, arch, engine=engine, llvm_flavor=llvm_flavor)
+        lower_hip_with_engine(kernel, arch, engine=engine)

@@ -2891,6 +2891,11 @@ rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
 const char* const ROCKE_ORPHAN_YIELD_ERROR = "scf.yield must be directly in an scf.for body or in "
                                              "a branch of an scf.if_else with results";
 
+/* Python core/ir.py::_LOOP_EARLY_YIELD_ERROR, same text. */
+static const char* const ROCKE_LOOP_EARLY_YIELD_ERROR
+    = "scf.for body yields before its last op; a loop takes its values only from the scf.yield "
+      "that ends its body";
+
 static const rocke_op_t* nested_orphan_yield(const rocke_op_t* op);
 
 const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops)
@@ -2925,9 +2930,115 @@ static const rocke_op_t* nested_orphan_yield(const rocke_op_t* op)
     return NULL;
 }
 
+/* Python core/ir.py::_scf_for_carried_count_error: the refusal for the scf.for
+ * `op` when its counts of carried values disagree, written into `buf`, or NULL
+ * when they agree. The num_iter_args attr (0 when absent) gives the count; the
+ * init operands (the operands after lower, upper and step), the iter_args
+ * metadata list (empty when absent) and the results each hold one entry per
+ * carried value. */
+static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    int64_t count = 0;
+    rocke_attr_get_int(&op->attrs, "num_iter_args", &count);
+    const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
+    if(metadata && metadata->kind != ROCKE_ATTR_LIST)
+    {
+        snprintf(buf, cap, "scf.for iter_args metadata must be a list");
+        return buf;
+    }
+    const struct
+    {
+        const char* what;
+        int actual;
+    } counts[] = {
+        {"init operands", op->num_operands > 3 ? op->num_operands - 3 : 0},
+        {"metadata entries", metadata ? metadata->u.list.count : 0},
+        {"results", op->num_results},
+    };
+    for(const auto& entry : counts)
+    {
+        if(entry.actual != count)
+        {
+            snprintf(buf,
+                     cap,
+                     "scf.for declares %lld iter_args but has %d %s",
+                     (long long)count,
+                     entry.actual,
+                     entry.what);
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_scf_for_yield_error: the refusal for the scf.yield ops
+ * directly in the body of the scf.for `op`, whose carried-value counts agree
+ * (scf_for_carried_count_error), written into `buf`, or NULL when they are
+ * sound. The loop takes its carried values from the one scf.yield that ends
+ * its body, so the body yields only at its end; it ends in a yield of one value
+ * per init operand (the operands after lower, upper and step), of that
+ * operand's type, whenever the loop carries any. A loop that carries none may
+ * end in an empty yield or in none. */
+static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_regions < 1 || !op->regions[0])
+        return NULL;
+    const rocke_region_t* body = op->regions[0];
+    const int count = op->num_operands > 3 ? op->num_operands - 3 : 0;
+    for(int i = 0; i + 1 < body->num_ops; i++)
+    {
+        if(body->ops[i]->opcode == ROCKE_OP_SCF_YIELD)
+        {
+            snprintf(buf, cap, "%s", ROCKE_LOOP_EARLY_YIELD_ERROR);
+            return buf;
+        }
+    }
+    if(body->num_ops == 0 || body->ops[body->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
+    {
+        if(count == 0)
+            return NULL;
+        snprintf(buf,
+                 cap,
+                 "scf.for carries %d values, so its body must end in scf.yield of %d values",
+                 count,
+                 count);
+        return buf;
+    }
+    const rocke_op_t* closing_yield = body->ops[body->num_ops - 1];
+    if(closing_yield->num_operands != count)
+    {
+        snprintf(buf,
+                 cap,
+                 "scf.for carries %d values, but its body yields %d values",
+                 count,
+                 closing_yield->num_operands);
+        return buf;
+    }
+    for(int i = 0; i < count; i++)
+    {
+        const rocke_type_t* init_type = op->operands[3 + i]->type;
+        const rocke_type_t* value_type = closing_yield->operands[i]->type;
+        if(!rocke_type_eq(value_type, init_type))
+        {
+            snprintf(buf,
+                     cap,
+                     "scf.for iter_arg %d is %s, but its body yields %s",
+                     i,
+                     init_type->name,
+                     value_type->name);
+            return buf;
+        }
+    }
+    return NULL;
+}
+
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
 {
+    if(scf_for_carried_count_error(op, buf, cap))
+        return buf;
     if(rocke_i_scf_for_carried_descriptor_error(op, buf, cap))
+        return buf;
+    if(scf_for_yield_error(op, buf, cap))
         return buf;
     if(op->num_regions < 1 || !op->regions[0])
         return NULL;
