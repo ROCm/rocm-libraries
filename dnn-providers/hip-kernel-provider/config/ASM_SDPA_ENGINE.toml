@@ -22,31 +22,23 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
-# ASM can rank only the bf16 D128 cases of the shared SdpaFwd sweeps
-# (integration-test-bundles/{quick,standard}/SdpaFwd/Default/), and in an installed
-# artifact it cannot load their kernels: AITER_ASM_DIR is the configure-time absolute
-# install prefix, and this entry sets no HIPDNN_AITER_ASM_DIR. The filter keys on the
-# case id's shape and dtype tokens (..._<D>_<dtype>_...), which assign_case_ids emits
-# while both vary across the sweep, including for cases import_graph.py appends. It
-# does not skip the whole sweep: the TOML skip runs before claim checks, so a
-# sweep-wide filter would silently hide any ASM-claimed case later added to it.
-# Arch-independent, so 'archs' is omitted.
-[[test_skips]]
-filters = ["*_SdpaFwd_Default.*_128_bfp16_*"]
-reason  = "ALMIOPEN-2766 — ASM SDPA fwd .co load fails (hipError 301) from a relocated install"
 
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
-# forward). SDPA backward gradients (dQ/dK/dV) accumulate more numerical error
-# than the forward pass and need the provider-local backward tolerance instead
-# — ported verbatim from the deleted provider-local
-# asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp (bf16: 5e-1, fp16: 2.5e-1).
+# forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here.
+# Calibrated on gfx942 against the CPU reference, with O and the LSE derived from
+# Q, K and V by the bundle fill, over every SdpaBackward case and eight seeds: the
+# worst |GPU - CPU| was 7.8e-3 for bf16 and 2.0e-3 for fp16, about one bf16 and two
+# fp16 ulps of the largest gradient (|dV| up to 2.1). Each entry leaves about 3x
+# that at the worst element, and an all-zero output fails every case.
+# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
+# in "_fp16_" keeps it from also matching "bfp16_".
 [[tolerance_overrides]]
-filters = ["*IntegrationGpuSdpaBwdBfp16*"]
-atol = 5e-1
-rtol = 5e-1
+filters = ["*_SdpaBackward_*.*_fp16_*"]
+atol = 2.5e-3
+rtol = 2.5e-3
 
 [[tolerance_overrides]]
-filters = ["*IntegrationGpuSdpaBwdFp16*"]
-atol = 2.5e-1
-rtol = 2.5e-1
+filters = ["*_SdpaBackward_*.*_bfp16_*"]
+atol = 1e-2
+rtol = 1e-2

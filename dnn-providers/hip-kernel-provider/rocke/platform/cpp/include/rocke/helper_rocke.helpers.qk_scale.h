@@ -33,7 +33,7 @@
  * apply_qk_scales. C99 has no exceptions, so:
  *
  *   * QkScaleSpec validation is exposed as rocke_qk_scale_spec_validate (returns
- *     1/0 + optional *out_reason), mirroring the sibling validate_io port. The
+ *     1/0 and writes the Python message into an optional caller buffer). The
  *     load helpers also re-check the spec/pointer on the builder's sticky-error
  *     model: an unsupported pointer or score type records ROCKE_ERR_VALUE + the
  *     Python-matching message on the builder and returns NULL.
@@ -103,10 +103,14 @@ void rocke_qk_scale_spec_init(rocke_qk_scale_spec_t* spec, rocke_qk_scale_layout
  *         raise ValueError("per_block scale_block must be > 0 "
  *                          "(got {scale_block})")
  *
- * Returns 1 if the spec is valid, 0 otherwise. *out_reason (if non-NULL)
- * receives a static / Python-matching message on rejection, or "" on success.
- * Takes no builder: pure validation, no IR side effects. */
-int rocke_qk_scale_spec_validate(const rocke_qk_scale_spec_t* spec, const char** out_reason);
+ * Returns 1 if the spec is valid, 0 otherwise. On rejection `reason` (if
+ * non-NULL, capacity reason_cap) receives the Python ValueError message,
+ * bad value included; on success it is set to "". The layout is an enum here,
+ * so an unknown layout is reported by its integer value. Takes no builder:
+ * pure validation, no IR side effects. */
+int rocke_qk_scale_spec_validate(const rocke_qk_scale_spec_t* spec,
+                                 char* reason,
+                                 size_t reason_cap);
 
 /* C99 port of load_q_scale_for_block:
  *

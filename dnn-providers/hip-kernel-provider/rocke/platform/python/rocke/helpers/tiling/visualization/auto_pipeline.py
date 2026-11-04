@@ -1531,16 +1531,16 @@ def _view_epilogue_flow(pipeline, *, out_path):
 
     # SHADE = transaction time order (§9.6): ONE shade per vectorized access, width from the RECORDED C-store
     # descriptor STRIDES, capped at b128 (`vector_transactions`), NOT from the register index or `vw`. `addr_fn`
-    # is the C store's memory order read straight off `cst.strides` (col-major C -> M stride-1; a row-major C
-    # would be N stride-1) -- NEVER assumed. So a lane's contiguous run splits into b128 transactions (e.g. a
+    # is the C store's memory order read straight off `cst.strides` (an M-contiguous C -> M stride-1; an
+    # N-contiguous C would be N stride-1) -- NEVER assumed. So a lane's contiguous run splits into b128 transactions (e.g. a
     # 16-wide f32 M-run = 4 shades), and the SAME store-transaction shade colours all three panels: the STORE
     # panel is banded (monotonic in memory order), the NATIVE panel is SCRAMBLED (each datum tinted by WHERE it
     # lands in the store) -- the scramble-vs-bands IS the within-lane reorder, made visible + physically honest.
     c_addr = lambda m, n, s=tuple(cst.strides): m * s[0] + n * s[1]
     # §9.6: ORDER THE REGISTER AXIS BY MEMORY ADDRESS -- the encoding/vreg index is NOT physical store order.
-    # `c_addr` reads the C descriptor's REAL strides (col-major C -> M stride-1; a row-major C -> N stride-1),
-    # so this is descriptor-driven and correct for EITHER major. Lane 0 defines the column order (symmetric
-    # across lanes). Without this, an M-contiguous (col-major) store renders N-fast and contradicts the ASM.
+    # `c_addr` reads the C descriptor's REAL strides (an M-contiguous C -> M stride-1; an N-contiguous C ->
+    # N stride-1), so this is descriptor-driven and correct for either contiguous axis. Lane 0 defines the
+    # column order (symmetric across lanes). Without this, an M-contiguous store renders N-fast and contradicts the ASM.
     nreg = max(r for _l, r in store_fm) + 1
     mem_order = tuple(sorted(range(nreg), key=lambda r: c_addr(*store_fm[(0, r)])))
     store_ts, _n = vector_transactions(
@@ -1660,7 +1660,7 @@ def _view_epilogue_flow(pipeline, *, out_path):
     stages += [
         # 64x64 stored tile: PER-LANE-PATCH grouping keeps it legible. Shade is the SAME b128-capped, stride-
         # driven store-transaction shade (passed explicitly, so it never falls back to the component's
-        # uncapped/row-major default) -- the wide run falls on the C store's real stride-1 axis.
+        # uncapped/coordinate-order default) -- the wide run falls on the C store's real stride-1 axis.
         FlowStage(
             "final C tile (stored, per-lane blocks)",
             LogicalTileComponent(

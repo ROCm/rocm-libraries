@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the ``is*`` predicate surface of
-``Tensile.Common.DataType.DataType`` (and the module-level ``_is8bitFloat``
+``tensilelite.Common.DataType.DataType`` (and the module-level ``_is8bitFloat``
 helper it delegates to).
 
 The predicate set is discovered by introspection so the matrix tracks the
@@ -38,7 +38,7 @@ import inspect
 
 import pytest
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 pytestmark = pytest.mark.unit
 

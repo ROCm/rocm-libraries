@@ -34,9 +34,7 @@
 
 #include "../rocsparse_sptrsm_descr.hpp"
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 #include "../level2/rocsparse_diagonal_solve.hpp"
-#endif
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)
@@ -331,15 +329,8 @@ namespace rocsparse
             alpha->data_type    = sptrsm_descr->get_compute_datatype();
         }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         if(sptrsm_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
         {
-            if(Y->batch_count > 1)
-            {
-                // LCOV_EXCL_START
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-                // LCOV_EXCL_STOP
-            }
 
             const rocsparse_diagonal_modifier modifier = sptrsm_descr->get_diagonal_modifier();
             const int64_t                     nrhs     = Y->cols;
@@ -360,47 +351,53 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::diagonal_solve_csr(handle,
-                                                  A_op,
-                                                  modifier,
-                                                  alpha->const_values,
-                                                  A,
-                                                  sptrsm_descr->get_csrsm_info(),
-                                                  nrhs,
-                                                  X->const_values,
-                                                  x_row_stride,
-                                                  x_col_stride,
-                                                  static_cast<int64_t>(0),
-                                                  Y->values,
-                                                  y_row_stride,
-                                                  y_col_stride,
-                                                  static_cast<int64_t>(0),
-                                                  static_cast<int64_t>(1),
-                                                  conj_x));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csr(
+                    handle,
+                    A_op,
+                    modifier,
+                    alpha->const_values,
+                    A,
+                    sptrsm_descr->get_csrsm_info(),
+                    nrhs,
+                    X->const_values,
+                    x_row_stride,
+                    x_col_stride,
+                    //
+                    // dnmat_set_strided_batch should take care of this.
+                    //
+                    (X->batch_count == 1) ? 0 : X->batch_stride,
+                    Y->values,
+                    y_row_stride,
+                    y_col_stride,
+                    Y->batch_stride,
+                    Y->batch_count,
+                    conj_x));
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                 return rocsparse_status_success;
             }
             case rocsparse_format_csc:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::diagonal_solve_csc(handle,
-                                                  A_op,
-                                                  modifier,
-                                                  alpha->const_values,
-                                                  A,
-                                                  sptrsm_descr->get_csrsm_info(),
-                                                  nrhs,
-                                                  X->const_values,
-                                                  x_row_stride,
-                                                  x_col_stride,
-                                                  static_cast<int64_t>(0),
-                                                  Y->values,
-                                                  y_row_stride,
-                                                  y_col_stride,
-                                                  static_cast<int64_t>(0),
-                                                  static_cast<int64_t>(1),
-                                                  conj_x));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csc(
+                    handle,
+                    A_op,
+                    modifier,
+                    alpha->const_values,
+                    A,
+                    sptrsm_descr->get_csrsm_info(),
+                    nrhs,
+                    X->const_values,
+                    x_row_stride,
+                    x_col_stride,
+                    //
+                    // dnmat_set_strided_batch should take care of this.
+                    //
+                    (X->batch_count == 1) ? 0 : X->batch_stride,
+                    Y->values,
+                    y_row_stride,
+                    y_col_stride,
+                    Y->batch_stride,
+                    Y->batch_count,
+                    conj_x));
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                 return rocsparse_status_success;
             }
@@ -417,7 +414,6 @@ namespace rocsparse
             }
             }
         }
-#endif
 
         _rocsparse_dnmat_descr Z_st{true,
                                     Y->rows,

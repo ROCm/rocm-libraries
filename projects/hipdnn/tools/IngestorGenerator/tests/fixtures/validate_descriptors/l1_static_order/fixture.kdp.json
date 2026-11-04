@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "id": "6254e906-76d3-4e2d-8ab1-3d9d6ab2453d",
+  "name": "hipkernel:fixture",
+  "arch": ["gfx942"],
+  "matchers": [
+    "8cc24955-971c-443b-8df9-492ed909f82c"
+  ],
+  "engine": "13ab344f-4818-4772-bb8e-8e1441fec82c",
+  "dispatch": "1af24c85-7f0f-4274-9a5d-df285eeb921d",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "2bbb41a3-cb0f-4ba9-abfa-5279bcfc6125",
+      "name": "fixture.f32_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "Fixture.cpp",
+        "entry_point": "Fixture"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4dfc8557-7e87-48d1-b512-be076419fad0",
+      "name": "fixture.f32_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "Fixture.cpp",
+        "entry_point": "Fixture"
+      },
+      "metadata": {
+        "block_size": 256,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ]
+}

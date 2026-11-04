@@ -1,32 +1,130 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""SSOT guards for the bare-op_id MMA accumulator-dtype lookup.
+"""SSOT guards for the bare-op_id MMA accumulator- and result-dtype lookups.
 
-``IRBuilder.mma`` uses ``target._op_id_c_dtype()`` to size a ``tile.mma`` result
-vector's accumulator element without an ``ArchTarget`` in hand. These tests pin
-the first-wins / raise-on-drift contract of that lookup so it stays deterministic
-across the arches that list a given op_id.
+``IRBuilder.mma`` uses ``target._op_id_dst_dtype()`` to size a ``tile.mma``
+result vector's element without an ``ArchTarget`` in hand;
+``target._op_id_c_dtype()`` answers the accumulator dtype the same way. These
+tests pin the first-wins / raise-on-drift contract of both lookups so they stay
+deterministic across the arches that list a given op_id.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
+from copy import deepcopy
 from dataclasses import asdict, replace
 from unittest import mock
 
 import pytest
 
-from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp, MmaScaleBlockK, MmaScaleDType
+from rocke.core.arch import (
+    ArchTarget,
+    MmaCatalog,
+    MmaOp,
+    MmaScaleBlockK,
+    MmaScaleDType,
+    known_arches,
+)
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
     _load_specs,
+    _expand_mma_rows,
+    _mma_op_by_id,
+    _GFX1250_SCALED_FAMILY,
     _op_id_c_dtype,
+    _op_id_dst_dtype,
     _op_id_family,
     normalize_dtype,
 )
+
+
+def test_filtered_catalog_preserves_supported_order_and_fields():
+    # Independent snapshot of the supported rows at 72c28a69, filtered with
+    # the LLVM legality table, plus the bf16-result row, the 16-bit-output,
+    # fp8-to-f16 and i8 rows, the f8f6f4 and f4 32x16x128 rows, and the fp8 /
+    # bf8 -> f32 K 128 rows. Preserve all remaining fields and relative order.
+    rows = _load_specs()["gfx1250"]["mma"]
+    assert len(rows) == 134
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    assert hashlib.sha256(encoded).hexdigest() == (
+        "79a9b44e43add19672f496216548d163d4416a9edd82c6663368cc4c1817376a"
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("generate", "gfx1250_wmma_scaled_v2"),
+        ("family", "wmma"),
+        ("input_dtypes", ["fp8", "bf8", "fp6", "bf6", "fp8"]),
+        ("input_dtypes", ["fp8"]),
+        ("scale_dtypes", ["e8m0", "e5m2", "e4m3"]),
+        ("scale_dtypes", ["e8m0", "e4m3", "e5m3"]),
+        ("block_k", [32, 8]),
+        ("block_k", [32.0, 16]),
+        ("shape", [16, 16, 64]),
+        ("c", "fp16"),
+        ("unexpected", True),
+    ],
+)
+def test_family_declaration_rejects_unsupported_axes(field, value):
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    declaration[field] = value
+    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+        _expand_mma_rows("gfx1250", [declaration])
+
+
+def test_family_declaration_is_admitted_by_its_content_on_any_arch():
+    # The declaration is checked against the one supported family, not against
+    # the name of the arch whose row carries it.
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    expected = _expand_mma_rows("gfx1250", [declaration])
+    assert expected
+    for gfx in ("gfx950", "gfx1201"):
+        assert _expand_mma_rows(gfx, [deepcopy(declaration)]) == expected
+
+
+def test_family_declaration_rejects_missing_fields_and_duplicates():
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    for field in declaration:
+        if field == "generate":
+            with pytest.raises(ValueError, match="invalid MMA declaration"):
+                _expand_mma_rows(
+                    "gfx1250", [{k: v for k, v in declaration.items() if k != field}]
+                )
+            continue
+        missing = {k: v for k, v in declaration.items() if k != field}
+        with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+            _expand_mma_rows("gfx1250", [missing])
+    rows = _expand_mma_rows("gfx1250", [declaration])
+    for declarations in (
+        [declaration, declaration],
+        [rows[0], declaration],
+        [declaration, rows[-1]],
+    ):
+        with pytest.raises(ValueError, match="duplicate MMA op_id"):
+            _expand_mma_rows("gfx1250", declarations)
+
+
+def test_atom_lookup_by_op_id_needs_no_target():
+    # Every catalogued atom is found from its op_id alone, whichever arch lists it.
+    for gfx in _load_specs():
+        for op in ArchTarget.from_gfx(gfx).mma.ops:
+            found = _mma_op_by_id(op.op_id)
+            assert found is not None
+            assert (found.op_id, found.family) == (op.op_id, op.family)
+    assert _mma_op_by_id("unknown") is None
+
+
+@pytest.mark.parametrize("declarations", [None, {}, [None], [42], [{}]])
+def test_invalid_family_schema_fails_loudly(declarations):
+    with pytest.raises(ValueError, match="MMA declaration"):
+        _expand_mma_rows("gfx1250", declarations)
 
 
 class TestOpIdCDtype(unittest.TestCase):
@@ -66,6 +164,16 @@ class TestOpIdCDtype(unittest.TestCase):
                     _op_id_c_dtype()
         finally:
             _op_id_c_dtype.cache_clear()
+
+
+class TestOpIdDstDtype(unittest.TestCase):
+    def test_matches_catalog_first_hit(self):
+        # A row's result dtype is its dst, or its accumulator c when it has none.
+        expected: dict = {}
+        for row in _load_specs().values():
+            for o in row["mma"]:
+                expected.setdefault(o["op_id"], normalize_dtype(o.get("dst", o["c"])))
+        self.assertEqual(_op_id_dst_dtype(), expected)
 
 
 def _contracts():
@@ -223,8 +331,8 @@ def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
 def test_scaled_catalog_identity_and_backend_contract():
     catalog = ArchTarget.from_gfx("gfx1250").mma
     rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
-    assert len(rows) == 50
-    assert len({row.op_id for row in rows}) == 50
+    assert len(rows) == 86
+    assert len({row.op_id for row in rows}) == 86
     for row in rows:
         tokens = {
             "fp8e4m3": "fp8",
@@ -235,10 +343,10 @@ def test_scaled_catalog_identity_and_backend_contract():
         }
         assert row.op_id == (
             f"wmma_gfx1250_f32_16x16x128_{tokens[row.a_dtype]}_{tokens[row.b_dtype]}"
-            f"_scale_e8m0_e8m0_k{row.scale_block_k}"
+            f"_scale_{row.a_scale_dtype}_{row.b_scale_dtype}_k{row.scale_block_k}"
         )
-        assert row.a_scale_dtype == row.b_scale_dtype == "e8m0"
-        assert row.a_scale_dtype is row.b_scale_dtype is MmaScaleDType.E8M0
+        assert isinstance(row.a_scale_dtype, MmaScaleDType)
+        assert isinstance(row.b_scale_dtype, MmaScaleDType)
         assert isinstance(row.scale_block_k, MmaScaleBlockK)
         packing = gfx1250_scaled_wmma(row.op_id)
         assert packing.atom is row
@@ -252,6 +360,10 @@ def test_scaled_catalog_identity_and_backend_contract():
         assert packing.matrix_formats == (
             selectors[row.a_dtype],
             selectors[row.b_dtype],
+        )
+        assert packing.scale_formats == tuple(
+            {"e8m0": 0, "e5m3": 1, "e4m3": 2}[dtype]
+            for dtype in (row.a_scale_dtype, row.b_scale_dtype)
         )
         assert packing.scales.count * packing.scales.block_k == row.k
         assert (row.a_frag_len, row.b_frag_len) == (16, 16)
@@ -407,3 +519,82 @@ def test_mma_naming_without_target_lookup():
                 )
                 result = b.mma(arg, a, a, c, *extra)
                 assert result.name.lstrip("%").startswith(hint)
+
+
+def test_rdna_integer_wmma_rows_name_i8_and_i4():
+    # The instruction names keep "iu8"/"iu4"; the operand dtypes are i8/i4, and only
+    # i8/i4 select the ops ("iu8"/"iu4" are not dtypes).
+    for gfx in ("gfx1151", "gfx11-generic"):
+        mma = ArchTarget.from_gfx(gfx).mma
+        for op_id, dtype, old in (
+            ("wmma_i32_16x16x16_iu8", "i8", "iu8"),
+            ("wmma_i32_16x16x16_iu4", "i4", "iu4"),
+        ):
+            op = mma.by_op_id(op_id)
+            assert (op.a_dtype, op.b_dtype, op.c_dtype) == (dtype, dtype, "i32")
+            for spelling, want in ((dtype, op_id), (old, None)):
+                found = mma.op_for_shape(
+                    family="wmma",
+                    a_dtype=spelling,
+                    b_dtype=spelling,
+                    c_dtype="i32",
+                    m=16,
+                    n=16,
+                    k=16,
+                )
+                assert (found and found.op_id) == want
+
+
+def test_gfx950_reaches_fp4_and_fp6_only_through_the_f8f6f4_mfma():
+    # gfx950 has no fp4-only 16x16x128 or fp6-only 16x16x96 MFMA instruction:
+    # the catalog lists neither op_id. A dense fp4 16x16x128 request selects the
+    # f8f6f4 MFMA reading fp4 x fp4; nothing serves fp6 at K 96.
+    mma = ArchTarget.from_gfx("gfx950").mma
+    op_ids = {op.op_id for op in mma.ops}
+    for op_id in ("mfma_f32_16x16x128_fp4", "mfma_f32_16x16x96_fp6"):
+        assert op_id not in op_ids
+        assert _op_id_family().get(op_id) is None
+    found = {
+        dtype: mma.op_for_shape(
+            family="mma",
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=16,
+            n=16,
+            k=k,
+        )
+        for dtype, k in (("fp4", 128), ("fp6", 96))
+    }
+    assert found["fp4"].op_id == "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1"
+    assert found["fp6"] is None
+
+
+@pytest.mark.parametrize("gfx", known_arches())
+def test_every_target_names_each_mma_contract_once(gfx):
+    # Selection answers one question per operand contract: op_for_shape and
+    # select_largest_k raise "ambiguous MMA query" when two ops of one target
+    # share a full contract, and the backend keys its lowering on op_id. So on
+    # every target both the op_id and the full contract (family, operand,
+    # accumulator and result dtypes, shape, scale contract) must name exactly
+    # one op.
+    ops = ArchTarget.from_gfx(gfx).mma.ops
+    op_ids = [op.op_id for op in ops]
+    contracts = [
+        (
+            op.family,
+            op.a_dtype,
+            op.b_dtype,
+            op.c_dtype,
+            op.dst_dtype,
+            op.m,
+            op.n,
+            op.k,
+            op.a_scale_dtype,
+            op.b_scale_dtype,
+            op.scale_block_k,
+        )
+        for op in ops
+    ]
+    assert sorted({x for x in op_ids if op_ids.count(x) > 1}) == []
+    assert [c for c in set(contracts) if contracts.count(c) > 1] == []

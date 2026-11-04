@@ -9,17 +9,15 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "ingestor/KernelIngestorTestFixtures.hpp"
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
-#include "ingestor/KernelIngestorTestFixtures.hpp"
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 /**
  * @file TestKernelIngestorConcurrency.cpp
@@ -31,60 +29,10 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
 constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
-
-/// Ceiling on every wait in this file: bounds a hang to a named assertion instead of a
-/// killed binary with no diagnosis. Named MAX_WAIT because winerror.h makes
-/// WAIT_TIMEOUT a macro.
-constexpr auto MAX_WAIT = std::chrono::seconds(30);
-
-class Gate
-{
-public:
-    bool wait()
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        return _cv.wait_for(lock, MAX_WAIT, [this] { return _open; });
-    }
-
-    void open()
-    {
-        {
-            const std::lock_guard<std::mutex> lock(_mutex);
-            _open = true;
-        }
-        _cv.notify_all();
-    }
-
-private:
-    std::mutex _mutex;
-    std::condition_variable _cv;
-    bool _open = false;
-};
-
-template <typename Body>
-void runConcurrently(int threadCount, Body body)
-{
-    Gate start;
-    std::vector<std::thread> threads;
-    threads.reserve(static_cast<size_t>(threadCount));
-
-    for(int i = 0; i < threadCount; ++i)
-    {
-        threads.emplace_back([&start, &body, i]() {
-            EXPECT_TRUE(start.wait()) << "thread " << i << " timed out waiting to start";
-            body(i);
-        });
-    }
-
-    start.open();
-    for(auto& thread : threads)
-    {
-        thread.join();
-    }
-}
 
 TEST(TestIngestorCacheConcurrency, SurvivesConcurrentReadsAndWrites)
 {
@@ -150,7 +98,7 @@ TEST(TestIngestorStateManagerConcurrency, RanksConsistentlyFromManyThreads)
             const MatchContext context{graph, 0, properties};
             const auto ranked = manager->sortedDefinitions(context);
             ASSERT_EQ(ranked.size(), 2U);
-            EXPECT_EQ(ranked.front().getIntMetadata(std::string(BLOCK_SIZE)), 256);
+            EXPECT_EQ(ranked.front()->getIntMetadata(std::string(BLOCK_SIZE)), 256);
         }
     });
 }
@@ -177,7 +125,7 @@ TEST(TestIngestorStateManagerConcurrency, ServesUncacheableGraphsConcurrently)
 {
     const ScopedTestSymbols symbols;
     const auto manager = makeTestStateManager();
-    const TestGraph graph;
+    const BytelessTestGraph graph;
     const auto properties = testDeviceProperties();
 
     runConcurrently(THREAD_COUNT, [&](int) {
@@ -198,7 +146,10 @@ TEST(TestIngestorStateManagerConcurrency, EvictsUnderConcurrentDistinctGraphs)
     runConcurrently(THREAD_COUNT, [&](int thread) {
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
-            const TestGraph graph(makeGraphId(static_cast<uint8_t>((thread * 7 + i) % 32)));
+            // Distinct content per seed: the catalog cache keys on content, not identity.
+            ContentCarryingTestGraph::Spec spec;
+            spec.tensors[0].dims = {4, 1 + ((thread * 7 + i) % 32)};
+            const ContentCarryingTestGraph graph{spec};
             const MatchContext context{graph, 0, properties};
 
             ASSERT_EQ(manager->unsortedDefinitions(context).size(), 2U);

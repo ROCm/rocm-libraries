@@ -7,15 +7,8 @@
 // License text and pinned upstream version: THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
 
-/**
- * @file knob_wrapper.h
- * @brief cuDNN-shaped knob projection helpers for the hipDNN cuDNN shim.
- *
- * cuDNN frontend exposes knobs as a fixed enum plus int64 min/max/stride
- * metadata. hipDNN native knobs are provider-defined string IDs with variant
- * values and richer constraints. The helpers here keep that conversion explicit
- * and lossy rather than aliasing incompatible types.
- */
+// Internal: lossy conversion between hipDNN knobs (string IDs, typed constraints)
+// and cuDNN FE knobs (KnobType_t, int64 min/max/stride).
 
 #pragma once
 

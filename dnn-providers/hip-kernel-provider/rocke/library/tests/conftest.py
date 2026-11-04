@@ -12,6 +12,7 @@
 # parents[1] -> rocke/library
 # parents[2] -> rocke
 
+import os
 import sys
 from pathlib import Path
 
@@ -38,14 +39,19 @@ _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
+# pytest rewrites asserts only in test modules and conftest files. Every
+# operation's pinned GPU tests come from this helper, so register it before a
+# test module imports it; otherwise a failed assert shows none of its values.
+pytest.register_assert_rewrite("reference_common.pinned_tests")
+
 
 def pytest_addoption(parser):
+    from reference_common.artifact import OPERATIONS
+
     parser.addoption("--rocke-reference-arch", default=None)
     parser.addoption("--rocke-reference-bundle", type=Path, default=None)
     parser.addoption("--rocke-reference-lock", type=Path, default=None)
-    parser.addoption(
-        "--rocke-reference-operation", choices=("sdpa", "conv"), default=None
-    )
+    parser.addoption("--rocke-reference-operation", choices=OPERATIONS, default=None)
     parser.addoption(
         "--gdn-batch",
         action="store",
@@ -58,6 +64,66 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="run GDN all-candidate numeric coverage for one stable spec ID",
+    )
+    parser.addoption(
+        "--rocke-seam-arches",
+        action="store",
+        default=None,
+        help=(
+            "comma-separated arch list for test_attention_body_seams's "
+            "score-hook IR-identity check (default: gfx950,gfx942,gfx1151)"
+        ),
+    )
+    parser.addoption(
+        "--rocke-require-hipdnn-assets",
+        action="store_true",
+        default=False,
+        help=(
+            "fail, instead of skip, the SDPA tests that read hipDNN's graph "
+            "template and golden bundles when those are missing"
+        ),
+    )
+
+
+def pytest_configure(config):
+    """Pin the production comgr (the torch wheel's bundled library) by path
+    for this session and its child processes, without importing torch
+    (``kernels/common/attention_bwd_comgr.py``), and give comgr's code-object
+    cache a directory of this session's own (removed at exit). An explicit ``ROCKE_COMGR_LIB`` /
+    ``AMD_COMGR_CACHE_DIR`` wins; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
+
+    An import failure of the ``kernels`` package is reported, not raised: the
+    tests that need the package fail on it themselves, the others still run
+    (the same rule as ``_restore_attention_arch_state`` below)."""
+    try:
+        from kernels.common.attention_bwd_comgr import ensure_production_comgr
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        config.issue_config_time_warning(
+            pytest.PytestConfigWarning(f"production comgr not pinned: {exc!r}"),
+            stacklevel=2,
+        )
+        return
+    ensure_production_comgr()
+
+
+def pytest_collection_finish(session):
+    """``ROCKE_BWD_PREBUILD=1``: compile the selected backward tests' kernels
+    once into ``ROCKE_BWD_HSACO_CACHE`` (``tests/_attention_bwd_prebuild.py``)."""
+    if os.environ.get("ROCKE_BWD_PREBUILD", "").strip() not in ("", "0"):
+        from tests._attention_bwd_prebuild import prebuild_session
+
+        prebuild_session(session)
+
+
+def pytest_terminal_summary(terminalreporter):
+    """With ``ROCKE_BWD_HSACO_CACHE``: one ``bwd-hsaco-cache:`` line of this
+    session's disk-cache counters (``misses`` = kernels compiled here)."""
+    ac = sys.modules.get("kernels.common.attention_bwd_cache")
+    if ac is None or not os.environ.get("ROCKE_BWD_HSACO_CACHE", "").strip():
+        return
+    stats = ac.env_cache_stats()
+    terminalreporter.write_line(
+        "bwd-hsaco-cache: " + " ".join(f"{k}={v}" for k, v in stats.items())
     )
 
 
@@ -72,11 +138,12 @@ def _restore_attention_arch_state():
     at all on a CPU one. Restoring it here makes the leak class impossible
     rather than relying on each test's own teardown.
 
-    ``_2D_LAUNCH_META`` is *cleared*, not restored: it is a pure memo whose
-    entries are derived from whatever arch was resolved when they were computed,
-    so a pinned-gfx942 entry must not be served back to a gfx950 test.
-    ``test_attn_k_slice_hd`` and ``test_attn_bf16_d128_ring`` clear it by hand
-    today; this makes that unnecessary.
+    ``_2D_LAUNCH_META`` and ``_2D_KV_ADDR_LIMITS`` are *cleared*, not restored:
+    they are pure memos whose entries are derived from whatever arch was
+    resolved when they were computed, so a pinned-gfx942 entry must not be
+    served back to a gfx950 test. ``test_attn_k_slice_hd`` and
+    ``test_attn_bf16_d128_ring`` clear the launch meta by hand today; this makes
+    that unnecessary.
 
     Deliberately NOT covered here: ``HIPDNN_GFX942_*`` env overrides. An env leak
     belongs to the test that pops them (``monkeypatch.delenv``), not to a blanket
@@ -98,6 +165,108 @@ def _restore_attention_arch_state():
         if au is not None:
             au._RESOLVED_ATTENTION_ARCH = prev
             au._2D_LAUNCH_META.clear()
+            au._2D_KV_ADDR_LIMITS.clear()
+
+
+def _memo_max(raw) -> int:
+    """``ROCKE_BWD_MEMO_MAX``: unset or empty = 8; 0 or less = off."""
+    raw = (raw or "").strip()
+    if not raw:
+        return 8
+    try:
+        return int(raw)
+    except ValueError:
+        raise pytest.UsageError(
+            f"ROCKE_BWD_MEMO_MAX must be an integer (0 = off), got {raw!r}"
+        ) from None
+
+
+_BWD_MEMO_MAX = _memo_max(os.environ.get("ROCKE_BWD_MEMO_MAX"))
+# The attention backward test modules memoize every kernel they build;
+# only they are bounded and regrouped below.
+_BWD_TEST_PREFIXES = ("test_attention_bwd", "test_attention_dense_bwd")
+# Backward module -> its memos, filled at collection. Only modules with
+# collected tests are recorded, so a memo must be called only from its own
+# module (true today); one imported elsewhere would not be bounded.
+_memo_modules: dict = {}
+
+
+def _is_bwd_test_module(mod) -> bool:
+    path = getattr(mod, "__file__", None) or ""
+    if not os.path.basename(path).startswith(_BWD_TEST_PREFIXES):
+        return False
+    # pytest keeps the path it was given; resolve it like _TESTROOT so a
+    # symlinked checkout still matches.
+    return os.path.dirname(os.path.realpath(path)) == str(_TESTROOT)
+
+
+def _module_caches(mod) -> list:
+    """The ``functools.cache`` / ``lru_cache`` helpers defined in ``mod``."""
+    return [
+        obj
+        for obj in vars(mod).values()
+        if getattr(obj, "__module__", None) == mod.__name__
+        and callable(getattr(obj, "cache_info", None))
+    ]
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Bound the backward test modules' kernel memos.
+
+    Those modules wrap kernel build and lowering in an unbounded ``@cache``
+    (``kernel_of``, ``ir_of``, ``_kernel``, ...). Every built kernel and its
+    ``.ll`` text then stays alive for the life of the process, about 1-5 MB
+    per test, so ``pytest -n N`` workers grow by gigabytes and get OOM-killed.
+    A memo holding more than ``ROCKE_BWD_MEMO_MAX`` entries
+    (default 8; 0 = never bound) is cleared once the last test of a parameter
+    set is done, never in the middle of one. :func:`_group_by_parameter_set`
+    runs the tests of one parameter set back to back, so most tests of one
+    kernel share its build.
+
+    Cost: a kernel is rebuilt when a later parameter set uses it again, for
+    example after a test that sweeps every kernel, or in the ``*_sched``
+    modules, whose reuse is thousands of tests apart. Measured, one process:
+    ``test_attention_bwd_unified.py`` 530 -> 1,066 builds and 76 -> 137 s;
+    ``test_attention_bwd_ir.py -k "gfx942 and debug"`` 1,182 -> 1,405 builds
+    and 61 -> 128 s. Other test modules are not touched."""
+    if getattr(item, "module", None) not in _memo_modules:
+        return
+    from tests.run_device_shards import shard_key
+
+    if nextitem is not None and shard_key(nextitem) == shard_key(item):
+        return
+    for fns in _memo_modules.values():
+        for fn in fns:
+            if fn.cache_info().currsize > _BWD_MEMO_MAX:
+                fn.cache_clear()
+
+
+def _group_by_parameter_set(items: list) -> None:
+    """In a backward test module with a kernel memo, run every test of one
+    parameter set back to back (the ``ROCKE_TEST_SHARD`` key: module plus
+    parameter id), in first-seen order. Each test function otherwise walks
+    every kernel in turn, so a bounded memo would rebuild them all for the
+    next function. Every other module keeps its order. Also records each
+    such module's memos in ``_memo_modules`` for
+    :func:`pytest_runtest_teardown`."""
+    from tests.run_device_shards import shard_key
+
+    if _BWD_MEMO_MAX <= 0:
+        return
+    memo, first = {}, {}
+    keys = []
+    for i, item in enumerate(items):
+        mod = getattr(item, "module", None)
+        if mod is not None and mod not in memo:
+            fns = _module_caches(mod) if _is_bwd_test_module(mod) else []
+            memo[mod] = bool(fns)
+            if fns:
+                _memo_modules[mod] = fns
+        key = shard_key(item) if mod is not None and memo[mod] else item.nodeid
+        first.setdefault(key, i)
+        keys.append(first[key])
+    order = {id(item): k for item, k in zip(items, keys)}
+    items.sort(key=lambda item: order[id(item)])
 
 
 def pytest_sessionstart(session):
@@ -107,6 +276,15 @@ def pytest_sessionstart(session):
 
 
 def pytest_collection_modifyitems(config, items):
+    """``--rocke-reference-arch``: keep that arch's reference cases; then
+    ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
+    ``tests/run_device_shards.py``; unset: every item); then group the tests
+    of one kernel (:func:`_group_by_parameter_set`)."""
     from reference_common.pytest_support import select_reference_items
 
     select_reference_items(config, items)
+    if os.environ.get("ROCKE_TEST_SHARD", "").strip():
+        from tests.run_device_shards import select_items
+
+        select_items(config, items)
+    _group_by_parameter_set(items)

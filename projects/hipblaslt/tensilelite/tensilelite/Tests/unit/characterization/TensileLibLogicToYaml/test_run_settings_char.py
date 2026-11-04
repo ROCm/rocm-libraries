@@ -12,9 +12,9 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileLibLogicToYaml")
-LibraryIO = importlib.import_module("Tensile.LibraryIO")
-ClientWriter = importlib.import_module("Tensile.ClientWriter")
+M = importlib.import_module("tensilelite.TensileLibLogicToYaml")
+LibraryIO = importlib.import_module("tensilelite.LibraryIO")
+ClientWriter = importlib.import_module("tensilelite.ClientWriter")
 
 _CHAR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Source of a realistic solution state for the benchmark data built below.

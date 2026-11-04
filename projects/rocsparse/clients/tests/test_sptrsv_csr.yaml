@@ -279,3 +279,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   graph_test: true
+
+- name: sptrsv_csr
+  category: quick
+  function: sptrsv_csr_extra

@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "5b0f3c1e-2d8a-4f6b-9c47-1e8d2a7b3f90",
+  "name": "fixture engine estimate",
+  "adapter": "native",
+  "objective": "min",
+  "score": {
+    "metric": "time",
+    "calibrated": true,
+    "transform": "identity"
+  },
+  "native": {
+    "symbol": "hipkernel.fixture.engine_estimate"
+  }
+}

@@ -8,7 +8,7 @@
   "matchers": [
     "umd-solo"
   ],
-  "engine": "ued-solo",
+  "engine": "7dfa7b97-7409-5013-8bc5-a644a26ab88d",
   "dispatch": "udd-solo",
   "kernelDescriptors": [
     {
@@ -36,8 +36,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "ued-solo",
-              "kmd_id": "kmd-solo",
+              "engine_id": "7dfa7b97-7409-5013-8bc5-a644a26ab88d",
+              "kmd_id": "17fd20dc-1faf-5e2b-ac45-b610aa4ce4c4",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "block_size",

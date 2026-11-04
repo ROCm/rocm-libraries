@@ -14,7 +14,16 @@
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
+#include "rocke/mfma_scale_internal.h"
 #include "rocke/storage.h"
+
+/* Mirrors target._gfx1250_scale_combination_valid and LLVM's supported pairs:
+ * https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74
+ * Matrix selectors: FP8=0, BF8=1, FP6=2, BF6=3, FP4=4; E8M0 scale selector=0. */
+static inline constexpr bool rocke_scaled_wmma_formats_valid(int a, int b, int sa, int sb)
+{
+    return (a == 4 || sa == 0) && (b == 4 || sb == 0) && (a != 4 || b != 4 || sa == sb);
+}
 
 typedef struct rocke_scale_packing
 {
@@ -44,25 +53,15 @@ static inline rocke_fragment_packing_t rocke_scale_fragment(const rocke_scale_pa
     return result;
 }
 
+/* The f8f6f4 operand layout of `dtype` in `abi_words` words over two groups
+ * of 16 lanes (rocke_matrix_operand_layout). */
 static inline rocke_matrix_fragment_layout_t rocke_scaled_matrix_layout(const char* dtype,
                                                                         int abi_words)
 {
     const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
-    int chunk = 0;
-    if(info && (strcmp(info->name, "fp8e4m3") == 0 || strcmp(info->name, "bf8e5m2") == 0))
-        chunk = 16;
-    else if(info
-            && (strcmp(info->name, "fp4e2m1") == 0 || strcmp(info->name, "fp6e2m3") == 0
-                || strcmp(info->name, "fp6e3m2") == 0))
-        chunk = 32;
-    rocke_bit_packing_t bits;
-    rocke_fragment_packing_t fragment;
-    rocke_matrix_fragment_layout_t result;
-    if(!chunk || abi_words < 0 || !rocke_bit_packing_init(&bits, info->encoded_bits, 0)
-       || !rocke_fragment_packing_init(&fragment, &bits, 64, 32, abi_words)
-       || !rocke_matrix_fragment_layout_init(&result, &fragment, chunk, 2, 16))
+    if(!info || rocke_mfma_matrix_format(info->name) < 0 || abi_words < 0)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled matrix layout");
-    return result;
+    return rocke_matrix_operand_layout(info->name, abi_words, 2, 16);
 }
 
 typedef struct rocke_scaled_wmma_op
@@ -82,9 +81,12 @@ static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma(const char* op_id)
         return NULL;
     if(strncmp(op_id, "tile.", 5) == 0)
         op_id += 5;
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
-    const rocke_mma_op_t* atom = rocke_mma_catalog_by_op_id(&target->mma, op_id);
-    return atom && strcmp(atom->family, "wmma_scaled") == 0 ? atom : NULL;
+    /* The atom comes from whichever arch's catalog lists op_id; whether a
+     * given target may lower it is the lowerer's question. */
+    const char* family = rocke_arch_mma_op_id_family(op_id);
+    if(!family || strcmp(family, "wmma_scaled") != 0)
+        return NULL;
+    return rocke_arch_mma_op_by_id(op_id);
 }
 
 static inline rocke_matrix_fragment_layout_t
@@ -115,11 +117,22 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
             spec.matrix_formats[i] = 4;
         else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA matrix format");
-        if(!scale_dtypes[i] || strcmp(scale_dtypes[i], "e8m0") != 0)
+        if(scale_dtypes[i] && strcmp(scale_dtypes[i], "e8m0") == 0)
+            spec.scale_formats[i] = 0;
+        else if(scale_dtypes[i] && strcmp(scale_dtypes[i], "e5m3") == 0)
+            spec.scale_formats[i] = 1;
+        else if(scale_dtypes[i] && strcmp(scale_dtypes[i], "e4m3") == 0)
+            spec.scale_formats[i] = 2;
+        else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA scale format");
-        spec.scale_formats[i] = 0; // E8M0.
         spec.matrix_words[i] = words[i];
     }
+    if(!rocke_scaled_wmma_formats_valid(spec.matrix_formats[0],
+                                        spec.matrix_formats[1],
+                                        spec.scale_formats[0],
+                                        spec.scale_formats[1]))
+        ckc::raise_status(ROCKE_ERR_VALUE,
+                          "unsupported scaled WMMA matrix/scale format combination");
     if((atom->scale_block_k != 16 && atom->scale_block_k != 32)
        || strcmp(atom->c_dtype, "fp32") != 0 || atom->m != 16 || atom->n != 16 || atom->k != 128)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");

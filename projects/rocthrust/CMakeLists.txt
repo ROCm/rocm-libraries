@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.7.0")
+set(VERSION_STRING "4.7.1")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
@@ -149,7 +149,7 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)

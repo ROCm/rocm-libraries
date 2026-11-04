@@ -243,11 +243,18 @@ endif()
 
 # The independent arithmetic reference is a host test on every FMHA architecture.
 add_gtest_executable(test_ck_tile_fmha_reference test_fmha_reference.cpp)
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
 target_compile_options(test_ck_tile_fmha_reference PRIVATE -Wno-float-equal)
 get_test_property(test_ck_tile_fmha_reference LABELS FMHA_REFERENCE_COMMON_LABELS)
 set_tests_properties(test_ck_tile_fmha_reference PROPERTIES
     LABELS "${FMHA_REFERENCE_COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
 list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_reference)
+# script/dependency-parser/smart_build_ci.sh force-builds the ninja target
+# `${TEST_NAME}` and runs `ctest -R ${TEST_NAME}` whenever the ck_tile FMHA
+# example changes. That regex is unanchored, so it also selects this test;
+# without the edge below the binary is never built and ctest reports Not Run.
+# Keep the umbrella a superset of what the regex matches.
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
 
 # Python integration test for the fmha_fwd codegen path.
 #

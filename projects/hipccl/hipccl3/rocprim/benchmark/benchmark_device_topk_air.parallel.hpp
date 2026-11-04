@@ -98,7 +98,11 @@ struct device_topk_air_benchmark : public primbench::benchmark_interface
                       "Size of mathed_int_t is not the same as input key_type");
 
         // TODO: get this value from Config
-        constexpr unsigned int radix_bits = 8;
+        constexpr unsigned int type_max_bits
+            = sizeof(key_type) == 1 && rocprim::is_signed<key_type>::value
+                  ? sizeof(key_type) * 8 - 1 // leave sign bit clear
+                  : sizeof(key_type) * 8;
+        constexpr unsigned int radix_bits = std::min(8u, type_max_bits);
         matched_int_t          max_int    = key_type{0};
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < radix_bits; ++i)

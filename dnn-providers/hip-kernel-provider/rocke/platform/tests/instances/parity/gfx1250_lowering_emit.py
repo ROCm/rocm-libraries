@@ -20,6 +20,7 @@
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
 from rocke.core.arch import ArchTarget
+from rocke.core.arch.target import _gfx1250_scale_combination_valid
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -75,7 +76,7 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(a_kind, b_kind, scale_mode):
+def _wmma_scaled(a_kind, b_kind, scale_mode, scale_a="e8m0", scale_b="e8m0"):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
     block_k = 16 if scale_mode == "scale16" else 32
@@ -84,7 +85,7 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
         a_dtype=a_kind,
         b_dtype=b_kind,
         c_dtype="fp32",
-        scales=("e8m0", "e8m0", block_k),
+        scales=(scale_a, scale_b, block_k),
         m=16,
         n=16,
         k=128,
@@ -126,12 +127,10 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
 
 
 def _tr16_b128(elem):
-    """ds_read_b128_tr_b16.
+    """ds_load_tr16_b128.
 
-    gfx950 has one type-agnostic opcode returning <8 x i16> that the handler
-    reinterprets; gfx1250 has per-element-type opcodes (.v8f16 / .v8bf16) that
-    land in the right type with no reinterpret. Run on both arches so the
-    element-typed selection cannot be hardcoded either way.
+    gfx1250 has per-element-type opcodes (.v8f16 / .v8bf16) that land in the
+    right type. gfx950 has no wide transpose read and raises.
     """
 
     def build(b: IRBuilder) -> None:
@@ -253,9 +252,7 @@ CONFIGS = [
     (_wmma_scaled("fp4", "fp4", "scale"), "gfx1250"),
     (_wmma_scaled("fp4", "fp4", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
-    (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
-    (_tr16_b128(BF16), "gfx950"),
     (build_barrier_drains, "gfx1250"),
     (build_barrier_drains, "gfx950"),
     (build_wait_counters, "gfx1250"),
@@ -318,6 +315,25 @@ CONFIGS.extend(
     for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
     for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
     if a != b
+)
+
+
+# Keep the supported FP4 scale cases in their original order.
+_MATRIX_DTYPES = ("fp8", "bf8", "fp6", "bf6", "fp4")
+_SCALE_DTYPES = ("e8m0", "e5m3", "e4m3")
+_SCALE_PAIRS = [
+    (a, b, sa, sb)
+    for a in _MATRIX_DTYPES
+    for b in _MATRIX_DTYPES
+    for sa in _SCALE_DTYPES
+    for sb in _SCALE_DTYPES
+    if (sa, sb) != ("e8m0", "e8m0") and _gfx1250_scale_combination_valid(a, b, sa, sb)
+]
+
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode, sa, sb), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b, sa, sb in _SCALE_PAIRS
 )
 
 
@@ -453,6 +469,60 @@ def build_tdm(b: IRBuilder) -> None:
 
 
 CONFIGS.append((build_tdm, "gfx1250"))
+
+
+def build_buffer_store_cachepolicy(b: IRBuilder) -> None:
+    """The f16/bf16 buffer stores with their optional cache-policy immediate:
+    every store form with a non-zero value (it reaches the intrinsic's aux
+    operand) and one default store (no attribute, aux 0)."""
+    src = b.param("src", PtrType(F16, "global"), readonly=True, align=16)
+    dst = b.param("dst", PtrType(F16, "global"), align=16)
+    nbytes = b.param("nbytes", I32)
+    rs = b.buffer_rsrc(src, nbytes)
+    rd = b.buffer_rsrc(dst, nbytes)
+    c0 = b.const_i32(0)
+    off = b.mul(b.thread_id_x(), b.const_i32(16))
+    h8 = b.buffer_load_vN(rs, off, c0, F16, 8)
+    b.buffer_store_vN_f16(rd, off, c0, h8, 4, cachepolicy=1)
+    h2 = b.buffer_load_vN(rs, off, c0, F16, 2)
+    b.buffer_store_vN_f16(rd, off, c0, h2, 1, cachepolicy=24)
+    b.buffer_store_vN_f16(rd, off, c0, h8, 4)
+    h1 = b.buffer_load_f16(rs, off, c0)
+    b.buffer_store_f16(rd, off, c0, h1, cachepolicy=3)
+    g8 = b.buffer_load_vN(rs, off, c0, BF16, 8)
+    b.buffer_store_vN_bf16(rd, off, c0, g8, 4, cachepolicy=1)
+    g4 = b.buffer_load_vN(rs, off, c0, BF16, 4)
+    b.buffer_store_vN_bf16(rd, off, c0, g4, 2, cachepolicy=17)
+    g1 = b.buffer_load_bf16(rs, off, c0)
+    b.buffer_store_bf16(rd, off, c0, g1, cachepolicy=31)
+    b.ret()
+
+
+CONFIGS.append((build_buffer_store_cachepolicy, "gfx1250"))
+
+
+def build_buffer_load_scalar(b: IRBuilder) -> None:
+    """The dtype-generic scalar buffer load for every element type (the
+    16-bit ones through the i16 intrinsic, the 32-bit ones through i32)."""
+    src = b.param("src", PtrType(I32, "global"), readonly=True, align=16)
+    dst = b.param("dst", PtrType(I32, "global"), align=16)
+    nbytes = b.param("nbytes", I32)
+    rs = b.buffer_rsrc(src, nbytes)
+    rd = b.buffer_rsrc(dst, nbytes)
+    c0 = b.const_i32(0)
+    off = b.mul(b.thread_id_x(), b.const_i32(4))
+    h = b.buffer_load(rs, off, c0, F16)
+    g = b.buffer_load(rs, off, c0, BF16)
+    f = b.buffer_load(rs, off, c0, F32)
+    i = b.buffer_load(rs, off, c0, I32)
+    b.buffer_store_f16(rd, off, c0, h)
+    b.buffer_store_bf16(rd, off, c0, g)
+    b.buffer_store_f32(rd, off, c0, f)
+    b.buffer_store_f32(rd, off, c0, b.bitcast(i, F32))
+    b.ret()
+
+
+CONFIGS.append((build_buffer_load_scalar, "gfx1250"))
 
 
 def _spec(idx: int):

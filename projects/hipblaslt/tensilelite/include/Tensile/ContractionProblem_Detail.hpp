@@ -158,12 +158,16 @@ namespace TensileLite
                                              rhs.fusedGemmA2A(),
                                              lhs.fusedA2AExtent(),
                                              rhs.fusedA2AExtent(),
-                                             lhs.fusedA2AWorld(),
-                                             rhs.fusedA2AWorld(),
+                                             lhs.world(),
+                                             rhs.world(),
                                              lhs.mxBlockA(),
                                              rhs.mxBlockA(),
                                              lhs.mxBlockB(),
                                              rhs.mxBlockB(),
+                                             lhs.mxBlockFreeA(),
+                                             rhs.mxBlockFreeA(),
+                                             lhs.mxBlockFreeB(),
+                                             rhs.mxBlockFreeB(),
                                              lhs.mxTypeA(),
                                              rhs.mxTypeA(),
                                              lhs.mxTypeB(),
@@ -189,7 +193,14 @@ namespace TensileLite
                                         lhs.getParams().gsu(),
                                         rhs.getParams().gsu(),
                                         lhs.getParams().fallbackStatus(),
-                                        rhs.getParams().fallbackStatus());
+                                        rhs.getParams().fallbackStatus(),
+                                        // A is Int4 in every w4a16 mode; compare the mode fields.
+                                        lhs.scaleBlockSizeA(),
+                                        rhs.scaleBlockSizeA(),
+                                        lhs.scaleZeroPointA(),
+                                        rhs.scaleZeroPointA(),
+                                        lhs.int4EncodingA(),
+                                        rhs.int4EncodingA());
         }
     };
 } // namespace TensileLite
@@ -235,9 +246,11 @@ namespace std
                                           problem.swizzleTensorB(),
                                           problem.fusedGemmA2A(),
                                           problem.fusedA2AExtent(),
-                                          problem.fusedA2AWorld(),
+                                          problem.world(),
                                           problem.mxBlockA(),
                                           problem.mxBlockB(),
+                                          problem.mxBlockFreeA(),
+                                          problem.mxBlockFreeB(),
                                           problem.mxTypeA(),
                                           problem.mxTypeB(),
                                           problem.getParams().smCountTarget(),
@@ -248,7 +261,10 @@ namespace std
                                           problem.amaxd().dataType(),
                                           problem.beta() == 0.0,
                                           problem.getParams().gsu(),
-                                          problem.getParams().fallbackStatus()));
+                                          problem.getParams().fallbackStatus(),
+                                          problem.scaleBlockSizeA(),
+                                          problem.scaleZeroPointA(),
+                                          problem.int4EncodingA()));
         }
     };
 

@@ -66,12 +66,12 @@
 //
 // FOOTPRINT
 // ---------
-// Only the row pointer array is large: (m + 1) * sizeof(int32_t) = 2.15 GB. It
-// is built on the DEVICE with hipMemset plus a single 4-byte write, so there is
-// no multi-gigabyte host allocation and no host->device copy of the row
-// pointers. The column, value and temporary buffers are a handful of bytes. If
-// the allocation cannot be satisfied the test fails with a message rather than
-// skipping.
+// Only the row pointer array is large: (m + 1) * sizeof(rocsparse_int) = 2.15 GB
+// (4.3 GB with rocsparse_ILP64). It is built on the DEVICE with hipMemset plus a
+// single rocsparse_int write, so there is no multi-gigabyte host allocation and
+// no host->device copy of the row pointers. The column, value and temporary
+// buffers are a handful of bytes. If the allocation cannot be satisfied the test
+// fails with a message rather than skipping.
 //
 // WHAT THIS DOES NOT COVER, AND WHERE THAT IS COVERED
 // ---------------------------------------------------
@@ -107,16 +107,18 @@ namespace
     // Smallest row count at which the int32_t (wf_size * m) product overflows for
     // the dispatched wf_size of 4: 4 * (2^29 + 1) = 2^31 + 4. See the SIZING note
     // above.
-    constexpr int32_t large_m = (int32_t{1} << 29) + 1; // 536,870,913
+    constexpr rocsparse_int large_m = (rocsparse_int{1} << 29) + 1; // 536,870,913
 
     // Exactly one nonzero in the whole matrix, so avg_row_nnz = nnz / m = 0 and
     // the dispatcher selects wf_size 4.
-    constexpr int32_t large_nnz = 1;
+    constexpr rocsparse_int large_nnz = 1;
 
     constexpr rocsparse_index_base   BASE    = rocsparse_index_base_zero;
     constexpr rocsparse_matrix_type  GENERAL = rocsparse_matrix_type_general;
     constexpr rocsparse_fill_mode    LOWER   = rocsparse_fill_mode_lower;
     constexpr rocsparse_storage_mode SORTED  = rocsparse_storage_mode_sorted;
+    constexpr rocsparse_indextype    IT
+        = sizeof(rocsparse_int) == 4 ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
 
     // Destroys the descriptor on every exit path, including an early return from
     // a failed ASSERT_*.
@@ -169,7 +171,7 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
     // hold the row pointer array plus the validator's workspace. The 2x margin
     // matches the other large-grid unit tests.
     {
-        const size_t need        = row_ptr_len * sizeof(int32_t);
+        const size_t need        = row_ptr_len * sizeof(rocsparse_int);
         size_t       free_bytes  = 0;
         size_t       total_bytes = 0;
         if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < 2 * need)
@@ -178,18 +180,18 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
         }
     }
 
-    device_vector<int32_t> d_row_ptr{row_ptr_len};
+    device_vector<rocsparse_int> d_row_ptr{row_ptr_len};
     ASSERT_NE(d_row_ptr.ptr, nullptr)
-        << "could not allocate the " << ((row_ptr_len * sizeof(int32_t)) >> 20)
+        << "could not allocate the " << ((row_ptr_len * sizeof(rocsparse_int)) >> 20)
         << " MB row pointer array for a " << large_m << "-row matrix";
-    UT_CHECK_HIP(hipMemset(d_row_ptr.ptr, 0, row_ptr_len * sizeof(int32_t)));
+    UT_CHECK_HIP(hipMemset(d_row_ptr.ptr, 0, row_ptr_len * sizeof(rocsparse_int)));
 
-    const int32_t row_ptr_end = large_nnz;
-    UT_CHECK_HIP(
-        hipMemcpy(d_row_ptr.ptr + large_m, &row_ptr_end, sizeof(int32_t), hipMemcpyHostToDevice));
+    const rocsparse_int row_ptr_end = large_nnz;
+    UT_CHECK_HIP(hipMemcpy(
+        d_row_ptr.ptr + large_m, &row_ptr_end, sizeof(rocsparse_int), hipMemcpyHostToDevice));
 
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0}};
-    device_vector<float>   val{std::vector<float>{1.0f}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0}};
+    device_vector<float>         val{std::vector<float>{1.0f}};
     ASSERT_TRUE(col_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
@@ -242,8 +244,8 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
 
     // (b) Plant an out-of-range column index in row m - 1. Only a grid that
     //     actually covers all m rows can see it.
-    const int32_t bad_col = large_m; // == n, i.e. one past the last legal column
-    UT_CHECK_HIP(hipMemcpy(col_ind.ptr, &bad_col, sizeof(int32_t), hipMemcpyHostToDevice));
+    const rocsparse_int bad_col = large_m; // == n, i.e. one past the last legal column
+    UT_CHECK_HIP(hipMemcpy(col_ind.ptr, &bad_col, sizeof(rocsparse_int), hipMemcpyHostToDevice));
 
     data_status = rocsparse_data_status_success;
     ASSERT_EQ(check(&data_status), rocsparse_status_success);
@@ -266,8 +268,8 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
                                          d_row_ptr.ptr,
                                          col_ind.ptr,
                                          val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         IT,
+                                         IT,
                                          BASE,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -320,11 +322,11 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
 //   row_len   130 -> wf_size 256
 namespace
 {
-    constexpr int32_t clamp_m = 4096;
+    constexpr rocsparse_int clamp_m = 4096;
 
     // Row whose offsets are corrupted. It sits in logical block 15 of the
     // 256-thread check_row_ptr_array grid, so only a later sweep reaches it.
-    constexpr int32_t bad_row = clamp_m - 16;
+    constexpr rocsparse_int bad_row = clamp_m - 16;
 
     enum class clamp_case
     {
@@ -340,19 +342,19 @@ namespace
     rocsparse_data_status run_clamped(rocsparse_handle       handle,
                                       rocsparse_storage_mode storage,
                                       clamp_case             c,
-                                      int32_t                row_len)
+                                      rocsparse_int          row_len)
     {
-        const int32_t clamp_n   = clamp_m + row_len - 1;
-        const int32_t clamp_nnz = row_len * clamp_m;
+        const rocsparse_int clamp_n   = clamp_m + row_len - 1;
+        const rocsparse_int clamp_nnz = row_len * clamp_m;
 
-        std::vector<int32_t> h_row_ptr(clamp_m + 1);
-        std::vector<int32_t> h_col_ind;
+        std::vector<rocsparse_int> h_row_ptr(clamp_m + 1);
+        std::vector<rocsparse_int> h_col_ind;
         h_col_ind.reserve(clamp_nnz);
         const bool ascending = (storage == rocsparse_storage_mode_sorted);
-        for(int32_t i = 0; i < clamp_m; ++i)
+        for(rocsparse_int i = 0; i < clamp_m; ++i)
         {
-            std::vector<int32_t> cols;
-            for(int32_t k = 0; k < row_len; ++k)
+            std::vector<rocsparse_int> cols;
+            for(rocsparse_int k = 0; k < row_len; ++k)
             {
                 cols.push_back(ascending ? i + k : i + row_len - 1 - k);
             }
@@ -368,7 +370,7 @@ namespace
                     cols.back() = clamp_m - 1;
                 }
             }
-            h_row_ptr[i + 1] = h_row_ptr[i] + static_cast<int32_t>(cols.size());
+            h_row_ptr[i + 1] = h_row_ptr[i] + static_cast<rocsparse_int>(cols.size());
             h_col_ind.insert(h_col_ind.end(), cols.begin(), cols.end());
         }
         EXPECT_EQ(h_row_ptr[clamp_m], clamp_nnz);
@@ -379,9 +381,9 @@ namespace
         }
         const std::vector<float> h_val(clamp_nnz, 1.0f);
 
-        device_vector<int32_t> d_row_ptr{h_row_ptr};
-        device_vector<int32_t> d_col_ind{h_col_ind};
-        device_vector<float>   d_val{h_val};
+        device_vector<rocsparse_int> d_row_ptr{h_row_ptr};
+        device_vector<rocsparse_int> d_col_ind{h_col_ind};
+        device_vector<float>         d_val{h_val};
         EXPECT_TRUE(d_row_ptr.ptr && d_col_ind.ptr && d_val.ptr);
 
         size_t buffer_size = 0;

@@ -43,6 +43,16 @@ struct SetDirectiveEntry {
     std::string value;
 };
 
+enum class ConditionalDirectiveKind { IF, ENDIF };
+
+/// Entry for an assembler conditional directive emitted inline with instructions.
+struct ConditionalDirectiveEntry {
+    size_t position;
+    size_t order;
+    ConditionalDirectiveKind kind;
+    std::string payload;  // Condition for .if; comment for .endif.
+};
+
 /// Entry for a label to be emitted inline with instructions.
 /// @c position is the instruction index before which the label is inserted.
 /// @c order is the global insertion sequence used to interleave with other entry types.
@@ -68,6 +78,16 @@ struct TextBlockEntry {
 /// @c order is the global insertion sequence used to interleave with other entry types.
 /// @c isBegin == true marks the start of a named group scope; false marks the end.
 struct GroupMarkerEntry {
+    size_t position;
+    size_t order;
+    std::string name;
+    bool isBegin;
+};
+
+/// Entry delimiting a callable function body in the logical instruction stream.
+/// The begin marker also records the position where the callable must be restored
+/// to the final linear ASM stream after per-function optimization.
+struct CallableMarkerEntry {
     size_t position;
     size_t order;
     std::string name;
@@ -175,6 +195,11 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      */
     const std::vector<SetDirectiveEntry>& getSetDirectives() const;
 
+    /// Record assembler conditional directives at the current source position.
+    void addIfDirective(const std::string& condition);
+    void addEndifDirective(const std::string& comment = "");
+    const std::vector<ConditionalDirectiveEntry>& getConditionalDirectives() const;
+
     /**
      * @brief Record a label to be emitted inline at the current position.
      *
@@ -224,6 +249,16 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @brief Get all recorded group marker entries (position-tagged).
      */
     const std::vector<GroupMarkerEntry>& getGroupMarkers() const;
+
+    /**
+     * @brief Mark the beginning/end of a callable function body.
+     *
+     * Lowering creates a separate callable Function and leaves an ASM placement
+     * marker in the entry Function, matching native rocisa conversion.
+     */
+    void beginCallable(const std::string& name);
+    void endCallable(const std::string& name);
+    const std::vector<CallableMarkerEntry>& getCallableMarkers() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)

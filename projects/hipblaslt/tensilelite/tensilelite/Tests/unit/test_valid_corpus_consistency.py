@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic unit tests for ``Tensile.TensileLogic.ValidCorpusConsistency``.
+"""Hermetic unit tests for ``tensilelite.TensileLogic.ValidCorpusConsistency``.
 
 Everything here builds its own tiny corpus under ``tmp_path`` -- no dependency
 on the real ``Logic/asm_full`` checkout, unlike ``test_PlaceholderMerge.py`` /
@@ -48,7 +48,7 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def vcc(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from Tensile.TensileLogic import ValidCorpusConsistency
+    from tensilelite.TensileLogic import ValidCorpusConsistency
 
     return ValidCorpusConsistency
 
@@ -524,7 +524,7 @@ def test_chip_id_arch_lock_flags_a_newly_gated_architecture(tmp_path, vcc, monke
     # chip-ID awareness without the corresponding re-audit -- the lock must
     # catch it even though no real logic file changed.
     f = _write_header_yaml(tmp_path / "codename" / "gfx1200" / "Equality" / "a.yaml", gfx="gfx1200")
-    import Tensile.Common.Architectures as arch_mod
+    import tensilelite.Common.Architectures as arch_mod
 
     monkeypatch.setattr(arch_mod, "supportsChipIdPredicate", lambda gfx: gfx == "gfx1200")
     violations = vcc.find_chip_id_arch_lock_violations([f])
@@ -537,7 +537,7 @@ def test_chip_id_arch_lock_flags_gfx950_losing_its_gate(tmp_path, vcc, monkeypat
     # The lock is symmetric: gfx950 silently losing chip-ID awareness is
     # just as much a violation as another arch silently gaining it.
     f = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml", gfx="gfx950")
-    import Tensile.Common.Architectures as arch_mod
+    import tensilelite.Common.Architectures as arch_mod
 
     monkeypatch.setattr(arch_mod, "supportsChipIdPredicate", lambda gfx: False)
     violations = vcc.find_chip_id_arch_lock_violations([f])

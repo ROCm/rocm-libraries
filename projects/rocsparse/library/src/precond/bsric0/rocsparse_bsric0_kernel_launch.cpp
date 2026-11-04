@@ -80,12 +80,20 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
                                                "No suitable kernel detected from bsric0");
     }
 
+    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                                  0,
-                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 sizeof(int32_t) * A->rows * A_batch_count,
                                                  handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsric0_info, A, buffer_size, buffer));
+
+    // Every instance aliases instance 0, so they all share its pivot.
+    if(A->batch_stride == 0 && A->batch_count > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, bsric0_info->get_singularity_numeric_exact(), A->batch_count));
+    }
 
     return rocsparse_status_success;
 }

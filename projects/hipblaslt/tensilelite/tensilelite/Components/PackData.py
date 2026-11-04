@@ -118,9 +118,11 @@ class PackData_BF16(PackData):
                 tmpDst_1 = formatting(sumIdxV-1, inputPrefix, prefixOffset)
 
             if ti.getAsmCaps()["HasBF16CVT"]:
+                # Read the inputs directly: tmpVgpr is only scratch for the non-CVT path below.
                 if vi%2 == 1:
                     d = destIdx + vi//2
-                    module.add(VCvtPkF32toBF16(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
+                    formatVgpr_1 = formatting(sumIdxV - 1, inputPrefix, prefixOffset)
+                    module.add(VCvtPkF32toBF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), \
                                 comment="convert C to bf16 and Pack with neighbor"))
             else:
                 vgprBf16Temp = bf16CVTVgprStruct.vgprBf16Temp

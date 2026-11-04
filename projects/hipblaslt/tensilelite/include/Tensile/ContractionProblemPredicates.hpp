@@ -2355,8 +2355,8 @@ namespace TensileLite
                 }
             };
 
-            struct UseGateResidualEqual
-                : public Predicate_CRTP<UseGateResidualEqual, ContractionProblemGemm>
+            struct UseGateResidualCheck
+                : public Predicate_CRTP<UseGateResidualCheck, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2365,8 +2365,8 @@ namespace TensileLite
                 };
                 bool value;
 
-                UseGateResidualEqual() = default;
-                UseGateResidualEqual(bool value)
+                UseGateResidualCheck() = default;
+                UseGateResidualCheck(bool value)
                     : value(value)
                 {
                 }
@@ -2378,7 +2378,7 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.useGateResidual() == value;
+                    return !problem.useGateResidual() || value;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -2386,7 +2386,7 @@ namespace TensileLite
                 {
                     bool rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "prob=" << problem.useGateResidual() << ", sol=" << value;
+                    details << "prob=" << problem.useGateResidual() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -2913,8 +2913,7 @@ namespace TensileLite
             };
 
             // value is the solution's MacroTile0.
-            struct FusedA2ATileDivisible
-                : public Predicate_CRTP<FusedA2ATileDivisible, ContractionProblemGemm>
+            struct GemmA2AShape : public Predicate_CRTP<GemmA2AShape, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2923,38 +2922,66 @@ namespace TensileLite
                 };
                 int64_t value;
 
-                FusedA2ATileDivisible() = default;
-                FusedA2ATileDivisible(int64_t value)
+                GemmA2AShape() = default;
+                GemmA2AShape(int64_t value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedA2ATileDivisible";
+                    return "GemmA2AShape";
                 }
 
-                bool divisible(ContractionProblemGemm const& problem) const
+                bool fits(ContractionProblemGemm const& problem) const
                 {
                     if(!problem.fusedGemmA2A())
                         return true;
-                    if(value <= 0 || problem.fusedA2AWorld() == 0)
-                        return false;
+                    const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
-                    const int64_t width = value * (int64_t)problem.fusedA2AWorld();
-                    return am % width == 0 && (int64_t)problem.freeSizeA(0) % value == 0;
+                    if(value <= 0 || world == 0 || am <= 0)
+                        return false;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        if(problem.batchSize(i) != 1)
+                            return false;
+                    const int64_t m       = problem.freeSizeA(0);
+                    const auto&   d       = problem.d();
+                    if(d.elementBytes() != 2)
+                        return false;
+                    const size_t  mStride = d.strides()[problem.freeIndices()[0].d];
+                    const size_t  ldd     = d.strides()[problem.freeIndices()[1].d];
+                    return am % (value * world) == 0 && m % value == 0 && am <= m
+                           && ((am / world) >> 3) < (1 << 14) && mStride == 1 && ldd % 8 == 0
+                           && (ldd >> 3) < (1 << 19);
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return divisible(problem);
+                    return fits(problem);
                 }
 
                 bool debugEval(ContractionProblemGemm const& problem,
                                std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "prob", divisible(problem), "==", "sol", true);
+                    bool               rv = fits(problem);
+                    std::ostringstream details;
+                    if(problem.fusedGemmA2A())
+                    {
+                        const auto& d = problem.d();
+                        details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
+                                << " dBytes=" << d.elementBytes() << " m=" << problem.freeSizeA(0)
+                                << " MT0=" << value
+                                << " mStride=" << d.strides()[problem.freeIndices()[0].d]
+                                << " ldd=" << d.strides()[problem.freeIndices()[1].d];
+                        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                            details << " batch=" << problem.batchSize(i);
+                        details
+                            << " (need dBytes == 2, am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
+                               " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
+                               " ldd>>3 < 2^19, batch == 1)";
+                    }
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
@@ -3048,6 +3075,25 @@ namespace TensileLite
                 // value = [XCC, XCCG]
                 std::array<int, 2> value;
                 size_t             cuCount;
+                AMDGPU::Processor  processor;
+
+                /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
+                /// MI300X) and always launch at WGMXCC=1, but this runs before
+                /// setFallbackStatus() marks them, so fallbackStatus() alone misses them.
+                bool isMI300A() const
+                {
+                    static constexpr size_t MI300ACuCount = 228;
+                    return processor == AMDGPU::Processor::gfx942 && cuCount == MI300ACuCount;
+                }
+
+                /// True when this solution will be launched at WGMXCC=1 regardless of the
+                /// XCC baked into it, so the predicate must be evaluated with XCC=1.
+                /// On MI300A this is unconditionally true: every solution there takes the
+                /// WGMXCC=1 launch path, so isMI300A() short-circuits the whole check.
+                bool fallbackXCC(ContractionProblemGemm const& problem) const
+                {
+                    return problem.getParams().fallbackStatus() || isMI300A();
+                }
 
                 WorkgroupMappingXCCCheck()
                 {
@@ -3056,6 +3102,7 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                    processor                = pAMDGPU->processor;
                 }
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
@@ -3065,13 +3112,16 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                    processor                = pAMDGPU->processor;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
+                /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
                     , cuCount(cuCountForTest)
+                    , processor(AMDGPU::Processor::gfx942)
                 {
                 }
 
@@ -3090,7 +3140,7 @@ namespace TensileLite
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
-                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
@@ -3100,7 +3150,7 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
-                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
                                         stream,
@@ -3182,6 +3232,185 @@ namespace TensileLite
                 }
             };
 
+            // W4A16 group-scale predicates.
+            struct ScaleBlockSizeA
+                : public Predicate_CRTP<ScaleBlockSizeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                ScaleBlockSizeA() = default;
+                ScaleBlockSizeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleBlockSizeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleBlockSizeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleBlockSizeA(), "==", "sol", value);
+                }
+            };
+
+            struct Int4EncodingA : public Predicate_CRTP<Int4EncodingA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                using Encoding = ContractionProblemGemm::Int4Encoding;
+                Encoding value = Encoding::Signed;
+
+                Int4EncodingA() = default;
+                explicit Int4EncodingA(Encoding value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Int4EncodingA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.int4EncodingA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        problem.int4EncodingA(),
+                                        "==",
+                                        "sol",
+                                        value);
+                }
+            };
+
+            struct ScaleZeroPointA
+                : public Predicate_CRTP<ScaleZeroPointA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                ScaleZeroPointA() = default;
+                ScaleZeroPointA(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleZeroPointA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleZeroPointA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleZeroPointA(), "==", "sol", value);
+                }
+            };
+
+            // Free-dimension extent of the MX scaling tile. Without these a
+            // 128x128 problem could match a 1x128 solution, since MXBlockA/B only
+            // constrain the K extent.
+            struct MXBlockFreeA
+                : public Predicate_CRTP<MXBlockFreeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeA() = default;
+                MXBlockFreeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeA(), "==", "sol", value);
+                }
+            };
+
+            struct MXBlockFreeB
+                : public Predicate_CRTP<MXBlockFreeB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeB() = default;
+                MXBlockFreeB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeB(), "==", "sol", value);
+                }
+            };
+
             struct DataTypeMXSA
                 : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
             {
@@ -3256,4 +3485,3 @@ namespace TensileLite
  */
     } // namespace Predicates
 } // namespace TensileLite
-

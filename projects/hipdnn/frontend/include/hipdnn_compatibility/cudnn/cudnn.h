@@ -11,16 +11,7 @@
 
 /**
  * @file cudnn.h
- * @brief Stub C-API header for the hipDNN cuDNN-compatibility shim (v9-only).
- *
- * Hand-curated, v9-only replacement for NVIDIA's `<cudnn.h>`: declares the few
- * C-API types the cuDNN frontend v9 graph API names in its signatures, plus the
- * C entry points for handle init, stream binding, error handling, and version
- * checks. Everything forwards to an existing hipDNN equivalent.
- *
- * @note Forwarding goes through `hipdnn_frontend::detail::hipdnnBackend()` — the
- *       same mockable indirection `Handle.hpp` uses — so these entry points are
- *       unit-testable with the in-tree mock backend.
+ * @brief cuDNN C-API subset needed by the cuDNN FE v9 graph API, forwarded to hipDNN.
  */
 
 #pragma once
@@ -41,29 +32,19 @@
 // C-API types
 // ===========================================================================
 
-/// @brief cuDNN handle, aliased directly to the hipDNN handle type.
-///
-/// `hipdnnHandle_t` is the global C typedef from `<hipdnn_backend.h>`, not a
-/// member of namespace `hipdnn_frontend`.
+/// @brief cuDNN handle; alias of the hipDNN handle type.
 using cudnnHandle_t = ::hipdnnHandle_t;
 
 static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
               "cudnnHandle_t must alias the hipDNN handle type");
 
-/// @brief Opaque CUDA-graph handle placeholder for compile-only error stubs.
-///
-/// The cuDNN-shim graph-capture methods are unsupported at runtime; this alias
-/// exists only so v9 source naming `cudaGraph_t` compiles without pulling CUDA
-/// runtime headers into the shim umbrella.
+/// @brief hipDNN placeholder so signatures naming it compile; graph capture is unsupported.
 using cudaGraph_t = void*;
 
-// Only the C-API types the v9 graph API actually references are declared here
-// (cudnnHandle_t, plus cudnnStatus_t from cudnn_status.h). Other cuDNN C-API
-// enums are intentionally omitted: the v9 graph surface uses the FE-namespace
-// enums (DataType_t, …) aliased in cudnn_frontend_utils.h, not the C-API ones.
+// Other cuDNN C-API enums are omitted: the v9 graph API uses the FE-namespace
+// enums aliased in cudnn_frontend_utils.h.
 
-// Status translation. Included after cudnnStatus_t above and before the entry
-// points below, which use it.
+// Needs cudnnStatus_t; used by the entry points below.
 #include <hipdnn_compatibility/cudnn/detail/status_translation.h>
 
 // ===========================================================================
@@ -72,7 +53,7 @@ using cudaGraph_t = void*;
 
 extern "C" {
 
-/// @brief Create a cuDNN/hipDNN handle. Mirrors NVIDIA `cudnnCreate`.
+/// @brief Creates a hipDNN handle; also maps cuDNN FE logging env vars to hipDNN logging.
 inline cudnnStatus_t cudnnCreate(cudnnHandle_t* handle)
 {
     hipdnn_frontend::compatibility::cudnn_frontend::detail::configureHipdnnLoggingFromCudnnEnv();
@@ -80,41 +61,41 @@ inline cudnnStatus_t cudnnCreate(cudnnHandle_t* handle)
         hipdnn_frontend::detail::hipdnnBackend()->create(handle));
 }
 
-/// @brief Destroy a handle. Mirrors NVIDIA `cudnnDestroy`.
+/// @brief Destroys a handle.
 inline cudnnStatus_t cudnnDestroy(cudnnHandle_t handle)
 {
     return hipdnn_frontend::compatibility::cudnn_frontend::detail::toCudnnStatus(
         hipdnn_frontend::detail::hipdnnBackend()->destroy(handle));
 }
 
-/// @brief Bind a stream to a handle. Mirrors NVIDIA `cudnnSetStream`.
+/// @brief Binds a HIP stream to a handle.
 inline cudnnStatus_t cudnnSetStream(cudnnHandle_t handle, hipStream_t streamId)
 {
     return hipdnn_frontend::compatibility::cudnn_frontend::detail::toCudnnStatus(
         hipdnn_frontend::detail::hipdnnBackend()->setStream(handle, streamId));
 }
 
-/// @brief Query the stream bound to a handle. Mirrors NVIDIA `cudnnGetStream`.
+/// @brief Returns the HIP stream bound to a handle.
 inline cudnnStatus_t cudnnGetStream(cudnnHandle_t handle, hipStream_t* streamId)
 {
     return hipdnn_frontend::compatibility::cudnn_frontend::detail::toCudnnStatus(
         hipdnn_frontend::detail::hipdnnBackend()->getStream(handle, streamId));
 }
 
-/// @brief Return a human-readable string for a status. Mirrors NVIDIA `cudnnGetErrorString`.
+/// @brief Returns the hipDNN error string for the equivalent hipDNN status.
 inline const char* cudnnGetErrorString(cudnnStatus_t status)
 {
     return hipdnn_frontend::detail::hipdnnBackend()->getErrorString(
         hipdnn_frontend::compatibility::cudnn_frontend::detail::toHipdnnStatus(status));
 }
 
-/// @brief Return the claimed cuDNN runtime version. Mirrors NVIDIA `cudnnGetVersion`.
+/// @brief Returns the claimed cuDNN runtime version, `CUDNN_VERSION`.
 inline size_t cudnnGetVersion(void)
 {
     return CUDNN_VERSION;
 }
 
-/// @brief Return the claimed CUDA-runtime version. Mirrors NVIDIA `cudnnGetCudartVersion`.
+/// @brief Returns the claimed CUDA runtime version, `CUDNN_CUDART_VERSION`.
 inline size_t cudnnGetCudartVersion(void)
 {
     return CUDNN_CUDART_VERSION;
@@ -122,21 +103,14 @@ inline size_t cudnnGetCudartVersion(void)
 
 } // extern "C"
 
-// ===========================================================================
-// create_cudnn_handle() convenience helper
-// ===========================================================================
-// Mirrors the helper in NVIDIA's sample utilities so mirrored sample code
-// compiles unchanged, minus the upstream test-framework dependency.
-
-/// @brief RAII deleter that destroys a heap-allocated cuDNN handle.
+/// @brief Deleter that destroys and frees a heap-allocated handle; a failed destroy is logged.
 struct CudnnHandleDeleter
 {
     void operator()(cudnnHandle_t* handle) const
     {
         if(handle != nullptr)
         {
-            // A failed destroy at teardown is not recoverable; log and ignore
-            // (the heap allocation is still freed below).
+            // Teardown failure is not recoverable; log it and still free the allocation.
             const cudnnStatus_t status = cudnnDestroy(*handle);
             if(status != CUDNN_STATUS_SUCCESS)
             {
@@ -148,10 +122,7 @@ struct CudnnHandleDeleter
     }
 };
 
-/// @brief Create a managed cuDNN handle (mirrors NVIDIA's sample helper).
-///
-/// snake_case name mirrors NVIDIA's so sample code compiles unchanged. On a
-/// backend create failure, logs and returns an empty (null) pointer.
+/// @brief Creates a managed handle; returns null on failure. Mirrors the upstream sample helper.
 inline std::unique_ptr<cudnnHandle_t, CudnnHandleDeleter>
     create_cudnn_handle() // NOLINT(readability-identifier-naming)
 {

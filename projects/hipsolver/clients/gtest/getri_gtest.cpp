@@ -96,59 +96,59 @@ protected:
     }
 };
 
-class GETRI : public GETRI_BASE<API_NORMAL, false, int, int>
+class GETRI_BATCHED : public GETRI_BASE<API_NORMAL, false, int, size_t>
 {
 };
 
-class GETRI_NPVT : public GETRI_BASE<API_NORMAL, true, int, int>
+class GETRI_NPVT_BATCHED : public GETRI_BASE<API_NORMAL, true, int, size_t>
 {
 };
 
 // batched tests
-TEST_P(GETRI, batched__float)
+TEST_P(GETRI_BATCHED, batched__float)
 {
     run_tests<true, false, float>();
 }
 
-TEST_P(GETRI, batched__double)
+TEST_P(GETRI_BATCHED, batched__double)
 {
     run_tests<true, false, double>();
 }
 
-TEST_P(GETRI, batched__float_complex)
+TEST_P(GETRI_BATCHED, batched__float_complex)
 {
     run_tests<true, false, hipsolverComplex>();
 }
 
-TEST_P(GETRI, batched__double_complex)
+TEST_P(GETRI_BATCHED, batched__double_complex)
 {
     run_tests<true, false, hipsolverDoubleComplex>();
 }
 
-TEST_P(GETRI_NPVT, batched__float)
+TEST_P(GETRI_NPVT_BATCHED, batched__float)
 {
     run_tests<true, false, float>();
 }
 
-TEST_P(GETRI_NPVT, batched__double)
+TEST_P(GETRI_NPVT_BATCHED, batched__double)
 {
     run_tests<true, false, double>();
 }
 
-TEST_P(GETRI_NPVT, batched__float_complex)
+TEST_P(GETRI_NPVT_BATCHED, batched__float_complex)
 {
     run_tests<true, false, hipsolverComplex>();
 }
 
-TEST_P(GETRI_NPVT, batched__double_complex)
+TEST_P(GETRI_NPVT_BATCHED, batched__double_complex)
 {
     run_tests<true, false, hipsolverDoubleComplex>();
 }
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         GETRI,
+                         GETRI_BATCHED,
                          Combine(ValuesIn(n_size_range), ValuesIn(lda_size_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         GETRI_NPVT,
+                         GETRI_NPVT_BATCHED,
                          Combine(ValuesIn(n_size_range), ValuesIn(lda_size_range)));

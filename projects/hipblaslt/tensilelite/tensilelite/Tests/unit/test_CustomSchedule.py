@@ -23,9 +23,9 @@
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
-from Tensile.Common import IsaVersion
+from tensilelite.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
+from tensilelite.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
+from tensilelite.Common import IsaVersion
 
 # Helper to create a mock data type
 def _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4):
@@ -522,7 +522,8 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == (2 if NT else 1)
         assert schedule_info.numMfma == 56
-        assert bool(kernel.get("SwapGlobalReadOrder", 0)) == NT
+        # 224x128 NT issues B first; the 128x224 mirror issues A first.
+        assert bool(kernel.get("SwapGlobalReadOrder", 0)) == (NT and mt0 > mt1)
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 

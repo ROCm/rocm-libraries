@@ -33,7 +33,12 @@ torch = pytest.importorskip("torch", reason="ROCm torch required")
 pytestmark = pytest.mark.gpu
 
 
-from dispatch.gdn.gfx950 import _TUNED_TILES_KDA  # noqa: E402
+from dispatch.gdn.axes import AUTO_DEFAULTS  # noqa: E402
+
+# Every KDA auto tile (plain and fused cases), each built here on the plain path.
+_KDA_AUTO_TILES = sorted(
+    {d.tile for (gate, _, _), d in AUTO_DEFAULTS.items() if gate == "kda"}
+)
 
 
 def _device_is_gfx950() -> bool:
@@ -76,8 +81,9 @@ def _kda(**kw):
 
 
 @requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
 @pytest.mark.parametrize("batch", [1, 3, 16, 64])
-def test_kda_simple_path_matches_reference(harness, batch):
+def test_kda_simple_path_matches_reference(harness, batch, state_dtype):
     """The one-thread-per-row reference emitter, with a per-channel gate.
 
     This path owns a whole state row per thread, so the gate vector maps onto
@@ -85,7 +91,8 @@ def test_kda_simple_path_matches_reference(harness, batch):
     here first means a later warp-tiled failure is an indexing bug and not a
     gate-formula bug.
     """
-    out_err, state_err = harness["check"](_kda(simple=True), batch)
+    spec = _kda(simple=True, state_dtype=state_dtype)
+    out_err, state_err = harness["check"](spec, batch)
 
     assert out_err <= harness["TOL"], f"KDA simple output error {out_err:.3e}"
     assert state_err <= harness["TOL"], f"KDA simple state error {state_err:.3e}"
@@ -102,53 +109,59 @@ def test_gdn_simple_path_still_matches_reference(harness):
 
 
 @requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
 @pytest.mark.parametrize("batch", [1, 3, 16, 64])
-def test_kda_warp_tiled_matches_reference(harness, batch):
+def test_kda_warp_tiled_matches_reference(harness, batch, state_dtype):
     """The production warp-tiled emitter, with a per-channel gate.
 
     The simple path above already proves the gate formula, so a failure here
     is an indexing bug: this emitter splits the DK axis across lanes, and the
     decay vector has to line up with the state slice each lane owns.
     """
-    out_err, state_err = harness["check"](_kda(), batch)
+    out_err, state_err = harness["check"](_kda(state_dtype=state_dtype), batch)
 
     assert out_err <= harness["TOL"], f"KDA warp-tiled output error {out_err:.3e}"
     assert state_err <= harness["TOL"], f"KDA warp-tiled state error {state_err:.3e}"
 
 
 @requires_gfx950
-@pytest.mark.parametrize("max_work,tile,spec_id", _TUNED_TILES_KDA)
-def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, spec_id):
-    """Every tile in the KDA table agrees with the independent reference."""
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize("tile", _KDA_AUTO_TILES)
+def test_every_kda_auto_tile_is_correct(harness, tile, state_dtype):
+    """Every KDA auto tile's base configuration agrees with the independent
+    reference, for each state width. f32 doubles the state bytes each lane
+    moves, so it exercises a different load/store split."""
     num_warps, warp_threads_k, blocks_per_v_dim = tile
     spec = _kda(
         num_warps=num_warps,
         warp_threads_k=warp_threads_k,
         blocks_per_v_dim=blocks_per_v_dim,
+        state_dtype=state_dtype,
     )
     out_err, state_err = harness["check"](spec, batch=16)
 
-    assert out_err <= harness["TOL"], (
-        f"KDA {spec_id} ({tile}, max_work={max_work}) " f"output error {out_err:.3e}"
-    )
-    assert state_err <= harness["TOL"], (
-        f"KDA {spec_id} ({tile}, max_work={max_work}) " f"state error {state_err:.3e}"
-    )
+    assert (
+        out_err <= harness["TOL"]
+    ), f"KDA tile {tile} (state {state_dtype}) output error {out_err:.3e}"
+    assert (
+        state_err <= harness["TOL"]
+    ), f"KDA tile {tile} (state {state_dtype}) state error {state_err:.3e}"
 
 
 @requires_gfx950
 @pytest.mark.parametrize(
-    "batch,expected_spec_id,expected_tile",
+    "state_dtype,expected_spec_id,expected_tile",
     [
-        (1, "kda_w128", (4, 16, 4)),
-        (8, "kda_w512", (1, 16, 4)),
-        (32, "kda_w_large", (2, 16, 1)),
+        ("bf16", "kda_nw1_wtk16_bpv8", (1, 16, 8)),
+        ("f32", "kda_nw1_wtk16_bpv16", (1, 16, 16)),
     ],
 )
-def test_kda_dispatch_band_launches_selected_kernel(
-    harness, batch, expected_spec_id, expected_tile
+@pytest.mark.parametrize("batch", [1, 8, 32])
+def test_kda_dispatch_launches_the_auto_kernel(
+    harness, batch, state_dtype, expected_spec_id, expected_tile
 ):
-    """Exercise request → dispatch → selected tile → compile → launch → oracle."""
+    """Exercise request → dispatch → selected tile → compile → launch → oracle.
+    The tile is the case's at every batch."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
@@ -160,13 +173,11 @@ def test_kda_dispatch_band_launches_selected_kernel(
             gate_kind="kda",
             num_k_heads=32,
             num_v_heads=32,
+            state_dtype=state_dtype,
         )
     )
-    got_tile = (
-        result.spec.num_warps,
-        result.spec.warp_threads_k,
-        result.spec.blocks_per_v_dim,
-    )
+    spec = result.spec.kernel_spec
+    got_tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
     assert result.candidate.spec_id == expected_spec_id
     assert got_tile == expected_tile
 
@@ -177,9 +188,9 @@ def test_kda_dispatch_band_launches_selected_kernel(
         signature=result.signature,
     )
 
-    inp = harness["make_inputs"](result.spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](result.spec, inp)
-    values, _ = harness["prepare"](result.spec, inp, batch)
+    inp = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import math
 from typing import Tuple
 
-from ..core.ir import BF8E5M2, FP8E4M3, IRBuilder, Type, Value
+from ..core.ir import BF8E5M2, FP8E4M3, F32, I32, IRBuilder, Type, Value
 
 
 def next_power_of_2(x: int) -> int:
@@ -320,6 +320,10 @@ def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     3D segment kernel, the future MFMA-based norm kernels, and any
     other op that needs an in-warp 16-lane butterfly.
     """
+    # Intentionally on ds_swizzle for all masks: unlike warp_xor_reduce_sum,
+    # masks 1, 2, 4, 8 are not routed to warp_shuffle_xor_dpp here. They could
+    # take the same win; if you add it, mirror the split in the C++ max
+    # reconstructions so the byte-identity gate stays green.
     cur = v
     for k in range(stages):
         remote = b.warp_shuffle_xor(cur, 1 << k)
@@ -333,10 +337,25 @@ def warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     See :func:`warp_xor_reduce_max` for the lane-XOR rationale (masks
     ``1, 2, 4, 8`` lower to ``ds_swizzle_b32``, not ``ds_bpermute``);
     the only difference is the combiner is ``fadd`` instead of ``fmax``.
+
+    For f32/i32 data the stages inside one 16-lane DPP row ride
+    ``warp_shuffle_xor_dpp`` (VALU DPP, no ``ds_swizzle`` / no
+    ``lgkmcnt(0)`` wait): masks 1 and 2 as themselves (``quad_perm`` on
+    gfx9 CDNA), masks 4 and 8 as dpp masks 7 and 15 (``row_half_mirror``
+    / ``row_mirror``). The stages run in ascending order, so when the
+    mask 4 (8) stage runs every lane of each quad (half-row) holds the same
+    sum, and pairing with ``i ^ 7`` (``i ^ 15``) adds the same value as
+    ``i ^ 4`` (``i ^ 8``): the result is bitwise identical. Masks 16 and
+    up, and any other dtype, stay on ``warp_shuffle_xor``.
+    Mirrors ``cpp/helpers/attention.cpp::rocke_warp_xor_reduce_sum``.
     """
     cur = v
     for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
+        mask = 1 << k
+        if mask <= 8 and cur.type.name in ("f32", "i32"):
+            remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
+        else:
+            remote = b.warp_shuffle_xor(cur, mask)
         cur = b.fadd(cur, remote)
     return cur
 
@@ -418,8 +437,8 @@ def wave64_reduce_sum(b: IRBuilder, v: Value) -> Value:
 #     long-standing CDNA path (``warp_xor_reduce_max/sum`` default stages=4).
 #   * wave32 WMMA 16x16x16 : a C-row spans the 16 lanes of one wave32 half
 #     (``lane // 16`` fixed) -> 4 XOR stages (masks 1,2,4,8) -- the masks
-#     stay inside the 32-lane half and lower to ``ds_swizzle`` (see
-#     ``instances/gfx1151/wmma_fmha_fwd.py::_half_reduce``).
+#     stay inside the 32-lane half and lower to ``ds_swizzle`` (the RDNA
+#     wave32 path of ``rocke.helpers.mfma_attention``).
 #
 # Both reduce one 16-lane row in 4 stages, so the wave32 path is *not* a
 # different algorithm -- only the wave_size context differs. These helpers give
@@ -465,7 +484,7 @@ def wave_reduce_max(
     4-stage XOR sequence (masks 1,2,4,8) of :func:`warp_xor_reduce_max`, so
     the long-standing CDNA path is reproduced byte-for-byte. The wave32 WMMA
     softmax passes ``wave_size=32`` (still ``lanes_per_row=16``) and gets the
-    same 4-stage butterfly, matching the hand-written wave32 ``_half_reduce``.
+    same 4-stage butterfly as the RDNA wave32 path of ``rocke.helpers.mfma_attention``.
 
     The XOR masks (``< lanes_per_row``) always stay inside one wave half on
     wave32, so :meth:`IRBuilder.warp_shuffle_xor` lowers them to the in-half
@@ -681,6 +700,23 @@ def mfma_32x32x16_for_dtype(
 # Binary search on ``cu_q``
 # ---------------------------------------------------------------------------
 
+# Trip count when the batch size is unknown (num_seqs <= 0), as in direct
+# unit-test specs. Enough for any i32 batch count.
+BINARY_SEARCH_FALLBACK_ITERS = 32
+
+
+def binary_search_seq_idx_iters(num_seqs: int, *, floor: int = 1) -> int:
+    """Trip count for :func:`binary_search_seq_idx` over ``num_seqs`` sequences.
+
+    ``ceil(log2(num_seqs + 1))``, at least ``floor``, or
+    :data:`BINARY_SEARCH_FALLBACK_ITERS` when ``num_seqs`` is unknown. Spec
+    classes specialize ``iterations`` with this, and launcher cache keys that
+    skip building the spec key on it, so both share one definition.
+    """
+    if num_seqs <= 0:
+        return BINARY_SEARCH_FALLBACK_ITERS
+    return max(floor, int(math.ceil(math.log2(num_seqs + 1))))
+
 
 def binary_search_seq_idx(
     b: IRBuilder,
@@ -698,8 +734,8 @@ def binary_search_seq_idx(
     ``find_seq_idx``. By default (``per_token=False``) the loop
     invariant is ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the
     cumulative Q-block count up to sequence ``i``). The caller
-    specializes ``iterations`` from the known problem batch size;
-    32 is a safe fallback for unspecialized tests.
+    specializes ``iterations`` from the known problem batch size with
+    :func:`binary_search_seq_idx_iters`.
 
     P49: ``per_token=True`` switches to per-token mode
     (``cu_q[s] <= q_token < cu_q[s+1]``) used by ``fmha_paged_prefill``,
@@ -732,6 +768,26 @@ def binary_search_seq_idx(
         nr = b.select(le, right, mid)
         b.scf_yield(b.select(done, left, nl), b.select(done, right, nr))
     return b.sub(loop.results[0], b.const_i32(1))
+
+
+def decode_fp8e4m3fn_to_f32(b: IRBuilder, byte: Value) -> Value:
+    """Decode an OCP E4M3FN byte without native FP8 conversion instructions.
+
+    Exponent-15 encodings stay finite except the two NaNs. Subnormals use
+    mantissa * 2**-9; sign insertion preserves both zero encodings.
+    """
+    bits = b.zext(byte, I32)
+    magnitude = b.land(bits, b.const_i32(0x7F))
+    sign = b.shl(b.land(bits, b.const_i32(0x80)), b.const_i32(24))
+    normal = b.add(b.shl(magnitude, b.const_i32(20)), b.const_i32(120 << 23))
+    subnormal = b.fmul(b.sitofp_f32(magnitude), b.const_f32(2.0**-9))
+    result = b.select(
+        b.cmp_lt(magnitude, b.const_i32(8)), b.bitcast(subnormal, I32), normal
+    )
+    result = b.select(
+        b.cmp_eq(magnitude, b.const_i32(0x7F)), b.const_i32(0x7FC00000), result
+    )
+    return b.bitcast(b.lor(result, sign), F32)
 
 
 def dequant_fp8x8_to_dtype(
@@ -808,8 +864,8 @@ def pv32_v_load_paired(
     Reference inlined version at ``instances/attention_tiled_2d.py:
     2610-2666`` (TRANSPOSED_HALF_LOCAL_PV branch). Same lane-layout
     arithmetic, just lifted into a callable so the future P12 / P47
-    swap to ``ds_read_b128_tr_b16`` is a one-line edit at every call
-    site.
+    swap to a wide transpose read would be a one-line edit at every call
+    site (gfx950 has none; gfx1250 has ``ds_load_tr16_b128``).
 
     Inputs:
 
