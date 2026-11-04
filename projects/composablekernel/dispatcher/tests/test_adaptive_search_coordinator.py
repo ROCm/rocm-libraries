@@ -1519,9 +1519,12 @@ def test_host_cache_bad_entries_are_misses(tmp_path):
     cache = HC.HostCache(tmp_path)
     fields = {"k": 1}
     path = cache.dir / HC.entry_key(fields)
-    path.mkdir()
-    for meta in ("{", '{"fields": {"k": 2}, "arrays": ["x"]}', "[]",
-                 '{"fields": {"k": 1}, "arrays": ["missing"]}'):
+    # A complete entry of other fields under this key (a hash collision).
+    _cache_calls(cache.spec, {"k": 2}, 7.0)
+    (cache.dir / HC.entry_key({"k": 2})).rename(path)
+    got, ran = _cache_calls(cache.spec, fields, 5.0)
+    assert ran == 1 and (got["x"] == 5.0).all()
+    for meta in ("{", "[]", '{"fields": {"k": 1}, "arrays": ["missing"]}'):
         (path / "meta.json").write_text(meta)
         got, ran = _cache_calls(cache.spec, fields, 5.0)
         assert ran == 1 and (got["x"] == 5.0).all()
@@ -1551,8 +1554,15 @@ def test_host_cache_concurrent_writers_publish_one_entry(tmp_path):
     for t in threads:
         t.join()
     assert len(out) == 8 and all((x == out[0]).all() for x in out)
-    assert [p.name for p in cache.dir.iterdir()] == [HC.entry_key({"k": "same"})]
+    path = cache.dir / HC.entry_key({"k": "same"})
+    assert list(cache.dir.iterdir()) == [path]
     assert _cache_calls(cache.spec, {"k": "same"})[1] == 0
+    # A published entry is never replaced: a later writer's rename fails.
+    inode = (path / "meta.json").stat().st_ino
+    with pytest.raises(OSError):
+        HC._publish(cache.spec, path, {"k": "same"}, {"x": out[0]})
+    assert (path / "meta.json").stat().st_ino == inode
+    assert list(cache.dir.iterdir()) == [path]
     cache.close()
 
 
