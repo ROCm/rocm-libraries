@@ -11,10 +11,10 @@
  *          a last K tile of 132 elements and a last scale block of 4 elements, and the default
  *          M = N = 1000 leaves partial tiles in M and N.
  *
- *          MxGemmKernel accepts such K only with fp8 or fp4 on each side, 32-element scales, a
- *          row-major A and a column-major B (K contiguous in both) and a K tile that is a
- *          multiple of 128 (four 32-element scales) and of the warp tile K; otherwise
- *          IsSupportedArgument requires K to be a multiple of the K tile and of
+ *          MxGemmKernel accepts such K only with fp8 or fp4 on each side or fp6 on both sides,
+ *          32-element scales, a row-major A and a column-major B (K contiguous in both) and a K
+ *          tile that is a multiple of 128 (four 32-element scales) and of the warp tile K;
+ *          otherwise IsSupportedArgument requires K to be a multiple of the K tile and of
  *          ScaleBlockSize * 4. The 384-deep K tile holds three scale packs, so it shows the reads
  *          of scales of later rows described below; it is not a tuned configuration, and the
  *          printed time does not represent the pipeline.
