@@ -101,6 +101,19 @@ all with the same correctness gate PASS. Treat this as a validated starting
 point, not a ceiling: a proper (non-time-boxed) sweep of the full opt-in
 space, or getting aledudek's own tuning notes/pins for these exact shapes,
 would likely do better still.
+
+Stream-overlap halo (``--halo-mode``, default ``auto``; prototyped from
+ideas.md's DESIGN-CCL doc -- see the comment above halo_exchange_overlap()
+below for why the in-kernel peer-push idea itself does not transfer to
+rocke, and what does): puts each halo copy on its own CUDA stream with an
+explicit event instead of relying on same-default-stream FIFO order.
+Measured on A/B/C: a real win at P=4 (+2.5% to +14.8% faster wall time,
+three overlapping copy->launch dependencies) but a small loss at P=2 (-1% to
+-5%, only one dependency, nothing to overlap, pure added Stream()/Event()
+bookkeeping cost). Correctness PASS on every case. ``auto`` wires this in as
+the default: 'overlap' at P>=3, 'single-stream' at P=2, each shape's own
+measured-faster path; force one path with ``--halo-mode single-stream`` or
+``--halo-mode overlap``.
 """
 
 from __future__ import annotations
@@ -204,6 +217,22 @@ def _parse_args(argv=None):
     ap.add_argument("--shard-warp-tile-mn", type=int, default=None)
     ap.add_argument("--shard-pipeline", default=None)
     ap.add_argument("--shard-epilogue", default=None)
+    ap.add_argument(
+        "--halo-mode", default="auto", choices=("auto", "single-stream", "overlap"),
+        help=(
+            "which halo_exchange()/launch_all() implementation the timed "
+            "region uses. 'single-stream' relies on same-default-stream FIFO "
+            "order (the original implementation). 'overlap' puts each halo "
+            "copy on its own CUDA stream with an explicit event instead "
+            "(prototyped from ideas.md's DESIGN-CCL doc -- see the comment "
+            "above halo_exchange_overlap() for why the in-kernel peer-push "
+            "idea itself does not transfer to rocke, and what does). "
+            "'auto' (default) picks per P from the measured result: "
+            "'overlap' at P>=3 (+2.5%% to +14.8%% faster at P=4), "
+            "'single-stream' at P=2 (overlap is a small net loss there, "
+            "-1%% to -5%%, with only one halo copy to overlap)."
+        ),
+    )
     ap.add_argument(
         "--advanced", action=argparse.BooleanOptionalAction, default=True,
         help=(
@@ -443,6 +472,55 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
             # benefit here -- nothing else reads the temporary.
             halo_dst[d].copy_(halo_src[d])
 
+    # ---- stream-overlap halo (default when it measured faster: P>=3) ----
+    #
+    # Prompted by ideas.md's DESIGN-CCL doc (in-kernel peer-mailbox push for a
+    # persistent-kernel LLM decode pipeline on gfx950): that exact mechanism
+    # does not transfer here -- rocke's buffer descriptor clamps a peer
+    # device's pointer to zero (platform/dsl_docs/runtime/limitations.md), so
+    # an in-kernel push would mean bypassing the DSL's normal kernel-arg path
+    # with raw HIP IPC handles via ctypes, a change to the emitter itself
+    # (both engines, per the byte-identity rule) -- out of scope here. The one
+    # idea that *does* fit within what rocke/torch already support: the
+    # single-stream path below (halo_exchange()/launch_all()) issues each
+    # halo_dst[d].copy_(halo_src[d]) and launchers[d](...) on device d's one
+    # default stream, so they are correctly ordered but only by accident of
+    # sharing a single queue -- the GPU's copy engine and compute engine could
+    # otherwise overlap this per-shard copy against unrelated work. The
+    # overlap variant puts each halo copy on its own side stream and makes
+    # the consuming device's default stream wait on a cheap event instead of
+    # relying on same-stream FIFO order, so the dependency is explicit rather
+    # than coincidental.
+    #
+    # Measured (A/B/C, this node): the split is by P, not by shape. At P=2
+    # (one halo copy) stream-overlap is a small loss (-1% to -5%): only one
+    # dependency exists, so there is nothing to overlap and the extra
+    # Stream()/Event() bookkeeping is pure added cost. At P>=3 (2+ halo
+    # copies) it is a real, consistent win (+2.5% to +14.8% at P=4): with
+    # multiple independent copy->launch dependencies, an explicit per-pair
+    # event lets the hardware copy engine and each device's compute engine
+    # actually run concurrently instead of every copy and launch contending
+    # for issue order on one shared per-device queue. Correctness PASS on
+    # every shape/P tested (same gate either path). Hence ``_use_overlap_halo``
+    # below picks the measured-faster path per P instead of a single global
+    # default; override with --halo-mode if you need to force one path.
+    halo_streams = {d: torch.cuda.Stream(device=d) for d in range(P - 1)}
+    halo_events = {d: torch.cuda.Event() for d in range(P - 1)}
+
+    def halo_exchange_overlap():
+        for d in range(P - 1):
+            with torch.cuda.device(d), torch.cuda.stream(halo_streams[d]):
+                halo_dst[d].copy_(halo_src[d])
+                halo_events[d].record(halo_streams[d])
+
+    def launch_all_overlap():
+        with no_fence():
+            for d in range(P):
+                with torch.cuda.device(d):
+                    if d in halo_events:
+                        torch.cuda.current_stream(d).wait_event(halo_events[d])
+                    launchers[d](launch_values[d], config=launch_cfgs[d])
+
     def launch_all():
         # KernelLauncher defaults to a *fenced* (synchronous,
         # hipStreamSynchronize-after-every-call) launch -- see
@@ -462,9 +540,16 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
         for d in range(P):
             torch.cuda.synchronize(d)
 
+    if a.halo_mode == "auto":
+        use_overlap = (P - 1) >= 2
+    else:
+        use_overlap = a.halo_mode == "overlap"
+    halo_fn = halo_exchange_overlap if use_overlap else halo_exchange
+    launch_fn = launch_all_overlap if use_overlap else launch_all
+
     # ---- correctness gate before any timing is trusted ----
-    halo_exchange()
-    launch_all()
+    halo_fn()
+    launch_fn()
     sync_all()
     max_rel_err = 0.0
     for d in range(P):
@@ -486,27 +571,24 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
 
     # ---- timed region: halo exchange + launch + sync, host wall-clock ----
     for _ in range(a.warmup):
-        halo_exchange()
-        launch_all()
+        halo_fn()
+        launch_fn()
         sync_all()
 
-    # The real (wall_ms) measurement: halo_exchange() + launch_all() + one
-    # sync_all(), with no intermediate barrier between them. halo_exchange()
-    # only touches each shard's own trailing rows and launch_all() only reads
-    # them back on that same device's default stream, so stream FIFO order
-    # already makes every launch see its halo copy -- a mid-barrier isn't
-    # needed for correctness (the P=1 baseline's correctness gate above
-    # already covers that), only for isolating a halo_ms number. Keeping it
-    # in the timed loop was a real cost: it forces every device's launch to
-    # wait on every other device's halo copy, which is most of why P=4 (3
-    # halo copies) scaled worse than P=2 (1 copy) beyond what pure kernel
-    # concurrency explains (see the no_fence concurrency probe referenced
-    # above the launch_values cache).
+    # The real (wall_ms) measurement: halo_fn() + launch_fn() + one
+    # sync_all(), with no intermediate barrier between them. With the
+    # single-stream path, halo_exchange() only touches each shard's own
+    # trailing rows and launch_all() only reads them back on that same
+    # device's default stream, so stream FIFO order already makes every
+    # launch see its halo copy. With the overlap path, the dependency is an
+    # explicit event wait instead. Either way a mid-barrier isn't needed for
+    # correctness (the gate above already covers that), only for isolating a
+    # halo_ms number.
     wall_times = []
     for _ in range(a.iters):
         t0 = time.perf_counter()
-        halo_exchange()
-        launch_all()
+        halo_fn()
+        launch_fn()
         sync_all()
         t2 = time.perf_counter()
         wall_times.append((t2 - t0) * 1e3)
@@ -518,7 +600,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     halo_times = []
     for _ in range(a.iters):
         t0 = time.perf_counter()
-        halo_exchange()
+        halo_fn()
         sync_all()
         t1 = time.perf_counter()
         halo_times.append((t1 - t0) * 1e3)
@@ -538,6 +620,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
         f"(halo={halo_ms:.4f}ms, compute~{compute_ms:.4f}ms, "
         f"{per_device_tflops:.0f} TFLOPS/dev) | speedup={speedup_vs_baseline:.2f}x "
         f"({pct_of_ideal:.0f}% of ideal {P}x) | "
+        f"halo_mode={'overlap' if use_overlap else 'single-stream'} | "
         f"p2p={'yes' if can_p2p else 'no/staged'}{vs_file} | "
         f"correctness rel_err={max_rel_err:.2e} (tol {_TOL_BF16:.0e}) PASS"
     )
