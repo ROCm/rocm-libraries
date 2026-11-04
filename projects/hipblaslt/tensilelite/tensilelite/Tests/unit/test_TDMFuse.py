@@ -10,6 +10,7 @@ import types
 
 import pytest
 from rocisa.code import RegSet
+from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
@@ -654,3 +655,89 @@ def _incrementText(state):
     mod = w.tdmSetupIncrementWaveSeparated(
         state, {"tensorChar": "A"}, {"tensorChar": "B"})
     return str(mod)
+
+
+# ---------------------------------------------------------------------------
+# Cache hints of a descriptor set: the data tensor decides
+# ---------------------------------------------------------------------------
+HINT_CAPS = {"HasTHModifier": True}
+DEV, SYS = CacheScope.SCOPE_DEV, CacheScope.SCOPE_SYS
+NO_TH, NO_NV = TemporalHint.TH_NONE, NonVolatile.NV_NONE
+
+
+@pytest.mark.parametrize("members, deciders", [
+    (("A", "B"), (0, 1)),             # TDMFuse=0, the data pair: both decide
+    (("MXSA", "MXSB"), (0, 1)),       # TDMFuse=0, the scale set: both decide
+    (("A", "MXSA"), (0,)),            # TDMFuse=1
+    (("MXSB", "B"), (1,)),
+    (("A", "MXSA", "MXSB"), (0,)),    # TDMFuse=2
+    (("B", "MXSA", "MXSB"), (0,)),    # TDMFuse=3
+    (("A",), (0,)),
+    (("MXSA",), (0,)),
+    (("Metadata",), (0,)),
+    (("A", "Metadata"), (0,)),        # a member other than A or B never decides next to a data tensor
+])
+def test_hint_deciders_by_set(members, deciders):
+    assert TF.tdmHintDeciders(members) == deciders
+
+
+def _hint_writer(kernel, caps):
+    """The real tdmLoadModifiers and _tdmTensorParameters over the hints stored in `kernel`."""
+    def tensor(tc):
+        return {"NonTemporal": kernel.get("NonTemporal" + tc, 0),
+                "TemporalHint": kernel.get("TemporalHint" + tc, 0)}
+
+    writer = types.SimpleNamespace(
+        states=types.SimpleNamespace(asmCaps=caps),
+        tPA=dict(tensor("A"), MX=tensor("MXSA")),
+        tPB=dict(tensor("B"), MX=tensor("MXSB")))
+    writer.isTdmWaveSeparated = lambda k: KernelWriterAssembly.isTdmWaveSeparated(writer, k)
+    writer._tdmTensorParameters = lambda tc: KernelWriterAssembly._tdmTensorParameters(writer, tc)
+    return writer
+
+
+def _issued(kernel, tc, caps=HINT_CAPS):
+    """(scope, th, nv) of the tensor_load_to_lds that issues `tc`'s descriptor set, or None."""
+    mods = KernelWriterAssembly.tdmLoadModifiers(_hint_writer(kernel, caps), kernel, tc)
+    return None if mods is None else (mods.scope, mods.th, mods.nv)
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+def test_fused_set_follows_its_data_tensor(fuse):
+    """A scale tensor shares a data tensor's set: scope, th and nv come from A or B alone."""
+    kernel = dict(_kernel(fuse),
+                  NonTemporalA=2, NonTemporalB=3, NonTemporalMXSA=1, NonTemporalMXSB=0,
+                  TemporalHintA=1, TemporalHintB=2, TemporalHintMXSA=3, TemporalHintMXSB=5,
+                  NonVolatileA=1, NonVolatileB=0, NonVolatileMXSA=0, NonVolatileMXSB=1)
+    assert _issued(kernel, "A") == (DEV, TemporalHint.TH_NT, NonVolatile.NV)
+    assert _issued(kernel, "B") == (SYS, TemporalHint.TH_HT, NO_NV)
+
+
+def test_default_grouping_still_needs_agreement_within_each_set():
+    """TDMFuse=0: {A,B} and {MXSA,MXSB} each keep only the fields their members agree on."""
+    kernel = _kernel(0)
+    agree = dict(kernel, NonTemporalA=2, NonTemporalB=2, TemporalHintA=1, TemporalHintB=2,
+                 NonTemporalMXSA=3, NonTemporalMXSB=3, TemporalHintMXSA=5, TemporalHintMXSB=5)
+    assert _issued(agree, "A") == (DEV, NO_TH, NO_NV)                       # th differs
+    assert _issued(agree, "MXSA") == (SYS, TemporalHint(5), NO_NV)
+    clash = dict(kernel, NonTemporalA=2, NonTemporalB=0, TemporalHintA=1, TemporalHintB=2,
+                 NonTemporalMXSA=1, NonTemporalMXSB=1)
+    assert _issued(clash, "A") is None                                      # nothing agrees
+    assert _issued(clash, "MXSB") == (CacheScope.SCOPE_SE, NO_TH, NO_NV)
+    # The hints of A and B never reach the scale set.
+    assert _issued(dict(kernel, NonTemporalA=2, NonTemporalB=2), "MXSA") is None
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+def test_unsuffixed_nontemporal_reaches_every_fused_set(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """NonTemporal=2 sets A and B but not MXSA/MXSB; the data tensor decides, so scope survives."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, NonTemporal=2)
+    assert sol.get("Valid") is True, out
+    state = sol._state
+    assert (state["NonTemporalA"], state["NonTemporalB"]) == (2, 2)
+    assert (state["NonTemporalMXSA"], state["NonTemporalMXSB"]) == (0, 0)
+    caps = {"HasTHModifier": bool(state["_HasTemporalHint"])}
+    assert caps["HasTHModifier"]
+    assert _issued(state, "A", caps) == (DEV, NO_TH, NO_NV)
+    assert _issued(state, "B", caps) == (DEV, NO_TH, NO_NV)

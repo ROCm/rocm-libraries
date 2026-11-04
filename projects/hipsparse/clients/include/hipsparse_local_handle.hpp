@@ -98,16 +98,16 @@ public:
                 "hipsparseStreamBeginCapture called while a capture is already active");
         }
 
-        throw_on_hip_error("hipStreamCreate", hipStreamCreate(&this->graph_stream));
+        throw_if_hip_error("hipStreamCreate", hipStreamCreate(&this->graph_stream));
         this->graph_stream_created = true;
-        throw_on_hipsparse_error("hipsparseGetStream",
+        throw_if_hipsparse_error("hipsparseGetStream",
                                  hipsparseGetStream(*this, &this->old_stream));
-        throw_on_hipsparse_error("hipsparseSetStream",
+        throw_if_hipsparse_error("hipsparseSetStream",
                                  hipsparseSetStream(*this, this->graph_stream));
         this->handle_on_graph_stream = true;
 
         // BEGIN GRAPH CAPTURE
-        throw_on_hip_error("hipStreamBeginCapture",
+        throw_if_hip_error("hipStreamBeginCapture",
                            hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
         this->capture_started = true;
 #endif
@@ -132,23 +132,23 @@ public:
         }
 
         // END GRAPH CAPTURE
-        throw_on_hip_error("hipStreamEndCapture",
+        throw_if_hip_error("hipStreamEndCapture",
                            hipStreamEndCapture(this->graph_stream, &this->graph));
         this->capture_started = false;
 
-        throw_on_hip_error("hipGraphInstantiate",
+        throw_if_hip_error("hipGraphInstantiate",
                            hipGraphInstantiate(&this->instance, this->graph, nullptr, nullptr, 0));
-        throw_on_hip_error("hipGraphDestroy", hipGraphDestroy(this->graph));
+        throw_if_hip_error("hipGraphDestroy", hipGraphDestroy(this->graph));
         this->graph = nullptr;
 
-        throw_on_hip_error("hipGraphLaunch", hipGraphLaunch(this->instance, this->graph_stream));
-        throw_on_hip_error("hipStreamSynchronize", hipStreamSynchronize(this->graph_stream));
-        throw_on_hip_error("hipGraphExecDestroy", hipGraphExecDestroy(this->instance));
+        throw_if_hip_error("hipGraphLaunch", hipGraphLaunch(this->instance, this->graph_stream));
+        throw_if_hip_error("hipStreamSynchronize", hipStreamSynchronize(this->graph_stream));
+        throw_if_hip_error("hipGraphExecDestroy", hipGraphExecDestroy(this->instance));
         this->instance = nullptr;
 
-        throw_on_hipsparse_error("hipsparseSetStream", hipsparseSetStream(*this, this->old_stream));
+        throw_if_hipsparse_error("hipsparseSetStream", hipsparseSetStream(*this, this->old_stream));
         this->handle_on_graph_stream = false;
-        throw_on_hip_error("hipStreamDestroy", hipStreamDestroy(this->graph_stream));
+        throw_if_hip_error("hipStreamDestroy", hipStreamDestroy(this->graph_stream));
         this->graph_stream         = nullptr;
         this->graph_stream_created = false;
 #endif
@@ -157,27 +157,11 @@ public:
     hipStream_t get_stream()
     {
         hipStream_t stream{};
-        throw_on_hipsparse_error("hipsparseGetStream", hipsparseGetStream(*this, &stream));
+        throw_if_hipsparse_error("hipsparseGetStream", hipsparseGetStream(*this, &stream));
         return stream;
     }
 
 private:
-    static void throw_on_hip_error(const char* call, hipError_t status)
-    {
-        if(status != hipSuccess)
-        {
-            throw_hip_error(call, status);
-        }
-    }
-
-    static void throw_on_hipsparse_error(const char* call, hipsparseStatus_t status)
-    {
-        if(status != HIPSPARSE_STATUS_SUCCESS)
-        {
-            throw_hipsparse_error(call, status);
-        }
-    }
-
     // Drop any graph left by a failed begin or end capture, restore the previous
     // stream, and destroy the capture stream. hipStream_t{} is the default stream,
     // so the capture stream is destroyed only when this object created it.
@@ -264,9 +248,16 @@ private:
     bool graph_testing{};
 };
 
-// Exact match for the wrapper, so this beats the implicit conversion to
-// hipsparseHandle_t. A leftover hipsparseDestroy(wrapper) is a compile error
-// instead of destroying the descriptor twice.
-hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&) = delete;
+// These beat the implicit conversion to void*. The handle, matrix descriptor,
+// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
+// void*, so a leftover destroy of the wrong kind would otherwise compile and
+// free this descriptor twice.
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&)          = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalHandle_t&)  = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalHandle_t&)    = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalHandle_t&) = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalHandle_t&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalHandle_t&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalHandle_t&)     = delete;
 
 #endif // HIPSPARSE_LOCAL_HANDLE_HPP

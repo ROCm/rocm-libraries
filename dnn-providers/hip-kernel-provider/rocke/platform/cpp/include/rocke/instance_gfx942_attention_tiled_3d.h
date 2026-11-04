@@ -224,6 +224,9 @@ typedef struct rocke_unified_attention_reduce_tiled_spec
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
+    /* emit_lse (False): add a trailing lse_ptr param and write the FP32 natural-log
+     * LSE [total_q, num_query_heads, 1]; kernel name gains a trailing "lse". */
+    bool emit_lse;
 } rocke_unified_attention_reduce_tiled_spec_t;
 
 rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void);

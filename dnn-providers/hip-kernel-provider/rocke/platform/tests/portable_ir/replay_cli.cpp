@@ -23,7 +23,7 @@
  *   replay_cli --recipe  <recipe.cbor> --cbor        [common opts] [spec opts]
  *   replay_cli --bundle  <bundle.cbor> --key KEY     [common opts] [spec opts]
  *
- *   common opts: --arch GFX (default gfx950), --flavor llvm20|llvm22|llvm23
+ *   common opts: --arch GFX (default gfx950), --flavor llvm20|llvm22|llvm23|llvm24
  *   spec opts  : --int NAME=VALUE, --str NAME=VALUE  (repeatable)
  *
  * Exits nonzero with a message on stderr for any read, parse, replay, or
@@ -57,7 +57,7 @@ void usage(const char* argv0)
 {
     std::fprintf(stderr,
                  "usage: %s (--ir FILE | --recipe FILE [--cbor] | --bundle FILE --key KEY)\n"
-                 "          [--arch GFX] [--flavor llvm20|llvm22|llvm23]\n"
+                 "          [--arch GFX] [--flavor llvm20|llvm22|llvm23|llvm24]\n"
                  "          [--int NAME=VALUE]... [--str NAME=VALUE]...\n"
                  "       %s --provenance\n",
                  argv0,

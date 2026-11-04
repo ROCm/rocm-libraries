@@ -252,6 +252,45 @@ void test_lowering(const char* flavor, const rocke_arch_domain_cell_t* cell)
     set_mode(nullptr);
 }
 
+/* Every qualified lane resolves to its own column or a declared alias. */
+void test_every_lane_has_a_column()
+{
+    for(int i = 0; i < rocke_llvm_flavor_count(); ++i)
+    {
+        const char* lane = rocke_llvm_flavor_at(i);
+        size_t count = 0;
+        (void)rocke_arch_domain_column(lane, &count);
+        EXPECT(count > 0, std::string("no arch-domain column for lane ") + lane);
+    }
+}
+
+/* Any borrowing lane refuses as its source and names that source in the message.
+ * The set can be empty once every qualified lane has a measured column. */
+void test_a_borrowing_lane_refuses_as_its_source()
+{
+    for(int i = 0; i < rocke_llvm_flavor_count(); ++i)
+    {
+        const char* lane = rocke_llvm_flavor_at(i);
+        const char* source = rocke_arch_domain_column_flavor(lane);
+        if(std::strcmp(source, lane) == 0)
+        {
+            continue;
+        }
+        const rocke_arch_domain_cell_t* cell = rocke_arch_domain_negative(source, kKey, kArch);
+        if(cell == nullptr || cell->waived)
+        {
+            continue;
+        }
+        char want[ROCKE_ERR_MSG_CAP];
+        rocke_arch_domain_message(cell, source, want, sizeof want);
+        set_mode("error");
+        Lowered refused = lower_dpp8(lane);
+        EXPECT(refused.status == ROCKE_ERR_ARCH_DOMAIN && refused.text == want,
+               std::string(lane) + " refuses as " + source + ": " + refused.text);
+        set_mode(nullptr);
+    }
+}
+
 } // namespace
 
 int main()
@@ -259,6 +298,8 @@ int main()
     test_mode_parsing();
     test_message_cap();
     test_message_text();
+    test_every_lane_has_a_column();
+    test_a_borrowing_lane_refuses_as_its_source();
 
     const rocke_arch_domain_cell_t* cell = nullptr;
     const char* flavor = refusing_flavor(&cell);

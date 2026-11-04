@@ -25,21 +25,20 @@ inline constexpr int64_t kSwPrefetchSpacingBytes = int64_t(32) * 128;
 /// klength simm5: 31 => 32 instruction cache lines (128 B each).
 inline constexpr int32_t kSwPrefetchPcRelKlengthImm = 31;
 
-/// Debug/perf-only toggle: emit `s_wait_xcnt 0` before each SW instruction prefetch
-/// (relative & absolute) for gfx1250 XNACK safety. A shader must drain outstanding address
-/// translations before any `s_prefetch_inst[_pc_rel]`, else the prefetch can be caught in an
-/// XNACK replay group. Relative inserts one wait per (scattered) prefetch; absolute inserts one
-/// wait per contiguous burst.
-///
-/// Intentionally NOT a ModuleOption / TensileLite parameter — purely a stinkytofu-internal knob
-/// for debugging and performance A/B testing. Flip to false to measure without the wait; when
-/// false every gated site collapses to today's bytes exactly (zero golden churn). Also gated by
-/// opcode availability (getMCIDByUOp(GFX::s_wait_xcnt) != nullptr), so it is a no-op off gfx1250.
-inline constexpr bool kSwPrefetchEmitXnackWait = true;
+/// Size of the `s_wait_xcnt 0` emitted before a SW instruction prefetch, when one is emitted at
+/// all: a fixed 4-byte SOPP (MC_SOPP => 0 literal bytes). Whether to emit it is the caller's
+/// `emitXnackWait` (see below), so byte accounting reads `emitXnackWait ? kSwPrefetchXnackWaitBytes
+/// : 0` rather than this alone.
+inline constexpr int64_t kSwPrefetchXnackWaitBytes = int64_t(4);
 
-/// s_wait_xcnt 0 encodes as a fixed 4-byte SOPP (MC_SOPP => 0 literal bytes). Compile-time size
-/// contribution of the wait, folded into the abs byte-accounting constants below.
-inline constexpr int64_t kSwPrefetchXnackWaitBytes = kSwPrefetchEmitXnackWait ? int64_t(4) : 0;
+/// Whether to emit `s_wait_xcnt 0` before each SW instruction prefetch (relative & absolute) is
+/// decided per run and threaded in as `bool emitXnackWait`. A shader must drain outstanding
+/// address translations before any `s_prefetch_inst[_pc_rel]`, else the prefetch can be caught in
+/// an XNACK replay group -- but only where XNACK replay can happen at all, so the passes take it
+/// from `AsmCapsConfig::enableXnackReplay`. A gfx1250 built for a driver configuration with XNACK
+/// off reports false and pays nothing. Relative emits one wait per (scattered) prefetch; absolute
+/// one per contiguous burst. Insertion is additionally gated on opcode availability
+/// (`getMCIDByUOp(GFX::s_wait_xcnt) != nullptr`), so it is a no-op off gfx1250 either way.
 
 /// Grid boundary P(k) = kSwPrefetchFirstGlobalByte + k * kSwPrefetchSpacingBytes.
 inline constexpr int64_t swPrefetchGridOffset(int64_t k) {
@@ -77,13 +76,19 @@ STINKYTOFU_EXPORT uint32_t absPrefetchEntrySgprBase(const Function& function);
 /// window, and tail-flush rules.
 ///
 /// \p blockGlobalByteOffset  Global layout offset of this BB's first byte.
+/// \p emitXnackWait  Emit `s_wait_xcnt 0` before each prefetch; from
+///                   `AsmCapsConfig::enableXnackReplay`.
 /// \p allowSwPrefetchInsertion  If false, identical walk without IR mutation.
+///
+/// Neither boolean is defaulted. One of them defaulted would let a call that
+/// passes a single `true`/`false` keep compiling while meaning the other thing:
+/// which parameter it binds to depends on the order, not on the call site, so
+/// the change would be silent.
 /// \p debugPassTag  Prefix for optional debug lines (e.g. pass name).
 STINKYTOFU_EXPORT void insertSwPrefetchLabels(
     BasicBlock& bb, int64_t blockGlobalByteOffset, GfxArchID archId, std::ostream* dbgOut,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols,
-    bool allowSwPrefetchInsertion = true,
-    const char* debugPassTag = "SwInstructionPrefetchRelStaticPass");
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
+    bool allowSwPrefetchInsertion, const char* debugPassTag = "SwInstructionPrefetchRelStaticPass");
 
 /// Debug-only: list P(k) grid boundaries that fall in this basic block.
 STINKYTOFU_EXPORT void debugPrintSwPrefetchGrid(
@@ -130,12 +135,13 @@ STINKYTOFU_EXPORT void computeSwPrefetchRelPhase1Accum(
 /// \p bbEntryAccum is Phase-1 `accumByte[bb]` (post-CP bytes accumulated before this BB).
 /// \p kNextIn is the first grid index `k` not yet consumed by earlier BBs; the walk runs BB-by-BB
 /// in layout order and carries `k` forward, so pass 0 only to start a fresh sweep.
+/// \p emitXnackWait is as in `insertSwPrefetchLabels`.
 /// Returns number of prefetches inserted in this BB.
 STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamic(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t kNextIn,
     GfxArchID archId, std::ostream* dbgOut,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols,
-    bool allowSwPrefetchInsertion = true,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
+    bool allowSwPrefetchInsertion,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPass");
 
 /// Alternate Phase-2 pipeline: same two-condition insert test (with **closed-left** match when
@@ -147,8 +153,8 @@ STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamic(
 STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamicPerBbAnchor(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
     int64_t kLocalNextIn, GfxArchID archId, std::ostream* dbgOut,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols,
-    bool allowSwPrefetchInsertion = true,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
+    bool allowSwPrefetchInsertion,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPassPerBbAnchor");
 
 }  // namespace stinkytofu

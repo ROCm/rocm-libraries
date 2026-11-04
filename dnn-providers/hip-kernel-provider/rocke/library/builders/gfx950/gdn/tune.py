@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Measure gfx950 GDN registry candidates and KDA tile-table alternatives.
+"""Measure the gfx950 GDN/KDA decode tiles against the ``auto`` tile.
 
-GDN dispatch has a static registry priority. Its sweep measures every legal
-registered candidate but does not change dispatcher-default selection. KDA keeps
-its separate work-keyed table, so its sweep enumerates every validator-admitted
-tile to challenge the selected work band.
+``auto`` is one static tile and knob stack per case (``dispatch.gdn.axes.
+AUTO_DEFAULTS``). This tool times tiles only, each at its base configuration
+(every knob off), and marks the tile ``auto`` dispatches; it does not time the
+knob stack and never changes selection. GDN measures every legal registered
+candidate; KDA enumerates every validator-admitted tile. A tiles x knobs sweep
+is not in this tool.
 
 Every candidate is correctness-gated before device timing. Host launch cost can
 hide kernel differences at small batch, so device time is the comparison metric.
@@ -15,7 +17,7 @@ Run GDN with its default batch anchors::
 
     PYTHONPATH=<rocke>/library:<rocke>/platform/python python3 tune.py
 
-Run the KDA work-keying study across several head geometries::
+Run the KDA tile study across several head geometries::
 
     PYTHONPATH=<rocke>/library:<rocke>/platform/python python3 tune.py --gate-kind kda \
         --geometries 16/32,8/16,4/8 \
@@ -34,7 +36,7 @@ from dispatch.gdn import (
     dispatch_gdn_decode,
     dispatch_gdn_decode_bases,
 )
-from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K, work_for
+from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K, make_spec
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 ARCH = "gfx950"
@@ -223,60 +225,36 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
 
 
 def report_gdn_dispatcher_default(rows, auto_id: str) -> bool:
-    """Print the shipped GDN default against the fastest measured candidate.
+    """Print the ``auto`` tile's base configuration against the fastest
+    measured candidate (``auto`` itself also runs its case's knob stack).
 
-    Return False when the default is not among the correct, timed rows.
+    Return False when the auto tile is not among the correct, timed rows.
     """
     best_micros, best_tile, best_id, _ = rows[0]
     for rank, (micros, tile, spec_id, _) in enumerate(rows, start=1):
         if spec_id != auto_id:
             continue
         print(
-            f"  dispatcher default: {micros:.3f}us  {spec_id} "
+            f"  auto tile (base configuration): {micros:.3f}us  {spec_id} "
             f"tile={tile} rank={rank}/{len(rows)}"
         )
         print(
             f"  fastest legal candidate: {best_micros:.3f}us  {best_id} "
             f"tile={best_tile}"
         )
-        print(f"  default / fastest = {micros / best_micros:.3f}x")
-        if spec_id == best_id:
-            print("  manual review: retain DEFAULT_TILE")
-        else:
-            print(f"  manual review: consider DEFAULT_TILE = {best_tile}")
+        print(f"  auto tile base / fastest = {micros / best_micros:.3f}x")
+        # Base-configuration timings cannot re-pick a row: auto runs its
+        # case's tile with a knob stack, chosen on tiles x knobs.
+        print(
+            "  base configurations only; not a basis for changing AUTO_DEFAULTS "
+            "(ALGORITHM.md section 4.6)"
+        )
         return True
     print(
-        f"  dispatcher default {auto_id!r} is NOT in the correct-and-timeable "
+        f"  auto tile {auto_id!r} is NOT in the correct-and-timeable "
         "set for this cell"
     )
     return False
-
-
-def report_kda_work_keying(by_work) -> None:
-    """Check that cells sharing ``batch * num_v_heads`` pick the same best tile.
-
-    ``_TUNED_TILES_KDA`` is keyed on work alone. Cells with equal work but a
-    different (batch, num_v_heads) split are the evidence for or against that
-    key: a disagreement invalidates the table's key, not just one value.
-    """
-    print("\n=== KDA work -> best tile, across geometries ===")
-    print(f"{'work':>7}  {'best tile':16} {'us':>9}  cells (batch x Hv)")
-    disagreements = 0
-    for work in sorted(by_work):
-        cells = by_work[work]
-        tiles = {cell[1] for cell in cells}
-        fastest = min(cells)
-        cell_text = " ".join(f"{batch}x{hv}" for _, _, batch, hv in cells)
-        flag = "" if len(tiles) == 1 else "   <-- TILES DISAGREE"
-        disagreements += len(tiles) > 1
-        print(f"{work:>7}  {str(fastest[1]):16} {fastest[0]:9.3f}  {cell_text}{flag}")
-    if disagreements:
-        print(
-            f"\nWARNING: work alone did not fix the best tile at {disagreements} "
-            "work value(s). Check whether the disagreeing times sit inside "
-            "run-to-run variation; if they do not, _TUNED_TILES_KDA must not be "
-            "keyed on work."
-        )
 
 
 def main() -> int:
@@ -310,7 +288,6 @@ def main() -> int:
         for item in args.geometries.split(",")
     ]
     failed = False
-    by_work = {}  # KDA work -> [(us, best tile, batch, num_v_heads), ...]
     for num_k_heads, num_v_heads in geometries:
         for batch in batches:
             request = GdnDecodeRequest(
@@ -321,11 +298,17 @@ def main() -> int:
                 num_v_heads=num_v_heads,
             )
             if args.gate_kind == "kda":
-                # KDA's measured table is work-keyed, but the study must test
-                # every validator-admitted tile rather than the current band's
-                # dispatcher result.
-                auto = dispatch_gdn_decode(request)
-                base = auto.spec.kernel_spec
+                # Every validator-admitted tile, not only the registered
+                # candidates' order, each at its base configuration: the
+                # sweep starts from the dispatched tile with every knob off,
+                # not from ``auto``'s knob stack.
+                kernel = dispatch_gdn_decode(request).spec.kernel_spec
+                auto_tile = (
+                    kernel.num_warps,
+                    kernel.warp_threads_k,
+                    kernel.blocks_per_v_dim,
+                )
+                base = make_spec(request, auto_tile)
                 configs = legal_configs(base)
                 print(f"legal KDA configurations for batch {batch}: {len(configs)}")
                 rows = sweep_batch(base, batch, configs)
@@ -333,26 +316,18 @@ def main() -> int:
                     print(f"batch {batch}: no candidate was both correct and timeable")
                     failed = True
                     continue
-                auto_tile = (
-                    base.num_warps,
-                    base.warp_threads_k,
-                    base.blocks_per_v_dim,
-                )
                 print(
                     f"\n=== Hk{num_k_heads}/Hv{num_v_heads} batch {batch}: "
                     f"top {args.top} ==="
                 )
                 for micros, tile, err in rows[: args.top]:
-                    mark = " <- dispatcher default" if tile == auto_tile else ""
+                    mark = " <- auto tile" if tile == auto_tile else ""
                     print(f"  {micros:9.3f}us tile={tile} err={err:.2e}{mark}")
                 if all(tile != auto_tile for _, tile, _ in rows):
                     print(
-                        f"  dispatcher default {auto_tile} is NOT in the "
+                        f"  auto tile {auto_tile} is NOT in the "
                         "correct-and-timeable set for this cell"
                     )
-                by_work.setdefault(work_for(batch, num_v_heads), []).append(
-                    (rows[0][0], rows[0][1], batch, num_v_heads)
-                )
                 continue
 
             # Each registered tile's base configuration.
@@ -370,15 +345,14 @@ def main() -> int:
                 f"top {args.top} ==="
             )
             for micros, tile, spec_id, err in rows[: args.top]:
-                mark = " <- dispatcher default" if spec_id == auto_id else ""
+                mark = " <- auto tile" if spec_id == auto_id else ""
                 print(f"  {micros:9.3f}us  {spec_id} tile={tile} err={err:.2e}{mark}")
             if not report_gdn_dispatcher_default(rows, auto_id):
                 failed = True
 
-    if by_work:
-        report_kda_work_keying(by_work)
     print(
-        "\nDispatcher default is deterministic; measurements do not change selection."
+        "\nThe auto configuration is deterministic; measurements do not change "
+        "selection."
     )
     return 1 if failed else 0
 
