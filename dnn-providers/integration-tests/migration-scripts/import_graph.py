@@ -36,10 +36,26 @@ prefix via ``TIER_MAP`` (``Full/...`` -> ``full/``), as in ``place_bundles.py``;
 with no sidecar, or one with no ``operation``, it defaults to ``quick``. A
 ``--tier`` that contradicts the sidecar warns like any other override.
 
+Grouped import (opt-in): ``--template-attributes``, ``--template-alignment``
+and ``--skeleton-value-form`` let one sweep hold generated cases with different
+node attributes, alignments or baked values. ``--op-dir``, ``--topology``,
+``--only-op-dir``, ``--require-marked-sweep`` and ``--case-id`` control where a
+case goes and its id. Each of these flags writes an ``import_mode`` object into
+a new ``sweep.json``, and the new template takes ``is_override_shape_enabled``
+and ``min_required_engine_api_version`` from the case values. Default mode
+never appends into a sweep with this object.
+Default mode still reports an exact duplicate of a case in such a sweep.
+``--sweep-format`` sets the file layout of a new grouped sweep (default
+``compact``) and records it in the object. An append keeps the layout of the sweep.
+See README.md.
+
 Usage::
 
     import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
         [--tier TIER] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
+        [--op-dir NAME] [--topology NAME] [--template-attributes]
+        [--template-alignment] [--skeleton-value-form] [--only-op-dir]
+        [--require-marked-sweep] [--case-id ID] [--sweep-format {pretty,compact}]
 """
 
 import argparse
@@ -52,10 +68,16 @@ import sys
 from pathlib import Path
 
 from bundle_utils import (
+    GROUPED_TOP_LEVEL,
     TENSOR_ALWAYS,
     TENSOR_IF_VARIES,
+    IMPORT_MODE_KEY,
     TOP_LEVEL_IF_VARIES,
+    SWEEP_FORMATS,
     _case_hash,
+    dump_sweep,
+    import_mode_grouping,
+    import_mode_marker,
     assign_case_ids,
     canon,
     canonical_uid_map_by_name,
@@ -71,6 +93,12 @@ from bundle_utils import (
     remap_meta_inputs,
     sanitize,
     skeleton_hash,
+    sweep_format,
+    sweep_import_mode,
+    template_node_attributes,
+    template_tensor_alignment,
+    template_tensor_values,
+    template_top_level_fields,
     tensors_by_uid,
     tier_for_suite,
 )
@@ -81,7 +109,7 @@ from bundle_utils import (
 # --------------------------------------------------------------------------
 
 
-def _index_existing(bundle_dir: Path) -> dict:
+def _index_existing(bundle_dir: Path, value_form: bool = False) -> dict:
     """Build {skeleton_hash: [(template, sweep, sweep_path)]} from the tree."""
     index = {}
     if not bundle_dir.is_dir():
@@ -101,7 +129,7 @@ def _index_existing(bundle_dir: Path) -> dict:
         if not cases:
             continue
         expanded_rep = expand(template, cases[0].get("values", {}))
-        h = skeleton_hash(expanded_rep)
+        h = skeleton_hash(expanded_rep, value_form=value_form)
         index.setdefault(h, []).append((template, sweep, sweep_path))
     return index
 
@@ -231,7 +259,7 @@ def _report_roundtrip_failure(where, expanded, graph, selected=None):
 def _extract_values(graph: dict, template: dict) -> dict:
     """Extract per-case values from a concrete graph given its template."""
     values = {}
-    for fld in TOP_LEVEL_IF_VARIES:
+    for fld in TOP_LEVEL_IF_VARIES + GROUPED_TOP_LEVEL:
         if isinstance(template.get(fld), str) and template[fld].startswith("${case."):
             values[fld] = graph.get(fld)
 
@@ -247,6 +275,17 @@ def _extract_values(graph: dict, template: dict) -> dict:
                     entry[fld] = src[fld]
         tv.append(entry)
     values["tensors"] = tv
+
+    # Whole-field tensor placeholders that resolve from the top-level values,
+    # such as ${case.alignment.<uid>}.
+    for tt in template.get("tensors", []):
+        src = tgraph.get(tt.get("uid"), {})
+        for fld, tval in tt.items():
+            if fld in TENSOR_ALWAYS + TENSOR_IF_VARIES or fld not in src:
+                continue
+            for loc, case_path in _extract_placeholders(tval):
+                if loc == "":
+                    _deep_set(values, case_path, src[fld])
 
     for t_node, g_node in zip(template.get("nodes", []), graph.get("nodes", [])):
         for loc, case_path in _extract_placeholders(t_node):
@@ -350,6 +389,33 @@ def _gtest_name(sweep_dir: Path, bundle_dir: Path, case_id: str) -> str:
     return f"{suite}.{_sanitize_gtest(case_id)}"
 
 
+# Opt-in flags that change how a new sweep is templated or matched. Each one
+# that is in effect is recorded in the sweep's import_mode object.
+_GROUPING_FLAGS = ("template_attributes", "template_alignment", "skeleton_value_form")
+
+
+def _is_folder_name(name: str) -> bool:
+    """True if ``name`` is one plain directory name (no separator, not . or ..)."""
+    return bool(name) and name not in (".", "..") and Path(name).name == name
+
+
+def _grouping_options(args):
+    """The grouping options in effect, as their command-line spellings."""
+    return [f.replace("_", "-") for f in _GROUPING_FLAGS if getattr(args, f)]
+
+
+def _is_grouped(args) -> bool:
+    """True if any opt-in grouped-import flag is given."""
+    return bool(
+        _grouping_options(args)
+        or args.op_dir is not None
+        or args.topology is not None
+        or args.only_op_dir
+        or args.require_marked_sweep
+        or args.case_id is not None
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -391,7 +457,92 @@ def main() -> int:
         action="store_true",
         help="exit non-zero on exact dup or sidecar override (CI mode)",
     )
+    grouped = ap.add_argument_group(
+        "grouped import (opt-in)",
+        "Any of these flags writes an import_mode object into a new sweep.json.",
+    )
+    grouped.add_argument(
+        "--op-dir",
+        default=None,
+        metavar="NAME",
+        help="operation folder for a new sweep (default: from the node types)",
+    )
+    grouped.add_argument(
+        "--topology",
+        default=None,
+        metavar="NAME",
+        help="sweep folder for a new sweep. An append must go to the sweep in"
+        " this folder, else the import fails. A folder that holds a different"
+        " sweep is never written",
+    )
+    grouped.add_argument(
+        "--template-attributes",
+        action="store_true",
+        help="a new template replaces every non-object node attribute value"
+        " with ${case.attributes.<key>}",
+    )
+    grouped.add_argument(
+        "--template-alignment",
+        action="store_true",
+        help="a new template replaces each tensor alignment with"
+        " ${case.alignment.<uid>}",
+    )
+    grouped.add_argument(
+        "--skeleton-value-form",
+        action="store_true",
+        help="the skeleton hash records each tensor's value form (baked value,"
+        " value_type, is_runtime_pass_by_value), and a new template replaces"
+        " each baked value with ${case.value}",
+    )
+    grouped.add_argument(
+        "--only-op-dir",
+        action="store_true",
+        help="match only sweeps under <bundle-dir>/<tier>/<op-dir>/",
+    )
+    grouped.add_argument(
+        "--require-marked-sweep",
+        action="store_true",
+        help="match only sweeps whose import_mode equals the import_mode of this"
+        " run. The format key of import_mode is not compared",
+    )
+    grouped.add_argument(
+        "--case-id",
+        default=None,
+        metavar="ID",
+        help="case id to use (lowercase_snake_case). The import fails if the"
+        " sweep already has this id",
+    )
+    grouped.add_argument(
+        "--sweep-format",
+        choices=SWEEP_FORMATS,
+        default=None,
+        help="file layout of a new sweep.json (default: compact). Needs another"
+        " grouped-import flag. An append keeps the layout of the sweep",
+    )
     args = ap.parse_args()
+
+    for flag, name in (("--op-dir", args.op_dir), ("--topology", args.topology)):
+        if name is not None and not _is_folder_name(name):
+            print(f"import_graph: {flag}: not a folder name: {name!r}", file=sys.stderr)
+            return 1
+    if args.case_id is not None and not re.fullmatch(r"[a-z0-9_]+", args.case_id):
+        print(
+            f"import_graph: --case-id: not lowercase_snake_case: {args.case_id!r}",
+            file=sys.stderr,
+        )
+        return 1
+    grouped_mode = _is_grouped(args)
+    if args.sweep_format is not None and not grouped_mode:
+        print(
+            "import_graph: --sweep-format needs a grouped-import flag",
+            file=sys.stderr,
+        )
+        return 1
+    marker = (
+        import_mode_marker(_grouping_options(args), args.sweep_format or "compact")
+        if grouped_mode
+        else None
+    )
 
     try:
         with open(args.graph) as f:
@@ -477,15 +628,25 @@ def main() -> int:
     graph = remap_graph(graph, uid_map)
     meta = remap_meta_inputs(meta, uid_map)
 
-    h = skeleton_hash(graph)
-    op = derive_operation(graph)
+    h = skeleton_hash(graph, value_form=args.skeleton_value_form)
+    op = args.op_dir if args.op_dir is not None else derive_operation(graph)
     graph_json = canon(graph)
 
     print(f"  skeleton hash: {h}", file=sys.stderr)
     print(f"  operation:     {op}", file=sys.stderr)
 
-    index = _index_existing(args.bundle_dir)
+    index = _index_existing(args.bundle_dir, value_form=args.skeleton_value_form)
     matches = index.get(h, [])
+    if args.only_op_dir:
+        op_prefix = str(args.bundle_dir / args.tier / op) + os.sep
+        matches = [m for m in matches if str(m[2]).startswith(op_prefix)]
+    if args.require_marked_sweep:
+        grouping = import_mode_grouping(marker)
+        matches = [
+            m
+            for m in matches
+            if import_mode_grouping(sweep_import_mode(m[1])) == grouping
+        ]
 
     # --- Check for exact duplicates ---
     for template, sweep, sweep_path in matches:
@@ -508,6 +669,28 @@ def main() -> int:
                         print("  skipped (use --force to append)", file=sys.stderr)
                         return 0
 
+    # Default mode never appends into a sweep that grouped mode wrote. It
+    # still reports an exact duplicate of a case there (checked above).
+    if not grouped_mode:
+        matches = [m for m in matches if sweep_import_mode(m[1]) is None]
+
+    topology_dir = (
+        args.bundle_dir / args.tier / op / args.topology
+        if args.topology is not None
+        else None
+    )
+    if topology_dir is not None and matches:
+        in_topology = [m for m in matches if m[2].parent == topology_dir]
+        if not in_topology:
+            print(
+                f"  ERROR: --topology {args.topology}: the graph matches"
+                f" {', '.join(str(m[2].parent) for m in matches)},"
+                f" not {topology_dir}",
+                file=sys.stderr,
+            )
+            return 1
+        matches = in_topology
+
     # --- Structural match: append to existing sweep ---
     if matches:
         # Prefer a sweep in the requested tier so Smoke cases land in quick/.
@@ -518,13 +701,22 @@ def main() -> int:
         new_case = {"id": None, "values": values, "metadata": meta}
         existing_cases = sweep.get("cases", [])
         saved_ids = [c["id"] for c in existing_cases]
-        all_cases = existing_cases + [new_case]
-        assign_case_ids(all_cases)
-        for c, orig_id in zip(existing_cases, saved_ids):
-            c["id"] = orig_id
         taken = set(saved_ids)
-        if new_case["id"] in taken:
-            new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
+        if args.case_id is not None:
+            if args.case_id in taken:
+                print(
+                    f"  ERROR: --case-id {args.case_id} already exists in {sweep_path}",
+                    file=sys.stderr,
+                )
+                return 1
+            new_case["id"] = args.case_id
+        else:
+            all_cases = existing_cases + [new_case]
+            assign_case_ids(all_cases)
+            for c, orig_id in zip(existing_cases, saved_ids):
+                c["id"] = orig_id
+            if new_case["id"] in taken:
+                new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
 
         expanded = expand(template, values)
         if canon(expanded) != canon(graph):
@@ -543,11 +735,17 @@ def main() -> int:
         # key already survives untouched since only sweep["cases"] is
         # replaced below.
         sweep["cases"] = existing_cases + [new_case]
+        fmt = sweep_format(sweep)
+        if fmt not in SWEEP_FORMATS:
+            print(
+                f"  ERROR: {sweep_path}: unknown sweep.json format {fmt!r}",
+                file=sys.stderr,
+            )
+            return 1
         support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
         if not args.dry_run:
             with open(sweep_path, "w", newline="\n") as f:
-                json.dump(sweep, f, indent=2)
-                f.write("\n")
+                f.write(dump_sweep(sweep, fmt))
         print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
         print(
             "  gtest name: "
@@ -570,6 +768,14 @@ def main() -> int:
         for fld in TENSOR_ALWAYS:
             if fld in t:
                 t[fld] = f"${{case.{fld}}}"
+    if args.template_attributes:
+        template_node_attributes(template)
+    if args.template_alignment:
+        template_tensor_alignment(template)
+    if args.skeleton_value_form:
+        template_tensor_values(template)
+    if grouped_mode:
+        template_top_level_fields(template)
 
     values = _extract_values(graph, template)
 
@@ -584,12 +790,27 @@ def main() -> int:
     preferred_topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
 
     op_dir = args.bundle_dir / args.tier / op
-    topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
+    if topology_dir is not None:
+        if next_free_topology_dir(op_dir, args.topology) != args.topology:
+            print(
+                f"  ERROR: --topology {args.topology}: {topology_dir} holds"
+                " another sweep",
+                file=sys.stderr,
+            )
+            return 1
+        topo_name = args.topology
+    else:
+        topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
     out_dir = op_dir / topo_name
 
     case_entry = {"id": None, "values": values, "metadata": meta}
-    assign_case_ids([case_entry])
+    if args.case_id is not None:
+        case_entry["id"] = args.case_id
+    else:
+        assign_case_ids([case_entry])
     sweep_out = {"version": 1, "cases": [case_entry]}
+    if marker is not None:
+        sweep_out = {"version": 1, IMPORT_MODE_KEY: marker, "cases": [case_entry]}
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -599,8 +820,7 @@ def main() -> int:
             json.dump(template, f, indent=2)
             f.write("\n")
         with open(out_dir / "sweep.json", "w", newline="\n") as f:
-            json.dump(sweep_out, f, indent=2)
-            f.write("\n")
+            f.write(dump_sweep(sweep_out, sweep_format(sweep_out)))
     print(
         f"  created new bundle: {out_dir} (case '{case_entry['id']}')",
         file=sys.stderr,

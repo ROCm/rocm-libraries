@@ -2198,6 +2198,921 @@ def test_retier_bundles():
         print("  PASS: retier_bundles")
 
 
+def test_retier_keeps_import_mode():
+    """Moved cases keep their sweep's import_mode; mixed import_modes are refused."""
+    script = SCRIPT_DIR / "retier_bundles.py"
+    marker = {"grouping": ["template-attributes"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        template = _retier_graph_template(None)
+        _retier_write(
+            root, "quick", template, [_retier_case("a"), _retier_case("b")], {}
+        )
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        for tier in ("quick", "full"):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            sweep = json.loads(path.read_text())
+            if tier == "quick":
+                sweep = {"version": 1, "import_mode": marker, "cases": sweep["cases"]}
+            path.write_text(json.dumps(sweep))
+        asg = Path(tmp) / "asg.json"
+
+        def retier(rows):
+            with open(asg, "w") as f:
+                json.dump(
+                    [dict(current_tier=t, key=k, proposed_tier=n) for t, k, n in rows],
+                    f,
+                )
+            return run(
+                [
+                    sys.executable,
+                    script,
+                    "--bundle-dir",
+                    root,
+                    "--assignments",
+                    asg,
+                    "--apply",
+                ],
+                check=False,
+            )
+
+        r = retier(
+            [
+                ("quick", "Op/Default/a", "quick"),
+                ("quick", "Op/Default/b", "full"),
+                ("full", "Op/Default/c", "full"),
+            ]
+        )
+        assert r.returncode != 0 and "import_mode" in r.stderr, r.stderr
+        assert not (root / "standard").exists()
+
+        r = retier(
+            [
+                ("quick", "Op/Default/a", "quick"),
+                ("quick", "Op/Default/b", "standard"),
+                ("full", "Op/Default/c", "full"),
+            ]
+        )
+        assert r.returncode == 0, r.stderr
+        moved = json.loads((root / "standard/Op/Default/sweep.json").read_text())
+        assert moved.get("import_mode") == marker, moved
+        assert [c["id"] for c in moved["cases"]] == ["b"], moved
+        kept = json.loads((root / "full/Op/Default/sweep.json").read_text())
+        assert "import_mode" not in kept, kept
+        print("  PASS: retier_keeps_import_mode")
+
+
+# --------------------------------------------------------------------------
+# Grouped import (opt-in flags of import_graph.py)
+# --------------------------------------------------------------------------
+
+_GROUPED_FLAGS = (
+    "--op-dir",
+    "GroupedOp",
+    "--template-attributes",
+    "--template-alignment",
+    "--skeleton-value-form",
+    "--only-op-dir",
+    "--require-marked-sweep",
+)
+
+
+def _grouped_graph(causal=False, alignment=16, scale=None, runtime=False, dims=None):
+    """A one-node graph with node attributes, tensor alignment and a scale tensor.
+
+    ``scale`` bakes a by-value scale tensor; ``runtime`` makes it a runtime
+    pass-by-value tensor instead. With neither, the graph has no scale tensor.
+    """
+    dims = dims or [2, 3, 4, 5]
+    strides = [60, 20, 5, 1] if dims == [2, 3, 4, 5] else [2 * 3 * 4, 3 * 4, 4, 1]
+    graph = _make_graph("Grouped", [0, 1], dims, strides, "float")
+    node = graph["nodes"][0]
+    node["attributes"] = {"causal": causal, "window": None, "mode": "AUTO"}
+    node["compute_data_type"] = "float"
+    for t in graph["tensors"]:
+        t["alignment"] = alignment
+        t["is_runtime_pass_by_value"] = False
+    graph["tensors"][0]["name"] = "X"
+    graph["tensors"][1]["name"] = "Y"
+    if scale is not None or runtime:
+        node["inputs"]["scale_tensor_uid"] = 2
+        tensor = {
+            "uid": 2,
+            "name": "SCALE",
+            "dims": [1],
+            "strides": [1],
+            "data_type": "float",
+            "virtual": False,
+            "alignment": alignment,
+            "is_runtime_pass_by_value": runtime,
+        }
+        if not runtime:
+            tensor["value"] = scale
+            tensor["value_type"] = "FloatValue"
+        graph["tensors"].append(tensor)
+    return graph
+
+
+def _sweep_dirs(bundle_dir):
+    """Sorted sweep directories, relative to bundle_dir, as posix strings."""
+    return sorted(
+        p.parent.relative_to(bundle_dir).as_posix()
+        for p in bundle_dir.rglob("sweep.json")
+    )
+
+
+def _load_sweep(bundle_dir, rel):
+    with open(bundle_dir / rel / "sweep.json") as f:
+        return json.load(f)
+
+
+def _write_marked_sweep(bundle_dir, rel, graph, marker):
+    """Write a one-case sweep for graph at bundle_dir/rel with an import_mode."""
+    from bundle_utils import TENSOR_ALWAYS
+
+    out = bundle_dir / rel
+    out.mkdir(parents=True)
+    template = copy.deepcopy(graph)
+    for t in template["tensors"]:
+        for fld in TENSOR_ALWAYS:
+            t[fld] = f"${{case.{fld}}}"
+    values = {
+        "tensors": [
+            {"uid": t["uid"], **{fld: t[fld] for fld in TENSOR_ALWAYS}}
+            for t in graph["tensors"]
+        ]
+    }
+    sweep = {"version": 1, "cases": [{"id": "only", "values": values, "metadata": {}}]}
+    if marker is not None:
+        sweep = {"version": 1, "import_mode": marker, "cases": sweep["cases"]}
+    (out / "graph.template.json").write_text(json.dumps(template, indent=2) + "\n")
+    (out / "sweep.json").write_text(json.dumps(sweep, indent=2) + "\n")
+
+
+def test_grouped_default_mode_ignores_marked_sweep():
+    """Default mode never appends into a marked sweep, but reports a duplicate."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        _write_marked_sweep(
+            bundle_dir, "quick/Relu/Marked", g, {"grouping": ["template-attributes"]}
+        )
+        before = _inventory(bundle_dir)
+
+        r = _import(tmp, "dup", g, bundle_dir, "--strict", check=False)
+        assert r.returncode == 1, f"strict duplicate should exit 1:\n{r.stderr}"
+        assert "DUPLICATE" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "duplicate check wrote files"
+
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        r = _import(tmp, "new", g2, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "created new bundle" in r.stderr, r.stderr
+        assert (bundle_dir / "quick/Relu/Marked/sweep.json").read_bytes() == before[
+            "quick/Relu/Marked/sweep.json"
+        ], "default mode changed a marked sweep"
+        assert "import_mode" not in _load_sweep(bundle_dir, "quick/Relu/Nchw")
+        assert _sweep_dirs(bundle_dir) == ["quick/Relu/Marked", "quick/Relu/Nchw"]
+        print("  PASS: grouped_default_mode_ignores_marked_sweep")
+
+
+def test_grouped_creates_marked_sweep():
+    """Opt-in import writes import_mode and templates attributes and alignment."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _grouped_graph(alignment=2)
+        r = _import(tmp, "g", g, bundle_dir, *_GROUPED_FLAGS, "--topology", "Topo")
+        assert r.returncode == 0, r.stderr
+        rel = "quick/GroupedOp/Topo"
+        assert _sweep_dirs(bundle_dir) == [rel], _sweep_dirs(bundle_dir)
+        sweep = _load_sweep(bundle_dir, rel)
+        assert list(sweep) == ["version", "import_mode", "cases"], list(sweep)
+        assert sweep["import_mode"] == {
+            "grouping": [
+                "skeleton-value-form",
+                "template-alignment",
+                "template-attributes",
+            ],
+            "format": "compact",
+        }, sweep["import_mode"]
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        node = template["nodes"][0]
+        assert node["attributes"] == {
+            "causal": "${case.attributes.attributes__causal}",
+            "window": "${case.attributes.attributes__window}",
+            "mode": "${case.attributes.attributes__mode}",
+        }, node["attributes"]
+        assert node["compute_data_type"] == "${case.attributes.compute_data_type}"
+        assert (
+            node["type"] == "GroupedAttributes" and node["inputs"]["x_tensor_uid"] == 0
+        )
+        assert [t["alignment"] for t in template["tensors"]] == [
+            "${case.alignment.0}",
+            "${case.alignment.1}",
+        ]
+        values = sweep["cases"][0]["values"]
+        assert values["alignment"] == {"0": 2, "1": 2}, values
+        assert values["attributes"]["attributes__window"] is None, values
+
+        from bundle_utils import canon, expand
+
+        assert canon(expand(template, values)) == canon(
+            g
+        ), "template does not round-trip"
+        sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+        from support_matrix_units import expand_template_graph
+
+        loaded = expand_template_graph(template, sweep["cases"][0])
+        assert canon(loaded) == canon(g), "the loader mirror expands it differently"
+        print("  PASS: grouped_creates_marked_sweep")
+
+
+def test_grouped_append_attributes_round_trip():
+    """A case that differs only in attributes, alignment or baked value appends."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        from bundle_utils import canon, canonical_uid_map_by_name, expand, remap_graph
+
+        graphs = [
+            _grouped_graph(scale=0.5),
+            _grouped_graph(causal=True, alignment=4, scale=-1.0),
+        ]
+        graphs[1]["nodes"][0]["attributes"]["window"] = 7
+        for i, g in enumerate(graphs):
+            r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+            assert r.returncode == 0, r.stderr
+        assert "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        (scale,) = [t for t in template["tensors"] if t["name"] == "SCALE"]
+        assert scale["value"] == "${case.value}", scale
+        cases = _load_sweep(bundle_dir, rel)["cases"]
+        assert len(cases) == 2, cases
+        for case, g in zip(cases, graphs):
+            want = remap_graph(g, canonical_uid_map_by_name(g))
+            assert canon(expand(template, case["values"])) == canon(want), case["id"]
+        print("  PASS: grouped_append_attributes_round_trip")
+
+
+def test_grouped_value_forms_never_share_sweep():
+    """Baked, runtime and absent scale tensors give three sweeps."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        forms = [
+            _grouped_graph(scale=0.5),
+            _grouped_graph(runtime=True),
+            _grouped_graph(scale=0.25),
+            _grouped_graph(),
+        ]
+        for i, g in enumerate(forms):
+            r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+            assert r.returncode == 0, r.stderr
+        dirs = _sweep_dirs(bundle_dir)
+        assert len(dirs) == 3, dirs
+        counts = sorted(len(_load_sweep(bundle_dir, d)["cases"]) for d in dirs)
+        assert counts == [1, 1, 2], counts
+
+        from bundle_utils import skeleton_hash
+
+        baked, runtime = forms[0], forms[1]
+        assert skeleton_hash(baked) == skeleton_hash(runtime)
+        assert skeleton_hash(baked, value_form=True) != skeleton_hash(
+            runtime, value_form=True
+        )
+        print("  PASS: grouped_value_forms_never_share_sweep")
+
+
+def test_grouped_only_op_dir_blocks_cross_appends():
+    """--only-op-dir never appends across tiers or operation folders."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        flags = ("--template-attributes", "--only-op-dir")
+        g1 = _grouped_graph()
+        g2 = _grouped_graph(causal=True)
+        g3 = _grouped_graph(alignment=8)
+        r = _import(tmp, "g1", g1, bundle_dir, *flags, "--op-dir", "OpA")
+        assert r.returncode == 0, r.stderr
+        r = _import(
+            tmp, "g2", g2, bundle_dir, *flags, "--op-dir", "OpA", "--tier", "standard"
+        )
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        r = _import(tmp, "g3", g3, bundle_dir, *flags, "--op-dir", "OpB")
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        assert _sweep_dirs(bundle_dir) == [
+            "quick/OpA/Nchw",
+            "quick/OpB/Nchw",
+            "standard/OpA/Nchw",
+        ], _sweep_dirs(bundle_dir)
+        print("  PASS: grouped_only_op_dir_blocks_cross_appends")
+
+
+def test_grouped_require_marked_sweep():
+    """--require-marked-sweep refuses unmarked and differently marked sweeps."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        _write_marked_sweep(bundle_dir, "quick/Relu/Unmarked", g, None)
+        _write_marked_sweep(
+            bundle_dir, "quick/Relu/Other", g, {"grouping": ["template-alignment"]}
+        )
+        before = _inventory(bundle_dir)
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        flags = ("--template-attributes", "--only-op-dir", "--require-marked-sweep")
+        r = _import(tmp, "g2", g2, bundle_dir, *flags, "--topology", "Mine")
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        for rel in ("quick/Relu/Unmarked", "quick/Relu/Other"):
+            for name in ("graph.template.json", "sweep.json"):
+                key = f"{rel}/{name}"
+                assert (bundle_dir / key).read_bytes() == before[key], key
+
+        g3 = _make_graph("Relu", [0, 1], [3, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g3", g3, bundle_dir, *flags, "--topology", "Mine")
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        assert len(_load_sweep(bundle_dir, "quick/Relu/Mine")["cases"]) == 2
+        print("  PASS: grouped_require_marked_sweep")
+
+
+def test_grouped_case_id():
+    """--case-id sets the id and refuses an id the sweep already has."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(
+            tmp,
+            "g1",
+            _grouped_graph(),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--case-id",
+            "fp32_a1",
+        )
+        assert r.returncode == 0, r.stderr
+        r = _import(
+            tmp,
+            "g2",
+            _grouped_graph(causal=True),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--case-id",
+            "fp32_b2",
+        )
+        assert r.returncode == 0 and "appended case 'fp32_b2'" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        ids = [c["id"] for c in _load_sweep(bundle_dir, rel)["cases"]]
+        assert ids == ["fp32_a1", "fp32_b2"], ids
+
+        before = _inventory(bundle_dir)
+        r = _import(
+            tmp,
+            "g3",
+            _grouped_graph(alignment=4),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--case-id",
+            "fp32_a1",
+            check=False,
+        )
+        assert r.returncode == 1 and "already exists" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "refused import changed the tree"
+
+        r = _import(
+            tmp, "g4", _grouped_graph(), bundle_dir, "--case-id", "Bad-Id", check=False
+        )
+        assert r.returncode == 1 and "lowercase_snake_case" in r.stderr, r.stderr
+        print("  PASS: grouped_case_id")
+
+
+def test_grouped_topology():
+    """--topology names the folder and refuses a mismatch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(
+            tmp,
+            "g1",
+            _grouped_graph(scale=0.5),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--topology",
+            "Baked",
+        )
+        assert r.returncode == 0, r.stderr
+        assert _sweep_dirs(bundle_dir) == ["quick/GroupedOp/Baked"]
+        before = _inventory(bundle_dir)
+
+        r = _import(
+            tmp,
+            "g2",
+            _grouped_graph(scale=0.25),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--topology",
+            "Other",
+            check=False,
+        )
+        assert r.returncode == 1 and "--topology Other" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "refused append changed the tree"
+
+        r = _import(
+            tmp,
+            "g3",
+            _grouped_graph(runtime=True),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--topology",
+            "Baked",
+            check=False,
+        )
+        assert r.returncode == 1 and "holds another sweep" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "refused create changed the tree"
+
+        r = _import(
+            tmp, "g4", _grouped_graph(), bundle_dir, "--topology", "../x", check=False
+        )
+        assert r.returncode == 1 and "not a folder name" in r.stderr, r.stderr
+        print("  PASS: grouped_topology")
+
+
+def test_grouped_attribute_keys_prefixed_per_node():
+    """An attribute key that two nodes share gets an n<index>__ prefix."""
+    from bundle_utils import canon, expand
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1, 2], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        for i, t in enumerate(g["tensors"]):
+            t["name"] = f"T{i}"
+        g["nodes"][0]["outputs"] = {"y_tensor_uid": 1}
+        g["nodes"].append(
+            {
+                "type": "ReluAttributes",
+                "name": "",
+                "inputs": {"x_tensor_uid": 1},
+                "outputs": {"y_tensor_uid": 2},
+            }
+        )
+        g["nodes"][0]["attributes"] = {"mode": "A", "only_first": 1}
+        g["nodes"][1]["attributes"] = {"mode": "B"}
+        r = _import(tmp, "g", g, bundle_dir, "--template-attributes")
+        assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        assert template["nodes"][0]["attributes"] == {
+            "mode": "${case.attributes.n0__attributes__mode}",
+            "only_first": "${case.attributes.attributes__only_first}",
+        }, template["nodes"][0]["attributes"]
+        assert template["nodes"][1]["attributes"] == {
+            "mode": "${case.attributes.n1__attributes__mode}"
+        }, template["nodes"][1]["attributes"]
+        values = _load_sweep(bundle_dir, rel)["cases"][0]["values"]
+        assert canon(expand(template, values)) == canon(g), "no round-trip"
+        print("  PASS: grouped_attribute_keys_prefixed_per_node")
+
+
+def test_grouped_runs_are_deterministic():
+    """Two identical grouped runs write identical bytes."""
+    trees = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graphs = [
+            _grouped_graph(scale=0.5),
+            _grouped_graph(causal=True, scale=0.5),
+            _grouped_graph(runtime=True, dims=[1, 2, 3, 4]),
+            _grouped_graph(alignment=2, scale=2.0),
+        ]
+        for run_index in range(2):
+            bundle_dir = tmp / f"bundles{run_index}"
+            bundle_dir.mkdir()
+            for i, g in enumerate(graphs):
+                r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+                assert r.returncode == 0, r.stderr
+            trees.append(_inventory(bundle_dir))
+            for rel in _sweep_dirs(bundle_dir):
+                text = (bundle_dir / rel / "sweep.json").read_text()
+                assert _is_compact(text), f"{rel}/sweep.json is not compact"
+    assert trees[0] == trees[1], "grouped runs differ"
+    print("  PASS: grouped_runs_are_deterministic")
+
+
+def _grouped_top_level_round_trip(field, first, second):
+    """Two graphs that differ only in top-level ``field`` share one grouped sweep.
+
+    Both cases must expand back to their graphs with ``expand()`` and with the
+    loader mirror. A default-mode import keeps the field literal.
+    """
+    from bundle_utils import canon, canonical_uid_map_by_name, expand, remap_graph
+
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    from support_matrix_units import expand_template_graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = []
+        for value in (first, second):
+            g = _grouped_graph(scale=0.5)
+            g["is_override_shape_enabled"] = False
+            g["min_required_engine_api_version"] = {"major": 1, "minor": 0, "patch": 0}
+            g[field] = value
+            graphs.append(g)
+        for i, g in enumerate(graphs):
+            r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+            assert r.returncode == 0, r.stderr
+        assert "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        for fld in ("is_override_shape_enabled", "min_required_engine_api_version"):
+            assert template[fld] == f"${{case.{fld}}}", template[fld]
+        cases = _load_sweep(bundle_dir, rel)["cases"]
+        assert [c["values"][field] for c in cases] == [first, second], cases
+        for case, g in zip(cases, graphs):
+            want = canon(remap_graph(g, canonical_uid_map_by_name(g)))
+            assert canon(expand(template, case["values"])) == want, case["id"]
+            assert canon(expand_template_graph(template, case)) == want, case["id"]
+
+        default_dir = tmp / "default"
+        default_dir.mkdir()
+        r = _import(tmp, "d", graphs[1], default_dir)
+        assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(default_dir)
+        with open(default_dir / rel / "graph.template.json") as f:
+            assert json.load(f)[field] == second, "default mode templated the field"
+
+
+def test_grouped_engine_api_version_per_case():
+    """Cases with different min_required_engine_api_version share a sweep."""
+    _grouped_top_level_round_trip(
+        "min_required_engine_api_version",
+        {"major": 1, "minor": 0, "patch": 0},
+        {"major": 1, "minor": 3, "patch": 0},
+    )
+    print("  PASS: grouped_engine_api_version_per_case")
+
+
+def test_grouped_override_shape_flag_per_case():
+    """Cases with different is_override_shape_enabled share a sweep."""
+    _grouped_top_level_round_trip("is_override_shape_enabled", False, True)
+    print("  PASS: grouped_override_shape_flag_per_case")
+
+
+# --------------------------------------------------------------------------
+# sweep.json layout (dump_sweep and the import_mode format key)
+# --------------------------------------------------------------------------
+
+
+def _compact_sample_sweep():
+    """A sweep with every member kind the compact layout treats differently."""
+    case = _retier_case("a", clip_attr=0.5)
+    case["values"]["alignment"] = {"0": 16}
+    case["values"]["tensors"].append(
+        {"uid": 1, "dims": [3], "strides": [1], "data_type": "half", "value": 0.25}
+    )
+    case["golden"] = {"path": "golden/a/a.json"}
+    case["values"][7] = {1: "int key"}
+    case[3] = [1, 2]
+    case["tensor_patches"] = [{"uid": 1, "value": None}]
+    empty = {"id": "b", "values": {}, "metadata": {}}
+    no_tensors = {"id": "c", "values": {"tensors": []}, "metadata": {"seed": 1}}
+    return {
+        "version": 1,
+        "import_mode": {"grouping": ["template-attributes"], "format": "compact"},
+        "cases": [case, empty, no_tensors],
+    }
+
+
+def _is_compact(text):
+    """True if text is the compact layout of the sweep it loads to."""
+    from bundle_utils import dump_sweep
+
+    return text == dump_sweep(json.loads(text), "compact")
+
+
+def test_sweep_format_compact_round_trip():
+    """dump_sweep compact loads to the same object, keeps key order, and puts one tensor per line."""
+    from bundle_utils import dump_sweep, sweep_format
+
+    sweep = _compact_sample_sweep()
+    text = dump_sweep(sweep, "compact")
+    back = json.loads(text)
+    assert json.dumps(back) == json.dumps(sweep), text
+    assert back["cases"][0]["values"]["7"] == {"1": "int key"}, text
+    assert '        "7": {"1": "int key"}' in text.splitlines(), text
+    assert '      "3": [1, 2],' in text.splitlines(), text
+    top = {"version": 1, 5: {"x": 1}, "cases": [{"id": "a", 2: True}]}
+    assert json.loads(dump_sweep(top, "compact")) == json.loads(json.dumps(top))
+    lines = text.splitlines()
+    assert '      "values": {' in lines, text
+    assert '        "tensors": [' in lines, text
+    tensor_lines = [ln for ln in lines if ln.startswith(" " * 10 + '{"uid": ')]
+    assert len(tensor_lines) == 2, text
+    assert (
+        '        "attributes": {"relu_lower_clip": 0.5},' in lines
+    ), "values members are not one compact line each"
+    assert any(ln.startswith('      "metadata": {"format_version": 1') for ln in lines)
+    assert '      "golden": {"path": "golden/a/a.json"},' in lines, text
+    assert '  "import_mode": {' in lines, "top level is not written as indent=2"
+    assert text.endswith("}\n") and _is_compact(text)
+    assert sweep_format(sweep) == "compact"
+
+    assert dump_sweep(sweep, "pretty") == json.dumps(sweep, indent=2) + "\n"
+    assert (
+        dump_sweep({"version": 1, "cases": []}, "compact")
+        == json.dumps({"version": 1, "cases": []}, indent=2) + "\n"
+    )
+    assert sweep_format({"version": 1, "cases": []}) == "pretty"
+    assert sweep_format({"import_mode": {"grouping": []}, "cases": []}) == "pretty"
+    try:
+        dump_sweep(sweep, "h4")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown format accepted")
+    print("  PASS: sweep_format_compact_round_trip")
+
+
+def test_grouped_append_keeps_sweep_format():
+    """An append writes the layout recorded in the sweep, whatever --sweep-format says."""
+    from bundle_utils import dump_sweep
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for fmt, other in (("compact", "pretty"), ("pretty", "compact")):
+            bundle_dir = tmp / f"bundles-{fmt}"
+            bundle_dir.mkdir()
+            create = ("--sweep-format", fmt) if fmt == "pretty" else ()
+            r = _import(
+                tmp,
+                "g1",
+                _grouped_graph(scale=0.5),
+                bundle_dir,
+                *_GROUPED_FLAGS,
+                *create,
+                "--strict",
+            )
+            assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+            r = _import(
+                tmp,
+                "g2",
+                _grouped_graph(causal=True, scale=0.5),
+                bundle_dir,
+                *_GROUPED_FLAGS,
+                "--sweep-format",
+                other,
+                "--strict",
+            )
+            assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+            (rel,) = _sweep_dirs(bundle_dir)
+            text = (bundle_dir / rel / "sweep.json").read_text()
+            sweep = json.loads(text)
+            assert sweep["import_mode"]["format"] == fmt, sweep["import_mode"]
+            assert len(sweep["cases"]) == 2, sweep
+            assert text == dump_sweep(sweep, fmt), f"append rewrote {fmt} as {other}"
+
+        legacy = tmp / "legacy"
+        legacy.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        marker = {"grouping": ["template-attributes"]}
+        _write_marked_sweep(legacy, "quick/Relu/Old", g, marker)
+        g2 = _make_graph("Relu", [0, 1], [3, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(
+            tmp,
+            "g3",
+            g2,
+            legacy,
+            "--template-attributes",
+            "--require-marked-sweep",
+            "--strict",
+        )
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        text = (legacy / "quick/Relu/Old/sweep.json").read_text()
+        sweep = json.loads(text)
+        assert sweep["import_mode"] == marker, sweep["import_mode"]
+        assert (
+            text == json.dumps(sweep, indent=2) + "\n"
+        ), "grouping-only sweep left pretty"
+        print("  PASS: grouped_append_keeps_sweep_format")
+
+
+def test_sweep_format_key_does_not_split_sweeps():
+    """--require-marked-sweep and retier compare import_mode without its format key."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [3, 3, 4, 5], [60, 20, 5, 1], "float")
+        flags = ("--template-attributes", "--only-op-dir", "--require-marked-sweep")
+        grouping = ["template-attributes"]
+        for i, marker in enumerate(
+            (
+                {"grouping": grouping},
+                {"grouping": grouping, "format": "pretty"},
+                {"grouping": grouping, "format": "compact"},
+            )
+        ):
+            bundle_dir = tmp / f"b{i}"
+            bundle_dir.mkdir()
+            _write_marked_sweep(bundle_dir, "quick/Relu/Mine", g, marker)
+            for fmt in (None, "compact", "pretty"):
+                extra = ("--sweep-format", fmt) if fmt else ()
+                r = _import(tmp, "g2", g2, bundle_dir, *flags, *extra, "--dry-run")
+                assert r.returncode == 0 and "appended" in r.stderr, (
+                    marker,
+                    fmt,
+                    r.stderr,
+                )
+            assert _sweep_dirs(bundle_dir) == ["quick/Relu/Mine"]
+
+        script = SCRIPT_DIR / "retier_bundles.py"
+        root = tmp / "retier"
+        template = _retier_graph_template(None)
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        for tier, marker in (
+            ("quick", {"grouping": grouping, "format": "pretty"}),
+            ("full", {"grouping": grouping}),
+        ):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            cases = json.loads(path.read_text())["cases"]
+            path.write_text(
+                json.dumps({"version": 1, "import_mode": marker, "cases": cases})
+            )
+        asg = tmp / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        merged = json.loads((root / "full/Op/Default/sweep.json").read_text())
+        assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
+        print("  PASS: sweep_format_key_does_not_split_sweeps")
+
+
+def test_retier_keeps_sweep_format():
+    """retier_bundles writes a moved and a kept compact sweep in compact."""
+    from bundle_utils import dump_sweep
+
+    script = SCRIPT_DIR / "retier_bundles.py"
+    marker = {"grouping": ["template-attributes"], "format": "compact"}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        template = _retier_graph_template(None)
+        _retier_write(
+            root, "quick", template, [_retier_case("a"), _retier_case("b")], {}
+        )
+        path = root / "quick" / "Op" / "Default" / "sweep.json"
+        cases = json.loads(path.read_text())["cases"]
+        path.write_text(
+            dump_sweep({"version": 1, "import_mode": marker, "cases": cases}, "compact")
+        )
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="quick"
+                    ),
+                    dict(
+                        current_tier="quick",
+                        key="Op/Default/b",
+                        proposed_tier="standard",
+                    ),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        for tier, ids in (("quick", ["a"]), ("standard", ["b"])):
+            text = (root / tier / "Op" / "Default" / "sweep.json").read_text()
+            sweep = json.loads(text)
+            assert sweep["import_mode"] == marker, sweep
+            assert [c["id"] for c in sweep["cases"]] == ids, sweep
+            assert (
+                _is_compact(text) and text != json.dumps(sweep, indent=2) + "\n"
+            ), tier
+        print("  PASS: retier_keeps_sweep_format")
+
+
+def test_retier_refuses_mixed_sweep_formats():
+    """retier_bundles refuses to merge sweeps whose sweep.json formats differ."""
+    from bundle_utils import dump_sweep
+
+    script = SCRIPT_DIR / "retier_bundles.py"
+    grouping = ["template-attributes"]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        template = _retier_graph_template(None)
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        for tier, fmt in (("quick", "compact"), ("full", "pretty")):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            cases = json.loads(path.read_text())["cases"]
+            marker = {"grouping": grouping, "format": fmt}
+            sweep = {"version": 1, "import_mode": marker, "cases": cases}
+            path.write_text(dump_sweep(sweep, fmt))
+        before = _inventory(root)
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "sweep.json formats" in r.stderr, r.stderr
+        assert _inventory(root) == before, "refused retier changed the tree"
+        print("  PASS: retier_refuses_mixed_sweep_formats")
+
+
+def test_default_mode_sweep_bytes_unchanged():
+    """Default mode writes json.dumps(indent=2) with no import_mode, and refuses --sweep-format."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        for name, graph, word in (
+            ("g", g, "created new bundle"),
+            ("g2", g2, "appended"),
+        ):
+            r = _import(tmp, name, graph, bundle_dir)
+            assert r.returncode == 0 and word in r.stderr, r.stderr
+            (rel,) = _sweep_dirs(bundle_dir)
+            raw = (bundle_dir / rel / "sweep.json").read_bytes()
+            sweep = json.loads(raw)
+            assert "import_mode" not in sweep, sweep
+            assert raw == (json.dumps(sweep, indent=2) + "\n").encode(), raw
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "g3", g, bundle_dir, "--sweep-format", "compact", check=False)
+        assert r.returncode == 1 and "--sweep-format" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+        print("  PASS: default_mode_sweep_bytes_unchanged")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -2233,6 +3148,25 @@ def main() -> int:
         test_import_seed_only_difference_distinct_cases,
         test_diff_coverage_suite_qualified_join,
         test_retier_bundles,
+        test_grouped_default_mode_ignores_marked_sweep,
+        test_grouped_creates_marked_sweep,
+        test_grouped_append_attributes_round_trip,
+        test_grouped_value_forms_never_share_sweep,
+        test_grouped_only_op_dir_blocks_cross_appends,
+        test_grouped_require_marked_sweep,
+        test_grouped_case_id,
+        test_grouped_topology,
+        test_grouped_runs_are_deterministic,
+        test_grouped_attribute_keys_prefixed_per_node,
+        test_grouped_engine_api_version_per_case,
+        test_grouped_override_shape_flag_per_case,
+        test_retier_keeps_import_mode,
+        test_sweep_format_compact_round_trip,
+        test_grouped_append_keeps_sweep_format,
+        test_sweep_format_key_does_not_split_sweeps,
+        test_retier_keeps_sweep_format,
+        test_retier_refuses_mixed_sweep_formats,
+        test_default_mode_sweep_bytes_unchanged,
     ]
 
     for t in tests:

@@ -1,0 +1,578 @@
+# Case model: rules for FORWARD SDPA (companion to model.yaml).
+#
+# What this file is
+#   Every rule the case generator applies to the axes of model.yaml. The generator applies all
+#   rules at once; their order has no effect. A generated row never breaks a rule.
+#
+# Kind tags (who may change a rule)
+#   definition  a fact about attention or about numbers. It never changes. Do not edit it to fit a
+#               library. (Ids D-*; ids are stable across files and reports.)
+#   frontend    a limit of hipDNN's frontend API. Change it when the API changes. (Ids F-*.)
+#   choice      a judgement call: classes, representative values, budgets, fixed settings.
+#               Change it freely, and record why. (Ids CH-*.)
+#   policy      a request that means something (not Layer 1) and that the frontend accepts today
+#               (not Layer 2), but that hipDNN should refuse. Removed from the numerical levels and
+#               recorded as a "should be refused" case for the rejection suite; `ticket` names the
+#               frontend gap. Change it when hipDNN's policy changes. (Ids P-*.)
+#   engine:<name>  written by discovery, in a separate file of the same format.
+#
+# Rule fields
+#   id, kind, reason (one line), source (where the fact or the decision comes from).
+#   basis       for definition rules: meaning (the combination has no defined result) or
+#               consistency (the combination contradicts itself, or a class cannot hold the values).
+#   form        exclusion   — removes rows; has `forbid` or `forbid_any`.
+#               value_list  — explains why values or axes are absent from model.yaml. Removes
+#                             nothing at generation time; `shapes_axes` lists the model axes it
+#                             shaped, `omits` (text) names what is absent.
+#               structural  — a fact that model.yaml enforces by its shape (one shared axis or a
+#                             child axis). Removes nothing; `enforced_by` says how. Kept so that a
+#                             rejection probe can name the fact it tests.
+#               setting     — a choice that fixes how the model is built or used; `applies_to`
+#                             lists the axes it concerns.
+#   forbid      map axis -> list of values. A row is excluded when, for EVERY listed axis, the
+#               row's value is in the list. A child axis that is not active never matches.
+#   forbid_any  list of `forbid` maps; the rule excludes a row that matches any one of them.
+#   adapted     for definition rules: how the rule differs from its Layer 1 form (branches
+#               dropped because their values are not expressible).
+#   probe       the injections.yaml rejection-probe entry that adds the removed request back.
+#   evidence    read in code | inferred | measured.
+#   moot        a definition rule whose values are all outside the model: it has no `forbid`, removes
+#               nothing, and is kept so that its rejection probe can name it. Says why.
+#   covered_by  for a policy rule with no `forbid`: the rule that already removes every request it
+#               names (form `covered`). It removes nothing itself.
+#   ticket      for policy rules: the Jira issue that asks hipDNN to refuse the request.
+#   debatable   the rule records a validation choice, not an impossibility; it is a draft.
+#
+# File and line citations (SA:, NODE:, TA:, ...) use the abbreviations of model.yaml
+# `api_record.paths`. A citation with "@ <commit>" gives the line numbers at that commit.
+
+schema_version: 1
+model: sdpa_forward
+applies_to_model: model.yaml
+
+rules:
+
+  # =========================================================================== definition — meaning
+  - id: D-HEADS-K-DIVIDES
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Each query head must use exactly one K head; with K heads not dividing query heads no grouping exists."
+    forbid: {k_head_sharing: [non_divisor]}
+    source: "definition of grouped attention: query head h uses K head floor(h / (H_q / H_k))"
+    frontend_enforces: "NODE:98-121 refuses it, so it is not a rejection probe"
+
+  - id: D-HEADS-V-DIVIDES
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Each query head must use exactly one V head; with V heads not dividing query heads no grouping exists."
+    forbid: {v_head_sharing: [non_divisor]}
+    source: "definition of grouped attention (as D-HEADS-K-DIVIDES, for V)"
+    frontend_enforces: "NODE:98-121"
+
+  - id: D-DROPOUT-P-RANGE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A dropout probability is a probability; a value below 0 or above 1 is not one."
+    forbid: {dropout_probability: [negative, above_one]}
+    source: "definition of a probability"
+    probe: MV-01
+
+  - id: D-SCALE-FINITE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "The scale multiplies every score; a NaN or infinite scale gives no defined attention weights, so there is no correct output to compare."
+    forbid: {scale_value: [non_finite]}
+    source: "definition of softmax over finite scores"
+    note: "A NaN scale belongs in the rejection suite, not in a numerical test. The value stays in the model with its labels so the rejection suite can name it. A negative scale stays valid."
+    evidence: "measured (PoC runner: with a NaN scale both references give NaN). At 1790cf623f4 both references decline a non-finite scale written into the graph as a number (set_attn_scale(value)): @ 1790cf623f4 PlanUtils.hpp:328-332 (dense plans), RaggedSdpaFwdSupport.hpp:233-238 (native ragged plan). A pass-by-value or tensor scale holding NaN or inf is not checked and gives NaN."
+
+  - id: D-RNG-DUMP-NEEDS-RANDOM
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "rng_dump hands back the keep mask that random dropout drew. A caller-supplied mask draws nothing, so there is no random mask to hand back."
+    forbid: {dropout: [caller_mask], dropout_pattern_output: [requested]}
+    source: "@ 00d9c566bea projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp:657-664 (both references refuse rng_dump unless dropout is Philox dropout)"
+    note: "Kept as a rejection probe."
+    evidence: read in code
+
+  - id: D-OUTPUTS-OVERLAP
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Two different results cannot both be stored in the same memory."
+    forbid: {tensor_overlap: [outputs_overlap]}
+    source: "one memory location holds one value"
+    probe: MV-05
+
+  - id: D-OUTPUT-SELF-ALIAS
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "An output stride pattern that sends two different output elements to one address cannot hold both results."
+    forbid_any:
+      - {strides_o: [zero_broadcast, self_overlapping]}
+      - {strides_stats: [zero_broadcast, self_overlapping]}
+    source: "one memory location holds one value; a zero stride is a broadcast, defined only for reading"
+    probe: MV-04
+
+  - id: D-BIAS-SHAPE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A bias that cannot be broadcast to the score shape has no score to add each element to."
+    forbid: {bias_broadcast: [not_broadcastable]}
+    source: "definition of an additive score term: one bias value per score, after broadcasting"
+    probe: MV-06
+
+  - id: D-SEQLEN-WITHIN-STORAGE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A sequence length longer than its storage describes tokens that do not exist."
+    forbid_any:
+      - {per_seq_len_q: [exceeds_storage]}
+      - {per_seq_len_kv: [exceeds_storage]}
+    source: "a real length counts stored tokens"
+    probe: MV-09
+
+  - id: D-RAGGED-NO-OVERLAP
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "The output shares the ragged packing, so overlapping sequences would write two results to one place."
+    source: "one memory location holds one value; O uses Q's offsets"
+    probe: MV-10
+    moot: "Removes nothing. hipDNN's ragged offsets are B + 1 non-decreasing boundaries, so sequences cannot overlap and the value overlapping ({ragged_offsets: [overlapping]}) is not in the model (F-RAGGED-OFFSETS-ARE-LENGTHS). Its probe belongs to the rejection suite."
+
+  - id: D-PAGES-SUFFICIENT
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A page table with fewer pages than the key/value length needs cannot address every key and value."
+    forbid: {page_count: [insufficient]}
+    source: "paged storage: every key and value lives on a listed page"
+    probe: MV-08
+
+  - id: D-MAXLEN-NOT-BELOW-ACTUAL
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A declared maximum key/value length below the actual length contradicts the actual length."
+    forbid: {max_seq_len_kv: [smaller]}
+    source: "definition of a maximum"
+    probe: MV-07
+
+  # =========================================================================== definition — consistency
+  - id: D-REL-SEQ
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "The query-vs-key/value relationship must agree with the two length classes (one < many)."
+    forbid_any:
+      - {seq_q: [one], seq_kv: [many], seq_q_vs_seq_kv: [equal, longer]}
+      - {seq_q: [many], seq_kv: [one], seq_q_vs_seq_kv: [shorter, equal]}
+      - {seq_q: [one], seq_kv: [one], seq_q_vs_seq_kv: [shorter, longer]}
+    source: "order of whole numbers: 1 < 2 or more"
+    adapted: "Branches with length class zero dropped: zero is not in the model (F-EXTENT-NONZERO)."
+
+  - id: D-REL-HEAD-SHARING
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "With one query head, the only possible K or V head count equals the query head count (MHA)."
+    forbid_any:
+      - {q_heads: [one], k_head_sharing: [gqa, mqa]}
+      - {q_heads: [one], v_head_sharing: [gqa, mqa]}
+    source: "a divisor of 1 is 1"
+    adapted: "q_heads class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-K-V-HEADS
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Whether K and V head counts are equal must agree with their two sharing relationships."
+    forbid_any:
+      - {k_head_sharing: [mha], v_head_sharing: [mha], k_heads_vs_v_heads: [differ]}
+      - {k_head_sharing: [mqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [differ]}
+      - {k_head_sharing: [mha], v_head_sharing: [gqa, mqa], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [gqa, mqa], v_head_sharing: [mha], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [mqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [gqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [equal]}
+    source: "H_k and H_v are fixed by H_q and the sharing value"
+
+  - id: D-REL-WINDOW
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A window that covers some but not all keys needs at least two keys."
+    forbid_any:
+      - {seq_kv: [one], window_left: [partial]}
+      - {seq_kv: [one], window_right: [partial]}
+    source: "a strict non-empty subset of one key does not exist"
+    adapted: "seq_kv class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-PER-SEQ-LEN
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Per-sequence length classes must be possible for the batch size and the stored length."
+    forbid_any:
+      - {batch_size: [one], per_seq_len_q: [mixed, some_zero]}
+      - {batch_size: [one], per_seq_len_kv: [mixed, some_zero]}
+      - {seq_q: [one], per_seq_len_q: [all_equal_partial, mixed]}
+      - {seq_kv: [one], per_seq_len_kv: [all_equal_partial, mixed]}
+    source: "'mixed' and 'some zero' need two sequences; a partial length needs a stored length of 2 or more"
+    adapted: "Branches with batch, seq_q or seq_kv class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-RAGGED-ORDER
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Overlapping start positions need at least two sequences."
+    source: "an overlap needs two items"
+    adapted: "batch class zero dropped (F-EXTENT-NONZERO); values out_of_order and overlapping dropped (F-RAGGED-OFFSETS-ARE-LENGTHS)."
+    moot: "Removes nothing: every value it names ({batch_size: [one], ragged_offsets: [overlapping]}) is outside the model."
+
+  - id: D-REL-PAGE-SIZE
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A page size between one token and a whole sequence needs a key/value length of at least two."
+    forbid: {seq_kv: [one], page_size: [partial]}
+    source: "no whole number lies strictly between 1 and 1"
+    adapted: "seq_kv class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-SUB-ELEMENT-ALIGNMENT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "An address cannot be part of a byte, so a 1-byte format cannot start off its element size."
+    forbid_any:
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_q: [sub_element]}
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], dtype_k_vs_q: [same], alignment_k: [sub_element]}
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], dtype_v_vs_q: [same], alignment_v: [sub_element]}
+      - {dtype_q: [fp16, bf16], dtype_k_vs_q: [differs], alignment_k: [sub_element]}
+      - {dtype_q: [fp16, bf16], dtype_v_vs_q: [differs], alignment_v: [sub_element]}
+      - {dtype_o: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_o: [sub_element]}
+      - {dtype_stats: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_stats: [sub_element]}
+    source: "byte addressing; element sizes in model.yaml `formats`"
+    adapted: "The Layer 1 rule states it per tensor in absolute formats; here it is written in the model's relative-format axes: the class sub_element has no value for 1-byte formats. K and V with dtype_*_vs_q = differs are 1-byte fp8 when dtype_q is fp16 or bf16 (class_to_value.dtype_relation)."
+    evidence: inferred
+
+  - id: D-REL-STRIDE-NEEDS-EXTENT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A zero, negative or self-overlapping stride needs a dimension with more than one element."
+    forbid_any:
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d1], strides_q: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_kv: [one], head_dim_qk: [d1], strides_k: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], strides_k: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_kv: [one], head_dim_v: [d1], strides_v: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], strides_v: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_v: [d1], strides_o: [negative]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], strides_stats: [negative]}
+    source: "a stride on a dimension of extent 1 is never used"
+    adapted: "The Layer 1 form also counts zero extents. O and Stats list only `negative`: D-OUTPUT-SELF-ALIAS already removes their other two classes."
+    evidence: inferred
+
+  - id: D-REL-ALIBI-HEAD-COUNT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "One query head is 2^0, a power of two, so it cannot be 'not a power of two'."
+    forbid: {q_heads: [one], alibi_head_count: [not_power_of_two]}
+    source: "arithmetic"
+    adapted: "The branch with q_heads zero dropped (F-EXTENT-NONZERO)."
+    evidence: inferred
+
+  - id: D-REL-PAGED-NOT-RAGGED
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A paged K or V stores its tokens in pages found through a table; the same tensor cannot also be squashed end to end with start positions."
+    forbid: {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only, v_only]}
+    source: "definition of paged and ragged storage: two ways to place one tensor's tokens"
+    adapted: "Same forbid as Layer 1. Ragged Q over a paged K/V (ragged_q_side) stays allowed."
+    decided: "Ragged offsets on the paged K/V storage stay a Layer 1 rule. Ragged Q over paged K/V stays allowed and checkable (the references' dense rewrite). The failing rows put ragged offsets on the paged K/V containers."
+    evidence: "inferred; seen in the data: in a PoC runner pass on gfx942 both references declined or errored on every ragged + paged row (for example 'ragged SDPA densify: primary ragged_offset[1] = 2 is not a whole number of tokens'). At 1790cf623f4 both references decline a ragged offset on a paged K or V container before running (@ 1790cf623f4 RaggedSdpaDensify.hpp:154-165; ragged Q over a non-ragged paged K/V stays accepted)"
+
+  # =========================================================================== definition — structural
+  # The model's shape enforces these. Rejection probes name them as their basis.
+  - {id: D-S-BATCH-SHARED, kind: definition, form: structural, reason: "Q, K, V and O have one batch size.", enforced_by: "one axis batch_size", source: "a query sequence attends only to its own keys"}
+  - {id: D-S-KV-LENGTH-SHARED, kind: definition, form: structural, reason: "Each key pairs with exactly one value, so K and V have one length.", enforced_by: "one axis seq_kv", source: "definition of attention"}
+  - {id: D-S-QK-HEAD-DIM-SHARED, kind: definition, form: structural, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "definition of attention"}
+  - {id: D-S-OUTPUT-SHAPE, kind: definition, form: structural, reason: "O has Q's batch, heads and length and V's head size; Stats, Max and Sum_exp have one value per query row.", enforced_by: "no O or Stats size axes", source: "definition of attention and of log-sum-exp"}
+  - {id: D-S-RAGGED-NEEDS-OFFSETS, kind: definition, form: structural, reason: "Ragged packing without start positions does not say where any sequence is.", enforced_by: "child axis ragged_offsets", source: "definition of ragged packing"}
+  - {id: D-S-VARLEN-NEEDS-LENGTHS, kind: definition, form: structural, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part.", enforced_by: "sequence_lengths = variable carries both; variable_no_flag carries the lengths without the API flag (the flag is not part of the meaning, SdpaSemanticsRegister.md SEM-008); child axes per_seq_len_q, per_seq_len_kv", source: "definition of varlen attention"}
+  - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, kind: definition, form: structural, reason: "A causal mask with seq_q != seq_kv is defined only once one diagonal is chosen.", enforced_by: "child axis causal_alignment (one value)", source: "definition of a causal mask"}
+  - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, kind: definition, form: structural, reason: "A sliding window is defined by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "definition of a sliding window"}
+  - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, kind: definition, form: structural, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "definition of a block mask"}
+  - {id: D-S-RANDOM-DROPOUT-NEEDS-P, kind: definition, form: structural, reason: "Random dropout is defined by its probability; a seed without dropout has no effect.", enforced_by: "child axes dropout_probability, dropout_rng_state", source: "definition of dropout"}
+  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, kind: definition, form: structural, reason: "Caller-mask dropout is defined by the caller's pattern and rescale factor.", enforced_by: "dropout = caller_mask carries both; child axis dropout_mask_pattern", source: "definition of dropout"}
+  - {id: D-S-ONE-DROPOUT-SOURCE, kind: definition, form: structural, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern", adapted: "Names the basis of rejection probe MV-13."}
+  - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, kind: definition, form: structural, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "definition of dropout"}
+  - {id: D-S-STATS-PROPERTIES-NEED-STATS, kind: definition, form: structural, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "definition of an optional output"}
+  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, kind: definition, form: structural, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "definition of paged storage"}
+  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, kind: definition, form: structural, reason: "A page table shared by K and V, and a K-vs-V page-size relation, exist only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "definition of paged storage"}
+  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, kind: definition, form: structural, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast under dropout = caller_mask", source: "definition of a broadcast caller mask"}
+  - {id: D-S-BIAS-PROPERTIES-NEED-BIAS, kind: definition, form: structural, reason: "A bias shape and format exist only for a bias.", enforced_by: "child axes bias_broadcast, bias_dtype", source: "definition of an additive term"}
+  - {id: D-S-SCALE-VALUE-NEEDS-SOURCE, kind: definition, form: structural, reason: "A scale has one source: a value or a tensor, not both.", enforced_by: "one axis scale_source", source: "consistency of a single number"}
+
+  # =========================================================================== frontend
+  - id: F-ONE-DIAGONAL
+    kind: frontend
+    form: exclusion
+    reason: "The node has one diagonal alignment and one band, so a causal mask and a sliding window cannot use different diagonals."
+    forbid_any:
+      - {causal_alignment: [top_left], window_alignment: [bottom_right]}
+      - {causal_alignment: [bottom_right], window_alignment: [top_left]}
+    source: "SA:617-645 (causal setters write diagonal_alignment and right_bound); FBS:82-83,87 (one left_bound, one right_bound, one diagonal_alignment); @ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:149 (one diagonal_alignment member), 611-648 (set_causal_mask and set_causal_mask_bottom_right write that member), 718-722 (set_diagonal_alignment, the only other writer); node/SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand (one left_bound and one right_bound checked)"
+    note: "Removed at every length relation. With equal lengths the two diagonals give the same scores, but a graph can state only one alignment, so a row that names two alignments cannot be built. Causal and sliding-window alignment must be the same."
+    evidence: read in code
+
+  - id: F-EXTENT-NONZERO
+    kind: frontend
+    form: value_list
+    reason: "Every tensor dimension must be at least 1, so an empty batch, head set, stored length or head size cannot be stated."
+    shapes_axes: [batch_size, seq_q, seq_kv, q_heads, head_dim_qk, head_dim_v]
+    omits: "value class zero on each listed axis"
+    source: "TA:636-639; NODE:70-96"
+    still_expressible: "A length 0 for one sequence, through per_seq_len_q / per_seq_len_kv (some_zero, all_zero)."
+    evidence: read in code
+
+  - id: F-ALIBI-NO-SLOPES
+    kind: frontend
+    form: value_list
+    reason: "ALiBi is an on/off flag; no API sets its per-head slopes, and which slopes the flag means is not documented."
+    shapes_axes: [alibi]
+    omits: "the slope axis (standard, other positive, zero, negative)"
+    source: "SA:596; FBS:74; no 'slope' setting in SA, NODE, the schemas or PY"
+    evidence: "read in code (absence); the meaning of alibi = present is inferred"
+
+  - id: F-NO-SOFTCAP
+    kind: frontend
+    form: value_list
+    reason: "No API sets logit soft-capping; set_score_mod is always refused at validate."
+    shapes_axes: []
+    omits: "axes logit_softcap and its cap value"
+    source: "NODE:30-32; SA:775-779; no softcap field in SA, NODE or the schemas"
+    evidence: read in code
+
+  - id: F-NO-KV-APPEND
+    kind: frontend
+    form: value_list
+    reason: "No API asks the operation to write new keys and values into an existing cache."
+    shapes_axes: []
+    omits: "axis kv_cache_append"
+    source: "no append / cache-update field in SA, NODE or the schemas"
+    evidence: read in code
+
+  - id: F-NO-AMAX-QKV
+    kind: frontend
+    form: value_list
+    reason: "The API returns amax only for S and O, not for Q, K or V."
+    shapes_axes: [amax_s, amax_o]
+    omits: "axes amax_q, amax_k, amax_v"
+    source: "SA:107-116,567,577; FBS:69-70"
+    evidence: read in code
+
+  - id: F-SCALE-NO-DEFAULT-SOURCE
+    kind: frontend
+    form: value_list
+    reason: "Leaving the scale unset gives 1.0, not 1/sqrt(d), so 'use the definition's own scale' cannot be stated."
+    shapes_axes: [scale_source]
+    omits: "scale_source value 'default'"
+    source: "SA:36-37; G:6175; FBS:81"
+    still_expressible: "The same number: scale_value = inverse_sqrt_d. Unset is API-path variant PV-SCALE-UNSET."
+    evidence: read in code
+
+  - id: F-RAGGED-OFFSETS-ARE-LENGTHS
+    kind: frontend
+    form: value_list
+    reason: "Ragged offsets are B + 1 boundaries that also give each sequence's length (offset[b + 1] - offset[b]), so unused memory between sequences, out-of-order starts or overlapping sequences cannot be stated."
+    shapes_axes: [ragged_offsets]
+    omits: "ragged_offsets values gapped, out_of_order, overlapping"
+    source: "projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp:67-71 (offset[0] == 0), 89-94 (non-decreasing)"
+    debatable: "Enforced by the references (test SDK), not by the frontend: DH:243-262 checks only the offset tensor's own properties. The rule keeps kind frontend."
+    evidence: read in code
+
+  - id: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN
+    kind: frontend
+    form: exclusion
+    reason: "With max_seq_len_kv declared, each page table must be exactly ceil(max_seq_len_kv / page size) pages wide, so a surplus page with the maximum equal to the length, or exactly the needed pages with a larger maximum, cannot be stated."
+    forbid_any:
+      - {page_count: [surplus], max_seq_len_kv: [equal]}
+      - {page_count: [exact], max_seq_len_kv: [larger]}
+    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:355-366 (page-table dim 2 must equal ceil(max_seq_len_kv / block_size)), 304-310 (stated as cuDNN's rule)"
+    note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (PV-OPTIONAL-UNSET), but the model has no unset value."
+    debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Draft: not yet confirmed."
+    evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950 in PoC discovery runs)"
+
+  - id: F-SHARED-TABLE-ONE-WIDTH
+    kind: frontend
+    form: exclusion
+    reason: "One page-table tensor has one width, but with max_seq_len_kv declared each side's table must be ceil(max_seq_len_kv / that side's page size) wide, so one table shared by K and V cannot serve two page sizes."
+    forbid: {page_table_sharing: [shared], page_size_k_vs_v: [differ]}
+    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:336-367 (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
+    note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (PV-OPTIONAL-UNSET); the graph builder always declares it."
+    debatable: "Draft: not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
+    evidence: read in code
+
+  - id: F-SCALE-TENSOR-BY-VALUE
+    kind: frontend
+    form: exclusion
+    reason: "A scale tensor must be passed by value (a compile-time constant or a runtime parameter), so a scale held in device memory cannot be stated."
+    forbid: {scale_source: [device_tensor]}
+    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:209-213 (Rule 6b) -> node/detail/Utilities.hpp:530-534 validateScalarParameter (get_is_pass_by_value); same check at 61c26758398 SdpaFwdNode.hpp:161-166"
+    note: "The value stays in the model with its labels so the rejection suite can name it (like page_count insufficient). Targeted case X6c asks for it and is skipped by the level script."
+    evidence: "read in code; measured (PoC discovery and runner passes: rows refused with 'attn_scale must be a pass-by-value tensor' on gfx942 and gfx950)"
+    debatable: "Draft: not yet confirmed. A device-memory scale is well defined; the frontend chooses not to accept one."
+
+  # =========================================================================== policy
+  # Meaningful layouts that the frontend accepts today and hipDNN should refuse. They leave the
+  # numerical levels and come back as rejection probes.
+  - id: P-NO-NEGATIVE-STRIDE
+    kind: policy
+    form: exclusion
+    reason: "A negative stride (a dimension walked backwards) on Q, K, V, O or Stats should be refused: the data SDK and the GPU references assume element 0 is the start of the allocation."
+    forbid_any:
+      - {strides_q: [negative]}
+      - {strides_k: [negative]}
+      - {strides_v: [negative]}
+      - {strides_o: [negative]}
+      - {strides_stats: [negative]}
+    ticket: ALMIOPEN-3114
+    source: "hipDNN policy; cuDNN does not support negative strides; the frontend accepts any int64 stride (TA:438,627-630)"
+    note: "The values stay in the model with their labels so the rejection suite can name them. Overlaps the negative branches of D-REL-STRIDE-NEEDS-EXTENT (extent-1 rows); both remove the same rows there."
+    probe: MV-22
+    evidence: read in code
+
+  - id: P-NO-OUTPUT-BROADCAST
+    kind: policy
+    form: covered
+    reason: "A zero stride on a dimension of size > 1 of O, Stats, Max or Sum_exp should be refused."
+    covered_by: D-OUTPUT-SELF-ALIAS
+    ticket: ALMIOPEN-3114
+    source: "hipDNN policy"
+    note: "Removes nothing: D-OUTPUT-SELF-ALIAS already removes zero_broadcast on strides_o and strides_stats (zero_broadcast means a dimension of extent > 1), and Max and Sum_exp have no stride axis (always packed). Its probes are MV-04a and MV-04c."
+    probe: MV-04
+    evidence: read in code
+
+  - id: P-NO-HEAD-DIM-BROADCAST
+    kind: policy
+    form: exclusion
+    reason: "A zero stride on the head-dimension axis of Q, K or V (head size > 1) should be refused: one head vector would be one repeated element."
+    forbid_any:
+      # The builder puts the zero stride on the first of S, H, B with extent > 1, else on D
+      # (class_to_value strides.zero_broadcast); these rows have extent 1 on S, H and B.
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d64, d128, d192, d256], strides_q: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], paged_kv: [absent], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
+      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], paged_kv: [absent], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
+      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], paged_kv: [v_only], max_seq_len_kv: [equal], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
+      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], paged_kv: [v_only], max_seq_len_kv: [equal], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [absent], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [absent], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [present], page_size_k_vs_v: [equal], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [present], page_size_k_vs_v: [equal], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [v_only], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [v_only], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [k_only], max_seq_len_kv: [equal], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [k_only], max_seq_len_kv: [equal], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
+    ticket: ALMIOPEN-3114
+    source: "hipDNN policy; cuDNN SDPA requires head-dim stride 1; the frontend accepts it (TA:438,627-630)"
+    note: "A zero stride on B, H or S of an input (a broadcast) stays in the model. O and Stats are covered by D-OUTPUT-SELF-ALIAS. Head size d1 is left to D-REL-STRIDE-NEEDS-EXTENT (no dimension with extent > 1). Paged sides use the page pool [B x pages, H, page size, D]; a dense side beside a paged one spans max_seq_len_kv. Checked row by row against the builder's stride placement."
+    probe: MV-23
+    evidence: "read in code (CaseGraph.cpp stridesFor, buildInputs, pagedTable)"
+
+  # =========================================================================== choice
+  - id: CH-SIZE-CLASSES
+    kind: choice
+    form: setting
+    reason: "Sizes enter as meaning classes (one, many) plus relationship axes; concrete numbers come from class_to_value."
+    applies_to: [batch_size, seq_q, seq_kv, seq_q_vs_seq_kv, q_heads, k_head_sharing, v_head_sharing, k_heads_vs_v_heads]
+    source: "the narrowing method: meaning classes, then concrete values from class_to_value"
+
+  - id: CH-HEAD-DIM-LEVELS
+    kind: choice
+    form: setting
+    reason: "Head sizes are carried as representative levels d1, d64, d128, d192, d256, so an engine's single-value refusal names one size; the v-vs-qk relation follows from the two levels."
+    applies_to: [head_dim_qk, head_dim_v]
+    source: "include the values the engine is sensitive to, e.g. head sizes 64, 128, 192; rules hold only for the tested values"
+
+  - id: CH-DTYPE-MIX-RELATIONSHIP
+    kind: choice
+    form: setting
+    reason: "K and V formats are carried relative to Q (same / differs), with one alternative format per Q format, to keep one axis to stratify by format."
+    applies_to: [dtype_q, dtype_k_vs_q, dtype_v_vs_q]
+    source: "supports per-format pairwise (CH-STRATIFY-DTYPE)"
+
+  - id: CH-FLOAT-FORMATS-ONLY
+    kind: choice
+    form: setting
+    reason: "Tensor formats are the seven float formats; compute types are fp32, fp16, bf16. The frontend also maps DOUBLE, FP8_E8M0, FP4, FP6, integer and BOOLEAN types; they are outside the model."
+    applies_to: [dtype_q, dtype_o, dtype_stats, bias_dtype, compute_precision, matmul_input_precision]
+    source: "frontend facts T:835-878, DH:106-110, BASE:242-246"
+
+  - id: CH-SCALE-DELIVERY-LEVELS
+    kind: choice
+    form: setting
+    reason: "scale_source carries the four API delivery forms (float attribute, by-value constant, runtime parameter, device tensor), grouped into classes constant and runtime."
+    applies_to: [scale_source]
+    source: "SA:344,665; TA:228-313"
+
+  - id: CH-PAIRED-SETTERS
+    kind: choice
+    form: setting
+    reason: "Setters that belong together are one axis: descale_s with scale_s. One alone is outside the model. logit_max and score_sum_exp, and the K and V page tables, are not paired: each alone is a model value (max_sumexp_output max_only / sum_exp_only, paged_kv k_only / v_only)."
+    applies_to: [s_quantization]
+    source: "SA:454-511"
+
+  - id: CH-FIXED-API-SETTINGS
+    kind: choice
+    form: setting
+    reason: "Held fixed: ragged_offset_multiplier 1; workspace large enough; block-mask tile 128 x 128; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
+    applies_to: []
+    source: "TA:562; G:4678; FBS:49-51; G:1007-1012"
+
+  - id: CH-STRATIFY-DTYPE
+    kind: choice
+    form: setting
+    reason: "Extra strength goes to the format axis: one complete pairwise set per dtype_q value. A second extra-strength axis (dim_order_q) is counted, not generated."
+    applies_to: [dtype_q, dim_order_q]
+    source: "per-data-type pairwise; dim_order_q is the candidate second axis"
+
+  - id: CH-SHARED-BASE
+    kind: choice
+    form: setting
+    reason: "The shared one-at-a-time base is model.yaml base_cases.shared: bf16, head size 128/128, no mask, chosen inside ASM_SDPA_ENGINE's support on gfx942 and gfx950."
+    applies_to: [dtype_q, head_dim_qk, head_dim_v, causal_mask, sliding_window]
+    source: "one shared base inside the engine's support on both archs; no per-engine base"
+
+  - id: CH-KEEP-EQUIVALENT-ROWS
+    kind: choice
+    form: setting
+    reason: "Combinations with the same result are kept, not merged (e.g. top-left and bottom-right causal with equal lengths; p = 0 vs no dropout; scale 1/sqrt(d) by value vs unset at d = 1)."
+    applies_to: [causal_alignment, window_alignment, dropout_probability, scale_value]
+    source: "an engine may treat equivalent requests differently"
+
+  - id: CH-KEEP-OPEN-QUESTIONS
+    kind: choice
+    form: setting
+    reason: "Debatable values stay in the model until they are decided: fully-masked rows, non-finite scale, p = 1, K heads != V heads, random dropout with no seed, output over an input."
+    applies_to: [block_mask_pattern, scale_value, dropout_probability, k_heads_vs_v_heads, dropout_rng_state, tensor_overlap]
+    source: "open questions: fully-masked rows, non-finite scale, p = 1, K heads != V heads, random dropout with no seed, output over an input"
+
+  - id: CH-PAIRWISE-STRENGTH
+    kind: choice
+    form: setting
+    reason: "Shared sets: one-at-a-time from the shared base, then pairwise (strength 2) over all axes."
+    applies_to: []
+    source: "one-at-a-time, complemented with 2-wise"

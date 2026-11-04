@@ -173,6 +173,13 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
 
+    add_test(
+        NAME hipdnn_migration_scripts_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/migration-scripts/test_migration.py
+    )
+    set(HIPDNN_IT_MIGRATION_SCRIPTS_TEST hipdnn_migration_scripts_python_tests)
+
     # pytest-style suites (fixtures, parametrize), so they run under -m pytest
     # rather than as scripts; a bare `python file.py` would collect nothing.
     add_test(
@@ -351,6 +358,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
+    endif()
+    if(HIPDNN_IT_MIGRATION_SCRIPTS_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_MIGRATION_SCRIPTS_TEST})
     endif()
     if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})

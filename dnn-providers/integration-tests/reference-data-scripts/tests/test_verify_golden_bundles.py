@@ -1277,6 +1277,40 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("has unused values entry 'layout'", completed.stderr)
 
+    def test_sweep_tensor_field_placeholders_resolve_by_first_token(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template["tensors"][1]["alignment"] = "${case.alignment.1}"
+            template["tensors"][1]["value"] = "${case.value}"
+            template_path.write_text(json.dumps(template))
+            used = self.sweep_case(
+                "used",
+                values_overrides={"alignment": {"0": 16, "1": 2}},
+                golden_path=None,
+            )
+            used["values"]["tensors"][1]["value"] = 0.5
+            missing = self.sweep_case("missing", golden_path=None)
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [used, missing]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertNotIn("case 'used' has unused values entry", completed.stderr)
+            self.assertNotIn("case 'used' is missing", completed.stderr)
+            self.assertIn(
+                "case 'missing' is missing placeholder value for 'alignment.0'",
+                completed.stderr,
+            )
+            self.assertIn(
+                "case 'missing' is missing placeholder value for 'value'",
+                completed.stderr,
+            )
+
     def test_sweep_golden_path_must_reference_tensors_dvc(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
