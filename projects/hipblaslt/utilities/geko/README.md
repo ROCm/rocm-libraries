@@ -597,6 +597,8 @@ invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 
 `TensileMergeLibrary` arguments: `--no_eff` skips efficiency calculations; `--force_merge True` forces merge on conflicts; the three positional args are original dir, new libs dir, output dir (same as original to update in place).
 
+`final_libs` and `full_libs` give every solution a new `SolutionUID`, including one copied from Origami. Tune also replaces colliding UIDs in the `3_LibraryLogic` files its Tensile jobs wrote before it merges them; `merge_solutions` itself does not edit its input files. Both use `tensilelite.SolutionIdGen` from the installed `tensilelite` package. If that package cannot be imported, the step fails instead of keeping a copied UID. `TensileMergeLibrary` matches `SolutionNameMin`. An existing Equality solution keeps its UID when that UID is unique and non-zero, and the incoming UID is ignored. A missing, zero, malformed, or duplicate base UID is replaced in the merged file. A new name, including an Origami copy, keeps its UID unless that value is already used in the merge.
+
 **Verify:**
 ```bash
 "${HIPBLASLT_PATH}/build/release/clients/staging/hipblaslt-bench" \
