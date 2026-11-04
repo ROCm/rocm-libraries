@@ -35,7 +35,7 @@ C API -> descriptors + Handle -> ProblemDescription + ExecutionContext
 | `src/kernels/`, `src/hip/`, `src/hipoc/` | Device sources, runtime execution, compilation, caching, and DB/model assets. |
 | `src/ck_impl/`, `src/legacy_composable_kernel/`, `src/hipconv/` | CK plugins, legacy CK sources, and vendored hipconv (see `src/hipconv/HIPCONV_VERSION`); distinguish integration code from upstream-managed kernels. |
 | `src/private/`, `include_wrapper/miopen/` | ABI split, hipDNN translation/routing, and wrapper-only declarations. |
-| `src/fin/` | Fin/Tuna interface, always compiled, including tunable-solver dispatch by ID. `MIOPEN_ENABLE_FIN_INTERFACE` (defaults to `MIOPEN_ENABLE_FIN`, OFF) only enables `unit_FinInterface` coverage. |
+| `src/fin/` | Fin/Tuna interface. `fin_interface.cpp` is always listed in sources, but its body (including tunable-solver dispatch by ID) compiles only when `MIOPEN_ENABLE_FIN_INTERFACE` is ON (defaults to `MIOPEN_ENABLE_FIN`, OFF). |
 | `test/`, `test/gtest/`, `test/public_abi/`, `driver/` | Legacy tests, GoogleTest fixtures, ABI baselines, and driver reproductions. |
 | `cmake/`, `script/`, `addkernels/`, `tools/`, `docs/` | Build rules, ABI/parity utilities, kernel embedding, DB conversion, and documentation. |
 
@@ -64,7 +64,7 @@ cmake -S . -B build -G Ninja \
   -DMIOPEN_STANDALONE_BUILD=ON -DMIOPEN_BACKEND=HIP -DGPU_TARGETS=gfx942 \
   -DBUILD_DEV=ON -DBUILD_TESTING=ON -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4
 cmake --build build --target MIOpenDriver miopen-tests
-cmake --build build --target check_format
+cmake --build build --target check_format  # clang-format only; run pre-commit separately.
 cmake --build build --target miopen-tidy
 # Install only when needed; choose CMAKE_INSTALL_PREFIX at configure time.
 cmake --install build
@@ -85,11 +85,11 @@ cmake --build build --target MIOpenDriver miopen-tests
 pre-commit run --files projects/miopen/AGENTS.md  # Replace with changed files.
 ```
 
-The `miopen-with-provider` preset also includes hipDNN and its MIOpen provider. Run pre-commit directly: the CMake wrapper in `cmake/ClangCheck.cmake` skips hooks when `pre-commit` or the config is not found (it looks two levels above the CMake source dir, so super-repo builds miss it) and accepts exit status 1. `format` modifies files; `check_format` checks them.
+The `miopen-with-provider` preset also includes hipDNN and its MIOpen provider. Run pre-commit directly: the `pre_commit_checks` and `format` targets in `cmake/ClangCheck.cmake` skip hooks when `pre-commit` or the config is not found (it looks two levels above the CMake source dir, so super-repo builds miss it) and accept exit status 1. `format` modifies files; `check_format` only checks C/C++ source formatting with clang-format.
 
 ## Code Conventions & Common Patterns
 
-- **Formatting:** follow the nearest `.clang-format`; the project-local file (not the super-repo root one) applies, and `src/hipconv/` has its own. The project style: four spaces, no tabs, 100 columns, custom Allman-style braces, left-aligned pointers, no automatic include sorting. Preserve local header guards/license headers; copy new-file attribution from a sibling.
+- **Formatting:** follow the nearest `.clang-format`; the project-local file (not the super-repo root one) applies, and `src/hipconv/` has its own. The project style: four spaces, no tabs, 100 columns, custom Allman-style braces, left-aligned pointers, no automatic include sorting. Preserve existing header guards and license headers on edit. New files use the two-line AMD copyright and `SPDX-License-Identifier: MIT` header (see `src/solver/conv/conv_hip_dir2D11x11.cpp`), not a copied legacy MIT block.
 - **Naming:** public functions use `miopen...`; internal types/methods use names such as `TensorDescriptor`, `Handle`, and `GetSolution` in `miopen` namespaces.
 - **Errors:** `MIOPEN_THROW` carries status information. Most status-returning APIs translate exceptions with `miopen::try_` and use `miopen::deref` for checked access. Inspect the specific API before assuming exception/null-check coverage.
 - **Logging:** `MIOPEN_ENABLE_LOGGING` enables API-call logging; `MIOPEN_LOG_LEVEL` independently controls severity; `MIOPEN_ENABLE_LOGGING_CMD` emits the associated MIOpenDriver command lines, which are incomplete for some paths (e.g. pooling with FP8 types). Reuse `MIOPEN_LOG_FUNCTION` and `MIOPEN_LOG_E/W/I/I2/T`.
@@ -103,7 +103,7 @@ Adding a convolution solver requires all integration points:
 2. Declare it in `src/include/miopen/conv/solvers.hpp`, using `ConvSolver` or `ConvTunableSolver<PerformanceConfigName>` and existing const override signatures.
 3. Append registration in `src/solver.cpp`. Numeric IDs are persistent: when removing a solver, replace its line with `++id`; never renumber, and reuse a removed ID only deliberately (see the comment above the registration list). Preserve `SolverDbId` when renaming a class.
 4. Add it to each applicable algorithm-family `SolverContainer` in `src/mlo_dir_conv.cpp` (e.g. `GetImplicitGemmSolvers` vs `GetImplicitGemmWrWSolvers`); registration alone does not make it discoverable. `test/gtest/solver_find_list_registry.cpp` only checks that it appears in at least one container.
-5. For a tunable solver, add its ID case to `AnySolver` in `src/fin/fin_interface.cpp`; otherwise Fin throws `Unknown solver ID`. Default test runs do not catch this omission (see `src/fin/` above).
+5. For a tunable solver, add its ID case to `AnySolver` in `src/fin/fin_interface.cpp`; otherwise Fin throws `Unknown solver ID` when the interface is enabled. Build and run the Fin interface tests with `-DMIOPEN_ENABLE_FIN_INTERFACE=ON`; the default OFF neither compiles the dispatch code nor exercises those tests.
 6. Document the solver's `MIOPEN_DEBUG_CONV_*` disable variable in `docs/reference/env_variables.rst` and add a `CHANGELOG.md` entry.
 7. Reuse `test/gtest/unit_conv_solver*.hpp` fixtures and `unit_conv_solver_<SolverName>.cpp` naming to cover applicability and numerical correctness.
 
@@ -135,6 +135,7 @@ Read `test/gtest/README.md` before changing tests. Use independent references, d
 - **Naming:** suites follow `CPU_..._<TYPE>`/`GPU_..._<TYPE>`; parameterized prefixes start with `Smoke`, `Standard`, `Full`, `Perf`, or `Unit`. Keep suites unique across files. `test/gtest/check_names.py` (run via `miopen_gtest_check` on the combined test list) rejects GPU+`NONE`; `test/utils/gtest_formating_checks.py` is the source-level check.
 - **Legacy tests:** `CHECK` prints `FAILED` and continues; `EXPECT`, `EXPECT_EQUAL`, and `STATUS` abort. CTest also rejects failure text. `add_custom_test(<test-name> ... COMMAND ...)` takes a positional name.
 - **Selection:** ordinary discovery/shards default to Smoke FP32/NONE. `MIOPEN_TEST_ALL` broadens prefixes, not datatype selection; choose datatype flags or explicit filters. YAML tiers ignore those flags (`quick` runs all compiled `Smoke/*` datatypes plus unprefixed `CPU_*` suites) and carry their own architecture exclusions in `test_categories.yaml`; even full has exclusions.
+- **Time budgets:** YAML tiers have per-tier timeouts (`execution_settings` in `test/gtest/test_categories.yaml`, including `timeout_multiplier`); `ffm-*` run a fixed list on a tight runtime budget. When adding or broadening tests in a tier, estimate the added runtime and keep it within budget. Move slow cases to a higher tier; follow the existing comment-and-ticket convention for necessary exclusions, not exclusions solely to make CI green.
 - **Isolation:** direct binaries and YAML tier suites may not set a test DB path; export isolated DB/cache paths. Unsupported-device skips do not prove a solver works on that device.
 - **Empty selections:** CTest exits 0 when a `-R`/`-L` selection matches nothing. Pass `--no-tests=error` to targeted runs.
 
@@ -190,4 +191,4 @@ Claude Code and other agents read this file directly; do not add a `CLAUDE.md` c
 - Point to the source of truth instead of copying values that change (defaults, lists, versions). Do not restate the super-repo `AGENTS.md`, `CONTRIBUTING.md`, or PR-bot rules; link them.
 - Record repository facts, not local-machine workarounds. Keep entries short; move detail to `README.md`, `test/gtest/README.md`, or `docs/`.
 - If you find this file wrong while doing other work, tell the user and propose the fix; edit it only when asked or when your change already alters the documented behavior.
-- Changes are reviewed by `@ROCm/miopen-reviewers` (`CODEOWNERS`); run pre-commit on the file.
+- Changes are reviewed by `@ROCm/miopen-reviewers` (`../../.github/CODEOWNERS`); run pre-commit on the file.
