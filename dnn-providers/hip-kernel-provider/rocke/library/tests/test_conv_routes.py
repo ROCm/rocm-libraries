@@ -88,6 +88,7 @@ def test_loader_modes(tmp_path):
     ({"cmd": _cmd(C=8), "route": "winograd", "kernel": "k", "winograd": {"spec": ZSPEC}}, "no pinned"),
     ({"cmd": _cmd(C=8, F=2), "route": "padcopy_halo", "kernel": "k"}, "serves fwd"),
     ({"cmd": _cmd(C=8, pd=0, p=0), "route": "padcopy_halo", "kernel": "k"}, "padded problem"),
+    ({"cmd": _cmd(C=8).replace("-n 1", "-n 2"), "route": "padcopy_halo", "kernel": "k"}, "N=1"),
 ])
 def test_bad_rows_refused(row, msg):
     with pytest.raises(ValueError, match=msg):

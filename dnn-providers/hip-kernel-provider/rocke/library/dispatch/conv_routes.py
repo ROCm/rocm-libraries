@@ -65,6 +65,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .conv_pins import (
+    _KEY_FIELDS,
     ConvPin,
     ConvPins,
     _SPLIT_RE,
@@ -128,8 +129,8 @@ class ConvRoutes:
         return {r.case: r for r in self.routes.values()}
 
 
-def _jsonable(v):
-    return list(v) if isinstance(v, tuple) else v
+def _hashable(v):
+    return tuple(v) if isinstance(v, list) else v
 
 
 def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
@@ -153,18 +154,18 @@ def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
             raise ValueError(f"{source}: case {case}: winograd.spec carries derived fields {bad}")
         if w["spec"].get("variant", "yx") != "yx":
             raise ValueError(f"{source}: case {case}: winograd.spec variant must be yx")
-        spec = tuple(sorted((k, _jsonable(v)) for k, v in w["spec"].items() if k != "variant"))
+        spec = tuple(sorted((k, _hashable(v)) for k, v in w["spec"].items() if k != "variant"))
         wtv = int(w.get("wtv", 1))
         if kernel:
             raise ValueError(f"{source}: case {case}: a winograd route names no pinned kernel")
     elif route == ROUTE_PADCOPY_HALO:
         if direction != "fwd":
             raise ValueError(f"{source}: case {case}: padcopy_halo serves fwd, not {direction}")
-        names = dict(zip(("N", "C", "K", "Hi", "Wi", "Y", "X", "G", "stride_h", "stride_w", "pad_h",
-                          "pad_w", "dilation_h", "dilation_w", "Di", "Z", "stride_d", "pad_d",
-                          "dilation_d"), key))
+        names = dict(zip(_KEY_FIELDS, key))
         if not any(names[p] for p in ("pad_d", "pad_h", "pad_w")):
             raise ValueError(f"{source}: case {case}: padcopy_halo needs a padded problem")
+        if names["N"] != 1 or names["Di"] is None:
+            raise ValueError(f"{source}: case {case}: padcopy_halo copies one 3-D image (N=1)")
     return ConvRoute(
         case=case,
         route=route,
