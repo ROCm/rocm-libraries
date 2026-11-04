@@ -46,6 +46,10 @@ extern "C" {
 /* seq_mode of dkv_store_rule: rocke_attn_bwd_seq_mode_t ("batched" / "thd"),
  * from helper_rocke.instances.common._attention_bwd_addr.h. */
 
+/* _floor_div(b, a, m): floor(a / m) for a signed i32 a and a positive
+ * constant m. */
+rocke_value_t* rocke_attn_bwd_band_floor_div(rocke_ir_builder_t* b, rocke_value_t* a, int m);
+
 /* q_tile_range(b, band, k0, *, k_n0, k_m0, uniform) -> (qt_start, n_qt). */
 rocke_status_t rocke_attn_bwd_band_q_tile_range(rocke_ir_builder_t* b,
                                                 rocke_band_emitter_t* band,

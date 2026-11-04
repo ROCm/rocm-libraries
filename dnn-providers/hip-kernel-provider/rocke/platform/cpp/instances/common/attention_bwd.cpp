@@ -26,6 +26,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_body.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_sched.h"
@@ -187,12 +188,7 @@ static std::string repr_opt_bool(int v)
 
 static int floordiv(int a, int b)
 {
-    if(b == 0) /* Python's ZeroDivisionError; ckc has no twin, so a ValueError */
-        throw ckc::ValueError("integer division or modulo by zero");
-    int q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
+    return (int)py_floordiv(a, b);
 }
 
 /* _check_in(name, value, allowed) */
@@ -206,14 +202,6 @@ static void check_in(const std::string& name, int value, const Ints& allowed)
 {
     if(!in(allowed, value))
         throw ckc::ValueError(name + "=" + std::to_string(value) + " not in " + py_tuple(allowed));
-}
-
-/* _atom_k(atom): int(atom.rsplit("x", 1)[1]) */
-static int atom_k(const char* atom)
-{
-    std::string a = s_(atom);
-    size_t x = a.rfind('x');
-    return std::stoi(a.substr(x + 1));
 }
 
 static Grid grid_of(const rocke_attn_bwd_opt_grid_t& g)
@@ -880,7 +868,7 @@ static int ds_slice_regs(const rocke_attn_bwd_spec_t& s, int wave)
 {
     int km = s.block_m;
     if(eq(s.g4_slicing, DEFAULT_G4_SLICING))
-        return floordiv(2 * km * atom_k(s.atom_g4), 2 * wave);
+        return floordiv(2 * km * atom_k_of(s.atom_g4), 2 * wave);
     int kk = s.block_k4;
     int regs = floordiv(2 * km * kk, 2 * wave);
     if(eq(s.kt_source, "lds"))
@@ -1012,9 +1000,9 @@ static rocke_attn_bwd_spec_t canonical_asm_knobs(const rocke_attn_bwd_spec_t& sp
 {
     if(!eq(spec.agpr_route, "asm_g13") || spec.atom_g13 == NULL)
         return spec;
-    std::vector<std::pair<int, int>> asm_ks = {{atom_k(spec.atom_g13), spec.block_m}};
+    std::vector<std::pair<int, int>> asm_ks = {{atom_k_of(spec.atom_g13), spec.block_m}};
     if(truthy(spec.s_in_agpr) && spec.atom_g02 != NULL)
-        asm_ks.emplace_back(atom_k(spec.atom_g02), spec.head_size);
+        asm_ks.emplace_back(atom_k_of(spec.atom_g02), spec.head_size);
     bool upd_nop = false, upd_cluster = false;
     /* shipped = {AGPR_ASM_TAIL_NOP.get(k)}; equal to {asm_tail_nop} */
     if(spec.asm_tail_nop != NONE)
@@ -1050,7 +1038,7 @@ static rocke_attn_bwd_spec_t canonical_g4_slicing(const rocke_attn_bwd_spec_t& s
         return spec;
     if(v == "slice_db" && spec.block_k4 == spec.block_n)
         v = "slice";
-    if(v == "slice" && spec.block_k4 == atom_k(spec.atom_g4))
+    if(v == "slice" && spec.block_k4 == atom_k_of(spec.atom_g4))
         v = DEFAULT_G4_SLICING;
     if(v == s_(spec.g4_slicing))
         return spec;
@@ -1139,73 +1127,8 @@ rocke_attn_bwd_spec_t resolved(const rocke_attn_bwd_spec_t& self, const std::str
 }
 
 /* ====================================================================== *
- * kernel_name: non_default_fields + salted_kernel_name (SHA-1)
+ * kernel_name: non_default_fields + salted_kernel_name (helpers/spec)
  * ====================================================================== */
-
-/* SHA-1 (FIPS 180-4) of a byte string, lower-case hex. */
-std::string sha1_hex(const std::string& msg)
-{
-    uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
-    std::string m = msg;
-    uint64_t bits = (uint64_t)msg.size() * 8u;
-    m += (char)0x80;
-    while(m.size() % 64 != 56)
-        m += (char)0;
-    for(int i = 7; i >= 0; --i)
-        m += (char)((bits >> (8 * i)) & 0xff);
-    auto rol = [](uint32_t x, int n) { return (x << n) | (x >> (32 - n)); };
-    for(size_t off = 0; off < m.size(); off += 64)
-    {
-        uint32_t w[80];
-        for(int i = 0; i < 16; ++i)
-            w[i] = ((uint32_t)(unsigned char)m[off + 4 * i] << 24)
-                   | ((uint32_t)(unsigned char)m[off + 4 * i + 1] << 16)
-                   | ((uint32_t)(unsigned char)m[off + 4 * i + 2] << 8)
-                   | (uint32_t)(unsigned char)m[off + 4 * i + 3];
-        for(int i = 16; i < 80; ++i)
-            w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
-        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
-        for(int i = 0; i < 80; ++i)
-        {
-            uint32_t f, k;
-            if(i < 20)
-            {
-                f = (b & c) | (~b & d);
-                k = 0x5A827999u;
-            }
-            else if(i < 40)
-            {
-                f = b ^ c ^ d;
-                k = 0x6ED9EBA1u;
-            }
-            else if(i < 60)
-            {
-                f = (b & c) | (b & d) | (c & d);
-                k = 0x8F1BBCDCu;
-            }
-            else
-            {
-                f = b ^ c ^ d;
-                k = 0xCA62C1D6u;
-            }
-            uint32_t tmp = rol(a, 5) + f + e + k + w[i];
-            e = d;
-            d = c;
-            c = rol(b, 30);
-            b = a;
-            a = tmp;
-        }
-        h[0] += a;
-        h[1] += b;
-        h[2] += c;
-        h[3] += d;
-        h[4] += e;
-    }
-    char out[41];
-    for(int i = 0; i < 5; ++i)
-        snprintf(out + 8 * i, 9, "%08x", h[i]);
-    return std::string(out, 40);
-}
 
 /* non_default_fields(spec, skip=("head_size", "name")): (name, repr(value))
  * of every field that differs from its declared default, in field order. */
@@ -1331,19 +1254,7 @@ std::string salted_kernel_name(const std::string& base,
     for(const auto& kv : non_default_fields(s))
         if(std::find(skip.begin(), skip.end(), kv.first) == skip.end())
             items.push_back(kv);
-    std::stable_sort(
-        items.begin(), items.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    if(items.empty())
-        return base;
-    std::string r = "[";
-    for(size_t i = 0; i < items.size(); ++i)
-    {
-        if(i)
-            r += ", ";
-        r += "(" + py_repr(items[i].first) + ", " + items[i].second + ")";
-    }
-    r += "]";
-    return base + "_" + sha1_hex(r).substr(0, 10);
+    return rocke_salted_kernel_name(base, items);
 }
 
 /* ====================================================================== *
@@ -1380,8 +1291,8 @@ rocke_attn_bwd_lds_request_t lds_request(const rocke_attn_bwd_spec_t& s, const s
     r.dkv_epilogue = planned_epilogue(s);
     r.lds_order = s.lds_order;
     r.ds_slots = eq(s.barrier_merge, "on") ? 2 : 1;
-    r.atom_k_g13 = atom_k(s.atom_g13);
-    r.atom_k_g4 = atom_k(s.atom_g4);
+    r.atom_k_g13 = atom_k_of(s.atom_g13);
+    r.atom_k_g4 = atom_k_of(s.atom_g4);
     lds_request_check(r); /* BwdLdsRequest.__post_init__ */
     return r;
 }
@@ -1668,11 +1579,11 @@ static Geom geometry_check(const rocke_attn_bwd_spec_t& s, const std::string& ar
                                   + " must hold W=" + std::to_string(w) + " waves");
     /* BlockGemm constructions (atom_facts holds for every backward atom) */
     BlockGemm g0
-        = block_gemm(arch, s.dtype, s.block_m, s.block_n, s.head_size, g0g, atom_k(s.atom_g02));
+        = block_gemm(arch, s.dtype, s.block_m, s.block_n, s.head_size, g0g, atom_k_of(s.atom_g02));
     BlockGemm g1
-        = block_gemm(arch, s.dtype, s.block_n, s.head_size, s.block_m, g1g, atom_k(s.atom_g13));
+        = block_gemm(arch, s.dtype, s.block_n, s.head_size, s.block_m, g1g, atom_k_of(s.atom_g13));
     BlockGemm g4
-        = block_gemm(arch, s.dtype, s.block_m, s.head_size, s.block_n, g4g, atom_k(s.atom_g4));
+        = block_gemm(arch, s.dtype, s.block_m, s.head_size, s.block_n, g4g, atom_k_of(s.atom_g4));
     /* relabel plan / K permutation: proved for the natural grids (not ported) */
     std::string reader = eq(s.transpose_source, "tr_read")  ? "tr16"
                          : eq(s.transpose_source, "xt_lds") ? "xt"
@@ -1752,7 +1663,7 @@ static Geom geometry_check(const rocke_attn_bwd_spec_t& s, const std::string& ar
     if(!eq(s.g4_slicing, DEFAULT_G4_SLICING))
     {
         std::string why;
-        int k4 = atom_k(s.atom_g4);
+        int k4 = atom_k_of(s.atom_g4);
         if(truthy(s.acc_in_lds) || !arch_caps(arch).has_agprs)
             why = "MFMA register accumulators (acc_in_lds=False)";
         else if(!eq(s.dq_issue, "block"))
@@ -2021,7 +1932,7 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
                               + grid_repr(g02));
     if(w == 1 && !(km == 16 && kn == 16))
         throw ckc::ValueError("waves=1 is legal only for the 16 x 16 debug / fallback tile");
-    int k4a = atom_k(s.atom_g4);
+    int k4a = atom_k_of(s.atom_g4);
     if(kk % k4a != 0)
         throw ckc::ValueError("block_k4=" + std::to_string(kk)
                               + " must be a multiple of the G4 atom K (" + std::to_string(k4a)
@@ -2029,7 +1940,7 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
     if(kn % kk != 0)
         throw ckc::ValueError("block_n=" + std::to_string(kn)
                               + " must be a multiple of block_k4=" + std::to_string(kk));
-    if(d % atom_k(s.atom_g02) != 0)
+    if(d % atom_k_of(s.atom_g02) != 0)
         throw ckc::ValueError("head_size=" + std::to_string(d)
                               + " must be a multiple of the G0/G2 atom K");
     if(eq(s.atom_g13, "16x16x32") && km < 32)
@@ -2213,9 +2124,9 @@ rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std
             throw ckc::ValueError("s_in_agpr=True requires agpr_alloc != (0, 0)");
         if(eq(s.agpr_route, "asm_g13") && s.asm_tail_nop != NONE)
         {
-            check_asm_tail_nop(arch, s_(s.dtype), atom_k(s.atom_g13), s.asm_tail_nop);
+            check_asm_tail_nop(arch, s_(s.dtype), atom_k_of(s.atom_g13), s.asm_tail_nop);
             if(truthy(s.s_in_agpr))
-                check_asm_tail_nop(arch, s_(s.dtype), atom_k(s.atom_g02), s.asm_tail_nop);
+                check_asm_tail_nop(arch, s_(s.dtype), atom_k_of(s.atom_g02), s.asm_tail_nop);
         }
     }
     if(!eq(spec.g4_slicing, DEFAULT_G4_SLICING) || !eq(s.g4_slicing, DEFAULT_G4_SLICING))

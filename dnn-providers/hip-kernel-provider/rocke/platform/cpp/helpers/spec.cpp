@@ -12,8 +12,14 @@
  */
 #include "rocke/helper_rocke.helpers.spec.h"
 
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include <new>
+
+#include "rocke/error.hpp" /* ckc::ValueError (the C++ spellings) */
 
 /* ------------------------------------------------------------------ *
  * derive_block_size / WarpTileBlockSizeMixin
@@ -818,4 +824,213 @@ void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
     }
     memcpy(reason, msg, n);
     reason[n] = '\0';
+}
+
+/* ------------------------------------------------------------------ *
+ * salted_kernel_name (and the SHA-1 digest it hashes with)
+ * ------------------------------------------------------------------ */
+
+/* SHA-1 (FIPS 180-4), streamed over the message, the 0x80 pad, zeros and
+ * the 64-bit big-endian bit length. */
+static uint32_t sha1_rol(uint32_t x, int n)
+{
+    return (x << n) | (x >> (32 - n));
+}
+
+static void sha1_block(uint32_t h[5], const unsigned char* blk)
+{
+    uint32_t w[80];
+    for(int i = 0; i < 16; ++i)
+        w[i] = ((uint32_t)blk[4 * i] << 24) | ((uint32_t)blk[4 * i + 1] << 16)
+               | ((uint32_t)blk[4 * i + 2] << 8) | (uint32_t)blk[4 * i + 3];
+    for(int i = 16; i < 80; ++i)
+        w[i] = sha1_rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+    for(int i = 0; i < 80; ++i)
+    {
+        uint32_t f, k;
+        if(i < 20)
+        {
+            f = (b & c) | (~b & d);
+            k = 0x5A827999u;
+        }
+        else if(i < 40)
+        {
+            f = b ^ c ^ d;
+            k = 0x6ED9EBA1u;
+        }
+        else if(i < 60)
+        {
+            f = (b & c) | (b & d) | (c & d);
+            k = 0x8F1BBCDCu;
+        }
+        else
+        {
+            f = b ^ c ^ d;
+            k = 0xCA62C1D6u;
+        }
+        uint32_t tmp = sha1_rol(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = sha1_rol(b, 30);
+        b = a;
+        a = tmp;
+    }
+    h[0] += a;
+    h[1] += b;
+    h[2] += c;
+    h[3] += d;
+    h[4] += e;
+}
+
+void rocke_sha1_hex(const void* data, size_t len, char out[41])
+{
+    uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
+    const unsigned char* p = (const unsigned char*)data;
+    size_t off = 0;
+    for(; off + 64 <= len; off += 64)
+        sha1_block(h, p + off);
+    /* Tail: the remaining bytes, 0x80, zeros, then the bit length; one or
+     * two blocks. */
+    unsigned char tail[128];
+    size_t rem = len - off;
+    memset(tail, 0, sizeof(tail));
+    if(rem > 0)
+        memcpy(tail, p + off, rem);
+    tail[rem] = 0x80;
+    size_t tail_len = (rem < 56) ? 64 : 128;
+    uint64_t bits = (uint64_t)len * 8u;
+    for(int i = 0; i < 8; ++i)
+        tail[tail_len - 1 - (size_t)i] = (unsigned char)((bits >> (8 * i)) & 0xff);
+    for(size_t t = 0; t < tail_len; t += 64)
+        sha1_block(h, tail + t);
+    for(int i = 0; i < 5; ++i)
+        snprintf(out + 8 * i, 9, "%08x", (unsigned)h[i]);
+    out[40] = '\0';
+}
+
+static int salted_name_ok(const char* name)
+{
+    if(name == NULL || name[0] == '\0')
+        return 0;
+    for(const char* c = name; *c; ++c)
+        if(!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9')
+             || *c == '_'))
+            return 0;
+    return 1;
+}
+
+rocke_status_t rocke_salted_kernel_name(const char* base,
+                                        const char* const* names,
+                                        const char* const* reprs,
+                                        size_t n,
+                                        char* out,
+                                        size_t out_cap,
+                                        size_t* out_len)
+{
+    if(base == NULL || out == NULL || out_cap == 0 || (n > 0 && (names == NULL || reprs == NULL)))
+        return ROCKE_ERR_VALUE;
+    size_t base_len = strlen(base);
+    size_t want = base_len + (n > 0 ? 11 : 0); /* "_" + 10 hex digits */
+    if(want + 1 > out_cap)
+        return ROCKE_ERR_VALUE;
+    size_t text_len = 2; /* "[" ... "]" */
+    for(size_t i = 0; i < n; ++i)
+    {
+        if(!salted_name_ok(names[i]) || reprs[i] == NULL)
+            return ROCKE_ERR_VALUE;
+        /* "('" name "', " repr ")" and ", " between items */
+        text_len += strlen(names[i]) + strlen(reprs[i]) + 6 + (i ? 2 : 0);
+    }
+    memcpy(out, base, base_len + 1);
+    if(n == 0)
+    {
+        if(out_len != NULL)
+            *out_len = base_len;
+        return ROCKE_OK;
+    }
+    /* sorted(..., key=lambda kv: kv[0]): stable insertion sort of indices;
+     * strcmp on identifiers orders by code point like Python's str <. */
+    size_t* order = (size_t*)malloc(n * sizeof(size_t));
+    char* text = (char*)malloc(text_len + 1);
+    if(order == NULL || text == NULL)
+    {
+        free(order);
+        free(text);
+        return ROCKE_ERR_OOM;
+    }
+    for(size_t i = 0; i < n; ++i)
+    {
+        size_t j = i;
+        while(j > 0 && strcmp(names[order[j - 1]], names[i]) > 0)
+        {
+            order[j] = order[j - 1];
+            --j;
+        }
+        order[j] = i;
+    }
+    /* repr(items): "[('a', 1), ('b', (2, 'x'))]" */
+    size_t pos = 0;
+    text[pos++] = '[';
+    for(size_t k = 0; k < n; ++k)
+    {
+        const char* nm = names[order[k]];
+        const char* rp = reprs[order[k]];
+        if(k)
+        {
+            text[pos++] = ',';
+            text[pos++] = ' ';
+        }
+        text[pos++] = '(';
+        text[pos++] = '\'';
+        memcpy(text + pos, nm, strlen(nm));
+        pos += strlen(nm);
+        text[pos++] = '\'';
+        text[pos++] = ',';
+        text[pos++] = ' ';
+        memcpy(text + pos, rp, strlen(rp));
+        pos += strlen(rp);
+        text[pos++] = ')';
+    }
+    text[pos++] = ']';
+    char digest[41];
+    rocke_sha1_hex(text, pos, digest);
+    free(text);
+    free(order);
+    out[base_len] = '_';
+    memcpy(out + base_len + 1, digest, 10);
+    out[want] = '\0';
+    if(out_len != NULL)
+        *out_len = want;
+    return ROCKE_OK;
+}
+
+std::string rocke_sha1_hex(const std::string& msg)
+{
+    char out[41];
+    rocke_sha1_hex(msg.data(), msg.size(), out);
+    return std::string(out, 40);
+}
+
+std::string rocke_salted_kernel_name(const std::string& base,
+                                     const std::vector<std::pair<std::string, std::string>>& salted)
+{
+    std::vector<const char*> names, reprs;
+    names.reserve(salted.size());
+    reprs.reserve(salted.size());
+    for(const auto& kv : salted)
+    {
+        names.push_back(kv.first.c_str());
+        reprs.push_back(kv.second.c_str());
+    }
+    std::string out(base.size() + 12, '\0');
+    size_t len = 0;
+    rocke_status_t st = rocke_salted_kernel_name(
+        base.c_str(), names.data(), reprs.data(), salted.size(), &out[0], out.size(), &len);
+    if(st == ROCKE_ERR_OOM)
+        throw std::bad_alloc();
+    if(st != ROCKE_OK)
+        throw ckc::ValueError("salted_kernel_name: a salted field name is not an identifier");
+    out.resize(len);
+    return out;
 }

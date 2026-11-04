@@ -213,9 +213,6 @@ rocke_attn_bwd_spec_t dense_validate_spec(const rocke_attn_bwd_dense_spec_t& spe
 std::vector<std::string> dense_not_built_all(const rocke_attn_bwd_dense_spec_t& spec,
                                              const rocke_attn_bwd_spec_t& body);
 std::string dense_spec_kernel_name(const rocke_attn_bwd_dense_spec_t& spec);
-/* salted_kernel_name(base, salted): salted are (name, repr(value)). */
-std::string salted_kernel_name(const std::string& base,
-                               std::vector<std::pair<std::string, std::string>> salted);
 } // namespace rocke_attn_bwd
 #endif
 

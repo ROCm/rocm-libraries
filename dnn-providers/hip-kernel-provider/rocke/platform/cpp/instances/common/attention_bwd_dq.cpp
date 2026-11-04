@@ -30,6 +30,7 @@
 #include "rocke/error.hpp"
 #include "rocke/error_boundary.hpp"
 #include "rocke/helper_rocke.helpers.attention_band.h"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_addr.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_band.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_body.h"
@@ -122,14 +123,6 @@ void check_in(const std::string& name, int value, const Ints& allowed)
 {
     if(!in(allowed, value))
         throw ckc::ValueError(name + "=" + std::to_string(value) + " not in " + py_tuple(allowed));
-}
-
-/* _atom_k(atom) */
-int atom_k(const char* atom)
-{
-    std::string a = s_(atom);
-    size_t x = a.rfind('x');
-    return std::stoi(a.substr(x + 1));
 }
 
 bool is_pair(const rocke_attn_bwd_agpr_alloc_t& a, int x, int y)
@@ -324,7 +317,7 @@ std::pair<int, int> raw_estimates(const Spec& s, const std::string& arch, bool a
     int wave = arch_facts(arch).wave_size;
     int w = s.waves, d = s.head_size, km = s.block_m, kn = s.block_n;
     int cols = km / w;
-    int k02 = atom_k(s.atom_g02), k4 = atom_k(s.atom_g4);
+    int k02 = atom_k_of(s.atom_g02), k4 = atom_k_of(s.atom_g4);
     int vgpr = REG_ALLOWANCE_FIXED;
     vgpr += 2 * cols * d / (2 * wave); /* resident Q^T, dO^T */
     vgpr += kn * cols / (2 * wave); /* dS^T as the G4' A operand */
@@ -428,19 +421,7 @@ std::string dq_kernel_name(const Spec& s)
     for(const auto& kv : non_default_fields(s))
         if(std::find(in_base.begin(), in_base.end(), kv.first) == in_base.end())
             items.push_back(kv);
-    std::stable_sort(
-        items.begin(), items.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    if(items.empty())
-        return base;
-    std::string r = "[";
-    for(size_t i = 0; i < items.size(); ++i)
-    {
-        if(i)
-            r += ", ";
-        r += "(" + py_repr(items[i].first) + ", " + items[i].second + ")";
-    }
-    r += "]";
-    return base + "_" + sha1_hex(r).substr(0, 10);
+    return rocke_salted_kernel_name(base, items);
 }
 
 /* AttnBwdSpec.dq_spec(**knobs) */
@@ -585,10 +566,10 @@ Spec validate_dq_spec(const Spec& spec, const std::string& arch)
     if(km % (16 * w))
         throw ckc::ValueError("block_m=" + std::to_string(km)
                               + " must be a multiple of 16*waves=" + std::to_string(16 * w));
-    if(kn % atom_k(s.atom_g4))
+    if(kn % atom_k_of(s.atom_g4))
         throw ckc::ValueError("block_n=" + std::to_string(kn)
                               + " must be a multiple of the G4' atom K");
-    if(d % atom_k(s.atom_g02))
+    if(d % atom_k_of(s.atom_g02))
         throw ckc::ValueError("head_size=" + std::to_string(d)
                               + " must be a multiple of the G0' atom K");
     {

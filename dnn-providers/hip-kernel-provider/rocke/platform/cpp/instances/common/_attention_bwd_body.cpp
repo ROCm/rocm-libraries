@@ -93,20 +93,12 @@ void need_st(rocke_status_t st, const rocke_attn_bwd_err_t& e)
         ckc::raise_status(e.code, e.msg);
 }
 
-/* BwdTileGeometry.wave_size / threads inside a guarded body: an unknown arch
- * raises bwd_arch_caps' ValueError (the C entry points return 0 instead). */
-int wave_size_of(const rocke_attn_bwd_tile_geometry_t* g)
-{
-    rocke_attn_bwd_caps_t c;
-    rocke_attn_bwd_err_t e;
-    need_st(rocke_attn_bwd_arch_caps(g->arch, &c, &e), e);
-    return c.wave_size;
-}
-
+/* BwdTileGeometry.threads inside a guarded body: an unknown arch raises
+ * bwd_arch_caps' ValueError (the C entry points return 0 instead). */
 int threads_of(const rocke_attn_bwd_tile_geometry_t* g)
 {
     int waves = g->waves;
-    return waves * wave_size_of(g);
+    return waves * rocke_attn_bwd::arch_wave_size(g->arch);
 }
 
 [[noreturn]] void value_error(const std::string& msg)
@@ -320,21 +312,6 @@ Opnd regs_opnd(rocke_attn_bwd_frags_t f)
     Opnd o;
     o.regs = f;
     return o;
-}
-
-/* Python's int(str(atom).rsplit("x", 1)[1]). */
-int atom_k_of(const char* atom)
-{
-    std::string s = s_(atom);
-    size_t x = s.rfind('x');
-    if(x == std::string::npos)
-        value_error("list index out of range");
-    std::string tail = s.substr(x + 1);
-    char* end = NULL;
-    long v = strtol(tail.c_str(), &end, 10);
-    if(tail.empty() || end == NULL || *end != '\0')
-        value_error("invalid literal for int() with base 10: " + repr(tail.c_str()));
-    return (int)v;
 }
 
 bool truthy(int optional_bool)
@@ -2366,7 +2343,7 @@ bool stage_qdo(B* b,
                   t->tid,
                   threads_of(g),
                   t->wave,
-                  wave_size_of(g),
+                  rocke_attn_bwd::arch_wave_size(g->arch),
                   8);
     loop_barrier(b, t);
     return have;
@@ -3206,9 +3183,9 @@ bool rocke_attn_bwd_tile_geometry_from_spec(rocke_ir_builder_t* b,
             dst[i][0] = grids[i]->rows;
             dst[i][1] = grids[i]->cols;
         }
-        g.atoms.g02 = atom_k_of(s->atom_g02);
-        g.atoms.g13 = atom_k_of(s->atom_g13);
-        g.atoms.g4 = atom_k_of(s->atom_g4);
+        g.atoms.g02 = rocke_attn_bwd::atom_k_of(s->atom_g02);
+        g.atoms.g13 = rocke_attn_bwd::atom_k_of(s->atom_g13);
+        g.atoms.g4 = rocke_attn_bwd::atom_k_of(s->atom_g4);
         g.pt_route = s->pt_route;
         g.kv_residency = s->kv_residency;
         g.kt_source = s->kt_source;

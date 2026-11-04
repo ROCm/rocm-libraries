@@ -53,12 +53,7 @@ int grid_waves(const Grid& g)
  * of a caller's 0 or 1 must match). */
 static int floordiv(int a, int b)
 {
-    if(b == 0) /* Python's ZeroDivisionError; ckc has no twin, so a ValueError */
-        throw ckc::ValueError("integer division or modulo by zero");
-    int q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
+    return (int)rocke_attn_bwd::py_floordiv(a, b);
 }
 
 static void push_unique(std::vector<Grid>& out, const Grid& g)

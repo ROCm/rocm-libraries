@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_caps.h"
 
 namespace rocke_attn_bwd
@@ -368,7 +369,7 @@ std::string dense_kernel_name(const rocke_attn_bwd_dense_spec_t& s)
     for(const auto& kv : dense_non_default_fields(s))
         if(std::find(keyed.begin(), keyed.end(), kv.first) == keyed.end())
             salted.push_back(kv);
-    return salted_kernel_name(base, salted);
+    return rocke_salted_kernel_name(base, salted);
 }
 
 rocke_attn_bwd_spec_t dense_validate(const rocke_attn_bwd_dense_spec_t& spec,
@@ -473,25 +474,6 @@ void dense_check_in(const std::string& name,
         if(value != NULL && a == value)
             return;
     throw ckc::ValueError(name + "=" + repr_str(value) + " not in " + py_tuple(allowed));
-}
-
-std::string salted_kernel_name(const std::string& base,
-                               std::vector<std::pair<std::string, std::string>> salted)
-{
-    std::stable_sort(salted.begin(), salted.end(), [](const auto& a, const auto& b) {
-        return a.first < b.first;
-    });
-    if(salted.empty())
-        return base;
-    std::string r = "[";
-    for(size_t i = 0; i < salted.size(); ++i)
-    {
-        if(i)
-            r += ", ";
-        r += "(" + py_repr(salted[i].first) + ", " + salted[i].second + ")";
-    }
-    r += "]";
-    return base + "_" + sha1_hex(r).substr(0, 10);
 }
 
 std::string dense_mask_token(int left, int right, bool bottom_right)

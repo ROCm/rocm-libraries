@@ -12,19 +12,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.instances.common._attention_bwd_caps.h" /* py_floordiv */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 const char* const ROCKE_ATTN_BWD_COUNTED_ISSUES[ROCKE_ATTN_BWD_COUNTED_N_ISSUES]
     = {"early", "late"};
-
-/* py: a // b (floor division); b != 0 */
-static int64_t floor_div(int64_t a, int64_t b)
-{
-    int64_t q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        q -= 1;
-    return q;
-}
 
 int rocke_attn_bwd_tile_chunks_count(
     rocke_ir_builder_t* b, int rows, int cols, int threads, int vec)
@@ -34,7 +26,7 @@ int rocke_attn_bwd_tile_chunks_count(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "tile_chunks: vec must not be 0");
         return -1;
     }
-    const int64_t per_row = floor_div(cols, vec);
+    const int64_t per_row = rocke_attn_bwd::py_floordiv(cols, vec);
     const int64_t total = (int64_t)rows * per_row;
     return rocke_attn_bwd_deal_chunks_count(b, total, threads);
 }
@@ -57,7 +49,7 @@ bool rocke_attn_bwd_tile_chunks(rocke_ir_builder_t* b,
             b, ROCKE_ERR_VALUE, "tile_chunks: %d chunks exceed the buffer (%d)", n, out_cap);
         return false;
     }
-    const int per_row = (int)floor_div(cols, vec);
+    const int per_row = (int)rocke_attn_bwd::py_floordiv(cols, vec);
     const int64_t total64 = (int64_t)rows * per_row;
     if(total64 > INT32_MAX || total64 < INT32_MIN)
     {
