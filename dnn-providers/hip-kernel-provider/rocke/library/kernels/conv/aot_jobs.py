@@ -41,7 +41,12 @@ Per direction, on top of that:
   group-merged depthwise kernels (``group_merge`` in 4..64, cshuffle, plain
   and ``unroll_k`` loops, load widths derived by the builder, on the tile
   subset the ``CACHE_FWD_GROUP_MERGE_*`` constants allow), served only to
-  depthwise problems whose merged GEMM-N fits the tile.
+  depthwise problems whose merged GEMM-N fits the tile. Plus, on the
+  ``CACHE_FWD_SPLIT_K_ARCHS`` targets, the split-K kernel (``split_k`` > 1,
+  recorded as 2 with ``two_stage``; fp32 workspace slabs + the Stage 2 fold,
+  the degree a kernarg swept at launch) on the small tiles, pipelines and
+  widths of ``CACHE_FWD_SPLIT_K_*``, and its cluster form where the target
+  launches workgroup clusters and the flavor lowers them.
 * **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
   take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
   carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
@@ -116,6 +121,7 @@ import itertools
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
+from kernels.common.conv_split_k import FWD_SPLIT_K_ARCHS
 from kernels.conv.kernel_identity import KernelIdentity, current_llvm_flavor
 
 
@@ -130,8 +136,9 @@ from kernels.conv.kernel_identity import KernelIdentity, current_llvm_flavor
 #
 # GFX1250-only extensions (tile=512, warp=16) are omitted: they require a
 # minimum register file that gfx950 and gfx942 do not have, so those kernels
-# fail spec validation and are silently skipped on those targets. They can be
-# added when a gfx1250 cache path is implemented.
+# fail spec validation and are silently skipped on those targets. The grid
+# below does build for gfx1250 (WMMA: "mem" and "wavelet" pipelines, group-
+# merged depthwise kernels included); only those extensions are left out.
 # ---------------------------------------------------------------------------
 
 CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
@@ -308,6 +315,39 @@ CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 # cache carries it too. Group-merged (depthwise) kernels skip it, as the JIT
 # sweep does: one workgroup per merged group cannot fill the device.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
+
+# Split-K forward (WMMA only; ImplicitGemmConvSpec.split_k): built for the
+# small-M / deep-K layers it exists for, so only small output tiles, the two
+# WMMA pipelines and the cshuffle epilogue. Recorded as split_k = 2 with
+# two_stage set: the degree is a kernarg, swept at launch.
+CACHE_FWD_SPLIT_K_TILE_M: Tuple[int, ...] = (16, 32, 64)
+CACHE_FWD_SPLIT_K_TILE_N: Tuple[int, ...] = (16, 32, 64, 128)
+CACHE_FWD_SPLIT_K_TILE_K: Tuple[int, ...] = (32, 64)
+CACHE_FWD_SPLIT_K_PIPELINES: Tuple[str, ...] = ("mem", "wavelet")
+CACHE_FWD_SPLIT_K_VECS: Tuple[int, ...] = (4, 8)
+# Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
+# the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
+# their slabs after a cluster barrier, so there is no Stage 2 launch. The
+# degree is baked (the cluster shape), so one binary per S, on the tiles
+# (tile_m, tile_n, warp_m, warp_n) that win the small-output / deep-K layers
+# it is for; mem pipeline, cshuffle, tile_k 64, 16-byte vectors.
+CACHE_FWD_SPLIT_K_CLUSTER_DEGREES: Tuple[int, ...] = (4, 8, 12, 15)
+CACHE_FWD_SPLIT_K_CLUSTER_TILES: Tuple[Tuple[int, int, int, int], ...] = (
+    (16, 32, 1, 1),
+    (32, 32, 2, 1),
+    (64, 32, 2, 1),
+    (64, 64, 2, 2),
+    (128, 128, 2, 2),
+)
+CACHE_FWD_SPLIT_K_CLUSTER_TILE_K = 64
+CACHE_FWD_SPLIT_K_CLUSTER_VEC = 8
+# Targets the split-K forward kernels are cached for: the ones they were
+# validated on, which are also the ones the conv split-K resolver splits a
+# forward on (one tuple, so the cache and auto-deduction cannot drift). The
+# cluster form also needs workgroup-cluster launch on the target and the LLVM
+# flavor that lowers the cluster attribute and barrier.
+CACHE_FWD_SPLIT_K_ARCHS: Tuple[str, ...] = FWD_SPLIT_K_ARCHS
+CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS: Tuple[str, ...] = ("llvm23",)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -680,6 +720,150 @@ def _fwd_jobs(
             flavor,
             wave_size,
             (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
+        )
+        if _fwd_split_target(arch):
+            yield from _fwd_split_jobs(
+                arch,
+                da,
+                db,
+                dd,
+                flavor,
+                wave_size,
+                (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
+                cluster=_fwd_split_cluster_target(target, flavor),
+            )
+
+
+def _fwd_split_target(arch: str) -> bool:
+    """Whether split-K forward kernels are cached for ``arch`` at all."""
+    return arch in CACHE_FWD_SPLIT_K_ARCHS
+
+
+def _fwd_split_cluster_target(target, flavor: str) -> bool:
+    """Whether cluster split-K forward kernels are cached for ``target`` and
+    ``flavor``: workgroup-cluster launch and an LLVM that lowers it."""
+    return (
+        target.memory.has_cluster_launch and flavor in CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS
+    )
+
+
+def _fwd_split_geometry(geometry: tuple) -> bool:
+    """Whether split-K forward kernels are built for ``geometry`` (WMMA only)."""
+    tile_m, tile_n, tile_k, _wm, _wn, _wt, pipeline, epilogue, atom = geometry
+    return (
+        atom.family == "wmma"
+        and epilogue == "cshuffle"
+        and pipeline in CACHE_FWD_SPLIT_K_PIPELINES
+        and tile_m in CACHE_FWD_SPLIT_K_TILE_M
+        and tile_n in CACHE_FWD_SPLIT_K_TILE_N
+        and tile_k in CACHE_FWD_SPLIT_K_TILE_K
+    )
+
+
+def _fwd_split_cluster_geometry(geometry: tuple) -> bool:
+    """Whether cluster split-K forward kernels are built for ``geometry``."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, _wt, pipeline, epilogue, atom = geometry
+    return (
+        atom.family == "wmma"
+        and epilogue == "cshuffle"
+        and pipeline == "mem"
+        and tile_k == CACHE_FWD_SPLIT_K_CLUSTER_TILE_K
+        and (tile_m, tile_n, warp_m, warp_n) in CACHE_FWD_SPLIT_K_CLUSTER_TILES
+    )
+
+
+def _fwd_split_jobs(
+    arch: str,
+    da: str,
+    db: str,
+    dd: str,
+    flavor: str,
+    wave_size: int,
+    geometry: tuple,
+    *,
+    cluster: bool,
+) -> Iterator[BuildJob]:
+    """Split-K forward kernels for one geometry (see ``CACHE_FWD_SPLIT_K_*``).
+
+    ``cluster`` adds the cluster binaries (see :func:`_fwd_split_cluster_target`).
+    """
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    if cluster and _fwd_split_cluster_geometry(geometry):
+        vec = CACHE_FWD_SPLIT_K_CLUSTER_VEC
+        for degree in CACHE_FWD_SPLIT_K_CLUSTER_DEGREES:
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                vector_size_a=vec,
+                vector_size_b=vec,
+                vector_size_c=vec,
+                split_k=2,
+                split_k_cluster=degree,
+            )
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="fwd",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=True,
+                    two_stage=True,
+                    **cfg,
+                ),
+                direction="fwd",
+                spec_kwargs=cfg,
+                caps=dict(grouped=True),
+            )
+    if not _fwd_split_geometry(geometry):
+        return
+    for vec_ab, vec_c in itertools.product(
+        CACHE_FWD_SPLIT_K_VECS, CACHE_FWD_SPLIT_K_VECS
+    ):
+        cfg = dict(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            warp_tile_k=atom.k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            wave_size=wave_size,
+            vector_size_a=vec_ab,
+            vector_size_b=vec_ab,
+            vector_size_c=vec_c,
+            split_k=2,
+        )
+        yield BuildJob(
+            identity=KernelIdentity(
+                arch=arch,
+                direction="fwd",
+                algorithm="implicit_gemm",
+                llvm_flavor=flavor,
+                dtype_a=da,
+                dtype_b=db,
+                dtype_d=dd,
+                grouped=True,
+                two_stage=True,
+                **cfg,
+            ),
+            direction="fwd",
+            spec_kwargs=cfg,
+            caps=dict(grouped=True),
         )
 
 
@@ -1403,6 +1587,43 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
     )
 
 
+# Forward LDS budget per arch for the AOT grid, below the arch's capacity.
+# gfx1250 has 320 KB of LDS per workgroup; its catalog value was a 160 KB
+# placeholder until the WMMA direct dgrad. The forward configurations between
+# the two (256x256 wavelet/cshuffle tiles) have not been run with --verify on
+# gfx1250 yet, so its forward grid stays at the old budget until they have.
+_AOT_FWD_LDS_BUDGET = {"gfx1250": 160 * 1024}
+
+# Configurations that validate but are left out of the AOT grid, per
+# (arch, direction): each entry is matched against the job's spec_kwargs.
+_AOT_EXCLUDED = {
+    # Fails --verify on the C=3 stem dgrad rows: the pre-existing
+    # vector_size_a=8 C=3 implicit-GEMM dgrad bug. The 320 KB gfx1250 LDS
+    # admits this tile; the bug's other configurations predate it.
+    ("gfx1250", "dgrad"): (
+        dict(
+            tile_m=256,
+            tile_n=256,
+            tile_k=64,
+            warp_m=1,
+            warp_n=8,
+            pipeline="wavelet",
+            epilogue="cshuffle",
+            vector_size_a=8,
+            vector_size_b=1,
+            vector_size_c=1,
+        ),
+    ),
+}
+
+
+def _aot_excluded(job: BuildJob, arch: str) -> bool:
+    return any(
+        all(job.spec_kwargs.get(k) == v for k, v in entry.items())
+        for entry in _AOT_EXCLUDED.get((arch, job.direction), ())
+    )
+
+
 def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     """Would this configuration build at all?
 
@@ -1411,7 +1632,12 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     so on. Running that check here costs microseconds; discovering it inside
     ``compile_kernel`` costs an LLVM invocation, so the prefilter is the
     difference between a cache build that finishes and one that does not.
+
+    It also applies the grid's own limits on top of spec validity
+    (:data:`_AOT_FWD_LDS_BUDGET`, :data:`_AOT_EXCLUDED`).
     """
+    if _aot_excluded(job, arch):
+        return False
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
     data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
@@ -1420,11 +1646,15 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
         if job.direction == "fwd":
             from kernels.common.conv_implicit_gemm import (
                 ImplicitGemmConvSpec,
+                implicit_gemm_lds_bytes,
                 is_valid_spec,
             )
 
             spec = ImplicitGemmConvSpec(problem=problem, data=data, **job.spec_kwargs)
             spec.validate()
+            budget = _AOT_FWD_LDS_BUDGET.get(arch)
+            if budget is not None and implicit_gemm_lds_bytes(spec)[0] > budget:
+                return False
             return is_valid_spec(spec, arch=arch)[0]
         if job.direction == "wgrad":
             from kernels.common.conv_implicit_gemm_wgrad import (
@@ -1455,9 +1685,13 @@ def count_jobs(
     split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    llvm_flavor: Optional[str] = None,
 ) -> int:
     """Raw candidate count ``kernel_sweep.enumerate_jobs`` walks, before
     dedup/validation.
+
+    ``llvm_flavor`` is the flavor the enumeration records (see
+    :func:`_job_flavor`); it gates the cluster split-K forward jobs.
 
     Cheap: it runs only the geometry filter and multiplies out the inner axes,
     without building a single identity -- which is where enumeration spends
@@ -1472,6 +1706,10 @@ def count_jobs(
     layouts = len(_layout_caps())
     merged = sum(1 for sk in split_ks if sk > 1) * len(_WGRAD_GROUP_MERGES)
     wave_size = target.wave_size
+    fwd_split = _fwd_split_target(target.gfx)
+    fwd_cluster = fwd_split and _fwd_split_cluster_target(
+        target, _job_flavor(llvm_flavor)
+    )
     total = 0
     for direction in directions:
         if direction not in _AOT_ALIAS_PIPELINES:
@@ -1484,6 +1722,10 @@ def count_jobs(
                 total += vecs * len(_fwd_k_loops(pipeline)) * layouts
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
+                if fwd_split and _fwd_split_geometry(geo):
+                    total += len(CACHE_FWD_SPLIT_K_VECS) ** 2
+                if fwd_cluster and _fwd_split_cluster_geometry(geo):
+                    total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":
                 total += (
                     vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts

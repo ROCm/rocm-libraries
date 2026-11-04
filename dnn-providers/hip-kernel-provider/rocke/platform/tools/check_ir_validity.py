@@ -11,8 +11,8 @@
 #
 # Why the oracle is a LINK and not a verify or a codegen
 # -----------------------------------------------------
-# A declare for an intrinsic that does not exist (e.g. the fictional
-# llvm.amdgcn.mfma.f32.16x16x128.fp4 in the decl table) is accepted by
+# A declare for an intrinsic that does not exist (e.g. a fictional fp4 MFMA
+# intrinsic, which an earlier decl table declared) is accepted by
 # `opt -passes=verify`, and is accepted by `clang -S` as well -- the backend
 # quietly treats the unknown llvm.* name as an ordinary external function and
 # emits a GOT-relative call to it. The undefined symbol only surfaces when the
@@ -219,7 +219,8 @@ def _dump_corpus(
         cid = case["case_id"]
         try:
             _rec, llvm = lower_case(case, flavor)
-        except NotImplementedError as exc:
+        except (NotImplementedError, ValueError) as exc:
+            # The llvm23-gated target ops refuse with a ValueError.
             if not _requires_newer_flavor(exc):
                 raise
             skipped[cid] = ("UNVALIDATED", f"{type(exc).__name__}: {exc}")

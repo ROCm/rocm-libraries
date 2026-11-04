@@ -46,7 +46,7 @@ class DebugConfig(NamedTuple):
         debugKernel: assembly only, kernel gets buffer for debug "printing";
                      kernel writes data to memory, gets coppied to host and printed.
         forceGenerateKernel: Even if error occurs in kernel generation (i.e. due to resource overflow),
-                             generate the kernel source anyway. Tensile will also attempt to run
+                             generate the kernel source anyway. TensileLite will also attempt to run
                              the kernel. Useful to examine and debug overflow errors.
         printSolutionRejectionReason: Print why a solution is marked as invalid.
         printIndexAssignmentInfo: Print the tensor index assignment info.
