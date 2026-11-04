@@ -38,6 +38,12 @@ struct TransformConvBwdWeightToGemmV2
     static_assert(GemmK1Number > 0, "GemmK1Number must be positive");
     static_assert(K0PerBlock > 0, "K0PerBlock must be positive");
 
+    // When UseTdm is enabled, we create 2D tensor descriptors consistent with the TDM transfer
+    //  - N(DH)W is considered packed
+    //  - there is no padding because OOB checks are handled by the instructions
+    //  - GemmK dimension is reduced in case of splitk hack because the pointer is shifted and
+    //    the GemmK descriptor must be changed accordingly to have correct OOB checks
+
     template <index_t N>
     using NumberType =
         std::conditional_t<std::is_same_v<IndexType, index_t>, Number<N>, LongNumber<N>>;
