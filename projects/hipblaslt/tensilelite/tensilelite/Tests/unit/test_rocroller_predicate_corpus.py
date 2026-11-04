@@ -43,6 +43,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from rocroller_logic_corpus import CORPUS, rocroller_logic_files
+
 pytestmark = pytest.mark.unit
 
 
@@ -62,14 +64,6 @@ RR_KERNEL_PREFIX = "RR_GEMM_"
 
 _HERE = Path(__file__).resolve().parent
 _MANIFEST = _HERE / "data" / "rocroller_predicate_manifest.yaml"
-
-# The rocRoller kernels are registered through this chip-id overlay only; the
-# base gfx950 directory would fail the ValidChipId lint.
-_CORPUS = (
-    _HERE.parents[3]
-    / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full"
-    / "gfx950/gfx950_id75a3/GridBased"
-)
 
 
 def _flatten(predicate, out):
@@ -119,13 +113,13 @@ def toolchain():
 def corpus_predicates(toolchain):
     """Map every shipped ``RR_GEMM_`` kernel to its rocRoller predicates.
 
-    Parsing the whole overlay takes on the order of a minute, so this is built
+    Parsing every rocRoller logic file takes on the order of a minute, so this is built
     once for the module. ``FromOriginalState`` is called with the same arguments
     ``MasterSolutionLibrary`` passes during a build, so what comes back is what
     the built library carries rather than an approximation of it.
     """
-    if not _CORPUS.is_dir():
-        pytest.skip(f"rocRoller logic overlay not present: {_CORPUS}")
+    if not CORPUS.is_dir():
+        pytest.skip(f"rocRoller logic directory not present: {CORPUS}")
 
     import tensilelite.Contractions as Contractions
     import tensilelite.LibraryIO as LibraryIO
@@ -134,7 +128,7 @@ def corpus_predicates(toolchain):
     predicates = {}
     macrotiles = {}
 
-    for logic_file in sorted(_CORPUS.glob("*.yaml")):
+    for logic_file in rocroller_logic_files():
         logic = LibraryIO.parseLibraryLogicFile(
             str(logic_file), assembler, False, False, False, isa_info_map, False
         )
@@ -156,18 +150,18 @@ def corpus_predicates(toolchain):
     return predicates, macrotiles
 
 
-def test_the_overlay_actually_holds_kernels(corpus_predicates):
+def test_the_corpus_actually_holds_kernels(corpus_predicates):
     """Guard against passing for the wrong reason.
 
-    Every other assertion here iterates the kernels found. If the overlay moved,
-    or the prefix the search keys on changed, that iteration would be empty and
-    the rest of this file would pass while checking nothing.
+    Every other assertion here iterates the kernels found. If the logic files
+    moved, or the prefix the search keys on changed, that iteration would be
+    empty and the rest of this file would pass while checking nothing.
     """
     predicates, _ = corpus_predicates
     assert len(predicates) > 100, (
-        f"only {len(predicates)} rocRoller kernels found under {_CORPUS}; "
-        "the overlay or the kernel naming has moved and these checks are no "
-        "longer looking at the shipped kernels"
+        f"only {len(predicates)} rocRoller kernels found under {CORPUS}; "
+        "the logic files or the kernel naming have moved and these checks are "
+        "no longer looking at the shipped kernels"
     )
 
 
