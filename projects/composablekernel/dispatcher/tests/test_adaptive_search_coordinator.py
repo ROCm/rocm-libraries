@@ -561,6 +561,13 @@ def test_output_dir_holding_a_run_is_refused(tmp_path):
         run(tmp_path, FakeAdapter({"P1": ABCD}), {"P1": [["A"]]})
 
 
+@pytest.mark.parametrize("out", ["out", "out/sub"])
+def test_output_dir_that_is_a_file_is_refused(tmp_path, out):
+    (tmp_path / "out").write_text("")
+    with pytest.raises(AS.SettingsError, match="not a directory"):
+        AS.RunWriter(tmp_path / out).check_fresh()
+
+
 def _ended_by_error(tmp_path, s, message):
     """The run stopped on an error and still wrote every output file."""
     out = tmp_path / "out"

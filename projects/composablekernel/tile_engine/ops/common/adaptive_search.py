@@ -455,6 +455,13 @@ class RunWriter:
         self._seq = 0
 
     def check_fresh(self) -> None:
+        # The directory, or else its nearest existing parent, must be a directory.
+        near = next((p for p in (self.out_dir, *self.out_dir.parents) if p.exists()),
+                    None)
+        if near is not None and not near.is_dir():
+            raise SettingsError(
+                f"search output dir {self.out_dir}: {near} is not a directory"
+            )
         old = [n for n in OUTPUT_FILES if (self.out_dir / n).exists()]
         if old:
             raise SettingsError(

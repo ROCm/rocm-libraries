@@ -227,7 +227,8 @@ Option rules:
   exhaustively. The fixed-vector-width kernels a full run falls back to when a
   native kernel fails to build are not candidates.
 
-Outputs, in a directory that must not hold an earlier run:
+Outputs, in a directory that must not hold an earlier run (a path that is, or
+lies under, an existing file is refused up front with exit status `2`):
 
 | File | Content |
 |---|---|
