@@ -815,18 +815,24 @@ STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
 
 
 def streamk_atomic_c_reject_reason(
-    reduction_strategy: Optional[str], vector_size_c: int, dtype_c: str
+    reduction_strategy: Optional[str], vector_size_c: int, dtype_c: str, layout_c: str
 ) -> Optional[str]:
-    """Why a Stream-K C store width is illegal for ``reduction_strategy`` (None if legal).
+    """Why a Stream-K C store is illegal for ``reduction_strategy`` (None if legal).
 
-    Only the atomic strategy adds partial C tiles into C, and its atomic adds need
-    at least 4 bytes per store (a narrower atomic C does not compile). Linear and
-    tree reduce the partials in the accumulator-type workspace and store C with a
-    plain store (StreamKTilePartitionerBase::MemoryOperation is ``set``), so any
-    width works for them. ``vector_size_c`` of 0 means native, and a None strategy
-    defers the check to the caller. An unknown strategy gets the atomic rules.
+    Only the atomic strategy adds partial C tiles into C. Its atomic adds need at
+    least 4 bytes per store (a narrower atomic C does not compile), and it zeroes C
+    with a row-major hipMemset2D, so its kernel header static_asserts a row-major C
+    (``layout_c`` "r"). Linear and tree reduce the partials in the accumulator-type
+    workspace and store C with a plain store (MemoryOperation ``set`` in
+    StreamKTilePartitionerBase), so any width and layout work for them.
+    ``vector_size_c`` of 0 means native, and a None strategy defers the check to
+    the caller. An unknown strategy gets the atomic rules.
     """
-    if reduction_strategy in (None, "linear", "tree") or not vector_size_c:
+    if reduction_strategy in (None, "linear", "tree"):
+        return None
+    if layout_c != "r":
+        return "stream_k atomic needs a row-major C"
+    if not vector_size_c:
         return None
     if vector_size_c * _VEC_ELEMENT_BYTES[dtype_c] < _STREAMK_ATOMIC_MIN_C_BYTES:
         return (
@@ -1161,7 +1167,9 @@ def resolve_gemm_vector_sizes(
                     f"(vector_size_{name}={width})",
                 )
     if variant == "stream_k":
-        c_reason = streamk_atomic_c_reject_reason(reduction_strategy, eff[2], dtype_c)
+        c_reason = streamk_atomic_c_reject_reason(
+            reduction_strategy, eff[2], dtype_c, layout[2]
+        )
         if c_reason:
             return eff, c_reason
     # K-major-in-LDS operands (col-major A / row-major B) on wave64 need

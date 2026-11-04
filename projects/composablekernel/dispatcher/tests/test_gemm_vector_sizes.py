@@ -242,18 +242,20 @@ class TestResolution(unittest.TestCase):
         self.assertIsNone(_resolve("rrr", (8, 1, 1))[1])
 
     def test_stream_k_c_rule_follows_reduction_strategy(self):
-        # Only atomic adds partial tiles into C and needs >= 4 bytes; linear and tree
-        # store C with a plain store, None defers the check to the caller, and an
-        # unknown strategy fails closed.
-        for strategy, dtype_c, width in itertools.product(
+        # Only atomic adds partial tiles into C: it needs >= 4 bytes and a row-major
+        # C. Linear and tree store C with a plain store, None defers the check to
+        # the caller, and an unknown strategy fails closed.
+        for strategy, layout_c, dtype_c, width in itertools.product(
             ("atomic", "linear", "tree", None, "unknown"),
+            "rc",
             ("bf16", "fp16", "fp32", "int32"),
             (0, 1, 2),
         ):
             narrow = width == 1 and dtype_c in ("bf16", "fp16")  # 2 bytes
-            rejected = strategy in ("atomic", "unknown") and narrow
-            with self.subTest(strategy=strategy, dtype_c=dtype_c, width=width):
-                reason = streamk_atomic_c_reject_reason(strategy, width, dtype_c)
+            rejected = strategy in ("atomic", "unknown") and (layout_c == "c" or narrow)
+            args = (strategy, width, dtype_c, layout_c)
+            with self.subTest(args=args):
+                reason = streamk_atomic_c_reject_reason(*args)
                 self.assertEqual(reason is not None, rejected)
                 if not width:
                     continue  # 0 = native, which resolution never checks
@@ -261,8 +263,9 @@ class TestResolution(unittest.TestCase):
                 dtype_ab = "int8" if dtype_c == "int32" else "bf16"
                 for variant in ("stream_k", "standard"):
                     _, reason = _resolve(
-                        "rrr", (8, 1, width), dtype_a=dtype_ab, dtype_b=dtype_ab,
-                        dtype_c=dtype_c, variant=variant, reduction_strategy=strategy,
+                        "rr" + layout_c, (8, 1, width), dtype_a=dtype_ab,
+                        dtype_b=dtype_ab, dtype_c=dtype_c, variant=variant,
+                        reduction_strategy=strategy,
                     )
                     self.assertEqual(
                         reason is not None, rejected and variant == "stream_k"
@@ -727,10 +730,11 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
 
     def test_codegen_checks_c_per_strategy(self):
         # The codegen resolves the widths with the strategy deferred, then checks C
-        # for each expanded strategy: only atomic drops a 2-byte C.
-        for vec, expected in (
-            ((8, 1, 1), ["linear", "tree"]),
-            ((8, 1, 2), self.ALL_STRATEGIES),
+        # for each expanded strategy: only atomic drops a 2-byte or column-major C.
+        for layout, vec, reject in (
+            ("rcr", (8, 1, 1), "vec(8, 1, 1): stream_k atomic C store needs >= 4"),
+            ("rcc", (0, 0, 0), "vec(0, 0, 0): stream_k atomic needs a row-major C"),
+            ("rcr", (8, 1, 2), None),
         ):
             config = _bridge_config(vec, variant="stream_k")[0].to_codegen_json()
             config["streamk_config"] = {"reduction_strategy": self.ALL_STRATEGIES}
@@ -739,14 +743,14 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
             ) as logs:
                 path = Path(d) / "config.json"
                 path.write_text(json.dumps(config))
-                gen = UnifiedGemmCodegen(Path(d), "bf16", "rcr", "gfx950", path)
+                gen = UnifiedGemmCodegen(Path(d), "bf16", layout, "gfx950", path)
                 kernels = gen._get_configs_for_variant(GemmVariant.STREAM_K)
-            with self.subTest(vec=vec):
+            with self.subTest(layout=layout, vec=vec):
+                expected = ["linear", "tree"] if reject else self.ALL_STRATEGIES
                 self.assertEqual([k.reduction_strategy for k in kernels], expected)
                 self.assertTrue(all(k.trait.vector_sizes == vec for k in kernels))
-                reject = "256x256x64 vec(8, 1, 1): stream_k atomic C store"
-                rejected = [r for r in logs.output if reject in r]
-                self.assertEqual(len(rejected), 3 - len(expected), logs.output)
+                rejected = [r for r in logs.output if f"256x256x64 {reject}" in r]
+                self.assertEqual(len(rejected), bool(reject), logs.output)
 
     def test_driver_checks_widths_against_the_requested_strategy(self):
         # --reduction-strategy reaches expand_sweep. Setting it on the expanded
@@ -771,6 +775,19 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
         self.assertEqual({c.reduction_strategy for c in configs}, {"linear"})
         fixed = {c.effective_vector_sizes for c in configs if any(c.vector_sizes)}
         self.assertIn((8, 1, 1), fixed)
+
+    def test_atomic_needs_row_major_c(self):
+        # Atomic zeroes C with a row-major hipMemset2D and its header static_asserts
+        # a row-major C; linear and tree zero their workspace instead.
+        from gemm_utils import expand_sweep
+
+        for layout, strategy in itertools.product(("rrr", "rrc"), ("atomic", "linear")):
+            cfgs = expand_sweep(
+                str(self.CONFIG), "gfx1250", dtype="bf16", layout=layout,
+                variant="stream_k", reduction_strategies=[strategy],
+            )
+            with self.subTest(layout=layout, strategy=strategy):
+                self.assertEqual(bool(cfgs), layout == "rrr" or strategy != "atomic")
 
     def test_strategy_override_is_validated(self):
         from gemm_utils import expand_sweep

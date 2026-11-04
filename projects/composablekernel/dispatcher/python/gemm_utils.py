@@ -3051,6 +3051,12 @@ def expand_sweep(
         # never emitted, which surfaces downstream as a spurious build failure.
         if variant == "stream_k" and epi != "cshuffle":
             continue
+        # Same for atomic with a column-major C: its header static_asserts a
+        # row-major C, and the codegen rejects it with this helper.
+        if variant == "stream_k" and _codegen_common().streamk_atomic_c_reject_reason(
+            red, 0, _output_dtype(dtype), lc
+        ):
+            continue
 
         for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
             for ew_op, md_nd in md_combos:

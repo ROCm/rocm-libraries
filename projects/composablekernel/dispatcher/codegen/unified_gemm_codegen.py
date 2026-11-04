@@ -1894,6 +1894,7 @@ class UnifiedGemmCodegen:
                             reduction_strategy,
                             trait.vector_size_c,
                             TypeMappings.get_output_dtype(self.datatype),
+                            self.layout[2],
                         )
                         if reason:
                             key = self._vector_reject(tile, trait.vector_sizes, reason)
