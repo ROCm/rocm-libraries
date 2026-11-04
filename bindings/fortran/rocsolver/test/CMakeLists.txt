@@ -49,18 +49,10 @@ if(NOT TARGET hip::hip_fortran)
     "bindings were built with ${CMAKE_Fortran_COMPILER}.")
 endif()
 
-# C is enabled because hip-config.cmake reaches FindThreads.
-if(NOT TARGET roc::rocsolver)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(rocsolver QUIET)
-endif()
 if(NOT TARGET roc::rocsolver)
   message(STATUS
     "rocSOLVER: no roc::rocsolver target, skipping the Fortran binding tests "
-    "(they link librocsolver). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link librocsolver). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
