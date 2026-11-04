@@ -447,15 +447,19 @@ public:
         // Under a candidate limit a benchmark measures only the shortlist, so its record
         // never covers the whole catalog. The same limit yields the same shortlist
         // (applyShortlistLimit), and a record covering all of it serves that build.
-        if(catalog.measuredRecord == nullptr && record.has_value()
-           && settings.shortlistLimit.has_value())
+        // Mirrors predictConfiguration's identical question (perGraphRecordOrderingShortlist).
+        if(catalog.measuredRecord == nullptr)
         {
-            if(const auto ranked = orderIfFullyCovered(*record, filtered);
-               ranked.has_value()
-               && serveRecordedOrder(
-                   *ranked, record->size(), context, catalog.bound, executionContext))
+            if(const auto perGraphRecord = perGraphRecordOrderingShortlist(
+                   filtered, settings.shortlistLimit, context, opGraph);
+               perGraphRecord.has_value())
             {
-                return;
+                const auto ranked = orderIfFullyCovered(*perGraphRecord, filtered);
+                if(serveRecordedOrder(
+                       *ranked, perGraphRecord->size(), context, catalog.bound, executionContext))
+                {
+                    return;
+                }
             }
         }
 
@@ -818,22 +822,17 @@ public:
         // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4).
         applyShortlistLimit(filtered, executionSettings.ingestorSettings.shortlistLimit);
         std::string modelId;
-        // Mirrors buildPlan's serveRecordedOrder/orderIfFullyCovered: under a limit, a
-        // per-graph winner-cache record that covers only the shortlist (not the whole
-        // catalog, so catalog.measuredRecord stays null) still decides buildPlan's order.
-        std::optional<WinnerRecord> perGraphRecord;
-        if(catalog.measuredRecord == nullptr
-           && executionSettings.ingestorSettings.shortlistLimit.has_value()
-           && _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
-        {
-            const WinnerKey winnerKey{
-                hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
-                DeviceKey{context.deviceProperties}};
-            perGraphRecord = _stateManager.winnerFor(winnerKey);
-        }
+        // Mirrors buildPlan's identical question (perGraphRecordOrderingShortlist): under
+        // a limit, a per-graph winner-cache record that covers only the shortlist (not
+        // the whole catalog, so catalog.measuredRecord stays null) still decides
+        // buildPlan's order.
+        const auto perGraphRecord
+            = catalog.measuredRecord == nullptr
+                  ? perGraphRecordOrderingShortlist(
+                        filtered, executionSettings.ingestorSettings.shortlistLimit, context, graph)
+                  : std::nullopt;
         const WinnerRecord* effectiveRecord = catalog.measuredRecord.get();
-        if(effectiveRecord == nullptr && perGraphRecord.has_value()
-           && orderIfFullyCovered(*perGraphRecord, filtered).has_value())
+        if(effectiveRecord == nullptr && perGraphRecord.has_value())
         {
             effectiveRecord = &*perGraphRecord;
         }
@@ -1131,6 +1130,40 @@ private:
                 std::move(filtered), context, catalog.bound, *settings.workspaceLimit);
         }
         return filtered;
+    }
+
+    /// Whether a per-graph winner-cache record, not the catalog's own, already fully
+    /// covers and orders @p filtered under a shortlist limit (RFC 0019 §11.4): the one
+    /// place buildPlan and predictConfiguration both decide this, so the two cannot drift
+    /// apart the way two independent copies of the same check once did. Looked up fresh
+    /// (an in-memory map read) rather than threaded through a caller's own winnerFor()
+    /// result, so a caller already holding one for another reason (buildPlan's
+    /// write-back key) is unaffected either way.
+    ///
+    /// Only consulted when @p shortlistLimit is set: without a limit, a record that
+    /// covers the request is already reflected in the catalog's own measuredRecord
+    /// (sortedCatalog/measuredCatalog), and one that does not cover it is ignored rather
+    /// than partially trusted -- see WinnerCache.hpp's recordCovers.
+    std::optional<WinnerRecord>
+        perGraphRecordOrderingShortlist(const std::vector<const KernelDefinition*>& filtered,
+                                        const std::optional<size_t>& shortlistLimit,
+                                        const MatchContext& context,
+                                        const IGraph& opGraph) const
+    {
+        if(!shortlistLimit.has_value()
+           || !_stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            return std::nullopt;
+        }
+        const WinnerKey winnerKey{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+            DeviceKey{context.deviceProperties}};
+        auto record = _stateManager.winnerFor(winnerKey);
+        if(record.has_value() && orderIfFullyCovered(*record, filtered).has_value())
+        {
+            return record;
+        }
+        return std::nullopt;
     }
 
     /// One engine knob: a KMD field of slot @p slot, advertised under @p id (see getCustomKnobs).
