@@ -120,8 +120,8 @@ using sdpa_graph::hasSdpaForwardNode;
 using sdpa_graph::HEAD_AXIS;
 using sdpa_graph::HEAD_SIZE_AXIS;
 using sdpa_graph::isWellFormedOperand;
-using sdpa_graph::sdpaNode;
 using sdpa_graph::SDPA_RANK;
+using sdpa_graph::sdpaNode;
 using sdpa_graph::SEQ_AXIS;
 
 /// `kernels/common/attention_kv_cache.py::KvTensorLayout`: the per-head span and the token

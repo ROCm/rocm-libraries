@@ -122,7 +122,9 @@ def _expected_signature(kernel):
 def test_the_split_kv_module_packs_both_launches_from_one_object(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    from kernels.gfx942.attention_tiled_3d import build_unified_attention_3d_tiled_module
+    from kernels.gfx942.attention_tiled_3d import (
+        build_unified_attention_3d_tiled_module,
+    )
 
     spec, runtime_reduce = _selected_specs()
     out = _pack(
@@ -170,7 +172,9 @@ def test_the_split_kv_module_packs_both_launches_from_one_object(
 def test_a_module_the_predicate_refuses_is_refused_at_pack_time(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    from kernels.gfx942.attention_tiled_3d import supports_unified_attention_3d_tiled_module
+    from kernels.gfx942.attention_tiled_3d import (
+        supports_unified_attention_3d_tiled_module,
+    )
 
     # D256 with 64-token blocks and no tile override: the segment's Q/K/V tiles
     # overflow gfx942's 64 KiB LDS.

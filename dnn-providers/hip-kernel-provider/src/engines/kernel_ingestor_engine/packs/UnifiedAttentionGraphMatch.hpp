@@ -59,9 +59,9 @@ using sdpa_graph::hasSdpaForwardNode;
 using sdpa_graph::HEAD_AXIS;
 using sdpa_graph::HEAD_SIZE_AXIS;
 using sdpa_graph::isWellFormedOperand;
+using sdpa_graph::problemFor;
 using sdpa_graph::sdpaNode;
 using sdpa_graph::SEQ_AXIS;
-using sdpa_graph::problemFor;
 using sdpa_graph::UnifiedAttentionProblem;
 
 /// Why @p tensor is not one the kernels can address: they read Q and write O as

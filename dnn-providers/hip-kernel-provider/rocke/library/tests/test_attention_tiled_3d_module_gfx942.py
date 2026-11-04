@@ -62,13 +62,9 @@ def test_rejects_other_arch():
 
 def test_lds_edge_uses_real_cap():
     cap = attention_lds_capacity_bytes("gfx942")
-    ok, reason = mod.supports_tiled_reduce_spec(
-        _spec(num_segments=cap // 4)
-    )
+    ok, reason = mod.supports_tiled_reduce_spec(_spec(num_segments=cap // 4))
     assert ok, reason
-    ok, reason = mod.supports_tiled_reduce_spec(
-        _spec(num_segments=cap // 4 + 1)
-    )
+    ok, reason = mod.supports_tiled_reduce_spec(_spec(num_segments=cap // 4 + 1))
     assert not ok
     assert "num_segments" in reason
 
@@ -201,7 +197,9 @@ def test_module_predicate_rejects_unsupported(kwargs, needle):
 
 
 def test_module_predicate_rejects_other_arch():
-    ok, reason = mod.supports_unified_attention_3d_tiled_module(_segment(), arch="gfx90a")
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(
+        _segment(), arch="gfx90a"
+    )
     assert not ok
     assert reason
 
