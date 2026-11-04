@@ -84,6 +84,11 @@ kmd_fields:
 - name: use_transposed_qk_32x32
   type: int
   default_value: 0
+# 1 for the LSE-on twin, which also writes the SDPA stats output head-major
+# ([B, Hq, S, 1], lse_layout head_major).
+- name: emit_lse
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -99,6 +104,7 @@ specialization:
   - block_m_per_warp
   - use_mfma_32x32
   - use_transposed_qk_32x32
+  - emit_lse
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -131,6 +137,8 @@ specialization:
       field: use_mfma_32x32
     use_transposed_qk_32x32:
       field: use_transposed_qk_32x32
+    emit_lse:
+      field: emit_lse
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -261,11 +269,22 @@ enumerate:
       fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
       cells: *cells
       spec_fields: *spec_fields
+    # The LSE-on twin of each cell's baseline-geometry kernel, for SDPA graphs that ask
+    # for stats: it also writes the LSE head-major, the hipDNN stats layout [B, Hq, S, 1].
+    # The registry never selects these outputs, so the section sets them; one twin per
+    # cell (`space: slice`), named apart by its own template.
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_narrow_nw4_mw16_t4xb_llvm}
+      fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
+      cells: *cells
+      space: slice
+      spec_fields: *spec_fields
+      spec_overrides: {emit_lse: true, lse_layout: head_major}
+      kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x{use_mfma_32x32}{use_transposed_qk_32x32}_lsehm.gfx950
 
 reduction:
   fields:
     # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, num_seqs]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, num_seqs, emit_lse]
     # The geometry: constant within a section, so variant reduction compares sections.
     performance:
       - {name: tile_size}

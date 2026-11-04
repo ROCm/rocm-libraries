@@ -70,6 +70,11 @@ kmd_fields:
 - name: use_decode_grid
   type: int
   default_value: 1
+# 1 for the LSE-on twin, whose reduce also writes the SDPA stats output. At decode the
+# reduce's token-major LSE is the head-major [B, Hq, 1, 1] stats layout too.
+- name: emit_lse
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -81,6 +86,7 @@ specialization:
   - sliding_window
   - num_segments
   - use_decode_grid
+  - emit_lse
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -105,6 +111,8 @@ specialization:
       field: num_segments
     use_decode_grid:
       field: use_decode_grid
+    emit_lse:
+      field: emit_lse
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -221,11 +229,22 @@ enumerate:
       fixed: *fixed
       cells: *cells
       spec_fields: *spec_fields
+    # The LSE-on twin of each cell's seg16 kernel, for SDPA graphs that ask for stats.
+    # The registry never selects emit_lse on a segment spec (the dispatcher passes the
+    # problem's value to the reduce), so the section sets it; one twin per cell
+    # (`space: slice`), named apart by its own template.
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg16_t1xb}
+      fixed: *fixed
+      cells: *cells
+      space: slice
+      spec_fields: *spec_fields
+      spec_overrides: {emit_lse: true}
+      kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_seg{num_segments}_lse.gfx950
 
 reduction:
   fields:
     # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid, emit_lse]
     performance:
       - {name: num_segments}
     ignored: [waves_per_eu, use_kv_lds_swizzle, use_wave_page_id_load]
