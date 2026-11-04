@@ -734,7 +734,10 @@ TEST(TestGfx950ConvDgradKernelMatcher, ServesExactlyWhatTheAdapterServesOverTheC
         }
     }
     EXPECT_GT(rows, 300U);
-    EXPECT_GT(served, 20000U);
+    // 20000 was the floor for the pre-prune catalog; the 640 -> 406 instance prune took
+    // the real count to 16715. A floor well below that still catches a served-candidates
+    // regression without chasing every catalog-size change.
+    EXPECT_GT(served, 15000U);
 }
 
 TEST(TestGfx950ConvDgradKernelMatcher, RefusesOutOfContractOrIncompleteMetadata)
@@ -1051,7 +1054,9 @@ TEST(TestGfx950ConvDgradCatalog, EveryGraphsCandidatesHaveDistinctKnobTuples)
         candidates += shipped.entries.size();
     }
     EXPECT_GT(graphs, 300U);
-    EXPECT_GT(candidates, 20000U);
+    // See ServesExactlyWhatTheAdapterServesOverTheCatalog: 20000 was the pre-prune floor;
+    // the 640 -> 406 instance prune took the real count to 16715.
+    EXPECT_GT(candidates, 15000U);
 }
 
 TEST(TestGfx950ConvDgradCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
