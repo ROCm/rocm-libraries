@@ -57,7 +57,7 @@ def test_input_config_defaults_accept_the_retired_arch_name() -> None:
 def test_configure_rewrites_the_retired_arch_name(tmp_path: Path, monkeypatch) -> None:
     seen = {}
     monkeypatch.setattr(optim.cg, "run", lambda config, *a, **k: seen.update(config))
-    gc = GemmConfig(GemmType.from_tensile("T", "N", "B", "B", "S"), [[512, 512, 1, 512]])
+    gc = GemmConfig(GemmType.from_tensilelite("T", "N", "B", "B", "S"), [[512, 512, 1, 512]])
     optim.configure("/unused", gc, tmp_path, arch="gfx1250v0_96cu")
     assert seen["ARCH"] == "gfx1250-strict_96cu"
 
@@ -90,7 +90,7 @@ def test_only_the_strict_target_needs_strict_runtime_mode() -> None:
 def test_run_script_sets_extra_env_on_the_command(tmp_path: Path) -> None:
     script = tmp_path / "e.sh"
     write_run_script(script, "e", tmp_path, extra_env={"HSA_DISABLE_GFX12_STRICT": "0"})
-    assert "HSA_DISABLE_GFX12_STRICT=0 PYTHONPATH=" in script.read_text()
+    assert "HSA_DISABLE_GFX12_STRICT=0 tensilelite run $YAML" in script.read_text()
 
 
 @pytest.mark.parametrize("architecture,strict", [('"gfx1250-strict"', True), ('"gfx1250"', False)])
