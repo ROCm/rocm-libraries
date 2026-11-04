@@ -4900,3 +4900,109 @@ class TestInitCMakeOpWiring:
         # Last MFMA should NOT have reuse (no successor)
         assert not mfmas[-1].reuseA
         assert not mfmas[-1].reuseB
+
+
+def _rank_emitter(cfg):
+    from types import SimpleNamespace
+    from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+
+    emitter = object.__new__(InstructionEmitter)
+    emitter.config = cfg
+    emitter.writer = SimpleNamespace(states=SimpleNamespace(asmCaps={}))
+    return emitter
+
+
+def _rank_placement(cfg, tensor, tile_id, partition, mt_iteration):
+    gran = {
+        "A": cfg.lrA, "B": cfg.lrB,
+        "SA": cfg.lrSA, "SB": cfg.lrSB,
+    }[tensor]
+    return LRPlacement(
+        tensor=tensor,
+        mtIteration=mt_iteration,
+        tiles=MFMATileRange(0, 1, tile_id, tile_id + gran.mn),
+        subIterK_slot=0,
+        partition=partition,
+        targetPartition=(partition + 1) % cfg.numPartitions,
+    )
+
+
+class TestFirstConsumerRank:
+    """The emit-identity rank is the MFMA ordinal of the next consumer.
+
+    It is relative to the end of the producer partition and does not depend
+    on a macrotile size. Kernels that are not on the partition-prefetch path
+    stay unranked.
+    """
+
+    @staticmethod
+    def _cfg_8x8():
+        return SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=8, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=4, partitionSizeN=4,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+
+    @pytest.mark.parametrize(
+        "partition,mt_iteration,tensor,tile_id,expected",
+        [
+            (0, 0, "SA", 0, 0),
+            (0, 0, "B", 5, 1),
+            (0, 0, "SA", 2, 8),
+            (0, 0, "SB", 2, 18),
+            (2, 1, "A", 0, 16),
+            (3, 1, "B", 3, 3),
+            (0, 2, "A", 0, 112),
+        ],
+    )
+    def test_rank_uses_partition_geometry(
+            self, partition, mt_iteration, tensor, tile_id, expected):
+        cfg = self._cfg_8x8()
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(
+            cfg, tensor, tile_id, partition, mt_iteration)
+        assert emitter._first_consumer_rank(placement, tile_id) == expected
+
+    def test_rank_supports_non_square_partition_grid(self):
+        cfg = SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(4, 2),
+            partitionSizeM=4, partitionSizeN=2,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(cfg, "SA", 2, 0, 0)
+        # Partition 1 is 4x2. A2 is first consumed after A0/A1 (four MFMAs).
+        assert emitter._first_consumer_rank(placement, 2) == 4
+
+    def test_rank_is_absent_without_partition_prefetch(self):
+        cfg = SchedulerConfig(
+            numMFMATilesM=4, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            pgr=2, plr=1,
+        )
+        emitter = _rank_emitter(cfg)
+        placement = LRPlacement(
+            tensor="A", mtIteration=0,
+            tiles=MFMATileRange(0, 1, 0, 1),
+            subIterK_slot=0, partition=0, targetPartition=0)
+        assert emitter._first_consumer_rank(placement, 0) is None
+
+    def test_local_read_group_metadata_repeats_the_rank(self):
+        cfg = self._cfg_8x8()
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(cfg, "A", 0, 0, 0)
+        meta = emitter._local_read_group_metadata(["r0", "r1"], placement, 0)
+        assert meta == [(0, 2), (0, 2)]
