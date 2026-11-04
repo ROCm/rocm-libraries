@@ -2028,22 +2028,10 @@ namespace
 
     bool mxScaleTensorNeedsPaddingFreeDim()
     {
-        static std::mutex                    cacheMutex;
-        static std::unordered_map<int, bool> cache;
-
         int deviceId = 0;
         HIP_CHECK_EXC(hipGetDevice(&deviceId));
 
-        std::lock_guard<std::mutex> lock(cacheMutex);
-        auto                        it = cache.find(deviceId);
-        if(it != cache.end())
-            return it->second;
-
-        hipDeviceProp_t prop;
-        HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
-        const bool needsPadFreeDim = std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
-        cache[deviceId]            = needsPadFreeDim;
-        return needsPadFreeDim;
+        return rocblaslt_internal_get_arch_name(deviceId).find("gfx950") != std::string::npos;
     }
 
     // A Block_32_UE8M0_32_8_EXT caller pre-swizzled its scales into the padded
