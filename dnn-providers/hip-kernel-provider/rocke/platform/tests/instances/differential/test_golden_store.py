@@ -56,6 +56,38 @@ def test_a_missing_file_is_an_empty_store(tmp_path):
     assert store.section(IR_CANONICAL, None) == {}
 
 
+def test_a_shared_profile_alias_resolves_and_records_its_source(tmp_path):
+    store = GoldenStore(
+        aliases={"llvm24": "llvm23"},
+        ll={"llvm23": {"conv": {"0": "a23"}}},
+    )
+    assert store.section(LL, "llvm24") == {"conv": {"0": "a23"}}
+    store.record(LL, "llvm24", {"conv": {"0": "a24"}})
+    assert store.ll == {"llvm23": {"conv": {"0": "a24"}}}
+
+    store.save(tmp_path / "g.json")
+    loaded = GoldenStore.load(tmp_path / "g.json")
+    assert loaded.aliases == {"llvm24": "llvm23"}
+    assert loaded.section(LL, "llvm24") == {"conv": {"0": "a24"}}
+
+
+def test_aliases_must_name_a_distinct_existing_section(tmp_path):
+    overlap = _write(
+        tmp_path / "overlap.json",
+        '{"schema": 2, "aliases": {"llvm24": "llvm23"}, '
+        '"ll": {"llvm23": {}, "llvm24": {}}}',
+    )
+    with pytest.raises(GoldenFormatError, match="both direct and aliased"):
+        GoldenStore.load(overlap)
+
+    missing = _write(
+        tmp_path / "missing.json",
+        '{"schema": 2, "aliases": {"llvm24": "llvm23"}, "ll": {}}',
+    )
+    with pytest.raises(GoldenFormatError, match="missing flavor sections"):
+        GoldenStore.load(missing)
+
+
 def test_flavors_are_separate_sections(tmp_path):
     store = GoldenStore()
     store.record(LL, "llvm20", {"conv": {"0": "a20"}})

@@ -225,6 +225,7 @@ cmake_args=(
   -DBUILD_TESTING=OFF
   -DROCM_PATH="${ROCM_PATH}"
   -DCMAKE_PREFIX_PATH="${ROCM_PATH}"
+  -DFETCHCONTENT_BASE_DIR="${ROCJITSU_BUILD_DIR}/third_party"
   -DCMAKE_CXX_FLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
 )
 

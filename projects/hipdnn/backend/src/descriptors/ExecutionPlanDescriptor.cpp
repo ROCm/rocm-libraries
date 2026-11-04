@@ -425,7 +425,8 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
 
     const std::lock_guard<std::mutex> lock(_serializedPlanCacheMutex);
 
-    // Build the serialized plan on the first call. Reuse it for all later size and fill calls.
+    // A loaded plan starts with the plan bytes it was loaded from; a built plan builds them on
+    // its first save. Later size and fill calls reuse the cached bytes.
     if(_serializedPlanCache.empty())
     {
         std::vector<uint8_t> pluginPayload;
@@ -539,14 +540,14 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
     {
         _tensorAlignments.clear();
     }
-    std::vector<uint8_t> pluginPayload(serializedPluginPayload->begin(),
-                                       serializedPluginPayload->end());
-
-    const hipdnnPluginConstData_t pluginPayloadData{pluginPayload.data(), pluginPayload.size()};
+    const hipdnnPluginConstData_t pluginPayloadData{serializedPluginPayload->data(),
+                                                    serializedPluginPayload->size()};
 
     _pluginResourceManager = pluginResourceManager;
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContextFromSerialized(
         _pluginResourceManager, _engineId, &pluginPayloadData);
+
+    _serializedPlanCache.assign(serializedPlan, serializedPlan + planByteSize);
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }

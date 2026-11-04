@@ -27,6 +27,7 @@
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu {
 class Function;
@@ -55,8 +56,13 @@ struct GemmTileConfig;
  * @param func   Function to lower (mutated in place).
  * @param config GemmTileConfig used by the passes. @c config.arch must be set;
  *               tile / wave fields can be left zero for trivial bring-up cases.
+ * @param caps   Assembler capabilities. ToStinkyAsmPass reads @c vgprMsbMode to
+ *               decide whether a split ds_*_b192 / ds_store_b256 half that lands
+ *               in another VGPR MSB bank needs its own encoding offset. Leaving
+ *               this defaulted keeps the pre-MSB behaviour (no re-encoding).
  */
-STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config);
+STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config,
+                                                  const AsmCapsConfig& caps = {});
 
 /**
  * @brief One-shot helper: build a StinkyAsmModule from a Python-side
@@ -70,9 +76,9 @@ STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTile
  *
  * Steps performed internally:
  *  1. Construct a fresh StinkyAsmModule (which already owns an "entry" block).
- *  2. Append the externally-owned LogicalInstruction* nodes from
- *     @p module into that entry block.
- *  3. Run @c runLogicalLoweringPipeline() on the underlying Function.
+ *  2. Append entry instructions to the entry block and callable ranges to
+ *     separate callable Functions, leaving placement markers in the entry.
+ *  3. Run @c runLogicalLoweringPipeline() on every Function.
  *  4. Detach any LogicalInstruction nodes whose lifetime is owned by Python
  *     (so the C++ IRList does not delete them when the StinkyAsmModule dies).
  *
