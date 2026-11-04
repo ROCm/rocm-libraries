@@ -15,6 +15,8 @@
  * int, {"param": NAME}, or {"add"|"sub"|"mul"|"div": [a, b]}).
  */
 #include <algorithm>
+#include <array>
+#include <iterator>
 #include <limits.h>
 #include <map>
 #include <optional>
@@ -39,7 +41,14 @@ namespace
 
 /* Python param_facts.FACT_WORDS: the bound words (ROCKE_INT_BOUND_WORDS), then
  * multiple_of, which takes no bound. */
-const char* const kFactWords[] = {"ge", "gt", "le", "lt", "eq", "multiple_of"};
+constexpr auto kFactWords = [] {
+    std::array<const char*, std::size(ROCKE_INT_BOUND_WORDS) + 1> words{};
+    size_t i = 0;
+    for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
+        words[i++] = bound_word.word;
+    words[i] = "multiple_of";
+    return words;
+}();
 const char* const kPointerAttrs[] = {"noalias",
                                      "readonly",
                                      "writeonly",
@@ -417,17 +426,21 @@ struct checker_t
         if(lower.stated && lower.value && *lower.value >= least)
             return;
         const std::string q = operand->name;
+        /* The word stating the lower end: eq, which states both ends, ahead of a
+         * lower word; among lower words, the first in table order (ge, gt). The
+         * order matters only for a declaration the rules already refuse. A stated
+         * lower end always has one of these words; none reads as unstated. */
+        const char* word = NULL;
+        for(const auto& entry : ROCKE_INT_BOUND_WORDS)
+            if(entry.side != ROCKE_INT_BOUND_UPPER && rocke_attr_get(&operand->attrs, entry.word)
+               && (word == NULL || entry.side == ROCKE_INT_BOUND_BOTH))
+                word = entry.word;
         std::string declared;
-        if(!lower.stated)
+        if(!lower.stated || word == NULL)
             declared = "is declared with no lower bound";
         else
-        {
-            const char* word = rocke_attr_get(&operand->attrs, "eq")   ? "eq"
-                               : rocke_attr_get(&operand->attrs, "ge") ? "ge"
-                                                                       : "gt";
             declared = std::string("is declared with ") + word + "="
                        + bound_text(rocke_attr_get(&operand->attrs, word));
-        }
         errors.push_back(
             "param " + name + ": " + text + " needs " + q + " ge " + std::to_string(least) + " -- "
             + q + " " + declared + ".\nFix: b.param(\"" + q + "\", "

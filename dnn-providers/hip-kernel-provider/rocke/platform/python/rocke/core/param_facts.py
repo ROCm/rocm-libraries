@@ -322,7 +322,14 @@ def _stated_lower_errors(
     if lower is UNSTATED:
         declared = "is declared with no lower bound"
     else:
-        word = next(w for w in ("eq", "ge", "gt") if w in operand.attrs)
+        # The word stating the lower end: eq, which states both ends, ahead of a lower
+        # word; among lower words, the first in _BOUND_WORDS order (ge, gt), as in C++.
+        # The order matters only for a declaration the rules already refuse.
+        word = next(
+            w
+            for w in ("eq", *_BOUND_WORDS)
+            if w in operand.attrs and w not in UPPER_WORDS
+        )
         declared = f"is declared with {word}={bound_text(operand.attrs[word])}"
     fix = f'b.param("{q}", {operand.type.name.upper()}, ge={least}, ...)'
     return [f"param {name}: {text} needs {q} ge {least} -- {q} {declared}.\nFix: {fix}"]

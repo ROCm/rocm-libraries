@@ -420,7 +420,7 @@ bool states_facts(const kernel_view_t& view, const rocke_value_t* v)
 /* One stated word of the call: its bound (int, relation or Value). */
 struct word_t
 {
-    const char* word;
+    const rocke_int_bound_word_t* fact; /* its ROCKE_INT_BOUND_WORDS row: word and end */
     const rocke_int_bound_t* bound;
 };
 
@@ -459,7 +459,7 @@ void gpu_check_form(const kernel_view_t& view,
         refuse("gpu_checked_value: state at least one fact: ge, gt, le, lt or multiple_of");
     auto has = [&](const char* w) {
         for(const word_t& entry : words)
-            if(strcmp(entry.word, w) == 0)
+            if(strcmp(entry.fact->word, w) == 0)
                 return true;
         return false;
     };
@@ -486,11 +486,11 @@ void gpu_check_form(const kernel_view_t& view,
         {
             const std::string shown = view.value_text(bound->value_bound);
             if(!rocke_type_eq(bound->value_bound->type, t))
-                refuse(std::string("gpu_checked_value: ") + entry.word + "=" + shown + " is "
+                refuse(std::string("gpu_checked_value: ") + entry.fact->word + "=" + shown + " is "
                        + bound->value_bound->type->name + " and the value is " + t->name
                        + " -- a bound has the value's type");
             if(!states_facts(view, bound->value_bound))
-                refuse(std::string("gpu_checked_value: ") + entry.word + "=" + shown
+                refuse(std::string("gpu_checked_value: ") + entry.fact->word + "=" + shown
                        + " has no stated facts -- a Value bound is a kernel parameter whose "
                          "declaration states facts, or a Value gpu_checked_value returned");
         }
@@ -501,13 +501,13 @@ void gpu_check_form(const kernel_view_t& view,
             rocke_relation_display(bound->relation, &text);
             const std::string shown = rocke_strbuf_cstr(&text);
             rocke_strbuf_free(&text);
-            refuse(std::string("gpu_checked_value: ") + entry.word + "=" + shown
+            refuse(std::string("gpu_checked_value: ") + entry.fact->word + "=" + shown
                    + " is a host expression -- on the GPU a bound is an int or one Value; "
                      "compute it with b.add / b.mul, where the instruction can be seen");
         }
         else if(bound->value < tmin || bound->value > tmax)
         {
-            refuse(std::string("gpu_checked_value: ") + entry.word + "="
+            refuse(std::string("gpu_checked_value: ") + entry.fact->word + "="
                    + std::to_string(bound->value) + " is outside the range of " + t->name);
         }
     }
@@ -548,7 +548,7 @@ void gpu_check_form(const kernel_view_t& view,
         for(const word_t& entry : words)
             if(int_bound(*entry.bound))
             {
-                ints += (ints.empty() ? "" : " and ") + std::string(entry.word) + "="
+                ints += (ints.empty() ? "" : " and ") + std::string(entry.fact->word) + "="
                         + std::to_string(entry.bound->value);
                 ++count;
             }
@@ -564,7 +564,7 @@ std::string stated_call_text(const kernel_view_t& view,
 {
     std::string out;
     for(const word_t& entry : words)
-        out += (out.empty() ? "" : ", ") + std::string(entry.word) + "="
+        out += (out.empty() ? "" : ", ") + std::string(entry.fact->word) + "="
                + bound_text(view, entry.bound);
     if(facts->multiple_of_set)
         out += (out.empty() ? "" : ", ") + std::string("multiple_of=")
@@ -696,7 +696,7 @@ rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
     /* eq was refused above, so every stated word here is a lower or upper end. */
     for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
         if(stated(facts->*bound_word.bound))
-            words.push_back(word_t{bound_word.word, &(facts->*bound_word.bound)});
+            words.push_back(word_t{&bound_word, &(facts->*bound_word.bound)});
     bool has_lower;
     bool has_upper;
     int64_t lower = 0;
@@ -716,7 +716,7 @@ rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
     const word_t* upper_word = NULL;
     for(const word_t& entry : words)
     {
-        if(strcmp(entry.word, "ge") == 0 || strcmp(entry.word, "gt") == 0)
+        if(entry.fact->side == ROCKE_INT_BOUND_LOWER)
             lower_word = &entry;
         else
             upper_word = &entry;
@@ -739,14 +739,16 @@ rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
         if(lower_word)
         {
             rocke_value_t* end = end_of(lower_word);
-            fails.push_back(strcmp(lower_word->word, "ge") == 0 ? rocke_b_cmp_lt(b, value, end)
-                                                                : rocke_b_cmp_le(b, value, end));
+            fails.push_back(strcmp(lower_word->fact->word, "ge") == 0
+                                ? rocke_b_cmp_lt(b, value, end)
+                                : rocke_b_cmp_le(b, value, end));
         }
         if(upper_word)
         {
             rocke_value_t* end = end_of(upper_word);
-            fails.push_back(strcmp(upper_word->word, "le") == 0 ? rocke_b_cmp_gt(b, value, end)
-                                                                : rocke_b_cmp_ge(b, value, end));
+            fails.push_back(strcmp(upper_word->fact->word, "le") == 0
+                                ? rocke_b_cmp_gt(b, value, end)
+                                : rocke_b_cmp_ge(b, value, end));
         }
     }
     if(facts->multiple_of_set && facts->multiple_of > 1)
@@ -769,7 +771,7 @@ rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
     if(lower_word && lower_word->bound->value_bound)
     {
         marker.ge.end = lower_word->bound->value_bound;
-        marker.ge.plus = strcmp(lower_word->word, "gt") == 0 ? 1 : 0;
+        marker.ge.plus = strcmp(lower_word->fact->word, "gt") == 0 ? 1 : 0;
     }
     else if(has_lower)
     {
@@ -779,7 +781,7 @@ rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
     if(upper_word && upper_word->bound->value_bound)
     {
         marker.lt.end = upper_word->bound->value_bound;
-        marker.lt.plus = strcmp(upper_word->word, "le") == 0 ? 1 : 0;
+        marker.lt.plus = strcmp(upper_word->fact->word, "le") == 0 ? 1 : 0;
     }
     else if(has_upper && upper < tmax)
     {

@@ -536,21 +536,33 @@ int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
  * Python texts' `t.name.upper()`. (cpp/core/ir/param_facts.cpp) */
 std::string rocke_i_upper_type_name(const rocke_type_t* t);
 
-/* A fact word that takes a bound, with the rocke_int_facts_t field it fills. */
+/* The end of a value a bound word states: Python param_facts.LOWER_WORDS or
+ * UPPER_WORDS, or both for eq. */
+typedef enum rocke_int_bound_side
+{
+    ROCKE_INT_BOUND_LOWER,
+    ROCKE_INT_BOUND_UPPER,
+    ROCKE_INT_BOUND_BOTH
+} rocke_int_bound_side_t;
+
+/* A fact word that takes a bound, with the rocke_int_facts_t field it fills and
+ * the end it states. */
 struct rocke_int_bound_word_t
 {
     const char* word;
     rocke_int_bound_t rocke_int_facts_t::*bound;
+    rocke_int_bound_side_t side;
 };
 
 /* The fact words that take a bound, in Python param_facts._BOUND_WORDS order:
- * the one table from a word to its field, which the param builder, the GPU-check
- * builder and the param-attr reader all read. */
-inline constexpr rocke_int_bound_word_t ROCKE_INT_BOUND_WORDS[] = {{"ge", &rocke_int_facts_t::ge},
-                                                                   {"gt", &rocke_int_facts_t::gt},
-                                                                   {"le", &rocke_int_facts_t::le},
-                                                                   {"lt", &rocke_int_facts_t::lt},
-                                                                   {"eq", &rocke_int_facts_t::eq}};
+ * the one table from a word to its field and its end, which the param builder,
+ * the param-fact rules, the GPU-check builder and the param-attr reader all read. */
+inline constexpr rocke_int_bound_word_t ROCKE_INT_BOUND_WORDS[]
+    = {{"ge", &rocke_int_facts_t::ge, ROCKE_INT_BOUND_LOWER},
+       {"gt", &rocke_int_facts_t::gt, ROCKE_INT_BOUND_LOWER},
+       {"le", &rocke_int_facts_t::le, ROCKE_INT_BOUND_UPPER},
+       {"lt", &rocke_int_facts_t::lt, ROCKE_INT_BOUND_UPPER},
+       {"eq", &rocke_int_facts_t::eq, ROCKE_INT_BOUND_BOTH}};
 #endif
 
 #endif /* ROCKE_IR_INTERNAL_H */

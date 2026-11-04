@@ -62,7 +62,9 @@ from ..core.ir import (
 from ..core.param_facts import (
     FACT_INT_TYPES,
     FACT_WORDS,
+    LOWER_WORDS,
     POINTER_ATTRS,
+    UPPER_WORDS,
     int_type_limits,
     stored_relation,
 )
@@ -403,8 +405,8 @@ def _with_type_limits(words: list[str], type_name: str) -> list[str]:
         return words
     lo, hi = int_type_limits(type_name)
     limit = f"({type_name.upper()} limit)"
-    lower = [w for w in words if w.startswith(("ge ", "gt "))] or [f"ge {lo} {limit}"]
-    upper = [w for w in words if w.startswith(("le ", "lt "))] or [f"le {hi} {limit}"]
+    lower = [w for w in words if w.split()[0] in LOWER_WORDS] or [f"ge {lo} {limit}"]
+    upper = [w for w in words if w.split()[0] in UPPER_WORDS] or [f"le {hi} {limit}"]
     rest = [w for w in words if w.startswith("multiple_of ")]
     return lower + upper + rest
 
