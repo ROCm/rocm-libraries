@@ -69,7 +69,7 @@ def _use_slots(instr: Dict[str, Any]):
             )
         for m in instr.get("iter", []):
             yield (lambda m=m: m["init"], lambda v, m=m: m.__setitem__("init", v))
-    elif op == "scf_if":
+    elif op in ("scf_if", "scf_if_else"):
         yield (lambda: instr["cond"], lambda v: instr.__setitem__("cond", v))
     elif op == "alias":
         yield (lambda: instr["from"], lambda v: instr.__setitem__("from", v))
@@ -558,6 +558,13 @@ def _merge_instr(
         if merged is None:
             return None
         out["then"] = merged
+        return out
+    if op == "scf_if_else":
+        for key in ("then", "else"):
+            merged = align(a.get(key, []), b.get(key, []))
+            if merged is None:
+                return None
+            out[key] = merged
         return out
     # param / ret / thread_id_x / const_* : must already be identical-by-sig
     return out
