@@ -3189,9 +3189,8 @@ struct FmhaBwdConvertQGradKernel
                     if(kn0 > 0)
                     {
                         const index_t m_end = min(i_m0 + kM0 - 1, kargs.seqlen_q - 1);
-                        const index_t k_max =
-                            min(kargs.seqlen_k - 1, m_end + kargs.mask_k_end_off);
-                        nsplits_eff = min(nsplits, k_max / kn0 + 1);
+                        const index_t k_max = min(kargs.seqlen_k - 1, m_end + kargs.mask_k_end_off);
+                        nsplits_eff         = min(nsplits, k_max / kn0 + 1);
                     }
                 }
                 FmhaBwdConvertQGrad{}(dq_acc_dram_window, dq_dram_window, nsplits_eff);
