@@ -59,6 +59,7 @@
     X_BOOL(xh_stride_m)                           \
     X_INT(fxh_dma)                                \
     X_INT(xh_yring)                               \
+    X_BOOL(xh_pad)                                \
     X_BOOL(rpf_lds_barrier)                       \
     X_BOOL(rpf_fetch_late)                        \
     X_INT(sched_strategy)
