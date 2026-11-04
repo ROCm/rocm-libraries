@@ -16,7 +16,6 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   Device: 0
   ValidateMetadata: True
-  UniformSummationOrder: 0
 
 BenchmarkProblems:
   -

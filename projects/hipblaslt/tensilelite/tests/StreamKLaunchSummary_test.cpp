@@ -103,8 +103,6 @@ namespace
             = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, batch);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
-        // Scheduling tests allow uneven K splits; USO-specific cases enable it explicitly.
-        problem.setParams().setUniformSummationOrder(0);
         return problem;
     }
 
@@ -206,18 +204,18 @@ TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapabili
         bool                   perTile;
         bool                   runtimeStagger;
         size_t                 mapping;
-        int                    uniformOrder;
+        bool                   uniformOrder;
         size_t                 expectedStagger;
     };
     const Case cases[] = {
-        {TileProcessingStrategy::None, false, true, 1, 1, 16},
-        {TileProcessingStrategy::DataParallel, false, true, 1, 1, 0},
-        {TileProcessingStrategy::StreamK, false, true, 1, 1, 0},
-        {TileProcessingStrategy::DataParallel, true, true, 1, 1, 16},
-        {TileProcessingStrategy::StreamK, true, true, 1, 1, 16},
-        {TileProcessingStrategy::StreamK, true, true, 0, 1, 0},
-        {TileProcessingStrategy::None, false, false, 1, 1, 0},
-        {TileProcessingStrategy::StreamK, false, true, 1, 0, 16},
+        {TileProcessingStrategy::None, false, true, 1, true, 16},
+        {TileProcessingStrategy::DataParallel, false, true, 1, true, 0},
+        {TileProcessingStrategy::StreamK, false, true, 1, true, 0},
+        {TileProcessingStrategy::DataParallel, true, true, 1, true, 16},
+        {TileProcessingStrategy::StreamK, true, true, 1, true, 16},
+        {TileProcessingStrategy::StreamK, true, true, 0, true, 0},
+        {TileProcessingStrategy::None, false, false, 1, true, 0},
+        {TileProcessingStrategy::StreamK, false, true, 1, false, 16},
     };
     AnalyticalEnv env;
     for(const auto& test : cases)
@@ -1645,7 +1643,8 @@ TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesSplitOneBiasD)
 }
 
 // ---------------------------------------------------------------------------
-// A workspace-starved parallel scenario, with uniform summation order explicitly OFF.
+// A workspace-starved parallel scenario, with uniform summation order OFF --
+// i.e. the default.
 //
 // Same shape as the test above, but with no workspace at all. getSKReduction()
 // still says parallel -- it never looks at the workspace -- but origami's
@@ -1668,11 +1667,10 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
 
     auto problem = makeGemmProblem(256, 4096, 4096);
     problem.setWorkspaceSize(0); // no workspace at all
-    problem.setParams().setUniformSummationOrder(0);
 
     // Anti-vacuity: the mode must be off.
-    ASSERT_EQ(problem.getParams().uniformSummationOrder(), 0)
-        << "uniform summation order must be off for this scenario, otherwise this test is "
+    ASSERT_FALSE(problem.getParams().uniformSummationOrder())
+        << "uniform summation order must default to off, otherwise this test is "
            "a duplicate of the variant below";
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
@@ -1744,7 +1742,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
 
     auto problem = makeGemmProblem(256, 4096, 4096);
     problem.setWorkspaceSize(0); // no workspace at all
-    problem.setParams().setUniformSummationOrder(1);
+    problem.setParams().setUniformSummationOrder(true);
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
