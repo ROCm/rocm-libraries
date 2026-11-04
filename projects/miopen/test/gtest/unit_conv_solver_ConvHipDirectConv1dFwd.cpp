@@ -40,6 +40,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
         TestCase{{3, 17, 1, 777}, {33, 17, 1, 3}, {0, 2}, {1, 3}, {1, 2}, datatype},
         TestCase{{1, 64, 1, 4099}, {64, 16, 1, 5}, {0, 2}, {1, 1}, {1, 1}, 4, datatype},
         TestCase{{1, 32, 1, 2048}, {32, 32, 1, 11}, {0, 0}, {1, 1}, {1, 5}, datatype},
+        // Ungrouped with few channels (BigVGAN-style last stage).
+        TestCase{{1, 8, 1, 3000}, {8, 8, 1, 11}, {0, 25}, {1, 1}, {1, 5}, datatype},
         // Near the LDS limit: (8 * (1013 + 16 * 64)) floats = 65184 bytes.
         TestCase{{1, 16, 1, 2048}, {16, 16, 1, 16}, {0, 0}, {1, 1}, {1, 59}, datatype},
         // clang-format on
