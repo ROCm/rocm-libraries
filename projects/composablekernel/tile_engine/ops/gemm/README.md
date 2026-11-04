@@ -258,7 +258,7 @@ by scaling it with the number of problems (the warm-started runs built about
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
 | `measurement_policy` | `full` | the only value |
-| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache: on a filesystem already over 90% full nothing is stored, and the run warns. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" and "Host cache space" below |
+| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` (keep it on a local filesystem) that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache: on a filesystem already over 90% full nothing is stored, and the run warns. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" and "Host cache space" below |
 
 Unknown keys are an error; relative warm-start and `host_cache.dir` paths are
 read from the settings file's directory.
@@ -423,7 +423,11 @@ so verification results are the same with or without it. The directory goes
 when the run ends (the run prints its entries and size), also on an error,
 Ctrl-C or SIGTERM; a run killed with SIGKILL leaves its
 `ck_search_host_cache-*` directory behind. Storing needs POSIX file locks
-(`fcntl`); without them every call computes.
+(`fcntl`); without them every call computes. Keep `dir` on a local filesystem
+(a tmpfs or a local disk): on NFS a worker that waits for the lock waits out
+the client's lock retry backoff, inside its call's timeout (in one test, the
+last of 8 workers that missed at once waited 15 s, and the last of 16, 62 s),
+so a run whose cache is on NFS starts with a `Host cache: NOTE` line.
 
 Host cache space: an entry is the fp32 reference (4*M*N bytes) plus the
 encoded A and B ((M+N)*K elements), so a large-K problem needs GiB per entry:
@@ -434,10 +438,10 @@ disk that is already over 90% full, that guard never passes (a 1.8 TB disk at
 93% has 134 GB free and would need 180 GB): nothing is stored, every call pays
 the full host cost, and the run starts with a `Host cache: WARNING: stores
 nothing` line (its closing `Host cache:` line then counts 0 entries). Point
-`host_cache.dir` at a tmpfs such as `/dev/shm` or at another filesystem with
-room, and size `max_total_gib` and `max_entry_gib` to the run's problems; an
-entry past either cap is not stored, and its problem computes on every call. A
-tmpfs is faster but holds the entries in RAM, so keep `max_total_gib` within
+`host_cache.dir` at a tmpfs such as `/dev/shm` or at another local filesystem
+with room, and size `max_total_gib` and `max_entry_gib` to the run's problems;
+an entry past either cap is not stored, and its problem computes on every call.
+A tmpfs is faster but holds the entries in RAM, so keep `max_total_gib` within
 the memory the build workers leave free.
 
 Console: builds print as in a full run; the search prints a line per build
@@ -445,7 +449,8 @@ and per round (`[search] round N: ...`: proposals, admissions, builds against
 the cap, measurements, active problems, elapsed time and deadline) and one
 title line per measure call, named like its `rounds/` file. A host cache whose
 filesystem is already under 10% free (see "Host cache space") prints a
-`Host cache: WARNING` line before the first round.
+`Host cache: WARNING` line before the first round, and one on NFS a
+`Host cache: NOTE` line.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`. If nearly every

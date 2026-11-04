@@ -29,7 +29,9 @@ a miss (``cached``, in the worker):
 
 ``HostCache.close`` (also on interpreter exit) removes the directory. Importing
 this module does not import numpy. Writing needs ``fcntl`` (POSIX); without
-it nothing is stored.
+it nothing is stored. The directory belongs on a local filesystem (a tmpfs or
+a local disk): on NFS a worker that waits for the lock waits out the client's
+lock retry backoff, seconds to minutes inside its call's timeout.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -51,6 +54,7 @@ GIB = 1 << 30
 PREFIX = "ck_search_host_cache-"
 CLAIM = ".w-"  # ".w-<key>-<bytes reserved>": a key's writer, kept once written
 NPY_HEADER_BYTES = 4096  # reserved per .npy file (its header is 128 bytes here)
+NFS_TYPES = ("nfs", "nfs4")  # filesystems where waiting for the lock backs off
 
 
 def entry_key(fields: Mapping) -> str:
@@ -71,6 +75,24 @@ def usage(root) -> Tuple[int, int]:
             except OSError:
                 pass
     return entries, size
+
+
+def fs_type(path, mounts="/proc/self/mounts") -> str:
+    """The type of the filesystem holding ``path``, from the Linux mount table
+    ``mounts`` (the last mount on the longest matching mount point); "" when
+    unknown."""
+    path, found, kind = os.path.realpath(path), "", ""
+    try:
+        with open(mounts) as f:
+            for line in f:
+                mnt, typ = line.split()[1:3]
+                mnt = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), mnt)
+                if ((path + "/").startswith(mnt.rstrip("/") + "/")
+                        and len(mnt) >= len(found)):
+                    found, kind = mnt, typ
+    except (OSError, ValueError):
+        return ""
+    return kind
 
 
 class HostCache:
@@ -107,7 +129,8 @@ def run_cache(settings, log=print):
     """A ``HostCache`` for the run's workers, from ``settings`` (the search's
     ``HostCacheSettings``), removed on exit with one ``log`` line; None when
     ``max_total_gib`` is 0. A filesystem already under ``MIN_FREE_FRACTION``
-    free can store no entry: the run then starts with a warning line."""
+    free can store no entry: the run then starts with a warning line. On NFS
+    it starts with a note to use a local filesystem."""
     if settings.max_total_gib == 0:
         yield None
         return
@@ -120,7 +143,13 @@ def run_cache(settings, log=print):
             log(f"  Host cache: WARNING: stores nothing: {disk.free / GIB:.1f} of "
                 f"{disk.total / GIB:.1f} GiB free under {cache.dir.parent}, and a write "
                 f"must leave {MIN_FREE_FRACTION:.0%} free; set host_cache.dir to a tmpfs "
-                "or another filesystem")
+                "or another local filesystem")
+        kind = fs_type(cache.dir)
+        if kind in NFS_TYPES:
+            log(f"  Host cache: NOTE: {cache.dir.parent} is on {kind}, where workers that "
+                "miss at once can wait seconds to minutes of their call's timeout for the "
+                "cache's lock; set host_cache.dir to a local filesystem (a tmpfs or a "
+                "local disk)")
         yield cache
     finally:
         entries, size = cache.close()

@@ -1658,23 +1658,47 @@ def test_host_cache_concurrent_misses_hold_the_caps(tmp_path):
         assert race(cache, keys, free)[:2] == (2, 2)
 
 
-def test_host_cache_warns_when_its_filesystem_is_too_full(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["ext4", "nfs4"])
+def test_host_cache_warns_when_its_filesystem_is_too_full_or_nfs(tmp_path, monkeypatch,
+                                                                 kind):
     # Every write leaves 10% of the filesystem free, so on one already under
     # that (a large, nearly full root disk) nothing is stored: the run says so.
+    # On NFS a worker that waits for the cache's lock backs off for seconds:
+    # the run says to use a local filesystem. Both lines come before any call.
     disk = HC.shutil.disk_usage(tmp_path)
     floor = math.ceil(disk.total * HC.MIN_FREE_FRACTION)
     settings = AS.HostCacheSettings(str(tmp_path), 1.0, 1.0)
+    monkeypatch.setattr(HC, "fs_type", lambda p: kind)
+    nfs = kind == "nfs4"
     for free, full in ((floor - 1, True), (floor + 2**20, False)):
         monkeypatch.setattr(HC.shutil, "disk_usage", lambda p, f=free: disk._replace(free=f))
         lines = []
         with HC.run_cache(settings, lines.append) as cache:
+            assert len(lines) == full + nfs  # before any call
             assert [_cache_calls(cache.spec, {"k": 1})[1] for _ in range(2)] == [1, int(full)]
-        assert len(lines) == 1 + full and lines[-1].startswith("  Host cache: ")
+        assert len(lines) == 1 + full + nfs and lines[-1].startswith("  Host cache: ")
         assert lines[0].startswith("  Host cache: WARNING: stores nothing: ") == full
         assert not full or f"under {tmp_path}, and a write must leave 10% free;" in lines[0]
+        assert not full or lines[0].endswith("a tmpfs or another local filesystem")
+        assert [n.startswith(f"  Host cache: NOTE: {tmp_path} is on nfs4, ")
+                for n in lines[:-1]] == [False] * full + [True] * nfs
 
 
-def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path):
+def test_fs_type_reads_the_mount_table(tmp_path):
+    # The last mount on the longest mount point holding the path; a mount
+    # table escapes a space as \040.
+    root = os.path.realpath(tmp_path)
+    table = tmp_path / "mounts"
+    table.write_text(f"/dev/md0 / ext4 rw 0 0\nauto {root}/h autofs rw 0 0\n"
+                     f"srv:/h {root}/h nfs4 rw 0 0\ntmpfs {root}/h/a\\040b tmpfs rw 0 0\n")
+    paths = ("", "/h", "/h/u/x", "/h/a b/c", "/h/a bc", "/hx")
+    assert [HC.fs_type(root + p, str(table)) for p in paths] == [
+        "ext4", "nfs4", "nfs4", "tmpfs", "nfs4", "ext4"]
+    assert HC.fs_type(root, str(tmp_path / "none")) == ""
+
+
+def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path, monkeypatch):
+    monkeypatch.setattr(HC, "fs_type", lambda p: "")  # no NFS note, wherever tmp is
     lines = []
     settings = AS.HostCacheSettings(str(tmp_path), 1.0, 1.0)
     with HC.run_cache(settings, lines.append) as cache:
