@@ -19,16 +19,23 @@ The coordinator owns the bookkeeping around that ask/tell loop:
 
 The operation itself (which kernels fit a problem, how to build and measure
 them) lives behind ``OperationAdapter``; the GEMM one is
-``tile_engine/ops/gemm/gemm_search.py``. Importing this module imports neither
+``tile_engine/ops/gemm/gemm_search.py``. The plumbing every op binding shares
+is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
+``CallFiles`` (per-call files under rounds/), ``measure_built``,
+``source_info``, ``check_search_options`` and ``run_search`` (the driver's
+search mode, with its exit code). Importing this module imports neither
 ``ck_search`` nor numpy: the search core is loaded when a search runs.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import shutil
 import statistics
+import subprocess
 import sys
 import time
 import traceback
@@ -1133,3 +1140,169 @@ class SearchCoordinator:
             unresolved=dict(self.unresolved), counts=self.counts, wall_s=wall,
             error=error,
         )
+
+
+# ------------------------------------------------------- op binding plumbing
+# Shared by the op bindings (GEMM: tile_engine/ops/gemm/gemm_search.py), so a
+# new op adds only its candidates, its build and measure hooks and the
+# reconciliation of its driver's rows into outcomes.
+
+
+def sha256_file(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _git_commit() -> Optional[str]:
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(Path(__file__).resolve().parent),
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def source_info(files, domain: Mapping) -> dict:
+    """run.json provenance: the CK commit, the sha256 of each given input file
+    (``None`` entries skipped) and of ``domain`` ({problem: [kernel names]})."""
+    return {
+        "sources": {"ck_commit": _git_commit(),
+                    "sha256": {str(p): sha256_file(p) for p in files if p}},
+        "domain_sha256": hashlib.sha256(
+            json.dumps(domain, sort_keys=True).encode()).hexdigest(),
+    }
+
+
+class ArtifactStore:
+    """The run's own copies of its built kernels, under ``<out>/artifacts``.
+    Only these copies are measured: a file the run did not copy is never
+    loaded, and a copy that changed on disk since its build is refused."""
+
+    def __init__(self, out_dir):
+        self.dir = Path(out_dir) / "artifacts"
+        self._copies: Dict[str, tuple] = {}  # key -> (path, sha256)
+
+    def add(self, key: str, src, name: str) -> BuildResult:
+        """Copy the built ``src`` in as ``name`` (temp file + rename)."""
+        self.dir.mkdir(parents=True, exist_ok=True)
+        dst = self.dir / name
+        tmp = dst.with_name(f".{name}.tmp")
+        shutil.copyfile(src, tmp)
+        digest = sha256_file(tmp)
+        tmp.replace(dst)
+        self._copies[key] = (dst, digest)
+        return BuildResult(str(dst), digest=digest)
+
+    def path(self, key: str) -> Path:
+        return self._copies[key][0]
+
+    def unusable(self, key: str):
+        """(status, diag) when ``key`` has no usable copy of this run, else None."""
+        art = self._copies.get(key)
+        if art is None:
+            return "compile_error", "not built in this run"
+        try:
+            same = sha256_file(art[0]) == art[1]
+        except OSError:
+            same = False
+        return None if same else ("run_error", f"artifact {art[0]} changed since its build")
+
+
+def measure_built(store: ArtifactStore, requests: Sequence[PairRequest],
+                  run: Callable[[List[PairRequest]], List[PairOutcome]]
+                  ) -> List[PairOutcome]:
+    """One outcome per request, in order: a request without a usable artifact
+    gets its outcome here, ``run`` measures the others (one outcome each, in
+    order)."""
+    out, rest, bad = {}, [], {}
+    for r in requests:
+        key = r.candidate_key
+        if key not in bad:
+            bad[key] = store.unusable(key)
+        if bad[key]:
+            out[r.call_id] = PairOutcome(r, bad[key][0], None, bad[key][1])
+        else:
+            rest.append(r)
+    if rest:
+        for r, o in zip(rest, run(rest)):
+            out[r.call_id] = o
+    return [out[r.call_id] for r in requests]
+
+
+class CallFiles:
+    """One new file per adapter call under ``<out>/rounds``:
+    ``NNNN-<kind><suffix>``, never an existing file."""
+
+    def __init__(self, out_dir):
+        self.dir = Path(out_dir) / "rounds"
+        self._n = 0
+
+    def new(self, kind: str, suffix: str) -> Path:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        while True:
+            self._n += 1
+            path = self.dir / f"{self._n:04d}-{kind}{suffix}"
+            if not path.exists():
+                return path
+
+    def write_json(self, path: Path, data) -> Path:
+        """``data`` next to the call's ``path`` (same stem, .json)."""
+        return RunWriter(self.dir).write_json(path.with_suffix(".json").name, data)
+
+
+def check_search_options(args, variant: str, conflicts=()) -> SearchSettings:
+    """The validated ``--search-config`` of a driver run. ``conflicts`` lists
+    the driver's (option, args attribute) pairs a search run does not take.
+    Raises SettingsError for a missing or conflicting option, another
+    ``--variant``, invalid settings or an output dir holding an earlier run."""
+    if not (args.search_config and args.search_output_dir):
+        raise SettingsError(
+            "--search-config and --search-output-dir go together, each with a path")
+    for opt, attr in conflicts:
+        if getattr(args, attr):
+            raise SettingsError(f"--search-config does not take {opt}")
+    if args.variant != variant:
+        raise SettingsError(
+            f"--search-config supports --variant {variant} only, got {args.variant}")
+    settings = SearchSettings.from_json(args.search_config)
+    RunWriter(args.search_output_dir).check_fresh()
+    return settings
+
+
+def run_search(adapter: OperationAdapter, settings: SearchSettings, out_dir,
+               devices: Sequence[str], **loaders) -> int:
+    """A driver's search mode: runs ``adapter``'s search into ``out_dir`` and
+    prints its outcome. ``loaders`` are the coordinator's ``pair_loader`` and
+    ``prior_loader``. Returns the exit code: 0 when every problem has a
+    confirmed winner, 1 otherwise, 2 for invalid options."""
+    bar = "=" * 80
+    print(f"\n{bar}\nAdaptive search: {settings.strategy}, "
+          f"{settings.trials_per_problem} trials per problem, at most "
+          f"{settings.new_builds_per_run} builds\n{bar}")
+    if not devices:
+        print("  ERROR: no GPU to measure on (--devices)")
+        return EXIT_USAGE
+    try:
+        coordinator = SearchCoordinator(adapter, settings, out_dir, **loaders)
+    except SettingsError as e:
+        print(f"  ERROR: {e}")
+        return EXIT_USAGE
+    s = coordinator.run()
+    n = len(s.winners) + len(s.unresolved)
+    print(f"\n{bar}\nSEARCH {s.status.upper()}: {len(s.winners)}/{n} problems with a "
+          f"confirmed winner (stopped: {s.stop_reason})\n{bar}")
+    c = s.counts
+    print(f"  Builds: {c['built']} ok, {c['build_failed']} failed; measurements: "
+          f"{c['measured']}; confirmation calls: {c['confirm_calls']}; "
+          f"{s.wall_s:.0f}s")
+    for key, why in sorted(s.unresolved.items()):
+        print(f"  Unresolved {key}: {why}")
+    if s.error:
+        print(f"  ERROR: {s.error}")
+    print(f"  Output: {out_dir} (winners.json is a --pairs file)")
+    return s.exit_code
