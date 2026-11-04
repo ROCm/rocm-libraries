@@ -131,6 +131,21 @@ endif()
 
 include(GNUInstallDirs)
 
+# Before the target: an installed hipSOLVER that still exports its own
+# roc::hipsolver_fortran must not meet this one. C is enabled because
+# hip-config.cmake reaches FindThreads.
+if(NOT TARGET roc::hipsolver)
+  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  find_package(hipsolver QUIET)
+endif()
+if(TARGET roc::hipsolver_fortran)
+  message(FATAL_ERROR
+    "hipSOLVER: the installed hipSOLVER already exports roc::hipsolver_fortran. "
+    "Build hipSOLVER with -DEXPORT_FORTRAN_BINDINGS=OFF to use these bindings.")
+endif()
+
 add_library(hipsolver_fortran STATIC hipsolver.F90)
 
 add_library(roc::hipsolver_fortran ALIAS hipsolver_fortran)
@@ -185,15 +200,8 @@ target_include_directories(hipsolver_fortran PUBLIC
   "$<BUILD_INTERFACE:${_moddir}>"
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fortran/${HIPSOLVER_FORTRAN_COMPILER_DIR}>")
 
-# Link interface only. C is enabled because hip-config.cmake reaches FindThreads.
-if(NOT TARGET roc::hipsolver)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(hipsolver QUIET)
-endif()
-
-# Substituted into a bare if() in the config template, so it must be TRUE or FALSE.
+# Link interface only. Substituted into a bare if() in the config template, so
+# it must be TRUE or FALSE.
 if(TARGET roc::hipsolver)
   target_link_libraries(hipsolver_fortran INTERFACE roc::hipsolver)
   set(HIPSOLVER_FORTRAN_NEEDS_C_PACKAGE TRUE)
