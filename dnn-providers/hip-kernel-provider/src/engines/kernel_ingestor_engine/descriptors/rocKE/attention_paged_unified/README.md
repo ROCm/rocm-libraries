@@ -126,6 +126,25 @@ the cache's K and V halves as two containers over one allocation, its `block_tab
 page tables (one tensor, `[B, 1, max_blocks, 1]`), `seq_lens` as `seq_len_kv`, the query lengths as
 `seq_len_q`, and `query_start_loc` as the ragged offset of Q and O.
 
+## Saved plans
+
+The engine reports `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`: a built plan saves with
+`to_binary()` or `to_compiled_plan_binary()` and loads into a fresh handle without matching,
+descriptor search or archive reads. The payload holds the kernel's code object and, under
+the dispatch contract `hipkernel.attention_paged_unified.dispatch.v1`
+(`packs/AttentionPagedUnifiedLaunchValues.hpp`), the launch values: the uids of Q, K, V, O,
+both page tables, `seq_len_kv`, `seq_len_q`, the ragged offset and the sink (`-1` when
+absent), the scale (any finite float, stored exactly as a double), every by-value kernel
+argument (`num_seqs`, `block_table_stride`, the head counts, `sliding_window`,
+`q_uniform_len` (`Sq` for a dense Q, 0 for a ragged one), the Q/O/KV strides,
+`kv_block_span_bytes`, `q_block_grid`) and
+`block_threads`. The loaded plan
+launches the same grid, `(num_kv_heads, q_block_grid)`, with `block_threads` threads. A load
+refuses a value of another type, an extra or missing value, or one outside what the kernel
+takes. Lengths, page tables, offsets and sinks stay device buffers bound at execute, so a
+loaded plan serves every step just as the original does
+(`IntegrationGpuAttentionPagedUnifiedSaveLoad`).
+
 ## Attention sinks
 
 `sink_token` adds one logit per query head to the softmax max and denominator, with no value

@@ -14,11 +14,13 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -28,17 +30,21 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "IngestorIntegrationSupport.hpp"
+
 /**
  * @file IntegrationGpuAttentionPagedUnified.cpp
  * @brief End-to-end runs of hipkernel:AttentionPagedUnified through the hipDNN frontend:
  *        paged uniform decode (dense Q), ragged Q over paged K/V (mixed decode and
- *        chunked prefill, a first origin past 0), sliding windows, separate K and V page
- *        tables, attention sinks, and HIP-graph capture/replay with changed sequence
- *        lengths, block ids and data. Every output is compared with a host gather-then-dense
- *        fp32 reference over the same page tables, which is itself checked against hipDNN's
- *        CPU SDPA reference. A dense Q's rows past seq_len_q, and rows with no visible key,
- *        must be zero (SdpaSemanticsRegister SEM-008, SEM-010); a ragged Q's rows past
- *        seq_len_q belong to no sequence (RFC 0014) and must keep their contents.
+ *        chunked prefill, a first origin past 0), sliding windows,
+ *        separate K and V page tables, attention sinks,
+ *        HIP-graph capture/replay with changed sequence lengths, block ids and data, and
+ *        saved plans restored into a fresh handle. Every output is compared with a host
+ *        gather-then-dense fp32 reference over the same page tables, which is itself
+ *        checked against hipDNN's CPU SDPA reference. A dense Q's rows past seq_len_q,
+ *        and rows with no visible key, must be zero (SdpaSemanticsRegister SEM-008,
+ *        SEM-010); a ragged Q's rows past seq_len_q belong to no sequence (RFC 0014) and
+ *        must keep their contents.
  *
  * Set HIPDNN_TEST_EXPECTED_ARCH=gfx942 (or gfx950) on required runs so a missing or
  * different device fails instead of skipping.
@@ -50,6 +56,9 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
 constexpr const char* ENGINE = "hipkernel:AttentionPagedUnified";
+
+namespace ingestor_it = hip_kernel_provider::kernel_ingestor_engine::integration;
+using ingestor_it::SaveForm;
 
 uint16_t toBits(float x, DataType type)
 {
@@ -1055,6 +1064,137 @@ TEST_F(IntegrationGpuAttentionPagedUnified, HipGraphCaptureReplaysWithChangedLen
         ASSERT_EQ(hipGraphExecDestroy(exec), hipSuccess);
         ASSERT_EQ(hipGraphDestroy(graph), hipSuccess);
     }
+}
+
+/// Saved plans: the engine saves the kernel's code object and its launch values, and a
+/// plan loaded into a fresh handle (a new provider container, no module cache) launches
+/// the same kernel with the same arguments.
+class IntegrationGpuAttentionPagedUnifiedSaveLoad : public IntegrationGpuAttentionPagedUnified
+{
+protected:
+    std::vector<uint16_t> readOutput(const Built& built)
+    {
+        std::vector<uint16_t> out(built.oBytes / 2);
+        EXPECT_EQ(
+            hipMemcpyAsync(
+                out.data(), built.buffers.at(O), built.oBytes, hipMemcpyDeviceToHost, _stream),
+            hipSuccess);
+        EXPECT_EQ(hipStreamSynchronize(_stream), hipSuccess);
+        return out;
+    }
+
+    /// Builds and runs @p p, saves the plan in @p form, destroys the graph and the handle,
+    /// loads the plan into a fresh handle and runs it on the same buffers and inputs. The
+    /// loaded plan's output must pass the same reference check and equal the original
+    /// plan's output bit for bit.
+    void roundTripInAFreshHandle(const Problem& p, SaveForm form)
+    {
+        Built built;
+        build(p, built);
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
+        {
+            return;
+        }
+        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(ENGINE);
+        std::vector<BehaviorNote> notes;
+        ASSERT_TRUE(ok(built.graph->get_behavior_notes_for_engine(engineId, notes)));
+        ASSERT_NE(std::find(notes.begin(),
+                            notes.end(),
+                            BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                  notes.end());
+
+        const auto state = makeState(p, p.seed);
+        upload(p, state, built);
+        ASSERT_TRUE(ok(built.graph->execute(_handle, built.buffers, nullptr)));
+        ASSERT_NO_FATAL_FAILURE(check(p, state, built));
+        const auto original = readOutput(built);
+
+        std::vector<uint8_t> saved;
+        {
+            auto save = ingestor_it::detail::saveInForm(*built.graph, form);
+            ASSERT_TRUE(ok(save.second));
+            saved = std::move(save.first);
+        }
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            int contents = 0;
+            ASSERT_EQ(
+                hipdnnBackendGetSerializedBinaryContents_ext(saved.data(), saved.size(), &contents),
+                HIPDNN_STATUS_SUCCESS);
+            ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
+                << "the saved graph holds no execution plan";
+        }
+
+        built.graph.reset();
+        ASSERT_NO_FATAL_FAILURE(ingestor_it::detail::replaceHandleWithAFreshOne(_handle, _stream));
+
+        auto loaded = std::make_shared<Graph>();
+        ASSERT_TRUE(ok(ingestor_it::detail::loadInForm(*loaded, _handle, saved, form)));
+        int64_t loadedEngineId = 0;
+        ASSERT_TRUE(ok(loaded->get_execution_plan_engine_id(loadedEngineId)));
+        EXPECT_EQ(loadedEngineId, engineId);
+        int64_t workspace = -1;
+        ASSERT_TRUE(ok(loaded->get_workspace_size(workspace)));
+        EXPECT_EQ(workspace, 0);
+
+        // upload() poisons O again, so the comparison sees only what the loaded plan wrote.
+        upload(p, state, built);
+        ASSERT_TRUE(ok(loaded->execute(_handle, built.buffers, nullptr)));
+        ASSERT_NO_FATAL_FAILURE(check(p, state, built));
+        EXPECT_TRUE(readOutput(built) == original)
+            << "the loaded plan's output differs from the original plan's";
+    }
+
+    void roundTripInBothForms(const Problem& p)
+    {
+        for(const SaveForm form : {SaveForm::GRAPH_AND_PLAN, SaveForm::PLAN_ONLY})
+        {
+            SCOPED_TRACE(form == SaveForm::GRAPH_AND_PLAN ? "graph and plan" : "plan only");
+            roundTripInAFreshHandle(p, form);
+            if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
+            {
+                return;
+            }
+        }
+    }
+};
+
+TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresPagedUniformDecode)
+{
+    roundTripInBothForms(decodeProblem(DataType::BFLOAT16));
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresSpeculativeDecodeRowsHalf)
+{
+    Problem p = decodeProblem(DataType::HALF);
+    p.denseQueryLength = 3;
+    p.queryLengths = {3, 1, 3, 2, 0, 3};
+    roundTripInBothForms(p);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresRaggedQueryOverPagedKvWithWindow)
+{
+    Problem p = mixedProblem(DataType::BFLOAT16);
+    p.leftBound = 32;
+    roundTripInBothForms(p);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresSeparateKAndVPageTables)
+{
+    Problem dense = decodeProblem(DataType::BFLOAT16);
+    dense.separateVTable = true;
+    roundTripInBothForms(dense);
+
+    Problem ragged = mixedProblem(DataType::HALF);
+    ragged.separateVTable = true;
+    roundTripInBothForms(ragged);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresAttentionSinks)
+{
+    Problem p = mixedProblem(DataType::BFLOAT16);
+    p.sinks = true;
+    roundTripInBothForms(p);
 }
 
 } // namespace

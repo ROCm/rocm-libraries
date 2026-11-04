@@ -12,6 +12,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/AttentionPagedUnifiedLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
@@ -47,6 +48,8 @@ TEST(TestIngestorDispatchAliases, EachVersionedAliasResolvesToTheSameHandler)
     expectOneHandler("hipkernel.conv_fwd.dispatch", CONV_FWD_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
                      GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    expectOneHandler("hipkernel.attention_paged_unified.dispatch",
+                     ATTENTION_PAGED_UNIFIED_DISPATCH_SYMBOL_V1);
 }
 
 // A superseded contract keeps its own handler, so a plan saved under it still restores

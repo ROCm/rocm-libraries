@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -485,6 +486,27 @@ TEST(TestAttentionPagedUnifiedMatchers, ServesAnAttentionSinkInTheIoDataType)
     EXPECT_TRUE(match(sinkGraph(), [](d::GraphT& g) {
                     find(g, SINK_UID).strides = {7, 1, 5, 3};
                 }).has_value());
+}
+
+/// Every finite attn_scale is served, zero and negative ones included; the saved-plan
+/// reader takes the same set (TestAttentionPagedUnifiedLaunchValues).
+TEST(TestAttentionPagedUnifiedMatchers, ServesEveryFiniteScale)
+{
+    for(const float scale : {0.0F, -0.125F, 1.0e30F})
+    {
+        SCOPED_TRACE(scale);
+        EXPECT_TRUE(match(decodeGraph(), [scale](d::GraphT& g) {
+                        attrs(g).attn_scale_value = scale;
+                    }).has_value());
+    }
+    for(const float scale :
+        {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
+    {
+        SCOPED_TRACE(scale);
+        const auto decline = loggedDecline(
+            decodeGraph(), [scale](d::GraphT& g) { attrs(g).attn_scale_value = scale; });
+        EXPECT_EQ(decline.cause, "scale") << decline.detail;
+    }
 }
 
 TEST(TestAttentionPagedUnifiedMatchers, SelectsTheSinkObjectExactlyWhenTheGraphHasASink)
