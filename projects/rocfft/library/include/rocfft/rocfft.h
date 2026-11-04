@@ -357,10 +357,21 @@ ROCFFT_EXPORT rocfft_status rocfft_get_version_string(char* buf, size_t len);
  *  handle to also be specified.  For MPI libraries, this is a
  *  pointer to an MPI communicator.
  *
+ *  rocfft_comm_mpi is accepted only when the library is built with
+ *  ROCFFT_MPI_ENABLE=ON.  That option defaults to off, and the
+ *  rocFFT library shipped in a ROCm package is built with it off.
+ *  On such a build this call returns rocfft_status_failure for
+ *  rocfft_comm_mpi.  Check the return value.  rocfft_plan_create
+ *  reports its own status and creates an MPI-distributed plan only
+ *  after set_comm has succeeded.
+ *
+ *  A null comm_handle with any communicator type other than
+ *  rocfft_comm_none returns rocfft_status_invalid_arg_value.
+ *
  *  @param[in] description description handle
  *  @param[in] comm_type communicator type
  *  @param[in] comm_handle handle to communication-library-specific state
- * 
+ *
  */
 ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_description description,
                                                              rocfft_comm_type        comm_type,
