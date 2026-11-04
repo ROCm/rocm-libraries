@@ -255,7 +255,7 @@ An additional root cannot replace what an earlier root defined: a file redefinin
 
 Replaces the provider's own descriptor tree. This is the only variable that can remove shipped descriptors.
 
-- Unset: the provider uses the ``arch_content/hip-kernel-provider`` directory beside the loaded provider library, or the configure-time install location when that directory does not exist.
+- Unset: the provider uses its directory beside the loaded provider library (``arch_content/hip-kernel-provider`` or ``arch_content/miopen-provider``), or the configure-time install location when that directory does not exist.
 - ``<path>``: the provider loads this directory instead of its own tree.
 
 A value that is not an existing directory is ignored with a warning, and the default tree is used.
