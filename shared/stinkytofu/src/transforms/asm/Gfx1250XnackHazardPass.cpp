@@ -29,7 +29,6 @@ namespace {
 using namespace stinkytofu;
 
 using gfx1250::getReplayGroupKind;
-using gfx1250::isFullTranslationDrain;
 using gfx1250::isScalarPrefetch;
 using MemoryGroupKind = gfx1250::ReplayGroupKind;
 using ReplayMode = gfx1250::ReplayMode;
@@ -209,10 +208,6 @@ class Gfx1250XnackHazardPass : public Pass {
 
         if (isTensorLoad(*inst)) profile.noteTensorLoad();
 
-        if (isFullTranslationDrain(*inst)) {
-            state.clear();
-            return;
-        }
         if (enableXnackReplay) {
             if (isForeverSleep(*inst)) {
                 if (state.hasMemory)
@@ -247,7 +242,8 @@ class Gfx1250XnackHazardPass : public Pass {
         const MemoryGroupKind kind = getReplayGroupKind(*inst, kReplayMode);
         if (kind == MemoryGroupKind::None) {
             // In single-group mode hardware drains XCNT before every real
-            // non-memory instruction, including control flow.
+            // non-memory instruction, including control flow and s_wait_*
+            // with any immediate value.
             state.clear();
             return;
         }

@@ -90,16 +90,15 @@ Insert or preserve `s_wait_xcnt 0` for these cases:
 No source-clobber drain is needed for global, buffer, scratch, or image VMEM
 within the same group.
 
-Use a data wait such as `s_wait_loadcnt`, `s_wait_dscnt`, or
-`s_wait_tensorcnt` only when data completion is also required. Use
-`s_wait_xcnt 0` when the only required condition is `XCNT == 0`.
-
 ## TODO
 
 The current StinkyTofu protection is intentionally scoped to the
 single-VMEM-group model implemented by `Gfx1250XnackHazardPass`. Before extending the
 rule set, resolve these coverage questions:
 
+- When adding multi-group support, model data waits by counter. For example,
+  `s_wait_loadcnt 0` proves completion only for operations tracked by LOADCNT;
+  it does not generally prove `XCNT == 0`.
 - Confirm whether `global_prefetch_b8` and `flat_prefetch_b8` need any
   single-VMEM-group XNACK source-clobber protection.
 - Confirm whether `global_store_async_from_lds_*` needs the same

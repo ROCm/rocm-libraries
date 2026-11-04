@@ -30,6 +30,27 @@ st.func @flat_source_clobber_across_fallthrough() {
   v0 = "st.flat_load_b32"(v[2:3], s[16:17])
 }
 
+# FLAT checks sources from every earlier VMEM family in the open group.
+# CHECK-LABEL: @buffer_then_flat_source_clobber
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: flat_load_b32
+st.func @buffer_then_flat_source_clobber() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  v0 = "st.flat_load_b32"(v[2:3], s[16:17])
+}
+
+# CHECK-LABEL: @global_then_flat_source_clobber
+# CHECK: global_load_tr_b64
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: flat_load_b32
+st.func @global_then_flat_source_clobber() {
+^entry:
+  v[8:9] = "st.global_load_tr_b64"(v0, s[0:1])
+  v0 = "st.flat_load_b32"(v[2:3], s[16:17])
+}
+
 # CHECK-LABEL: @atomic_run
 # CHECK: buffer_load_b32
 # CHECK-NEXT: s_wait_xcnt"(0)
@@ -40,6 +61,21 @@ st.func @atomic_run() {
   v9 = "st.buffer_load_b32"(v0)
   v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
   v5 = "st.flat_atomic_dec_u32"(v[6:7], v8, s[6:7])
+}
+
+# A non-returning global atomic is available by omitting the destination.
+# One drain protects a consecutive run of global atomics.
+# CHECK-LABEL: @global_atomic_store_run
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NOT: s_wait_xcnt
+st.func @global_atomic_store_run() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+  v5 = "st.global_atomic_inc_u32"(v6, v7, s[16:17])
 }
 
 # CHECK-LABEL: @forever_sleep_and_msb
@@ -70,6 +106,20 @@ st.func @preserve_existing_xcnt_and_finite_sleep() {
   "st.s_wait_xcnt"(0)
   v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
   "st.s_sleep"(127)
+}
+
+# In single-group mode, any s_wait_* is a non-memory group transition; its
+# immediate does not need to be zero for the transition to drain XCNT.
+# CHECK-LABEL: @nonzero_data_wait_ends_group
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_loadcnt"(7)
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NOT: s_wait_xcnt
+st.func @nonzero_data_wait_ends_group() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_wait_loadcnt"(7)
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
 }
 
 # Single-group hardware treats TDM as "other", so tensor -> VMEM is a
@@ -199,6 +249,18 @@ st.func @buffer_source_reuse() {
   v0 = "st.buffer_load_b32"(v1)
 }
 
+# Ordered Global memory also permits a later destination to reuse an earlier
+# source.
+# CHECK-LABEL: @global_source_reuse
+# CHECK: global_load_tr_b64
+# CHECK-NEXT: global_load_tr_b64
+# CHECK-NOT: s_wait_xcnt
+st.func @global_source_reuse() {
+^entry:
+  v[8:9] = "st.global_load_tr_b64"(v0, s[0:1])
+  v[0:1] = "st.global_load_tr_b64"(v2, s[2:3])
+}
+
 # A VGPR-MSB setter adjacent to its VMEM user needs no explicit drain.
 # CHECK-LABEL: @adjacent_vgpr_msb_vmem
 # CHECK: buffer_load_b32
@@ -267,4 +329,28 @@ st.func @tensor_then_vgpr_msb() {
   "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
   "st.s_set_vgpr_msb"(1)
   s5 = "st.v_readfirstlane_b32"(v0)
+}
+
+# LDS is not VMEM, so it does not open replay state that needs draining before
+# an atomic or VGPR-MSB change.
+# CHECK-LABEL: @lds_then_global_atomic
+# CHECK: ds_load_b32
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NOT: s_wait_xcnt
+st.func @lds_then_global_atomic() {
+^entry:
+  v4 = "st.ds_load_b32"(v0) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+}
+
+# CHECK-LABEL: @lds_then_vgpr_msb
+# CHECK: ds_load_b32
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+# CHECK-NEXT: v_readfirstlane_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @lds_then_vgpr_msb() {
+^entry:
+  v4 = "st.ds_load_b32"(v0) { mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_set_vgpr_msb"(1)
+  s5 = "st.v_readfirstlane_b32"(v1)
 }

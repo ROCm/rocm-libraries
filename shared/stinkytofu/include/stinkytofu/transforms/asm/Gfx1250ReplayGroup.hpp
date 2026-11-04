@@ -51,31 +51,6 @@ inline ReplayGroupKind getReplayGroupKind(const StinkyInstruction& inst, ReplayM
     return ReplayGroupKind::None;
 }
 
-inline bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
-    const auto& srcs = inst.getSrcRegs();
-    return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
-           srcs.front().getLiteralInt() == 0;
-}
-
-// A zero-count data wait guarantees translation for the corresponding memory
-// operations. Nonzero waits leave work in flight and are not full drains.
-inline bool isFullTranslationDrain(const StinkyInstruction& inst) {
-    switch (inst.getUnifiedOpcode()) {
-        case GFX::s_wait_xcnt:
-        case GFX::s_wait_loadcnt:
-        case GFX::s_wait_kmcnt:
-        case GFX::s_wait_dscnt:
-        case GFX::s_wait_loadcnt_dscnt:
-        case GFX::s_wait_tensorcnt:
-        case GFX::s_wait_storecnt:
-        case GFX::s_wait_storecnt_dscnt:
-        case GFX::s_wait_asynccnt:
-            return hasZeroWaitImmediate(inst);
-        default:
-            return false;
-    }
-}
-
 // Internal-control instructions can co-issue with a neighbour, and s_set_vgpr_msb is known to
 // issue with XCNT != 0 (DEMI400-9920, ROCM-25414), so none of them is trusted to end a group.
 inline bool isReplayGroupTransparent(const StinkyInstruction& inst) {
