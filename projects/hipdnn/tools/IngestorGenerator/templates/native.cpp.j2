@@ -179,8 +179,8 @@ public:
         // Build each launch through launchKernelDefinition(kernel, "<name>") first (the names
         // are the ones launchNames() declares above), then pass that single-launch definition
         // to the buildIngestorKernelCode overload that takes no compiler and no compile
-        // options: hkp_pack compiled this dialect's rocke kernels to KPACK. launch() runs
-        // the launches in the order this handler chooses.
+        // options: hkp_pack compiled or packed every launch to KPACK, whether rocke, hip or
+        // hsaco. launch() runs the launches in the order this handler chooses.
 {% elif config.is_packaged %}
         // TODO - FILL THIS OUT. hkp_pack compiles this dialect's hip/rocke kernels to KPACK,
         // so load them with the buildIngestorKernelCode overload that takes no compiler and

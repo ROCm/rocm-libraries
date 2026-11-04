@@ -116,8 +116,8 @@ unverified findings, pending approvals, open decisions, `STOP:` rows, FAILED lan
 ## COMMENTS.md
 
 Drafts for the user to post. One `### <path>:<line> (<ID>, <tier>)` entry per `BLOCKING` or
-`IMPORTANT` finding that is `OPEN` (problem, consequence, smallest fix). Batch `SUGGESTION` and
-`FUTURE WORK` findings by theme into `## General`, one item per theme.
+`IMPORTANT` finding that is `OPEN` (problem, consequence, smallest fix). List `SUGGESTION` and
+`FUTURE WORK` findings under `## General`, one item per finding, below a `**<tier>: <kind>**` line.
 
 `comments.py draft` writes the first draft from the `OPEN` ledger rows. The anchor line must lie
 inside a changed new-side hunk of the diff between `$BASE` and `$HEAD` for that path (`-U0`

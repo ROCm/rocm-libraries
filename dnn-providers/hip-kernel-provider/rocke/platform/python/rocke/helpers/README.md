@@ -18,6 +18,9 @@ top-level skeleton that names what's special about the kernel (the
 shape, the atom, the descriptor for non-bijective addressing) and
 leaves the boilerplate to the helpers.
 
+That only holds if kernels add and fix helpers as they go, with
+tests: [platform/AGENTS.md](../../../AGENTS.md#helpers-placement).
+
 ## What's here
 
 ```text

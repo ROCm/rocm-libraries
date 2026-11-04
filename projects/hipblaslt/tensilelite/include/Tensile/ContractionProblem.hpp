@@ -176,12 +176,16 @@ namespace TensileLite
         }
 
         // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
-        void setUniformSummationOrder(bool uniformSummationOrder)
+        void setUniformSummationOrder(int uniformSummationOrder)
         {
+            if(uniformSummationOrder < -1 || uniformSummationOrder > 1)
+            {
+                throw std::invalid_argument("uniform summation order must be -1, 0, or 1");
+            }
             m_uniformSummationOrder = uniformSummationOrder;
         }
 
-        bool uniformSummationOrder() const
+        int uniformSummationOrder() const
         {
             return m_uniformSummationOrder;
         }
@@ -194,6 +198,31 @@ namespace TensileLite
         int smCountTarget() const
         {
             return m_smCountTarget;
+        }
+
+        // CU-occupancy probe target for kernels built with SupportOccupancyProbe.
+        // A 1-D grid below minGrid is padded to it with probe-only WGs; any
+        // other grid below it gets a null probe address.
+        void setOccupancyProbe(void* addr, uint32_t epoch, uint32_t minGrid)
+        {
+            m_occupancyProbeAddr    = addr;
+            m_occupancyProbeEpoch   = epoch;
+            m_occupancyProbeMinGrid = minGrid;
+        }
+
+        void* occupancyProbeAddr() const
+        {
+            return m_occupancyProbeAddr;
+        }
+
+        uint32_t occupancyProbeEpoch() const
+        {
+            return m_occupancyProbeEpoch;
+        }
+
+        uint32_t occupancyProbeMinGrid() const
+        {
+            return m_occupancyProbeMinGrid;
         }
 
     private:
@@ -209,7 +238,10 @@ namespace TensileLite
         bool             m_fallbackStatus = false; // default value
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
-        bool             m_uniformSummationOrder = false; // default value
+        int              m_uniformSummationOrder = -1; // default value
+        void*            m_occupancyProbeAddr    = nullptr;
+        uint32_t         m_occupancyProbeEpoch   = 0;
+        uint32_t         m_occupancyProbeMinGrid = 0;
     };
 
     /**
@@ -1265,14 +1297,26 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
+        /// mxBlockFree is the extent of one scaling tile along the free dimension
+        /// (M for A, N for B); mxBlock is its extent along the bound (K)
+        /// dimension. mxBlockFree == 1 is the original 1xmxBlock layout, one
+        /// scale per (row, K-block).
+        void setMXScaleA(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> saStride              = {},
+                         bool                padScaleTensorFreeDim = true,
+                         int                 mxBlockFree           = 1);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleB(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> sbStride              = {},
+                         bool                padScaleTensorFreeDim = true,
+                         int                 mxBlockFree           = 1);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1337,6 +1381,19 @@ namespace TensileLite
         size_t mxBlockB() const
         {
             return m_mxBlockB;
+        }
+
+        /// Extent of one scaling tile along the free dimension: M for A, N for
+        /// B. 1 means one scale per row/column, the layout that predates 2D MX
+        /// scaling. Never 0, so callers can divide by it unconditionally.
+        size_t mxBlockFreeA() const
+        {
+            return m_mxBlockFreeA;
+        }
+
+        size_t mxBlockFreeB() const
+        {
+            return m_mxBlockFreeB;
         }
 
         /// Allocated elements excluding batch dimensions
@@ -1615,6 +1672,8 @@ namespace TensileLite
         int              m_metadataLayout          = 0;
         int              m_mxBlockA                = 0;
         int              m_mxBlockB                = 0;
+        int              m_mxBlockFreeA            = 1;
+        int              m_mxBlockFreeB            = 1;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
 

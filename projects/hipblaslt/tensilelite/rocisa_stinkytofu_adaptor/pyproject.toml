@@ -1,0 +1,17 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocisa-stinkytofu-adaptor"
+version = "0.1.0"
+description = "rocisa-compatible facade backed by the stinkytofu Python binding."
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rocisa_stinkytofu_adaptor*"]

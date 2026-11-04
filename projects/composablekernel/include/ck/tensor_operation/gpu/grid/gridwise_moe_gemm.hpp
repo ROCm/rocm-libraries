@@ -285,7 +285,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     // 8-element FP8 K vectors need the single-rate MFMA on gfx950.
     // Every other instance keeps the double-rate MFMA.
     static constexpr bool is_single_rate_mfma =
-        (is_same_v<ComputeTypeA, f8_t> || is_same_v<ComputeTypeA, bf8_t>) &&
+        (is_f8_type_v<ComputeTypeA> || is_bf8_type_v<ComputeTypeA>) &&
         math::lcm(AK1Value, BK1Value) < 16;
 #endif
 
@@ -348,8 +348,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
 #if defined(__gfx125__)
         false;
 #else
-        (is_same_v<remove_cvref_t<BDataType>, f8_t> ||
-         is_same_v<remove_cvref_t<BDataType>, bf8_t>) &&
+        (is_f8_type_v<remove_cvref_t<BDataType>> || is_bf8_type_v<remove_cvref_t<BDataType>>) &&
         BK1Value == FP8HalfKVec && (PadsN || PadsK) && KPerBlock % (KLane * FP8KVec) == 0;
 #endif
     static constexpr index_t KPack = math::max(
@@ -368,7 +367,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         return (mfma_selector::GetK1PerXdlops() * sizeof(ComputeTypeA) > 16) && !isDequantPipe ? 2
                                                                                                : 1;
 #else
-        if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
+        if constexpr(is_f8_type_v<remove_cvref_t<BDataType>>)
             // On gfx950, we have a mfma that required 32 f8 elements as input,
             // splited into 2 groups of 16 f8 elements.
             // the 2 groups is not contiguous in the B preshuffed layout.

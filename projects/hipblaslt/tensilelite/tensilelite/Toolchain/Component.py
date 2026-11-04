@@ -285,7 +285,7 @@ class Assembler(Component):
             destPath: The destination path for the generated object file.
         """
         features = deviceTargetFeaturesOf(targetGfx)
-        targetGfx = compilerTargetOf(targetGfx)
+        targetGfx = compilerTargetOf(targetGfx, self.path)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
@@ -365,7 +365,7 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
+        archFlags = [f"--offload-arch={compilerTargetOf(gfx, self.path)}" for gfx in target_list]
         # -Xclang reaches every device compile; an alias always builds alone.
         features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
         featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]

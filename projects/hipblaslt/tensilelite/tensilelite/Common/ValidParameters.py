@@ -419,10 +419,12 @@ validParameters = { # we need to make sure this matches develop
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
-    #   -1 = auto: enable only where it needs no extra LDS reserved.
-    #    0 = off (default): baseline layout.
-    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
-    #            boundary (needs PrefetchGlobalRead=2).
+    #    0 = off (default).
+    #    1 = require interleave; allow additional LDS up to MaxLDS.
+    #        Reject the kernel candidate if the layout or buffering is unsupported.
+    #   -1 = auto: enable only when supported and LDS usage does not exceed mode 0;
+    #        otherwise disable interleave.
+    #
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
@@ -436,11 +438,10 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
-    # Persistent loop: keep the whole K extent of an operand (and its MX
-    # scales) resident in VGPRs across persistent iterations, so every tile after
-    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
-    # traffic. Only valid when every tile a workgroup visits shares that operand,
-    # which the emitted size predicates enforce.
+    # Persistent loop: keep an operand (and its MX scales) resident in VGPRs across persistent tiles,
+    # so tiles that share it skip reloading it. The size predicates cap K at the resident k-tiles;
+    # a K remainder ((AssertSummationElementMultiple % DepthU != 0)) is tail-folded into the main loop, 
+    # so there is no tail loop in RAP kernel.
     #   0 = off (default)
     #   1 = A resident
     #   2 = B resident -- planned, not implemented yet
@@ -1275,6 +1276,9 @@ validParameters = { # we need to make sure this matches develop
     #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
     #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
     #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #
+    # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
+    # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],
