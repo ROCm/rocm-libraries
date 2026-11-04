@@ -56,8 +56,8 @@ DETACHING_CHARACTERS = ";{}#@"
 GROUP_PATTERN = re.compile(
     r"(?P<canonical>"
     + DOC_PATTERN
-    + r")\n+"
-    + r"(?P<open>/\*\*@\{\*/)\n"
+    + r")[ \t]*\n(?:[ \t]*\n)*"
+    + r"(?P<open>/\*\*@\{\*/)[ \t]*\n"
     + r"(?P<body>.*?)"
     + r"(?P<close>/\*\*@\}\*/)",
     re.DOTALL,
@@ -65,10 +65,11 @@ GROUP_PATTERN = re.compile(
 GROUP_OPEN = "/**@{*/"
 ENTRY_PATTERN = re.compile(
     r"(?:(?P<doc>" + DOC_PATTERN + r")(?P<separator>\s*))?"
-    r"(?P<prefix>(?:" + PREFIX_PATTERN + r"\n)+)"
+    r"(?P<prefix>(?:" + PREFIX_PATTERN + r"(?:[ \t]*\n|[ \t]+))+)"
     r"(?=hipsparseStatus_t\s+(?P<name>hipsparse[A-Za-z0-9_]+)\s*\()",
     re.DOTALL,
 )
+TRAILING_WHITESPACE_PATTERN = re.compile(r"[ \t]+\n")
 DECL_NAME_PATTERN = re.compile(
     r"hipsparseStatus_t\s+(hipsparse[A-Za-z0-9_]+)\s*\("
 )
@@ -180,8 +181,9 @@ def synchronize_group(match: re.Match, write: bool) -> Tuple[str, List[str]]:
         if entry.group("doc") != canonical or entry.group("separator") != "\n":
             stale.append(entry.group("name"))
 
-    for entry in reversed(entries[1:]):
-        replacement = canonical + "\n" + entry.group("prefix")
+    for index, entry in reversed(list(enumerate(entries))):
+        prefix = TRAILING_WHITESPACE_PATTERN.sub("\n", entry.group("prefix"))
+        replacement = prefix if index == 0 else canonical + "\n" + prefix
         body = body[: entry.start()] + replacement + body[entry.end() :]
 
     replacement = (

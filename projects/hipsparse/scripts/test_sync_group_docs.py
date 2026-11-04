@@ -163,6 +163,46 @@ class SynchronizeFileTest(unittest.TestCase):
         self.assertEqual(self.text(), SYNCED)
         self.assertEqual(self.check(), [])
 
+    def test_trailing_whitespace_around_group_marker_is_reported(self):
+        for old, new in (
+            ("*/\n/**@{*/", "*/ \n/**@{*/"),
+            ("/**@{*/\n", "/**@{*/\t\n"),
+            ("HIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseS",
+             "HIPSPARSE_EXPORT \nhipsparseStatus_t hipsparseS"),
+            ("HIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+             "HIPSPARSE_EXPORT \nhipsparseStatus_t hipsparseD"),
+        ):
+            with self.subTest(new=new):
+                self.write(SYNCED.replace(old, new, 1))
+                self.assertEqual(len(self.check()), 1)
+                self.fix()
+                self.assertEqual(self.text(), SYNCED)
+                self.assertEqual(self.check(), [])
+
+    def test_prefixes_on_the_declaration_line_pass(self):
+        one_line = group(
+            DOC,
+            "HIPSPARSE_EXPORT hipsparseStatus_t hipsparseSaxpyi(int x);\n"
+            + "\n"
+            + DOC
+            + "\n"
+            + 'DEPRECATED_CUDA_12000("old") HIPSPARSE_EXPORT '
+            + "hipsparseStatus_t hipsparseDaxpyi(int x);\n",
+        )
+        self.write(one_line)
+        self.assertEqual(self.check(), [])
+        self.assertEqual(self.fix(), [])
+        self.assertEqual(self.text(), one_line)
+
+    def test_detaching_character_in_one_line_prefix_is_refused(self):
+        self.assert_refused(
+            DOC
+            + "\n"
+            + 'HIPSPARSE_DEPRECATED_MSG("old; use X") HIPSPARSE_EXPORT '
+            + "hipsparseStatus_t hipsparseAxpby(int x);\n",
+            "the prefix of hipsparseAxpby contains ';'",
+        )
+
     def test_blank_lines_before_group_marker_are_reported(self):
         self.write(SYNCED.replace("*/\n/**@{*/", "*/\n\n/**@{*/", 1))
         self.assertEqual(self.check(), ["hipsparseSaxpyi"])
