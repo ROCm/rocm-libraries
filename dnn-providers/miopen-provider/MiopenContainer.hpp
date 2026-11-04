@@ -10,14 +10,23 @@
 #include <vector>
 
 #include "HipdnnMiopenHandle.hpp"
+#include "engines/MiopenEngine.hpp"
 
 namespace miopen_plugin
 {
 
-/// @brief Each MIOpen engine's declared L1 models: ranking metric to the UUID of the UHD
-/// that answers in it. A deployer installs a model by publishing a UHD with that id.
+/// @brief Each MIOpen engine's declared L1 models: ranking metric to the UUID bound under
+/// `default`, for a model an operator deploys.
 extern const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS;
 extern const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS;
+/// @brief Each MIOpen engine's shipped L1 models: architecture to the UUID of its tflops model.
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_ARCH_L1_MODELS;
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_ARCH_L1_MODELS;
+
+/// @brief The binding an engine is constructed with: @p byMetric under `default`, and each
+/// of @p byArch as that architecture's tflops model.
+L1ModelIds declaredL1Models(const std::map<std::string, std::string>& byMetric,
+                            const std::map<std::string, std::string>& byArch);
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.

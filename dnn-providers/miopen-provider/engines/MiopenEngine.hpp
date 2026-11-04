@@ -20,6 +20,12 @@
 namespace miopen_plugin
 {
 
+/// An engine's declared L1 models (RFC 0019 Open Question 7): architecture key (`default`,
+/// or a gcnArchName base id such as `gfx942`) to ranking metric to the UUID of the
+/// `predict_engine` UHD bound for that pair. The longest matching key wins and `default`
+/// answers only when none does (RFC 0019 §8.3).
+using L1ModelIds = std::map<std::string, std::map<std::string, std::string>>;
+
 /**
  * @brief MIOpen implementation of the IEngine interface.
  *
@@ -31,10 +37,10 @@ class MiopenEngine : public hipdnn_plugin_sdk::
 {
 public:
     /// @param name        This engine's hipDNN name, as its container declared it.
-    /// @param l1ModelIds  Ranking metric to the UUID of the `predict_engine` UHD bound for
-    ///                    it under `default`. A model whose `score.metric` differs from its
-    ///                    declared metric is refused. Empty or undeployed means no estimate.
-    MiopenEngine(int64_t id, std::string name, std::map<std::string, std::string> l1ModelIds);
+    /// @param l1ModelIds  The models this engine binds. A model whose `score.metric` differs
+    ///                    from the metric its id was declared for is refused. Empty or
+    ///                    undeployed means no estimate.
+    MiopenEngine(int64_t id, std::string name, L1ModelIds l1ModelIds);
 
     int64_t id() const override;
 
@@ -81,7 +87,7 @@ private:
     /// must match a model's `trained_against.selector_revision`. Excludes the build's
     /// commit so a model survives a rebuild.
     std::string _selectorRevision;
-    std::map<std::string, std::string> _l1ModelIds;
+    L1ModelIds _l1ModelIds;
     /// Empty when no descriptor root is installed: reported as UNAVAILABLE, not an error.
     hipdnn_plugin_sdk::uhd::EngineModelBinding _l1Models;
 #endif
