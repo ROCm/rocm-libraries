@@ -5348,17 +5348,19 @@ class SAtomicUmaxX2(Instruction):
         return dup
 
 
-# --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment, tensor) ---
-def _make_tensor_load_class():
+# --- TensorLoadToLds / TensorStoreFromLds: rocisa(group0, group1, group2, group3, comment, tensor) ---
+def _make_tensor_class(name: str, mnemonic: str):
     def __init__(self, group0: Any = None, group1: Any = None,
                  group2: Any = None, group3: Any = None,
                  comment: str = "", tensor: Any = None, **kw):
         _ = kw
+        if name == "TensorStoreFromLds" and (group2 is None) != (group3 is None):
+            raise ValueError("TensorStoreFromLds requires group2 and group3 to be both set or both null")
         CommonInstruction.__init__(
             self, instType=InstType.INST_NOTYPE, dst=group0,
             srcs=[group1, group2, group3], dpp=None, sdwa=None,
             vop3=None, comment=comment)
-        self.setInst("tensor_load_to_lds")
+        self.setInst(mnemonic)
         self.tensor = tensor
 
     def getArgStr(self) -> str:
@@ -5388,7 +5390,7 @@ def _make_tensor_load_class():
             kwargs["group2"] = _to_stinky_register(group2)
         if group3 is not None:
             kwargs["group3"] = _to_stinky_register(group3)
-        logical = _st.TensorLoadToLds(
+        logical = getattr(_st, name)(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             **kwargs)
@@ -5401,18 +5403,19 @@ def _make_tensor_load_class():
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type("TensorLoadToLds", (CommonInstruction,), {
+    cls = type(name, (CommonInstruction,), {
         "__init__": __init__,
         "getArgStr": getArgStr,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
         **_mem_issue_latency(1),
     })
-    cls.__qualname__ = "TensorLoadToLds"
+    cls.__qualname__ = name
     return cls
 
 
-TensorLoadToLds = _make_tensor_load_class()
+TensorLoadToLds = _make_tensor_class("TensorLoadToLds", "tensor_load_to_lds")
+TensorStoreFromLds = _make_tensor_class("TensorStoreFromLds", "tensor_store_from_lds")
 # logicalIR: GlobalPrefetchB8 — 2 srcs (vaddr, saddr), no dest
 def _make_global_prefetch_class():
     """GlobalPrefetchB8: (vaddr, saddr, globalModifiers) → logicalIR 2 srcs."""
