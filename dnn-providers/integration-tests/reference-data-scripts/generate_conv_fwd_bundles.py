@@ -19,7 +19,9 @@ Each directory gets ``graph.template.json``, ``sweep.json`` and an empty
 ``support.json`` (claims are harvested with ``--write-support-claims``, never
 written here). The generator is deterministic: the same plan gives the same
 bytes. Every case carries a ``purpose`` (claim | probe) and the plan items it
-implements (``plan_items``) in its metadata. See
+implements (``plan_items``) in its metadata. The level rules build the complete
+products; the trims declared in ``conv_fwd_plan.TRIMS`` are removed after case
+ids are assigned, so a trim never renames a surviving case. See
 ``docs/test-plans/convolution-fwd.md``.
 
 Usage:
@@ -411,8 +413,13 @@ def sweep_case(c, cid):
         "seed": _seed(cid, "case"),
         "inputs": input_recipes(c, cid),
     }
+    notes = []
     if probe:
-        meta["notes"] = "probe: " + "; ".join(probe)
+        notes.append("probe: " + "; ".join(probe))
+    if c.get("src"):
+        notes.append(c["src"])
+    if notes:
+        meta["notes"] = "; ".join(notes)
     total = sum(P.numel(d) * P.BYTES.get(t, 1) for d, _, t in tensor_specs(c).values())
     if total > (1 << 30):
         meta["minimum_vram_mb"] = int(total * 2 / (1 << 20)) + 1
@@ -562,6 +569,9 @@ class Builder:
     def A(self, aid, pair, **kw):
         return self._make(dict(P.ACCUM_SHAPES[aid]), pair, (aid,), "A", **kw)
 
+    def R(self, rid):
+        return P.new(**P.shape_R(rid), ids=(rid,), size="R", src=P.r_source(rid))
+
     def _make(self, kwargs, pair, ids, size, **kw):
         lay, dt = pair
         return P.new(**kwargs, xl=lay, wl=lay, yl=lay, xt=dt, ids=ids, size=size, **kw)
@@ -644,6 +654,9 @@ def rules(lv):
             add(v_scale(sc, kind))
         add(v_materialised(fuse(base, "act", act="relu")))
         add(v_inter_io(fuse(S3(P.PAIRS[2]), "act", act="relu")))
+        for rid, e in P.R_SHAPES.items():
+            if e["level"] == "standard":
+                add(b.R(rid))
 
     elif lv == 2:  # nightly: what should we test each day, wider per engine?
         for r in (1, 2, 3, 4):
@@ -723,6 +736,9 @@ def rules(lv):
                 add(v_scale(sc, kind))
             add(v_materialised(fuse(b.S("S3", r, pr), "act", act="relu")))
             add(v_inter_io(fuse(b.S("S3", r, pr), "act", act="relu")))
+        for rid, e in P.R_SHAPES.items():
+            if e["level"] == "comprehensive":
+                add(b.R(rid))
 
     else:  # full: which wider sweeps must exist in the full suite?
         for r in P.RANKS:
@@ -773,6 +789,9 @@ def rules(lv):
             for r in P.RANKS:
                 for i, s in enumerate(b.sids(r)):
                     add(fuse(b.S(s, r, P.PAIRS[(i + ti) % 6]), topo))
+        for rid, e in P.R_SHAPES.items():
+            if e["level"] == "full":
+                add(b.R(rid))
     return b.cases
 
 
@@ -813,7 +832,36 @@ def build():
             if counts[(c["topo"], cid)] > 1:
                 item[1] = f"{cid}_{P.short_hash(c)}"
         result[level] = out
+    dropped.update(apply_trims(result))
     return result, dropped
+
+
+def apply_trims(result):
+    """Remove the products of ``P.TRIMS``. A T10 case survives when no other
+    surviving bias_act case covers its activation x core cell; levels are visited
+    lowest first, so that case is the lowest and first one. Runs after the ids
+    are assigned, so the cases that remain keep their ids."""
+    removed = Counter()
+    covered = {
+        P.core_cell(c)
+        for level, items in result.items()
+        for c, _ in items
+        if c["topo"] == "bias_act" and P.trim(c, level) is None
+    }
+    for level, items in result.items():
+        keep = []
+        for item in items:
+            c = item[0]
+            t = P.trim(c, level)
+            if t == "T10" and P.core_cell(c) not in covered:
+                covered.add(P.core_cell(c))
+                t = None
+            if t:
+                removed[f"{level}: trimmed {t}"] += 1
+            else:
+                keep.append(item)
+        result[level] = keep
+    return removed
 
 
 # --------------------------------------------------------------------------

@@ -9,11 +9,16 @@ generator (``generate_conv_fwd_bundles.py``) and the exhaustive tool read:
 
 * the case model and its geometry rules (output size, strides, FLOP, bytes);
 * the legality rules, which copy ``ConvolutionFpropNode::pre_validate_node``;
-* the shape catalog (S, L, M, H, X) and the per-level size ceilings;
-* the activation list, the value domains and the purpose rule.
+* the shape catalog (S, L, M, R, H, X) and the per-level size ceilings;
+* the activation list, the value domains and the purpose rule;
+* the products that are generated and then trimmed (``TRIMS``), each with the
+  trigger that brings it back.
 
-It contains no engine knowledge. A case is a plain ``dict``; ``finalize``
-resolves every default so that two spellings of one graph compare equal.
+It has no engine matrix. The one piece of engine evidence is ``TRIMS``: it
+records which products no engine executed when they were measured, and each
+trim names the trigger that brings its product back. A case is a plain
+``dict``; ``finalize`` resolves every default so that two spellings of one
+graph compare equal.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from pathlib import Path
 
 # --------------------------------------------------------------------------
 # Axes
@@ -300,7 +306,7 @@ def fits(c, level):
 def canon(c):
     """Stable key of the graph: everything that changes the graph or its data,
     nothing that only labels the case."""
-    skip = {"ids", "size"}
+    skip = {"ids", "size", "src"}
     return json.dumps(
         {k: v for k, v in sorted(c.items()) if k not in skip}, sort_keys=True
     )
@@ -604,6 +610,40 @@ M_SHAPES = {
 }
 M_PR = ("M2", "M9", "M11")  # the only cases that may exceed the PR ceiling
 
+# R: real model geometries from the dnn-benchmarking convolution corpus (plan
+# section 3.3). The pick, its selection rule and its provenance (repository
+# commit and archive md5) are data in conv_fwd_corpus.json; the cases keep the
+# data type and layout the model used.
+CORPUS_FILE = Path(__file__).with_name("conv_fwd_corpus.json")
+
+
+def corpus():
+    """The R-set document: source pin, selection rule and the picked cases."""
+    with open(CORPUS_FILE, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+R_SHAPES = {e["id"]: e for e in corpus()["cases"]}
+
+
+def shape_R(rid):
+    """Case kwargs of R shape ``rid``: geometry, layout and data type."""
+    e = R_SHAPES[rid]
+    geo = {k: e[k] for k in ("rank", "n", "c", "k", "g")}
+    geo.update({k: tuple(e[k]) for k in ("ins", "f", "s", "d", "pre", "post")})
+    lay = e["layout"]
+    return dict(geo, xl=lay, wl=lay, yl=lay, xt=e["dtype"])
+
+
+def r_source(rid):
+    """Provenance note of R shape ``rid`` (written into the case metadata)."""
+    e = R_SHAPES[rid]
+    return (
+        f"dnn-benchmarking corpus {e['shape_id']}; models: {', '.join(e['models'])}"
+        f"; family: {', '.join(e['family'])}"
+    )
+
+
 # H: hazard breakpoints. One change from the S defaults (N 1, C 16, K 32, 16 per
 # dimension, filter 3, pad 1). Powers of 2 +- 1, dims not divisible by 4 or 8.
 H_SHAPES = {
@@ -670,6 +710,53 @@ ACCUM_SHAPES = {
         rank=3, n=1, c=128, k=32, g=1, ins=(8, 8, 8), f=3, pre=1, post=1
     ),  # 3,456
 }
+
+
+# --------------------------------------------------------------------------
+# Trimmed products (plan section 4.3, trade-off register T8-T11). The level rules
+# generate the complete products; the generator then removes these cases, so the
+# cases that remain keep their ids, seeds and claims. Each trim removes a product
+# that no engine executed on the measured architectures (gfx942 and gfx90a, see
+# plan section 4.5); its trigger brings the product back. Activations that an
+# engine executes are never trimmed.
+# --------------------------------------------------------------------------
+
+# Activations at least one engine executed in the act topology (plan section 4.5).
+EXECUTED_ACTS = ("relu", "relu6", "relu_clamp", "sigmoid", "tanh")
+UNEXECUTED_TOPOLOGIES = ("scale_bias_act", "add_relu", "bias_add_relu", "act_add")
+
+TRIMS = {
+    "T8": "full: act x every S and L shape for activations no engine executes",
+    "T9": "comprehensive and full: plain repeats of the four fused topologies no engine executes",
+    "T10": "comprehensive and full: fp16 and bf16 bias_act, except one case per activation x core cell",
+    "T11": "full: F13, F19 and F35 paired with every S shape",
+}
+
+
+def trim(c, level):
+    """The trim (key of TRIMS) that removes case ``c`` from ``level``, or None.
+    T10's per-cell exception is applied by the generator, which sees all levels."""
+    tagged = any(i.startswith("F") for i in c["ids"])
+    topo = c["topo"]
+    if level == "full" and topo == "act" and c["act"] not in EXECUTED_ACTS:
+        return "T8"
+    late = level in ("comprehensive", "full")
+    if late and topo in UNEXECUTED_TOPOLOGIES and not tagged:
+        return "T9"
+    if late and topo == "bias_act" and c["xt"] in ("half", "bfloat16") and not tagged:
+        return "T10"
+    if (
+        level == "full"
+        and topo == "conv"
+        and any(i in ("F13", "F19", "F35") for i in c["ids"])
+    ):
+        return "T11"
+    return None
+
+
+def core_cell(c):
+    """The core cell of a fused case, per activation: (act, rank, layout, dtype)."""
+    return (c["act"], c["rank"], c["xl"], c["xt"])
 
 
 # --------------------------------------------------------------------------
