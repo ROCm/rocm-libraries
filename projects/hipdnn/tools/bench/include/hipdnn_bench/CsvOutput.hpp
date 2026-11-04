@@ -67,13 +67,14 @@ inline std::vector<std::pair<std::string, std::string>>
 }
 
 /// The CSV header: the problem and its graph's content key, the device and problem columns
-/// (named in full), the `--query` parameters (`q.*`), the knobs (`kernel.*`), then the row's
-/// outcome. Timing
+/// (named in full), the `--query` parameters (`q.*`), the knobs (`kernel.*`), the
+/// `slotColumns` of a slotted engine (none otherwise), then the row's outcome. Timing
 /// names follow RFC 0019.13 §8.3 (camelCase); `numerically_valid` is three-valued text,
 /// kept apart from `is_valid` (RFC 0019 §13.2).
 inline std::string csvHeader(const std::vector<std::string>& featureColumns,
                              const std::vector<std::string>& queryNames,
-                             const std::vector<std::string>& knobNames)
+                             const std::vector<std::string>& knobNames,
+                             const std::vector<std::string>& slotColumns = {})
 {
     std::string header = "problem,benchmark";
     for(const auto& column : featureColumns)
@@ -87,6 +88,10 @@ inline std::string csvHeader(const std::vector<std::string>& featureColumns,
     for(const auto& knob : knobNames)
     {
         header += "," + csvField("kernel." + knob);
+    }
+    for(const auto& column : slotColumns)
+    {
+        header += "," + column;
     }
     return header
            + ",engine,rank,succeeded,is_valid,numerically_valid,validation,skip_reason,"
@@ -145,7 +150,8 @@ struct CandidateOutcome
 };
 
 /// One CSV row, in @ref csvHeader's column order: the problem and its graph's content key,
-/// the feature, query and knob values given in their header's order, then the outcome.
+/// the feature, query and knob values given in their header's order, the @p slotValues of a
+/// slotted engine (none otherwise), then the outcome.
 ///
 /// Every text field goes through csvField: the problem id defaults to the graph's path, and
 /// knob values and engine names are free text. Training filters on is_valid.
@@ -154,10 +160,11 @@ inline std::string csvRow(const std::string& problem,
                           const std::vector<std::string>& features,
                           const std::vector<std::string>& queries,
                           const std::vector<std::string>& knobs,
-                          const CandidateOutcome& outcome)
+                          const CandidateOutcome& outcome,
+                          const std::vector<std::string>& slotValues = {})
 {
     std::string row = csvField(problem) + "," + csvField(benchmark);
-    for(const auto* values : {&features, &queries, &knobs})
+    for(const auto* values : {&features, &queries, &knobs, &slotValues})
     {
         for(const auto& value : *values)
         {

@@ -8,8 +8,10 @@
 // without depending on the checked-in bundles.
 
 #include <cstdint>
+#include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <nlohmann/json.hpp>
 
@@ -138,6 +140,47 @@ inline flatbuffers::DetachedBuffer buildSdpaGraph(int64_t seq)
     auto offset = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
         builder, graph);
     builder.Finish(offset);
+    return builder.Release();
+}
+
+// A single-node SdpaBackward graph. Only Q and K carry the dimensions the cost gate reads
+// (Q is [batch, heads, seqQ, headDim], K is [batch, heads, seqKv, headDim]); the other
+// operands reuse Q's shape because the gate never looks at them.
+inline flatbuffers::DetachedBuffer buildSdpaBackwardGraph(
+    int64_t batch, int64_t heads, int64_t seqQ, int64_t seqKv, int64_t headDim)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const auto strides = [headDim](int64_t seq, int64_t headCount) {
+        return std::vector<int64_t>{headCount * seq * headDim, seq * headDim, headDim, 1};
+    };
+    const std::vector<int64_t> qDims = {batch, heads, seqQ, headDim};
+    const std::vector<int64_t> kDims = {batch, heads, seqKv, headDim};
+    const auto qStrides = strides(seqQ, heads);
+    const auto kStrides = strides(seqKv, heads);
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "q", DataType::HALF, &qStrides, &qDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 2, "k", DataType::HALF, &kStrides, &kDims));
+    for(int64_t uid = 3; uid <= 9; ++uid)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(builder, uid, "", DataType::HALF, &qStrides, &qDims));
+    }
+
+    auto attributes = CreateSdpaBackwardAttributes(builder, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     attributes.Union()));
+
+    builder.Finish(CreateGraphDirect(
+        builder, "test", DataType::HALF, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
     return builder.Release();
 }
 

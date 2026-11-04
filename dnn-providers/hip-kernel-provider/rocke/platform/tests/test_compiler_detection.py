@@ -114,6 +114,16 @@ def test_unavailable_library_does_not_prevent_offline_emission(monkeypatch):
         assert lower_llvm._resolve_llvm_flavor() == "llvm23"
 
 
+@pytest.mark.parametrize("value", ["llvm25", "LLVM24", " llvm24 "])
+def test_unknown_explicit_flavor_fails_without_querying(monkeypatch, value):
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", value)
+    query = Mock(side_effect=AssertionError("unknown override queried COMGR"))
+    monkeypatch.setattr(comgr, "_require_compiler_info", query)
+    with pytest.raises(ValueError, match="not a recognized flavor"):
+        lower_llvm._resolve_llvm_flavor()
+    query.assert_not_called()
+
+
 def test_auto_lowering_recovers_then_retains_success(monkeypatch):
     monkeypatch.setenv("ROCKE_BACKEND", "python")
     monkeypatch.setattr(comgr, "_lib", None)
@@ -176,11 +186,16 @@ def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
         (21, "llvm22"),
         (22, "llvm22"),
         (23, "llvm23"),
-        (24, "llvm23"),
+        (24, "llvm24"),
     ],
 )
 def test_llvm_flavor_boundaries(major, flavor):
     assert lower_llvm._flavor_for_llvm(major) == flavor
+
+
+def test_newer_compiler_major_is_not_silently_qualified():
+    with pytest.raises(ValueError, match="major 25.*latest qualified lane llvm24"):
+        lower_llvm._flavor_for_llvm(25)
 
 
 def test_override_does_not_falsify_guard_evidence(monkeypatch):
@@ -195,6 +210,28 @@ def test_override_does_not_falsify_guard_evidence(monkeypatch):
             f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm23")}"'
         )
     assert info.describe() in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "ir",
+    [
+        "define void @k() {}",
+        'target datalayout = "unrecognized"\ndefine void @k() {}',
+        f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm24")}"\n'
+        "define void @k() {}",
+    ],
+)
+def test_unqualified_future_compiler_is_rejected_before_ir_shape_checks(
+    monkeypatch, ir
+):
+    info = comgr.CompilerInfo(
+        (25, 0, 0), "fixture", "requested.so", "loaded.so", "loaded.so"
+    )
+    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    with pytest.raises(
+        comgr.ComgrError, match="major 25.*latest qualified lane llvm24"
+    ):
+        comgr._assert_ir_flavor_matches_lib(ir)
 
 
 def test_loader_skips_unloadable_candidate_before_querying(monkeypatch):

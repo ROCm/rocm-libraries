@@ -37,9 +37,11 @@
 
 namespace
 {
-    bool uniformSummationOrderEnabled(hipblasLtHandle_t handle, bool pref)
+    int32_t uniformSummationOrderEnabled(hipblasLtHandle_t handle, int32_t pref)
     {
-        return pref || (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
+        if(pref != -1)
+            return pref;
+        return (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
     }
 }
 
@@ -54,7 +56,7 @@ namespace hipblaslt_ext
     public:
         size_t                           workspace_bytes          = 0;
         hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
-        bool                             uniform_summation_order  = false;
+        int32_t                          uniform_summation_order  = -1;
     };
 
     GemmPreference::GemmPreference()
@@ -108,12 +110,16 @@ namespace hipblaslt_ext
         return pimpl->streamk_tile_scheduling_mode;
     }
 
-    void GemmPreference::setUniformSummationOrder(bool value)
+    void GemmPreference::setUniformSummationOrder(int32_t value)
     {
+        if(value < -1 || value > 1)
+        {
+            throw std::invalid_argument("uniform summation order must be -1, 0, or 1");
+        }
         pimpl->uniform_summation_order = value;
     }
 
-    bool GemmPreference::getUniformSummationOrder() const
+    int32_t GemmPreference::getUniformSummationOrder() const
     {
         return pimpl->uniform_summation_order;
     }
@@ -854,8 +860,10 @@ namespace hipblaslt_ext
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedCpp");
         auto                    gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
-        applyUniformSummationOrder(
-            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
+        // -1 inherits the value setProblem resolved from the matmul descriptor.
+        // Applying the handle here would clear an explicit descriptor 0.
+        if(m_uniform_summation_order != -1)
+            applyUniformSummationOrder(m_data, gemmType, m_uniform_summation_order);
         auto                    rocalgo  = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         rocblaslt::RocTuningV2* tuning   = nullptr;
         auto                    status = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp(
@@ -876,8 +884,10 @@ namespace hipblaslt_ext
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedTuningV2Cpp");
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
-        applyUniformSummationOrder(
-            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
+        // -1 inherits the value setProblem resolved from the matmul descriptor.
+        // Applying the handle here would clear an explicit descriptor 0.
+        if(m_uniform_summation_order != -1)
+            applyUniformSummationOrder(m_data, gemmType, m_uniform_summation_order);
         auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status
@@ -1142,6 +1152,26 @@ namespace hipblaslt_ext
                       inputs.getScaleAux());
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
+        // A null scalar or data pointer keeps the invalid-pointer status rocblaslt reports for it.
+        if(!gemm_pointers_missing(m,
+                                  n,
+                                  k,
+                                  batch_count,
+                                  false,
+                                  (rocblaslt_compute_type)problemtype.getTypeCompute(),
+                                  HIPBLASLT_DATATYPE_INVALID,
+                                  problemtype.getTypeA(),
+                                  rocblaslt_pointer_mode_host,
+                                  inputs.getAlpha(),
+                                  inputs.getBeta(),
+                                  inputs.getA(),
+                                  inputs.getB(),
+                                  inputs.getC(),
+                                  inputs.getD()))
+            if(auto status = refuse_unsupported_order(
+                   __func__, problemtype.getOrderA(), problemtype.getOrderB());
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
         auto rocepilogue = reinterpret_cast<rocblaslt::RocGemmEpilogueV2*>(epilogue.pimpl.get());
         auto rocepinputs = reinterpret_cast<rocblaslt::RocGemmInputsV2*>(inputs.pimpl.get());
@@ -1186,6 +1216,27 @@ namespace hipblaslt_ext
                                      void*                   D,
                                      hipblasLtMatrixLayout_t matD)
     {
+        // A null descriptor, layout, scalar, or data pointer keeps the status rocblaslt reports
+        // for it.
+        if(!gemm_pointers_missing(false,
+                                  (rocblaslt_matmul_desc)matmul_descr,
+                                  (rocblaslt_matrix_layout)matA,
+                                  (rocblaslt_matrix_layout)matB,
+                                  (rocblaslt_matrix_layout)matC,
+                                  (rocblaslt_matrix_layout)matD,
+                                  alpha,
+                                  beta,
+                                  A,
+                                  B,
+                                  C,
+                                  D))
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      (rocblaslt_matrix_layout)matA,
+                                                      (rocblaslt_matrix_layout)matB,
+                                                      (rocblaslt_matrix_layout)matC,
+                                                      (rocblaslt_matrix_layout)matD);
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemCAPICpp");
         auto rocproblemtypes
             = reinterpret_cast<std::vector<rocblaslt::RocGemmProblemTypeV2>*>(&m_problem_types);
@@ -1356,6 +1407,32 @@ namespace hipblaslt_ext
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
             }
         }
+        // A null scalar or data pointer in any GEMM keeps the invalid-pointer status rocblaslt
+        // reports for it.
+        bool pointersPresent = inputs.size() >= m.size();
+        for(size_t i = 0; pointersPresent && i < m.size(); i++)
+            pointersPresent
+                = i < n.size() && i < k.size() && i < batch_count.size()
+                  && !gemm_pointers_missing(m[i],
+                                            n[i],
+                                            k[i],
+                                            batch_count[i],
+                                            true,
+                                            (rocblaslt_compute_type)problemtype.getTypeCompute(),
+                                            HIPBLASLT_DATATYPE_INVALID,
+                                            problemtype.getTypeA(),
+                                            rocblaslt_pointer_mode_host,
+                                            inputs[i].getAlpha(),
+                                            inputs[i].getBeta(),
+                                            inputs[i].getA(),
+                                            inputs[i].getB(),
+                                            inputs[i].getC(),
+                                            inputs[i].getD());
+        if(pointersPresent)
+            if(auto status = refuse_unsupported_order(
+                   __func__, problemtype.getOrderA(), problemtype.getOrderB());
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullV2Cpp");
         std::vector<rocblaslt::RocGemmEpilogueV2> rocepilogue;
         for(auto& e : epilogue)
@@ -1410,6 +1487,40 @@ namespace hipblaslt_ext
                                             std::vector<void*>&                   D,
                                             std::vector<hipblasLtMatrixLayout_t>& matD)
     {
+        auto layoutAt = [](const std::vector<hipblasLtMatrixLayout_t>& mats, size_t i) {
+            return i < mats.size() ? (rocblaslt_matrix_layout)mats[i] : nullptr;
+        };
+        // A null descriptor, layout, scalar, or data pointer in any GEMM keeps the status
+        // rocblaslt reports for it, so the order is checked only once every GEMM's arguments are
+        // present.
+        auto pointerAt = [](const auto& ptrs, size_t i) -> const void* {
+            return i < ptrs.size() ? ptrs[i] : nullptr;
+        };
+        bool present = true;
+        for(size_t i = 0; present && i < matmul_descr.size(); i++)
+            present = !gemm_pointers_missing(true,
+                                             (rocblaslt_matmul_desc)matmul_descr[i],
+                                             layoutAt(matA, i),
+                                             layoutAt(matB, i),
+                                             layoutAt(matC, i),
+                                             layoutAt(matD, i),
+                                             pointerAt(alpha, i),
+                                             pointerAt(beta, i),
+                                             pointerAt(A, i),
+                                             pointerAt(B, i),
+                                             pointerAt(C, i),
+                                             pointerAt(D, i));
+        const size_t count = present ? matmul_descr.size() : 0;
+        for(size_t i = 0; i < count; i++)
+        {
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      layoutAt(matA, i),
+                                                      layoutAt(matB, i),
+                                                      layoutAt(matC, i),
+                                                      layoutAt(matD, i));
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
+        }
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemCAPICpp");
         auto matmul_descr_groupedGemm
             = reinterpret_cast<std::vector<rocblaslt_matmul_desc>*>(&matmul_descr);
@@ -1496,6 +1607,15 @@ namespace hipblaslt_ext
                                           size_t&                 workspaceSizeInBytes)
     try
     {
+        // Missing arguments keep the status rocblaslt_matmul_is_algo_supported reports for them.
+        if(handle && matmulDesc && alpha && beta)
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      (rocblaslt_matrix_layout)Adesc,
+                                                      (rocblaslt_matrix_layout)Bdesc,
+                                                      (rocblaslt_matrix_layout)Cdesc,
+                                                      (rocblaslt_matrix_layout)Ddesc);
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtMatMulIsAlgoSupportedCpp");
         auto status = RocBlasLtStatusToHIPStatus(
             rocblaslt_matmul_is_algo_supported((rocblaslt_handle)handle,
@@ -1617,6 +1737,13 @@ namespace hipblaslt_ext
                       hipblasLtMatrixLayout_t Cdesc,
                       hipblasLtMatrixLayout_t Ddesc)
     {
+        if(refuse_unsupported_order(__func__,
+                                    (rocblaslt_matrix_layout)Adesc,
+                                    (rocblaslt_matrix_layout)Bdesc,
+                                    (rocblaslt_matrix_layout)Cdesc,
+                                    (rocblaslt_matrix_layout)Ddesc)
+           != HIPBLAS_STATUS_SUCCESS)
+            return -1;
         rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulIsTunedCpp");
         auto status = rocblaslt_matmul_is_tuned((rocblaslt_handle)handle,
                                                 (rocblaslt_matmul_desc)matmulDesc,
@@ -1646,6 +1773,15 @@ namespace hipblaslt_ext
                                          size_t*                            workspaceSize,
                                          int*                               returnAlgoCount)
     {
+        // Missing arguments keep the status rocblaslt_matmul_is_algo_supported reports for them.
+        if(handle && matmulDesc && alpha && beta)
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      (rocblaslt_matrix_layout)matA,
+                                                      (rocblaslt_matrix_layout)matB,
+                                                      (rocblaslt_matrix_layout)matC,
+                                                      (rocblaslt_matrix_layout)matD);
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         if(heuristicResultsArray[0].algo.data[0] != 0)
         {
             rocblaslt_status status = rocblaslt_matmul_is_algo_supported((rocblaslt_handle)handle,

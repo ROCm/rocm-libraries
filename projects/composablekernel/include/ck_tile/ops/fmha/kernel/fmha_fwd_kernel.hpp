@@ -8,6 +8,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 
 #include <string>
 #include <type_traits>
@@ -166,6 +167,24 @@ static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
         return false;
 }();
 
+// Whether an epilogue takes the kernel's LDS as a 4th operator() argument
+// (kUsesSmem). An arity probe would also match Default2DEpilogue's defaulted
+// `void*` parameter, and GetSmemSize() != 0 would match DynamicQuantEpilogue,
+// which reserves its own LDS.
+template <typename Epilogue, typename = void>
+struct epilogue_uses_smem : std::false_type
+{
+};
+
+template <typename Epilogue>
+struct epilogue_uses_smem<Epilogue, std::void_t<decltype(Epilogue::kUsesSmem)>>
+    : std::bool_constant<Epilogue::kUsesSmem>
+{
+};
+
+template <typename Epilogue>
+inline constexpr bool epilogue_uses_smem_v = epilogue_uses_smem<Epilogue>::value;
+
 } // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
@@ -243,6 +262,11 @@ struct FmhaFwdKernel
     static constexpr bool kUseTrLoad    = detail::is_using_trload_v<FmhaPipeline>;
     static constexpr bool kIsTdmSchedD128 =
         kPipelineName == "qr_tdm_sched" && FmhaPipeline::BlockFmhaShape::kQKHeaddim == 128;
+    static constexpr bool kUseAsyncLdsOStore =
+        kIsTdmSchedD128 && kUsesFixedSegmentedLdsArena && sizeof(ODataType) == 2;
+    static constexpr index_t kAsyncOStoreBytes          = 16;
+    static constexpr index_t kAsyncOStoreVec            = kAsyncOStoreBytes / sizeof(ODataType);
+    static constexpr uint64_t kAsyncOTileSpanLimitBytes = uint64_t{1} << 32;
     // Match qr_tdm plus the validated sched D64/D128 variants. Sched D192 keeps
     // the existing head-major remap. GetTileIndex additionally requires batch
     // BHSD, square causal attention, one V tile, and no dropout for this order.
@@ -1517,6 +1541,29 @@ struct FmhaFwdKernel
             if constexpr(!FmhaPipeline::kEnableVirtualSink)
             {
                 if(kargs.sink_ptr != nullptr)
+                    return false;
+            }
+            // The codegen constraint repeats these checks so the dispatcher falls back to qr_tdm.
+            if constexpr(kUseAsyncLdsOStore)
+            {
+                if(kargs.hdim_v != FmhaPipeline::kN1)
+                    return false;
+                if(reinterpret_cast<uintptr_t>(kargs.o_ptr) % kAsyncOStoreBytes != 0 ||
+                   kargs.stride_o < 0 || kargs.stride_o % kAsyncOStoreVec != 0 ||
+                   kargs.nhead_stride_o % kAsyncOStoreVec != 0)
+                {
+                    return false;
+                }
+                if constexpr(!kIsGroupMode)
+                {
+                    if(kargs.batch_stride_o % kAsyncOStoreVec != 0)
+                        return false;
+                }
+                const uint64_t tile_span_bytes = (FmhaPipeline::kM0 - 1) *
+                                                     static_cast<uint64_t>(kargs.stride_o) *
+                                                     sizeof(ODataType) +
+                                                 FmhaPipeline::kN1 * sizeof(ODataType);
+                if(tile_span_bytes > kAsyncOTileSpanLimitBytes)
                     return false;
             }
         }
@@ -3565,6 +3612,20 @@ struct FmhaFwdKernel
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...);
             };
 
+            // Declared here so the epilogue can reuse the pipeline's LDS. The
+            // non-arena prefill pipelines and the fixed segmented arena declare
+            // their own arrays.
+            constexpr bool kPipelineDeclaresLds =
+                PrefillCase &&
+                (kUsesFixedSegmentedLdsArena || !detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>);
+            char* smem_ptr = nullptr;
+            if constexpr(!kPipelineDeclaresLds)
+            {
+                alignas(256) __shared__ char smem[GetSmemSize()];
+                smem_ptr = smem;
+            }
+            [[maybe_unused]] void* o_lds_staging = nullptr;
+
             auto o_acc_tile = [&]() {
                 if constexpr(PrefillCase)
                 {
@@ -3572,7 +3633,8 @@ struct FmhaFwdKernel
                     {
                         using Policy = typename FmhaPipeline::Policy;
                         static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
-                        __shared__ char smem_arena[Policy::GetLdsArenaSize()];
+                        alignas(16) __shared__ char smem_arena[Policy::GetLdsArenaSize()];
+                        o_lds_staging = smem_arena + Policy::GetLdsOffsetK0();
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
                                                     v_dram_window,
@@ -3589,9 +3651,6 @@ struct FmhaFwdKernel
                     }
                     else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
                     {
-                        using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
-                            typename FmhaPipeline::Problem>;
-                        alignas(256) __shared__ char smem_arena[Layout::kArenaBytes];
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
                                                     v_dram_window,
@@ -3601,7 +3660,7 @@ struct FmhaFwdKernel
                                                     position_encoding,
                                                     scale_s,
                                                     sink_value,
-                                                    smem_arena);
+                                                    smem_ptr);
                     }
                     else
                     {
@@ -3635,36 +3694,18 @@ struct FmhaFwdKernel
                 }
                 else
                 {
-                    if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
-                    {
-                        using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
-                            typename FmhaPipeline::Problem>;
-                        alignas(256) __shared__ char smem_arena[Layout::kArenaBytes];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    position_encoding,
-                                                    scale_s,
-                                                    smem_arena,
-                                                    sink_value);
-                    }
-                    else
-                    {
-                        __shared__ char smem_ptr[GetSmemSize()];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    position_encoding,
-                                                    scale_s,
-                                                    smem_ptr,
-                                                    sink_value);
-                    }
+                    // The arena pipeline and the single-buffer ones both take
+                    // one LDS block here: the hoisted smem_ptr.
+                    return invoke_fmha_pipeline(q_dram_window,
+                                                k_dram_window,
+                                                v_dram_window,
+                                                bias_dram_window,
+                                                lse_dram_window,
+                                                mask,
+                                                position_encoding,
+                                                scale_s,
+                                                smem_ptr,
+                                                sink_value);
                 }
             }();
 
@@ -3691,7 +3732,32 @@ struct FmhaFwdKernel
                 o_dram,
                 make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
                 {i_m0, i_n1});
-            EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+
+            // Same logical output as the current Default2DEpilogue (cast to ODataType, overwrite
+            // valid rows, no scale or atomic); bounds come from clamping/skipping. Mirror epilogue
+            // changes here.
+            if constexpr(kUseAsyncLdsOStore && PrefillCase)
+            {
+                fmha_tdm_sched_store_o_tile_async_from_lds<FmhaPipeline, kAsyncOStoreBytes>(
+                    o_lds_staging,
+                    o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o + i_n1,
+                    kargs.stride_o,
+                    kargs.seqlen_q - i_m0,
+                    o_acc_tile);
+            }
+            else if constexpr(detail::epilogue_uses_smem_v<EpiloguePipeline>)
+            {
+                // The pipeline is done with its LDS; pipelines that declare
+                // their own arrays leave none to the epilogue (direct store).
+                if constexpr(kPipelineDeclaresLds)
+                    EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr, nullptr);
+                else
+                    EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr, smem_ptr);
+            }
+            else
+            {
+                EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+            }
         }
     }
 };
