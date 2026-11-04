@@ -52,18 +52,10 @@ if(NOT TARGET hip::hip_fortran)
     "bindings were built with ${CMAKE_Fortran_COMPILER}.")
 endif()
 
-# hip-config.cmake reaches FindThreads, which needs C or CXX enabled.
-if(NOT TARGET hip::hiprand)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(hiprand QUIET)
-endif()
 if(NOT TARGET hip::hiprand)
   message(STATUS
     "hipRAND: no hip::hiprand target, skipping the Fortran binding tests "
-    "(they link libhiprand). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link libhiprand). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
@@ -130,19 +122,9 @@ if(NOT FORTRAN_ARRAY_INTERFACES STREQUAL "none")
   hiprand_fortran_add_test(hiprand_version_f2008 hiprand_version.f08)
   list(APPEND _hiprand_version_tests hiprand_version_f2008)
 endif()
-# In-tree the module must carry this tree's version (hiprandGetVersion
-# reports rocRAND's on ROCm, so the runtime value cannot serve).
-get_target_property(_hiprand_aliased hip::hiprand ALIASED_TARGET)
+# The version query touches no device.
 foreach(_t IN LISTS _hiprand_version_tests)
-  # The version query touches no device.
   set_tests_properties(hiprand_fortran_${_t} PROPERTIES LABELS "")
-  if(_hiprand_aliased STREQUAL "hiprand"
-     AND hiprand_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
-    math(EXPR _hiprand_code
-         "${CMAKE_MATCH_1} * 100000 + ${CMAKE_MATCH_2} * 100 + ${CMAKE_MATCH_3}")
-    set_tests_properties(hiprand_fortran_${_t} PROPERTIES
-                         ENVIRONMENT "HIPRAND_FORTRAN_EXPECTED_VERSION=${_hiprand_code}")
-  endif()
 endforeach()
 
 if(_have_hip_binding)
