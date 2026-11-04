@@ -307,11 +307,11 @@ endif()
 if(BUILD_CODE_COVERAGE)
   add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-O0>
-    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
-    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+    "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+    "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
   )
   add_link_options(
-    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+    "$<$<LINK_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
   )
 endif()
 
