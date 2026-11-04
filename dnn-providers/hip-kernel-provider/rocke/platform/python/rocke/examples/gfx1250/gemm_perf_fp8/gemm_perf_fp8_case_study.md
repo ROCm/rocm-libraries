@@ -382,10 +382,18 @@ gfx1250. Every arm shares one geometry and differs only in K-loop traits:
 
 | | |
 |---|---|
-| WMMA atom | dense 16×16×128 `f8f6f4` (format immediate = fp8), `<16 x i32>` operands |
+| WMMA atom | 16×16×128 fp8 × fp8 (`v_wmma_f32_16x16x128_fp8_fp8`), `<16 x i32>` operands |
 | tile | 256×256×256, 4×4 warps (16 waves, 512 threads) |
 | A/B staging | TDM, depth 2 (ping-pong), `lds_k_pad = 48` |
 | epilogue | `cshuffle`, `pipeline=mem`, `scheduler=intrawave` |
+
+The measurements in this part were taken when the atom was the `f8f6f4`
+instruction with both matrix formats set to fp8, before the dedicated fp8 × fp8
+instruction was in the catalog. The GEMM now issues the dedicated one, with the
+same operands and lane maps. Rerun after the switch, every arm still verifies
+exactly on the integer set, the trait ratios match the tables here within
+run-to-run noise, and the probe ceiling of the dedicated instruction is within
+1% of the `f8f6f4` form's on the same data.
 
 The two LDS halves of this tile leave room for one workgroup per compute
 unit. The geometry was chosen with the staged sweep (Part 1,
@@ -570,7 +578,7 @@ python3 -m $P.clock_probe
 
 # 1. ceilings before, on each input set (§13, §15)
 for d in const int rand; do
-  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d
+  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_fp8_fp8 --data $d
 done
 
 # 1b. memory side: streaming read/copy bandwidth, and the TDM feed floor (§18)

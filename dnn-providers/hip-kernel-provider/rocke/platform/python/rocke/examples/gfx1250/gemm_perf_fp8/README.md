@@ -210,7 +210,7 @@ python3 -m $P.clock_probe           # should end with "health: ok"
 
 # 2. ceilings before: WMMA on each operand set; then memory
 for d in const int rand; do
-  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d \
+  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_fp8_fp8 --data $d \
       --json $OUT/wmma_pre_$d.json
 done
 python3 -m $P.memory_probe | tee $OUT/memory_pre.txt
@@ -224,7 +224,7 @@ python3 -m $P.fp8_trait_ab --sustained-rounds 0 --k 8192 \
 
 # 5. ceilings after, as in step 2
 for d in const int rand; do
-  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d \
+  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_fp8_fp8 --data $d \
       --json $OUT/wmma_post_$d.json
 done
 python3 -m $P.memory_probe tdm | tee $OUT/memory_post.txt
