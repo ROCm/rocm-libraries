@@ -257,6 +257,53 @@ namespace
         EXPECT_EQ(d.run(HIP_R_32F, static_cast<hipDataType>(-1), false), 1);
     }
 
+    // Runs a 64 x 64 x 64 f32 GEMM through the hipblaslt-bench timing path with
+    // --post_bench_verify_iters 3 and C stored in D, and counts the checks that failed.
+    int64_t bench_relaunch_failures(double beta)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = arg.aux_type = HIP_R_32F;
+        arg.compute_type                                                 = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.K[0] = 64;
+        arg.lda[0] = arg.ldb[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 64;
+        arg.stride_a[0] = arg.stride_b[0] = arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0]
+            = 64 * 64;
+        arg.alpha             = 1;
+        arg.beta              = beta;
+        arg.c_equal_d         = true;
+        arg.timing            = 1;
+        arg.iters             = 3;
+        arg.cold_iters        = 1;
+        arg.unit_check        = 0;
+        arg.norm_check        = 1;
+        arg.allclose_check    = 1;
+        arg.norm_check_assert = false;
+        arg.fast_check        = 0;
+
+        const int32_t saved = hipblaslt_bench_options::post_bench_verify_iters();
+        hipblaslt_bench_options::post_bench_verify_iters() = 3;
+        const int64_t before = hipblaslt_bench_options::verification_failures();
+        testing_matmul(arg);
+        hipblaslt_bench_options::post_bench_verify_iters() = saved;
+        return hipblaslt_bench_options::verification_failures() - before;
+    }
+
+    // With beta 1, every launch adds A * B to the D the previous launch left, so each relaunch
+    // gives a different D from the first launch. The bench refuses this setup from the command
+    // line; here it stands in for a solution that writes a wrong result on some launches.
+    TEST(BenchVerify, smoke_RelaunchThatChangesDIsCaught)
+    {
+        EXPECT_EQ(bench_relaunch_failures(1), 1);
+    }
+
+    TEST(BenchVerify, smoke_RepeatableRelaunchesPass)
+    {
+        EXPECT_EQ(bench_relaunch_failures(0), 0);
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
@@ -292,6 +339,94 @@ namespace
         arg.fast_check          = 0;
         // A has its supported orientation, so it cannot mask a missing B check.
         expect_preswizzled_layout_error(arg, "scaleB=1001 requires transB=N");
+    }
+
+    // FP4 x FP4 is the one pairing the preswizzled path accepts in any layout, so the
+    // non-TN scale generation can only be reached through it.
+    void expect_preswizzled_fp4_error(const Arguments& arg, const char* expected)
+    {
+        try
+        {
+            testing_matmul_with_bias(arg,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_32F,
+                                     HIP_R_32F,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_32F,
+                                     HIP_R_32F);
+            FAIL() << "Expected " << expected;
+        }
+        catch(const std::runtime_error& error)
+        {
+            EXPECT_STREQ(error.what(), expected);
+        }
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_partial_k_block_when_k_runs_along_columns)
+    {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+        // The guard lives in the generator, which the client skips over entirely when it
+        // is not built. Skipping from the callee only returns from it, so the helper's
+        // FAIL() would turn that skip into a failure. The other cases in this suite are
+        // refused before initialization and so do not need this.
+        GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON";
+#else
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'N'; // A is M-contiguous, so K runs along its columns
+        arg.transB              = 'N';
+        arg.M[0]                = 64;
+        arg.N[0]                = 64;
+        arg.K[0]                = 33;
+        arg.lda[0]              = 64;
+        arg.ldb[0]              = 33;
+        arg.ldc[0] = arg.ldd[0] = 64;
+        arg.fast_check          = 0;
+        // M = 64 emits 66 scales, which divide by kBlocks = 2 and so satisfy the grid
+        // check, while the reference indexes a 64 by 2 grid. The shape itself is refused.
+        expect_preswizzled_fp4_error(
+            arg, "GFX950 scales with K along the columns require K to be a multiple of 32, got 33");
+#endif
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_padded_lda)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        // TN, so the orientation guards pass and only the leading dimension is at fault.
+        arg.transA = 'T';
+        arg.transB = 'N';
+        arg.M[0]   = 32;
+        arg.N[0]   = 32;
+        arg.K[0]   = 64;
+        arg.lda[0] = 128; // A_row is K = 64
+        arg.ldb[0] = 64;
+        arg.ldc[0] = arg.ldd[0] = 32;
+        arg.fast_check          = 0;
+        // The generator sizes its scales from the stride it is handed, so a padded lda
+        // writes past the buffer allocated from the logical extent.
+        expect_preswizzled_layout_error(arg, "MX scales require lda equal to the rows stored");
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_padded_ldb)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'T';
+        arg.transB              = 'N';
+        arg.M[0]                = 32;
+        arg.N[0]                = 32;
+        arg.K[0]                = 64;
+        arg.lda[0]              = 64; // correct, so it cannot mask a missing B check
+        arg.ldb[0]              = 128; // B_row is K = 64
+        arg.ldc[0] = arg.ldd[0] = 32;
+        arg.fast_check          = 0;
+        expect_preswizzled_layout_error(arg, "MX scales require ldb equal to the rows stored");
     }
 
     TEST(FastCheckMx_pre_checkin, unsupported_transpose_layouts_are_refused)
@@ -462,6 +597,8 @@ namespace
 
                 if(arg.c_equal_d)
                     name << "_C_EQUAL_D";
+                if(arg.timing)
+                    name << "_TIMING";
                 if(arg.placement[0])
                     name << "_PLACE_" << arg.placement;
                 if(arg.integer_exact_pattern[0])

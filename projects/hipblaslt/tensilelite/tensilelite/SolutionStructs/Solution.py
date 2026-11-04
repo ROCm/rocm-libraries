@@ -54,8 +54,10 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
-from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
+                                       tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
+                                       tdmPairOnEveryWave, \
+                                       tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -66,6 +68,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams, \
                                             globalParameters
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxTdmTileM
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -80,7 +83,8 @@ from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
   b_rotate_reason as segBRotateReason, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
-  paired_buffer_layout_reason as segPairedLayoutReason
+  paired_buffer_layout_reason as segPairedLayoutReason, \
+  persistent_keeps_unpaired as segPersistentKeepsUnpaired
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -91,6 +95,19 @@ from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+
+
+def _oneSidedMX(state):
+  """True when exactly one of A and B carries MX scales."""
+  problemType = state["ProblemType"]
+  return bool(problemType.get("MXBlockA", 0)) != bool(problemType.get("MXBlockB", 0))
+
+
+def _oneSidedMXHead(state):
+  """The subject of every one-sided MX rejection, with both MXBlock values."""
+  problemType = state["ProblemType"]
+  return ("MX scales on one tensor only (MXBlockA=%d, MXBlockB=%d)"
+          % (problemType.get("MXBlockA", 0), problemType.get("MXBlockB", 0)))
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -213,6 +230,23 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _validateMXBlock128Arch(state, asmCaps, printRejectionReason):
+  """Reject MXBlock 128 and 2D MX scales off gfx1250.
+
+  Only the WMMA_V3 path splats one scale byte per WMMA and indexes 2D scale
+  rows; elsewhere (e.g. gfx950) these solutions fail kernel generation.
+  """
+  if asmCaps.get("HasWMMA_V3", False):
+    return True
+  for tc in ("A", "B"):
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    if mxBlock == 128 or (mxBlock and state["ProblemType"][f"MXBlockFree{tc}"] > 1):
+      reject(state, printRejectionReason,
+             f"MXBlock{tc} 128 and 2D MX scales require WMMA_V3 (gfx1250)")
+      return False
+  return True
+
+
 def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
   """Reject invalid MX scale units and undersized M-major local reads.
 
@@ -253,6 +287,166 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
           f"got {vectorWidth}")
       return False
 
+  return True
+
+
+def _validateMX2DFreeTile(state, printRejectionReason):
+  """Reject 2D MX tiles whose scale rows the TDM / LRA codegen misplaces.
+
+  The 2D scale path loads ``mxTdmTileM(MT, MXBlockFree)`` scale rows, enough for
+  the worst workgroup phase, from ``(wg*MT)/MXBlockFree`` and picks a row with
+  ``(phase + localM) >> log2(MXBlockFree)``. A MacroTile neither a multiple nor a
+  divisor of MXBlockFree starts WGs partway into a row; _validateMXFreePhase
+  checks the phase fixup can index it.
+
+  2D also requires ``MXBlock == MatrixInstK`` (one scale byte per row along K);
+  the TDM, LRA and local-read 2D paths do not handle ``mxUnit > 1``.
+
+  2D supports ``MXBlockFree == 128`` only (``[128, 128]``). The 2D local read
+  address has no lane term, so one scale row must cover a wave's whole free
+  extent; smaller free blocks read row 0's scale for every row (e.g. ``[32, 128]``
+  with VW 8 gets 75% of A rows wrong).
+
+  2D also requires ``MXBlock == MatrixInstK`` (one scale byte per row along K);
+  the TDM, LRA and local-read 2D paths do not handle ``mxUnit > 1``.
+
+  The wave-separated TDM M-split gives each of ``numComp`` components
+  ``scaleRows // numComp`` rows; a remainder is never loaded, and an unaligned
+  MT puts MT/numComp off a row boundary. Fewer rows than components is fine
+  (every component loads the full tile).
+  """
+  for tc, tile01 in (("A", 0), ("B", 1)):
+    mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
+    # 1 is the 1D layout; 2D is validated for [128, 128] only.
+    if state["ProblemType"][f"MXBlock{tc}"] and mxTile not in (1, 128):
+      reject(state, printRejectionReason,
+             f"2D MX scale for {tc} supports MXBlockFree{tc} 128 only, got {mxTile}")
+      return False
+    if mxTile <= 1:
+      continue
+    # 2D addressing (TDM wg offset, LRA wave offset, the one-VGPR local read)
+    # assumes one scale byte per scale row along K, i.e. MXBlock == MatrixInstK.
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    mxUnit = state["MatrixInstK"] // mxBlock if mxBlock else 1
+    if mxUnit != 1:
+      reject(state, printRejectionReason,
+             f"2D MX scale for {tc} requires MXBlock{tc} == MatrixInstK ({state['MatrixInstK']}), "
+             f"got mxUnit {mxUnit}")
+      return False
+  return True
+
+
+def _validateMX2DTdmMSplit(state, printRejectionReason):
+  """Reject a 2D MX wave-separated TDM M-split that drops scale rows.
+
+  The M-split gives each of ``numComp`` components ``scaleRows // numComp`` rows;
+  a remainder is never loaded, and an unaligned MT puts MT/numComp off a row
+  boundary. Fewer rows than components is fine (every component loads the full
+  tile). Whether the TDM splits M or K depends on DepthU, so this
+  runs once DepthU is resolved.
+  """
+  waveSeparated = tdmWaveSeparated(state) and not state.get("UseSubtileImpl") \
+      and state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]
+  if not waveSeparated:
+    return True
+  for tc, tile01 in (("A", 0), ("B", 1)):
+    mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
+    if mxTile <= 1:
+      continue
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    mxUnit = state["MatrixInstK"] // mxBlock
+    if mxUnit <= 0:
+      continue  # _validateMXLocalReadWidth rejects it
+    numMxKGroups = (state["DepthU"] // mxBlock) // mxUnit
+    numComp, _ = tdmWavePartition(state, f"MXS{tc}")
+    mt = state[f"MacroTile{tile01}"]
+    scaleRows = mxTdmTileM(mt, mxTile)
+    if numMxKGroups < numComp and scaleRows >= numComp \
+        and (mt % mxTile != 0 or scaleRows % numComp != 0):
+      reject(state, printRejectionReason,
+             f"2D MX TDM M-split for {tc} requires MacroTile{tile01} ({mt}) aligned to "
+             f"MXBlockFree{tc} ({mxTile}) and scale rows ({scaleRows}) a multiple of TDM "
+             f"components ({numComp}); otherwise rows are dropped")
+      return False
+  return True
+
+
+def _validateMXFreePhase(state, printRejectionReason):
+  """Reject 2D MX tiles whose workgroup phase the kernel cannot index.
+
+  A MacroTile that is neither a multiple nor a divisor of MXBlockFree starts
+  workgroups partway into a scale row (e.g. MT=224 puts WG1 at N=224, 96 into
+  row 1). KernelWriterAssembly.mxPhaseLraFixup adds that phase per tile and
+  gives each WaveTile vector its own LocalReadAddr. It counts free elements,
+  so it needs a one-byte LDS tile-stride (swizzled, MatrixInstK == MXBlock),
+  needs LRA rebuilt by setupNewTile every tile, and keeps one scale per
+  vector, so a vector's MI * VW columns must not straddle a row at any phase.
+
+  The one-scale-per-vector read holds for aligned 2D tiles as well, so a vector
+  wider than ``MXBlockFree`` (e.g. 256-column vectors, MI 16 * VW 16) is
+  rejected there too.
+  """
+  for tc in ("A", "B"):
+    mxTc = "MXS" + tc
+    mxBlock = state["ProblemType"]["MXBlock%s" % tc]
+    mxTile = mxFreeTile(state, mxTc)
+    if not mxBlock or mxTile <= 1:
+      continue
+    mt = state["MacroTile%s" % mxTc]
+    miT = state["MatrixInstM"] * state["MatrixInstBM"] if tc == "A" else state["MatrixInstN"] * state["MatrixInstBN"]
+    vecCols = miT * state["VectorWidth%s" % tc]
+    if not mxFreePhase(state, mxTc):
+      # Aligned tiles read one scale per WaveTile vector too, so a vector wider than a
+      # scale row would take one row's scale for all of them.
+      if math.gcd(mt, mxTile) % vecCols:
+        reject(state, printRejectionReason,
+               "2D MX scale for %s: a WaveTile vector (%u columns) spans more than one "
+               "MXBlockFree%s %u scale row; the 2D local read loads one scale per vector"
+               % (tc, vecCols, tc, mxTile))
+        return False
+      continue
+    why = None
+    if state["MXScaleFormat"] not in ("InMemorySwizzle", "HostPreSwizzle") \
+        or state["MatrixInstK"] // mxBlock != 1:
+      why = "a swizzled scale with MatrixInstK == MXBlock%s" % tc
+    elif state["UseSubtileImpl"] or state["PrefetchAcrossPersistent"] or state["DirectToVgpr%s" % mxTc]:
+      why = "no UseSubtileImpl, PrefetchAcrossPersistent or DirectToVgpr%s" % mxTc
+    else:
+      if math.gcd(mt, mxTile) % vecCols:
+        why = "WaveTile vectors (%u columns) dividing gcd(MT, MXBlockFree) = %u" % (vecCols, math.gcd(mt, mxTile))
+    if why:
+      reject(state, printRejectionReason,
+             "MacroTile%s %u is not aligned to MXBlockFree%s %u; the workgroup phase needs %s"
+             % (tc, mt, tc, mxTile, why))
+      return False
+  return True
+
+
+def _validateMXFreePhaseReadOffset(state, printRejectionReason):
+  """Reject a 2D MX workgroup phase whose scale reads need offsets of 64K or more.
+
+  The per-vector LocalReadAddr of the phase fixup replaces the +64K
+  LocalReadAddr fan-out, so every scale ds_load offset must stay below 64K.
+  The offset is the read position inside one MXS buffer plus, under
+  ExpandPointerSwap without StoreSwapAddr, the buffer swap LdsOffsetA_Blk.
+  """
+  if not state["ExpandPointerSwap"] or state["StoreSwapAddr"]:
+    return True
+  for tc in ("A", "B"):
+    mxTc = "MXS" + tc
+    mxBlock = state["ProblemType"]["MXBlock%s" % tc]
+    if not mxBlock or not mxFreePhase(state, mxTc):
+      continue
+    bufferBytes = mxLdsNumBytes(state["MacroTile%s" % mxTc], state["DepthU"], mxBlock,
+                                mxTile=mxFreeTile(state, mxTc), ldsPad=state["LdsPad%s" % mxTc],
+                                unrollMajor=state["UnrollMajorLDS%s" % mxTc],
+                                padInterval=state["LdsBlockSizePerPad%s" % mxTc])
+    if state["LdsOffsetA_Blk"] + bufferBytes > 65536:
+      reject(state, printRejectionReason,
+             "%s 2D workgroup phase (MacroTile not aligned to MXBlockFree) needs scale read "
+             "offsets below 64K; ExpandPointerSwap without StoreSwapAddr adds LdsOffsetA_Blk (%u)"
+             % (mxTc, state["LdsOffsetA_Blk"]))
+      return False
   return True
 
 
@@ -2208,6 +2402,31 @@ class Solution(collections.abc.Mapping):
       # The amax workspace/counter indexes dense output tiles within one batch.
       # Publish the corresponding runtime predicate, including for explicit YAML.
       state["BatchSizeEqual"] = 1
+    # The limit that needs derived state (the decoupled pair) is checked where it exists.
+    if _oneSidedMX(state):
+      if tuple(state["ISA"])[:2] != (12, 5):
+        reject(state, printRejectionReason,
+               "%s are implemented only for gfx1250 (ISA 12.5.x) TDM kernels; got ISA %s, whose MX "
+               "scale path (UseSubtileImpl or buffer scale loads) has no one-sided support. Put MX "
+               "scales on both tensors or on neither, or target gfx1250"
+               % (_oneSidedMXHead(state), ".".join(str(v) for v in state["ISA"])))
+        return
+      if state.get("UseSubtileImpl"):
+        reject(state, printRejectionReason,
+               "%s are not implemented with UseSubtileImpl: the subtile scale loads always set up "
+               "both MXSA and MXSB. Use UseSubtileImpl=0 (the gfx1250 TDM path)"
+               % _oneSidedMXHead(state))
+        return
+      # A non-persistent kernel has PrefetchAcrossPersistent and ReuseAcrossPersistent cleared
+      # later, so only a persistent one keeps them.
+      for key in ("PrefetchAcrossPersistent", "ReuseAcrossPersistent"):
+        if state.get(key) and isPersistent(state):
+          reject(state, printRejectionReason,
+                 "%s are not implemented with %s=%s on a persistent kernel: the persistent "
+                 "descriptor refresh, the PAP tail reset and the RAP null handle MX scales only as "
+                 "a pair. Put MX scales on both tensors or on neither, or use %s=0"
+                 % (_oneSidedMXHead(state), key, state[key], key))
+          return
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
@@ -2865,6 +3084,14 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
+    # An unsuffixed NonTemporal sets A, B, C, D, Gate and Metadata only; MXSA, MXSB, E and WS need
+    # their own NonTemporal<tensor> key. (An unsuffixed TemporalHint or NonVolatile, above, is
+    # expanded over every tensor.)
+    # Under TDMFuse=1/2/3 a data tensor (A or B) and its scale tensor(s) share one tensor_load_to_lds
+    # whose th/scope/nv bits are instruction-wide. The data tensor decides: its TemporalHint,
+    # NonTemporal and NonVolatile are emitted and the scale tensors' are ignored for that
+    # instruction (see tdmHintDeciders), so the generated asm follows A/B. Under TDMFuse=0 a field
+    # is emitted only when the members of each set ({A,B}, {MXSA,MXSB}) agree.
     if state["NonTemporal"] != -1:
       state["NonTemporalA"] = state["NonTemporal"]
       state["NonTemporalB"] = state["NonTemporal"]
@@ -3400,6 +3627,13 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
         reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
         return
+      # The CLS store reads acc VGPRs through M0-relative v_movrelsd_2_b32 and turns
+      # the per-batch row advance into a delayed primer chain; both are defined only
+      # by the MFMA acc->arch mapping, so there is nothing to compact on a VALU
+      # kernel. Clearing it here keeps every downstream site testing CompactLoopStore
+      # alone.
+      if not state["EnableMatrixInstruction"]:
+        state["CompactLoopStore"] = False
 
     # MX scale layout + transport derivation and validation. See
     # _deriveAndValidateMXScaleLayoutAndTransport for the full set of rules.
@@ -3491,7 +3725,9 @@ class Solution(collections.abc.Mapping):
     # TDMSplit is disabled: it has unresolved read-token/tensorcnt races under
     # the decoupled load-vs-compute wave layout. Reject any solution requesting it.
     if state["TDMSplit"]:
-      reject(state, printRejectionReason, "TDMSplit is currently disabled")
+      reject(state, printRejectionReason,
+             "TDMSplit is currently disabled: it has unresolved read-token and tensorcnt races "
+             "under the decoupled load-vs-compute wave layout. Use TDMSplit=0")
       return
 
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
@@ -3518,75 +3754,71 @@ class Solution(collections.abc.Mapping):
         state["TDMLoadWaveSync"] = False
     # TDMFuse pins which tensors share a TDM descriptor set; see ValidParameters.py.
     tdmFuse: int = state.get("TDMFuse", 0)
+    if tdmFuse not in TDM_FUSE_GROUPING:
+      fuseValues = sorted(TDM_FUSE_GROUPING)
+      reject(state, printRejectionReason,
+             "TDMFuse=%r names no descriptor grouping; supported values are %s and %d"
+             % (tdmFuse, ", ".join(str(v) for v in fuseValues[:-1]), fuseValues[-1]))
+      return
     if tdmFuse:
       if not tdmBothTensors(state):
         reject(state, printRejectionReason,
-               "TDMFuse=%d needs the TDM on both tensors (TDMInst=3); got TDMInst=%d"
-               % (tdmFuse, state["TDMInst"]))
+               "TDMFuse=%d is not implemented with TDMInst=%d: it chooses which TDM descriptor "
+               "sets A, B and their MX scales share, so it needs the TDM on both tensors "
+               "(TDMInst=3). Use TDMInst=3, or TDMFuse=0" % (tdmFuse, state["TDMInst"]))
         return
-      if tdmFuse in (2, 3):
+      if state["NumWaves"] <= 1:
+        reject(state, printRejectionReason,
+               "TDMFuse=%d needs more than one wave (NumWaves=%d): it splits the waves among the "
+               "TDM descriptor sets of A, B and their MX scales, while a one-wave kernel keeps one "
+               "descriptor per tensor. Use TDMFuse=0 on one wave" % (tdmFuse, state["NumWaves"]))
+        return
+      bothScales: bool = tdmLiveScales(state) == TDM_SCALE_TENSORS
+      if state.get("UseSubtileImpl"):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d is not implemented with UseSubtileImpl on more than one wave "
+               "(NumWaves=%d): the subtile path keeps one TDM descriptor per tensor, so no "
+               "descriptor set can be shared. Use UseSubtileImpl=0, or TDMFuse=0"
+               % (tdmFuse, state["NumWaves"]))
+        return
+      if tdmFuse in (2, 3) and bothScales and state["NumWaves"] not in (2, 4):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d with MX scales on both tensors supports 2 or 4 waves; got "
+               "NumWaves=%d: the %s grouping has a wave layout for its set {%s,MXSA,MXSB} only "
+               "on those counts. Use TDMFuse=0 or 1 on other wave counts"
+               % (tdmFuse, state["NumWaves"], TDM_FUSE_GROUPING[tdmFuse],
+                  "A" if tdmFuse == 2 else "B"))
+        return
+      if tdmFuse in (2, 3) and bothScales:
         owner = "A" if tdmFuse == 2 else "B"
         other = "B" if tdmFuse == 2 else "A"
-        if state["NumWaves"] != 4:
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires NumWaves=4 for its 2/1/1 split; got %d"
-                 % (tdmFuse, state["NumWaves"]))
-          return
-        if state.get("UseSubtileImpl"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires UseSubtileImpl=0" % tdmFuse)
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires MX scales on both tensors" % tdmFuse)
-          return
-        if state["enableTDMMetadata"]:
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d does not support sparse metadata" % tdmFuse)
-          return
         decoupled, blkA, blkB = decouplePGRBlocks(state)
         if decoupled and blkA != blkB:
           # Only the scale laid into the other side's LDS blocks conflicts.
           conflicting = next(mx for mx in ("MXSA", "MXSB") if dcpLdsSide(mx) != owner)
           reject(state, printRejectionReason,
-                 "TDMFuse=%d requires an equal decoupled pair (PGRA=%d, PGRB=%d -> %d and %d "
-                 "LDS blocks): %s rides %s's descriptor set but follows %s's LDS block count. "
-                 "Use TDMFuse=0 or 1, or an equal pair"
+                 "TDMFuse=%d with MX scales on both tensors is not implemented at a divergent "
+                 "decoupled pair (PGRA=%d, PGRB=%d -> %d and %d LDS blocks) on more than one "
+                 "wave: %s is in %s's descriptor group but follows %s's LDS block count. Use an "
+                 "equal pair, or TDMFuse=0 or 1"
                  % (tdmFuse, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
                     blkA, blkB, conflicting, owner, other))
           return
-      if tdmFuse == 1:
-        if state["NumWaves"] <= 1:
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires NumWaves > 1 for parity grouping; got %d"
-                 % state["NumWaves"])
-          return
-        if state.get("UseSubtileImpl"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires UseSubtileImpl=0")
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires MX scales on both tensors")
-          return
-        if state["enableTDMMetadata"]:
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 does not support sparse metadata")
-          return
-        decoupled, blkA, blkB = decouplePGRBlocks(state)
-        if state["HalfPLR"] and decoupled and blkA != blkB:
-          # The late-fill pass moves one set's advance out of HalfPLR's end-of-loop mask.
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair "
-                 "(HalfPLR=%d, PGRA=%d, PGRB=%d -> %d and %d LDS blocks)"
-                 % (state["HalfPLR"], state["PrefetchGlobalReadA"],
-                    state["PrefetchGlobalReadB"], blkA, blkB))
-          return
-      # Catch a row declined by a precondition no arm checks (TDMSplit).
-      if not tdmGroupingAccepted(state):
+    if _oneSidedMX(state) and state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1:
+      decoupled, blkA, blkB = decouplePGRBlocks(state)
+      if decoupled and blkA != blkB:
+        # A set with one live member rides every wave, and the divergent-pair late fill
+        # re-slots one set by wave parity.
         reject(state, printRejectionReason,
-               "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
+               "%s are not implemented at a divergent decoupled pair (PGRA=%d, PGRB=%d -> %d and "
+               "%d LDS blocks) on more than one wave (NumWaves=%d): a set with one live member "
+               "rides every wave, while the divergent-pair late fill re-slots a set by wave "
+               "parity. Use an equal pair"
+               % (_oneSidedMXHead(state), state["PrefetchGlobalReadA"],
+                  state["PrefetchGlobalReadB"], blkA, blkB, state["NumWaves"]))
         return
+    if not _validateMX2DFreeTile(state, printRejectionReason):
+      return
 
     # Check PAP after TDMFuse-specific errors.
     if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
@@ -3700,8 +3932,9 @@ class Solution(collections.abc.Mapping):
     # and sets it for sparse, and the fp4/fp6/MX overrides above set it again. The
     # runtime predicate admits any K that is a multiple of the final ASEM, so a
     # NoTailLoop derived from an earlier value drops the K remainder.
-    # ReuseAcrossPersistent keeps NoTailLoop: its own predicate requires
-    # K % DepthU == 0 (Contractions.py).
+    # NoTailLoop says only that no tail loop is emitted; whether K can leave a
+    # remainder is ASEM % DepthU != 0. ReuseAcrossPersistent never emits one: a
+    # remainder is tail-folded into the main loop instead (_TailFolding, below).
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 or state.get("ReuseAcrossPersistent", 0):
       state["NoTailLoop"] = True
@@ -3902,6 +4135,26 @@ class Solution(collections.abc.Mapping):
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
 
+    # A 2D scaling tile divides the free dimension of the scale tensor, so a
+    # partial last tile would need a scale covering fewer than MXBlockFree
+    # rows/columns; require the free dimension to be tile-aligned instead.
+    # Free0 is M (A's free index), Free1 is N, as in the 6-bit branch above.
+    # Both extents default to 1, making this a no-op for 1xMXBlock scaling.
+    state["AssertFree0ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeA"], state["AssertFree0ElementMultiple"])
+    state["AssertFree1ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeB"], state["AssertFree1ElementMultiple"])
+
+    # Tail folding: the main loop runs a partial last k-tile, which TDM clamps at
+    # K. Only RAP folds, so only RAP solutions carry _TailFolding (readers default
+    # it to False). Set after the fp4/fp6/MX ASEM overrides above, which can leave
+    # a remainder depthUIteration never saw.
+    if state["Valid"] and state["ReuseAcrossPersistent"]:
+      state["_TailFolding"] = state["AssertSummationElementMultiple"] % state["DepthU"] != 0
+      # The clamp is one K-dim subtract per descriptor set, so every member must
+      # keep K in the same field.
+      if state["_TailFolding"] and not tdmKDimTrackable(state):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent with AssertSummationElementMultiple % DepthU != 0 requires TDM descriptor sets that keep K in one field (TDMFuse = 0, K-contiguous A and B that step K alike or by bytes, no sparse, no TDM iterate mode)")
+        return
+
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only
@@ -3958,7 +4211,13 @@ class Solution(collections.abc.Mapping):
 
     # optSingleColVgpr shares one address vgpr across the batch, so the store needs
     # no per-element address register. Mirrors AsmStoreState's beta, non-edge,
-    # non-atomic branch -- the only store path the RAP size predicates allow.
+    # non-atomic branch.
+    #
+    # Non-edge even though an edge store is reachable: the edge path loses
+    # optSingleColVgpr and so costs one more register per element, and pricing it
+    # here would lower the resident k-tile count for every problem to pay for the
+    # ones that take it. That count is what K's ceiling is made of, so the edge
+    # path is left to cost a store batch instead. See rapCheckStoreNeutrality.
     optSingleColVgpr = (state["BufferStore"] and not packedC0 and not packedC1
                         and not problemType["UseInitialStridesCD"])
     vgprsPerAddr = 0 if optSingleColVgpr else (1 if state["BufferStore"] else 2)
@@ -3970,17 +4229,24 @@ class Solution(collections.abc.Mapping):
       vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
 
     # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
-    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic. The MX
-    # TileSpan halving is deliberately not modelled: leaving it out overstates R,
-    # which understates k, and only the understating direction is safe here.
+    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic, including
+    # its ceil: at MXBlock 128 a WaveTile's single e8 still takes a whole VGPR,
+    # which flooring the product would price at none. The MX TileSpan halving is
+    # deliberately not modelled: leaving it out overstates R, which understates
+    # k, and only the understating direction is safe here.
     numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
                     else state["PrefetchLocalRead"] + 1
     macA = problemType.get("MacDataTypeA") or problemType["DataType"]
     bpeA = bpr * macA.numRegisters()
+    mxsaPerBlock = 0
+    if problemType["MXBlockA"]:
+      mxsaWaveTiles = state["MIWaveTileMXSA"]
+      if problemType.get("MXBlockFreeA", 1) > 1:
+        # A 2D tile gives VectorWidth WaveTiles one shared SSSS VGPR.
+        mxsaWaveTiles = max(1, mxsaWaveTiles // max(1, int(state["VectorWidthMXSA"])))
+      mxsaPerBlock = mxsaWaveTiles * int(math.ceil(state["MIInputPerThreadMXSA"] / bpr))
     residentPerKTile = numVgprBuffer * (
-        int(state["MIWaveTileA"] * state["MIInputPerThreadA"] * bpeA // bpr)
-        + (int(state["MIWaveTileMXSA"] * state["MIInputPerThreadMXSA"] // bpr)
-           if problemType["MXBlockA"] else 0))
+        int(state["MIWaveTileA"] * state["MIInputPerThreadA"] * bpeA // bpr) + mxsaPerBlock)
     if residentPerKTile <= 0:
       return None
 
@@ -4067,6 +4333,17 @@ class Solution(collections.abc.Mapping):
 
       state["_DepthU"] = depthU
       state["DepthU"] = depthU
+
+      # One K-group of scales per MXBlock: a DepthU below it has no scale to load
+      # (DepthU // MXBlock is 0 and later divides by zero).
+      for tc in ("A", "B"):
+        mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+        if mxBlock and depthU < mxBlock:
+          reject(state, printRejectionReason,
+                 f"MX scale for {tc} requires DepthU >= MXBlock{tc} ({depthU} < {mxBlock})")
+          return
+      if not _validateMX2DTdmMSplit(state, printRejectionReason):
+        return
 
       state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
@@ -4604,13 +4881,25 @@ class Solution(collections.abc.Mapping):
         ldsAlign = int(64 / state["ProblemType"]["MacDataType%s"%tc].numRegisters())
         ldsAlign = 64 if state["ProblemType"]["MacDataType%s"%tc].is6bitFloat() else ldsAlign
 
-        if state["UnrollMajorLDS%s"%mxTc]:
+        if "MXS" in mxTc:
+          mxTile = mxFreeTile(state, mxTc)
+          ldsAlign = mxLdsAlign(mxTile, ldsAlign)
+          ldsNumBytes = mxLdsNumBytes(
+            state["MacroTile%s"%mxTc],
+            state["DepthU"],
+            state["ProblemType"]["MXBlock%s"%tc],
+            mxTile=mxTile,
+            ldsPad=ldsPad,
+            unrollMajor=state["UnrollMajorLDS%s"%mxTc],
+            padInterval=LdsBlockSizePerPad,
+          )
+        elif state["UnrollMajorLDS%s"%mxTc]:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] + ldsPad) * state["MacroTile%s"%mxTc] * bpe)
         else:
           ldsNumBytes = int(state["_DepthU%s"%mxTc] * (state["MacroTile%s"%mxTc] + ldsPad) * bpe)
         padInterval = LdsBlockSizePerPad
 
-        if padInterval != 0:
+        if "MXS" not in mxTc and padInterval != 0:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] * state["MacroTile%s"%mxTc] * bpe) / padInterval * (padInterval + ldsPad * bpe))
         ldsNumBytesAligned = roundUpToNearestMultiple(ldsNumBytes, ldsAlign)
 
@@ -4885,8 +5174,14 @@ class Solution(collections.abc.Mapping):
       else:
         calLRVW()
 
+      if not _validateMXBlock128Arch(state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
+
       if not _validateMXLocalReadWidth(
           state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
+
+      if not _validateMXFreePhase(state, printRejectionReason):
         return
 
       # An explicitly wide local read cannot be reduced by the auto-width
@@ -5730,7 +6025,10 @@ class Solution(collections.abc.Mapping):
       state["1LDSBuffer"] = 0
     # MX case
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
+      # One-sided MX is handled on more than one wave only; one wave compares both pairs.
+      oneWave = state["NumWaves"] <= 1
+      if ((oneWave or state["ProblemType"]["MXBlockA"]) and state["DirectToLdsA"] != state["DirectToLdsMXSA"]) \
+          or ((oneWave or state["ProblemType"]["MXBlockB"]) and state["DirectToLdsB"] != state["DirectToLdsMXSB"]):
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
       if state["DirectToLdsA"] != state["DirectToLdsB"]:
           reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")
@@ -6606,6 +6904,15 @@ class Solution(collections.abc.Mapping):
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
+    # 3+ LDS buffers rebuild LocalReadAddr from one LocalReadAddrOrig, which the
+    # per-vector 2D MXS phase addresses do not have.
+    if numLdsBlk >= 3:
+      for mxTc in ("MXSA", "MXSB"):
+        if state["ProblemType"]["MXBlock%s" % mxTc[-1]] and mxFreePhase(state, mxTc):
+          reject(state, printRejectionReason,
+                 "%s 2D workgroup phase (MacroTile not aligned to MXBlockFree) does not support "
+                 "%u LDS buffers" % (mxTc, numLdsBlk))
+          return
 
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
@@ -6685,9 +6992,12 @@ class Solution(collections.abc.Mapping):
       if _bRotReason is not None:
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
-    # Persistent kernels retain their existing interleave offsets and buffer swaps.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned and not isPersistent(state):
-      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
+    # Tight layouts pair each component's ping/pong buffers when supported. Persistent
+    # kernels retain their existing unpaired interleave if pairing is unavailable;
+    # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
+        and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
+      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)
         _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)
@@ -6697,14 +7007,14 @@ class Solution(collections.abc.Mapping):
         state["LDSSegInterleaveOffsets"] = _pairedOffsets
         state["StoreSwapAddr"] = True
         ldsNumBytesAB = _pairedOffsets["pairedUsedBytes"]
-      elif state["LDSSegmentBRotate"] or _segRequested == 1:
-        # Explicit tight interleave and tight B rotation require a valid paired layout.
+      elif state["LDSSegmentBRotate"] or (_segRequested == 1 and not isPersistent(state)):
+        # Non-persistent explicit tight interleave and tight B rotation require pairing.
         _parameter = "LDSSegmentBRotate" if state["LDSSegmentBRotate"] else "LDSSegmentInterleave=1"
         reject(state, printRejectionReason, "%s requires paired LDS placement: %s" % (_parameter, _pairedReason))
         return
-      else:
-        # Pairing failed in auto mode. Keep the ordinary LDS offsets, buffer
-        # swap policy and byte count calculated above.
+      elif not isPersistent(state):
+        # Non-persistent auto mode disables interleave when pairing fails. Persistent
+        # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
     if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
       state["LDSSegInterleaveOffsets"] = {}
@@ -7329,6 +7639,9 @@ class Solution(collections.abc.Mapping):
     if state["ExpandPointerSwap"] == 1 and state["LDSTrInst"]:
       reject(state, printRejectionReason, "LDSTrInst + ExpandPointerSwap not supported")
 
+    if not _validateMXFreePhaseReadOffset(state, printRejectionReason):
+      return
+
     # guard against out of bounds reads
     # None: don't guard against ou
     # ShiftPtr: shift read pointers to be in bounds, then unshift registers (source & assembly),
@@ -7561,12 +7874,35 @@ class Solution(collections.abc.Mapping):
       if not (state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1):
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires wave-separated TDM (TDMInst = 3 and NumWaves > 1)")
         return
+      # The RAP null writes that parity assumption into the kernel: it zeroes the
+      # even waves of a descriptor set's enable word
+      # (KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves), once per set
+      # owner. RAP holds both A and its scale resident, so both have to be
+      # silenced. TDMFuse=0 gives each its own set on exactly the even waves and
+      # both are, and without MX scales TDMFuse 1-3 give A and B a set each on
+      # every wave, which the null's every-wave arm handles. With MX scales a
+      # scale shares its data tensor's set, so one owner carries both and the
+      # single null cannot cover them: TDMFuse=1 seats A on the even waves but
+      # leaves MXSA on the odd ones, TDMFuse=2 seats A on the low half of a block
+      # set so half of it survives, and TDMFuse=3 leaves A on every wave with
+      # MXSA on B's set, which this null never writes. A resident tensor that
+      # goes on loading moves data into an LDS buffer the reuse copy does not
+      # read, so the row is refused rather than left to waste the bandwidth.
+      if state.get("TDMFuse", 0) and not tdmPairOnEveryWave(state, "A", "B"):
+        reject(state, printRejectionReason,
+               "ReuseAcrossPersistent is not implemented with TDMFuse=%d and MX scales on %s: it "
+               "silences the even waves of one descriptor set per owner, which covers A and its "
+               "scale for TDMFuse=0, and A and B for TDMFuse 1-3 without MX scales, where each "
+               "rides every wave of a set of its own. Under the %s grouping a scale shares a data "
+               "tensor's set, so the null cannot silence every resident member and the ones it "
+               "misses keep loading into an LDS buffer the reuse copy never reads. Use TDMFuse=0, "
+               "put the MX scales on neither tensor, or use ReuseAcrossPersistent=0"
+               % (state["TDMFuse"],
+                  " and ".join(tdmLiveScales(state)),
+                  tdmGroupingName(state)))
+        return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
-        return
-      # NoTailLoop is derived later, once ASEM is final (assignDerivedParameters).
-      if state["AssertSummationElementMultiple"] % state["DepthU"] != 0:
-        reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
         return
       if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on A")
@@ -7576,6 +7912,17 @@ class Solution(collections.abc.Mapping):
         return
       if state.get("UseSubtileImpl", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not implemented for the subtile path")
+        return
+      # The entry guard repeats DefaultWGM's remap to learn which M-tile a tile
+      # reads, and the phased tile walk derives its period from that remap.
+      # SpaceFillingCurveWalk is DefaultWGM's sibling,
+      # selected at codegen by len(SpaceFillingAlgo), and redefines the field: with
+      # SFC the WGM kernarg carries packed per-level grid dims rather than a WGM
+      # value. Rejecting the compile-time list is enough, because which algorithm
+      # gets emitted is baked into the assembly; only the WGM *value* arrives from
+      # a runtime field.
+      if len(state["SpaceFillingAlgo"]):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with SpaceFillingAlgo")
         return
       # The A-side local-read pack buffers are sized from numVgprBufferPackA,
       # which RAP does not grow, so the resident buffer sets would alias each
