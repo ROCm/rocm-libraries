@@ -31,7 +31,9 @@ add_executable(${SDPA_CASE_FLOW_RUNNER_EXE}
     Main.cpp
     ${_runner_hash_header}
     ${_it_src}/sdpa-case-flow-poc/CaseGraph.cpp
+    ${_it_src}/harness/CpuReferenceGraphExecutorAdapter.cpp
     ${_it_src}/harness/bundle/OutputComparison.cpp
+    ${_it_src}/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     ${_it_src}/harness/input-init/FillInputs.cpp
     ${_it_src}/harness/input-init/SdpaBackwardInputs.cpp
 )
