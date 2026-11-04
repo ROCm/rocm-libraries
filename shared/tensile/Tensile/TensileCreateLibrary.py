@@ -1485,6 +1485,16 @@ def TensileCreateLibrary():
     tPrint(3, HR)
     tPrint(3, "")
 
+    # The build runs --verify-manifest on every invocation, including no-op
+    # rebuilds. For named targets the manifest location does not depend on
+    # assembler capabilities, so verify before probing the assembler.
+    if args["VerifyManifest"] and Common.asmCapsProbeIsas(args["Architecture"]) is not None:
+        requestedArchs, _ = Common.splitNamedArchs(args["Architecture"])
+        if verifyManifest(libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME):
+            tPrint(1, "Successfully verified all files in manifest were generated")
+            return
+        printExit("Failed to verify all files in manifest")
+
     # Library generation does not benchmark assembly kernels, so a GPU-less
     # host (e.g. CI) is expected; suppress the "no ISA detected" warning.
     Common.configureCompilerTarget(args["Architecture"])
