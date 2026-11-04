@@ -1577,7 +1577,7 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
             rocke_value_t* atom_n_off
                 = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+            const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
             for(int i = 0; i < op->dst.frag_len; i++)
             {
                 rocke_value_t* row_off;
@@ -2349,7 +2349,7 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
 
     /* Wherever two operands of one builder call would both emit ops, they are
      * sequenced into temporaries: C leaves argument evaluation order

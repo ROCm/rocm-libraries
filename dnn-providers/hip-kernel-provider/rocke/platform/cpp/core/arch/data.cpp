@@ -863,8 +863,8 @@ static constexpr rocke_layout_map_t lm_wmma_gfx1250_32_b
     = {ROCKE_MMA_ROLE_SRC1, 16, 32, _wmma_gfx1250_b_16x16x32};
 
 /* =========================================================================
- * op_id -> accumulator fragment length (the dst_frag_len projection of
- * target.py::_MMA_FRAGMENT_INFO).
+ * op_id -> accumulator-input and result fragment lengths, mirroring the
+ * source2 and dst projections of target.py::_MMA_FRAGMENT_INFO.
  * =========================================================================
  *
  * This is the arch SSOT that rocke.core.ir.IRBuilder.mma (rocke_b_mma) consults
@@ -895,18 +895,34 @@ static constexpr rocke_layout_map_t lm_wmma_gfx1250_32_b
 typedef struct rocke_ati_mma_frag_row
 {
     const char* op_id;
+    int src2_frag_len;
     int dst_frag_len;
+
+    constexpr rocke_ati_mma_frag_row(const char* id, int src2, int dst)
+        : op_id(id)
+        , src2_frag_len(src2)
+        , dst_frag_len(dst)
+    {
+    }
+
+    /* Current physical rows share a width; the representation does not require it. */
+    constexpr rocke_ati_mma_frag_row(const char* id, int shared_width)
+        : rocke_ati_mma_frag_row(id, shared_width, shared_width)
+    {
+    }
 } rocke_ati_mma_frag_row_t;
 
 /* Layout guard for the rocke_arch_mma_dst_frag_len lookup below, which derives its
  * row count from sizeof(table)/sizeof(row). That division is exact for any
- * element size, so padding of rocke_ati_mma_frag_row_t (12 bytes of data padded
- * out to 16 for op_id's 8-byte alignment) cannot desync the count. These asserts
+ * element size, so padding of rocke_ati_mma_frag_row_t cannot desync the count.
+ * These asserts
  * pin the field order so a future reorder/resize is caught at compile time. */
 static_assert(offsetof(rocke_ati_mma_frag_row_t, op_id) == 0,
               "op_id must be the first field of rocke_ati_mma_frag_row_t");
-static_assert(offsetof(rocke_ati_mma_frag_row_t, dst_frag_len) == sizeof(const char*),
-              "dst_frag_len must immediately follow op_id (no leading padding)");
+static_assert(offsetof(rocke_ati_mma_frag_row_t, src2_frag_len) == sizeof(const char*),
+              "src2_frag_len must immediately follow op_id");
+static_assert(offsetof(rocke_ati_mma_frag_row_t, dst_frag_len) == sizeof(const char*) + sizeof(int),
+              "dst_frag_len must immediately follow src2_frag_len");
 
 static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_32x32x4_xf32", 16},
@@ -5210,7 +5226,7 @@ consteval gfx1250_catalog make_gfx1250_catalog()
 constexpr auto k_mma_gfx1250 = make_gfx1250_catalog();
 } // namespace
 
-int rocke_arch_mma_dst_frag_len(const char* op_id)
+static int rocke_ati_mma_frag_len(const char* op_id, bool accumulator_input)
 {
     if(!op_id)
     {
@@ -5228,25 +5244,30 @@ int rocke_arch_mma_dst_frag_len(const char* op_id)
     }
     if(row)
     {
-        return row->dst_frag_len;
+        return accumulator_input ? row->src2_frag_len : row->dst_frag_len;
     }
     for(const auto& op : k_mma_gfx1250.ops)
     {
         if(strcmp(op.op_id, op_id) == 0)
-            return op.dst.frag_len;
+            return accumulator_input ? op.srcs[2].frag_len : op.dst.frag_len;
     }
     /* An atom with no fragment row at all -- the gfx950 scaled MFMAs -- takes its
      * accumulator length from its catalog row. */
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx950");
     const rocke_mma_op_t* atom = rocke_mma_catalog_by_op_id(&target->mma, op_id);
     if(atom)
-        return atom->dst.frag_len;
+        return accumulator_input ? atom->srcs[2].frag_len : atom->dst.frag_len;
     return 0; /* unknown atom: the zero-length _frag_info fallback */
+}
+
+int rocke_arch_mma_dst_frag_len(const char* op_id)
+{
+    return rocke_ati_mma_frag_len(op_id, false);
 }
 
 int rocke_arch_mma_c_frag_len(const char* op_id)
 {
-    return rocke_arch_mma_dst_frag_len(op_id);
+    return rocke_ati_mma_frag_len(op_id, true);
 }
 
 /* =========================================================================

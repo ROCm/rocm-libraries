@@ -39,7 +39,7 @@ const rocke_arch_layout_map_t* rocke_mmaop_b_layout(const rocke_mmaop_t* op, roc
 
 const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b)
 {
-    /* Historical MmaOp.c_layout(): result (row, col) lane/slot map. */
+    /* MmaOp.c_layout(): accumulator-input (row, col) lane/slot map. */
     return rocke_mma_op_c_layout(op, b);
 }
 

@@ -186,8 +186,10 @@ int main(void)
               "indexed src2 layout remains independent");
         CHECK(rocke_mma_op_dst_layout(&distinct, NULL) == &dst_layout,
               "dst layout remains independent");
-        CHECK(rocke_mma_op_c_layout(&distinct, NULL) == &dst_layout,
-              "historical C layout projects dst");
+        CHECK(rocke_mma_op_c_layout(&distinct, NULL) == &src2_layout,
+              "C layout projects the accumulator input");
+        CHECK(rocke_mma_op_acc_layout(&distinct, NULL) == &src2_layout,
+              "acc layout projects the accumulator input");
         const rocke_mma_op_t* selected
             = rocke_mma_catalog_by_op_id(&catalog, "synthetic_distinct_dst");
         CHECK(selected != NULL, "catalog preserves scaled operand metadata");
@@ -233,8 +235,13 @@ int main(void)
           "mfma_f32_4x4x4_f16 has no catalog row");
     check_atom(&b, "mfma_f32_4x4x4_f16", 4, ROCKE_SCALAR_F32);
 
-    /* Every catalog accumulator has an IR type, and the op_id lookup rocke_b_mma
-     * uses returns the row's accumulator dtype. */
+    CHECK(rocke_arch_mma_c_frag_len(NULL) == 0, "NULL source fragment ID");
+    CHECK(rocke_arch_mma_c_frag_len("not_a_real_op_id") == 0, "unknown source fragment ID");
+    CHECK(rocke_arch_mma_dst_frag_len(NULL) == 0, "NULL result fragment ID");
+    CHECK(rocke_arch_mma_c_frag_len("mfma_f32_4x4x4_f16") == 4, "fragment-only source");
+    CHECK(rocke_arch_mma_c_frag_len("mfma_f32_16x16x32_xf32") == 4, "emulated source");
+
+    /* Source2 and result metadata remain independent, including result typing. */
     int num_arches = 0;
     const char* const* arches = rocke_known_arches(&num_arches);
     for(int i = 0; i < num_arches; ++i)
@@ -243,9 +250,13 @@ int main(void)
         for(int j = 0; arch && j < arch->mma.num_ops; ++j)
         {
             const rocke_mma_op_t* op = &arch->mma.ops[j];
-            const char* c_dtype = rocke_arch_mma_op_id_dst_dtype(op->op_id);
+            const char* dst_dtype = rocke_arch_mma_op_id_dst_dtype(op->op_id);
+            const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op->op_id);
             CHECK(rocke_dtype_to_ir_type(op->dst.dtype) != NULL, op->op_id);
-            CHECK(c_dtype != NULL && strcmp(c_dtype, op->dst.dtype) == 0, op->op_id);
+            CHECK(dst_dtype != NULL && strcmp(dst_dtype, op->dst.dtype) == 0, op->op_id);
+            CHECK(c_dtype != NULL && strcmp(c_dtype, op->srcs[2].dtype) == 0, op->op_id);
+            CHECK(rocke_arch_mma_c_frag_len(op->op_id) == op->srcs[2].frag_len, op->op_id);
+            CHECK(rocke_arch_mma_dst_frag_len(op->op_id) == op->dst.frag_len, op->op_id);
         }
     }
 

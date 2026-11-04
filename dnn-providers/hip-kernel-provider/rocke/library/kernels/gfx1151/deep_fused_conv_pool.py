@@ -1675,7 +1675,7 @@ def _fuse_c0_to_conv1_a_regs(
     for mi in range(mfmas_m):
         for kk in range(mfmas_n):
             acc = accs0[mi * mfmas_n + kk]
-            codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.c_frag_len)]
+            codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.dst.frag_len)]
             words = b.bitcast(b.vec_pack(codes, I8), VectorType(I32, 2))
             lo = b.vec_extract(words, 0)  # this half's k0_local {0,2,4,6}+half
             hi = b.vec_extract(words, 1)  # this half's k0_local {8,10,12,14}+half
@@ -2288,7 +2288,7 @@ def _scatter_codes_to_lds(
     and store it at its (row, col) in the row-major ``dst_smem`` tile."""
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
     flat = 0
@@ -2298,7 +2298,7 @@ def _scatter_codes_to_lds(
             flat += 1
             m_base = b.add(warp_m_off, b.const_i32(mi * _WMMA))
             n_base = b.add(warp_n_off, b.const_i32(ni * _WMMA))
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, grid.lane, i)
                 row = b.add(m_base, row_off)
                 col = b.add(n_base, col_off)
@@ -2317,7 +2317,7 @@ def _scatter_codes_to_i8_lds(
     """Apply ``code_fn(acc_slot) -> i8 int4 code`` and store byte-per-code LDS."""
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
     flat = 0
@@ -2327,7 +2327,7 @@ def _scatter_codes_to_i8_lds(
             flat += 1
             m_base = b.add(warp_m_off, b.const_i32(mi * _WMMA))
             n_base = b.add(warp_n_off, b.const_i32(ni * _WMMA))
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, grid.lane, i)
                 row = b.add(m_base, row_off)
                 col = b.add(n_base, col_off)
@@ -2347,7 +2347,7 @@ def _scatter_vec_codes_to_i8_lds(
     """Vector-quantize one accumulator vector, then scatter i8 code lanes."""
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
     flat = 0
@@ -2358,7 +2358,7 @@ def _scatter_vec_codes_to_i8_lds(
             codes = vec_code_fn(acc)
             m_base = b.add(warp_m_off, b.const_i32(mi * _WMMA))
             n_base = b.add(warp_n_off, b.const_i32(ni * _WMMA))
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, grid.lane, i)
                 row = b.add(m_base, row_off)
                 col = b.add(n_base, col_off)
@@ -2381,7 +2381,7 @@ def _scatter_packed_i4_codes_to_lds(
     """
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
     flat = 0
@@ -2395,7 +2395,7 @@ def _scatter_packed_i4_codes_to_lds(
             flat += 1
             m_base = b.add(warp_m_off, b.const_i32(mi * _WMMA))
             n_base = b.add(warp_n_off, b.const_i32(ni * _WMMA))
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, grid.lane, i)
                 row = b.add(m_base, row_off)
                 col = b.add(n_base, col_off)

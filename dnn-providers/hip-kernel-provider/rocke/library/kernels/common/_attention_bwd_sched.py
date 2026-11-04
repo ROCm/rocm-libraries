@@ -715,7 +715,7 @@ class StageTable:
 
     @property
     def c_frag_len(self) -> int:
-        return int(self._op(16).c_frag_len)
+        return int(self._op(16).dst.frag_len)
 
     # ----- MMA counts -----------------------------------------------------
 

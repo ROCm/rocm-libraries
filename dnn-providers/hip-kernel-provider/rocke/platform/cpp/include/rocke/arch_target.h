@@ -203,8 +203,8 @@ const rocke_layout_map_t*
     rocke_mma_op_src_layout(const rocke_mma_op_t* op, int index, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_dst_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 
-/* Historical mathematical-role compatibility accessors. A/B project src0/src1;
- * C projects dst. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL, matching
+/* Mathematical-role compatibility accessors. A/B/C project src0/src1/src2;
+ * results use the independent dst accessor. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL, matching
  * Python's NotImplementedError. An enclosing public builder/lowering boundary
  * translates the exception to status + message; direct C++ callers must catch
  * it, even with b=NULL. A NULL op returns NULL. */
@@ -408,7 +408,7 @@ const rocke_mma_op_t*
  * (rocke_arch_mma_op_id_physical_op_id). Returns 0 for an unknown atom,
  * matching the zero-length _FragInfo fallback. */
 int rocke_arch_mma_dst_frag_len(const char* op_id);
-/* Legacy C metadata projection: the result's fragment length. */
+/* Legacy C metadata projection: the accumulator input's fragment length. */
 int rocke_arch_mma_c_frag_len(const char* op_id);
 
 /* Canonical (normalised) result-dtype key, as produced by
@@ -425,7 +425,7 @@ int rocke_arch_mma_c_frag_len(const char* op_id);
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id);
 
-/* Legacy C metadata projection: the independent result dtype. */
+/* Legacy C metadata projection: the accumulator input dtype, not the result. */
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
 
 /* True when the hardware encodes this atom directly, mirroring MmaOp.is_native.

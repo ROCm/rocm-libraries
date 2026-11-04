@@ -220,7 +220,7 @@ def _wmma_attention_fwd_inner_body(
     # a_frag=8) ABIs are both expressed through the same accessors.
     a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=lane-base+slot)
     c_map = (
-        op.c_layout()
+        op.dst_layout()
     )  # (row, col): gfx11 (2i+l//16, l%16); gfx12 ((l//16)*8+i, l%16)
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
     c_frag = op.dst.frag_len  # Result slots per lane; also sizes row statistics.

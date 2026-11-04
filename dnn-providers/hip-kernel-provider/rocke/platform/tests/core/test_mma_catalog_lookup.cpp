@@ -652,9 +652,11 @@ static int test_scale_contracts()
         &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &e8);
     CHECK(base);
     auto compatibility_op = *base;
-    rocke_layout_map_t dst_layout = {};
+    rocke_layout_map_t src2_layout = {}, dst_layout = {};
+    compatibility_op.srcs[2].layout = &src2_layout;
     compatibility_op.dst.layout = &dst_layout;
-    CHECK(rocke_mmaop_acc_layout(&compatibility_op, NULL) == &dst_layout);
+    CHECK(rocke_mmaop_acc_layout(&compatibility_op, NULL) == &src2_layout);
+    CHECK(rocke_mma_op_dst_layout(&compatibility_op, NULL) == &dst_layout);
     // Indexed queries must match both the independent result and both scales.
     rocke_mma_op_t indexed_rows[3] = {*base, *base, *base};
     indexed_rows[1].dst.dtype = indexed_rows[2].dst.dtype = "i32";

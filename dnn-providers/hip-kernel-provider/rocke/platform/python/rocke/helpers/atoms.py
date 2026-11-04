@@ -778,8 +778,8 @@ class WmmaAtom:
         return self.mma_op(arch).b_layout()
 
     def c_layout(self, arch: str = "gfx1151") -> LayoutMap:
-        """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
-        return self.mma_op(arch).c_layout()
+        """The accumulator input ``(row, col)`` lane/slot -> coordinate map."""
+        return self.mma_op(arch).src_layout(2)
 
     # Convenience alias mirroring ``MmaOp.acc_layout``.
     def acc_layout(self, arch: str = "gfx1151") -> LayoutMap:

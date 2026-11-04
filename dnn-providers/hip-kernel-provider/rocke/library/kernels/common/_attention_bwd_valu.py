@@ -171,7 +171,7 @@ def check_stats_vec_layout(op: MmaOp, width: int) -> None:
     """
     if width not in STATS_VECS:
         raise ValueError(f"stats_vec={width!r} not in {STATS_VECS}")
-    lanes = eval_layout(op.c_layout())
+    lanes = eval_layout(op.dst_layout())
     n = len(lanes[0])
     if n % width:
         raise ValueError(

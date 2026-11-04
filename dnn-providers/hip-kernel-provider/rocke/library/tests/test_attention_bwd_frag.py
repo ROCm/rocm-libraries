@@ -127,7 +127,9 @@ def _perturbed(layout: LayoutMap, bad_lane: int) -> LayoutMap:
 @pytest.mark.parametrize("arch", BWD_ARCHES)
 def test_mismatched_c_map_has_no_relabel(arch):
     op = bwd_atoms(arch, "fp16")[0]
-    bad = dataclasses.replace(op, _c_layout=_perturbed(op.c_layout(), 5))
+    bad = dataclasses.replace(
+        op, dst=dataclasses.replace(op.dst, layout=_perturbed(op.dst_layout(), 5))
+    )
     with pytest.raises(ValueError, match="no register C-to-A relabel"):
         F.plan_c_to_a(bad, op)
 
@@ -136,7 +138,14 @@ def test_mismatched_b_k_map_refuses_the_permuted_load():
     ops = bwd_atoms("gfx950", "fp16")
     c_op, a_op = ops[0], ops[1]
     plan = F.plan_c_to_a(c_op, a_op)
-    bad = dataclasses.replace(a_op, _b_layout=_perturbed(a_op.b_layout(), 3))
+    bad = dataclasses.replace(
+        a_op,
+        srcs=(
+            a_op.srcs[0],
+            dataclasses.replace(a_op.srcs[1], layout=_perturbed(a_op.src_layout(1), 3)),
+            a_op.srcs[2],
+        ),
+    )
     assert not F.atom_facts(bad).ab_same_k
     with pytest.raises(ValueError, match="K maps differ"):
         F.kperm_b_coords(plan, c_op, bad)

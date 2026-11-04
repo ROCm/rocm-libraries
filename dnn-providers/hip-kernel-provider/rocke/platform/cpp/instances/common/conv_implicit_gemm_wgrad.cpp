@@ -2080,7 +2080,7 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
      * (Python _row_addr) while the bounds stay on the per-group row. */
     rocke_value_t* c_kpg_e = ctx->group_idx != NULL ? ctx->p_kpg : NULL;
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; ++mi)
@@ -2381,7 +2381,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     bool _is_pw = ctx->is_pointwise;
     rocke_value_t* c_wgN_wmma = _is_pw ? rocke_b_const_i32(b, wg_N) : NULL;
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
     rocke_value_t* c0 = ctx->c0;
 
     int flat = 0;

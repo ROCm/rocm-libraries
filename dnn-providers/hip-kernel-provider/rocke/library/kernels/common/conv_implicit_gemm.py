@@ -1396,7 +1396,7 @@ def _build_implicit_gemm_conv_impl(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
+    c_per_lane = op.dst.frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 

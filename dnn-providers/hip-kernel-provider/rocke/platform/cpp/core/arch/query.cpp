@@ -157,7 +157,7 @@ const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_
 
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b)
 {
-    return rocke_mma_op_dst_layout(op, b);
+    return rocke_mma_op_src_layout(op, 2, b);
 }
 
 const rocke_layout_map_t*
@@ -198,7 +198,7 @@ const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
 }
 const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b)
 {
-    return rocke_mma_op_dst_layout(op, b);
+    return rocke_mma_op_src_layout(op, 2, b);
 }
 
 /* ============================== MMA catalog =========================== */
@@ -594,6 +594,12 @@ const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id)
         }
     }
     return NULL;
+}
+
+const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
+{
+    const rocke_mma_op_t* op = rocke_arch_mma_op_by_id(op_id);
+    return op ? op->srcs[2].dtype : NULL;
 }
 
 bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op)

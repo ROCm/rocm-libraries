@@ -747,7 +747,7 @@ def _atom_frag_lengths(op) -> Tuple[int, int, int]:
     be wrong). Driving everything off ``op.*_frag_len`` is what lets one body
     emit both ISAs.
     """
-    return op.a_frag_len, op.b_frag_len, op.c_frag_len
+    return op.a_frag_len, op.b_frag_len, op.dst.frag_len
 
 
 def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
@@ -1813,7 +1813,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         On RDNA (WMMA) this delegates to the fully contract-driven
         :func:`_emit_wmma_phase`. On CDNA (MFMA) it keeps the byte-identical
         arch-formula fragment load below; the matmul + accumulator length are
-        contract-driven (``_emit_mma`` / ``op.c_frag_len``).
+        contract-driven (``_emit_mma`` / ``op.dst.frag_len``).
 
         ``lds_parity`` (DTLA + prefetch only): shifts every A row by
         ``parity * block_m`` and every B row by ``parity * block_n`` so
@@ -2446,7 +2446,7 @@ def _emit_epilogue_default(
     # One slot -> one f16 store. (The supported WMMA subset is the single
     # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)
     if op.family == "wmma":
-        c_map = op.c_layout()
+        c_map = op.dst_layout()
         block_warp_m_off = b.add(block_m_off, warp_m_off)
         block_warp_n_off = b.add(block_n_off, warp_n_off)
         flat = 0

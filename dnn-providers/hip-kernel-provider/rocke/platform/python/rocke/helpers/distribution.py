@@ -1715,7 +1715,7 @@ def store_wmma_acc(
     block). The accumulator layout naturally places adjacent slots so the
     AMDGPU backend coalesces neighbouring stores.
     """
-    cmap = atom.c_layout(arch)
+    cmap = atom.mma_op(arch).dst_layout()
     c_off = b.const_i32(col_offset)
     lead = list(lead)
     for r in range(atom.c_per_lane):
@@ -1779,7 +1779,7 @@ class WmmaTensor:
             return self.atom.a_layout(self.arch)
         if self.role == "b":
             return self.atom.b_layout(self.arch)
-        return self.atom.c_layout(self.arch)
+        return self.atom.mma_op(self.arch).dst_layout()
 
     def coord(self, b: IRBuilder, lane: Value, slot: int):
         """``(row, col)`` of accumulator ``slot`` for ``lane`` (role ``"c"``)."""

@@ -159,7 +159,7 @@ def _mn_k(role: str, coord: tuple[int, int]) -> tuple[int, int]:
 
 
 def _layout(op: MmaOp, role: str) -> LayoutMap:
-    return {"a": op.a_layout, "b": op.b_layout, "c": op.c_layout}[role]()
+    return {"a": op.a_layout, "b": op.b_layout, "c": op.dst_layout}[role]()
 
 
 @cache
@@ -196,7 +196,7 @@ def c_row_runs(op: MmaOp, run: int = 4) -> bool:
     one column (slot ``s``: row ``r0 + s``, the same column), with the
     fragment a whole number of runs: the per-row stats of a run are one
     ``run``-float vector (the MFMA 16 x 16 C layouts, the gfx12 WMMA one)."""
-    if op.c_frag_len % run:
+    if op.dst.frag_len % run:
         return False
     for lane_coords in _eval(op, "c"):
         r0, c0 = lane_coords[0]
@@ -212,7 +212,7 @@ def c_quad_transposable(op: MmaOp) -> bool:
     hold 4 consecutive columns starting at a multiple of 4. After the
     transpose lane ``j`` of the quad holds row ``r0 + j`` at the quad's 4
     columns."""
-    if op.c_frag_len != 4 or not c_row_runs(op, 4) or op.wave_size % 4:
+    if op.dst.frag_len != 4 or not c_row_runs(op, 4) or op.wave_size % 4:
         return False
     ev = _eval(op, "c")
     for q in range(0, op.wave_size, 4):
@@ -249,7 +249,7 @@ def _affine(op: MmaOp, role: str) -> bool:
 
 def atom_facts(op: MmaOp) -> AtomFacts:
     a, b_, c = _eval(op, "a"), _eval(op, "b"), _eval(op, "c")
-    c_is_aT = op.c_frag_len == op.a_frag_len and all(
+    c_is_aT = op.dst.frag_len == op.a_frag_len and all(
         c[lane][s] == (a[lane][s][1], a[lane][s][0])
         for lane in range(op.wave_size)
         for s in range(op.a_frag_len)
@@ -304,7 +304,7 @@ def _logical_a(c_coord: tuple[int, int], tile: int, rows: int) -> tuple[int, int
 
 
 def _try_direct(c_op: MmaOp, a_op: MmaOp, tiles: int) -> RelabelPlan | None:
-    cf = c_op.c_frag_len
+    cf = c_op.dst.frag_len
     if a_op.a_frag_len != tiles * cf:
         return None
     a, c = _eval(a_op, "a"), _eval(c_op, "c")
@@ -335,13 +335,13 @@ def _try_direct(c_op: MmaOp, a_op: MmaOp, tiles: int) -> RelabelPlan | None:
 
 def _try_xlane16(c_op: MmaOp, a_op: MmaOp, tiles: int) -> RelabelPlan | None:
     ws = a_op.wave_size
-    if ws != 32 or tiles != 1 or a_op.a_frag_len != 2 * c_op.c_frag_len:
+    if ws != 32 or tiles != 1 or a_op.a_frag_len != 2 * c_op.dst.frag_len:
         return None
-    if a_op.a_frag_len % 2 or c_op.c_frag_len % 2:
+    if a_op.a_frag_len % 2 or c_op.dst.frag_len % 2:
         return None
     a, c = _eval(a_op, "a"), _eval(c_op, "c")
     # where[lane][(row, k)] -> cslot for the values a lane holds
-    held = [{_logical_a(c[lane][cs], 0, c_op.m): cs for cs in range(c_op.c_frag_len)}
+    held = [{_logical_a(c[lane][cs], 0, c_op.m): cs for cs in range(c_op.dst.frag_len)}
             for lane in range(ws)]  # fmt: skip
     # per half: A slot -> (from_partner, cslot); must be uniform over the half
     per_half: list[list[tuple[int, int]] | None] = [None, None]
@@ -666,7 +666,7 @@ def kperm_b_coords(plan: RelabelPlan, c_op: MmaOp, b_op: MmaOp) -> FragCoords:
         [(c[1], plan.k_perm[c[0]]) for c in bl[lane]] for lane in range(b_op.wave_size)
     ]
     deltas = _deltas_of(per_lane)
-    c_layout = c_op.c_layout()
+    c_layout = c_op.dst_layout()
     b_layout = b_op.b_layout()
     t0, cs0 = plan.slot_src[0]
     rows = plan.c_tile_rows

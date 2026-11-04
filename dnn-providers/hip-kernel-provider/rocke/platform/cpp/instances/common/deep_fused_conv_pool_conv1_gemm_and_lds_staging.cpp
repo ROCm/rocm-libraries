@@ -194,7 +194,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
 
     warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    c_map = rocke_mmaop_c_layout(op, b);
+    c_map = rocke_mma_op_dst_layout(op, b);
     if(!rocke_ir_builder_ok(b))
     {
         return NULL;

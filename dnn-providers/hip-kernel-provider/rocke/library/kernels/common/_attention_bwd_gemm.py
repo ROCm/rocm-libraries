@@ -218,7 +218,7 @@ def mma_agpr_asm_steps(
         outs_c = ["=a"] * n
     else:
         _check_agpr_base(g, agpr_base)
-        w = g.op.c_frag_len
+        w = g.op.dst.frag_len
         outs_c = [
             "={a[%d:%d]}" % (agpr_base + i * w, agpr_base + (i + 1) * w - 1)
             for i in range(n)
@@ -226,7 +226,7 @@ def mma_agpr_asm_steps(
     constraints = ",".join(outs_c + [str(i) for i in range(tied)] + ["v"] * len(srcs))
     if zero:
         accs = []
-        result_types = [VectorType(F32, g.op.c_frag_len)] * n
+        result_types = [VectorType(F32, g.op.dst.frag_len)] * n
     else:
         accs = [acc[fm][fn] for fm, fn in outs]
         result_types = [x.type for x in accs]
@@ -253,7 +253,7 @@ def _check_agpr_base(g: "BlockGemm", agpr_base: int) -> None:
     """Raise unless the wave's accumulators fit a0..a255 from ``agpr_base``."""
     if isinstance(agpr_base, bool) or not isinstance(agpr_base, int):
         raise ValueError(f"agpr_base must be an int, got {agpr_base!r}")
-    last = agpr_base + g.frags_m * g.frags_n * g.op.c_frag_len - 1
+    last = agpr_base + g.frags_m * g.frags_n * g.op.dst.frag_len - 1
     if agpr_base < 0 or last > 255:
         raise ValueError(f"pinned AGPRs a[{agpr_base}:{last}] outside a0..a255")
 
@@ -689,7 +689,7 @@ class BlockGemm:
         self, b: IRBuilder, lane: Value, origin: tuple[Value, Value], fm: int, fn: int
     ) -> list[tuple[Value, Value]]:
         """Block coordinates ``(row, col)`` of every slot of accumulator ``[fm][fn]``."""
-        layout = self.op.c_layout()
+        layout = self.op.dst_layout()
         out = []
         for s in range(layout.frag_len):
             r, c = layout.coord(b, lane, s)

@@ -310,7 +310,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     /* Pointwise: no descriptor; the flat D offset uses the D row pitch. */
     rocke_value_t* c_K_wmma = _is_pointwise ? ir_d_pitch_pw : NULL;
     /* c_map = op.c_layout() */
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
 
     int flat = 0;
     int mi, ni, i;

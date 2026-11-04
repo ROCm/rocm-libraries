@@ -3,6 +3,7 @@
 """Accumulator initialization and result slots have separate metadata roles."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from rocke.core.arch import ArchTarget, MmaCatalog
@@ -30,9 +31,25 @@ def test_wmma_attention_zeros_use_source_width_without_changing_result(
     target = ArchTarget.from_gfx(arch)
     atom = target.mma.by_op_id(_wmma_attn_op_id(target, dtype))
     source_width = atom.srcs[2].frag_len + 1
+
     # This asymmetric fixture checks role selection, not instruction legality.
+    def source_map_must_not_drive_result_scatter(*args):
+        raise AssertionError("result scatter used the accumulator input map")
+
     custom = replace(
-        atom, srcs=(*atom.srcs[:2], replace(atom.srcs[2], frag_len=source_width))
+        atom,
+        srcs=(
+            *atom.srcs[:2],
+            replace(
+                atom.srcs[2],
+                frag_len=source_width,
+                layout=replace(
+                    atom.srcs[2].layout,
+                    frag_len=source_width,
+                    fn=source_map_must_not_drive_result_scatter,
+                ),
+            ),
+        ),
     )
     target = replace(target, mma=MmaCatalog([custom]))
     b = IRBuilder("wmma_source_result_roles")
@@ -88,3 +105,41 @@ def test_wmma_attention_zeros_use_source_width_without_changing_result(
     assert len(mmas) == 2
     assert all(op.operands[2].type == VectorType(F32, source_width) for op in mmas)
     assert all(op.result.type == VectorType(F32, atom.dst.frag_len) for op in mmas)
+
+
+def test_wmma_output_tensor_and_store_use_the_destination_map():
+    from rocke.helpers.distribution import WmmaTensor, store_wmma_acc
+
+    atom = ArchTarget.from_gfx("gfx1151").mma.by_op_id("wmma_f32_16x16x16_f16")
+
+    def source_map(*args):
+        raise AssertionError("output operation used the source2 layout")
+
+    custom = replace(
+        atom,
+        srcs=(
+            *atom.srcs[:2],
+            replace(
+                atom.srcs[2],
+                frag_len=3,
+                layout=replace(atom.srcs[2].layout, frag_len=3, fn=source_map),
+            ),
+        ),
+    )
+    wrapper = SimpleNamespace(
+        c_per_lane=custom.dst.frag_len,
+        mma_op=lambda arch: custom,
+        c_layout=lambda arch: custom.c_layout(),
+    )
+    b = IRBuilder("output_layout_roles")
+    lane = b.thread_id_x()
+    acc = b.param("acc", VectorType(F32, custom.dst.frag_len))
+    tensor = WmmaTensor(atom=wrapper, role="c", value=acc)
+    assert tensor._layout() is custom.dst.layout
+    assert custom.c_frag_len == 3
+    stores = []
+    window = SimpleNamespace(
+        dtype=F32, store_scalar=lambda *args, **kwargs: stores.append((args, kwargs))
+    )
+    store_wmma_acc(b, window, wrapper, lane, acc)
+    assert len(stores) == custom.dst.frag_len

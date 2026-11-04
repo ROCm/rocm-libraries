@@ -56,7 +56,9 @@ entrypoints mirror the gfx1250 scaled-GEMM structure. See the
 MMA metadata stores three `srcs` and an independent `dst`. `srcs[0]` and
 `srcs[1]` are the multiplicands; `srcs[2]` is the accumulator input. Each source
 and the destination have their own dtype, fragment length, and layout. Historical
-A/B projections refer to `srcs[0]`/`srcs[1]`; C projections refer to `dst`.
+A/B/C projections refer to `srcs[0]`/`srcs[1]`/`srcs[2]`, matching the source
+query arguments. Result consumers use `dst` and `dst_layout()` explicitly;
+`dst_dtype` projects only the independent result dtype.
 
 A source's optional `MmaScaleOperand` owns its scale `dtype`, `block_size`,
 logical `frag_len`, and `layout`. `block_size` is the number of matrix elements
@@ -226,8 +228,8 @@ dtype pointers must be non-NULL; an explicit empty destination stays an exact
 filter. Legacy three-dtype catalog queries use the same default: a NULL
 `dst_dtype` selects the accumulator-source dtype (`c_dtype`, or `srcs[2]`).
 An explicit `dst_dtype` filters the result independently, so it may differ from
-`c_dtype`. Query `c_dtype` describes the accumulator input, unlike the legacy
-C metadata accessors that project the result.
+`c_dtype`. Query `c_dtype` and the legacy C metadata accessors both describe
+the accumulator input; destination metadata and queries remain independent.
 No match, or a null target, returns
 `NULL`; invalid filters and ambiguous matches raise `ckc::Error`. Handle those
 errors at a C++ boundary before returning to C. In particular, the scaled

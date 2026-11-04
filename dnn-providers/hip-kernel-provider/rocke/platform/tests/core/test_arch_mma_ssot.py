@@ -90,7 +90,10 @@ def test_mma_destination_aliases_and_unspecified_width(dtype, element):
 
 
 def test_gemm_zero_accumulator_uses_source_width():
-    from rocke.instances.common.gemm_universal import _emit_zero_acc_op
+    from rocke.instances.common.gemm_universal import (
+        _atom_frag_lengths,
+        _emit_zero_acc_op,
+    )
 
     atom = ArchTarget.from_gfx("gfx942").mma.op_for_shape(
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
@@ -105,6 +108,8 @@ def test_gemm_zero_accumulator_uses_source_width():
     assert acc.type.count == 4
     assert acc.type.elem.name == "f32"
     assert b.mma(atom, acc, acc, acc).type.count == 7
+    assert atom.c_frag_len == 4
+    assert _atom_frag_lengths(atom) == (1, 1, 7)
 
 
 # Independent established sequences, including generated scaled rows. Never
@@ -525,7 +530,7 @@ def test_invalid_family_schema_fails_loudly(declarations):
         _expand_mma_rows("gfx1250", declarations)
 
 
-class TestOpIdDstDtype(unittest.TestCase):
+class TestIndexedOpIdDstDtype(unittest.TestCase):
     def test_matches_catalog_first_hit(self):
         # Every op_id in the catalog resolves to its normalized dst dtype,
         # taking the first arch that lists it (dict preserves catalog order).
@@ -550,7 +555,7 @@ class TestOpIdDstDtype(unittest.TestCase):
         specs = _load_specs()
         # Find an op_id and clone its row into a fake arch with a different dst dtype.
         sample = next(o for row in specs.values() for o in row["mma"])
-        original_dst = normalize_dtype(sample["dst"]["dtype"])
+        original_dst = normalize_dtype(_mma_operand_rows(sample)[1]["dtype"])
         other_dst = "i32" if original_dst != "i32" else "f32"
         clash = dict(sample)
         clash["dst"] = {"dtype": other_dst}
@@ -648,8 +653,11 @@ class TestIndexedMmaOperands(unittest.TestCase):
         self.assertEqual(op.dst.frag_len, 7)
         self.assertIs(op.src_layout(2).fn, src2_coord)
         self.assertIs(op.dst_layout().fn, dst_coord)
-        self.assertEqual(op.c_frag_len, op.dst.frag_len)
-        self.assertIs(op.c_layout(), op.dst_layout())
+        self.assertEqual(op.c_dtype, op.srcs[2].dtype)
+        self.assertEqual(op.c_frag_len, op.srcs[2].frag_len)
+        self.assertIs(op.c_layout(), op.src_layout(2))
+        self.assertIs(op.acc_layout(), op.src_layout(2))
+        self.assertIsNot(op.c_layout(), op.dst_layout())
 
         builder = IRBuilder("distinct_fragment_metadata")
         value = builder.const_i32(0)
@@ -1412,7 +1420,8 @@ def test_duplicate_matrix_rows_preserve_aliases_and_independent_result(reader):
     result = _read_fixture_row(row, reader)
     if reader == "builder":
         assert result.srcs[2].dtype == "fp32"
-        assert result.dst.dtype == result.c_dtype == "i32"
+        assert result.dst.dtype == "i32"
+        assert result.c_dtype == result.srcs[2].dtype == "fp32"
     else:
         assert result == "i32"
     del row["dst"]

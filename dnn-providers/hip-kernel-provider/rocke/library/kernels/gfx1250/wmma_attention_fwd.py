@@ -198,7 +198,7 @@ def build_wmma_attention_fwd(
     op = target.mma.by_op_id(_WMMA_OP_ID)
     wave = op.wave_size  # 32
     a_map = op.a_layout()  # (row, k): lane l, slot j -> (l%16, (l//16)*16 + j)
-    c_map = op.c_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
+    c_map = op.dst_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
     a_frag = op.a_frag_len  # 16
     c_frag = op.dst.frag_len  # Result slots, including softmax/output bookkeeping.
 

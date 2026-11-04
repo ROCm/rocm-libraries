@@ -108,6 +108,24 @@ def test_a_query_selects_the_bf16_result_only_when_it_names_it(dst_dtype, expect
     assert not catalog.has_shape(**query, k=16)
 
 
+def test_legacy_source_getters_round_trip_an_independent_result():
+    catalog = _catalog()
+    atom = catalog.by_op_id(_OP_ID)
+    assert atom.c_dtype == atom.srcs[2].dtype == "fp32"
+    assert atom.dst_dtype == atom.dst.dtype == "bf16"
+    query = dict(
+        family=atom.family,
+        a_dtype=atom.a_dtype,
+        b_dtype=atom.b_dtype,
+        c_dtype=atom.c_dtype,
+        m=atom.m,
+        n=atom.n,
+        k=atom.k,
+    )
+    assert catalog.op_for_shape(**query, dst_dtype=atom.dst_dtype) is atom
+    assert catalog.op_for_shape(**query).op_id == _F32_RESULT_OP_ID
+
+
 def test_a_result_dtype_no_instruction_returns_selects_nothing():
     catalog = _catalog()
     assert catalog.enumerate(**_QUERY, dst_dtype="fp16") == []

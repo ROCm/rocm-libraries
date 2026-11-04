@@ -301,10 +301,11 @@ class LayoutMap:
     Attributes
     ----------
     role
-        ``"acc"`` (accumulator C/D, coords are ``(row, col)``), ``"a"`` (A
-        operand, coords are ``(row, k)``) or ``"b"`` (B operand, coords are
-        ``(k, col)``), ``"a_scale"`` (``(row, K-group)``), or
-        ``"b_scale"`` (``(K-group, col)``). Scale slots count logical elements,
+        Catalog roles are ``"src0"`` (A, coords ``(row, k)``), ``"src1"``
+        (B, coords ``(k, col)``), ``"src2"`` (accumulator input) and ``"dst"``
+        (result), whose coords are ``(row, col)``. ``"scale_src0"`` and
+        ``"scale_src1"`` use ``(row, K-group)`` and ``(K-group, col)``.
+        Scale slots count logical elements,
         independently of the backend register carrier.
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
@@ -583,9 +584,8 @@ class MmaOp:
     def dst_layout(self) -> LayoutMap:
         return self.dst.require_layout("dst", self)
 
-    # Compatibility projections for existing mathematical A/B/C callers. The
-    # historical C surface described the accumulator result, so C projects dst;
-    # src2 is available only through the canonical indexed interface.
+    # A/B/C project the three sources, matching the query arguments. Result
+    # consumers use dst explicitly, including when its dtype or maps differ.
     @property
     def a_dtype(self) -> str:
         return self.srcs[0].dtype
@@ -596,7 +596,7 @@ class MmaOp:
 
     @property
     def c_dtype(self) -> str:
-        return self.dst.dtype
+        return self.srcs[2].dtype
 
     @property
     def dst_dtype(self) -> str:
@@ -613,7 +613,7 @@ class MmaOp:
 
     @property
     def c_frag_len(self) -> int:
-        return self.dst.frag_len
+        return self.srcs[2].frag_len
 
     # --- physical-layout compatibility accessors -------------------------
     @property
@@ -631,8 +631,8 @@ class MmaOp:
         return self.src_layout(1)
 
     def c_layout(self) -> LayoutMap:
-        """Legacy result ``(row, col)`` lane/slot -> coordinate map."""
-        return self.dst_layout()
+        """Accumulator input ``(row, col)`` lane/slot -> coordinate map."""
+        return self.src_layout(2)
 
     @property
     def a_scale_dtype(self) -> MmaScaleDType | None:
@@ -677,7 +677,7 @@ class MmaOp:
         return self.src_scale_layout(1)
 
     def acc_layout(self) -> LayoutMap:
-        return self.dst_layout()
+        return self.src_layout(2)
 
 
 # ---------------------------------------------------------------------------

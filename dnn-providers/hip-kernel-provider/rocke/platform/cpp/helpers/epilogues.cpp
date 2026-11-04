@@ -616,7 +616,8 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
                     rocke_value_t* idx[2];
                     if(epi->mma_op != NULL)
                     {
-                        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(epi->mma_op, b);
+                        const rocke_arch_layout_map_t* c_map
+                            = rocke_mma_op_dst_layout(epi->mma_op, b);
                         rocke_arch_layout_map_coord(
                             c_map, b, grid->lane, i, &row_in_atom, &col_in_atom);
                     }
@@ -890,7 +891,8 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                     rocke_value_t* idx[2];
                     if(epi->mma_op != NULL)
                     {
-                        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(epi->mma_op, b);
+                        const rocke_arch_layout_map_t* c_map
+                            = rocke_mma_op_dst_layout(epi->mma_op, b);
                         rocke_arch_layout_map_coord(
                             c_map, b, grid->lane, i, &row_in_atom, &col_in_atom);
                     }
