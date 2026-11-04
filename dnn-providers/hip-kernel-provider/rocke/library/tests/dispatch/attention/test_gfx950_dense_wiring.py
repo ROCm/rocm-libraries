@@ -756,6 +756,16 @@ class TestScaleValidation(unittest.TestCase):
             self._launch(_MAX_SCALE * 2)
         self.assertIn("[2**-64, 2**4]", str(cm.exception))
 
+    def test_dense_scale_range_names_this_module(self):
+        """``dense_scale_range("gfx950")`` is the public lookup a caller outside
+        this package (the SDPA gate) uses instead of reaching for this
+        module's private ``_MIN_SCALE`` / ``_MAX_SCALE`` directly; it must keep
+        reading from here, not drift to its own copy of the bounds."""
+        from dispatch.attention import dense_scale_range
+        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
+
+        self.assertEqual(dense_scale_range("gfx950"), (_MIN_SCALE, _MAX_SCALE))
+
     def test_out_of_range_scale_rejected(self):
         """The ordinary kernel takes the row max on unscaled scores (valid only
         for scale > 0) and masks raw scores with a power-of-two sentinel that

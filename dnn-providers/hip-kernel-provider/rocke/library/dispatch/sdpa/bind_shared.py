@@ -9,6 +9,7 @@ checks on carried hints, and the per-operand views the bindings copy through.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,7 @@ __all__ = [
     "Operand",
     "asked_band",
     "band_text",
+    "declined_table",
     "host_ints",
     "keeps_asked_keys",
     "kept_keys",
@@ -42,8 +44,12 @@ TORCH_DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
 def torch_dtype(name: str):
     """A ``torch.dtype`` by attribute name (e.g. ``"float16"``, ``"float32"``).
 
-    The one place the unified and dense bindings import torch to resolve a
-    dtype, so neither binding module needs its own ``import torch`` for this.
+    The one place the unified and dense bindings resolve a dtype by name, so
+    neither binding module reaches for ``getattr(torch, ...)`` itself. This
+    does not make either binding torch-free: ``bind_unified.py`` still
+    imports torch directly to build the index tensors (``block_table``,
+    ``cu_seqlens_q``, ``seqused_k``) its paged ABI needs from a Python
+    list/range, which neither this helper nor ``empty_workspace`` cover.
     """
     import torch
 
@@ -168,6 +174,55 @@ def band_text(b: AttentionBand) -> str:
     if b.is_full:
         return "full attention"
     return f"left={b.left_bound} right={b.right_bound} " f"{b.alignment.name.lower()}"
+
+
+# --- declines --------------------------------------------------------------
+
+
+# Reason text for every feature a routed family (unified, dense) might
+# decline, with ``{family}`` filled in by :func:`declined_table`. A reason
+# tagged ``NOT_YET_IMPLEMENTED`` names an implementation shortcut (a missing
+# reference oracle, an unmapped schema) that nothing about the hardware or
+# ABI rules out, as opposed to a permanent kernel/ABI limit; keep a feature's
+# wording identical across families unless the kernels genuinely differ on
+# it (see each gate's own ``overrides``, e.g. dense's ``d_v_differs``).
+_SHARED_DECLINE_REASONS = {
+    "kv_heads_differ": "the {family} request has one nhead_k for K and V",
+    "dtype_mixed": "the {family} kernels read and write one dtype",
+    "compute_dtype": "the {family} kernels accumulate in fp32 only",
+    "scale_tensor": "NOT_YET_IMPLEMENTED: the {family} kernels take only a scalar scale",
+    "bias": "NOT_YET_IMPLEMENTED: no {family} candidate declares additive-bias support",
+    "bias_broadcast": "NOT_YET_IMPLEMENTED: no {family} candidate declares additive-bias support",
+    "alibi": "NOT_YET_IMPLEMENTED: no {family} candidate declares alibi support",
+    "sinks": "NOT_YET_IMPLEMENTED: no reference oracle for sink tokens",
+    "dropout": "NOT_YET_IMPLEMENTED: the {family} kernels have no dropout",
+    "paged": "NOT_YET_IMPLEMENTED: the page-table format is not mapped (see SdpaPaged)",
+    "block_mask": "NOT_YET_IMPLEMENTED: the {family} kernels take no block mask",
+    "fp8": "NOT_YET_IMPLEMENTED: the {family} kernels take no descale/scale tensors",
+    "fp8_s_o": "NOT_YET_IMPLEMENTED: the {family} kernels take no softmax/output quantization",
+    "max_sum_exp": "the {family} kernels write only LSE, not max and sum-exp",
+}
+
+
+def declined_table(
+    family: str, order: Sequence[str], overrides: Mapping[str, str] = {}
+) -> dict:
+    """``{feature: "feature: reason"}`` for every feature in ``order``, in
+    that order (a gate checks its declines in this order, so the reason it
+    reports for a request that fails more than one is deterministic).
+
+    A feature not in ``overrides`` gets the shared reason text with
+    ``family`` filled in; one in ``overrides`` gets that text verbatim,
+    already carrying its own feature prefix, for a reason specific to this
+    family (e.g. dense's ``d_v_differs``, which unified does not decline at
+    all -- it carries that feature instead).
+    """
+    return {
+        feature: overrides[feature]
+        if feature in overrides
+        else f"{feature}: {_SHARED_DECLINE_REASONS[feature].format(family=family)}"
+        for feature in order
+    }
 
 
 # --- carried hints -------------------------------------------------------------

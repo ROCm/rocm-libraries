@@ -17,6 +17,13 @@ returns what the registry holds plus the attention combos of the family an SDPA
 gate admits the request to -- nothing for a request both gates decline. The ABI version
 arrives with the first candidate, whose ``KernelCandidate.abi_version`` carries
 it.
+
+See ``KERNEL_AUTHORING.md`` sections E and F for the request-contract and
+operand-routing rules this module follows, and its attention appendix
+("Route a family over ``dispatch.attention``") for the binding-layer checklist
+this package's gates (:mod:`.bind_unified`, :mod:`.bind_dense`) follow
+specifically, since SDPA routes to another family's candidates instead of
+registering its own.
 """
 
 from __future__ import annotations

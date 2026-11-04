@@ -71,6 +71,16 @@ _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
+# The two generic unified-path algorithms this module registers, named so a
+# caller outside this package (the SDPA gate) does not have to reconstruct
+# ``f"unified_{path}"`` itself.
+UNIFIED_2D_ALGORITHM = "unified_2d"
+UNIFIED_3D_ALGORITHM = "unified_3d"
+_UNIFIED_PATH_ALGORITHMS = {"2d": UNIFIED_2D_ALGORITHM, "3d": UNIFIED_3D_ALGORITHM}
+
+# The D256 bf16 decode candidate's algorithm (see _make_d256_decode_candidate).
+D256_DECODE_ALGORITHM = "d256_decode"
+
 
 def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     spec_id = f"unified_{path}"
@@ -141,7 +151,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm=f"unified_{path}",
+        algorithm=_UNIFIED_PATH_ALGORITHMS[path],
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
@@ -213,7 +223,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_decode",
+        algorithm=D256_DECODE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

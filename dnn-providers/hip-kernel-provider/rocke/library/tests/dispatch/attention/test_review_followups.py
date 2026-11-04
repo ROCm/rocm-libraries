@@ -13,13 +13,19 @@ from benchmarks.common.attention_flops import attended_pairs
 from dispatch.attention import (
     ATTENTION_EXECUTION_REGISTRY,
     ATTENTION_ROUTE_REGISTRY,
+    DENSE_ALGORITHM,
+    DENSE_GRID_ALGORITHM,
+    DENSE_PERSIST_ALGORITHM,
+    UNIFIED_ALGORITHMS,
     AttentionRequest,
     attention_dispatch_result,
     attention_tuning_spec,
 )
 from dispatch.attention.bindings import bind_dense_attention_torch
 from dispatch.attention.common import AttentionTuningSpec, _problem
+from dispatch.attention.gfx1151 import DECODE_ALGORITHM, PREFILL_ALGORITHM
 from dispatch.attention.unified_rules import (
+    TUNING_ALGORITHM,
     AttentionGeometryVariant,
     _explicit_configs,
 )
@@ -232,3 +238,49 @@ class TestReviewFollowups(unittest.TestCase):
                 )
         finally:
             au._RESOLVED_ATTENTION_ARCH = old
+
+
+class TestRouteAlgorithmCoverage(unittest.TestCase):
+    """Every ``ATTENTION_ROUTE_REGISTRY`` candidate's algorithm is accounted
+    for by one of: ``UNIFIED_ALGORITHMS`` (SDPA's unified gate routes among
+    these, see ``dispatch.sdpa.bind_unified._UNIFIED_ALGORITHMS``), a dense
+    algorithm (SDPA's dense gate), ``TUNING_ALGORITHM`` (reachable only
+    through an explicit pin, not either gate's auto-admission check), or this
+    test's own named not-served-by-SDPA set (RDNA WMMA, gfx1250 WMMA, strided
+    KV decode). A new route candidate whose algorithm lands in none of these
+    is a family no SDPA request can ever reach -- the gap this test exists to
+    catch, per KERNEL_AUTHORING.md Appendix A step 4."""
+
+    # Not reachable through SDPA today; named here, not inferred, so a
+    # genuinely new "nothing can reach this" algorithm fails loudly instead
+    # of quietly joining this set.
+    _NOT_SERVED_BY_SDPA = frozenset({PREFILL_ALGORITHM, DECODE_ALGORITHM}) | {
+        "wmma_attention_fwd",  # gfx1250.py
+        "strided_decode",  # strided_decode.py
+    }
+
+    def test_every_route_algorithm_is_accounted_for(self):
+        dense_algorithms = frozenset(
+            {DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM}
+        )
+        accounted = (
+            UNIFIED_ALGORITHMS
+            | dense_algorithms
+            | {TUNING_ALGORITHM}
+            | self._NOT_SERVED_BY_SDPA
+        )
+        algorithms = {c.algorithm for c in ATTENTION_ROUTE_REGISTRY.candidates()}
+        unaccounted = algorithms - accounted
+        self.assertEqual(
+            unaccounted,
+            set(),
+            f"{unaccounted} routes through no known SDPA path and is not on "
+            "the explicit not-served list -- a new route candidate stays "
+            "unreachable through SDPA until it is added to one of them",
+        )
+        self.assertEqual(
+            self._NOT_SERVED_BY_SDPA - algorithms,
+            set(),
+            "a not-served algorithm named here no longer exists on any "
+            "registered candidate; trim it",
+        )

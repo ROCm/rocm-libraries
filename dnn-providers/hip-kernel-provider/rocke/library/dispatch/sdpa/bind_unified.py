@@ -27,23 +27,27 @@ from typing import TYPE_CHECKING, Any
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
+from rocke.runtime.torch_interop import empty_workspace, resolve_stream
 
-from dispatch.attention import ATTENTION_ROUTE_REGISTRY, UNIFIED_HEAD_SIZES
-from dispatch.attention.common import (
-    Alignment,
-    AttentionBand,
-    _attention_band,
-    _problem,
+from dispatch.attention import (
+    ATTENTION_ROUTE_REGISTRY,
+    UNIFIED_ALGORITHMS,
+    UNIFIED_HEAD_SIZES,
+    attention_band,
+    attention_problem,
 )
+from dispatch.attention.common import Alignment, AttentionBand
 
 from .bind_shared import (
     TORCH_DTYPES,
     Operand,
     asked_band,
     band_text,
+    declined_table,
     host_ints,
     keeps_asked_keys,
     to_attention_request,
+    torch_dtype,
     value_rejects,
 )
 
@@ -60,11 +64,15 @@ __all__ = [
 ]
 
 # What the unified launch path routes among (``run_unified_attention_torch``
-# with no tuning spec). Tuning geometries, dense, RDNA WMMA and strided-KV
-# decode candidates are other launch paths.
-_UNIFIED_ALGORITHMS = frozenset(
-    {"unified_2d", "unified_3d", "d256_decode", "d256_gfx950", "dense_pipe"}
-)
+# with no tuning spec), named by the modules that register them rather than
+# duplicated here as literals, so a renamed algorithm breaks this import
+# instead of silently leaving an orphaned string nothing matches. Tuning
+# geometries, dense, RDNA WMMA and strided-KV decode candidates are other
+# launch paths (see ``dispatch.attention.UNIFIED_ALGORITHMS`` and
+# ``TestRouteAlgorithmCoverage`` in
+# tests/dispatch/attention/test_review_followups.py for the full partition of
+# ``ATTENTION_ROUTE_REGISTRY`` by launch path).
+_UNIFIED_ALGORITHMS = UNIFIED_ALGORITHMS
 # Only the split-KV (3D) path writes LSE.
 _LSE_ALGORITHMS = frozenset({"unified_3d", "d256_decode"})
 
@@ -96,37 +104,41 @@ SDPA_UNIFIED_FEATURES = frozenset(
     }
 )
 
-# Every other feature, with the reason it is declined. Checked in this order,
-# so the reported reason is deterministic.
-_DECLINED = {
-    "kv_heads_differ": "kv_heads_differ: the unified request has one nhead_k for K and V",
-    "dtype_mixed": "dtype_mixed: the unified kernels read and write one dtype",
-    "compute_dtype": "compute_dtype: the unified kernels accumulate in fp32 only",
-    "scale_tensor": "scale_tensor: NOT_YET_IMPLEMENTED: the unified kernels take only a scalar scale",
-    "bias": "bias: NOT_YET_IMPLEMENTED: no unified candidate declares additive-bias support",
-    "bias_broadcast": "bias_broadcast: NOT_YET_IMPLEMENTED: no unified candidate declares additive-bias support",
-    "alibi": "alibi: NOT_YET_IMPLEMENTED: no unified candidate declares alibi support",
-    "sinks": "sinks: NOT_YET_IMPLEMENTED: no reference oracle for sink tokens",
-    "dropout": "dropout: NOT_YET_IMPLEMENTED: the unified kernels have no dropout",
-    "paged": "paged: NOT_YET_IMPLEMENTED: the page-table format is not mapped (see SdpaPaged)",
-    "block_mask": "block_mask: NOT_YET_IMPLEMENTED: the unified kernels take no block mask",
-    "fp8": "fp8: NOT_YET_IMPLEMENTED: the unified kernels take no descale/scale tensors",
-    "fp8_s_o": "fp8_s_o: NOT_YET_IMPLEMENTED: the unified kernels take no softmax/output quantization",
-    "max_sum_exp": "max_sum_exp: the unified kernels write only LSE, not max and sum-exp",
-}
+# Every other feature, with the reason it is declined (shared template in
+# bind_shared.py, so the unified and dense wording cannot drift apart).
+# Checked in this order, so the reported reason is deterministic.
+_DECLINED = declined_table(
+    "unified",
+    (
+        "kv_heads_differ",
+        "dtype_mixed",
+        "compute_dtype",
+        "scale_tensor",
+        "bias",
+        "bias_broadcast",
+        "alibi",
+        "sinks",
+        "dropout",
+        "paged",
+        "block_mask",
+        "fp8",
+        "fp8_s_o",
+        "max_sum_exp",
+    ),
+)
 
 
 def _computed_band(req: SdpaRequest) -> AttentionBand:
     """The band the unified kernels compute for ``req``.
 
-    Read from ``_attention_band``, which is what ``_problem`` hands every
-    unified route candidate, not from ``normalize_band``: outside the band
-    arches the problem is always built bottom-right causal, whatever band the
-    request names. ``normalize_band`` raises for a band the band arches cannot
-    serve.
+    Read from ``attention_band``, which is what ``attention_problem`` hands
+    every unified route candidate, not from ``normalize_band``: outside the
+    band arches the problem is always built bottom-right causal, whatever band
+    the request names. ``normalize_band`` raises for a band the band arches
+    cannot serve.
     """
     attn = to_attention_request(req)
-    top_left, right_bound = _attention_band(attn)
+    top_left, right_bound = attention_band(attn)
     return AttentionBand(
         left_bound=attn.sliding_window if attn.sliding_window > 0 else None,
         right_bound=None if right_bound < 0 else right_bound,
@@ -245,9 +257,7 @@ class _LaunchPlan:
     def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
         import dataclasses
 
-        import torch
-
-        dtype = getattr(torch, TORCH_DTYPES[req.dtype])
+        dtype = torch_dtype(TORCH_DTYPES[req.dtype])
         device = tensors["q"].device
         for name in ("q", "k", "v", "o"):
             t = tensors[name]
@@ -291,41 +301,53 @@ class _LaunchPlan:
         attn = to_attention_request(req)
         self.block = int(attn.kv_block_size)
         self.pages = max(1, -(-req.s_kv // self.block))
-        self.problem = dataclasses.replace(_problem(attn), total_q=cu[-1])
+        self.problem = dataclasses.replace(attention_problem(attn), total_q=cu[-1])
 
         self.q_packed = self.q.packed_view(cu)
         self.q_inplace = self.q_packed is not None
         if not self.q_inplace:
-            self.q_packed = torch.empty(
+            self.q_packed = empty_workspace(
                 (cu[-1], req.h_q, req.d_qk), dtype=dtype, device=device
             )
         self.o_packed = self.o.packed_view(cu)
         self.o_inplace = self.o_packed is not None
         if not self.o_inplace:
-            self.o_packed = torch.empty(
+            self.o_packed = empty_workspace(
                 (cu[-1], req.h_q, req.d_v), dtype=dtype, device=device
             )
 
         # Identity page table, exactly ceil(S_kv / block) wide: the scalar
-        # fallback indexes it with that row stride.
+        # fallback indexes it with that row stride. Zeroed, not just
+        # allocated: some kernels (e.g. the gfx942 4-warp body) read a KV
+        # tile's trailing rows past a sequence's own length, masked but
+        # still dereferenced, so they must be finite.
         slots = batch * self.pages
-        self.k_cache = torch.zeros(
+        self.k_cache = empty_workspace(
             (slots, self.block, req.h_k, req.d_qk), dtype=dtype, device=device
-        )
-        self.v_cache = torch.zeros(
+        ).zero_()
+        self.v_cache = empty_workspace(
             (slots, self.block, req.h_v, req.d_v), dtype=dtype, device=device
-        )
+        ).zero_()
+
+        # No torch_interop constructor builds an index tensor from a Python
+        # list/range (only workspace shapes), so this is the one place in the
+        # module that still imports torch directly.
+        import torch
+
+        int32 = torch_dtype("int32")
         self.block_table = (
-            torch.arange(slots, dtype=torch.int32, device=device)
+            torch.arange(slots, dtype=int32, device=device)
             .view(batch, self.pages)
             .contiguous()
         )
-        self.cu_seqlens_q = torch.tensor(cu, dtype=torch.int32, device=device)
-        self.seqused_k = torch.tensor(self.kv_len, dtype=torch.int32, device=device)
+        self.cu_seqlens_q = torch.tensor(cu, dtype=int32, device=device)
+        self.seqused_k = torch.tensor(self.kv_len, dtype=int32, device=device)
         self.lse = (
             None
             if self.stats is None
-            else torch.empty((cu[-1], req.h_q, 1), dtype=torch.float32, device=device)
+            else empty_workspace(
+                (cu[-1], req.h_q, 1), dtype=torch_dtype("float32"), device=device
+            )
         )
 
     def kernel_tensors(self) -> dict[str, Any]:
@@ -389,8 +411,6 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     if not ok:
         raise ValueError(reason)
 
-    import torch
-
     from dispatch.attention.bindings import validate_tuning_attention_tensors
     from kernels.common.attention_unified import run_unified_attention_torch
 
@@ -410,7 +430,7 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
                 softmax_scale=scale,
                 softcap=0.0,
                 backend=backend,
-                stream=int(torch.cuda.current_stream(device).cuda_stream),
+                stream=resolve_stream(0, device=device),
                 lse=plan.lse,
             )
         plan.unpack()

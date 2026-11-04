@@ -96,6 +96,11 @@ def _variants():
 
 GFX942_TUNING_VARIANTS = tuple(_variants())
 
+# The gfx942 dense_pipe candidate's algorithm (see
+# _make_gfx942_dense_pipe_candidate), named so a caller outside this package
+# (the SDPA gate) does not have to reconstruct the literal.
+GFX942_DENSE_PIPE_ALGORITHM = "dense_pipe"
+
 
 def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     """Fast gfx942 fp16 prefill kernel — transposed-x8 flash with ring-sliced K.
@@ -157,7 +162,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="dense_pipe",
+        algorithm=GFX942_DENSE_PIPE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

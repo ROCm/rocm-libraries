@@ -126,10 +126,14 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
 
 # A NOT_YET_IMPLEMENTED decline names an implementation shortcut with its own
 # follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
-# Unlike the unified gate, dense bias/alibi are not tagged: no dense candidate
-# declares that support, planned or otherwise.
+# Same set as the unified gate (bind_shared.declined_table shares the
+# wording): nothing about the dense hardware or ABI rules out bias/alibi
+# either, so they are tagged here too, not called permanent.
 _NOT_YET_IMPLEMENTED_FEATURES = {
     "scale_tensor",
+    "bias",
+    "bias_broadcast",
+    "alibi",
     "sinks",
     "dropout",
     "paged",

@@ -318,6 +318,7 @@ down to [platform/](platform/). It distills the conventions already encoded in
 | Kernel emitters | [library/kernels/common/](library/kernels/common/), [library/kernels/gfx950/](library/kernels/gfx950/) | Build the typed SSA `KernelDef` (e.g. [attention_unified.py](library/kernels/common/attention_unified.py), [attention_tiled_2d.py](library/kernels/gfx950/attention_tiled_2d.py), [attention_tiled_3d.py](library/kernels/gfx950/attention_tiled_3d.py)) |
 | Spec seam | [library/builders/common/attention_spec_builder.py](library/builders/common/attention_spec_builder.py) | Maps `UnifiedAttentionProblem` → arch tiled-spec; owns every knob decision |
 | Dispatch | [library/dispatch/attention/](library/dispatch/attention/) | `ATTENTION_REGISTRY` + `dispatch_attention`; selects `(path, head_size, block_size)` |
+| Routed families | [library/dispatch/sdpa/](library/dispatch/sdpa/) | hipDNN SDPA request contract; routes to `dispatch.attention`'s unified/dense candidates via a gate per family ([H](#h-route-a-family-over-dispatchattention)) — registers no kernel of its own |
 | Builders / harnesses | [library/builders/gfx950/attention/](library/builders/gfx950/attention/) | Parity + benchmark drivers, captured shape JSONs, case studies |
 | Benchmarks | [library/benchmarks/](library/benchmarks/) | Standalone perf sweeps (e.g. [benchmark_rocke_unified_attention.py](library/benchmarks/common/benchmark_rocke_unified_attention.py)) |
 | Parity emitters | [library/tests/parity/](library/tests/parity/) | `.py`/`.c` emitter pairs, byte-compared |
@@ -350,7 +351,11 @@ scoped to library.
    ([sweep coverage](#a-new-kernel-family)). If it introduces a new
    selection axis, extend `select_path` / `supports_native_unified_attention`
    (keep the decision a **pure** function of the problem so it mirrors on the C
-   side).
+   side). Registering it here is not enough by itself for a family routed over
+   `dispatch.attention` (SDPA) to reach it: the routed family's gate names
+   which algorithms it routes among, so the new candidate stays unreachable
+   through that family until it is added there too
+   ([H](#h-route-a-family-over-dispatchattention)).
 5. **Add the parity pair.** Create `tests/parity/<family>_emit.py` (Python
    reference, driven by `run_emit` from
    [platform/tests/instances/parity/_emit_common.py](platform/tests/instances/parity/_emit_common.py))
@@ -582,6 +587,67 @@ cross-lane softmax (`ds_swizzle`), async-DMA K/V issue ordering, and the 64-bit
 paged addressing primitive (`global_ptr_add` / `offset_i64*`) — several of these
 already live in platform; new ones that recur across families follow the same
 path.
+
+### H. Route a family over `dispatch.attention`
+
+A family that has no kernel of its own but serves its requests by translating
+them into `AttentionRequest` and asking `ATTENTION_ROUTE_REGISTRY` — SDPA
+(`library/dispatch/sdpa/`) is the worked example — follows [E](#e-new-operator-with-a-hipdnn-graph-node)
+and [F](#f-new-operand-or-output-on-an-existing-operator) for its own request
+contract, plus this binding-layer checklist for the gate that sits in front of
+`dispatch.attention`:
+
+- [ ] **One `bind_<family>.py` per attention launch family** (e.g.
+      `bind_unified.py`, `bind_dense.py`), each exposing `<family>_admits`,
+      `<family>_candidates` and `<family>_bind` behind one shared reject
+      function, so admission and candidate enumeration cannot drift apart.
+      Translation only: the module adds no shape/dtype/head-size rule of its
+      own — "can it run" stays the attention candidates' own `admits()`. Dense
+      (opt-in) candidates are each probed with their own `algorithm` / `spec_id`
+      pinned (`opt_in_probe`), since they do not serve by default.
+- [ ] **Every feature classified once per family**, either carried
+      (`SDPA_<FAMILY>_FEATURES`) or declined with a reason; a shortcut decline
+      (a feature no candidate implements yet, as opposed to an ABI limit) is
+      tagged `NOT_YET_IMPLEMENTED:`. A test asserts carried ∪ declined covers
+      every feature, so a newly added request field cannot silently fall
+      through both sets.
+- [ ] **Check what the kernel computes, not just that it admits.** A candidate
+      that accepts the translated request may still build a different band
+      (e.g. bottom-right causal when top-left was asked) or the wrong scale
+      range; the gate must compare what gets computed against what was asked,
+      not only call `admits()`.
+- [ ] **Decline a pinned dispatch choice** (`algorithm`, `spec_id`, `tuning_id`,
+      `tuning_knobs`) rather than forwarding it — the family's launch takes
+      only the automatic route, so a pin would be silently ignored.
+- [ ] **The never-overclaim test**: nothing is admitted and then dropped. For
+      every admitted request, a kernel is actually reachable with it.
+- [ ] **Four test layers**: wiring (one decline case per declined feature, the
+      value checks, the band comparison), a case-table test (every entry in
+      the family's shared case table gets a verdict), a CPU binding test (the
+      kernel replaced with the reference oracle, every layout/length mode), and
+      a GPU numeric test (binds every admitted case, compares against the
+      reference), enrolled in the GPU test lane.
+- [F](#f-new-operand-or-output-on-an-existing-operator) **for a routed
+  family**: move the feature from the gate's decline table into
+  `SDPA_<FAMILY>_FEATURES`, and bind the request field in both the
+  `SdpaRequest` → `AttentionRequest` translation (`to_attention_request`) and
+  the launch plan that copies tensors through.
+- **[A](#a-new-kernel-family) step 4, for a routed family**: registering a new
+  candidate in `ATTENTION_ROUTE_REGISTRY` is not enough by itself — a routed
+  family's gate names which algorithms it routes among (e.g.
+  `bind_unified.py`'s `_UNIFIED_ALGORITHMS`, `bind_dense.py`'s
+  `_DENSE_ALGORITHMS`), so a new route candidate stays unreachable through the
+  family until it is added there too.
+
+Known gaps in the current SDPA routing (tracked as "Not in this PR" on the
+introducing change, not silently): choosing between the unified and dense
+families for one request is not modeled — a request both admit goes to
+whichever the caller picks; `sdpa_dense_bind` always launches the first
+serving dense candidate in registry order, not the fastest; LSE is served only
+on the shapes that route to the split-KV (3D) unified path, even though
+forcing 3D could serve more; and the unified binding always copies K and V
+into the paged cache rather than viewing them in place when the layout and
+block size would allow it (Q already has the in-place path).
 
 ### Attention specifics — quick reference
 

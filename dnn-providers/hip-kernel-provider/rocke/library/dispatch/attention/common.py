@@ -778,6 +778,12 @@ def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
     return band.top_left, band.kernel_right_bound
 
 
+def attention_band(req: AttentionRequest) -> Tuple[bool, int]:
+    """Public name for :func:`_attention_band`, for callers outside this
+    package (e.g. the SDPA gates) that must not depend on a private symbol."""
+    return _attention_band(req)
+
+
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
@@ -808,6 +814,12 @@ def _problem_with_num_cus(
 def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     """The production-routing problem, including the live-device CU policy."""
     return _problem_with_num_cus(req, _resolve_num_cus(req))
+
+
+def attention_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """Public name for :func:`_problem`, for callers outside this package
+    (e.g. the SDPA gates) that must not depend on a private symbol."""
+    return _problem(req)
 
 
 def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
@@ -924,6 +936,21 @@ def _dense_kernel_module(arch: str):
     else:
         raise ValueError(f"no dense attention kernel for arch {arch!r}")
     return attention_dense
+
+
+def dense_scale_range(arch: str) -> Tuple[float, float] | None:
+    """``(low, high)`` the ``arch`` dense kernels accept for ``scale``, or
+    ``None`` when the kernel module declares no range.
+
+    Public, so a caller outside this package (e.g. the SDPA gate) names the
+    range instead of reaching for a kernel module's private ``_MIN_SCALE`` /
+    ``_MAX_SCALE`` attributes, which would silently stop being checked if
+    those names moved.
+    """
+    module = _dense_kernel_module(arch)
+    low = getattr(module, "_MIN_SCALE", None)
+    high = getattr(module, "_MAX_SCALE", None)
+    return None if low is None or high is None else (low, high)
 
 
 @dataclass(frozen=True)

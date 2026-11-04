@@ -31,19 +31,24 @@ from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding, opt_in_probe
 from rocke.runtime.torch_interop import empty_workspace, resolve_stream
 
-from dispatch.attention import ATTENTION_ROUTE_REGISTRY, AttentionRequest
+from dispatch.attention import (
+    ATTENTION_ROUTE_REGISTRY,
+    AttentionRequest,
+    dense_scale_range,
+)
 from dispatch.attention.candidate import (
     DENSE_ALGORITHM,
     DENSE_GRID_ALGORITHM,
     DENSE_PERSIST_ALGORITHM,
 )
-from dispatch.attention.common import Alignment, AttentionBand, _dense_kernel_module
+from dispatch.attention.common import Alignment, AttentionBand
 
 from .bind_shared import (
     TORCH_DTYPES,
     Operand,
     asked_band,
     band_text,
+    declined_table,
     keeps_asked_keys,
     to_attention_request,
     torch_dtype,
@@ -91,27 +96,38 @@ SDPA_DENSE_FEATURES = frozenset(
     }
 )
 
-# Every other feature, with the reason it is declined. Checked in this order,
-# so the reported reason is deterministic.
-_DECLINED = {
-    "kv_heads_differ": "kv_heads_differ: the dense request has one nhead_k for K and V",
-    "d_v_differs": "d_v_differs: the dense kernels take one head size for Q/K and V",
-    "dtype_mixed": "dtype_mixed: the dense kernels read and write one dtype",
-    "compute_dtype": "compute_dtype: the dense kernels accumulate in fp32 only",
-    "scale_tensor": "scale_tensor: NOT_YET_IMPLEMENTED: the dense kernels take only a scalar scale",
-    "bias": "bias: no dense candidate declares additive-bias support",
-    "bias_broadcast": "bias_broadcast: no dense candidate declares additive-bias support",
-    "alibi": "alibi: no dense candidate declares alibi support",
-    "sinks": "sinks: NOT_YET_IMPLEMENTED: no reference oracle for sink tokens",
-    "padded": "padded: the dense candidates take one sequence length per batch",
-    "ragged": "ragged: the dense candidates take one sequence length per batch",
-    "dropout": "dropout: NOT_YET_IMPLEMENTED: the dense kernels have no dropout",
-    "paged": "paged: NOT_YET_IMPLEMENTED: the page-table format is not mapped (see SdpaPaged)",
-    "block_mask": "block_mask: NOT_YET_IMPLEMENTED: the dense kernels take no block mask",
-    "fp8": "fp8: NOT_YET_IMPLEMENTED: the dense kernels take no descale/scale tensors",
-    "fp8_s_o": "fp8_s_o: NOT_YET_IMPLEMENTED: the dense kernels take no softmax/output quantization",
-    "max_sum_exp": "max_sum_exp: the dense kernels write only LSE, not max and sum-exp",
-}
+# Every other feature, with the reason it is declined (shared template in
+# bind_shared.py, so the unified and dense wording cannot drift apart; a
+# dense-only feature like d_v_differs/padded/ragged keeps its own text in
+# ``overrides`` since unified does not decline it at all -- it carries it
+# instead). Checked in this order, so the reported reason is deterministic.
+_DECLINED = declined_table(
+    "dense",
+    (
+        "kv_heads_differ",
+        "d_v_differs",
+        "dtype_mixed",
+        "compute_dtype",
+        "scale_tensor",
+        "bias",
+        "bias_broadcast",
+        "alibi",
+        "sinks",
+        "padded",
+        "ragged",
+        "dropout",
+        "paged",
+        "block_mask",
+        "fp8",
+        "fp8_s_o",
+        "max_sum_exp",
+    ),
+    overrides={
+        "d_v_differs": "d_v_differs: the dense kernels take one head size for Q/K and V",
+        "padded": "padded: the dense candidates take one sequence length per batch",
+        "ragged": "ragged: the dense candidates take one sequence length per batch",
+    },
+)
 
 
 def _dense_candidates(arch: str) -> tuple[KernelCandidate, ...]:
@@ -144,17 +160,17 @@ def _spec_band(kernel_spec) -> AttentionBand:
 
 def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     """The kernel's own scale range, where its module declares one."""
-    module = _dense_kernel_module(req.arch)
-    low = getattr(module, "_MIN_SCALE", None)
-    high = getattr(module, "_MAX_SCALE", None)
     scale = float(req.scale)
     if not math.isfinite(scale):
         return False, f"scale: the dense kernels need a finite scale, got {scale}"
-    if low is not None and high is not None and not low <= scale <= high:
-        return False, (
-            f"scale: the {req.arch} dense kernels take a scale in "
-            f"[{low}, {high}], got {scale}"
-        )
+    scale_range = dense_scale_range(req.arch)
+    if scale_range is not None:
+        low, high = scale_range
+        if not low <= scale <= high:
+            return False, (
+                f"scale: the {req.arch} dense kernels take a scale in "
+                f"[{low}, {high}], got {scale}"
+            )
     return None
 
 
