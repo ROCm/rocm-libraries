@@ -1,0 +1,90 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# A three-slot engine (RFC 0021): prep -> dkdv -> dq, the split SDPA backward shape.
+# Each slot has its own KMD, knobs and ranker; `dq` has two packs, so its packs carry
+# discriminators. Only descriptors are generated for a slotted config.
+
+engine:
+  name: hipkernel:SplitBwd
+  sdk_version: "1.0.0"
+  shared_workspace: ws.bytes
+
+slots:
+  - name: prep
+    kmd_fields:
+      - name: dtype
+        type: string
+    specialization:
+      metadata_fields: []
+      matcher_only_fields: [dtype]
+      bindings: {}
+      vocabulary: {}
+  - name: dkdv
+    kmd_fields:
+      - name: block_m
+        type: int
+        default_value: 64
+      - name: num_warps
+        type: int
+        default_value: 4
+      - name: dtype
+        type: string
+    knobs: [block_m, num_warps]
+    ranker: true
+    specialization:
+      metadata_fields: []
+      matcher_only_fields: [block_m, num_warps, dtype]
+      bindings: {}
+      vocabulary: {}
+  - name: dq
+    kmd_fields:
+      - name: block_m
+        type: int
+        default_value: 64
+      - name: dtype
+        type: string
+    knobs: [block_m]
+    ranker: true
+    specialization:
+      metadata_fields: []
+      matcher_only_fields: [block_m, dtype]
+      bindings: {}
+      vocabulary: {}
+
+authored_subpath: unit
+
+packs:
+  - name: prep
+    slot: prep
+    arch: [gfx950]
+    kernels:
+      - name: bwd.prep
+        kernel_source: {kind: embedded_source, source_file: Prep.cpp, entry_point: Prep}
+        metadata: {dtype: BFLOAT16}
+  - name: dkdv
+    slot: dkdv
+    arch: [gfx950]
+    kernels:
+      - name: bwd.dkdv_m64
+        kernel_source: {kind: embedded_source, source_file: Dkdv.cpp, entry_point: Dkdv}
+        metadata: {block_m: 64, num_warps: 4, dtype: BFLOAT16}
+      - name: bwd.dkdv_m128
+        kernel_source: {kind: embedded_source, source_file: Dkdv.cpp, entry_point: Dkdv}
+        metadata: {block_m: 128, num_warps: 8, dtype: BFLOAT16}
+  - name: dq_causal
+    slot: dq
+    discriminator: causal
+    arch: [gfx950]
+    kernels:
+      - name: bwd.dq_causal_m64
+        kernel_source: {kind: embedded_source, source_file: DqCausal.cpp, entry_point: DqCausal}
+        metadata: {block_m: 64, dtype: BFLOAT16}
+  - name: dq_full
+    slot: dq
+    discriminator: full
+    arch: [gfx950]
+    kernels:
+      - name: bwd.dq_full_m128
+        kernel_source: {kind: embedded_source, source_file: DqFull.cpp, entry_point: DqFull}
+        metadata: {block_m: 128, dtype: BFLOAT16}
