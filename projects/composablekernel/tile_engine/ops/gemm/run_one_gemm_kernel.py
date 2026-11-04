@@ -23,12 +23,10 @@ Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, ..., "verified": true, "max_rel": 3.1e-4}   # with --verify
     {"idx": 1, "ok": false, "error": "...", "kernel": "..."}
 
-``kernel`` echoes the request; ``loaded_kernel``, when the library loaded, is
-the name the library itself reports (``GpuGemmRunner.kernel_name``, the codegen
-``KERNEL_NAME`` that ``GemmKernelConfig.name`` reproduces). ``loaded_kernel``
-is informational, for readers of the raw worker output: the driver does not
-copy it into its rows or CSV. The identity is enforced by ``check_identity``
-above, whose error names both kernels.
+``kernel`` echoes the request. The library's own name, which
+``check_identity`` compares with it, is ``GpuGemmRunner.kernel_name`` (the
+codegen ``KERNEL_NAME`` that ``GemmKernelConfig.name`` reproduces); a mismatch
+is an error naming both.
 """
 
 import json
@@ -147,7 +145,6 @@ def _run_one(
                 "tflops": result.tflops,
                 "non_zero": non_zero,
                 "kernel": kernel_name,
-                "loaded_kernel": runner.kernel_name,
             }
             if verify and _is_multi_abd(kernel_name):
                 # Multi-ABD verifies against its own full multi-tensor reference
@@ -187,7 +184,6 @@ def _run_one(
                         "ok": False,
                         "error": f"kernel returned status {result.status}",
                         "kernel": kernel_name,
-                        "loaded_kernel": runner.kernel_name,
                     }
                 ),
                 flush=True,

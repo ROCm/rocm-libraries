@@ -276,9 +276,8 @@ unconfirmed result. A search run asks the worker to check each library's
 identity (`check_identity`): a library whose own name
 (`GpuGemmRunner.kernel_name`, the codegen `KERNEL_NAME` that
 `GemmKernelConfig.name` reproduces) is not the requested kernel is refused
-with an error naming both. The worker also reports that name as
-`loaded_kernel` in its raw output, for information only: the driver copies it
-into neither its rows nor its CSV.
+with an error naming both. Without `check_identity` (every run without
+`--search-config`) the worker's input and output are unchanged.
 
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against

@@ -528,9 +528,7 @@ def test_misleading_rows_never_become_winners(tmp_path, monkeypatch, confirm_ok)
         assert "no finalist passed confirmation" in summary["unresolved"][K1]
 
 
-def test_worker_reports_the_loaded_kernel_and_checks_it_only_when_asked(
-    monkeypatch, capsys
-):
+def test_worker_checks_the_library_identity_only_when_asked(monkeypatch, capsys):
     for cache in ("_ab_cache", "_ref_cache"):
         if hasattr(worker._run_one, cache):
             monkeypatch.delattr(worker._run_one, cache)
@@ -542,17 +540,18 @@ def test_worker_reports_the_loaded_kernel_and_checks_it_only_when_asked(
     worker._run_one(2, "a.so", P1, A, check_identity=True)
     legacy, checked, status = (
         json.loads(ln) for ln in capsys.readouterr().out.splitlines())
-    assert legacy["ok"] and legacy["verified"]
-    assert (legacy["kernel"], legacy["loaded_kernel"]) == (A, C)
+    assert legacy["ok"] and legacy["verified"] and legacy["kernel"] == A
+    assert set(legacy) == {"idx", "ok", "ms", "tflops", "non_zero", "kernel",
+                           "max_rel", "verified"}
     assert not checked["ok"] and "identity mismatch" in checked["error"]
     assert repr(C) in checked["error"] and repr(A) in checked["error"]
     assert status == {"idx": 2, "ok": False, "error": "kernel returned status -3",
-                      "kernel": A, "loaded_kernel": A}
+                      "kernel": A}
 
 
 def test_legacy_worker_payload_and_rows_are_unchanged(tmp_path, monkeypatch):
     # A run without the search sends the worker what it always did (no
-    # check_identity) and keeps the worker's loaded_kernel out of its rows.
+    # check_identity) and gets back the keys it always got.
     tc = Toolchain(tmp_path, monkeypatch)
     (lib,) = tc.build([CFGS[0]])
     rows = []
@@ -560,9 +559,10 @@ def test_legacy_worker_payload_and_rows_are_unchanged(tmp_path, monkeypatch):
                              *drv.worker_setup(), tmp_path / "legacy.csv", measured=rows)
     (payload,) = tc.payloads
     assert set(payload) == {"items", "verify", "verify_tol"}
-    assert tc.outputs[0]["loaded_kernel"] == A
+    assert set(tc.outputs[0]) == {"idx", "ok", "ms", "tflops", "non_zero", "kernel",
+                                  "max_rel", "verified"}
     (row,) = rows
-    assert row["verified"] is True and "loaded_kernel" not in row
+    assert row["verified"] is True
     with open(tmp_path / "legacy.csv", newline="") as f:
         assert csv.DictReader(f).fieldnames == [
             "kernel", "problem_idx", "M", "N", "K", "device", "latency_ms", "tflops",
