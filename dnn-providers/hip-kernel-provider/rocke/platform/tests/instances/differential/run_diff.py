@@ -400,7 +400,7 @@ def _run_native_configs(
             emission = Emission(124, False, None, f"TIMEOUT in native config {index}")
         emissions.append(emission)
         if (
-            _is_end_emission(emission)
+            is_end_emission(emission)
             or emission.returncode < 0
             or emission.returncode == 124
         ):
@@ -539,7 +539,7 @@ def _run_python_batch(
                             emissions, f"invalid batch worker response: {exc}"
                         )
                     emissions.append(emission)
-                    if _is_end_emission(emission):
+                    if is_end_emission(emission):
                         break
 
                 try:
@@ -576,12 +576,20 @@ def _run_python_batch(
 _MODE_REJECTION_PREFIXES = ("unknown mode", "usage:")
 
 
+def last_error_line(emission: Emission) -> str:
+    """The last non-blank line `emission` wrote to stderr, stripped, or "".
+
+    For a failing config that is the exception line of its traceback; for an
+    emitter rejecting its argv, its one-line message."""
+    lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
 def mode_unsupported(emission: Emission) -> bool:
     """True when `emission` is the emitter refusing the mode itself."""
     if emission.returncode != 2 or emission.has_output:
         return False
-    lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
-    return bool(lines) and lines[-1].lower().startswith(_MODE_REJECTION_PREFIXES)
+    return last_error_line(emission).lower().startswith(_MODE_REJECTION_PREFIXES)
 
 
 def emission_from_record(record: dict, *, canonical: bool = False) -> Emission:
@@ -598,7 +606,9 @@ def emission_from_record(record: dict, *, canonical: bool = False) -> Emission:
     )
 
 
-def _is_end_emission(emission: Emission) -> bool:
+def is_end_emission(emission: Emission) -> bool:
+    """True when `emission` is the emitter reporting that its config list has
+    ended (the index is past the last config), not a config failing."""
     return (
         emission.returncode != 0
         and not emission.has_output
@@ -615,7 +625,7 @@ def classify_emissions(
     # remaining config and making the gate look hung.
     if c_emission.returncode == 124 or p_emission.returncode == 124:
         return "TIMEOUT", None
-    if _is_end_emission(c_emission) and _is_end_emission(p_emission):
+    if is_end_emission(c_emission) and is_end_emission(p_emission):
         return "END", None
     if c_emission.returncode < 0 or p_emission.returncode < 0:
         return "CRASH", None
@@ -712,7 +722,7 @@ def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) 
     if len(emissions) == limit:
         return True
     return (
-        _is_end_emission(tail)
+        is_end_emission(tail)
         or tail.returncode < 0
         or tail.returncode == 124
         or (mode != "ll" and mode_unsupported(tail))
@@ -773,8 +783,8 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             mode_unsupported(c_emission) or mode_unsupported(p_emission)
         ):
             return configs, range_drift, True, None
-        c_end = _is_end_emission(c_emission)
-        p_end = _is_end_emission(p_emission)
+        c_end = is_end_emission(c_emission)
+        p_end = is_end_emission(p_emission)
         if c_end and p_end:
             break
         if c_end or p_end:
@@ -991,7 +1001,7 @@ def python_reference_shas(name, mode, canonical, src_dir):
     for idx, emission in enumerate(emissions):
         if mode != "ll" and mode_unsupported(emission):
             return {}, None
-        if _is_end_emission(emission):
+        if is_end_emission(emission):
             break
         if emission.returncode < 0 or emission.returncode == 124:
             return shas, f"config {idx}: {emission.error or 'crashed'}"

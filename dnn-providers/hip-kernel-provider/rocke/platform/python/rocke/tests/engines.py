@@ -22,6 +22,8 @@ the run selects.
   accepts either as long as the two agree.
 
 All five skip, naming the reason, when the ``rocke_engine`` binding is not built.
+``REFUSAL_ERROR_TYPES`` are the exception types that stand for a refusal in both
+engines.
 ``available_engines`` names the engines a test that drives each engine itself can
 use: the installed wheel has no ``rocke_engine`` binding, so such a test runs the
 Python engine alone there and both engines wherever the binding is supplied.
@@ -44,6 +46,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
 __all__ = [
+    "REFUSAL_ERROR_TYPES",
     "all_engines_backend",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
@@ -62,6 +65,10 @@ _NATIVE_STATUS: dict[type[Exception], int] = {
     KeyError: 3,
     NotImplementedError: 5,
 }
+
+#: The exception types a lowerer or builder raises to refuse a kernel: those a
+#: C++ engine status code stands for. Any other exception is a failure.
+REFUSAL_ERROR_TYPES: tuple[type[Exception], ...] = tuple(_NATIVE_STATUS)
 
 # The binding's refusal text: "<entry point>: lower failed for arch '<gfx>'
 # (status <code>): <message>".
