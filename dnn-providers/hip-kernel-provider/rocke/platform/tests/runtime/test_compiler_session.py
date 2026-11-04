@@ -241,6 +241,21 @@ def test_explicit_paths_are_anchored_before_loading(
 @pytest.mark.parametrize(
     "stem,key", [("amd_comgr", "ROCKE_COMGR_LIB"), ("amdhip64", "ROCKE_HIP_LIB")]
 )
+def test_explicit_candidates_preserve_parent_path_spelling(
+    tmp_path, monkeypatch, stem, key
+):
+    from rocke.runtime import runtime_coexistence
+
+    monkeypatch.chdir(tmp_path)
+    relative = os.path.join("alias", "..", "selected.so")
+    paths = runtime_coexistence._candidate_lib_paths(stem, key, [], {key: relative})
+    assert paths == [os.path.join(str(tmp_path), relative)]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink/parent traversal semantics")
+@pytest.mark.parametrize(
+    "stem,key", [("amd_comgr", "ROCKE_COMGR_LIB"), ("amdhip64", "ROCKE_HIP_LIB")]
+)
 def test_explicit_candidates_preserve_symlink_parent_traversal(
     tmp_path, monkeypatch, stem, key
 ):
@@ -629,7 +644,12 @@ for item in providers:release(item)
     env = rocke_subprocess_env()
     for key in ("ROCKE_COMGR_LIB", "ROCKE_HIP_LIB", "ROCKE_LLVM_FLAVOR"):
         env.pop(key, None)
-    env["LD_LIBRARY_PATH"] = str(fallback.parent)
+    # The fixture must lead loader search, but CI's Python can itself need
+    # inherited library directories before the child interpreter even starts.
+    inherited = env.get("LD_LIBRARY_PATH")
+    env["LD_LIBRARY_PATH"] = str(fallback.parent) + (
+        os.pathsep + inherited if inherited else ""
+    )
     result = subprocess.run(
         rocke_python_command("-c", code, name, kind),
         cwd=cwd,
@@ -638,6 +658,28 @@ for item in providers:release(item)
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_filename_probe_preserves_interpreter_loader_paths(tmp_path, monkeypatch):
+    module = sys.modules[__name__]
+    loader = tmp_path / "fixture loader"
+    loader.mkdir()
+    fallback = loader / "libamd_comgr.so.3"
+    inherited = os.pathsep.join(
+        str(tmp_path / name) for name in ("interpreter libs", "other libs")
+    )
+    monkeypatch.setenv("LD_LIBRARY_PATH", inherited)
+    monkeypatch.setattr(module, "library", lambda *args, **kwargs: fallback)
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(subprocess, "run", run)
+
+    test_filename_override_cannot_search_for_another_file(
+        tmp_path, "compiler", "missing"
+    )
+    assert run.call_args.kwargs["env"]["LD_LIBRARY_PATH"].split(os.pathsep) == [
+        str(loader),
+        *inherited.split(os.pathsep),
+    ]
 
 
 @pytest.mark.skipif(
