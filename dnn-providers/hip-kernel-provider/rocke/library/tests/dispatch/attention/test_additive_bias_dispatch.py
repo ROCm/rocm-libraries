@@ -31,6 +31,9 @@ from dispatch.attention.tuning_specs import (
     make_explicit_attention_3d_specs,
 )
 
+from ._fake_paged_tensors import FakeTensor as _Tensor
+from ._fake_paged_tensors import paged_tensors as _paged_tensors
+
 _BIAS_PARAMS = [
     "additive_bias_ptr",
     "additive_bias_batch_stride",
@@ -66,82 +69,6 @@ def _candidate(prefix: str):
 
 def _pinned(candidate, **kw) -> AttentionRequest:
     return _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id, **kw)
-
-
-_ELEMENT_SIZE = {"torch.float32": 4, "torch.int32": 4, "torch.bfloat16": 2}
-
-
-class _Tensor:
-    """A stand-in for a torch tensor. Its storage backs exactly the elements
-    its strides reach unless ``storage_elems`` says otherwise."""
-
-    def __init__(
-        self,
-        shape,
-        dtype,
-        values=None,
-        *,
-        strides=None,
-        device="cuda:0",
-        storage_elems=None,
-    ):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-        self.device = device
-        self._values = values
-        self._strides = strides
-        if storage_elems is None:
-            storage_elems = 1 + sum(
-                (extent - 1) * self.stride(dim) for dim, extent in enumerate(self.shape)
-            )
-        self._storage_bytes = storage_elems * self.element_size()
-
-    def element_size(self):
-        return _ELEMENT_SIZE[self.dtype]
-
-    def storage_offset(self):
-        return 0
-
-    def untyped_storage(self):
-        return mock.Mock(nbytes=mock.Mock(return_value=self._storage_bytes))
-
-    def is_contiguous(self):
-        return self._strides is None
-
-    def detach(self):
-        return self
-
-    def stride(self, dim=None):
-        if dim is None:
-            return tuple(self.stride(d) for d in range(len(self.shape)))
-        if self._strides is not None:
-            return self._strides[dim]
-        stride = 1
-        values = [0] * len(self.shape)
-        for index in range(len(self.shape) - 1, -1, -1):
-            values[index] = stride
-            stride *= self.shape[index]
-        return values[dim]
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        if self._values is None:
-            raise AssertionError("no host values")
-        return self._values
-
-
-def _paged_tensors():
-    return {
-        "q": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "out": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "k": _Tensor((64, 16, 8, 128), "torch.bfloat16"),
-        "v": _Tensor((64, 16, 8, 128), "torch.bfloat16"),
-        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1024]),
-        "seqused_k": _Tensor((1,), "torch.int32", [1024]),
-        "block_table": _Tensor((1, 64), "torch.int32", [list(range(64))]),
-    }
 
 
 class TestRouting(unittest.TestCase):

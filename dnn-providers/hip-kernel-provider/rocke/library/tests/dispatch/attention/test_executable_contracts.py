@@ -18,6 +18,9 @@ from dispatch.attention import bindings as attention_bindings
 from dispatch.attention.common import AttentionTuningSpec, _problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 
+from ._fake_paged_tensors import FakeTensor as _Tensor
+from ._fake_paged_tensors import paged_tensors as _paged_tensors
+
 
 def _req(arch="gfx950", **kw) -> AttentionRequest:
     base = dict(
@@ -34,61 +37,6 @@ def _req(arch="gfx950", **kw) -> AttentionRequest:
     )
     base.update(kw)
     return AttentionRequest(**base)
-
-
-class _Tensor:
-    def __init__(
-        self,
-        shape,
-        dtype,
-        values=None,
-        *,
-        device="cuda:0",
-        contiguous=True,
-        strides=None,
-    ):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-        self.device = device
-        self._values = values
-        self._contiguous = contiguous
-        self._strides = strides
-
-    def is_contiguous(self):
-        return self._contiguous
-
-    def detach(self):
-        return self
-
-    def stride(self, dim):
-        if self._strides is not None:
-            return self._strides[dim]
-        stride = 1
-        values = [0] * len(self.shape)
-        for index in range(len(self.shape) - 1, -1, -1):
-            values[index] = stride
-            stride *= self.shape[index]
-        return values[dim]
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        if self._values is None:
-            raise AssertionError("no host values")
-        return self._values
-
-
-def _paged_tensors(*, num_blocks=64):
-    return {
-        "q": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "out": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "k": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "v": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1024]),
-        "seqused_k": _Tensor((1,), "torch.int32", [1024]),
-        "block_table": _Tensor((1, 64), "torch.int32", [list(range(64))]),
-    }
 
 
 class TestRegistrySplit(unittest.TestCase):
