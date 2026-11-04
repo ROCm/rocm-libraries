@@ -5,6 +5,13 @@ solution. This first migration step provides the identifier format and
 maintenance tooling, but does not assign or consume UIDs in library generation
 or at runtime.
 
+`TensileMergeLibrary` matches `SolutionNameMin`. A matching name keeps the
+pooled Equality solution and ignores the incoming UID. The merge also claims a
+UID for every solution copied from the base file into the output. A base UID
+that is already unique and non-zero is kept. A base UID that is missing, zero,
+malformed, or duplicated inside that base file is replaced in the merged file.
+The input file is left unchanged unless the output path is that file.
+
 ## Identifier format
 
 ```text
@@ -59,9 +66,11 @@ again, keeps their stored UIDs. So a UID copied out of `3_LibraryLogic` after a
 normal tuning run is not the UID the library ships for that kernel. When the
 tuned file is merged, `TensileMergeLibrary` matches solutions by
 `SolutionNameMin`, and a matching name keeps the solution, and its UID, that the
-library already has. Uniqueness across the shipped logic tree is checked by
-`test_solution_uid_uniqueness.py` in the logic-corpus lane
-(`tox -e logic-corpus`).
+library already has. The merge output replaces a missing, zero, malformed, or
+colliding UID on every solution it contains, including solutions copied from
+the base file. A unique non-zero base UID is kept. Uniqueness across the
+shipped logic tree is checked by `test_solution_uid_uniqueness.py` in the
+logic-corpus lane (`tox -e logic-corpus`).
 
 Runtime metadata, runtime selection, and mandatory uniqueness are introduced
 by later migration steps.

@@ -13,6 +13,7 @@ import pytest
 
 from tensilelite import LibraryIO
 from tensilelite.CustomYamlLoader import DEFAULT_YAML_LOADER, load_yaml_stream
+from tensilelite.SolutionIdGen import encode_solution_uid
 from tensilelite.merge_library import (
     addKernel,
     allFiles,
@@ -491,6 +492,68 @@ class TestMergeLogic:
         merged_data, _, _, _ = mergeLogic(ori_data, inc_data, forceMerge=True)
         solution_names = [s["SolutionNameMin"] for s in merged_data["Solutions"]]
         assert "Forced_Sol" in solution_names
+
+    def test_merge_claims_solution_uids(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Merged UIDs: base repairs, a new-name collision, and a reused name.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If a merged solution stores the wrong UID.
+        """
+        draws = iter(range(100, 200))
+        monkeypatch.setattr(
+            "tensilelite.SolutionIdGen.generate_solution_id", lambda: next(draws)
+        )
+
+        def _solution(index: int, name: str, uid: str | None) -> dict[str, Any]:
+            """Build a minimal solution record.
+
+            Args:
+                index: Local ``SolutionIndex``.
+                name: ``SolutionNameMin``.
+                uid: Stored ``SolutionUID``, or None to omit the field.
+
+            Returns:
+                The solution dictionary.
+
+            Raises:
+                None.
+            """
+            solution = {"SolutionIndex": index, "SolutionNameMin": name}
+            if uid is not None:
+                solution["SolutionUID"] = uid
+            return solution
+
+        ori_data = {
+            "Solutions": [
+                _solution(0, "A", "0u5"),
+                _solution(1, "B", "0u5"),
+                _solution(2, "C", "0u0"),
+                _solution(3, "D", None),
+            ],
+            "ExactLogic": [[[m, 1, 1, 1], [m - 1, 1.0]] for m in range(1, 5)],
+        }
+        inc_data = {
+            "Solutions": [_solution(0, "A", "0u9"), _solution(1, "E", "0u5")],
+            "ExactLogic": [[[1, 1, 1, 1], [0, 2.0]], [[5, 1, 1, 1], [1, 1.0]]],
+        }
+
+        merged_data, _, _, _ = mergeLogic(ori_data, inc_data, forceMerge=False)
+
+        uids = {s["SolutionNameMin"]: s["SolutionUID"] for s in merged_data["Solutions"]}
+        assert uids == {
+            "A": "0u5",
+            "B": encode_solution_uid(100),
+            "C": encode_solution_uid(101),
+            "D": encode_solution_uid(102),
+            "E": encode_solution_uid(103),
+        }
+        assert ori_data["Solutions"][3].get("SolutionUID") is None
 
     def test_merge_converted_list_fixture(self, dict_from_list_logic: dict[str, Any]) -> None:
         """Merge works on dict converted from legacy list fixture."""
