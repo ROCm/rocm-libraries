@@ -331,6 +331,8 @@ def collect_diffs(
     # (and therefore occurrence classes) are the same on every machine. File
     # names come from NUL-separated output, never from patch headers.
     args = [
+        "-c",
+        "diff.autoRefreshIndex=true",  # else an untouched, stat-dirty file has no hunk
         "diff",
         "-M",
         "-U0",

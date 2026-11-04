@@ -105,6 +105,23 @@ class Repo:
         return proc.returncode, (json.loads(proc.stdout) if proc.stdout else {})
 
 
+def set_git_config(monkeypatch, tmp_path_factory, options: dict) -> None:
+    """Apply user-level git settings through a global config file.
+
+    A file under HOME works on every git; GIT_CONFIG_COUNT needs git 2.31 and
+    older gits silently ignore it, which would leave the settings unapplied.
+    """
+    home = tmp_path_factory.mktemp("home")
+    for key, value in options.items():
+        subprocess.run(
+            ["git", "config", "--file", str(home / ".gitconfig"), key, value],
+            check=True,
+        )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Repo:
     r = Repo(tmp_path)
@@ -461,6 +478,31 @@ def test_forks_that_differ_only_in_indentation_get_a_sibling_note(repo):
     head = repo.commit()
     _, report = repo.check("--base", base, "--head", head)
     assert [e["kind"] for e in report["existing_copies"]] == ["SIBLING NOTE"]
+
+
+def test_the_same_edit_on_approved_forks_saved_with_a_bom_and_with_crlf_is_not_a_note(
+    repo,
+):
+    # One fork starts with a BOM, the other uses CRLF; the edit is identical, so
+    # nothing differs between the copies and no sibling note is due.
+    def save(rel: str, text: str, bom: bool, crlf: bool) -> None:
+        data = text.replace("\n", "\r\n") if crlf else text
+        target = repo.path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((b"\xef\xbb\xbf" if bom else b"") + data.encode())
+
+    repo.write(GROUPS_PATH, GROUPS)
+    before = func("f")
+    after = func("f", BLOCK.replace("b.add(", "b.mul("))
+    save("library/kernels/gfx942/k.py", before, bom=True, crlf=False)
+    save("library/kernels/gfx950/k.py", before, bom=False, crlf=True)
+    base = repo.commit()
+    save("library/kernels/gfx942/k.py", after, bom=True, crlf=False)
+    save("library/kernels/gfx950/k.py", after, bom=False, crlf=True)
+    head = repo.commit()
+    _, report = repo.check("--base", base, "--head", head)
+    assert report["findings"] == []
+    assert existing(report) == []
 
 
 def test_same_edit_on_both_sides_of_an_approved_fork_reports_nothing(repo):
@@ -1423,7 +1465,7 @@ SETTING_SCENARIOS = {
 @pytest.mark.parametrize("head_mode", (False, True), ids=("worktree", "commit"))
 @pytest.mark.parametrize("setting", sorted(GIT_SETTINGS))
 def test_user_git_settings_do_not_change_the_result(
-    repo, monkeypatch, scenario, head_mode, setting
+    repo, monkeypatch, tmp_path_factory, scenario, head_mode, setting
 ):
     before, after = SETTING_SCENARIOS[scenario]
     for path, text in before.items():
@@ -1439,11 +1481,7 @@ def test_user_git_settings_do_not_change_the_result(
     args = ["--base", base] + (["--head", repo.commit()] if head_mode else [])
     expected = repo.check(*args)
     assert expected[1]["findings"] or expected[1]["existing_copies"]
-    options = GIT_SETTINGS[setting]
-    monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(options)))
-    for i, (key, value) in enumerate(options.items()):
-        monkeypatch.setenv(f"GIT_CONFIG_KEY_{i}", key)
-        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{i}", value)
+    set_git_config(monkeypatch, tmp_path_factory, GIT_SETTINGS[setting])
     if setting == "external-diff":
         if os.name != "posix":
             pytest.skip("the external diff program is /bin/true")
@@ -1668,6 +1706,22 @@ def test_a_file_moved_into_scope_from_an_excluded_path_counts_as_added(repo, hea
     assert kinds(report) == ["NEW COPY"]
 
 
+def test_a_file_touched_without_changes_is_not_a_tool_error(
+    repo, monkeypatch, tmp_path_factory
+):
+    # A stat-dirty file that git does not refresh is listed by --name-status
+    # but has no patch section, unless diff.autoRefreshIndex is pinned.
+    set_git_config(monkeypatch, tmp_path_factory, {"diff.autoRefreshIndex": "false"})
+    repo.write("library/kernels/a.py", func("f1"))
+    base = repo.commit()
+    (repo.path / "library/kernels/a.py").touch()
+    os.utime(repo.path / "library/kernels/a.py", (1, 1))
+    repo.write("library/kernels/c.py", func("f2"))
+    rc, report = repo.check("--base", base)
+    assert rc == 0
+    assert kinds(report) == ["NEW COPY"]
+
+
 @POSIX_ONLY
 @pytest.mark.parametrize("head_mode", (False, True), ids=("worktree", "commit"))
 def test_a_file_that_becomes_a_symlink_is_not_a_tool_error(repo, head_mode):
@@ -1832,7 +1886,7 @@ def test_a_crlf_working_tree_file_matches_the_lf_blobs_of_its_copies(repo):
 
 @pytest.mark.parametrize("autocrlf", (None, "true", "input"))
 def test_a_tracked_file_saved_with_crlf_still_reports_the_pasted_copy(
-    repo, monkeypatch, autocrlf
+    repo, monkeypatch, tmp_path_factory, autocrlf
 ):
     # The blob is LF and the file on disk is CRLF. With core.autocrlf unset git
     # reports every line as changed, so the copy is labelled LIKELY, not NEW; it
@@ -1844,9 +1898,7 @@ def test_a_tracked_file_saved_with_crlf_still_reports_the_pasted_copy(
     crlf = (block + block).replace("\n", "\r\n").encode()
     (repo.path / "library" / "kernels" / "a.py").write_bytes(crlf)
     if autocrlf is not None:
-        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-        monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
-        monkeypatch.setenv("GIT_CONFIG_VALUE_0", autocrlf)
+        set_git_config(monkeypatch, tmp_path_factory, {"core.autocrlf": autocrlf})
     rc, report = repo.check("--base", base, "--fail-on-new")
     (finding,) = report["findings"]
     assert finding["kind"] in ("NEW COPY", "LIKELY COPY")
