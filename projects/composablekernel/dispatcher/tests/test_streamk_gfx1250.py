@@ -171,18 +171,32 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertEqual(len(configs), 4)
 
     def test_reduction_override_replaces_config_strategies(self):
+        # Each expanded candidate counts a reject for the illegal 0_0_3 widths, so
+        # an override applied after the product (its copies collapsed by name)
+        # still shows up in the rejects. Only that strategy-independent reason
+        # (vector_size_c=3 is not a power of two) is compared: a width rule for
+        # one strategy may rightly reject more of the full sweep.
+        rejects = ({}, {})
         with tempfile.TemporaryDirectory() as tmp:
             config_path = _write_reduction_config(tmp, ["atomic", "linear", "tree"])
             kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
-            swept = expand_sweep(config_path, "gfx1250", **kwargs)
+            kwargs["vector_sizes"] = [(0, 0, 0), (0, 0, 3)]
+            swept = expand_sweep(config_path, "gfx1250", rejects=rejects[0], **kwargs)
             tree = expand_sweep(
-                config_path, "gfx1250", reduction_strategies=["tree"], **kwargs
+                config_path,
+                "gfx1250",
+                reduction_strategies=["tree"],
+                rejects=rejects[1],
+                **kwargs,
             )
             single = expand_sweep(
                 config_path, "gfx1250", reduction_strategies="tree", **kwargs
             )
         self.assertEqual([c.name for c in single], [c.name for c in tree])
         self.assertEqual(len(swept), 3 * len(tree))
+        pow2 = [{k: n for k, n in r.items() if "power of two" in k} for r in rejects]
+        self.assertTrue(pow2[1])
+        self.assertEqual(pow2[0], {k: 3 * n for k, n in pow2[1].items()})
         self.assertEqual({c.reduction_strategy for c in tree}, {"tree"})
         self.assertEqual(len({c.name for c in tree}), len(tree))
         self.assertTrue(all(c.name.endswith("_streamk_tree") for c in tree))
@@ -334,6 +348,40 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                 ),
                 _write_reduction_config(tmp, ["linear"], "b.json"),
             )
+
+    def test_reduction_override_reaches_every_expansion(self):
+        # The driver hands --reduction-strategy to each file's expand_sweep, so
+        # every expansion already carries it. The driver's dedupe of the combined
+        # list hides a strategy rewritten after expansion, in place or by
+        # replace(), from the built configs; the spy records each file's
+        # strategies when expand_sweep returns, so such a rewrite or a skipped
+        # file shows here. Without the option each file keeps its own strategies.
+        sweeps = (["atomic", "linear"], ["linear", "tree"])
+        expansions = []
+
+        def expand(*args, **kwargs):
+            configs = expand_sweep(*args, **kwargs)
+            expansions.append({c.reduction_strategy for c in configs})
+            return configs
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            self.driver, "expand_sweep", side_effect=expand
+        ):
+            paths = [_write_reduction_config(tmp, r, f"{r[0]}.json") for r in sweeps]
+            for n, override in ((1, None), (1, "tree"), (2, None), (2, "tree")):
+                with self.subTest(files=n, override=override):
+                    expansions.clear()
+                    argv = ["--arch", "gfx1250", "--max-kernels", "0"]
+                    argv += ["--reduction-strategy", override] if override else []
+                    configs, _ = self._main_build_configs(*paths[:n], *argv)
+                    want = [{override} if override else set(r) for r in sweeps[:n]]
+                    self.assertEqual(
+                        len(expansions), n, "one expand_sweep call per config file"
+                    )
+                    self.assertEqual(expansions, want)
+                    self.assertEqual(
+                        {c.reduction_strategy for c in configs}, set.union(*want)
+                    )
 
     def test_arch_config_is_a_file_drop(self):
         with tempfile.TemporaryDirectory() as tmp:
