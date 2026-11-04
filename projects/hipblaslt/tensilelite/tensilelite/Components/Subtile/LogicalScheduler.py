@@ -2063,11 +2063,15 @@ class LogicalScheduler:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
                 rel = 0
             elif cfg.uniformPgrEpoch:
-                # Bound each non-frontier cohort by the configured size.  The
-                # frontier receives the remainder immediately before its epoch
-                # wait.  Do not shrink the chunk to a small partition's MFMA
-                # count; that moves the scale request across the wait.
-                nonfrontier_chunk = cfg.uniformEpochVmemCohortSize
+                # Bound each non-frontier cohort by the derived size, and
+                # further by the smallest non-frontier partition.  The frontier
+                # receives the remainder immediately before its epoch wait.
+                nonfrontier_chunk = max(
+                    1,
+                    min(cfg.uniformEpochVmemCohortSize, min(
+                        mfma_per_partition[s // numK]
+                        for s in dist_slots[:-1]
+                    ))) if len(dist_slots) > 1 else nAtoms
                 rel = min(i // nonfrontier_chunk, len(dist_slots) - 1)
             else:
                 rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
