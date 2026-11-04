@@ -140,16 +140,20 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 
 #ifdef BUILD_WITH_TENSILE
 
-    // The grid Y/Z dimensions are hardware-limited (e.g. 65536 on gfx12). Tensile gemm
-    // kernels map the free (n) dimension to grid.y, so a single launch with n beyond
-    // (limit * tile_n) silently drops the trailing workgroups and leaves those output
-    // columns uninitialized (wrong/NaN results). Chunk n so every Tensile launch stays
-    // within the limit, matching the chunking already done on the source-GEMM and _64 paths.
+    // On gfx12 the workgroup IDs in grid Y/Z are 16-bit. Tensile gemm kernels map the free
+    // (n) dimension to grid.y (ceil(n / MacroTile1) * GlobalSplitU workgroups), so a single
+    // launch whose grid.y exceeds 65536 wraps blockIdx.y, silently leaving the trailing
+    // output columns unwritten while returning success. Chunk n on gfx12 so every Tensile
+    // launch stays within the limit, matching the source-GEMM and _64 paths. The chunk is
+    // in columns, so it is safe for any MacroTile1/GlobalSplitU combination. Other
+    // architectures handle the full grid and keep the single, unchunked launch.
     // The batch dimension (grid.z) is already chunked inside rocblas_call_tensile using
     // handle->getBatchGridDim().
-    for(; n_base < n; n_base += c_i64_grid_YZ_chunk)
+    const int64_t n_chunk
+        = handle->getArchMajor() == 12 ? c_i64_grid_YZ_chunk : std::max<int64_t>(n, 1);
+    for(; n_base < n; n_base += n_chunk)
     {
-        rocblas_int    nblock  = rocblas_int(std::min<int64_t>(n - n_base, c_i64_grid_YZ_chunk));
+        rocblas_int    nblock  = rocblas_int(std::min<int64_t>(n - n_base, n_chunk));
         rocblas_stride c_shift = n_base * ldc;
         rocblas_stride b_shift = (trans_b == rocblas_operation_none) ? n_base * ldb : n_base;
 

@@ -12,6 +12,7 @@ rocBLAS documentation is available at
 ### Resolved issues
 
 * Fix trace and bench logging of `alpha` for `axpy_ex` and `scal_ex`, including batched and strided-batched forms, when `alpha_type` is `bf16_r`. The trace log wrote an empty `alpha` field, and the bench log omitted `--alpha`, so replaying the logged command with `rocblas-bench` ran with the default `alpha` of 1. Logging-helper failures in the `_ex` functions are now reported on `stderr` rather than silently discarded.
+* Fix incorrect or NaN `gemm` results on gfx12 when the free (`N`) dimension needs more than 65536 workgroups in grid Y (for example `zgemm` and `cgemm` with `N` above 2^21, or real types when `ROCBLAS_USE_HIPBLASLT=0`). On gfx12 the Tensile launch in `rocblas_internal_gemm` is now chunked over `N`, matching the source `gemm` and ILP64 (`_64`) paths. Other architectures are unchanged.
 
 ## rocBLAS 5.8.0 
 
@@ -70,11 +71,6 @@ rocBLAS documentation is available at
 
 
 ## rocBLAS 5.6.0 for ROCm 10.0.0
-### Resolved issues
-
-* Fix incorrect or NaN `gemm` results on gfx12 with a large free (`N`) dimension exceeding 65536 workgroups in the grid Y dimension. The Tensile launch in `rocblas_internal_gemm` is now chunked over `N`, matching the source `gemm` and ILP64 (`_64`) paths.
-
-## rocBLAS 5.6.0
 
 ### Added
 

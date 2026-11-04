@@ -3791,7 +3791,7 @@ Tests:
 - name: gemm_large_n_grid_y_limit
   category: pre_checkin
   function:
-    - gemm: *single_double_precisions
+    - gemm: *single_double_precisions_complex_real
   arguments:
     - { transA: N, transB: N, M: 3, N: 2097153, K: 15, lda: 3, ldb: 15, ldc: 3, ldd: 3 }
     - { transA: N, transB: T, M: 3, N: 2097153, K: 15, lda: 3, ldb: 2097153, ldc: 3, ldd: 3 }
