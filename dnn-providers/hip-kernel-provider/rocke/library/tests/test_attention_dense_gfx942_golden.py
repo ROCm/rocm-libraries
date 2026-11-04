@@ -15,7 +15,10 @@ fixture is re-blessed.
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
 combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
-gfx942, so unlike the gfx950 sibling they are absent here.
+gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128
+K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
+(``v_reg_prefetch=True``) knobs are pinned individually and together on supported
+persistent grids (including LSE); no shipped default reaches the new pipeline paths.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -65,7 +68,7 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 
 def _cases():
     """cid -> zero-arg builder returning a KernelDef. Small Sq keeps the IR compact
-    while still exercising the full pipeline (both grid variants, both decodes).
+    while covering CFVST on the default grid and KDB/VPF on persistent decodes.
 
     Two families of builders:
       * ``mk`` builds an ``AttentionDenseSpec`` DIRECTLY. The D64 cases pass
@@ -100,7 +103,11 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        gfx942_only = d.get("emit_lse", False) or d.get("window_wave_skip", False)
+        gfx942_only = (
+            d.get("emit_lse", False)
+            or d.get("window_wave_skip", False)
+            or any(k in d for k in ("lds_num_buffers", "v_reg_prefetch"))
+        )
         spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
@@ -325,6 +332,97 @@ def _cases():
             seqlen_kv=64,
             sliding_window=64,
         ),
+        # --- Opt-in K double buffering and V register prefetch on the BF16 D128
+        #     CFVST body (on by default), persistent grid only. Pin both persistent
+        #     decodes and LSE; V LDS stays single-buffered. ---
+        "attention_dense_gfx942/persist_bthkvmin_kdb_d128_bf16_causal": mk(
+            lds_num_buffers=2,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/persist_bthkvmin_vpf_d128_bf16_causal": mk(
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/persist_bthkvmin_kdbvpf_d128_bf16_causal": mk(
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/persist_kdb_d128_bf16_qbmaj": mk(
+            lds_num_buffers=2,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/persist_vpf_d128_bf16_qbmaj": mk(
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/persist_kdbvpf_d128_bf16_qbmaj": mk(
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        # The last KV tile is folded in after the loop; the LSE epilogue must
+        # use the final row max independently for both pipeline levers.
+        "attention_dense_gfx942/lse_persist_bthkvmin_kdb_d128_bf16": mk(
+            emit_lse=True,
+            lds_num_buffers=2,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/lse_persist_bthkvmin_vpf_d128_bf16": mk(
+            emit_lse=True,
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/lse_persist_bthkvmin_kdbvpf_d128_bf16": mk(
+            emit_lse=True,
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        # The measured final optimization: KDB + VPF + K pad4 + diagonal split.
+        "attention_dense_gfx942/persist_bthkvmin_kdbvpf_pad4_dsplit": mk(
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+            lds_row_pad=4,
+            causal_diag_split=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        # Diagonal split with each pipeline lever alone: each flag-on path has its
+        # own pin.
+        "attention_dense_gfx942/persist_bthkvmin_kdb_dsplit_d128_bf16": mk(
+            lds_num_buffers=2,
+            causal_diag_split=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/persist_bthkvmin_vpf_dsplit_d128_bf16": mk(
+            v_reg_prefetch=True,
+            causal_diag_split=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="bt_hkv_minor",
+        ),
     }
 
 
@@ -367,6 +465,113 @@ def test_attention_dense_gfx942_ir_matches_golden():
     assert not drift, "gfx942 attention_dense IR drift vs golden:\n  " + "\n  ".join(
         drift
     )
+
+
+def test_pipeline_golden_entries_cover_each_independent_mode_and_llvm_flavor():
+    """Pin non-vacuous fixture coverage without generating unverified new hashes.
+
+    This checks the *existing* golden matrix (including the pad4 + diagonal-split
+    winner) independently of lowering. The main golden test separately verifies
+    that the current lowered LLVM IR matches each recorded digest.
+    """
+    from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
+
+    doc = json.loads(_GOLDEN.read_text())
+    expected = set(_cases())
+    required = {
+        "attention_dense_gfx942/persist_bthkvmin_kdb_d128_bf16_causal",
+        "attention_dense_gfx942/persist_bthkvmin_vpf_d128_bf16_causal",
+        "attention_dense_gfx942/persist_bthkvmin_kdbvpf_d128_bf16_causal",
+        "attention_dense_gfx942/persist_kdb_d128_bf16_qbmaj",
+        "attention_dense_gfx942/persist_vpf_d128_bf16_qbmaj",
+        "attention_dense_gfx942/persist_kdbvpf_d128_bf16_qbmaj",
+        "attention_dense_gfx942/lse_persist_bthkvmin_kdb_d128_bf16",
+        "attention_dense_gfx942/lse_persist_bthkvmin_vpf_d128_bf16",
+        "attention_dense_gfx942/lse_persist_bthkvmin_kdbvpf_d128_bf16",
+        "attention_dense_gfx942/persist_bthkvmin_kdbvpf_pad4_dsplit",
+        "attention_dense_gfx942/persist_bthkvmin_kdb_dsplit_d128_bf16",
+        "attention_dense_gfx942/persist_bthkvmin_vpf_dsplit_d128_bf16",
+    }
+    assert required <= expected, sorted(required - expected)
+    assert set(doc["flavors"]) == set(GOLDEN_PROFILE_FLAVORS)
+    assert doc["aliases"] == GOLDEN_ALIASES
+    for flavor, value in doc["flavors"].items():
+        cases = value["cases"]
+        assert set(cases) == expected, (
+            f"{flavor}: missing={sorted(expected - set(cases))}, "
+            f"extra={sorted(set(cases) - expected)}"
+        )
+        for case_id in required:
+            entry = cases[case_id]
+            assert len(entry["sha256"]) == 64 and entry["bytes"] > 0, (
+                flavor,
+                case_id,
+                entry,
+            )
+
+
+def test_independent_pipeline_diag_split_changes_lowered_ir():
+    """CPU codegen proof for each split-mode pipeline branch.
+
+    Split-only KDB/VPF lowerings are compared with their unsplit twins after
+    normalizing the symbol, so the split must change the pipeline body itself;
+    each split mode is also pinned by its own golden SHA-256 entry.
+    """
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        build_attention_dense,
+        supports_attention_dense,
+    )
+    from rocke.core.lower_llvm import (
+        _lower_kernel_to_llvm_python,
+        _resolve_llvm_flavor,
+    )
+
+    base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=16,
+        num_kv_heads=4,
+        head_size=128,
+        dtype="bf16",
+        causal=True,
+        block_n=64,
+        persistent=True,
+        num_persistent=304,
+        persist_decode="bt_hkv_minor",
+    )
+    fingerprints = {}
+    for nbuf, vpf, label in (
+        (2, False, "kdb"),
+        (1, True, "vpf"),
+        (2, True, "kdb_vpf"),
+    ):
+        fingerprints[label] = {}
+        for split in (False, True):
+            spec = Gfx942AttentionDenseSpec(
+                **base,
+                lds_num_buffers=nbuf,
+                v_reg_prefetch=vpf,
+                causal_diag_split=split,
+            )
+            ok, why = supports_attention_dense(spec, arch=_ARCH)
+            assert ok, f"{label} split={split}: {why}"
+            kd = build_attention_dense(spec, arch=_ARCH)
+            llvm = _lower_kernel_to_llvm_python(
+                kd, arch=_ARCH, llvm_flavor=_resolve_llvm_flavor()
+            )
+            # Exclude symbol renaming: require a genuine change to the IR body.
+            normalized = llvm.replace(kd.name, "KERNEL")
+            fingerprints[label][split] = hashlib.sha256(
+                normalized.encode("utf-8")
+            ).hexdigest()
+        assert (
+            fingerprints[label][True] != fingerprints[label][False]
+        ), f"{label} split and unsplit unexpectedly emit identical IR"
+    assert (
+        len({fingerprints[mode][True] for mode in fingerprints}) == 3
+    ), "independent split-mode pipeline IRs unexpectedly aliased"
 
 
 if __name__ == "__main__":

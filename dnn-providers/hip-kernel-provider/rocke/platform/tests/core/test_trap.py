@@ -4,10 +4,9 @@
 """The ``trap`` op: abort the kernel.
 
 ``trap()`` lowers to ``call void @llvm.trap()`` (HIP ``__builtin_trap()``),
-which the AMDGPU backend emits as ``s_trap 2``. A taken trap ends the kernel
-with a hardware exception; depending on the HIP runtime the launch reports an
-error or the runtime aborts the process, and either way the process cannot use
-the GPU afterwards. That is the runtime's behaviour, not rocKE's, so no test
+which the AMDGPU backend emits as ``s_trap 2`` (on gfx11, its simulated trap).
+A taken trap aborts the process on Linux (ROCr) and never returns from the
+launch on Windows. That is the runtime's behaviour, not rocKE's, so no test
 takes the trap on a GPU: ``s_trap 2`` in the code object is the check that the
 trap is emitted.
 

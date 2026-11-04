@@ -59,6 +59,8 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
+| `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
+| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
 | `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
@@ -207,14 +209,16 @@ architecture-domain data or generation, LLVM discovery/classification, or this
 test's CMake/install wiring. Inspect a named skip rather than counting it as
 measurement validation.
 
-The runner has two independent selectors, neither of which scopes pytest or
-CTest:
+The runner has independent selectors for the corpus gates and pytest. None
+of them scopes CTest, and any selected run is an iteration aid rather than the
+complete pre-merge gate:
 
 | Change or intent | Focused route |
 |---|---|
 | One parity emitter family | `python tests/run_all.py --only <family>`; scopes byte identity only |
 | One representative emitted-IR corpus case | `python tests/run_all.py --only-ir <family/arch/variant>`; scopes IR validity and the arch-domain warning gate only |
-| One Python behavior | invoke its pytest module or node ID directly |
+| One or more Python behaviors while retaining the other runner stages | `python tests/run_all.py --pytest-target <path-or-node-id>`; repeat the option as needed, with paths relative to `tests/` |
+| The shortest Python-only inner loop | invoke its pytest module or node ID directly |
 | Arch-domain artifact reproduction | use the focused `ctest -R` command above |
 | Full pre-merge validation | run `python tests/run_all.py` with no selectors |
 

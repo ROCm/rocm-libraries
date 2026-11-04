@@ -1047,6 +1047,14 @@ namespace TensileLite
         void                 calculateGrid(dim3&                               workGroupSize,
                                            dim3&                               numWorkGroups,
                                            ContractionSolution::Problem const& problem) const;
+        // Workgroup grid that generateSingleCall hands to the cluster launch of a
+        // non-persistent kernel with clusterDim > 1. Not meaningful otherwise.
+        dim3                 clusterLaunchGrid(Problem const& problem, Hardware const& hardware) const;
+        // False when a non-persistent cluster launch of this problem would exceed
+        // KernelInvocation::MaxClusterGridDimZ in grid z. Always true for other
+        // kernels.
+        bool                 clusterLaunchGridFits(Problem const&  problem,
+                                                   Hardware const& hardware) const;
         origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
         size_t               getSKGrid(Problem const&       problem,
                                        Hardware const&      hardware,
@@ -1117,11 +1125,6 @@ namespace TensileLite
         {
             return internalArgsSupport.persistentLoopArgsVersion == 2;
         }
-
-        // Fraction of spatial-cluster peers that own a real output tile.
-        // Used only to rank analytical candidates; explicit solution dispatch
-        // and measured exact matches keep their selected kernel.
-        double streamKClusterUtilization(Problem const& problem) const;
 
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
                                           PersistentLaunchSettings const& launch) const;
