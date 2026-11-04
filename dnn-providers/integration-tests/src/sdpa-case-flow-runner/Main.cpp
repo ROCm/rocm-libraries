@@ -11,7 +11,8 @@
 //
 // With --export-graphs DIR --arch X the runner loads no plugin, creates no handle and runs
 // nothing. It writes each row's graph JSON and a bundle metadata sidecar under DIR, and one
-// JSON line per row with the export outcome.
+// JSON line per row with the export outcome. With --arch X,Y a row whose graph differs between
+// the archs is written once per arch, and the metadata of each copy names its arch.
 
 #include <algorithm>
 #include <array>
@@ -125,6 +126,7 @@ struct Options
     std::vector<std::pair<std::string, std::string>> meta;
     std::string exportDir;
     std::string exportArch;
+    std::vector<std::string> exportArchs;
     std::string sourceSha256;
 };
 
@@ -156,7 +158,9 @@ void printUsage(std::ostream& os)
           "\n"
           "Export mode (no plugin, no handle, no execution):\n"
           "  --export-graphs DIR           write DIR/<case_key>/<case_key>.json and .meta.json\n"
-          "  --arch GFX                    base arch the graphs are built for (required)\n"
+          "  --arch GFX[,GFX...]           base archs the graphs are built for (required); a row\n"
+          "                                whose graph differs between them is written once per\n"
+          "                                arch as DIR/<case_key>_<arch>/, with archs [<arch>]\n"
           "  --source-sha256 HEX           sha256 of the case CSV the input rows come from "
           "(required)\n";
 }
@@ -365,6 +369,22 @@ Options parseArgs(int argc, char** argv)
         if(!hex)
         {
             usageError("--source-sha256 needs 64 lower-case hex digits");
+        }
+        std::stringstream archList(opts.exportArch);
+        std::string arch;
+        while(std::getline(archList, arch, ','))
+        {
+            if(arch.empty() || arch.find(':') != std::string::npos
+               || std::find(opts.exportArchs.begin(), opts.exportArchs.end(), arch)
+                      != opts.exportArchs.end())
+            {
+                usageError("--arch needs distinct base arch names separated by commas");
+            }
+            opts.exportArchs.push_back(arch);
+        }
+        if(opts.exportArch.back() == ',')
+        {
+            usageError("--arch needs distinct base arch names separated by commas");
         }
         if(!opts.pluginPaths.empty() || !opts.expectArch.empty())
         {
@@ -2027,6 +2047,13 @@ struct ExportResult
     std::string stage;
     std::string message;
     std::string inputsNote;
+    std::vector<std::string> caseIds;
+};
+
+struct PreparedCase
+{
+    nlohmann::json graph;
+    nlohmann::json meta;
 };
 
 bool writeText(const std::filesystem::path& path, const std::string& text)
@@ -2037,9 +2064,12 @@ bool writeText(const std::filesystem::path& path, const std::string& text)
     return static_cast<bool>(out);
 }
 
-ExportResult exportCase(const CaseInput& input,
-                        const Options& opts,
-                        const sdpa_case_flow::ClassValues& values)
+// The graph JSON and metadata of one row built for one arch. On success the outcome stays empty.
+ExportResult prepareCase(const CaseInput& input,
+                         const Options& opts,
+                         const sdpa_case_flow::ClassValues& values,
+                         const std::string& arch,
+                         PreparedCase& prepared)
 {
     ExportResult result;
     result.stage = "realise";
@@ -2062,8 +2092,7 @@ ExportResult exportCase(const CaseInput& input,
         }
 
         const auto sizes = sdpa_case_flow::parseSizeOverride(extra("sizes"));
-        const sdpa_case_flow::CaseContext caseContext{
-            values, opts.descaleForm, opts.exportArch, sizes};
+        const sdpa_case_flow::CaseContext caseContext{values, opts.descaleForm, arch, sizes};
         auto built = sdpa_case_flow::buildCaseGraph(input.row, input.overrides, caseContext);
         auto& graph = *built.graph;
         graph.set_name(EXPORT_GRAPH_NAME);
@@ -2165,16 +2194,8 @@ ExportResult exportCase(const CaseInput& input,
                                  + recipeNote(recipes.fill(content.uid));
         }
 
-        result.stage = "write";
-        const auto caseDir = std::filesystem::path(opts.exportDir) / caseKey;
-        std::filesystem::create_directories(caseDir);
-        if(!writeText(caseDir / (caseKey + ".json"), graphJson.dump(2) + "\n")
-           || !writeText(caseDir / (caseKey + ".meta.json"), meta.dump(2) + "\n"))
-        {
-            return fail("write-error", "cannot write the files under " + caseDir.string());
-        }
-        result.stage = "done";
-        result.outcome = "exported";
+        prepared.graph = graphJson;
+        prepared.meta = std::move(meta);
         return result;
     }
     catch(const std::exception& e)
@@ -2182,7 +2203,6 @@ ExportResult exportCase(const CaseInput& input,
         const bool frontendStage = result.stage == "validate" || result.stage == "serialise";
         const std::string outcome = result.stage == "realise" ? "realise-error"
                                     : frontendStage           ? "frontend-rejected"
-                                    : result.stage == "write" ? "write-error"
                                                               : "content-not-expressible";
         return fail(outcome, std::string("exception: ") + e.what());
     }
@@ -2190,6 +2210,152 @@ ExportResult exportCase(const CaseInput& input,
     {
         return fail("realise-error", "unknown exception");
     }
+}
+
+// The graph JSON with every tensor uid replaced by the tensor's name and the tensors keyed by
+// name. Two builds of one graph give equal results, also when the frontend numbers the outputs
+// in a different order.
+nlohmann::json graphByTensorName(const nlohmann::json& graph)
+{
+    std::map<int64_t, std::string> names;
+    if(graph.contains("tensors") && graph["tensors"].is_array())
+    {
+        for(const auto& tensor : graph["tensors"])
+        {
+            if(tensor.contains("uid") && tensor["uid"].is_number_integer())
+            {
+                names[tensor["uid"].get<int64_t>()] = tensor.value("name", std::string());
+            }
+        }
+    }
+    const std::function<nlohmann::json(const nlohmann::json&)> rename
+        = [&](const nlohmann::json& value) -> nlohmann::json {
+        if(value.is_array())
+        {
+            auto out = nlohmann::json::array();
+            for(const auto& item : value)
+            {
+                out.push_back(rename(item));
+            }
+            return out;
+        }
+        if(!value.is_object())
+        {
+            return value;
+        }
+        auto out = nlohmann::json::object();
+        for(const auto& [key, item] : value.items())
+        {
+            const bool uidKey
+                = key == "uid" || (key.size() > 4 && key.compare(key.size() - 4, 4, "_uid") == 0);
+            const auto found
+                = item.is_number_integer() ? names.find(item.get<int64_t>()) : names.end();
+            out[key]
+                = uidKey && found != names.end() ? nlohmann::json(found->second) : rename(item);
+        }
+        return out;
+    };
+    auto renamed = rename(graph);
+    if(renamed.contains("tensors") && renamed["tensors"].is_array())
+    {
+        auto byName = nlohmann::json::object();
+        for(const auto& tensor : renamed["tensors"])
+        {
+            byName[tensor.value("name", std::string())] = tensor;
+        }
+        renamed["tensors"] = std::move(byName);
+    }
+    return renamed;
+}
+
+bool writeCase(const std::string& exportDir,
+               const std::string& caseId,
+               const PreparedCase& prepared)
+{
+    const auto caseDir = std::filesystem::path(exportDir) / caseId;
+    std::error_code ec;
+    std::filesystem::create_directories(caseDir, ec);
+    return !ec && writeText(caseDir / (caseId + ".json"), prepared.graph.dump(2) + "\n")
+           && writeText(caseDir / (caseId + ".meta.json"), prepared.meta.dump(2) + "\n");
+}
+
+// Builds the row for every export arch. A row whose graph or metadata differs between the archs
+// is written once per arch as <case_key>_<arch>, and its metadata limits it to that arch.
+ExportResult exportCase(const CaseInput& input,
+                        const Options& opts,
+                        const sdpa_case_flow::ClassValues& values)
+{
+    std::vector<PreparedCase> prepared(opts.exportArchs.size());
+    ExportResult result;
+    std::string inputsNote;
+    for(size_t i = 0; i < opts.exportArchs.size(); ++i)
+    {
+        result = prepareCase(input, opts, values, opts.exportArchs[i], prepared[i]);
+        if(!result.outcome.empty())
+        {
+            if(opts.exportArchs.size() > 1)
+            {
+                result.message = opts.exportArchs[i] + ": " + result.message;
+            }
+            return result;
+        }
+        if(i == 0)
+        {
+            inputsNote = result.inputsNote;
+        }
+    }
+    result.inputsNote = inputsNote;
+
+    result.stage = "write";
+    try
+    {
+        const std::string caseKey = input.extra.at("case_key");
+        // Compare the serialised text: a NaN value is not equal to itself as a JSON number.
+        const auto firstGraph = graphByTensorName(prepared.front().graph).dump();
+        const auto firstMeta = prepared.front().meta.dump();
+        const bool perArch
+            = std::any_of(prepared.begin() + 1, prepared.end(), [&](const PreparedCase& other) {
+                  return other.meta.dump() != firstMeta
+                         || graphByTensorName(other.graph).dump() != firstGraph;
+              });
+
+        std::vector<std::string> caseIds;
+        if(perArch)
+        {
+            for(size_t i = 0; i < prepared.size(); ++i)
+            {
+                auto& meta = prepared[i].meta;
+                meta["format_version"] = std::max(meta["format_version"].get<int>(), 2);
+                meta["archs"] = nlohmann::json::array({opts.exportArchs[i]});
+                caseIds.push_back(caseKey + "_" + opts.exportArchs[i]);
+            }
+        }
+        else
+        {
+            prepared.resize(1);
+            caseIds.push_back(caseKey);
+        }
+        for(size_t i = 0; i < prepared.size(); ++i)
+        {
+            if(!writeCase(opts.exportDir, caseIds[i], prepared[i]))
+            {
+                result.outcome = "write-error";
+                result.message
+                    = "cannot write the files of " + caseIds[i] + " under " + opts.exportDir;
+                return result;
+            }
+        }
+        result.caseIds = std::move(caseIds);
+    }
+    catch(const std::exception& e)
+    {
+        result.outcome = "write-error";
+        result.message = std::string("exception: ") + e.what();
+        return result;
+    }
+    result.stage = "done";
+    result.outcome = "exported";
+    return result;
 }
 
 int runExport(const Options& opts,
@@ -2249,7 +2415,8 @@ int runExport(const Options& opts,
             .str("outcome", result.outcome)
             .str("stage", result.stage)
             .str("message", result.message)
-            .str("inputs", result.inputsNote);
+            .str("inputs", result.inputsNote)
+            .raw("exported_as", jsonStringArray(result.caseIds));
         out << line.done() << "\n" << std::flush;
     }
 
