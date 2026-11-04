@@ -43,6 +43,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Fixed wrong workspace sizes in the system find-dbs for gfx908, gfx90a (104 CU), gfx942,
   gfx950, gfx1100, gfx1151 and gfx1201, mostly for `GemmWrwUniversal`, the CK grouped solvers and
   `TransposedConvBinWinoRxS`. DBSync now checks the workspace stored in each find-db record.
+* [FP8] Fixed wrong FP8 and BF8 results on gfx942 from a library built for several targets that
+  include gfx950 or gfx12 ([#14375](https://github.com/ROCm/rocm-libraries/issues/14375)). The
+  FP8 exponent bias was picked once at build time from `GPU_TARGETS`. MIOpen now picks it at run
+  time from the device: the IEEE bias on gfx950 and gfx12, the FNUZ bias everywhere else.
 * [Conv] Fixed HIP graph captures of convolutions failing with `hipErrorStreamCaptureInvalidated`
   after a find had skipped a naive solver for exceeding `MIOPEN_NAIVE_TIMEOUT` (#12121). Scratch
   held by a skipped evaluation is now released by a background thread as soon as its kernel
@@ -68,6 +72,17 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
 * Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+* Removed the `MIOPEN_FP8_IEEE_EXPONENT_BIAS` CMake option and its `config.h` define. The FP8
+  exponent bias now follows the device at run time.
+
+### Optimized
+* [Conv] Restored gfx1200 backward-weights performance that #13697 gave up when it removed the
+  Composable Kernel entries invalidated by #13373 from 838 find-db keys. 835 of those problems were
+  re-tuned on gfx1200, and the 475 whose config verifies on a fresh-process replay and beats the
+  post-#13697 pick by at least 5 percent are back in the system database, for a geomean 2.64x and
+  up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
+  split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
+  between builds.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

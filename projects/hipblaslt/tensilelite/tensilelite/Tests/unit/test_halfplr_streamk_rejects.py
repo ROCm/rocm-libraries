@@ -315,10 +315,13 @@ def test_halfplr_rejects_use_subtile_impl(
 
 
 # ---------------------------------------------------------------------------
-# Guard 4: HalfPLR + TDMFuse=1 at a divergent pair. The increment mask rides
-# in the module the single-buffered fill relocation moves.
+# HalfPLR + TDMFuse=1 at a divergent pair: TDMFuse=1 sets no limit of its own any
+# more (the single-buffered fill relocation leaves HalfPLR's last-trip masks at the
+# head of the early fill set), but this persistent shape stays refused by the
+# divergent-LDS rule: the two groups' LDS strides differ, so the persistent tail
+# cannot normalize LDS to buffer 0.
 # ---------------------------------------------------------------------------
-def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
+def test_halfplr_tdmfuse1_divergent_pair_is_refused_only_by_the_persistent_lds_rule(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
     sol, out = _derive(
@@ -343,7 +346,8 @@ def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
         },
     )
     assert sol.get("Valid") is False
-    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
+    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" not in out, out
+    assert "the persistent tail cannot normalize LDS to buffer 0" in out, out
 
 
 # ---------------------------------------------------------------------------
