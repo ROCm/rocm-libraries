@@ -49,8 +49,10 @@ constexpr int kTileW          = 128;
 constexpr int kTileC          = 8;
 constexpr int kBlockSize      = 256;
 constexpr std::size_t kLdsMax = std::size_t{64} * 1024;
-// Below this many output channels per group most of the 64-wide channel tile idles, and Find
-// does not pick the solver; skip it rather than compile and benchmark it.
+// Grouped convolutions with fewer output channels per group leave most of the 64-wide channel
+// tile idle, and other solvers (e.g. ConvDirectDepthwiseFwd2D) serve them; skip them rather than
+// compile and benchmark. Ungrouped convolutions are kept at any channel count: there the only
+// alternatives are the naive solver and GemmFwdRest.
 constexpr std::size_t kMinOutChannelsPerGroup = 16;
 // Per-dimension HSA grid limits, in work-items.
 constexpr std::size_t kMaxGridX  = 0x7fffffff;
@@ -119,7 +121,7 @@ bool ConvHipDirectConv1dFwd::IsApplicable(const ExecutionContext& ctx,
 
     const std::size_t groups  = problem.GetGroupCount();
     const std::size_t k_per_g = problem.GetOutChannels() / groups;
-    if(k_per_g < kMinOutChannelsPerGroup)
+    if(groups > 1 && k_per_g < kMinOutChannelsPerGroup)
         return false;
 
     // Grid: x = width tiles * block, y = groups * channel tiles, z = batch.
