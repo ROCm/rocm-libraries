@@ -48,21 +48,22 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
-       "n_tile": 64,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 2
+       "bps_halo_z": 2,
+       "epi_vec": true,
+       "fill_il": true,
+       "n_tile": 64,
+       "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -73,20 +74,21 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
        "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
        "n_tile": 64,
        "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
        "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
+       "stage": "lds16",
+       "waves": 8,
        "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -97,21 +99,22 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
-       "n_tile": 64,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 2
+       "bps_halo_z": 2,
+       "epi_vec": true,
+       "fill_il": true,
+       "n_tile": 64,
+       "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -122,20 +125,21 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
        "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
        "n_tile": 64,
        "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
        "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
+       "stage": "lds16",
+       "waves": 8,
        "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -146,21 +150,22 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
-       "n_tile": 64,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 2
+       "bps_halo_z": 2,
+       "epi_vec": true,
+       "fill_il": true,
+       "n_tile": 64,
+       "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -171,20 +176,21 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
        "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
        "n_tile": 64,
        "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
        "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
+       "stage": "lds16",
+       "waves": 8,
        "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -195,21 +201,22 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
-       "n_tile": 64,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 2
+       "bps_halo_z": 2,
+       "epi_vec": true,
+       "fill_il": true,
+       "n_tile": 64,
+       "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -220,20 +227,21 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
        "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
        "n_tile": 64,
        "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
        "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
+       "stage": "lds16",
+       "waves": 8,
        "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -256,21 +264,22 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
-       "n_tile": 64,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 2
+       "bps_halo_z": 2,
+       "epi_vec": true,
+       "fill_il": true,
+       "n_tile": 64,
+       "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -281,20 +290,21 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
        "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
        "n_tile": 64,
        "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
        "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
+       "stage": "lds16",
+       "waves": 8,
        "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -305,21 +315,22 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
-       "n_tile": 64,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 2
+       "bps_halo_z": 2,
+       "epi_vec": true,
+       "fill_il": true,
+       "n_tile": 64,
+       "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -330,20 +341,21 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
        "fill_il": true,
-       "waves": 8,
-       "nsplit": true,
-       "z_tile": 2,
        "n_tile": 64,
        "nfast": true,
+       "nsplit": true,
+       "op_dtype": "f16",
        "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
+       "stage": "lds16",
+       "waves": 8,
        "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
+       "xpf": 1,
+       "yf16": true,
+       "z_tile": 2
       },
       "wtv": 3
      }
@@ -363,63 +375,26 @@
     "fwd_s1_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 2,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio1-lxrk-xws-eqx4-mb32-xsm-fxd2016-wave64-gfx942-llvm22"
+     "route": "direct",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-mb32-xsm-fxd2016-xpd-wave64-gfx942-llvm22"
     },
     "fwd_s1_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 2,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio1-lxrk-xws-eqx4-mb32-xsm-fxd2016-wave64-gfx942-llvm22"
+     "route": "direct",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-mb32-xsm-fxd2016-xpd-wave64-gfx942-llvm22"
     },
     "fwd_s2_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "winograd",
-     "winograd": {
-      "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1,
-       "bps_halo_z": 0
-      },
-      "wtv": 4
-     }
+     "route": "direct",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-nag-mb32-xsm-fxd2016-xpd-wave64-gfx942-llvm22"
     },
     "fwd_s2_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "winograd",
-     "winograd": {
-      "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
-       "bps": 1,
-       "bps_halo": 1
-      },
-      "wtv": 4
-     }
+     "route": "direct",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-nag-mb32-xsm-fxd2016-xpd-wave64-gfx942-llvm22"
     },
     "fwd_s3_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
@@ -427,21 +402,19 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 0
+       "bps_halo_z": 0,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -452,20 +425,18 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
-       "bps_halo": 1
+       "bps_halo": 1,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -476,21 +447,19 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 0
+       "bps_halo_z": 0,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -501,20 +470,18 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
-       "bps_halo": 1
+       "bps_halo": 1,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -525,21 +492,19 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 0
+       "bps_halo_z": 0,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -550,20 +515,18 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
-       "bps_halo": 1
+       "bps_halo": 1,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -574,21 +537,19 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
        "bps_halo": 1,
-       "bps_halo_z": 0
+       "bps_halo_z": 0,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -599,20 +560,18 @@
      "route": "winograd",
      "winograd": {
       "spec": {
-       "stage": "lds16",
-       "op_dtype": "f16",
-       "fill_il": true,
-       "waves": 8,
-       "nsplit": false,
-       "z_tile": 4,
-       "n_tile": 32,
-       "nfast": true,
-       "pkrtz": true,
-       "epi_vec": true,
-       "yf16": true,
-       "xcd": 6,
        "bps": 1,
-       "bps_halo": 1
+       "bps_halo": 1,
+       "epi_vec": true,
+       "fill_il": true,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
       },
       "wtv": 4
      }
@@ -632,26 +591,61 @@
     "fwd_s8_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-mch2-nopad-vmi5-kprd-cg2-pp5-lxrk-sapl-psf10-fbse-shy16-sdet3-wave64-gfx942-llvm22 @split_k=228"
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 0,
+       "epi_vec": true,
+       "fill_il": true,
+       "ksplit": 4,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
+      },
+      "wtv": 4
+     }
     },
     "fwd_s8_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-mch2-nopad-vmi5-kprd-cg2-pp5-lxrk-sapl-psf10-fbse-shy16-sdet3-wave64-gfx942-llvm22 @split_k=228"
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "bps": 1,
+       "bps_halo": 1,
+       "epi_vec": true,
+       "fill_il": true,
+       "ksplit": 4,
+       "nfast": true,
+       "op_dtype": "f16",
+       "pkrtz": true,
+       "stage": "lds16",
+       "waves": 8,
+       "xcd": 6,
+       "xpf": 1,
+       "yf16": true
+      },
+      "wtv": 4
+     }
     },
     "fwd_s9_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-tapf-kprd-uxh8-prio1-lxrk-xws-eqx4-xsm-fxd1040-xyr14-wave64-gfx942-llvm22"
+     "route": "direct",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-tapf-kprd-uxh8-prio2-lxrk-xws-eqx4-nag-xsm-fxd1036-xyr14-xpd-wave64-gfx942-llvm22"
     },
     "fwd_s9_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
      "calls": 1,
-     "route": "padcopy_halo",
-     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-tapf-kprd-uxh8-prio1-lxrk-xws-eqx4-xsm-fxd1040-xyr14-wave64-gfx942-llvm22"
+     "route": "direct",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-tapf-kprd-uxh8-prio2-lxrk-xws-eqx4-nag-xsm-fxd1036-xyr14-xpd-wave64-gfx942-llvm22"
     },
     "wgrad_s10_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 18 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
@@ -705,13 +699,13 @@
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
      "calls": 2,
      "route": "direct",
-     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=24"
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=25"
     },
     "wgrad_s4_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
      "calls": 2,
      "route": "direct",
-     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg2-xpp8-xgn2-wss1-wave64-gfx942-llvm22 @split_k=24"
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=25"
     },
     "wgrad_s5_pad011": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
@@ -765,13 +759,13 @@
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
      "calls": 1,
      "route": "direct",
-     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-mb1-wave64-gfx942-llvm22 @split_k=48"
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=50"
     },
     "wgrad_s9_pad1": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
      "calls": 1,
      "route": "direct",
-     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=48"
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=50"
     }
    }
   }
