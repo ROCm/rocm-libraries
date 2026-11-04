@@ -28,27 +28,24 @@
 #include "rocsparse_csrmv_partition.hpp"
 #include "rocsparse_handle.hpp"
 
-#include <optional>
-
 namespace rocsparse
 {
     // Resolves csrmv_alg_default to the algorithm to analyse.
     //
     // *alg is left unchanged when it already names a specific algorithm, and
-    // *partition is left empty. Default with a transpose becomes row-split.
-    // Default and non-transpose with keep_adaptive_default becomes adaptive.
-    // Both of those leave *partition empty. Otherwise the partition is built,
-    // and *alg is nnz-split when it is a poor fit and adaptive when it is not.
-    // A default request does not stay csrmv_alg_default.
+    // *p_partition is left null. Default with a transpose becomes row-split
+    // and leaves *p_partition null. Otherwise the partition is allocated, and
+    // *alg is nnz-split when it is a poor fit and adaptive when it is not.
+    // A default request does not stay csrmv_alg_default. The caller deletes
+    // *p_partition.
     template <typename I, typename J>
-    rocsparse_status csrmv_select_algorithm(rocsparse_handle      handle,
-                                            rocsparse_operation   trans,
-                                            J                     m,
-                                            I                     nnz,
-                                            const I*              csr_row_ptr,
-                                            bool                  keep_adaptive_default,
-                                            rocsparse::csrmv_alg* alg,
-                                            std::optional<csrmv_partition<I, J>>* partition);
+    rocsparse_status csrmv_select_algorithm(rocsparse_handle        handle,
+                                            rocsparse_operation     trans,
+                                            J                       m,
+                                            I                       nnz,
+                                            const I*                csr_row_ptr,
+                                            rocsparse::csrmv_alg*   alg,
+                                            csrmv_partition<I, J>** p_partition);
 
     // Helper function to extract gamma arrays and z vectors for batched operations
     // gamma_device_array and z_array must be preallocated device buffers
@@ -60,8 +57,9 @@ namespace rocsparse
                                                       T*        gamma_device_array,
                                                       const Y** z_array);
 
-    // known_max_row_nnz is the longest row of the matrix when the caller already
-    // has it, or nullptr to compute it here.
+    // When p_csrmv_info[0] is already set and its max_nnz_per_row is known,
+    // that value is the longest row. Otherwise this allocates the descriptor
+    // and computes the longest row.
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_nnzsplit_template_dispatch(rocsparse_handle          handle,
                                                                rocsparse_operation       trans,
@@ -72,9 +70,7 @@ namespace rocsparse
                                                                const A*                  csr_val,
                                                                const I*              csr_row_ptr,
                                                                const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info,
-                                                               const int64_t* known_max_row_nnz
-                                                               = nullptr);
+                                                               rocsparse_csrmv_info* p_csrmv_info);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_template(rocsparse_handle          handle,

@@ -123,7 +123,7 @@ namespace
 }
 
 // csrmv_partition::is_poor_fit decides when default SpMV selects nnz-split.
-// A block is wide when it spans more than csrmv_adaptive_wide_block_rows rows.
+// A block is wide when it spans more than csrmv_adaptive_constants::wide_block_rows rows.
 TEST(csrmv_adaptive_analysis, poor_fit_wide_blocks_covering_the_matrix)
 {
     const int        n = 10000;

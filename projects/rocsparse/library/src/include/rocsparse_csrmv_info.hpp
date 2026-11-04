@@ -59,6 +59,11 @@ typedef struct _rocsparse_csrmv_info
     // algorithm, so a later default compute does not reuse that choice.
     rocsparse::csrmv_alg alg = rocsparse::csrmv_alg_default;
 
+    // Longest row, when analysis has already walked the host row pointers.
+    // -1 until then. nnz-split reads this from the descriptor. The value stays
+    // on the mat info so a later routine can reuse it.
+    int64_t max_nnz_per_row = -1;
+
     _rocsparse_csrmv_info();
     ~_rocsparse_csrmv_info();
 
@@ -68,6 +73,13 @@ typedef struct _rocsparse_csrmv_info
     // is the one analysis ran for. Otherwise the static default map. operation
     // is the caller's operation, compared with this->trans.
     rocsparse::csrmv_alg alg_for(rocsparse_operation operation) const;
+
+    // Algorithm for a csrmv_alg_default compute. Uses the choice analysis stored
+    // for this operation, or the static map when csrmv_info is null. Row-split
+    // and an empty matrix leave no descriptor, and compute without analysis has
+    // none either.
+    static rocsparse::csrmv_alg choose_alg(const _rocsparse_csrmv_info* csrmv_info,
+                                           rocsparse_operation          operation);
 
 } * rocsparse_csrmv_info, *rocsparse_cscmv_info;
 

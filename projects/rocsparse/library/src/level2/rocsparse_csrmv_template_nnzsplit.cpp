@@ -447,30 +447,32 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_csrmv_info*     p_csrmv_info,
-                                                         const int64_t* known_max_row_nnz)
+                                                         rocsparse_csrmv_info*     p_csrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
+    if(p_csrmv_info[0] == nullptr)
+    {
+        p_csrmv_info[0] = new _rocsparse_csrmv_info();
+    }
     rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
 
     // Choose the launch tuning once, here, and record it so the compute phase
     // replays the exact same (block, npt) - the block layout of the arrays
     // allocated below depends on both. Block size is wavefront-relative; the
     // nnz-per-thread granularity folds in the row-skew guard and real occupancy.
+    // A caller that already walked the host row pointers stores the longest row
+    // on the descriptor. Otherwise compute it here, and keep it on the descriptor.
     const uint32_t block       = rocsparse::nnzsplit_block_size(handle);
-    int64_t        max_row_nnz = 0;
-    if(known_max_row_nnz != nullptr)
+    int64_t        max_row_nnz = csrmv_info->max_nnz_per_row;
+    if(max_row_nnz < 0)
     {
-        max_row_nnz = *known_max_row_nnz;
-    }
-    else
-    {
+        max_row_nnz = 0;
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::csrmv_nnzsplit_max_row_nnz(handle, m, csr_row_ptr, &max_row_nnz));
     }
-    const uint32_t npt = rocsparse::nnzsplit_nnz_per_thread(
+    csrmv_info->max_nnz_per_row = max_row_nnz;
+    const uint32_t npt          = rocsparse::nnzsplit_nnz_per_thread(
         handle->properties, block, static_cast<int64_t>(m), static_cast<int64_t>(nnz), max_row_nnz);
 
     csrmv_info->nnzsplit.block_size     = block;
@@ -731,8 +733,7 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_csrmv_info*     p_csrmv_info,                                     \
-        const int64_t*            known_max_row_nnz);
+        rocsparse_csrmv_info*     p_csrmv_info);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, _Float16);

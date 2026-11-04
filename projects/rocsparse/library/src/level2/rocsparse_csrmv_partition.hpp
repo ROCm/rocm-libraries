@@ -58,7 +58,7 @@ namespace rocsparse
         // - wide blocks, walked serially by one workgroup, that together span at
         //   least one eighth of the rows
         // - at least 8 blocks, a quarter or more of which hold fewer than
-        //   csrmv_adaptive_block_nnz / 8 nonzeros (empty blocks included). These are
+        //   csrmv_adaptive_constants::block_nnz / 8 nonzeros (empty blocks included). These are
         //   the runs of short rows that adaptive cuts off between long rows, so most
         //   of the grid does almost no numeric work.
         //
@@ -67,20 +67,10 @@ namespace rocsparse
         // from empty edges. The row count is row_ptr.size() - 1.
         bool is_poor_fit() const;
 
-        // Longest row in the host row-pointer copy. Zero when row_ptr is empty.
-        int64_t max_nnz_per_row() const
-        {
-            int64_t max_row_nnz = 0;
-            for(size_t row = 1; row < this->row_ptr.size(); ++row)
-            {
-                const int64_t row_nnz
-                    = static_cast<int64_t>(this->row_ptr[row] - this->row_ptr[row - 1]);
-                if(row_nnz > max_row_nnz)
-                {
-                    max_row_nnz = row_nnz;
-                }
-            }
-            return max_row_nnz;
-        }
+        // Longest row recorded by compute(). Zero until compute() runs.
+        int64_t max_nnz_per_row() const;
+
+    private:
+        int64_t max_nnz_per_row_value{};
     };
 }

@@ -37,6 +37,7 @@
 #include "csrmv_device.h"
 #include "csrmv_symm_device.h"
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #define BLOCK_SIZE 1024
@@ -44,15 +45,14 @@
 #define ROWS_FOR_VECTOR 1
 #define WG_SIZE 256
 
-static_assert(rocsparse::csrmv_adaptive_block_nnz == BLOCK_SIZE,
+static_assert(rocsparse::csrmv_adaptive_constants::block_nnz == BLOCK_SIZE,
               "adaptive row-block size drifted from the analysis predicate");
 
 namespace rocsparse
 {
-    // numThreadsForReduction() and flp2() were lifted (behavior-preserving) into
-    // library/src/level2/rocsparse_csrmv_adaptive_analysis.hpp so they can be
-    // unit-tested without linking this device translation unit. The call sites
-    // below use the default wg_size argument, which equals WG_SIZE (256).
+    // numThreadsForReduction() and flp2() live in
+    // rocsparse_csrmv_adaptive_analysis.cpp. The call sites below use the
+    // default wg_size argument, which equals WG_SIZE (256).
 
     // Choose the general (non-symmetric) CSR-adaptive workgroup size from the
     // average nnz/row. For dense rows a smaller workgroup lowers reduction/sync
@@ -320,7 +320,8 @@ namespace rocsparse
             I num_rows = rowBlocksBase[1] - rowBlocksBase[0];
             if(num_rows > ROWS_FOR_VECTOR)
             {
-                if(first_row_with_nonzeros > static_cast<I>(csrmv_adaptive_wide_block_rows))
+                if(first_row_with_nonzeros
+                   > static_cast<I>(csrmv_adaptive_constants::wide_block_rows))
                 {
                     first_row = std::max((I)0, first_row_with_nonzeros - (ROWS_FOR_VECTOR + 1));
                 }
@@ -329,7 +330,8 @@ namespace rocsparse
             num_rows = rowBlocksBase[rowBlockSize - 1] - rowBlocksBase[rowBlockSize - 2];
             if(num_rows > ROWS_FOR_VECTOR)
             {
-                if(nRows - last_row_with_nonzeros > static_cast<I>(csrmv_adaptive_wide_block_rows))
+                if(nRows - last_row_with_nonzeros
+                   > static_cast<I>(csrmv_adaptive_constants::wide_block_rows))
                 {
                     last_row
                         = std::min(nRows, (last_row_with_nonzeros + (ROWS_FOR_VECTOR + 1)) + 1);
@@ -364,6 +366,17 @@ rocsparse_status rocsparse::csrmv_partition<I, J>::compute(rocsparse_handle hand
 
     // Wait for host transfer to finish
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+    this->max_nnz_per_row_value = 0;
+    for(size_t row = 1; row < this->row_ptr.size(); ++row)
+    {
+        const int64_t row_nnz = static_cast<int64_t>(this->row_ptr[row] - this->row_ptr[row - 1]);
+        if(row_nnz > this->max_nnz_per_row_value)
+        {
+            this->max_nnz_per_row_value = row_nnz;
+        }
+    }
+
     // Choose the general-path workgroup size from avg nnz/row; wg_ids must be
     // built with the same value the kernel is later launched with.
     // Use nnz (not row_ptr[m] - row_ptr[0]) so the workgroup size baked into wg_ids
@@ -427,11 +440,12 @@ rocsparse_status
         // Stream
         hipStream_t stream = handle->stream;
 
-        csrmv_partition<I, J> computed_partition;
+        std::unique_ptr<csrmv_partition<I, J>> owned_partition;
         if(partition == nullptr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(computed_partition.compute(handle, m, nnz, csr_row_ptr));
-            partition = &computed_partition;
+            owned_partition.reset(new csrmv_partition<I, J>());
+            RETURN_IF_ROCSPARSE_ERROR(owned_partition->compute(handle, m, nnz, csr_row_ptr));
+            partition = owned_partition.get();
         }
 
         const std::vector<I>& row_blocks = partition->row_blocks;
@@ -440,6 +454,7 @@ rocsparse_status
         csrmv_info->adaptive.size      = row_blocks.size();
         csrmv_info->adaptive.first_row = partition->first_row;
         csrmv_info->adaptive.last_row  = partition->last_row;
+        csrmv_info->max_nnz_per_row    = partition->max_nnz_per_row();
 
         if(descr->type == rocsparse_matrix_type_symmetric)
         {

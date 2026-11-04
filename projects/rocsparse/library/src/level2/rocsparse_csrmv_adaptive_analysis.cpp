@@ -25,6 +25,39 @@
 #include "rocsparse_csrmv_adaptive_analysis.hpp"
 #include "rocsparse_csrmv_partition.hpp"
 
+#include <cstddef>
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
+uint32_t rocsparse::flp2(uint32_t x)
+{
+    x |= (x >> 1);
+    x |= (x >> 2);
+    x |= (x >> 4);
+    x |= (x >> 8);
+    x |= (x >> 16);
+    return x - (x >> 1);
+}
+
+uint64_t rocsparse::numThreadsForReduction(uint64_t num_rows, uint64_t wg_size)
+{
+#if defined(__INTEL_COMPILER)
+    return wg_size >> (_bit_scan_reverse(num_rows - 1) + 1);
+#elif(defined(__clang__) && __has_builtin(__builtin_clz)) \
+    || !defined(__clang) && defined(__GNUG__)             \
+           && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 30202)
+    return (wg_size >> (8 * sizeof(int) - __builtin_clz(num_rows - 1)));
+#elif defined(_MSC_VER) && (_MSC_VER >= 1400)
+    uint64_t bit_returned;
+    _BitScanReverse(&bit_returned, (num_rows - 1));
+    return wg_size >> (bit_returned + 1);
+#else
+    return rocsparse::flp2(wg_size / num_rows);
+#endif
+}
+
 template <typename I, typename J>
 bool rocsparse::csrmv_partition<I, J>::is_poor_fit() const
 {
@@ -35,15 +68,15 @@ bool rocsparse::csrmv_partition<I, J>::is_poor_fit() const
         return false;
     }
 
-    const std::size_t nblocks         = this->row_blocks.size() - 1;
-    const I           span_limit      = static_cast<I>(csrmv_adaptive_wide_block_rows);
-    const I           underfilled_nnz = static_cast<I>(csrmv_adaptive_block_nnz / 8);
+    const size_t nblocks         = this->row_blocks.size() - 1;
+    const I      span_limit      = static_cast<I>(csrmv_adaptive_constants::wide_block_rows);
+    const I      underfilled_nnz = static_cast<I>(csrmv_adaptive_constants::block_nnz / 8);
 
-    int64_t     wide_rows   = 0;
-    std::size_t comparable  = 0;
-    std::size_t underfilled = 0;
+    int64_t wide_rows   = 0;
+    size_t  comparable  = 0;
+    size_t  underfilled = 0;
 
-    for(std::size_t block = 0; block < nblocks; ++block)
+    for(size_t block = 0; block < nblocks; ++block)
     {
         I begin = this->row_blocks[block];
         I end   = this->row_blocks[block + 1];
@@ -95,7 +128,15 @@ bool rocsparse::csrmv_partition<I, J>::is_poor_fit() const
     return comparable >= 8 && underfilled * 4 >= comparable;
 }
 
-#define INSTANTIATE(I, J) template bool rocsparse::csrmv_partition<I, J>::is_poor_fit() const;
+template <typename I, typename J>
+int64_t rocsparse::csrmv_partition<I, J>::max_nnz_per_row() const
+{
+    return this->max_nnz_per_row_value;
+}
+
+#define INSTANTIATE(I, J)                                                   \
+    template bool    rocsparse::csrmv_partition<I, J>::is_poor_fit() const; \
+    template int64_t rocsparse::csrmv_partition<I, J>::max_nnz_per_row() const;
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);
