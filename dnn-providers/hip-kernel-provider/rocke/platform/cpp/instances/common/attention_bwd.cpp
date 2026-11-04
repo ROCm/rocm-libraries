@@ -26,6 +26,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_body.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_sched.h"
@@ -1139,73 +1140,8 @@ rocke_attn_bwd_spec_t resolved(const rocke_attn_bwd_spec_t& self, const std::str
 }
 
 /* ====================================================================== *
- * kernel_name: non_default_fields + salted_kernel_name (SHA-1)
+ * kernel_name: non_default_fields + salted_kernel_name (helpers/spec)
  * ====================================================================== */
-
-/* SHA-1 (FIPS 180-4) of a byte string, lower-case hex. */
-std::string sha1_hex(const std::string& msg)
-{
-    uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
-    std::string m = msg;
-    uint64_t bits = (uint64_t)msg.size() * 8u;
-    m += (char)0x80;
-    while(m.size() % 64 != 56)
-        m += (char)0;
-    for(int i = 7; i >= 0; --i)
-        m += (char)((bits >> (8 * i)) & 0xff);
-    auto rol = [](uint32_t x, int n) { return (x << n) | (x >> (32 - n)); };
-    for(size_t off = 0; off < m.size(); off += 64)
-    {
-        uint32_t w[80];
-        for(int i = 0; i < 16; ++i)
-            w[i] = ((uint32_t)(unsigned char)m[off + 4 * i] << 24)
-                   | ((uint32_t)(unsigned char)m[off + 4 * i + 1] << 16)
-                   | ((uint32_t)(unsigned char)m[off + 4 * i + 2] << 8)
-                   | (uint32_t)(unsigned char)m[off + 4 * i + 3];
-        for(int i = 16; i < 80; ++i)
-            w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
-        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
-        for(int i = 0; i < 80; ++i)
-        {
-            uint32_t f, k;
-            if(i < 20)
-            {
-                f = (b & c) | (~b & d);
-                k = 0x5A827999u;
-            }
-            else if(i < 40)
-            {
-                f = b ^ c ^ d;
-                k = 0x6ED9EBA1u;
-            }
-            else if(i < 60)
-            {
-                f = (b & c) | (b & d) | (c & d);
-                k = 0x8F1BBCDCu;
-            }
-            else
-            {
-                f = b ^ c ^ d;
-                k = 0xCA62C1D6u;
-            }
-            uint32_t tmp = rol(a, 5) + f + e + k + w[i];
-            e = d;
-            d = c;
-            c = rol(b, 30);
-            b = a;
-            a = tmp;
-        }
-        h[0] += a;
-        h[1] += b;
-        h[2] += c;
-        h[3] += d;
-        h[4] += e;
-    }
-    char out[41];
-    for(int i = 0; i < 5; ++i)
-        snprintf(out + 8 * i, 9, "%08x", h[i]);
-    return std::string(out, 40);
-}
 
 /* non_default_fields(spec, skip=("head_size", "name")): (name, repr(value))
  * of every field that differs from its declared default, in field order. */
@@ -1331,19 +1267,7 @@ std::string salted_kernel_name(const std::string& base,
     for(const auto& kv : non_default_fields(s))
         if(std::find(skip.begin(), skip.end(), kv.first) == skip.end())
             items.push_back(kv);
-    std::stable_sort(
-        items.begin(), items.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    if(items.empty())
-        return base;
-    std::string r = "[";
-    for(size_t i = 0; i < items.size(); ++i)
-    {
-        if(i)
-            r += ", ";
-        r += "(" + py_repr(items[i].first) + ", " + items[i].second + ")";
-    }
-    r += "]";
-    return base + "_" + sha1_hex(r).substr(0, 10);
+    return rocke_salted_kernel_name(base, items);
 }
 
 /* ====================================================================== *

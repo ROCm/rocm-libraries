@@ -24,6 +24,7 @@
 
 #include "rocke/error.hpp"
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_addr.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_band.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_body.h"
@@ -217,7 +218,7 @@ std::string dense_dq_kernel_name(const DSpec& s)
         if(!skip)
             salted.emplace_back("dq_" + kv.first, kv.second);
     }
-    return salted_kernel_name(base, salted);
+    return rocke_salted_kernel_name(base, salted);
 }
 
 /* dq_rows_per_head(spec, group) of a resolved spec. */

@@ -195,6 +195,17 @@ if(BUILD_TESTING)
                  rocke_arch_domain_refusal)
   endif()
 
+  # helpers/spec.py salted_kernel_name and its SHA-1 digest, pinned to hashlib.
+  add_executable(rocke_salted_kernel_name core/test_salted_kernel_name.cpp)
+  target_link_libraries(rocke_salted_kernel_name PRIVATE rocke_core)
+  add_test(NAME rocke_salted_kernel_name COMMAND rocke_salted_kernel_name)
+  set_tests_properties(rocke_salted_kernel_name PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_salted_kernel_name)
+  set_target_properties(rocke_salted_kernel_name
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_salted_kernel_name RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_salted_kernel_name)
+
   # QkScaleSpec validation in the C++ engine: the Python messages, bad value included.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_qk_scale_spec_validate.cpp")
     add_executable(rocke_qk_scale_spec_validate core/test_qk_scale_spec_validate.cpp)

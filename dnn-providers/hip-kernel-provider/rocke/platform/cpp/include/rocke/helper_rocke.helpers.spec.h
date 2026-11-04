@@ -10,6 +10,8 @@
  *     ._init_block_size()                rocke_warp_tile_init_block_size()
  *   choose_load_vec(...)               rocke_choose_load_vec(...)
  *   kernel_name_join(...)              rocke_kernel_name_join(...)
+ *   salted_kernel_name(...)            rocke_salted_kernel_name(...) +
+ *     (its hashlib.sha1 digest)          rocke_sha1_hex()
  *
  * These three are pure compute / string helpers: NONE of them call the IR
  * builder (rocke_b_*). They are bit-for-bit value producers whose results are
@@ -366,8 +368,54 @@ rocke_status_t
  * so the family validators do not each carry an identical local copy. */
 void rocke_spec_set_reason(char* reason, size_t cap, const char* msg);
 
+/* ------------------------------------------------------------------ *
+ * salted_kernel_name
+ * ------------------------------------------------------------------ *
+ *
+ * Python:
+ *
+ *   def salted_kernel_name(base, salted):
+ *       items = sorted(salted, key=lambda kv: kv[0])
+ *       if not items:
+ *           return base
+ *       digest = hashlib.sha1(repr(items).encode()).hexdigest()
+ *       return f"{base}_{digest[:10]}"
+ *
+ * C has no repr() of an arbitrary value, so the caller passes each pair as
+ * its field name and the repr() text of its value. A field name is a Python
+ * identifier ([A-Za-z0-9_]+), whose repr() is the name in single quotes; any
+ * other name is refused with ROCKE_ERR_VALUE rather than spelled differently.
+ */
+
+/* hashlib.sha1(data).hexdigest(): 40 lower-case hex digits and a NUL. */
+void rocke_sha1_hex(const void* data, size_t len, char out[41]);
+
+/* salted_kernel_name(base, zip(names, reprs)) into out (NUL-terminated).
+ * ROCKE_ERR_VALUE on a NULL argument, a name that is not an identifier, or an
+ * out buffer smaller than the result; *out_len (if not NULL) gets strlen. */
+rocke_status_t rocke_salted_kernel_name(const char* base,
+                                        const char* const* names,
+                                        const char* const* reprs,
+                                        size_t n,
+                                        char* out,
+                                        size_t out_cap,
+                                        size_t* out_len);
+
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __cplusplus
+#include <string>
+#include <utility>
+#include <vector>
+
+/* C++ spellings of the two above (ckc::ValueError instead of a status). */
+std::string rocke_sha1_hex(const std::string& msg);
+/* salted: (field name, repr(value)) pairs, in any order. */
+std::string
+    rocke_salted_kernel_name(const std::string& base,
+                             const std::vector<std::pair<std::string, std::string>>& salted);
 #endif
 
 #endif /* ROCKE_HELPER_ROCKE_HELPERS_SPEC_H */

@@ -379,8 +379,6 @@ extern const std::vector<int> STAGE_VECS;
 extern const std::vector<std::string> MASK_CLASSES;
 extern const std::vector<std::string> WS_LAYOUTS;
 extern const std::vector<std::string> SPLIT_DQ_ARCHS;
-/* SHA-1 of a byte string, lower-case hex (salted_kernel_name's digest). */
-std::string sha1_hex(const std::string& msg);
 /* `name and name.replace("_", "").isalnum()` (NotImplError beyond U+00FF). */
 bool name_ok(const char* name);
 const rocke_attn_bwd_arch_facts_t& arch_facts(const std::string& arch);

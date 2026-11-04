@@ -30,6 +30,7 @@
 #include "rocke/error.hpp"
 #include "rocke/error_boundary.hpp"
 #include "rocke/helper_rocke.helpers.attention_band.h"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_addr.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_band.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_body.h"
@@ -428,19 +429,7 @@ std::string dq_kernel_name(const Spec& s)
     for(const auto& kv : non_default_fields(s))
         if(std::find(in_base.begin(), in_base.end(), kv.first) == in_base.end())
             items.push_back(kv);
-    std::stable_sort(
-        items.begin(), items.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    if(items.empty())
-        return base;
-    std::string r = "[";
-    for(size_t i = 0; i < items.size(); ++i)
-    {
-        if(i)
-            r += ", ";
-        r += "(" + py_repr(items[i].first) + ", " + items[i].second + ")";
-    }
-    r += "]";
-    return base + "_" + sha1_hex(r).substr(0, 10);
+    return rocke_salted_kernel_name(base, items);
 }
 
 /* AttnBwdSpec.dq_spec(**knobs) */
