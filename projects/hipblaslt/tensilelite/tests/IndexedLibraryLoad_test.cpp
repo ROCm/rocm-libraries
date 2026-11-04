@@ -708,6 +708,36 @@ TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
     EXPECT_EQ(solution->index, indices.front());
     EXPECT_EQ(master->blobCache->materializedCount(), 1u)
         << "resolving one index must not materialize the rest";
+
+    ASSERT_NE(master->resolvedSolutions.find(indices.front()), nullptr)
+        << "a resolved index must be recorded for the lock-free path";
+    EXPECT_EQ(master->resolveSolutionByIndex(indices.front()), solution)
+        << "a resolved index must return the object it published";
+    EXPECT_EQ(master->blobCache->materializedCount(), 1u);
+}
+
+TEST_F(IndexedLibraryParityTest, ResolvingALegacyIndexAgainReturnsTheSameObject)
+{
+    auto fixture = legacyFixture();
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    if(!lib)
+        GTEST_SKIP() << fixture << " does not load";
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_FALSE(master->solutions.empty());
+
+    int const index    = master->solutions.begin()->first;
+    auto      solution = master->resolveSolutionByIndex(index);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution, master->solutions.at(index));
+    ASSERT_NE(master->resolvedSolutions.find(index), nullptr)
+        << "a resolved index must be recorded for the lock-free path";
+    EXPECT_EQ(master->resolveSolutionByIndex(index), solution);
 }
 
 // ---------------------------------------------------------------------------
