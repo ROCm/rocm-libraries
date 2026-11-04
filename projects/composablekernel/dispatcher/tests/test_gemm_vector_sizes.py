@@ -677,7 +677,7 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
 
     CONFIG = (
         DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "gemm_streamk" / "configs"
-        / "gfx1250_config.json"
+        / "default_config_gfx1250.json"
     )
     ALL_STRATEGIES = list(STREAMK_REDUCTION_STRATEGIES)
 
