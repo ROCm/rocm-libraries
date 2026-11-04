@@ -274,11 +274,24 @@ public:
     }
 };
 
-// The number of entries in the kpack module caches of all packs.
+// The number of entries in the kpack module caches of all packs that expose one. The
+// gfx1151 WMMA attention caches are file-local to their pack, so they are not counted.
 inline size_t packModuleCacheEntries()
 {
-    return pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
-           + gfx950AttentionDenseKpackModuleCache().size();
+    size_t entries = pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
+                     + gfx950AttentionDenseKpackModuleCache().size()
+                     + gfx950AttentionUnified2DKpackModuleCache().size()
+                     + gfx950AttentionUnified3DKpackModuleCache().size()
+                     + gfx942AttentionDenseKpackModuleCache().size();
+#ifdef HIPDNN_ENGINE_FLYDSL
+    entries += flydslRmsNormKpackModuleCache().size() + flydslRmsNormBwdKpackModuleCache().size()
+               + flydslSdpaRdnaKpackModuleCache().size()
+               + flydslSdpaRdnaDecodeKpackModuleCache().size()
+               + flydslSdpaAiwKpackModuleCache().size() + flydslSdpaCdnaKpackModuleCache().size()
+               + flydslSdpaCdnaDualwaveKpackModuleCache().size()
+               + flydslSdpaCdnaDecodeKpackModuleCache().size();
+#endif
+    return entries;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

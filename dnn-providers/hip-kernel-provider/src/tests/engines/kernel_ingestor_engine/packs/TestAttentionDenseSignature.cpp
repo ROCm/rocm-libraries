@@ -27,11 +27,12 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
 
 /**
- * @file TestGfx942AttentionDenseSignature.cpp
- * @brief Pins the kernarg ABI hipkernel:Gfx942AttentionDense marshals against the ABI
- *        the rocKE builder declares.
+ * @file TestAttentionDenseSignature.cpp
+ * @brief Pins the kernarg ABI hipkernel:Gfx942AttentionDense and
+ *        hipkernel:Gfx950AttentionDense marshal against the ABI the rocKE builder declares.
  *
  * A wrong argument count, order, kind or width is not a launch error. The driver copies
  * whatever the host hands it into the kernarg segment and the kernel reads it as the
@@ -39,14 +40,20 @@
  * a success status. This is the silent-wrong-answer class the layout and stride gates in
  * the matcher exist to stop, one layer lower down.
  *
- * Every variant in gfx942_attention_dense.kdp.json declares `use_sinks: false`. A grid
- * kernel takes the 10-argument form -- four pointers, scale, then batch, seqlen_q,
- * seqlen_kv, num_query_heads and num_kv_heads -- whatever its block order, and a kernel on
- * the persistent grid then takes a magic/shift pair per fast-division divisor of its
- * decode, in the decode's own order (14 or 16 arguments). An `emit_lse: true` kernel takes
- * lse_ptr last. A graph that binds a stats output prepares the LSE form and any other the
- * form without it; the candidate's own grid selects the pairs. The sink tail of
- * attention_dense_signature is unreachable from this catalog.
+ * Both catalogs ship the 10-argument grid form -- four pointers, scale, then batch,
+ * seqlen_q, seqlen_kv, num_query_heads and num_kv_heads -- and the TEST_P cases pin it on
+ * each. Every variant in either catalog declares `use_sinks: false`, so the sink tail of
+ * attention_dense_signature is unreachable.
+ *
+ * gfx942 only: a kernel on the persistent grid then takes a magic/shift pair per
+ * fast-division divisor of its decode, in the decode's own order (14 or 16 arguments), and
+ * an `emit_lse: true` kernel takes lse_ptr last. A graph that binds a stats output prepares
+ * the LSE form and any other the form without it; the candidate's own grid selects the
+ * pairs.
+ *
+ * gfx950 only: every variant declares `persistent: false`, `varlen: false` and
+ * `paged: false`. The five-argument form of a baked persistent body (the pointers and
+ * scale, no shape) is covered only as a shape the pack must refuse.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
  * one. The name comparison is the only one that tells the four pointers apart, or `scale`
@@ -69,9 +76,6 @@ using hipdnn_plugin_sdk::ingestor::KernelArgument;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
-
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx942_attention_dense.graph_match";
-constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_dense.dispatch";
 
 // ---------------------------------------------------------------------------
 // The ABI, as the Python declares it
@@ -110,7 +114,8 @@ std::vector<KernelArgument> pythonAbi()
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
-/// The divisors of each persistent decode, in kernarg order (PersistDecode.fastdiv_divisors).
+/// The divisors of each gfx942 persistent decode, in kernarg order
+/// (PersistDecode.fastdiv_divisors).
 const std::vector<std::pair<std::string, std::vector<std::string>>>& persistentDecodes()
 {
     static const std::vector<std::pair<std::string, std::vector<std::string>>> s_decodes{
@@ -122,9 +127,9 @@ const std::vector<std::pair<std::string, std::vector<std::string>>>& persistentD
     return s_decodes;
 }
 
-/// The form the persistent body takes on @p decode (qb_major by default): the same ten
-/// arguments, then a magic/shift pair per fast-division divisor, so the pointers and shape
-/// all still line up and only the count differs; lse_ptr last for @p lse.
+/// The form the gfx942 persistent body takes on @p decode (qb_major by default): the same
+/// ten arguments, then a magic/shift pair per fast-division divisor, so the pointers and
+/// shape all still line up and only the count differs; lse_ptr last for @p lse.
 std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major", bool lse = false)
 {
     auto signature = pythonAbi();
@@ -146,6 +151,15 @@ std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major"
     {
         signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
     }
+    return signature;
+}
+
+/// The form a gfx950 baked persistent body (ragged, or a gqa_pair order) takes: the four
+/// pointers and scale with no shape tail. None ships in that catalog.
+std::vector<KernelArgument> bakedPersistentAbi()
+{
+    auto signature = pythonAbi();
+    signature.resize(SCALE_INDEX + 1);
     return signature;
 }
 
@@ -182,7 +196,7 @@ constexpr int64_t O_UID = 4;
 constexpr int64_t STATS_UID = 5;
 
 /// The shape is not what these cases are about -- any graph the engine accepts would do,
-/// and TestGfx942AttentionDenseMatchers.cpp owns the applicability rules.
+/// and the per-arch matcher suites own the applicability rules.
 constexpr int64_t BATCH = 2;
 constexpr int64_t HEADS = 4;
 constexpr int64_t SEQ = 256;
@@ -202,7 +216,8 @@ enum class Stats
     BOUND
 };
 
-flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(Stats stats)
+flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(const AttentionDenseTestArch& arch,
+                                                      Stats stats)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -257,7 +272,7 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(Stats stats)
                                                    data_objects::NodeAttributes::SdpaAttributes,
                                                    attributes.Union()));
 
-    auto name = builder.CreateString("gfx942_attention_dense_signature");
+    auto name = builder.CreateString(std::string(arch.tokenPrefix) + "_signature");
     auto tensorsVector = builder.CreateVector(tensors);
     auto nodesVector = builder.CreateVector(nodes);
 
@@ -277,14 +292,15 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(Stats stats)
 /// renders both argument lists and is not stable enough to match on.
 constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
-/// A KPACK descriptor for this engine whose recorded argument list is @p recorded.
+/// A KPACK descriptor for @p arch's engine whose recorded argument list is @p recorded.
 ///
 /// The archive it names is not there, which is the point: the containment and link checks
 /// pass, the signature comparison runs, and only if it agrees does the loader get as far
 /// as reporting the absence. The metadata is the completed baseline tile prepare() reads
 /// before the comparison; the tile is not what these cases are about, and
-/// TestGfx942AttentionDenseDispatch.cpp owns its refusal.
-KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded,
+/// TestAttentionDenseDispatch.cpp owns its refusal.
+KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
+                            const std::vector<KernelArgument>& recorded,
                             const std::string& persistDecode = "")
 {
     KernelDefinition kernel;
@@ -294,7 +310,7 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded,
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a2");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a3");
-    kernel.name = "attention_dense.bf16_d128_c1_swa0_bm256_bn64_lds_row_pad8_pv_priority0.gfx942";
+    kernel.name = std::string(arch.kernelName);
     kernel.source.kind = KernelSourceKind::KPACK;
     kernel.source.library = "there-is-no-archive-here.kpack";
     kernel.source.tocKey = "toc#0";
@@ -302,17 +318,8 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded,
     kernel.source.signature = recorded;
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
-    // The qb_minor grid, as a record completed through the KMD defaults carries it.
-    kernel.metadata = {
-        {std::string("head_size"), HEAD_SIZE},
-        {std::string("block_m"), int64_t{256}},
-        {std::string("block_n"), int64_t{64}},
-        {std::string("persistent"), int64_t{0}},
-        {std::string("num_persistent"), int64_t{304}},
-        {std::string("persist_decode"), std::string("auto")},
-        {std::string("nonpersist_decode"), std::string("qb_minor")},
-    };
-    // A persistent candidate at @p persistDecode, 304 CTAs.
+    kernel.metadata = completedAttentionDenseMetadata(arch, HEAD_SIZE, 256, 64);
+    // A gfx942 persistent candidate at @p persistDecode, 304 CTAs.
     if(!persistDecode.empty())
     {
         kernel.metadata[std::string("persistent")] = int64_t{1};
@@ -321,26 +328,27 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded,
     return kernel;
 }
 
-/// Runs the pack's prepare() over a descriptor recording @p recorded, for a graph that
+/// Runs @p arch's prepare() over a descriptor recording @p recorded, for a graph that
 /// binds @p stats, and returns the message of whatever it throws. Empty means it returned
 /// a prepared dispatch, which no case expects.
-std::string prepareFailure(const std::vector<KernelArgument>& recorded,
+std::string prepareFailure(const AttentionDenseTestArch& arch,
+                           const std::vector<KernelArgument>& recorded,
                            Stats stats = Stats::NONE,
                            const std::string& persistDecode = "")
 {
     registerNativeIngestorSymbols();
 
-    auto builder = buildAcceptedSdpaGraph(stats);
+    auto builder = buildAcceptedSdpaGraph(arch, stats);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
     DeviceProperties properties;
-    properties.gcnArchName = "gfx942";
+    properties.gcnArchName = std::string(arch.gcnArchName);
     properties.warpSize = 64;
     const MatchContext context{graph, 0, properties};
 
     const auto matcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL));
+        std::string(arch.graphMatchSymbol));
     const auto bound = matcher(context);
     EXPECT_TRUE(bound.has_value()) << "graph_match declined the fixture graph, so prepare() "
                                       "never ran and no case below means anything";
@@ -350,7 +358,7 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded,
     }
 
     const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(DISPATCH_SYMBOL));
+        std::string(arch.dispatchSymbol));
     EXPECT_NE(handler, nullptr);
     if(handler == nullptr)
     {
@@ -359,7 +367,7 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded,
 
     try
     {
-        handler->prepare(context, *bound, makeKernel(recorded, persistDecode));
+        handler->prepare(context, *bound, makeKernel(arch, recorded, persistDecode));
     }
     catch(const std::exception& error)
     {
@@ -368,23 +376,33 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded,
     return {};
 }
 
-/// Asserts the pack refuses @p recorded on signature grounds rather than on any of the
-/// other grounds prepare() can fail for.
-void expectRefused(const std::vector<KernelArgument>& recorded,
+/// Asserts @p arch's pack refuses @p recorded on signature grounds rather than on any of
+/// the other grounds prepare() can fail for.
+void expectRefused(const AttentionDenseTestArch& arch,
+                   const std::vector<KernelArgument>& recorded,
                    const char* what,
                    Stats stats = Stats::NONE,
                    const std::string& persistDecode = "")
 {
-    const std::string failure = prepareFailure(recorded, stats, persistDecode);
+    const std::string failure = prepareFailure(arch, recorded, stats, persistDecode);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
 }
 
+class TestAttentionDenseSignature : public ::testing::TestWithParam<const AttentionDenseTestArch*>
+{
+protected:
+    static const AttentionDenseTestArch& arch()
+    {
+        return *GetParam();
+    }
+};
+
 } // namespace
 
 // =============================================================================
-// The shipped form is accepted
+// The shipped grid form is accepted
 // =============================================================================
 
 /// The positive control every refusal below depends on. A pack that refused every
@@ -392,9 +410,9 @@ void expectRefused(const std::vector<KernelArgument>& recorded,
 ///
 /// Failure is still expected -- the archive is absent -- but it must arrive from the
 /// loader, past the comparison, rather than from the comparison itself.
-TEST(TestGfx942AttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
+TEST_P(TestAttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 {
-    const std::string failure = prepareFailure(pythonAbi());
+    const std::string failure = prepareFailure(arch(), pythonAbi());
     ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
@@ -405,122 +423,75 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 // Count
 // =============================================================================
 
-TEST(TestGfx942AttentionDenseSignature, RefusesADroppedTrailingArgument)
+TEST_P(TestAttentionDenseSignature, RefusesADroppedTrailingArgument)
 {
     // num_kv_heads gone. Nine arguments against ten: the kernel would read the kernarg
     // segment one slot past what the host wrote.
     auto signature = pythonAbi();
     signature.pop_back();
-    expectRefused(signature, "a nine-argument list is not this ABI");
+    expectRefused(arch(), signature, "a nine-argument list is not this ABI");
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesAnExtraTrailingArgument)
+TEST_P(TestAttentionDenseSignature, RefusesAnExtraTrailingArgument)
 {
-    // One i32 too many -- the shape a stride argument would add. Every argument the host
-    // does write still lands correctly, so nothing faults.
+    // One i32 too many -- the shape a fourth shape parameter, or a stride argument, would
+    // add. Every argument the host does write still lands correctly, so nothing faults.
     auto signature = pythonAbi();
     signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(signature, "an eleven-argument list is not this ABI");
-}
-
-TEST(TestGfx942AttentionDenseSignature, RefusesThePersistentFastDivisionFormForAGridKernel)
-{
-    expectRefused(persistentAbi(), "a grid kernel takes no fast-division pairs");
-}
-
-/// A persistent candidate prepares its own decode's form, with and without lse_ptr; the
-/// grid form and every other decode's pairs are refused.
-TEST(TestGfx942AttentionDenseSignature, AcceptsThePersistentFormOfTheCandidatesOwnDecode)
-{
-    for(const auto& [decode, divisors] : persistentDecodes())
-    {
-        for(const auto stats : {Stats::NONE, Stats::BOUND})
-        {
-            const bool lse = stats == Stats::BOUND;
-            const std::string failure = prepareFailure(persistentAbi(decode, lse), stats, decode);
-            ASSERT_FALSE(failure.empty()) << decode;
-            EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
-                << decode << " lse " << lse << ": " << failure;
-        }
-    }
-}
-
-TEST(TestGfx942AttentionDenseSignature, RefusesTheGridFormForAPersistentKernel)
-{
-    for(const auto& [decode, divisors] : persistentDecodes())
-    {
-        expectRefused(pythonAbi(), "a persistent kernel takes its pairs", Stats::NONE, decode);
-        expectRefused(pythonLseAbi(),
-                      "a persistent LSE kernel takes its pairs before lse_ptr",
-                      Stats::BOUND,
-                      decode);
-    }
-}
-
-TEST(TestGfx942AttentionDenseSignature, RefusesAnotherDecodesPairs)
-{
-    for(const auto& [decode, divisors] : persistentDecodes())
-    {
-        for(const auto& [other, otherDivisors] : persistentDecodes())
-        {
-            if(other != decode)
-            {
-                expectRefused(persistentAbi(other),
-                              "another decode's pairs name other divisors",
-                              Stats::NONE,
-                              decode);
-            }
-        }
-    }
+    expectRefused(arch(), signature, "an eleven-argument list is not this ABI");
 }
 
 // =============================================================================
 // Kind
 // =============================================================================
 
-TEST(TestGfx942AttentionDenseSignature, RefusesAScalarInAPointerSlot)
+TEST_P(TestAttentionDenseSignature, RefusesAScalarInAPointerSlot)
 {
     // q_ptr as a by-value scalar. The count still agrees, so only the kind catches it.
-    expectRefused(withArgument(0, KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""}),
+    expectRefused(arch(),
+                  withArgument(0, KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""}),
                   "q_ptr is a global buffer");
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesAPointerInAScalarSlot)
+TEST_P(TestAttentionDenseSignature, RefusesAPointerInAScalarSlot)
 {
     // scale as a buffer: the kernel would take the float's bit pattern for an address.
-    expectRefused(withArgument(SCALE_INDEX, KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, ""}),
+    expectRefused(arch(),
+                  withArgument(SCALE_INDEX, KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, ""}),
                   "scale is passed by value");
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesBuffersAndScalarsTransposed)
+TEST_P(TestAttentionDenseSignature, RefusesBuffersAndScalarsTransposed)
 {
-    // The by-value tail ahead of the pointers. Same ten entries, same count of each kind,
-    // and the comparison is positional, so only the order distinguishes this from the
-    // shipped ABI.
+    // The by-value tail ahead of the pointers. Same ten entries, the same four buffers
+    // and six scalars, and the comparison is positional, so only the order distinguishes
+    // this from the shipped ABI.
     const KernelArgument buffer{BUFFER_KIND, POINTER_BYTES, 0, ""};
     const KernelArgument scalar{BY_VALUE_KIND, SCALAR_BYTES, 0, ""};
     const std::vector<KernelArgument> transposed{
         scalar, scalar, scalar, scalar, scalar, scalar, buffer, buffer, buffer, buffer};
-    expectRefused(transposed, "the four pointers come first");
+    expectRefused(arch(), transposed, "the four pointers come first");
 }
 
 // =============================================================================
 // Size
 // =============================================================================
 
-TEST(TestGfx942AttentionDenseSignature, RefusesANarrowedPointerSlot)
+TEST_P(TestAttentionDenseSignature, RefusesANarrowedPointerSlot)
 {
     // o_ptr as a 32-bit buffer. The kind still agrees; the width does not, and every
     // argument after it would be read from the wrong offset.
-    expectRefused(withArgument(3, KernelArgument{BUFFER_KIND, SCALAR_BYTES, 0, ""}),
+    expectRefused(arch(),
+                  withArgument(3, KernelArgument{BUFFER_KIND, SCALAR_BYTES, 0, ""}),
                   "a device pointer is eight bytes");
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesAWidenedScalarSlot)
+TEST_P(TestAttentionDenseSignature, RefusesAWidenedScalarSlot)
 {
     // num_kv_heads as an i64. The shape parameters are i32 and the pack marshals int32_t,
-    // so a 64-bit slot would take the next four bytes of the segment as its high half.
-    expectRefused(withArgument(LAST_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
+    // so a 64-bit slot would take four bytes the host never wrote as its high half.
+    expectRefused(arch(),
+                  withArgument(LAST_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
                   "the shape parameters are 32-bit");
 }
 
@@ -528,7 +499,7 @@ TEST(TestGfx942AttentionDenseSignature, RefusesAWidenedScalarSlot)
 // Name
 // =============================================================================
 
-TEST(TestGfx942AttentionDenseSignature, RefusesEachSlotUnderAnotherName)
+TEST_P(TestAttentionDenseSignature, RefusesEachSlotUnderAnotherName)
 {
     // Kind, size, count and order all agree; only the one slot's name differs.
     const auto abi = pythonAbi();
@@ -536,11 +507,11 @@ TEST(TestGfx942AttentionDenseSignature, RefusesEachSlotUnderAnotherName)
     {
         auto renamed = abi;
         renamed.at(index).name += "_renamed";
-        expectRefused(renamed, abi.at(index).name.c_str());
+        expectRefused(arch(), renamed, abi.at(index).name.c_str());
     }
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
+TEST_P(TestAttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
 {
     // Kind and size agree position by position, so the names are the only thing that
     // separates each of these from the shipped ABI; accepted, the kernel reads keys as
@@ -558,20 +529,89 @@ TEST(TestGfx942AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
             auto exchanged = abi;
             std::swap(exchanged.at(first), exchanged.at(second));
             const std::string what = abi.at(first).name + " <-> " + abi.at(second).name;
-            expectRefused(exchanged, what.c_str());
+            expectRefused(arch(), exchanged, what.c_str());
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestAttentionDenseSignature,
+                         ::testing::Values(&GFX942_ATTENTION_DENSE, &GFX950_ATTENTION_DENSE),
+                         attentionDenseArchName);
+
+// =============================================================================
+// gfx942: the persistent fast-division form, selected by the candidate's own decode
+// =============================================================================
+
+TEST(TestGfx942AttentionDenseSignature, RefusesThePersistentFastDivisionFormForAGridKernel)
+{
+    expectRefused(
+        GFX942_ATTENTION_DENSE, persistentAbi(), "a grid kernel takes no fast-division pairs");
+}
+
+/// A persistent candidate prepares its own decode's form, with and without lse_ptr; the
+/// grid form and every other decode's pairs are refused.
+TEST(TestGfx942AttentionDenseSignature, AcceptsThePersistentFormOfTheCandidatesOwnDecode)
+{
+    for(const auto& [decode, divisors] : persistentDecodes())
+    {
+        for(const auto stats : {Stats::NONE, Stats::BOUND})
+        {
+            const bool lse = stats == Stats::BOUND;
+            const std::string failure
+                = prepareFailure(GFX942_ATTENTION_DENSE, persistentAbi(decode, lse), stats, decode);
+            ASSERT_FALSE(failure.empty()) << decode;
+            EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+                << decode << " lse " << lse << ": " << failure;
+        }
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheGridFormForAPersistentKernel)
+{
+    for(const auto& [decode, divisors] : persistentDecodes())
+    {
+        expectRefused(GFX942_ATTENTION_DENSE,
+                      pythonAbi(),
+                      "a persistent kernel takes its pairs",
+                      Stats::NONE,
+                      decode);
+        expectRefused(GFX942_ATTENTION_DENSE,
+                      pythonLseAbi(),
+                      "a persistent LSE kernel takes its pairs before lse_ptr",
+                      Stats::BOUND,
+                      decode);
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesAnotherDecodesPairs)
+{
+    for(const auto& [decode, divisors] : persistentDecodes())
+    {
+        for(const auto& [other, otherDivisors] : persistentDecodes())
+        {
+            if(other != decode)
+            {
+                expectRefused(GFX942_ATTENTION_DENSE,
+                              persistentAbi(other),
+                              "another decode's pairs name other divisors",
+                              Stats::NONE,
+                              decode);
+            }
         }
     }
 }
 
 // =============================================================================
-// The emit_lse form: lse_ptr last, for a graph that binds a stats output
+// gfx942: the emit_lse form, lse_ptr last, for a graph that binds a stats output
 // =============================================================================
 
 /// The positive control for the cases below, as AcceptsTheAbiThePythonDeclares is for the
 /// 10-argument form.
 TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseAbiForAGraphThatBindsStats)
 {
-    const std::string failure = prepareFailure(pythonLseAbi(), Stats::BOUND);
+    const std::string failure
+        = prepareFailure(GFX942_ATTENTION_DENSE, pythonLseAbi(), Stats::BOUND);
     ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
@@ -581,22 +621,26 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseAbiForAGraphThatBindsStats)
 TEST(TestGfx942AttentionDenseSignature, RefusesTheTenArgumentFormForAGraphThatBindsStats)
 {
     // A non-LSE kernel would never write the stats output the graph asked for.
-    expectRefused(pythonAbi(), "a stats graph launches lse_ptr", Stats::BOUND);
+    expectRefused(
+        GFX942_ATTENTION_DENSE, pythonAbi(), "a stats graph launches lse_ptr", Stats::BOUND);
 }
 
 TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormForAGraphWithoutStats)
 {
     // The launch would pass ten arguments, and the kernel would store the LSE through
     // whatever the eleventh kernarg slot holds.
-    expectRefused(pythonLseAbi(), "a graph without stats launches ten arguments");
+    expectRefused(
+        GFX942_ATTENTION_DENSE, pythonLseAbi(), "a graph without stats launches ten arguments");
 }
 
 TEST(TestGfx942AttentionDenseSignature, RefusesAnLseSlotThatIsNotAPointer)
 {
-    expectRefused(withLseArgument(LSE_INDEX, KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""}),
+    expectRefused(GFX942_ATTENTION_DENSE,
+                  withLseArgument(LSE_INDEX, KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""}),
                   "lse_ptr is a global buffer",
                   Stats::BOUND);
-    expectRefused(withLseArgument(LSE_INDEX, KernelArgument{BUFFER_KIND, SCALAR_BYTES, 0, ""}),
+    expectRefused(GFX942_ATTENTION_DENSE,
+                  withLseArgument(LSE_INDEX, KernelArgument{BUFFER_KIND, SCALAR_BYTES, 0, ""}),
                   "a device pointer is eight bytes",
                   Stats::BOUND);
 }
@@ -608,14 +652,14 @@ TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormWithAnyPointerRenamedOr
     const auto abi = pythonLseAbi();
     auto renamed = abi;
     renamed.at(LSE_INDEX).name += "_renamed";
-    expectRefused(renamed, "lse_ptr", Stats::BOUND);
+    expectRefused(GFX942_ATTENTION_DENSE, renamed, "lse_ptr", Stats::BOUND);
 
     for(std::size_t pointer = 0; pointer < SCALE_INDEX; ++pointer)
     {
         auto exchanged = abi;
         std::swap(exchanged.at(pointer), exchanged.at(LSE_INDEX));
         const std::string what = abi.at(pointer).name + " <-> lse_ptr";
-        expectRefused(exchanged, what.c_str(), Stats::BOUND);
+        expectRefused(GFX942_ATTENTION_DENSE, exchanged, what.c_str(), Stats::BOUND);
     }
 }
 
@@ -623,11 +667,23 @@ TEST(TestGfx942AttentionDenseSignature, RefusesAnLseFormWithASlotDroppedOrAdded)
 {
     auto dropped = pythonLseAbi();
     dropped.erase(dropped.begin() + static_cast<std::ptrdiff_t>(LAST_INDEX));
-    expectRefused(dropped, "num_kv_heads still precedes lse_ptr", Stats::BOUND);
+    expectRefused(
+        GFX942_ATTENTION_DENSE, dropped, "num_kv_heads still precedes lse_ptr", Stats::BOUND);
 
     auto extra = pythonLseAbi();
     extra.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(extra, "lse_ptr is the last argument", Stats::BOUND);
+    expectRefused(GFX942_ATTENTION_DENSE, extra, "lse_ptr is the last argument", Stats::BOUND);
+}
+
+// =============================================================================
+// gfx950: no persistent form ships
+// =============================================================================
+
+TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
+{
+    expectRefused(GFX950_ATTENTION_DENSE,
+                  bakedPersistentAbi(),
+                  "the persistent form does not ship in this catalog");
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

@@ -234,7 +234,7 @@ launch_surface:
       gfx950AttentionDenseGeometry() throws HipdnnPluginException for
       non-positive dimensions (seqlen_q, num_query_heads or batch <= 0).
       Grid is (ceil(Sq/block_m), Hq, B) from the candidate's own block_m.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   - name: block
     python_source: kernels/gfx950/attention_dense.py:attention_dense_block
@@ -243,7 +243,7 @@ launch_surface:
     guard: >
       block_m / GFX950_ROWS_PER_WAVE(32) * GFX950_WAVE_LANES(64) threads:
       256 for block_m=128, 512 for block_m=256.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   # The tile-legality and static-LDS rules are restated by hand from the rocKE Python.
   # Matching and dispatch are shared with gfx942 (AttentionDenseNative.cpp);
@@ -276,7 +276,7 @@ launch_surface:
       and on the runtime-shape path, which enumerate.pin and the aligned catalog
       keep true. use_sinks=False; no sink_ptr slot. Validated at prepare() time
       by buildIngestorKernelCode(..., expectedSignature).
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
 
   # The cold ranking reads only the tile, through the shared candidateTile().
   - name: score

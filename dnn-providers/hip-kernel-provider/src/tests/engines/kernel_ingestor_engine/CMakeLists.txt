@@ -15,9 +15,10 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDensePersistent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseGeometry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseSignature.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DSignature.cpp
@@ -28,9 +29,6 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestUnifiedAttentionGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseMatchers.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseGeometry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseSignature.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp

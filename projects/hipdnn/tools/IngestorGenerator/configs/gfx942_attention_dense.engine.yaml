@@ -362,7 +362,7 @@ launch_surface:
       (ceil(Sq/block_m), Hq, B) from the candidate's own block_m and the graph's
       shape on the qb_minor grid; the other grids are the grid_order surface, and
       emit_lse does not change the grid.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   - name: block
     python_source: kernels/gfx942/attention_dense.py:attention_dense_block
@@ -370,7 +370,7 @@ launch_surface:
     kmd_fields: [block_m]
     guard: >
       block_m / GFX942_ROWS_PER_WAVE(32) * GFX942_WAVE_LANES(64) threads.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   # The tile rules, the window translation, the sliding-window zero-trip guard and the
   # empty-row rule are restated by hand from the rocKE Python. The LDS budget is not
@@ -416,7 +416,7 @@ launch_surface:
       restore selects the form from the saved stats.uid, grid_order and persist_decode
       first. launch() packs its argument addresses in the same order and throws if their
       count is not the signature's.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseSignature.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
 
   # emit_lse is baked into the kernel (one trailing lse_ptr store of the natural-log LSE
   # at element (b*Hq + h)*Sq + s, no stride arguments), so it selects candidates rather
