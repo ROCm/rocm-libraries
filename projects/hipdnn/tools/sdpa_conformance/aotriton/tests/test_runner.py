@@ -4,12 +4,14 @@
 """run_aotriton.py: command composition, collected.txt and result-directory rules (no pytest run)."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 import aotriton_layout as layout
+import completion
 import conformance_contract as contract
 import reconcile
 import run_aotriton
@@ -1087,6 +1089,44 @@ def test_extreme_runs_candidate_passes_over_every_enumerable_pair(
     assert {r["reason"] for r in blocked} == {"fwd F: no enumeration"}
     # the plain pair passes of --all-engines are opt-in (--pairs); EXTREME's candidate pairs are not
     assert not (tmp_path / "all-engines" / "pair").exists()
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ("--exhaustive",),
+        ("--all-engines", "--pairs"),
+        ("--exhaustive", "--all-engines"),
+        ("--exhaustive", "--all-engines", "--pairs"),
+    ],
+)
+def test_completion_calls_for_exactly_the_passes_the_runner_ran(
+    monkeypatch, tmp_path, flags
+):
+    ids = [f"{BWD}::b1", f"{BWD}::b2"]
+    pass1 = {
+        "b1": dict(
+            fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A;F", bwd_engines="X;Y",
+            fwd_candidate='{"A": 2, "F": "no enumeration"}', bwd_candidate='{"X": 2, "Y": 1}',
+        ),
+        "b2": dict(
+            fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A", bwd_engines="X",
+            fwd_candidate='{"A": 1}', bwd_candidate='{"X": 1}',
+        ),
+    }  # fmt: skip
+    status, _ = run_with(monkeypatch, tmp_path, ids, candidate_behave(pass1), *flags)
+    assert status == 0
+    assert completion.shard_gaps(tmp_path) == []
+    ran = reconcile.pass_dirs(tmp_path)
+    assert ran  # every flag set above runs passes beyond pass 1
+    expected = []
+    for d, _ in ran:
+        listed = reconcile.listing(d / reconcile.NODEIDS_NAME)
+        expected.append(
+            f"{reconcile.pass_name(tmp_path, d)}: not started ({len(listed)} cases)"
+        )
+        shutil.rmtree(d)  # a link killed before the pass started
+    assert sorted(completion.shard_gaps(tmp_path)) == sorted(expected)
 
 
 def test_exhaustive_is_refused_with_fake_or_a_preset_candidate(
