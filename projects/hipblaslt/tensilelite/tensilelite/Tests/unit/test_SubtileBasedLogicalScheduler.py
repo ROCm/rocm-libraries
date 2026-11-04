@@ -5233,3 +5233,85 @@ class TestPartitionZeroIssueOrder:
         assert found["m0-1"] == width
         assert found["gr-1"] == width + 1
         assert found["stop"] == 2 * width
+
+    def test_short_c1_tail_spills_scale_refresh_into_c0(self):
+        """A short final partition keeps a full shadow and spills the rest.
+
+        The spill issues in the next C0, before that VGPR is read and
+        before the scale-pointer swap.
+        """
+        from rocisa.code import Module, TextBlock
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            appendC1ScaleShadowReads, spillC0ScaleRefreshes)
+
+        def mfma(sa=18, sb=84):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(sa), mxsb=vgpr(sb), comment="scaled")
+
+        def entry(register, tensor, last_use, first_use=0):
+            return {
+                "canonicalVgpr": register,
+                "tensor": tensor,
+                "readTemplate": DSLoadB32(
+                    dst=vgpr(register), src=vgpr(1),
+                    ds=DSModifiers(offset=0),
+                    comment=f"{tensor} MT=n tile=0 K=0"),
+                "firstC0Mfma": first_use,
+                "lastC1Mfma": last_use,
+            }
+
+        def items(module):
+            return list(module.flatitems())
+
+        held = Module("C1")
+        for index in range(10):
+            held.add(mfma())
+            if index == 6:
+                held.add(SBarrier(comment="final barrier"))
+        placed = appendC1ScaleShadowReads(held, [entry(18, "SA", 0)], 4)
+        assert placed == ([], 10)
+        held_items = items(held)
+        refresh_at = next(
+            index for index, inst in enumerate(held_items)
+            if "prior C1 shadow" in (getattr(inst, "comment", "") or ""))
+        target = sum(
+            1 for inst in held_items[:refresh_at]
+            if isinstance(inst, MXMFMAInstruction)) - 1
+        assert target - 0 + 1 >= 9
+
+        short = Module("C1-short")
+        for index in range(4):
+            short.add(mfma())
+            if index == 2:
+                short.add(SBarrier(comment="final barrier"))
+        missed = appendC1ScaleShadowReads(short, [entry(18, "SA", 0)], 2)
+        assert missed is not None and missed[0]
+
+        c0 = Module("C0")
+        c0.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        c0.add(mfma())
+        c0.add(TextBlock("// swap MXSA LR\n"))
+        assert spillC0ScaleRefreshes(c0, missed[0], 16)
+        spilled = items(c0)
+
+        def comment_at(needle):
+            return next(
+                index for index, inst in enumerate(spilled)
+                if needle in " ".join(
+                    getattr(inst, attr, "") or ""
+                    for attr in ("comment", "text", "name"))
+            )
+
+        refresh_at = comment_at("next C0 prologue")
+        wait_at = comment_at("Wait for current-cell LR")
+        use_at = next(
+            index for index, inst in enumerate(spilled)
+            if isinstance(inst, MXMFMAInstruction))
+        swap_at = comment_at("swap MXSA LR")
+        assert refresh_at < wait_at < use_at < swap_at
