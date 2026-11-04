@@ -254,7 +254,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const index_t num_k_per_block)
 {
-#if defined(__gfx950__) || defined(__gfx1250__)
+#if defined(__gfx950__) || defined(__gfx125__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<EGlobalMemoryDataOperation>())
     {
         // offset base pointer for each work-group
@@ -481,7 +481,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
     ignore = compute_ptr_offset_of_batch;
     ignore = num_k_per_block;
 
-#endif // end of if defined(__gfx950__) || defined(__gfx1250__)
+#endif // end of if defined(__gfx950__) || defined(__gfx125__)
 }
 
 } // namespace
