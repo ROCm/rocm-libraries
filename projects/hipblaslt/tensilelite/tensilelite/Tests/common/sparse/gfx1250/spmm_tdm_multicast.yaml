@@ -106,6 +106,27 @@ BenchmarkProblems:
           - [Enum: none]
 
 
+########################################################
+# ProblemType, TN, sparse A (Sparse=1), StreamK
+# Separate from the bias/activation problem type above: the StreamK cases
+# exercise the fixup path with a plain epilogue (no bias, no activation).
+########################################################
+  -
+    - 
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      Sparse: 1
+
     # StreamK starts mid-tile; aligned K preserves the sparse format. Multiple
     # output blocks exercise metadata descriptor refresh across persistent work.
     - BenchmarkCommonParameters: &sparse_streamk_defaults
