@@ -150,7 +150,15 @@ def test_wmma_llvm_rejects_actual_types(case, flavor, role, kind, engine):
 def test_wmma_llvm_rejects_arity(case, flavor, kind, engine):
     kernel, op = _kernel(case)
     _corrupt_arity(op, kind)
-    _assert_llvm_rejects(kernel, case[0], flavor, ARITY_ERROR, engine)
+    error = ARITY_ERROR
+    if case[4] == I32:
+        name = f"tile.{case[1]}"
+        error = (
+            f"{name} expects 3 operands, got {len(op.operands)}"
+            if kind in ("missing_operand", "extra_operand")
+            else f"{name}: expected exactly one result, got {len(op.results)}"
+        )
+    _assert_llvm_rejects(kernel, case[0], flavor, error, engine)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
@@ -334,3 +342,71 @@ def test_wmma_hip_rejects_multiplicands(case, concrete, role, kind):
         _assert_python_rejects(
             lambda: lower_kernel_to_hip(candidate, arch=case[0]), error
         )
+
+
+# Independent register widths, including the scalar gfx12 iu4 register (one
+# word, accepted either as i32 or a same-bit vec<i32x1>). Signedness changes the
+# call's flags, not the integer accumulator/result or the preflight boundary.
+_INTEGER_WMMA_SHAPES = [
+    ("gfx1151", "wmma_i32_16x16x16_iu8", 4, 8),
+    ("gfx1151", "wmma_i32_16x16x16_iu4", 2, 4),
+    ("gfx1201", "wmma_gfx12_i32_16x16x16_iu8", 2, 8),
+    ("gfx1201", "wmma_gfx12_i32_16x16x16_iu4", 1, 4),
+    ("gfx1201", "wmma_gfx12_i32_16x16x32_iu4", 2, 4),
+    ("gfx1250", "wmma_gfx1250_i32_16x16x64_iu8", 8, 8),
+]
+_INTEGER_WMMA_CASES = [
+    (gfx, op_id + suffix, I32, words, I32)
+    for gfx, op_id, words, bits in _INTEGER_WMMA_SHAPES
+    for suffix in ("", f"_u{bits}_i{bits}", f"_i{bits}_u{bits}", f"_u{bits}_u{bits}")
+]
+
+
+@pytest.mark.parametrize(
+    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
+)
+@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+def test_integer_registry_preserves_valid_carriers_and_signedness(case, flavor):
+    kernel, _ = _kernel(case, use_result=True)
+    native = pytest.importorskip("rocke_engine")
+    text = _lower_kernel_to_llvm_python(kernel, arch=case[0], llvm_flavor=flavor)
+    assert (
+        native.lower_serialized_ir(serialize(kernel), arch=case[0], flavor=flavor)
+        == text
+    )
+    if case[3] == 1:
+        # The logical vector is reinterpreted as the instruction's scalar word.
+        assert "bitcast <1 x i32>" in text
+
+
+@pytest.mark.parametrize(
+    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
+)
+@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+@pytest.mark.parametrize("role", ["src2", "dst"])
+@pytest.mark.parametrize("engine", ["python", "native"])
+def test_integer_registry_preflights_fixed_source_and_result(
+    case, flavor, role, engine
+):
+    kernel, op = _kernel(case)
+    _corrupt_type(kernel, op, case, role, 7)
+    _assert_llvm_rejects(kernel, case[0], flavor, _type_error(case), engine)
+
+
+@pytest.mark.parametrize(
+    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
+)
+def test_integer_registry_refuses_non_integer_counts_before_emission(case):
+    from rocke.core.lower_llvm import _Lowerer
+
+    kernel, op = _kernel(case)
+    count = float(case[3])
+    op.operands[0].type = VectorType(I32, count)
+    lowerer = _Lowerer(kernel, arch=case[0], llvm_flavor="llvm24")
+    with pytest.raises(ValueError) as caught:
+        lowerer.lower_op(op)
+    assert str(caught.value) == (
+        f"MMA operand a of {case[1]!r} requires an integer operand vector count, got {count!r}"
+    )
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)

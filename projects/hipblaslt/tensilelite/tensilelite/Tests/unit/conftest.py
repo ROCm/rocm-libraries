@@ -22,6 +22,43 @@ def _isolate_rocisa_state():
         yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _single_threaded_parallel_map():
+    """Run the unit tests' ``ParallelMap``/``ParallelMap2`` calls in-process.
+
+    Why here: ``CPUThreadCount()`` sizes its pool from ``globalParameters["CpuThreads"]``
+    (default -1, meaning every CPU the process can see). That is the machine's CPU count,
+    not the CI job's CPU allocation, so each pytest/xdist process launches a pool of
+    roughly that many workers (96 on a 96-CPU host) for tests that map over one or a few
+    items. The pool never speeds those tests up, and it multiplies CPU use by the number
+    of xdist workers. A session-scoped autouse fixture in this conftest runs once in every
+    process that runs unit tests, each xdist worker included, so no test or CLI flag has to
+    opt in.
+
+    Why a fixture and not a ``pytest_configure`` hook: pytest runs a nested conftest's
+    ``pytest_configure`` as soon as it imports that conftest during collection, so a run
+    that collects all of ``Tests`` (``tox -e py3 -- tensilelite/Tests -m common``) would
+    also have set ``CpuThreads`` for the non-unit tests that call ``Tensile`` in-process.
+    Autouse fixtures only reach tests under ``unit/``, and the patches are undone when the
+    session ends.
+
+    Why both values: ``restoreDefaultGlobalParameters()``, called by the ``Tensile``,
+    ``TensileUpdateLibrary`` and ``TensileRetuneLibrary`` entry points the tests exercise,
+    clears ``globalParameters`` and refills it from ``defaultGlobalParameters``. Setting
+    only the live value is undone by the first such call and the pools come back.
+    A test that needs a different value sets it for itself, as several already do. The
+    real worker-pool path stays covered by the device-library builds, by the
+    subprocess-based ``Tests/common/test_config.py`` runs, and by one small test in
+    ``characterization/Parallel``.
+    """
+    from tensilelite.Common import GlobalParameters
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(GlobalParameters.globalParameters, "CpuThreads", 1)
+        patch.setitem(GlobalParameters.defaultGlobalParameters, "CpuThreads", 1)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def skip_parametrized_if_cli(request):
     """Skip all tests except test_storeD_cli when CLI options (--mn) are provided."""

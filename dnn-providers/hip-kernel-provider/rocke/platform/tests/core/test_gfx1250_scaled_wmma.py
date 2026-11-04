@@ -95,7 +95,7 @@ def _scaled_call(scale16, concrete, dtype="fp8"):
     return b.kernel, call
 
 
-def _assert_scaled_lowering_rejects(kernel, message, engine):
+def _assert_scaled_lowering_rejects(kernel, message, engine, *, hip_message=None):
     # Use the normal catalog; re-resolving op_id must not hide malformed SSA.
     ir = serialize(kernel)
     neutral = any(op.name == "tile.mma" for op in kernel.body.ops)
@@ -119,7 +119,7 @@ def _assert_scaled_lowering_rejects(kernel, message, engine):
             assert str(caught.value) == message
         with pytest.raises(ValueError) as caught:
             lower_kernel_to_hip(candidate, arch="gfx1250")
-        assert str(caught.value) == message
+        assert str(caught.value) == (message if hip_message is None else hip_message)
 
 
 @pytest.mark.parametrize("scale16", [False, True])
@@ -528,6 +528,20 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
 
+def _scaled_matrix_error(op_id, role, bad, dtype, register_words=16):
+    """Independent format/width oracle, not a call into the production guard."""
+    label = f"MMA operand {('a', 'b')[role]} of {op_id!r}"
+    register_bits = 32 * register_words
+    if dtype in ("fp8", "bf8"):
+        logical = {"fp8": "fp8e4m3", "bf8": "bf8e5m2"}[dtype]
+        if isinstance(bad, VectorType) and bad.elem == F32:
+            return f"{label} holds f32 values; the instruction takes {logical} or i32 -- convert the values first"
+        bits = 32 * bad.count if isinstance(bad, VectorType) else 32
+        return f"{label} is {bad.name} ({bits} bits); the instruction takes vec<i32x{register_words}> ({register_bits} bits) -- pass a {register_bits}-bit value"
+    words = {"fp6": 12, "bf6": 12, "fp4": 8}[dtype]
+    return f"{label} is {bad.name}; the instruction takes the operand's {words} packed 32-bit words as vec<i32x{words}>, or the whole <{register_words} x i32> register -- pass one of those"
+
+
 @pytest.mark.parametrize("scale16", [False, True])
 @pytest.mark.parametrize("concrete", [False, True])
 @pytest.mark.parametrize("role", [0, 1, 3, 4])
@@ -545,7 +559,8 @@ def test_scaled_lowering_rejects_sources(scale16, concrete, role, kind, engine, 
                 16 + (-1 if kind == "short" else 1 if kind == "long" else 0),
             )
         )
-        message = f"scaled WMMA requires src{role} to be vec<i32x16>"
+        op_id = call.attrs.get("op_id", call.name.removeprefix("tile."))
+        message = _scaled_matrix_error(op_id, role, bad, dtype)
         param = ("a", "b")[role]
     else:
         expected = I64 if scale16 else I32
@@ -568,7 +583,10 @@ def test_scaled_lowering_rejects_sources(scale16, concrete, role, kind, engine, 
     if role >= 3:
         op_id = call.attrs.get("op_id", call.name.removeprefix("tile."))
         message = f"tile.{op_id} expects {expected.name} scale operands, got {call.operands[3].type.name}/{call.operands[4].type.name}"
-    _assert_scaled_lowering_rejects(kernel, message, engine)
+    hip_message = (
+        f"scaled WMMA requires src{role} to be vec<i32x16>" if role < 2 else message
+    )
+    _assert_scaled_lowering_rejects(kernel, message, engine, hip_message=hip_message)
 
 
 @pytest.mark.parametrize("scale16", [False, True])
@@ -625,18 +643,23 @@ def test_scaled_python_preserves_independent_carrier_widths(scale16, bad_width):
                     candidate, arch="gfx1250"
                 )
             else:
-                for lower in (
-                    lambda: _lower_kernel_to_llvm_python(
-                        candidate, arch="gfx1250", llvm_flavor="llvm23"
+                for engine, lower in (
+                    (
+                        "llvm",
+                        lambda: _lower_kernel_to_llvm_python(
+                            candidate, arch="gfx1250", llvm_flavor="llvm23"
+                        ),
                     ),
-                    lambda: lower_kernel_to_hip(candidate, arch="gfx1250"),
+                    ("hip", lambda: lower_kernel_to_hip(candidate, arch="gfx1250")),
                 ):
                     with pytest.raises(ValueError) as caught:
                         lower()
-                    assert (
-                        str(caught.value)
-                        == "scaled WMMA requires src1 to be vec<i32x8>"
+                    expected = (
+                        _scaled_matrix_error(atom.op_id, 1, bb.type, "bf8", 8)
+                        if engine == "llvm"
+                        else "scaled WMMA requires src1 to be vec<i32x8>"
                     )
+                    assert str(caught.value) == expected
 
 
 @pytest.mark.parametrize("scale16", [False, True])

@@ -24,10 +24,13 @@
  *   class ArchTarget (frozen)         rocke_arch_target_t + rocke_arch_* () getters
  *   ArchTarget.from_gfx(gfx)          rocke_arch_target_from_gfx()
  *   known_arches()                    rocke_known_arches()
+ *   _load_pointers().get(gfx)         rocke_arch_facts_of()
  *   arch_from_isa(isa)                rocke_arch_from_isa()
  *   target_id_from_isa(isa)           rocke_target_id_from_isa()
  *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
  *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
+ *   compiler_target_for_flavor(id, llvm_flavor=)
+ *                                     rocke_compiler_target_for_flavor()
  *   generic_arch_from_target_id(id)   rocke_generic_arch_from_target_id()
  *
  * The Python loader reads core/arch/data/arch_specs.json at import time. The C99
@@ -156,6 +159,11 @@ typedef struct rocke_mma_src
     const rocke_layout_map_t* scale_layout; /* may be NULL */
 } rocke_mma_src_t;
 
+/* A supported matrix-multiply-accumulate atom. Frozen, in static storage.
+ * srcs[0..2] describe the multiplicands and accumulator input; dst describes
+ * the independent result. Matrix dtypes are canonical catalog keys.
+ * op_id is an opaque backend handle; lowering reads metadata, not its spelling.
+ * Layout pointers are NULL when no verified lane map is registered. */
 typedef struct rocke_mma_op
 {
     const char* family;
@@ -182,6 +190,10 @@ typedef struct rocke_mma_op
 
 /* MmaOp.shape -> (m, n, k) via out params. */
 void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
+
+/* MmaOp.dst_dtype: the independent result dtype, op->dst.dtype.
+ * A NULL op returns NULL. Static storage; do not free. */
+const char* rocke_mma_op_dst_dtype(const rocke_mma_op_t* op);
 
 /* Canonical physical-layout accessors. Each returns the verified map for the
  * machine operand position. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL,
@@ -263,11 +275,17 @@ const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int*
 /* Optional scale filter: NULL leaves scales unconstrained; {NULL, NULL, 0}
  * selects unscaled atoms. C callers supply the filter pointer explicitly.
  * Exact selection and largest-K ties raise a query error on ambiguity.
- * As with layout queries, C++ callers catch ckc::Error at their entry boundary. */
+ * As with layout queries, C++ callers catch ckc::Error at their entry boundary.
+ *
+ * Optional result dtype (dst_dtype, after the scales): NULL means "equal to
+ * c_dtype", not "any", so a query that names no result dtype only sees atoms
+ * whose result is their accumulator. C callers pass it explicitly. */
 #ifdef __cplusplus
 #define ROCKE_MMA_DEFAULT_SCALES = nullptr
+#define ROCKE_MMA_DEFAULT_DST = nullptr
 #else
 #define ROCKE_MMA_DEFAULT_SCALES
+#define ROCKE_MMA_DEFAULT_DST
 #endif
 
 /* Indexed MmaCatalog.enumerate: filter atoms by family + the exact three src
@@ -301,7 +319,8 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int n,
                                 const rocke_mma_op_t** out,
                                 int cap,
-                                const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+                                const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+                                const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 /* Indexed and compatibility MmaCatalog.has_shape variants. */
 bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
@@ -321,9 +340,12 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  int m,
                                  int n,
                                  int k,
-                                 const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+                                 const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+                                 const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
-/* Indexed and compatibility MmaCatalog.select_largest_k variants. */
+/* Indexed and compatibility MmaCatalog.select_largest_k variants: matching
+ * atom with largest k (k <= k_max if k_max >= 0; negative means Python None).
+ * Returns NULL if none match. */
 const rocke_mma_op_t* rocke_mma_catalog_select_largest_k_indexed(
     const rocke_mma_catalog_t* cat,
     const char* family,
@@ -333,16 +355,17 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k_indexed(
     int n,
     int k_max,
     const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
-const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog_t* cat,
-                                                         const char* family,
-                                                         const char* a_dtype,
-                                                         const char* b_dtype,
-                                                         const char* c_dtype,
-                                                         int m,
-                                                         int n,
-                                                         int k_max,
-                                                         const rocke_mma_scale_filter_t* scales
-                                                             ROCKE_MMA_DEFAULT_SCALES);
+const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(
+    const rocke_mma_catalog_t* cat,
+    const char* family,
+    const char* a_dtype,
+    const char* b_dtype,
+    const char* c_dtype,
+    int m,
+    int n,
+    int k_max,
+    const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+    const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 /* MmaCatalog.by_op_id. Returns NULL if absent. */
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id);
@@ -366,7 +389,8 @@ const rocke_mma_op_t*
                                    int m,
                                    int n,
                                    int k,
-                                   const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+                                   const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+                                   const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 #undef ROCKE_MMA_DEFAULT_SCALES
 
@@ -376,12 +400,16 @@ const rocke_mma_op_t*
  * any atom metadata. They mirror the target.py module-level helpers that
  * rocke.core.ir.IRBuilder.mma consults. */
 
+#undef ROCKE_MMA_DEFAULT_DST
+
 /* dst fragment length for op_id -- the dst.frag_len projection of
  * target.py::_frag_info(op_id). An emulated atom's logical op_id resolves
  * through the physical atom it expands into
  * (rocke_arch_mma_op_id_physical_op_id). Returns 0 for an unknown atom,
  * matching the zero-length _FragInfo fallback. */
 int rocke_arch_mma_dst_frag_len(const char* op_id);
+/* Legacy C metadata projection: the result's fragment length. */
+int rocke_arch_mma_c_frag_len(const char* op_id);
 
 /* Canonical (normalised) result-dtype key, as produced by
  * rocke_normalize_dtype / the _DTYPE_ALIASES table. Compare an op_id's
@@ -396,6 +424,9 @@ int rocke_arch_mma_dst_frag_len(const char* op_id);
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id);
+
+/* Legacy C metadata projection: the independent result dtype. */
+const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
 
 /* True when the hardware encodes this atom directly, mirroring MmaOp.is_native.
  * A NULL op is reported native: callers that lost the row have no expansion to
@@ -492,6 +523,20 @@ bool rocke_arch_has_dpp_row_xmask(const rocke_arch_target_t* t);
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
 
+/* The generic target whose facts the arch_specs.json row of `gfx` takes
+ * ("facts_of"), or NULL when that row holds facts of its own or `gfx` has no row.
+ * Static storage. A table keyed by target resolves a name it has no entry for
+ * through this generic, as Python's listed_arch_for(gfx, table) does, so a
+ * generic's members need no entries of their own. */
+const char* rocke_arch_facts_of(const char* gfx);
+
+/* Python repr() of the list of known arches `keep` accepts, in
+ * rocke_known_arches order: "['gfx908', 'gfx90a']". A NULL `keep` keeps every
+ * known arch. Writes as much as fits in out_cap bytes, NUL-terminated (NULL out
+ * or zero out_cap writes nothing), and returns the length of the whole text, as
+ * snprintf does, so a result >= out_cap means the text was cut. */
+size_t rocke_known_arch_list_repr(char* out, size_t out_cap, bool (*keep)(const char* gfx));
+
 /* Write str(KeyError) of ArchTarget.from_gfx's miss for `gfx` into out:
  *   "unknown gfx target '<gfx>'; known: ['gfx...', ...]. Add a row to arch_specs.json."
  * wrapped in double quotes, exactly as Python's is_valid_spec(...) reports
@@ -509,14 +554,31 @@ void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
 const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap);
 
 /* Remove features and profiles for catalog lookup, preserving catalog names
- * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942.
- * A generic-target member without its own row uses the generic row (gfx1100 ->
- * gfx11-generic, gfx1200 -> gfx12-generic). */
+ * such as gfx11-generic and gfx1100. gfx1250-strict and gfx942:xnack- become
+ * gfx1250/gfx942. A generic-target member without its own row would use the
+ * generic row; every catalogued generic's members have rows of their own. */
 const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
 
 /* Remove profiles but preserve compiler features: gfx1250-strict:xnack-
  * becomes gfx1250:xnack-. */
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* The compiler target to pass to the llvm_flavor compiler for target_id: the
+ * rocke_compiler_target_from_target_id name, whose processor is then checked
+ * against what that compiler was measured to accept. Accepted or never
+ * measured, it stays; not accepted but its row points at a generic target the
+ * compiler accepts, that generic replaces it and message (when non-NULL) says
+ * so; otherwise NULL is returned and message holds the error. message is empty
+ * when the processor stays.
+ * The C++ engine has no compile path yet, so nothing in it calls this: it
+ * exists for API parity with Python's compiler_target_for_flavor, which the
+ * Python compile helpers use. */
+const char* rocke_compiler_target_for_flavor(const char* target_id,
+                                             const char* llvm_flavor,
+                                             char* out,
+                                             size_t out_cap,
+                                             char* message,
+                                             size_t message_cap);
 
 /* Catalogued LLVM generic processor whose code objects load on target_id:
  * gfx1100 and gfx1151:xnack- become gfx11-generic; a generic name maps to

@@ -19,7 +19,7 @@ from unittest import mock
 
 import pytest
 
-from rocke.core.arch import MmaScaleBlockK, MmaScaleDType
+from rocke.core.arch import MmaScaleBlockK, MmaScaleDType, known_arches
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
@@ -115,6 +115,13 @@ _CATALOG_ORDER = {
         "mfma_f32_32x32x8_f16",
         "mfma_f32_16x16x16_bf16",
         "mfma_f32_32x32x8_bf16",
+        "mfma_f32_16x16x8_bf16",
+        "mfma_f32_32x32x4_bf16",
+        "mfma_f32_16x16x4_f32",
+        "mfma_f32_32x32x2_f32",
+        "mfma_i32_16x16x16_i8",
+        "mfma_i32_32x32x8_i8",
+        "mfma_f64_16x16x4_f64",
     ),
     "gfx942": (
         "mfma_f32_16x16x8_xf32",
@@ -131,6 +138,12 @@ _CATALOG_ORDER = {
         "mfma_f32_32x32x16_fp8",
         "mfma_f32_16x16x32_bf8",
         "mfma_f32_32x32x16_bf8",
+        "mfma_i32_16x16x32_i8",
+        "mfma_i32_32x32x16_i8",
+        "mfma_f32_16x16x32_fp8_bf8",
+        "mfma_f32_16x16x32_bf8_fp8",
+        "mfma_f32_32x32x16_fp8_bf8",
+        "mfma_f32_32x32x16_bf8_fp8",
     ),
     "gfx950": (
         "mfma_f32_16x16x4_f32",
@@ -147,6 +160,65 @@ _CATALOG_ORDER = {
         "mfma_f32_32x32x16_fp8",
         "mfma_f32_16x16x32_bf8",
         "mfma_f32_32x32x16_bf8",
+        "mfma_i32_16x16x32_i8",
+        "mfma_i32_32x32x16_i8",
+        "mfma_f64_16x16x4_f64",
+        "mfma_f32_16x16x32_fp8_bf8",
+        "mfma_f32_16x16x32_bf8_fp8",
+        "mfma_f32_32x32x16_fp8_bf8",
+        "mfma_f32_32x32x16_bf8_fp8",
+        "mfma_i32_16x16x64_i8",
+        "mfma_i32_32x32x32_i8",
+        "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
+        "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
+        "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
+        "mfma_f32_16x16x128_f8f6f4_bf8e5m2_fp6e2m3",
+        "mfma_f32_16x16x128_f8f6f4_bf8e5m2_fp6e3m2",
+        "mfma_f32_16x16x128_f8f6f4_bf8e5m2_fp4e2m1",
+        "mfma_f32_16x16x128_f8f6f4_fp6e2m3_fp8e4m3",
+        "mfma_f32_16x16x128_f8f6f4_fp6e2m3_bf8e5m2",
+        "mfma_f32_16x16x128_f8f6f4_fp6e2m3_fp6e2m3",
+        "mfma_f32_16x16x128_f8f6f4_fp6e2m3_fp6e3m2",
+        "mfma_f32_16x16x128_f8f6f4_fp6e2m3_fp4e2m1",
+        "mfma_f32_16x16x128_f8f6f4_fp6e3m2_fp8e4m3",
+        "mfma_f32_16x16x128_f8f6f4_fp6e3m2_bf8e5m2",
+        "mfma_f32_16x16x128_f8f6f4_fp6e3m2_fp6e2m3",
+        "mfma_f32_16x16x128_f8f6f4_fp6e3m2_fp6e3m2",
+        "mfma_f32_16x16x128_f8f6f4_fp6e3m2_fp4e2m1",
+        "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
+        "mfma_f32_16x16x128_f8f6f4_fp4e2m1_bf8e5m2",
+        "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp6e2m3",
+        "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp6e3m2",
+        "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1",
+        "mfma_f32_32x32x64_f8f6f4_fp8e4m3_fp6e2m3",
+        "mfma_f32_32x32x64_f8f6f4_fp8e4m3_fp6e3m2",
+        "mfma_f32_32x32x64_f8f6f4_fp8e4m3_fp4e2m1",
+        "mfma_f32_32x32x64_f8f6f4_bf8e5m2_fp6e2m3",
+        "mfma_f32_32x32x64_f8f6f4_bf8e5m2_fp6e3m2",
+        "mfma_f32_32x32x64_f8f6f4_bf8e5m2_fp4e2m1",
+        "mfma_f32_32x32x64_f8f6f4_fp6e2m3_fp8e4m3",
+        "mfma_f32_32x32x64_f8f6f4_fp6e2m3_bf8e5m2",
+        "mfma_f32_32x32x64_f8f6f4_fp6e2m3_fp6e2m3",
+        "mfma_f32_32x32x64_f8f6f4_fp6e2m3_fp6e3m2",
+        "mfma_f32_32x32x64_f8f6f4_fp6e2m3_fp4e2m1",
+        "mfma_f32_32x32x64_f8f6f4_fp6e3m2_fp8e4m3",
+        "mfma_f32_32x32x64_f8f6f4_fp6e3m2_bf8e5m2",
+        "mfma_f32_32x32x64_f8f6f4_fp6e3m2_fp6e2m3",
+        "mfma_f32_32x32x64_f8f6f4_fp6e3m2_fp6e3m2",
+        "mfma_f32_32x32x64_f8f6f4_fp6e3m2_fp4e2m1",
+        "mfma_f32_32x32x64_f8f6f4_fp4e2m1_fp8e4m3",
+        "mfma_f32_32x32x64_f8f6f4_fp4e2m1_bf8e5m2",
+        "mfma_f32_32x32x64_f8f6f4_fp4e2m1_fp6e2m3",
+        "mfma_f32_32x32x64_f8f6f4_fp4e2m1_fp6e3m2",
+        "mfma_f32_32x32x64_f8f6f4_fp4e2m1_fp4e2m1",
+        "mfma_f32_16x16x128_fp8",
+        "mfma_f32_16x16x128_f8f6f4_fp8e4m3_bf8e5m2",
+        "mfma_f32_16x16x128_f8f6f4_bf8e5m2_fp8e4m3",
+        "mfma_f32_16x16x128_f8f6f4_bf8e5m2_bf8e5m2",
+        "mfma_f32_32x32x64_f8f6f4_fp8e4m3_fp8e4m3",
+        "mfma_f32_32x32x64_f8f6f4_fp8e4m3_bf8e5m2",
+        "mfma_f32_32x32x64_f8f6f4_bf8e5m2_fp8e4m3",
+        "mfma_f32_32x32x64_f8f6f4_bf8e5m2_bf8e5m2",
         "mfma_gfx950_f32_32x32x64_fp8_fp8_scale_e8m0_e8m0_k32",
         "mfma_gfx950_f32_32x32x64_fp8_bf8_scale_e8m0_e8m0_k32",
         "mfma_gfx950_f32_32x32x64_fp8_fp6_scale_e8m0_e8m0_k32",
@@ -178,21 +250,88 @@ _CATALOG_ORDER = {
     "gfx1151": (
         "wmma_f32_16x16x16_f16",
         "wmma_f32_16x16x16_bf16",
+        "wmma_f16_16x16x16_f16",
+        "wmma_bf16_16x16x16_bf16",
         "wmma_i32_16x16x16_iu8",
+        "wmma_i32_16x16x16_iu8_u8_i8",
+        "wmma_i32_16x16x16_iu8_i8_u8",
+        "wmma_i32_16x16x16_iu8_u8_u8",
         "wmma_i32_16x16x16_iu4",
+        "wmma_i32_16x16x16_iu4_u4_i4",
+        "wmma_i32_16x16x16_iu4_i4_u4",
+        "wmma_i32_16x16x16_iu4_u4_u4",
     ),
     "gfx1201": (
         "wmma_gfx12_f32_16x16x16_f16",
         "wmma_gfx12_f32_16x16x16_bf16",
+        "wmma_gfx12_f32_16x16x16_fp8_fp8",
+        "wmma_gfx12_f32_16x16x16_fp8_bf8",
+        "wmma_gfx12_f32_16x16x16_bf8_fp8",
+        "wmma_gfx12_f32_16x16x16_bf8_bf8",
+        "wmma_gfx12_i32_16x16x16_iu8",
+        "wmma_gfx12_i32_16x16x16_iu8_u8_i8",
+        "wmma_gfx12_i32_16x16x16_iu8_i8_u8",
+        "wmma_gfx12_i32_16x16x16_iu8_u8_u8",
+        "wmma_gfx12_i32_16x16x16_iu4",
+        "wmma_gfx12_i32_16x16x16_iu4_u4_i4",
+        "wmma_gfx12_i32_16x16x16_iu4_i4_u4",
+        "wmma_gfx12_i32_16x16x16_iu4_u4_u4",
+        "wmma_gfx12_i32_16x16x32_iu4",
+        "wmma_gfx12_i32_16x16x32_iu4_u4_i4",
+        "wmma_gfx12_i32_16x16x32_iu4_i4_u4",
+        "wmma_gfx12_i32_16x16x32_iu4_u4_u4",
+        "wmma_gfx12_f16_16x16x16_f16",
+        "wmma_gfx12_bf16_16x16x16_bf16",
     ),
     "gfx1250": (
         "wmma_gfx1250_f32_16x16x4_f32",
         "wmma_gfx1250_f32_16x16x32_f16",
         "wmma_gfx1250_f32_16x16x32_bf16",
+        "wmma_gfx1250_bf16f32_16x16x32_bf16",
+        "wmma_gfx1250_f16_16x16x32_f16",
+        "wmma_gfx1250_bf16_16x16x32_bf16",
         "wmma_gfx1250_f32_16x16x64_fp8_fp8",
         "wmma_gfx1250_f32_16x16x64_fp8_bf8",
         "wmma_gfx1250_f32_16x16x64_bf8_fp8",
         "wmma_gfx1250_f32_16x16x64_bf8_bf8",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp8",
+        "wmma_gfx1250_f32_16x16x128_fp8_bf8",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp8",
+        "wmma_gfx1250_f32_16x16x128_bf8_bf8",
+        "wmma_gfx1250_f16_16x16x64_fp8_fp8",
+        "wmma_gfx1250_f16_16x16x64_fp8_bf8",
+        "wmma_gfx1250_f16_16x16x64_bf8_fp8",
+        "wmma_gfx1250_f16_16x16x64_bf8_bf8",
+        "wmma_gfx1250_f16_16x16x128_fp8_fp8",
+        "wmma_gfx1250_f16_16x16x128_fp8_bf8",
+        "wmma_gfx1250_f16_16x16x128_bf8_fp8",
+        "wmma_gfx1250_f16_16x16x128_bf8_bf8",
+        "wmma_gfx1250_i32_16x16x64_iu8",
+        "wmma_gfx1250_i32_16x16x64_iu8_u8_i8",
+        "wmma_gfx1250_i32_16x16x64_iu8_i8_u8",
+        "wmma_gfx1250_i32_16x16x64_iu8_u8_u8",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_bf8e5m2_fp6e2m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_bf8e5m2_fp6e3m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_bf8e5m2_fp4e2m1",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e2m3_fp8e4m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e2m3_bf8e5m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e2m3_fp6e2m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e2m3_fp6e3m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e2m3_fp4e2m1",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e3m2_fp8e4m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e3m2_bf8e5m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e3m2_fp6e2m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e3m2_fp6e3m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp6e3m2_fp4e2m1",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp4e2m1_bf8e5m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp4e2m1_fp6e2m3",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp4e2m1_fp6e3m2",
+        "wmma_gfx1250_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1",
+        "wmma_gfx1250_f32_32x16x128_f4",
         "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
         "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32",
         "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k32",
@@ -304,24 +443,14 @@ def test_catalog_order_guard_detects_permuted_rows(gfx):
 
 def test_filtered_catalog_preserves_supported_order_and_fields():
     # Independent snapshot of the supported rows at 72c28a69, filtered with
-    # the LLVM legality table. Preserve all remaining fields and relative order.
+    # the LLVM legality table, plus the bf16-result row, the 16-bit-output,
+    # fp8-to-f16 and i8 rows, the f8f6f4 and f4 32x16x128 rows, and the fp8 /
+    # bf8 -> f32 K 128 rows. Preserve all remaining fields and relative order.
     rows = _load_specs()["gfx1250"]["mma"]
-    assert len(rows) == 93
-    legacy = []
-    for row in rows:
-        row = deepcopy(row)
-        if "srcs" in row:
-            srcs, dst = row.pop("srcs"), row.pop("dst")
-            assert dst["dtype"] == srcs[2]["dtype"]
-            for key, src in zip(("a", "b", "c"), srcs):
-                row[key] = src["dtype"]
-                if "scale" in src:
-                    row[f"{key}_scale_dtype"] = src["scale"]["dtype"]
-                    row["scale_block_k"] = src["scale"]["block_size"]
-        legacy.append(row)
-    encoded = json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()
+    assert len(rows) == 134
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(encoded).hexdigest() == (
-        "d31fe60f6172c7c2172a420cc4558591fa1389d41cc2829eafc99bceb66e858a"
+        "79a9b44e43add19672f496216548d163d4416a9edd82c6663368cc4c1817376a"
     )
 
 
@@ -638,6 +767,16 @@ def _replace_scales(row, **changes):
                 scale = replace(scale, block_size=changes["scale_block_k"])
         srcs[i] = replace(srcs[i], scale=scale)
     return replace(row, srcs=tuple(srcs))
+
+
+class TestOpIdDstDtype(unittest.TestCase):
+    def test_matches_catalog_first_hit(self):
+        # A row's result dtype is its dst, or its accumulator c when it has none.
+        expected: dict = {}
+        for row in _load_specs().values():
+            for o in row["mma"]:
+                expected.setdefault(o["op_id"], normalize_dtype(o.get("dst", o["c"])))
+        self.assertEqual(_op_id_dst_dtype(), expected)
 
 
 def _contracts():
@@ -1384,3 +1523,56 @@ def test_rdna_integer_wmma_rows_name_i8_and_i4():
                     k=16,
                 )
                 assert (found and found.op_id) == want
+
+
+def test_gfx950_reaches_fp4_and_fp6_only_through_the_f8f6f4_mfma():
+    # gfx950 has no fp4-only 16x16x128 or fp6-only 16x16x96 MFMA instruction:
+    # the catalog lists neither op_id. A dense fp4 16x16x128 request selects the
+    # f8f6f4 MFMA reading fp4 x fp4; nothing serves fp6 at K 96.
+    mma = ArchTarget.from_gfx("gfx950").mma
+    op_ids = {op.op_id for op in mma.ops}
+    for op_id in ("mfma_f32_16x16x128_fp4", "mfma_f32_16x16x96_fp6"):
+        assert op_id not in op_ids
+        assert _op_id_family().get(op_id) is None
+    found = {
+        dtype: mma.op_for_shape(
+            family="mma",
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=16,
+            n=16,
+            k=k,
+        )
+        for dtype, k in (("fp4", 128), ("fp6", 96))
+    }
+    assert found["fp4"].op_id == "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1"
+    assert found["fp6"] is None
+
+
+@pytest.mark.parametrize("gfx", known_arches())
+def test_every_target_names_each_mma_contract_once(gfx):
+    # Selection answers one question per operand contract: op_for_shape and
+    # select_largest_k raise "ambiguous MMA query" when two ops of one target
+    # share a full contract, and the backend keys its lowering on op_id. So on
+    # every target both the op_id and the full contract (family, operand,
+    # accumulator and result dtypes, shape, scale contract) must name exactly
+    # one op.
+    ops = ArchTarget.from_gfx(gfx).mma.ops
+    op_ids = [op.op_id for op in ops]
+    contracts = [
+        (
+            op.family,
+            *(src.dtype for src in op.srcs),
+            op.dst.dtype,
+            op.m,
+            op.n,
+            op.k,
+            op.a_scale_dtype,
+            op.b_scale_dtype,
+            op.scale_block_k,
+        )
+        for op in ops
+    ]
+    assert sorted({x for x in op_ids if op_ids.count(x) > 1}) == []
+    assert [c for c in set(contracts) if contracts.count(c) > 1] == []

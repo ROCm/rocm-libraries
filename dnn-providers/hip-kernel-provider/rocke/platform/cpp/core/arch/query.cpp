@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "mma_family_index.h"
+#include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
 #include "rocke/arch_target_internal.h"
 #include "rocke/error.hpp"
@@ -113,6 +114,11 @@ void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k)
         *n = op->n;
     if(k)
         *k = op->k;
+}
+
+const char* rocke_mma_op_dst_dtype(const rocke_mma_op_t* op)
+{
+    return op ? op->dst.dtype : NULL;
 }
 
 /* MmaOp._require_layout: returns the map, or NULL + (on a non-NULL builder)
@@ -346,11 +352,12 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int n,
                                 const rocke_mma_op_t** out,
                                 int cap,
-                                const rocke_mma_scale_filter_t* scales)
+                                const rocke_mma_scale_filter_t* scales,
+                                const char* dst_dtype)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
     return rocke_mma_catalog_enumerate_indexed(
-        cat, family, src_dtypes, c_dtype, m, n, out, cap, scales);
+        cat, family, src_dtypes, dst_dtype, m, n, out, cap, scales);
 }
 
 bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
@@ -396,10 +403,11 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  int m,
                                  int n,
                                  int k,
-                                 const rocke_mma_scale_filter_t* scales)
+                                 const rocke_mma_scale_filter_t* scales,
+                                 const char* dst_dtype)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
-    return rocke_mma_catalog_has_shape_indexed(cat, family, src_dtypes, c_dtype, m, n, k, scales);
+    return rocke_mma_catalog_has_shape_indexed(cat, family, src_dtypes, dst_dtype, m, n, k, scales);
 }
 
 const rocke_mma_op_t*
@@ -457,11 +465,12 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
                                                          int m,
                                                          int n,
                                                          int k_max,
-                                                         const rocke_mma_scale_filter_t* scales)
+                                                         const rocke_mma_scale_filter_t* scales,
+                                                         const char* dst_dtype)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
     return rocke_mma_catalog_select_largest_k_indexed(
-        cat, family, src_dtypes, c_dtype, m, n, k_max, scales);
+        cat, family, src_dtypes, dst_dtype, m, n, k_max, scales);
 }
 
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id)
@@ -527,11 +536,12 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
                                                      int m,
                                                      int n,
                                                      int k,
-                                                     const rocke_mma_scale_filter_t* scales)
+                                                     const rocke_mma_scale_filter_t* scales,
+                                                     const char* dst_dtype)
 {
     const char* src_dtypes[3] = {a_dtype, b_dtype, c_dtype};
     return rocke_mma_catalog_op_for_shape_indexed(
-        cat, family, src_dtypes, c_dtype, m, n, k, scales);
+        cat, family, src_dtypes, dst_dtype, m, n, k, scales);
 }
 
 /* ===================== bare-op_id SSOT lookups ======================== */
@@ -772,6 +782,47 @@ const char* const* rocke_known_arches(int* count)
     return rocke_ati_known_arches;
 }
 
+/* Copy `text` into out at `pos`, as much as fits in out_cap with its NUL, and
+ * return strlen(text): the amount pos advances whether or not it fitted. */
+static size_t append_at(char* out, size_t out_cap, size_t pos, const char* text)
+{
+    const size_t length = strlen(text);
+    size_t copied;
+
+    if(out != NULL && pos < out_cap)
+    {
+        copied = length < out_cap - pos - 1 ? length : out_cap - pos - 1;
+        memcpy(out + pos, text, copied);
+        out[pos + copied] = '\0';
+    }
+    return length;
+}
+
+/* Python repr(list) over rocke_known_arches(): "['gfx908', 'gfx90a']". */
+size_t rocke_known_arch_list_repr(char* out, size_t out_cap, bool (*keep)(const char* gfx))
+{
+    int count = 0;
+    const char* const* arches = rocke_known_arches(&count);
+    size_t pos = 0;
+    bool first = true;
+    int i;
+
+    pos += append_at(out, out_cap, pos, "[");
+    for(i = 0; i < count; ++i)
+    {
+        if(keep != NULL && !keep(arches[i]))
+        {
+            continue;
+        }
+        pos += append_at(out, out_cap, pos, first ? "'" : ", '");
+        pos += append_at(out, out_cap, pos, arches[i]);
+        pos += append_at(out, out_cap, pos, "'");
+        first = false;
+    }
+    pos += append_at(out, out_cap, pos, "]");
+    return pos;
+}
+
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
  *
  *   Python _build_target: raise KeyError(
@@ -782,49 +833,29 @@ const char* const* rocke_known_arches(int* count)
  * the whole message. sorted(specs) renders as ['gfx...', 'gfx...']. */
 void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
 {
-    int count = 0;
-    const char* const* arches;
-    int i;
-    size_t pos = 0;
     int wrote;
+    size_t pos;
 
     if(out == NULL || out_cap == 0)
     {
         return;
     }
 
-    arches = rocke_known_arches(&count);
-
-    wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
+    wrote = snprintf(out, out_cap, "\"unknown gfx target '%s'; known: ", gfx);
     if(wrote < 0)
     {
         out[0] = '\0';
         return;
     }
-    pos += (size_t)wrote;
-    if(pos >= out_cap)
+    pos = (size_t)wrote;
+    if(pos < out_cap)
     {
-        out[out_cap - 1] = '\0';
-        return;
+        pos += rocke_known_arch_list_repr(out + pos, out_cap - pos, NULL);
     }
-
-    for(i = 0; i < count; ++i)
+    if(pos < out_cap)
     {
-        wrote = snprintf(out + pos, out_cap - pos, "%s'%s'", (i == 0) ? "" : ", ", arches[i]);
-        if(wrote < 0)
-        {
-            out[out_cap - 1] = '\0';
-            return;
-        }
-        pos += (size_t)wrote;
-        if(pos >= out_cap)
-        {
-            out[out_cap - 1] = '\0';
-            return;
-        }
+        snprintf(out + pos, out_cap - pos, ". Add a row to arch_specs.json.\"");
     }
-
-    snprintf(out + pos, out_cap - pos, "]. Add a row to arch_specs.json.\"");
 }
 
 /* Return the final gfx component without discarding profile or feature suffixes. */
@@ -844,7 +875,9 @@ static const char* rocke_target_id_start(const char* isa)
  * wildcard. Membership comes from rocke_ati_generic_targets (arch_specs.json
  * "generic_targets"), aligned with LLVM's AMDGPU Generic Processors table:
  * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
- * A member without its own catalog row (gfx1100, gfx1200) uses its generic row. */
+ * A member without its own catalog row uses its generic row; every member of a
+ * catalogued generic target has a row of its own, so this serves only names
+ * the catalog does not list. */
 static const char* rocke_generic_arch_alias(const char* target_id)
 {
     size_t name_len = strcspn(target_id, ":");
@@ -933,20 +966,115 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
     return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
 }
 
+/* The generic target the row named by the first len bytes of gfx points at
+ * (arch_specs.json "facts_of"), or NULL. */
+static const char* rocke_row_facts_of(const char* gfx, size_t len)
+{
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_ati_arch_row_t* row = &rocke_ati_arch_registry[i];
+        if(strlen(row->gfx) == len && strncmp(row->gfx, gfx, len) == 0)
+            return row->facts_of;
+    }
+    return NULL;
+}
+
+const char* rocke_arch_facts_of(const char* gfx)
+{
+    return gfx != NULL ? rocke_row_facts_of(gfx, strlen(gfx)) : NULL;
+}
+
+static void rocke_set_message(char* message, size_t message_cap, const char* fmt, ...)
+{
+    if(message == NULL || message_cap == 0)
+        return;
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, message_cap, fmt, args);
+    va_end(args);
+}
+
+/* Length of the processor part of target_id with any profile removed
+ * (gfx1250-strict:xnack- -> 7); its features start at strcspn(target_id, ":"). */
+static size_t rocke_compiler_processor_length(const char* target_id)
+{
+    size_t name_len = strcspn(target_id, ":");
+    size_t base_len = rocke_base_arch_length(target_id);
+    if(base_len < name_len && target_id[base_len] == '-')
+        name_len = base_len;
+    return name_len;
+}
+
+/* Write the first name_len bytes of name followed by features into out. */
+static const char* rocke_write_compiler_target(
+    const char* name, size_t name_len, const char* features, char* out, size_t out_cap)
+{
+    if(name_len >= out_cap)
+        return rocke_copy_target(name, name_len, out, out_cap);
+    memcpy(out, name, name_len);
+    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
+    return out;
+}
+
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap)
 {
     if(!target_id || !out || out_cap == 0)
         return NULL;
-    size_t name_len = strcspn(target_id, ":");
-    const char* features = target_id + name_len;
-    size_t base_len = rocke_base_arch_length(target_id);
-    if(base_len < name_len && target_id[base_len] == '-')
-        name_len = base_len;
-    if(name_len >= out_cap)
-        return rocke_copy_target(target_id, name_len, out, out_cap);
-    memcpy(out, target_id, name_len);
-    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
-    return out;
+    return rocke_write_compiler_target(target_id,
+                                       rocke_compiler_processor_length(target_id),
+                                       target_id + strcspn(target_id, ":"),
+                                       out,
+                                       out_cap);
+}
+
+const char* rocke_compiler_target_for_flavor(const char* target_id,
+                                             const char* llvm_flavor,
+                                             char* out,
+                                             size_t out_cap,
+                                             char* message,
+                                             size_t message_cap)
+{
+    rocke_set_message(message, message_cap, "%s", "");
+    if(!target_id || !llvm_flavor || !out || out_cap == 0)
+        return NULL;
+    size_t name_len = rocke_compiler_processor_length(target_id);
+    const char* features = target_id + strcspn(target_id, ":");
+    const char* name = target_id;
+    if(rocke_arch_domain_rejects_processor(llvm_flavor, target_id, name_len))
+    {
+        const char* generic = rocke_row_facts_of(target_id, name_len);
+        const int len = (int)name_len;
+        if(generic == NULL
+           || rocke_arch_domain_rejects_processor(llvm_flavor, generic, strlen(generic)))
+        {
+            rocke_set_message(message,
+                              message_cap,
+                              "the %s compiler does not accept the processor '%.*s', and its "
+                              "arch_specs.json row points at no generic target that compiler "
+                              "accepts -- compile with an LLVM flavor whose compiler accepts "
+                              "'%.*s'",
+                              llvm_flavor,
+                              len,
+                              target_id,
+                              len,
+                              target_id);
+            return NULL;
+        }
+        rocke_set_message(message,
+                          message_cap,
+                          "the %s compiler does not accept the processor '%.*s'; compiling for "
+                          "'%s' instead, the generic target its arch_specs.json row points at, "
+                          "whose code objects load on '%.*s'",
+                          llvm_flavor,
+                          len,
+                          target_id,
+                          generic,
+                          len,
+                          target_id);
+        name = generic;
+        name_len = strlen(generic);
+    }
+    return rocke_write_compiler_target(name, name_len, features, out, out_cap);
 }
 
 const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap)

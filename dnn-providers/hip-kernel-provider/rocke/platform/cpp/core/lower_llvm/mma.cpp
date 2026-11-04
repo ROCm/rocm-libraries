@@ -27,6 +27,7 @@
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/matrix_calls_internal.h"
 #include "rocke/mfma_internal.h"
 #include "rocke/mfma_scale_internal.h"
 #include "rocke/mma_operand_internal.h"
@@ -35,6 +36,13 @@
 
 namespace ckc
 {
+
+static void _validate_unscaled_wmma(rocke_lower_t* L,
+                                    const rocke_op_t* op,
+                                    const rocke_type_t* elem,
+                                    int count,
+                                    const rocke_type_t* source_elem,
+                                    int source_count);
 
 /* ------------------------------------------------------------ forward decls */
 
@@ -535,6 +543,31 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
 
+    /* The backend's first step (Python ISABackend.emit_mma): an op_id described
+     * as data is lowered from its matrix call; every other op_id keeps its
+     * hand-written handler below. */
+    if(const rocke_matrix_call_t* call = rocke_matrix_call_for(op_id))
+    {
+        const auto* atom = rocke_ll_require_catalog_op(L, op_id);
+        /* Preflight the integer WMMA's fixed accumulator/result signature
+         * before any declaration or operand reinterpretation is emitted.
+         * Matrix-call arity diagnostics remain with the registry emitter. */
+        if(strcmp(atom->family, "wmma") == 0 && strcmp(atom->dst.dtype, "i32") == 0
+           && op->num_operands == 3 && op->num_results == 1)
+        {
+            const auto* source = rocke_matrix_form_type_at(&L->arena, &call->a, L->flavor);
+            const auto* result = rocke_matrix_form_type_at(&L->arena, &call->result, L->flavor);
+            _validate_unscaled_wmma(L,
+                                    op,
+                                    result->elem,
+                                    result->count,
+                                    source->kind == ROCKE_TYPE_VECTOR ? source->elem : source,
+                                    source->kind == ROCKE_TYPE_VECTOR ? source->count : 1);
+        }
+        rocke_ll_emit_matrix_call(L, op, op_id, call);
+        return;
+    }
+
     /* f16 / bf16 / f32 / f64 dense atoms resolve from the table; the K=128 f8f6f4
      * ops and the fp8-bf8 atoms keep their dedicated bodies below. */
     if(_try_emit_mfma_table(L, op, op_id))
@@ -618,7 +651,11 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
 
 /* Emit the scaled-WMMA intrinsic using the resolved operand contract.
  * The contract supplies packed carrier types, matrix and scale format selectors,
- * and the declaration identity. This instruction family requires LLVM 23. */
+ * and the declaration identity. This instruction family requires LLVM 23.
+ * A and B each reach their <n x i32> register through the f8f6f4 form of their
+ * own matrix format (Python ISABackend.emit_scaled_wmma): the register words
+ * pass unchanged, logical fp8 / bf8 values with one bitcast, and the packed
+ * words of fp6 / bf6 / fp4 values are zero-padded. */
 static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
 {
     const char* intrinsic;
@@ -642,16 +679,7 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     op_name = concrete_name;
     /* Admitted on any target whose MMA catalog lists the atom (Python
      * ISABackend.emit_scaled_wmma), never by the target's name. */
-    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
-    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
-    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, spec->op_id))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_NOTIMPL,
-                      "%s is not available on %s: its MMA catalog does not list it",
-                      op_name,
-                      gfx ? gfx : "(unknown)");
-    }
+    rocke_ll_require_catalog_op(L, spec->op_id);
     if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
     {
         rocke_ll_fail(L,
@@ -671,16 +699,15 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
            || !rocke_type_eq(type->elem, rocke_f32()))
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "scaled WMMA requires src2 and dst to be vec<f32x8>");
 
-    for(int role = 0; role < 2; ++role)
+    const rocke_matrix_arg_kind_t matrix_args[2] = {ROCKE_MATRIX_ARG_A, ROCKE_MATRIX_ARG_B};
+    rocke_matrix_form_t forms[2];
+    for(int i = 0; i < 2; ++i)
     {
-        const auto* type = op->operands[role]->type;
-        if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != spec->matrix_words[role]
-           || !rocke_type_eq(type->elem, rocke_i32()))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "scaled WMMA requires src%d to be vec<i32x%d>",
-                          role,
-                          spec->matrix_words[role]);
+        forms[i] = rocke_f8f6f4_operand_form(
+            spec->matrix_formats[i],
+            rocke_matrix_register_t{{"i32", spec->matrix_words[i]}, NULL, 0});
+        /* Validate both complete logical payloads before either form emits. */
+        rocke_ll_check_matrix_operand(L, op, spec->op_id, matrix_args[i], &forms[i]);
     }
     char packed_type[8];
     snprintf(packed_type, sizeof(packed_type), "i%d", rocke_scale_word_bits(&spec->scales));
@@ -697,6 +724,12 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
                       op->operands[4]->type->name);
     }
 
+    /* A before B: each form may emit one instruction, in the order of the
+     * Python engine. */
+    const char* matrix_values[2];
+    for(int i = 0; i < 2; ++i)
+        matrix_values[i] = rocke_ll_matrix_operand(L, op, spec->op_id, matrix_args[i], &forms[i]);
+
     // Physical declaration identity comes from the resolved backend contract.
     decl_key = spec->declaration_key;
     intrinsic = spec->intrinsic;
@@ -710,10 +743,10 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
                    intrinsic,
                    spec->matrix_formats[0],
                    spec->matrix_words[0],
-                   rocke_ll_operand(L, op->operands[0]),
+                   matrix_values[0],
                    spec->matrix_formats[1],
                    spec->matrix_words[1],
-                   rocke_ll_operand(L, op->operands[1]),
+                   matrix_values[1],
                    rocke_ll_operand(L, op->operands[2]),
                    spec->scale_formats[0],
                    scale_ty,
@@ -871,36 +904,6 @@ static const _wmma_spec_t WMMA_SPECS[] = {
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
-/* Integer WMMA spec table (Python _RDNA_WMMA_INT). Integer WMMA differs from
- * the float path: operands/accumulator are i32 vectors (A/B packed, C/D the i32
- * accumulator), and the intrinsic signature carries i1 signedness flags before
- * each matrix operand and a trailing i1 clamp. A and B are passed as <N x i32>;
- * packed bytes of the same width (for example <16 x i8>) are reinterpreted with
- * one bitcast (mma_operand). Quantized data is signed and within i32
- * range, so the flags are (signedA=1, signedB=1, clamp=0). */
-typedef struct _wmma_int_spec
-{
-    const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
-    const char* decl_key; /* _need() key                                   */
-    const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
-    int op_vec; /* A/B operand vector width                      */
-    int acc_vec; /* accumulator/result vector width               */
-} _wmma_int_spec_t;
-
-static const _wmma_int_spec_t WMMA_INT_SPECS[] = {
-    {"wmma_i32_16x16x16_iu8",
-     "wmma.i32.16x16x16.iu8",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
-     4,
-     8},
-    {"wmma_i32_16x16x16_iu4",
-     "wmma.i32.16x16x16.iu4",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
-     2,
-     8},
-};
-static const int WMMA_INT_SPECS_N = (int)(sizeof(WMMA_INT_SPECS) / sizeof(WMMA_INT_SPECS[0]));
-
 /* Mirrors core/wmma.py::validate_unscaled_wmma. Validate actual SSA types;
  * re-resolving the catalog cannot check a caller's independent src2/dst values. */
 static void _validate_unscaled_wmma(rocke_lower_t* L,
@@ -947,35 +950,6 @@ static void _validate_unscaled_wmma(rocke_lower_t* L,
     }
 }
 
-/* Emit an integer WMMA (iu8/iu4) call (Python _emit_wmma_int). The signature is
- * (i1 signedA, <N x i32> A, i1 signedB, <N x i32> B, <8 x i32> C, i1 clamp) with
- * an <8 x i32> result. Both signedness flags are 1 (signed quant data); clamp
- * is 0 (values stay within i32 range). */
-static void _emit_wmma_int(rocke_lower_t* L, const rocke_op_t* op, const _wmma_int_spec_t* spec)
-{
-    _validate_unscaled_wmma(L, op, rocke_i32(), spec->acc_vec, rocke_i32(), spec->op_vec);
-    const rocke_value_t* c = op->operands[2];
-    const char* result = mma_result_name(L, op);
-    rocke_ll_need(L, spec->decl_key);
-    const rocke_type_t* register_type = mma_register_vector(L, rocke_i32(), spec->op_vec);
-    const char* a_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_SRC0, register_type);
-    const char* b_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_SRC1, register_type);
-    rocke_ll_emitf(L,
-                   "  %s = call <%d x i32> @%s("
-                   "i1 1, <%d x i32> %s, "
-                   "i1 1, <%d x i32> %s, "
-                   "<%d x i32> %s, i1 0)",
-                   result,
-                   spec->acc_vec,
-                   spec->intrinsic,
-                   spec->op_vec,
-                   a_arg,
-                   spec->op_vec,
-                   b_arg,
-                   spec->acc_vec,
-                   rocke_ll_operand(L, c));
-}
-
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
 {
     const _wmma_spec_t* spec = NULL;
@@ -988,17 +962,6 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
         return;
     }
 
-    /* Integer WMMA (iu8/iu4) is checked first, mirroring
-     * Gfx11RdnaBackend.emit_wmma (int_spec lookup precedes the float table). */
-    for(i = 0; i < WMMA_INT_SPECS_N; i++)
-    {
-        if(strcmp(WMMA_INT_SPECS[i].op_id, op_id) == 0)
-        {
-            _emit_wmma_int(L, op, &WMMA_INT_SPECS[i]);
-            return;
-        }
-    }
-
     for(i = 0; i < WMMA_SPECS_N; i++)
     {
         if(strcmp(WMMA_SPECS[i].op_id, op_id) == 0)
@@ -1009,10 +972,10 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     }
     if(spec == NULL)
     {
-        /* WMMA_SPECS / WMMA_INT_SPECS above cover exactly the Python
-         * _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA (gfx12), _RDNA_WMMA_INT and
-         * _GFX1250_WMMA / _GFX1250_WMMA_FP8 op_ids -- the full set reachable
-         * on every WMMA backend rocke_ll_backend_for resolves. */
+        /* WMMA_SPECS above covers exactly the Python _RDNA_WMMA (gfx11),
+         * _RDNA_GFX12_WMMA (gfx12) and _GFX1250_WMMA / _GFX1250_WMMA_FP8
+         * op_ids -- the full set of hand-written WMMAs reachable on every
+         * WMMA backend rocke_ll_backend_for resolves. */
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "unsupported RDNA WMMA op 'tile.%s' for %s",

@@ -671,22 +671,6 @@ def _mma_dst_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_dst_is_int(op_id: str) -> bool:
-    """True when ``op_id`` produces i32 (integer WMMA).
-
-    Sourced from the arch catalog's ``dst`` dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_dst_dtype``), imported
-    lazily. Op_ids absent from the catalog default to an f32 ``dst``.
-    """
-    dtypes = _arch._op_id_dst_dtype()
-    if op_id not in dtypes:
-        return False
-    dtype = dtypes[op_id]
-    if not isinstance(dtype, str):
-        raise ValueError("MMA destination dtype must be a valid dtype string")
-    return dtype_info(dtype).name == "i32"
-
-
 def _mma_dst_dtype(op_id: str) -> str:
     """The result dtype of ``op_id``, from the arch catalog.
 
@@ -3172,6 +3156,7 @@ class IRBuilder:
         ``dtype_to_ir_type``. Lowering enforces the selected instruction's operand
         and result types.
 
+
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
         kept for backward compatibility; they pass the ``op_id`` that reproduces
@@ -3217,6 +3202,7 @@ class IRBuilder:
                 dst_elem = dtype_to_ir_type(_mma_dst_dtype(op_id))
             except ValueError as exc:
                 raise ValueError(f"MMA destination dtype: {exc}") from exc
+
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
@@ -5560,15 +5546,19 @@ class IRBuilder:
 
     def trap(self) -> None:
         """Abort the kernel: ``call void @llvm.trap()`` (HIP
-        ``__builtin_trap()``), ``s_trap 2`` on the GPU.
+        ``__builtin_trap()``). The AMDGPU backend emits ``s_trap 2``; on gfx11
+        it emits its simulated trap instead: ``s_trap 2``, then ``s_sendmsg``,
+        then an ``s_sethalt`` loop.
 
-        A taken trap ends the kernel with a hardware exception. What the host
-        sees depends on the HIP runtime: the launch reports an error, or the
-        runtime aborts the process. Either way the process cannot use the GPU
-        afterwards. So a trap is the last resort, for a condition the host
-        checks before the launch and that must still never reach a memory
-        access on the device. Put it under a branch on that condition
-        (``scf_if``).
+        What a taken trap does depends on the host. On Linux (ROCr) the queue
+        reports an error and the runtime aborts the process. On Windows the
+        HIP runtime never turns the trap into an error: the launch never
+        returns. Under a debugger the wave stops at the trap. None of these
+        lets the process carry on, so a trap is the last resort, for a
+        condition the host checks before the launch and that must still never
+        reach a memory access on the device. Put it under a branch on that
+        condition (``scf_if``). A check the process must survive belongs on
+        the host, before the launch, not in a trap.
         """
         self._op("tile.trap")
 

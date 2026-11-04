@@ -8,7 +8,13 @@ from .ir import I32, Op, Type, VectorType
 
 
 def validate_unscaled_wmma(
-    op: Op, elem: Type, count: int = 8, *, source_elem: Type, source_count: int
+    op: Op,
+    elem: Type,
+    count: int = 8,
+    *,
+    source_elem: Type,
+    source_count: int,
+    arch=None,
 ) -> None:
     """Reject values that cannot use the selected instruction's fixed ABI.
 
@@ -29,13 +35,16 @@ def validate_unscaled_wmma(
             from .arch import ArchTarget
 
             op_id = op.attrs.get("op_id", op.name.removeprefix("tile."))
-            gfx = "gfx1250" if "gfx1250" in op_id else "gfx1151"
+            target = arch
+            if target is None:
+                gfx = "gfx1250" if "gfx1250" in op_id else "gfx1151"
+                target = ArchTarget.from_gfx(gfx)
             mma_operand_needs_reinterpret(
                 op_id,
                 "a" if role == 0 else "b",
                 op.operands[role].type,
                 source,
-                ArchTarget.from_gfx(gfx),
+                target,
             )
         elif op.operands[role].type != source:
             raise ValueError(f"unscaled WMMA requires src{role} to be {source.name}")
