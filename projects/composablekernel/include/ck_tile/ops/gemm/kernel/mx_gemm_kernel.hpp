@@ -501,8 +501,13 @@ struct MxGemmKernel
             // UniversalGemmKernel::IsSupportedArgument skips its shape checks for TDM pipelines.
             // The device check comes last so that the argument checks also run on a host without
             // a gfx125 device.
+            // The TDM split-K rejection is about the TDM epilogue, which overwrites C. With a
+            // split-K-capable epilogue (CShuffle, checked above as kSplitKAtomicAddSupported) each
+            // split adds into C atomically and its TDM loads are clipped to its own K range, so
+            // k_batch > 1 is checked here only with a TDM epilogue, as in UniversalGemmKernel.
+            const index_t tdm_k_batch = is_tdm_epilogue_v<EpiloguePipeline> ? kargs.k_batch : 1;
             if(!BaseKernel::IsTdmArgumentSupported("MX GEMM",
-                                                   kargs.k_batch,
+                                                   tdm_k_batch,
                                                    kargs.K,
                                                    kargs.as_ptr[0],
                                                    kargs.bs_ptr[0],
