@@ -565,6 +565,29 @@ TEST(CachingLibraryCollision, smoke_FallbackStatusIsPartOfKey)
         withFallback(false));
 }
 
+// A caller's cache tag keeps problems that are otherwise equal apart: each tag gets its own
+// entry, a repeat of one is served from it, and an untagged problem never sees a tagged entry.
+TEST(CachingLibraryCollision, smoke_CacheTagIsPartOfKey)
+{
+    auto sub = std::make_shared<PredicateSubLibrary>(
+        std::make_shared<Predicates::True<ContractionProblemGemm>>());
+    CachingLibrary<ContractionProblemGemm> library(sub);
+    auto                                   gpu = makeGpu();
+
+    auto withTag = [](ContractionProblemGemm::CacheTag const& tag) {
+        auto problem = makeProblem();
+        problem.setCacheTag(tag);
+        return problem;
+    };
+    for(auto const& tag : {ContractionProblemGemm::CacheTag{},
+                           ContractionProblemGemm::CacheTag{1, 0, 0, 0},
+                           ContractionProblemGemm::CacheTag{0, 0, 0, uint64_t(1) << 63},
+                           ContractionProblemGemm::CacheTag{},
+                           ContractionProblemGemm::CacheTag{1, 0, 0, 0}})
+        EXPECT_EQ(library.findTopSolutions(withTag(tag), gpu, 1).size(), 1u);
+    EXPECT_EQ(sub->findTopCalls, 3);
+}
+
 // The added key fields must still compare equal for identical problems, or every lookup misses.
 TEST(CachingLibraryCollision, smoke_IdenticalProblemIsServedFromCache)
 {

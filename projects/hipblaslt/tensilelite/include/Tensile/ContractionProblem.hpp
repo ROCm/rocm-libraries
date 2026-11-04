@@ -40,6 +40,8 @@
 #include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <array>
+
 namespace TensileLite
 {
     /**
@@ -905,6 +907,24 @@ namespace TensileLite
             return m_scaleZeroPointA;
         }
 
+        /**
+         * Words a caller sets to keep problems that are otherwise equal in
+         * separate CachingLibrary entries, when what it stores for a problem
+         * depends on more than the problem. Nothing in selection or in a
+         * kernel reads them; all zero, the default, is a plain problem.
+         */
+        using CacheTag = std::array<uint64_t, 4>;
+
+        void setCacheTag(CacheTag const& tag)
+        {
+            m_cacheTag = tag;
+        }
+
+        CacheTag const& cacheTag() const
+        {
+            return m_cacheTag;
+        }
+
         void setUseScaleCD(bool useScaleCD)
         {
             m_useScaleCD = useScaleCD;
@@ -1720,6 +1740,7 @@ namespace TensileLite
         int              m_scaleBlockSizeA         = 0;
         bool             m_scaleZeroPointA         = false;
         Int4Encoding     m_int4EncodingA           = Int4Encoding::Signed;
+        CacheTag         m_cacheTag                     = {};
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
