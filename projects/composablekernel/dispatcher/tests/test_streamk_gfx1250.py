@@ -44,6 +44,16 @@ GFX1250_CONFIG = (
 )
 
 
+def _write_reduction_config(tmp, reductions):
+    """Write the gfx1250 default config with a Stream-K reduction sweep into tmp."""
+    with open(GFX1250_CONFIG) as f:
+        cfg = json.load(f)
+    cfg["streamk_config"] = {"reduction_strategy": {"values": reductions}}
+    config_path = Path(tmp) / "config.json"
+    config_path.write_text(json.dumps(cfg))
+    return str(config_path)
+
+
 class TestGfx1250Supported(unittest.TestCase):
     """gfx1250 must be a first-class supported arch."""
 
@@ -157,21 +167,15 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertEqual(len(configs), 4)
 
     def test_reduction_override_replaces_config_strategies(self):
-        with open(GFX1250_CONFIG) as f:
-            cfg = json.load(f)
-        cfg["streamk_config"] = {
-            "reduction_strategy": {"values": ["atomic", "linear", "tree"]}
-        }
         with tempfile.TemporaryDirectory() as tmp:
-            config_path = Path(tmp) / "config.json"
-            config_path.write_text(json.dumps(cfg))
+            config_path = _write_reduction_config(tmp, ["atomic", "linear", "tree"])
             kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
-            swept = expand_sweep(str(config_path), "gfx1250", **kwargs)
+            swept = expand_sweep(config_path, "gfx1250", **kwargs)
             tree = expand_sweep(
-                str(config_path), "gfx1250", reduction_strategies=["tree"], **kwargs
+                config_path, "gfx1250", reduction_strategies=["tree"], **kwargs
             )
             single = expand_sweep(
-                str(config_path), "gfx1250", reduction_strategies="tree", **kwargs
+                config_path, "gfx1250", reduction_strategies="tree", **kwargs
             )
         self.assertEqual([c.name for c in single], [c.name for c in tree])
         self.assertEqual(len(swept), 3 * len(tree))
@@ -180,13 +184,9 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertTrue(all(c.name.endswith("_streamk_tree") for c in tree))
 
     def test_unknown_reduction_strategy_is_rejected(self):
-        with open(GFX1250_CONFIG) as f:
-            cfg = json.load(f)
-        cfg["streamk_config"] = {"reduction_strategy": {"values": ["bogus"]}}
         kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
         with tempfile.TemporaryDirectory() as tmp:
-            config_path = Path(tmp) / "config.json"
-            config_path.write_text(json.dumps(cfg))
+            config_path = _write_reduction_config(tmp, ["bogus"])
             for path, override in ((GFX1250_CONFIG, ["Linear"]), (config_path, None)):
                 with self.subTest(override=override), self.assertRaisesRegex(
                     ValueError, "reduction strategy"
@@ -287,6 +287,19 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                 self.assertEqual(
                     {c.reduction_strategy for c in configs}, {reduction or "atomic"}
                 )
+
+    def test_reduction_override_keeps_kernel_budget_distinct(self):
+        # Overriding a multi-strategy sweep must not spend --max-kernels on copies
+        # of one kernel.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = _write_reduction_config(tmp, ["atomic", "linear", "tree"])
+            argv = ["--arch", "gfx1250", "--reduction-strategy", "tree"]
+            configs, _ = self._main_build_configs(
+                config_path, *argv, "--max-kernels", "3"
+            )
+        base = [c.name for c in configs if not any(c.vector_sizes)]
+        self.assertEqual(len(set(base)), 3)
+        self.assertEqual(len({c.name for c in configs}), len(configs))
 
     def test_arch_config_is_a_file_drop(self):
         with tempfile.TemporaryDirectory() as tmp:
