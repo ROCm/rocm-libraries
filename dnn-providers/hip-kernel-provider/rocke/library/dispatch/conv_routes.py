@@ -536,6 +536,23 @@ def dispatch_conv_route(req, routes: ConvRoutes, pins: ConvPins | None = None) -
                          steps=winograd_steps(plan, problem, direction))
 
 
+def dispatch_conv_production(req, routes: ConvRoutes | None = None, pins: ConvPins | None = None) -> ConvRoutePlan:
+    """One call's plan from the opt-in tables, routes first: the route of
+    ``req`` when ``routes`` routes it, else a ``direct`` plan of its pin in
+    ``pins``. Raises ``ValueError`` when neither table covers the problem (the
+    caller then uses its default selection, ``dispatch_conv_grouped``)."""
+    if routes is not None and routes.lookup(req) is not None:
+        return dispatch_conv_route(req, routes, pins)
+    if pins is not None and pins.lookup(req) is not None:
+        from .grouped_convolution import _conv_problem
+
+        res = dispatch_conv_pinned(req, pins)
+        step = RouteStep(f"pinned {res.spec.name}", "pinned", (("A", "x"), ("B", "w"), ("D", "y")))
+        return ConvRoutePlan(case=res.spec.case, route=ROUTE_DIRECT, request=req, problem=_conv_problem(req),
+                             kernel=res, kernel_request=req, steps=(step,), calls=pins.lookup(req).calls)
+    raise ValueError("neither the route table nor the pin table covers this problem")
+
+
 def request_for_route(route: ConvRoute, arch: str, **kw):
     """The ``ConvGroupedRequest`` of a routed case (from its command)."""
     from .conv_pins import request_from_miopen_cmd

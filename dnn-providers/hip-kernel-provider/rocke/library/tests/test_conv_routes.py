@@ -192,6 +192,22 @@ def test_kernel_from_pins():
         cr.dispatch_conv_route(_req("dgrad_s1_pad1", r), r)
 
 
+def test_production_routes_then_pins():
+    pins = cp.load_conv_pins(PIN_TABLE, "deterministic")
+    r = _routes()
+    plan = cr.dispatch_conv_production(_req("fwd_s3_pad1", r), r, pins)
+    assert plan.route == "winograd"
+    # not routed, pinned: a direct plan of the pin (here the halo-form problem)
+    hreq = cr.halo_request(_req("fwd_s1_pad1", r))
+    plan = cr.dispatch_conv_production(hreq, r, pins)
+    assert plan.route == "direct" and plan.kernel_label.split()[0] == pins.lookup(hreq).instance
+    assert plan.steps[0].kind == "pinned" and plan.calls == pins.lookup(hreq).calls
+    with pytest.raises(ValueError, match="neither"):
+        cr.dispatch_conv_production(dataclasses.replace(hreq, C=8), r, pins)
+    with pytest.raises(ValueError, match="neither"):
+        cr.dispatch_conv_production(hreq)
+
+
 def test_default_dispatch_unchanged():
     from dispatch import grouped_convolution as gc
 

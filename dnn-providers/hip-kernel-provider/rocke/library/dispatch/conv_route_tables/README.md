@@ -61,6 +61,9 @@ plan.kernel           # DispatchResult of the pinned kernel (direct / padcopy_ha
 plan.winograd         # Winograd3dPlan (winograd): Winograd3dDropin(plan.problem, plan.direction, plan.winograd)
 ```
 
+`dispatch_conv_production(req, routes, pins)` answers from both opt-in tables, routes first: the route when the
+route table covers the problem, else a `direct` plan of the pin table's kernel (`ValueError` when neither does).
+
 `benchmarks/common/conv_route_exec.RouteBinding` binds a plan to device buffers (torch-free; the pinned step is bound
 as `--run-from-cache` binds a cached binary). `benchmarks/common/conv_route_check.py` verifies, determinism-checks and
 times every routed case through dispatch; `benchmarks/common/conv_step_replay.py --routes <table>#<mode>@pad1`
