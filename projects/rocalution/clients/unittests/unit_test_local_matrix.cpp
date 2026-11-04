@@ -1026,14 +1026,9 @@ TEST_P(local_matrix_formats, moves_keep_the_format_and_the_values)
             A->Sync();
             expect_matrix(*A, ref, format(), Backend::Accelerator);
 
-            KNOWN_BUG("Sync after MoveToHostAsync deletes the matrix");
-            expect_in_child([&] {
-                auto B = make(ref);
-                B->MoveToAccelerator();
-                B->MoveToHostAsync();
-                B->Sync();
-                expect_matrix(*B, ref, format(), Backend::Host);
-            });
+            A->MoveToHostAsync();
+            A->Sync();
+            expect_matrix(*A, ref, format(), Backend::Host);
         }
     });
 }
@@ -1060,13 +1055,10 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
     if(available(Backend::Accelerator))
     {
-        KNOWN_BUG("Sync after MoveToHostAsync deletes the matrix");
-        expect_in_child([&] {
-            auto D = make_local_matrix(Backend::Accelerator, ref);
-            D->MoveToHostAsync();
-            D->Sync();
-            expect_matrix(*D, ref, csr_format, Backend::Host);
-        });
+        auto D = make_local_matrix(Backend::Accelerator, ref);
+        D->MoveToHostAsync();
+        D->Sync();
+        expect_matrix(*D, ref, csr_format, Backend::Host);
     }
 }
 

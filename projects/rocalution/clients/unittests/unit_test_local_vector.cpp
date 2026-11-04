@@ -1192,16 +1192,12 @@ TEST(local_vector_moves, sync_after_move_to_host_async_ends_on_the_host)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
 
-    KNOWN_BUG("Sync after MoveToHostAsync also runs the MoveToAcceleratorAsync branch, which "
-              "deletes the host copy and leaves the vector without data, as for LocalMatrix");
-    expect_in_child([] {
-        const std::vector<double> a = x<double>();
-        auto                      v = make_local_vector(Backend::Accelerator, a);
-        v->MoveToHostAsync();
-        v->Sync();
-        EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
-        EXPECT_EQ(values_of(*v), a);
-    });
+    const std::vector<double> a = x<double>();
+    auto                      v = make_local_vector(Backend::Accelerator, a);
+    v->MoveToHostAsync();
+    v->Sync();
+    EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
+    EXPECT_EQ(values_of(*v), a);
 }
 
 TEST(local_vector_allocation, allocate_with_size_zero_empties_the_vector)
