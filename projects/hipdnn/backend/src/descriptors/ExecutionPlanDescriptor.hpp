@@ -39,9 +39,10 @@ private:
     int64_t _engineId = INVALID_ENGINE_ID;
     bool _isOverrideShapeEnabled = false;
 
-    // Cached serialized execution-plan blob. Populated lazily on the first
-    // serializeBackendPlan() call and reused by all subsequent size/fill calls.
-    // A finalized plan is immutable, so this never needs invalidation.
+    // Cached serialized execution-plan blob. A loaded plan starts with the exact plan bytes it was
+    // loaded from (for a graph-and-plan container, only the plan part). A built plan fills it on
+    // its first serializeBackendPlan() call. Every later size/fill call reuses it. A finalized
+    // plan is immutable, so this never needs invalidation.
     mutable std::vector<uint8_t> _serializedPlanCache;
     // Guards _serializedPlanCache. serializeBackendPlan() is const and can run on several threads.
     mutable std::mutex _serializedPlanCacheMutex;

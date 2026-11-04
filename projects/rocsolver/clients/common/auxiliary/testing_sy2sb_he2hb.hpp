@@ -604,7 +604,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "berror", "orthogonality");
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "berror", "ortho");
                 rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1]);
             }
             else

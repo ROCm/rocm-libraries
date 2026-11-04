@@ -41,13 +41,15 @@ void EngineDescriptor::finalize()
                    HIPDNN_STATUS_BAD_PARAM,
                    "EngineDescriptor::finalize() failed: Engine id is not set.");
 
-    auto engineIds
-        = _graph->getHandle()->getPluginResourceManager()->getApplicableEngineIds(_graph.get());
-    if(std::find(engineIds.begin(), engineIds.end(), _engineId) == engineIds.end())
+    // Asks only the plugin that owns the pinned engine, so its own failure surfaces as is
+    // and an unrelated plugin's failure cannot fail the pin.
+    if(!_graph->getHandle()->getPluginResourceManager()->isEngineApplicable(_engineId,
+                                                                            _graph.get()))
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "EngineDescriptor::finalize() failed: Engine id is not in a valid "
-                              "range of engine IDs");
+                              "EngineDescriptor::finalize() failed: Engine id is not applicable "
+                              "to this graph (no engine plugin offered it; see the log for "
+                              "plugin warnings)");
     }
 
     // Engine details load lazily: providers build the knob list by ranking the catalog, which
