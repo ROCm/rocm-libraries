@@ -51,6 +51,14 @@ from rocke.helpers.magic_division import calculate_magic_numbers
 
 _NAME = "attention_gfx942_dense"
 _SPEC_ID = "gfx942_dense"
+# Every gfx942 dense candidate, (name, spec_id): all opt-in, all priority 3.
+_VARIANTS = (
+    (_NAME, _SPEC_ID),
+    ("attention_gfx942_dense_qbminor", "gfx942_dense_qbminor"),
+    ("attention_gfx942_dense_persist_aot", "gfx942_dense_persist_aot"),
+    ("attention_gfx942_dense_btminor_aot", "gfx942_dense_btminor_aot"),
+    ("attention_gfx942_dense_hqswz_aot", "gfx942_dense_hqswz_aot"),
+)
 
 
 def _req(**kw) -> AttentionRequest:
@@ -90,8 +98,8 @@ def _spec(req: AttentionRequest, **knobs) -> Gfx942AttentionDenseSpec:
     return attention_tuning_spec(req, _SPEC_ID).kernel_spec
 
 
-def _candidate():
-    return next(c for c in attention_candidates() if c.name == _NAME)
+def _candidate(name: str = _NAME):
+    return next(c for c in attention_candidates() if c.name == name)
 
 
 class _Gfx942Arch:
@@ -108,68 +116,92 @@ class _Gfx942Arch:
 
 class TestGfx942DenseRegistration(unittest.TestCase):
     def test_candidate_is_registered(self):
-        self.assertIn(_NAME, [c.name for c in attention_candidates()])
+        """A new gfx942 dense candidate must join _VARIANTS, or the opt-in tests
+        below never see it."""
+        registered = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.name.startswith(_NAME)
+        }
+        self.assertEqual(registered, {name for name, _ in _VARIANTS})
 
     def test_spec_id_and_algorithm(self):
-        c = _candidate()
-        self.assertEqual(c.spec_id, _SPEC_ID)
-        self.assertEqual(c.algorithm, "attention_dense")
-        self.assertTrue(c.opt_in)
+        for name, spec_id in _VARIANTS:
+            with self.subTest(spec_id=spec_id):
+                c = _candidate(name)
+                self.assertEqual(c.spec_id, spec_id)
+                self.assertEqual(c.algorithm, "attention_dense")
+                self.assertTrue(c.opt_in)
 
     def test_priority_outranks_every_other_candidate(self):
-        """Documents WHY the opt-in gate matters: nothing else holds this arm back."""
-        c = _candidate()
-        others = [o for o in attention_candidates() if o.name != _NAME]
-        self.assertTrue(all(c.priority <= o.priority for o in others))
+        """Documents WHY the opt-in gate matters: nothing else holds these arms back."""
+        for name, spec_id in _VARIANTS:
+            with self.subTest(spec_id=spec_id):
+                c = _candidate(name)
+                others = [o for o in attention_candidates() if o.name != name]
+                self.assertTrue(all(c.priority <= o.priority for o in others))
 
 
 class TestGfx942DenseOptIn(unittest.TestCase):
     def test_unpinned_requests_never_select_it(self):
         with _Gfx942Arch():
-            for kw in (
-                dict(algorithm="auto", spec_id="auto"),
-                dict(algorithm="auto", spec_id=_SPEC_ID),
-                dict(algorithm="attention_dense", spec_id="auto"),
-            ):
-                with self.subTest(**kw):
-                    ok, why = _candidate().admits(_req(**kw))
-                    self.assertFalse(ok)
-                    self.assertIn("opt-in", why)
+            for name, spec_id in _VARIANTS:
+                for kw in (
+                    dict(algorithm="auto", spec_id="auto"),
+                    dict(algorithm="auto", spec_id=spec_id),
+                    dict(algorithm="attention_dense", spec_id="auto"),
+                ):
+                    with self.subTest(candidate=name, **kw):
+                        ok, why = _candidate(name).admits(_req(**kw))
+                        self.assertFalse(ok)
+                        self.assertIn("opt-in", why)
             routed = dispatch_attention(_req(algorithm="auto", spec_id="auto"))
-            self.assertNotEqual(routed.candidate.name, _NAME)
+            self.assertNotIn(routed.candidate.name, {name for name, _ in _VARIANTS})
 
     def test_routes_on_explicit_pin(self):
         with _Gfx942Arch():
-            r = dispatch_attention(_req())
-            self.assertEqual(r.candidate.name, _NAME)
-            self.assertIsInstance(r.spec, AttentionTuningSpec)
-            self.assertEqual(r.spec.path, "dense")
-            self.assertIsInstance(r.spec.kernel_spec, Gfx942AttentionDenseSpec)
-            self.assertIn("gfx942", r.spec.kernel_name())
-            self.assertNotEqual(r.grid, (0, 0, 0))
+            for name, spec_id in _VARIANTS:
+                with self.subTest(spec_id=spec_id):
+                    r = dispatch_attention(_req(spec_id=spec_id))
+                    self.assertEqual(r.candidate.name, name)
+                    self.assertIsInstance(r.spec, AttentionTuningSpec)
+                    self.assertEqual(r.spec.path, "dense")
+                    self.assertIsInstance(r.spec.kernel_spec, Gfx942AttentionDenseSpec)
+                    self.assertIn("gfx942", r.spec.kernel_name())
+                    self.assertNotEqual(r.grid, (0, 0, 0))
 
     def test_tuning_id_replays_and_unknown_ids_are_refused(self):
         with _Gfx942Arch():
-            req = _req(seqlen_q=8192, seqlen_k=8192)
-            specs = [
-                s
-                for _c, s in islice(
-                    iter_registered_attention_combos(req, candidate_prefix=_NAME), 12
-                )
-            ]
-            for spec in specs:
-                with self.subTest(tuning_id=spec.tuning_id):
-                    got = dispatch_attention(
-                        _req(
-                            seqlen_q=8192,
-                            seqlen_k=8192,
-                            tuning_id=spec.tuning_id,
-                        )
+            for name, spec_id in _VARIANTS:
+                req = _req(spec_id=spec_id, seqlen_q=8192, seqlen_k=8192)
+                # The prefix also matches the longer candidate names; keep this one's.
+                specs = [
+                    s
+                    for _c, s in islice(
+                        (
+                            combo
+                            for combo in iter_registered_attention_combos(
+                                req, candidate_prefix=name
+                            )
+                            if combo[0].name == name
+                        ),
+                        12,
                     )
-                    self.assertEqual(got.spec, spec)
-            ok, why = _candidate().admits(_req(tuning_id="other_wpe2@00"))
-            self.assertFalse(ok)
-            self.assertIn("tuning_id", why)
+                ]
+                with self.subTest(spec_id=spec_id):
+                    self.assertTrue(specs)
+                for spec in specs:
+                    with self.subTest(spec_id=spec_id, tuning_id=spec.tuning_id):
+                        got = dispatch_attention(
+                            dataclasses.replace(req, tuning_id=spec.tuning_id)
+                        )
+                        self.assertEqual(got.spec, spec)
+                with self.subTest(spec_id=spec_id, tuning_id="other_wpe2@00"):
+                    ok, why = _candidate(name).admits(
+                        _req(spec_id=spec_id, tuning_id="other_wpe2@00")
+                    )
+                    self.assertFalse(ok)
+                    self.assertIn("tuning_id", why)
 
 
 class TestGfx942DenseSupportGates(unittest.TestCase):
