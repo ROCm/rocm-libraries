@@ -2688,11 +2688,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             // W4A16 keeps a float copy of A, dequantized, for the CPU reference.
             if(isW4A16Scaling(arg.scaleA))
                 hostBytes += size_t(lda[i]) * size_t(M[i]) * sizeof(float);
-            // The host buffers. The pool pins 20% extra for a buffer below kHostPoolRetainLimit,
-            // so that a slightly larger request can reuse it.
+            // The host buffers, each as large as the pool pins it (host_pool_capacity).
             size_t pinned = 0;
             auto   pin    = [&](size_t bytes, size_t count = 1) {
-                pinned += (bytes < kHostPoolRetainLimit ? bytes + bytes / 5 : bytes) * count;
+                pinned += host_pool_capacity(bytes) * count;
             };
             if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
