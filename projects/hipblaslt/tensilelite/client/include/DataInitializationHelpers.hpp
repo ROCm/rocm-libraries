@@ -224,12 +224,30 @@ namespace TensileLite
             {
                 if(layout == MXScaleLayout::GFX950)
                 {
-                    size_t const kExtent  = kIsRows ? rows : cols;
-                    size_t const kBlocks  = mxBlock > 0 ? (kExtent + mxBlock - 1) / mxBlock : 0;
+                    size_t const kExtent = kIsRows ? rows : cols;
+                    size_t const kBlocks = mxBlock > 0 ? (kExtent + mxBlock - 1) / mxBlock : 0;
+                    if(!kIsRows && mxBlock > 0 && kExtent % mxBlock != 0)
+                        throw std::runtime_error(
+                            "GFX950 scales with K along the columns require K to be a multiple of "
+                            + std::to_string(mxBlock) + ", got " + std::to_string(kExtent));
                     size_t const mnExtent = (kBlocks > 0 && natural.size() % kBlocks == 0)
                                                 ? natural.size() / kBlocks
                                                 : (kIsRows ? cols : rows);
-                    return DGen::preSwizzleScalesGFX950(natural, {mnExtent, kBlocks});
+                    if(mnExtent * kBlocks != natural.size())
+                        throw std::runtime_error("GFX950 scales do not form an MN by K block grid: "
+                                                 + std::to_string(mnExtent) + " x "
+                                                 + std::to_string(kBlocks) + " covers "
+                                                 + std::to_string(mnExtent * kBlocks) + " of "
+                                                 + std::to_string(natural.size()) + " scales");
+                    if(kIsRows)
+                        return DGen::preSwizzleScalesGFX950(natural, {mnExtent, kBlocks});
+                    // The swizzle reads [MN][K block]; a free-dim contiguous operand's
+                    // natural scales are [K block][MN].
+                    std::vector<uint8_t> mnMajor(natural.size());
+                    for(size_t kb = 0; kb < kBlocks; ++kb)
+                        for(size_t mn = 0; mn < mnExtent; ++mn)
+                            mnMajor[mn * kBlocks + kb] = natural[kb * mnExtent + mn];
+                    return DGen::preSwizzleScalesGFX950(mnMajor, {mnExtent, kBlocks});
                 }
                 if(layout == MXScaleLayout::GFX1250 && mxBlock > 0)
                     return DGen::preSwizzleScalesGFX1250(
