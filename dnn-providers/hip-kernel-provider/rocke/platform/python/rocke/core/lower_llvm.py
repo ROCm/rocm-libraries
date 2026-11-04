@@ -46,6 +46,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
     _int_add_wrap_error,
     _scf_for_carried_descriptor_error,
     BF16,
@@ -69,7 +70,7 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_branch_yield,
+    _if_else_yields,
     _is_unsigned,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -7446,8 +7447,7 @@ class _Lowerer:
         """
         # Refuse a malformed if/else, or a branch that does not yield the
         # results, before reading the op or emitting.
-        for branch in range(2):
-            _if_else_branch_yield(op, branch)
+        _if_else_yields(op)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7509,7 +7509,7 @@ class _Lowerer:
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
-            raise RuntimeError("scf.yield without enclosing scf.for")
+            raise ValueError(_ORPHAN_YIELD_ERROR)
         self._yield_stack[-1].extend(self._operand(v) for v in op.operands)
 
     def _op_cf_return(self, op: Op) -> None:

@@ -1364,59 +1364,69 @@ def _gpu_check_failed_op_error(op: Op) -> str | None:
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
+# The refusal for an scf.yield that no scf.for or scf.if_else with results
+# encloses. Both lowerings report it, in both engines (the C++ engine's
+# ROCKE_ORPHAN_YIELD_ERROR has the same text).
+_ORPHAN_YIELD_ERROR = "scf.yield outside an scf.for or an scf.if_else with results"
 
-def _if_else_result_type_error(index: int, result_type: Type) -> Optional[str]:
-    """The refusal for an ``scf.if_else`` result ``index`` of type
-    ``result_type``, or None when an if/else can carry it.
 
-    An LDS allocation is a name the lowerings resolve to its base, not a value:
-    neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
-    one. The builder and :func:`_if_else_branch_yield` use this rule, and the
-    C++ engine (``rocke_i_if_else_result_type_error``) reports the same text.
+def _refuse_if_else_result_type(index: int, result_type: Type) -> None:
+    """Refuse an ``scf.if_else`` result ``index`` of type ``result_type`` that
+    an if/else cannot carry.
+
+    A packed-only type has no value form (:func:`_refuse_packed_only_value`,
+    ``TypeError``). An LDS allocation is a name the lowerings resolve to its
+    base, not a value: neither the phi (LLVM) nor the variable (HIP) that holds
+    a result can hold one (``ValueError``). The packed-only rule comes first, so
+    an LDS tile of i4 gets its ``TypeError``. The builder and
+    :func:`_if_else_yields` use this rule, and the C++ engine
+    (``rocke_i_check_if_else_result_type``) reports the same type and text.
     """
+    _refuse_packed_only_value("scf.if_else", result_type)
     if isinstance(result_type, SmemType):
-        return (
+        raise ValueError(
             f"scf.if_else result {index} is an LDS allocation, which an if/else "
             "cannot carry; allocate before the if/else and yield an offset into "
             "the allocation instead"
         )
-    return None
 
 
-def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
-    """The ``scf.yield`` that gives ``op``'s results their values on branch
-    ``branch`` (0 then, 1 else), or None when the ``scf.if_else`` ``op`` has no
-    results.
+def _holds_scf_yield(ops: Sequence[Op]) -> bool:
+    """True when one of ``ops`` is an ``scf.yield``."""
+    return any(op.name == "scf.yield" for op in ops)
 
-    Every ``scf.if_else`` has one condition and two branches. One with results
-    ends each branch in an ``scf.yield`` of one value per result, of the
-    result's type, and never a buffer descriptor
+
+def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
+    """The ``scf.yield`` that ends branch ``branch`` (0 then, 1 else) of the
+    ``scf.if_else`` ``op``, whose condition and branch counts
+    :func:`_if_else_yields` has checked; None when ``op`` has no results.
+
+    Only the ``scf.yield`` that ends a branch of an if/else with results has
+    its values taken, so a branch holds no other ``scf.yield``; the rule reads
+    only the ops directly in a branch. That closing ``scf.yield`` gives
+    one value per result, of the result's type, and never a buffer descriptor
     (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
-    (HIP) that holds a result can hold the lowered descriptor. No result is an
-    LDS allocation (:func:`_if_else_result_type_error`). The builder, the
-    verifier and every lowering refuse anything else with these texts, in both
-    engines (``rocke_i_if_else_branch_yield``); the counts are checked first,
-    as serialized IR reaches the verifier and the lowerings without passing the
-    builder.
+    (HIP) that holds a result can hold the lowered descriptor.
     """
-    if len(op.operands) != 1 or len(op.regions) != 2:
-        raise ValueError(
-            f"scf.if_else: expected 1 condition / 2 branches, got "
-            f"{len(op.operands)} / {len(op.regions)}"
-        )
-    if not op.results:
-        return None
-    for index, result in enumerate(op.results):
-        error = _if_else_result_type_error(index, result.type)
-        if error is not None:
-            raise ValueError(error)
     name = _IF_ELSE_BRANCHES[branch]
     count = len(op.results)
     region = op.regions[branch]
+    if not count:
+        if _holds_scf_yield(region.ops):
+            raise ValueError(
+                f"scf.if_else has no results, so its {name} branch cannot "
+                "contain scf.yield"
+            )
+        return None
     if not region.ops or region.ops[-1].name != "scf.yield":
         raise ValueError(
             f"scf.if_else has {count} results, so its {name} branch must end in "
             f"scf.yield of {count} values"
+        )
+    if _holds_scf_yield(region.ops[:-1]):
+        raise ValueError(
+            f"scf.if_else has {count} results, so its {name} branch must yield "
+            "only at its end"
         )
     yld = region.ops[-1]
     if len(yld.operands) != count:
@@ -1437,6 +1447,28 @@ def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
                 f"branch yields {value.type.name}"
             )
     return yld
+
+
+def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
+    """The ``scf.yield`` that ends the then and the else branch of the
+    ``scf.if_else`` ``op``; both None when ``op`` has no results.
+
+    Every ``scf.if_else`` has one condition and two branches, and each result
+    is a type an if/else can carry (:func:`_refuse_if_else_result_type`); each
+    branch then follows :func:`_if_else_branch_yield`. The builder, the
+    verifier and every lowering refuse anything else with these types and
+    texts, in both engines (``rocke_i_if_else_yields``). The counts are checked
+    first, as serialized IR reaches the verifier and the lowerings without
+    passing the builder.
+    """
+    if len(op.operands) != 1 or len(op.regions) != 2:
+        raise ValueError(
+            f"scf.if_else: expected 1 condition / 2 branches, got "
+            f"{len(op.operands)} / {len(op.regions)}"
+        )
+    for index, result in enumerate(op.results):
+        _refuse_if_else_result_type(index, result.type)
+    return _if_else_branch_yield(op, 0), _if_else_branch_yield(op, 1)
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -7346,13 +7378,11 @@ class IRBuilder:
                     b.scf_yield(b.zero_vec_f16(8))
             (value,) = branch.results
 
-        Leaving the ``with`` refuses a branch that does not end that way.
+        Leaving the ``with`` refuses a branch that does not end that way, and
+        a branch of an if/else without results that holds an ``scf_yield``.
         """
-        for index, t in enumerate(result_types):
-            _refuse_packed_only_value("scf.if_else", t)
-            error = _if_else_result_type_error(index, t)
-            if error is not None:
-                raise ValueError(error)
+        for index, result_type in enumerate(result_types):
+            _refuse_if_else_result_type(index, result_type)
         results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
@@ -7593,8 +7623,7 @@ class _IfElseBuilder:
         # The regions were already popped by their own context managers. Once
         # both branches are built, refuse one that does not yield the results.
         if exc_type is None:
-            for branch in range(len(_IF_ELSE_BRANCHES)):
-                _if_else_branch_yield(self.op, branch)
+            _if_else_yields(self.op)
 
     @property
     def results(self) -> List[Value]:

@@ -614,14 +614,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     else if(o == ROCKE_OP_SCF_IF_ELSE)
     {
         char err[ROCKE_ERR_MSG_CAP];
-        const rocke_op_t* yld = NULL;
-        for(int branch = 0; branch < 2; ++branch)
+        const rocke_op_t* yields[2];
+        if(rocke_i_if_else_yields(op, yields, err, sizeof err) != ROCKE_OK)
         {
-            if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof err))
-            {
-                v_errf(v, op, "%s", err);
-                break;
-            }
+            v_errf(v, op, "%s", err);
         }
     }
     else if(o == ROCKE_OP_TILE_BUFFER_LOAD_VN || o == ROCKE_OP_TILE_BUFFER_STORE_VN)

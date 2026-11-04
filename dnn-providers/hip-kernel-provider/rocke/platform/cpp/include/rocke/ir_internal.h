@@ -142,10 +142,18 @@ const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
  * not. */
 bool rocke_i_is_packed_only(const rocke_type_t* t);
 
-/* Throw ckc::TypeError when rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
- * which states the rule and the message. rocke_i_op calls it for every result
- * and rocke_b_param for every parameter, so no builder makes such a value.
- * NULL-safe. */
+/* The refusal of an `op_name` value of type `t` whose elements are packed-only
+ * (rocke_i_is_packed_only), written to `buf`, or NULL when `t` is not; the text
+ * of core/ir.py::_refuse_packed_only_value. NULL-safe. */
+const char* rocke_i_packed_only_value_error(const char* op_name,
+                                            const rocke_type_t* t,
+                                            char* buf,
+                                            size_t cap);
+
+/* Throw ckc::TypeError with rocke_i_packed_only_value_error's text when
+ * rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
+ * which states the rule. rocke_i_op calls it for every result and rocke_b_param
+ * for every parameter, so no builder makes such a value. NULL-safe. */
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
 
 /* Throw ckc::TypeError when `t` is unsigned (rocke_type_is_unsigned) and
@@ -296,23 +304,35 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
 #define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"
 
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
- * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
- * Otherwise returns false and writes the Python engine's refusal into `err`.
- * The builder and rocke_i_if_else_branch_yield use it. */
-bool rocke_i_if_else_result_type_ok(int index,
-                                    const rocke_type_t* result_type,
-                                    char* err,
-                                    size_t err_cap);
+ * (Python core/ir.py::_refuse_if_else_result_type, which raises where this
+ * returns): ROCKE_OK, or the status of the Python exception with its text
+ * written to `err`. A packed-only type is refused first (ROCKE_ERR_TYPE), then
+ * an LDS allocation (ROCKE_ERR_VALUE). The builder and rocke_i_if_else_yields
+ * use it. */
+rocke_status_t rocke_i_check_if_else_result_type(int index,
+                                                 const rocke_type_t* result_type,
+                                                 char* err,
+                                                 size_t err_cap);
 
-/* The scf.yield that gives the scf.if_else `op`'s results their values on
- * branch `branch` (0 then, 1 else), in `*out_yield`; NULL when `op` has no
- * results (Python core/ir.py::_if_else_branch_yield). Every if/else has one
- * condition and two branches, checked first; no result is an LDS allocation;
- * a branch of an if/else with results ends in an scf.yield of one value per
- * result, of the result's type, and never a buffer descriptor. Otherwise
- * returns false and writes the Python engine's refusal into `err`. */
-bool rocke_i_if_else_branch_yield(
-    const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap);
+/* The scf.yield that ends the then and the else branch of the scf.if_else `op`,
+ * in `out_yields[0]` and `out_yields[1]`; both NULL when `op` has no results
+ * (Python core/ir.py::_if_else_yields). Every if/else has one condition and two
+ * branches, checked first; each result passes rocke_i_check_if_else_result_type;
+ * a branch of an if/else without results holds no scf.yield, and a branch of
+ * one with results holds one, at its end, of one value per result, of the
+ * result's type, and never a buffer descriptor. The rule reads only the ops
+ * directly in a branch. Returns ROCKE_OK, or the status of the Python engine's
+ * exception with its refusal written to `err`. The verifier and both lowerings
+ * use it. */
+rocke_status_t rocke_i_if_else_yields(const rocke_op_t* op,
+                                      const rocke_op_t* out_yields[2],
+                                      char* err,
+                                      size_t err_cap);
+
+/* The refusal for an scf.yield that no scf.for or scf.if_else with results
+ * encloses (Python core/ir.py::_ORPHAN_YIELD_ERROR, same text). Both lowerings
+ * report it. */
+extern const char* const ROCKE_ORPHAN_YIELD_ERROR;
 
 /* Refuse a bitcast of a `source` value to `target` unless both are values of
  * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names

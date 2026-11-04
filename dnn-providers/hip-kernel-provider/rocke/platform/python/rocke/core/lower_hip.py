@@ -29,6 +29,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
     F64,
     _int_add_wrap_error,
     _int_cmp_pred_error,
@@ -45,7 +46,7 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_branch_yield,
+    _if_else_yields,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -3062,7 +3063,7 @@ class _Lowerer:
         # In practice we assume scf.yield is the last op in the for body.
         parent_for = _find_enclosing_for(self.kernel.body, op)
         if parent_for is None:
-            raise RuntimeError("scf.yield without enclosing scf.for")
+            raise ValueError(_ORPHAN_YIELD_ERROR)
         meta = parent_for.attrs.get("iter_args", [])
         if len(op.operands) != len(meta):
             raise RuntimeError(
@@ -3083,14 +3084,14 @@ class _Lowerer:
         # The results are variables declared before the ``if``; the
         # ``scf.yield`` that ends each branch assigns them.
         # First: the rule checks the condition and branch counts read below.
-        yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+        then_yield, else_yield = _if_else_yields(op)
         (cond,) = op.operands
         for result in op.results:
             self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
         self._emit(f"if({_name(cond)}) {{")
-        self._lower_if_else_branch(op, op.regions[0], yields[0])
+        self._lower_if_else_branch(op, op.regions[0], then_yield)
         self._emit("} else {")
-        self._lower_if_else_branch(op, op.regions[1], yields[1])
+        self._lower_if_else_branch(op, op.regions[1], else_yield)
         self._emit("}")
 
     def _lower_if_else_branch(self, op: Op, region: Region, yld: Optional[Op]) -> None:

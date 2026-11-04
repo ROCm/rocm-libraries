@@ -2621,13 +2621,11 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
         return;
     /* Refuse a malformed if/else, or a branch that does not yield the results,
      * before reading the op or emitting. */
-    for(int branch = 0; branch < 2; branch++)
-    {
-        const rocke_op_t* yld = NULL;
-        char err[ROCKE_ERR_MSG_CAP];
-        if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof(err)))
-            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", err);
-    }
+    const rocke_op_t* yields[2];
+    char err[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t status = rocke_i_if_else_yields(op, yields, err, sizeof(err));
+    if(status != ROCKE_OK)
+        rocke_ll_fail(L, status, "%s", err);
     const char* const* then_values = NULL;
     const char* const* else_values = NULL;
     int num_then_values = 0;
@@ -2693,12 +2691,17 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
-/* Python _op_scf_yield: record yielded operand strings into the top frame. */
+/* Python _op_scf_yield: record yielded operand strings into the top frame,
+ * which an scf.for or an scf.if_else with results pushed. */
 static void _op_scf_yield(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || L->yield_stack.len == 0)
+    if(!rocke_ll_live(L))
     {
         return;
+    }
+    if(L->yield_stack.len == 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", ROCKE_ORPHAN_YIELD_ERROR);
     }
     for(int i = 0; i < op->num_operands; i++)
     {

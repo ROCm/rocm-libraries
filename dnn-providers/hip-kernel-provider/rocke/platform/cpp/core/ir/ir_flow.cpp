@@ -2852,9 +2852,11 @@ rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
     for(int i = 0; i < num_results; i++)
     {
         char err[ROCKE_ERR_MSG_CAP];
-        if(!rocke_i_if_else_result_type_ok(i, result_types[i], err, sizeof(err)))
+        const rocke_status_t status
+            = rocke_i_check_if_else_result_type(i, result_types[i], err, sizeof(err));
+        if(status != ROCKE_OK)
         {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err);
+            rocke_i_set_err(b, status, "%s", err);
             return out;
         }
     }
@@ -2886,14 +2888,22 @@ rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
     return out;
 }
 
-/* Python core/ir.py::_if_else_result_type_error; the text is the Python
- * engine's. An LDS allocation is a name the lowerings resolve to its base, not
- * a value, so neither a phi nor a HIP variable can hold one. */
-bool rocke_i_if_else_result_type_ok(int index,
-                                    const rocke_type_t* result_type,
-                                    char* err,
-                                    size_t err_cap)
+const char* const ROCKE_ORPHAN_YIELD_ERROR
+    = "scf.yield outside an scf.for or an scf.if_else with results";
+
+/* Python core/ir.py::_refuse_if_else_result_type; the types and texts are the
+ * Python engine's. A packed-only type has no value form; an LDS allocation is a
+ * name the lowerings resolve to its base, not a value, so neither a phi nor a
+ * HIP variable can hold one. */
+rocke_status_t rocke_i_check_if_else_result_type(int index,
+                                                 const rocke_type_t* result_type,
+                                                 char* err,
+                                                 size_t err_cap)
 {
+    if(rocke_i_packed_only_value_error("scf.if_else", result_type, err, err_cap) != NULL)
+    {
+        return ROCKE_ERR_TYPE;
+    }
     if(result_type && result_type->kind == ROCKE_TYPE_SMEM)
     {
         snprintf(err,
@@ -2901,39 +2911,51 @@ bool rocke_i_if_else_result_type_ok(int index,
                  "scf.if_else result %d is an LDS allocation, which an if/else cannot carry; "
                  "allocate before the if/else and yield an offset into the allocation instead",
                  index);
-        return false;
+        return ROCKE_ERR_VALUE;
     }
-    return true;
+    return ROCKE_OK;
 }
 
-bool rocke_i_if_else_branch_yield(
+/* Whether one of the first `num_ops` ops directly in `region` is an scf.yield. */
+static bool holds_yield(const rocke_region_t* region, int num_ops)
+{
+    for(int i = 0; i < num_ops; i++)
+    {
+        if(region->ops[i]->opcode == ROCKE_OP_SCF_YIELD)
+            return true;
+    }
+    return false;
+}
+
+/* Python core/ir.py::_if_else_branch_yield: the scf.yield that ends branch
+ * `branch` (0 then, 1 else) of the scf.if_else `op`, whose condition and branch
+ * counts rocke_i_if_else_yields has checked, in `*out_yield` (NULL when `op` has
+ * no results). Only that closing scf.yield has its values taken, so a branch
+ * holds no other; the rule reads only the ops directly in a branch. Every
+ * refusal is a ValueError; returns false and writes it into `err`. */
+static bool if_else_branch_yield(
     const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap)
 {
     static const char* const branch_names[2] = {"then", "else"};
     const char* name = branch_names[branch];
-    const rocke_region_t* region;
+    const rocke_region_t* region = op->regions[branch];
     const rocke_op_t* yld;
     int count = op->num_results;
     int i;
 
     *out_yield = NULL;
-    /* The counts first: serialized IR reaches the verifier and the lowerings
-     * without passing the builder. */
-    if(op->num_operands != 1 || op->num_regions != 2)
-    {
-        snprintf(err,
-                 err_cap,
-                 "scf.if_else: expected 1 condition / 2 branches, got %d / %d",
-                 op->num_operands,
-                 op->num_regions);
-        return false;
-    }
     if(count == 0)
-        return true;
-    for(i = 0; i < count; i++)
-        if(!rocke_i_if_else_result_type_ok(i, op->results[i]->type, err, err_cap))
+    {
+        if(holds_yield(region, region->num_ops))
+        {
+            snprintf(err,
+                     err_cap,
+                     "scf.if_else has no results, so its %s branch cannot contain scf.yield",
+                     name);
             return false;
-    region = op->regions[branch];
+        }
+        return true;
+    }
     if(region->num_ops == 0 || region->ops[region->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
     {
         snprintf(err,
@@ -2942,6 +2964,15 @@ bool rocke_i_if_else_branch_yield(
                  count,
                  name,
                  count);
+        return false;
+    }
+    if(holds_yield(region, region->num_ops - 1))
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else has %d results, so its %s branch must yield only at its end",
+                 count,
+                 name);
         return false;
     }
     yld = region->ops[region->num_ops - 1];
@@ -2987,6 +3018,43 @@ bool rocke_i_if_else_branch_yield(
     }
     *out_yield = yld;
     return true;
+}
+
+rocke_status_t rocke_i_if_else_yields(const rocke_op_t* op,
+                                      const rocke_op_t* out_yields[2],
+                                      char* err,
+                                      size_t err_cap)
+{
+    out_yields[0] = NULL;
+    out_yields[1] = NULL;
+    /* The counts first: serialized IR reaches the verifier and the lowerings
+     * without passing the builder. */
+    if(op->num_operands != 1 || op->num_regions != 2)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else: expected 1 condition / 2 branches, got %d / %d",
+                 op->num_operands,
+                 op->num_regions);
+        return ROCKE_ERR_VALUE;
+    }
+    for(int i = 0; i < op->num_results; i++)
+    {
+        const rocke_status_t status
+            = rocke_i_check_if_else_result_type(i, op->results[i]->type, err, err_cap);
+        if(status != ROCKE_OK)
+        {
+            return status;
+        }
+    }
+    for(int branch = 0; branch < 2; branch++)
+    {
+        if(!if_else_branch_yield(op, branch, &out_yields[branch], err, err_cap))
+        {
+            return ROCKE_ERR_VALUE;
+        }
+    }
+    return ROCKE_OK;
 }
 
 void rocke_b_ret(rocke_ir_builder_t* b)

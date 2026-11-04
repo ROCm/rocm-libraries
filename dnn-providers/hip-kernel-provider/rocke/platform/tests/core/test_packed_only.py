@@ -18,7 +18,15 @@ import subprocess
 
 import pytest
 
-from rocke.core.ir import I32, IRBuilder, Param, PtrType, VectorType, dtype_to_ir_type
+from rocke.core.ir import (
+    I32,
+    IRBuilder,
+    Param,
+    PtrType,
+    SmemType,
+    VectorType,
+    dtype_to_ir_type,
+)
 from rocke.tests.engines import (
     assert_both_engines_reject,
     assert_both_engines_reject_hip,
@@ -46,6 +54,20 @@ _BUILDERS = {
         ),
     ),
     "smem_alloc": ("tile.smem_alloc", lambda b, t: b.smem_alloc(t, (64,))),
+    "if_else": (
+        "scf.if_else",
+        lambda b, t: b.scf_if_else(
+            b.cmp_lt(b.const_i32(0), b.const_i32(0)), result_types=[t]
+        ),
+    ),
+    # The packed-only rule comes before the if/else's LDS rule.
+    "if_else_lds": (
+        "scf.if_else",
+        lambda b, t: b.scf_if_else(
+            b.cmp_lt(b.const_i32(0), b.const_i32(0)),
+            result_types=[SmemType(t, (64,))],
+        ),
+    ),
 }
 
 
