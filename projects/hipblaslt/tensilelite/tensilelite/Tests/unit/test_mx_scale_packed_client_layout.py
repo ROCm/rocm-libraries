@@ -17,6 +17,8 @@ config. These tests check both paths.
 import inspect
 import os
 
+import pytest
+
 from tensilelite.BenchmarkProblems import _benchmarkProblemType, _readCacheIfValid
 from tensilelite.ClientWriter import writeClientConfigIni
 from tensilelite.CustomKernels import (
@@ -29,6 +31,7 @@ _KERNEL_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "CustomKernels",
 )
+_CLIENT = os.path.join(os.path.dirname(os.path.dirname(_KERNEL_ROOT)), "client")
 
 
 def _firstKernelIn(subdir):
@@ -159,6 +162,11 @@ def test_cache_reader_surfaces_the_layout_decision(tmp_path):
     assert _readCacheIfValid(legacyPath, step, "{path}")["MXScalesPacked"] is False
 
 
+@pytest.mark.skipif(
+    not os.path.isdir(_CLIENT),
+    reason=f"source-tree check: no TensileLite client sources at {_CLIENT}; the "
+    "installed test payload does not ship them",
+)
 def test_packed_and_preswizzled_scales_are_refused_together():
     """The client must reject the two contradictory scale declarations.
 
@@ -174,10 +182,7 @@ def test_packed_and_preswizzled_scales_are_refused_together():
     canonical scales and reports success for a pre-swizzle test that permuted
     nothing. Measured with the check removed, that is exactly what happens.
     """
-    factory = os.path.join(
-        os.path.dirname(os.path.dirname(_KERNEL_ROOT)),
-        "client", "src", "ClientProblemFactory.cpp",
-    )
+    factory = os.path.join(_CLIENT, "src", "ClientProblemFactory.cpp")
     with open(factory, encoding="utf-8") as f:
         src = f.read()
 
