@@ -23,7 +23,7 @@ _installation: ValidatedRocm | None = None
 
 def initialize() -> None:
     """Validate generator prerequisites without requiring the optional client."""
-    from tensilelite import __version__
+    from . import __version__
 
     global _installation
 
@@ -39,7 +39,7 @@ def client_executable() -> Path:
     if _installation is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
 
-    from tensilelite import __version__
+    from . import __version__
 
     candidate = None
     try:
