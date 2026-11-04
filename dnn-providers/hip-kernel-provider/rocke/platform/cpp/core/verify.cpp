@@ -778,10 +778,10 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
     }
     {
-        char descriptor_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        char loop_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
         {
-            v_errf(v, op, "%s", descriptor_error);
+            v_errf(v, op, "%s", loop_error);
         }
     }
 
@@ -1066,6 +1066,16 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     }
 
     check_region(&v, k->body, 1);
+    /* The kernel body takes no yields; an scf.for or scf.if_else checks the
+     * yields its own regions hold. */
+    if(k->body)
+    {
+        const rocke_op_t* orphan = rocke_i_orphan_yield(k->body->ops, k->body->num_ops);
+        if(orphan)
+        {
+            v_errf(&v, orphan, "%s", ROCKE_ORPHAN_YIELD_ERROR);
+        }
+    }
 
     /* The scope holds pointers; param ids were heap-strdup'd above (leak: the
      * scope table is freed below but the strings would leak). Free those before

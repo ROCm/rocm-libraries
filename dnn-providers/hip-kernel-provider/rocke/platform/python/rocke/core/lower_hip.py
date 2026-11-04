@@ -32,7 +32,7 @@ from .ir import (
     _ORPHAN_YIELD_ERROR,
     F64,
     _int_add_wrap_error,
-    _scf_for_carried_descriptor_error,
+    _scf_for_error,
     KernelDef,
     Op,
     PtrType,
@@ -2963,9 +2963,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
-        descriptor_error = _scf_for_carried_descriptor_error(op)
-        if descriptor_error is not None:
-            raise ValueError(descriptor_error)
+        error = _scf_for_error(op)
+        if error is not None:
+            raise ValueError(error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]
