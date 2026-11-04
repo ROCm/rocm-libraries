@@ -32,8 +32,9 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
     def complete_compile(command, **_kwargs):
         if "-o" in command:
             Path(command[command.index("-o") + 1]).touch()
-        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+        return SimpleNamespace(returncode=0, stdout=b"matching fixture IR", stderr="")
 
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
     run = Mock(side_effect=complete_compile)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(sys, "platform", platform)
@@ -77,6 +78,83 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
             assert command.index(flag) > archive_index
         else:
             assert flag not in command
+
+
+@pytest.mark.parametrize("profile", [None, "llvm20"])
+def test_micro_parity_forwards_one_profile_to_both_emitters(
+    monkeypatch, tmp_path, profile
+):
+    from rocke.runtime import comgr
+
+    driver = load_driver(
+        "profile_micro_parity", PLATFORM / "tests/instances/parity/run_parity.py"
+    )
+    monkeypatch.setattr(driver.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(driver, "_cxx", lambda: "c++")
+    archive = tmp_path / "librocke_core.a"
+    archive.touch()
+    monkeypatch.setattr(sys, "argv", ["run_parity", "--archive", str(archive)])
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    query = Mock(
+        return_value=comgr.CompilerInfo(
+            (24, 0, 0), "fixture", None, "selected", "selected"
+        )
+    )
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", query)
+    if profile:
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", profile)
+    seen = []
+
+    def run(command, **kwargs):
+        if "-o" in command:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        seen.append(kwargs["env"]["ROCKE_LLVM_FLAVOR"])
+        return SimpleNamespace(returncode=0, stdout=b"matching IR", stderr=b"")
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    assert driver.main() == 0
+    assert seen == [profile or "llvm24"] * 8
+    assert os.environ.get("ROCKE_LLVM_FLAVOR") == profile
+    if profile:
+        query.assert_not_called()
+    else:
+        query.assert_called_once_with(required=True)
+
+
+@pytest.mark.parametrize("failure", ["native", "reference", "empty", "drift"])
+def test_micro_parity_does_not_pass_failed_or_empty_emitters(
+    monkeypatch, tmp_path, failure
+):
+    driver = load_driver(
+        "failure_micro_parity", PLATFORM / "tests/instances/parity/run_parity.py"
+    )
+    monkeypatch.setattr(driver.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(driver, "_cxx", lambda: "c++")
+    archive = tmp_path / "librocke_core.a"
+    archive.touch()
+    monkeypatch.setattr(sys, "argv", ["run_parity", "--archive", str(archive)])
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
+
+    def run(command, **kwargs):
+        if "-o" in command:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        native = len(command) == 2
+        failed = (failure == "native" and native) or (
+            failure == "reference" and not native
+        )
+        output = (
+            b""
+            if failure == "empty"
+            else b"different" if failure == "drift" and native else b"IR"
+        )
+        return SimpleNamespace(
+            returncode=1 if failed else 0,
+            stdout=output,
+            stderr=b"diagnostic" if failed else b"",
+        )
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    assert driver.main() == 1
 
 
 @pytest.mark.parametrize(
