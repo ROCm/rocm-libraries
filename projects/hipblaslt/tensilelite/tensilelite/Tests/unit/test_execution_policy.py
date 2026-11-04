@@ -8,7 +8,7 @@ import itertools
 
 import pytest
 
-from Tensile.ExecutionPolicy import (
+from tensilelite.ExecutionPolicy import (
     normalize_execution_policy,
     normalize_hybrid_assignment_policy,
     resolve_policy,

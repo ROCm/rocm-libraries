@@ -18,7 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 {% if config.engine.census_name_symbol %}
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -203,6 +203,21 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryKernelDeclaresTheEmittedRu
     {
         for(const auto& kernel : pack.kernels)
         {
+{% if config.launch_names %}
+            // A multi-launch kernel keeps a default `source`; the kinds it ships are its
+            // `sources` entries'.
+            if(!kernel.sources.empty())
+            {
+                for(const auto& [launch, source] : kernel.sources)
+                {
+                    EXPECT_EQ(source.kind, EXPECTED_SOURCE_KIND)
+                        << "kernel '" << kernel.name << "' launch '" << launch
+                        << "' reached the loader as a different source kind than this "
+                        << "bundle ships";
+                }
+                continue;
+            }
+{% endif %}
             EXPECT_EQ(kernel.source.kind, EXPECTED_SOURCE_KIND)
                 << "kernel '" << kernel.name << "' reached the loader as a different "
                 << "source kind than this bundle ships";
@@ -238,7 +253,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "{{ config.score_symbol | cpp_escape }}");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "{{ config.score_symbol | cpp_escape }}");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
 }
 {% else %}

@@ -3,8 +3,8 @@
 
 """Gate the arch-domain *warning lane* — the first consumer of the artifact.
 
-``test_arch_domain_artifact.py`` gates the committed data. This file gates what
-the lowerer does with it: every intrinsic demand goes through one chokepoint,
+``tests/tools/test_arch_domain_artifact.py`` gates the committed data. This file
+gates what the lowerer does with it: every intrinsic demand goes through one chokepoint,
 that chokepoint consults the table, and it speaks only for a measured, definite
 negative.
 

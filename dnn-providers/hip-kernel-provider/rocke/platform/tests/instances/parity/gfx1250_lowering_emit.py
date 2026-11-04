@@ -127,12 +127,10 @@ def _wmma_scaled(a_kind, b_kind, scale_mode, scale_a="e8m0", scale_b="e8m0"):
 
 
 def _tr16_b128(elem):
-    """ds_read_b128_tr_b16.
+    """ds_load_tr16_b128.
 
-    gfx950 has one type-agnostic opcode returning <8 x i16> that the handler
-    reinterprets; gfx1250 has per-element-type opcodes (.v8f16 / .v8bf16) that
-    land in the right type with no reinterpret. Run on both arches so the
-    element-typed selection cannot be hardcoded either way.
+    gfx1250 has per-element-type opcodes (.v8f16 / .v8bf16) that land in the
+    right type. gfx950 has no wide transpose read and raises.
     """
 
     def build(b: IRBuilder) -> None:
@@ -254,9 +252,7 @@ CONFIGS = [
     (_wmma_scaled("fp4", "fp4", "scale"), "gfx1250"),
     (_wmma_scaled("fp4", "fp4", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
-    (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
-    (_tr16_b128(BF16), "gfx950"),
     (build_barrier_drains, "gfx1250"),
     (build_barrier_drains, "gfx950"),
     (build_wait_counters, "gfx1250"),

@@ -15,7 +15,7 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
-  - [Key Files Reference](#key-files-reference)
+  - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -42,7 +42,7 @@ These plugins focus on performance optimization by benchmarking different implem
 These plugins provide the actual kernel implementations for operations. They contain the compute kernels that execute on the target hardware (GPUs, accelerators, etc.).
 
 > [!IMPORTANT]
-> 🕒 **Current Status**: Only kernel engine plugins are presently supported in hipDNN. Support for engine heuristic/selection and benchmarking/tuning plugins will be added in future releases. See the [Roadmap](./Roadmap.md#plugins) for future development plans.
+> 🕒 **Current Status**: Kernel engine plugins and engine heuristic/selection plugins are supported in hipDNN. Heuristic plugins implement [`HeuristicsPluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/HeuristicsPluginApi.h). hipDNN loads them from `hipdnn_plugins/heuristics/`. Use `HIPDNN_HEURISTIC_PLUGIN_DIR` or `hipdnnSetHeuristicPluginPaths_ext` to change this location. Support for benchmarking/tuning plugins will be added in future releases. See the [Roadmap](./Roadmap.md) for future development plans.
 
 ## SDK Libraries
 
@@ -64,7 +64,7 @@ The FlatBuffers SDK contains the FlatBuffers schemas, generated headers, and gra
 - Generated headers under `hipdnn_flatbuffers_sdk/data_objects/`
 - Wrapper classes (`GraphWrapper`, `NodeWrapper`, `IEngineConfig`) for working with serialized graphs
 
-For adding new operations to the FlatBuffers SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
+For adding new operations to the FlatBuffers SDK (schemas, nodes, attributes), see the [Adding a New Operation Guide](./AddingNewOperations.md).
 
 ### Plugin SDK (`plugin_sdk`)
 
@@ -91,6 +91,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
+- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
 
 ## Engine IDs
 
@@ -98,7 +99,7 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 
 ### How It Works
 
-1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
+1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_ENGINE", "MY_CUSTOM_ENGINE")
 2. **Hash Function**: The `hipdnn_data_sdk::utilities::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
 3. **Registration**: Engine names built into the hipDNN tree are registered in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp` for discoverability
 
@@ -151,7 +152,7 @@ Engines built into the hipDNN tree are registered as follows:
 
 ## Creating a Kernel Engine Plugin
 
-This section focuses on developing kernel engine plugins; currently the only supported plugin type.
+This section focuses on developing kernel engine plugins.
 
 ### Prerequisites
 
@@ -163,10 +164,11 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
    - Create a new project/repository for your plugin
    - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
    - See [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/) as a reference implementation.
+   - See the [example engine plugin](../samples/example_engine_plugin/README.md) for a self-contained template that you can copy and rename.
 
 2. **Implement Plugin API Functions**
 
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in `EnginePluginApi.h`. However, the common architectural pattern consists of:
    - **Engine Manager**: Manages available engines and their capabilities
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
    - **Execution Plans**: Define how operations are executed
@@ -359,14 +361,16 @@ public:
         MySettings& executionSettings) const override
     {
         // Extract and apply knob settings to execution settings
-        for (const auto& setting : engineConfig.knobSettings()) {
-            const std::string& knobId = setting.knobIdStr();
+        for (const auto& setting : engineConfig.knobSettingWrappers()) {
+            const std::string knobId = setting->knobId();
 
             if (knobId == hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME) {
-                executionSettings.benchmarkingEnabled = (setting.intValue() == 1);
+                executionSettings.benchmarkingEnabled =
+                    (setting->valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value() == 1);
             }
             else if (knobId == "myplugin.tile_size") {
-                executionSettings.tileSize = setting.intValue();
+                executionSettings.tileSize =
+                    setting->valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
             }
         }
     }
@@ -416,7 +420,9 @@ The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements th
 
 A handle used with the ingestor **must** expose `hipStream_t getStream() const`: benchmarking's default timer brackets each candidate with HIP events on that stream. Both `GenericPlanBuilder` and `BenchmarkPlan` `static_assert` the requirement, so a handle without it fails to compile with a message naming it rather than failing at plan-build time. The requirement sits on the ingestor templates, not on `validateHandleType()`, so a provider that never instantiates them is unaffected. `BenchmarkPlan` accepts an optional `Timer` in place of that default; it exists so tests can prove candidate selection without a device, and is not part of any stability promise.
 
-`Graph::autotune()` in `EXHAUSTIVE` mode primes every engine advertising the knob: it compiles a *separate* plan carrying `global.benchmarking=1`, executes it once, then discards that plan and compiles and times the plan it keeps from the original knob settings. Discarding is required, because that first execute samples every candidate, and timing it would measure the sampling sweep instead of a single kernel; the ingestor's `BenchmarkPlan` resolves once for the plan's lifetime (see `TheWinnerIsResolvedOnceAcrossRepeatedExecuteCalls`), so this is specifically about the priming execute, not a claim that a benchmarking-enabled plan resamples on every call. Priming therefore only pays off if its result survives in the provider: MIOpen's search populates a find-db that outlives the throwaway plan, and the ingestor's winner cache does the same. The ingestor keeps the measured ranking in its winner cache, keyed by (graph content, device), so the ranking survives the throwaway priming plan. An `EXHAUS…
+`Graph::autotune()` in `EXHAUSTIVE` mode primes every engine advertising the knob: it compiles a *separate* plan carrying `global.benchmarking=1`, executes it once, then discards that plan and compiles and times the plan it keeps from the original knob settings. Discarding is required, because that first execute samples every candidate, and timing it would measure the sampling sweep instead of a single kernel; the ingestor's `BenchmarkPlan` resolves once for the plan's lifetime (see `TheWinnerIsResolvedOnceAcrossRepeatedExecuteCalls`), so this is specifically about the priming execute, not a claim that a benchmarking-enabled plan resamples on every call. Priming therefore only pays off if its result survives in the provider: MIOpen's search populates a find-db that outlives the throwaway plan, and the ingestor's winner cache does the same. The ingestor keeps the measured ranking in its winner cache, keyed by (graph content, device), so the ranking survives the throwaway priming plan. An `EXHAUSTIVE` run samples the candidates only when the winner cache has no record that covers them. `HIPDNN_FORCE_BENCHMARKING=0` suppresses that cost.
+
+The frontend sizes its workspace estimate for an engine that exposes `global.benchmarking` from the engine's workspace query with that knob set on the engine config. The workspace an engine reports for that configuration must therefore cover the priming plan's workspace, or EXHAUSTIVE priming is skipped when the caller allocates from `get_estimated_max_workspace_size()`.
 
 A provider implementing `global.benchmarking` by hand rather than through the ingestor must apply `hipdnn_plugin_sdk::benchmarkingOverrideFromEnv()` as the ingestor and MIOpen do: consulted *outside* any config-validity branch and composed as `override.value_or(knobValue)` -- **never** an OR. An OR cannot express force-off, because a `false` override term never clears a `true` knob term, so `HIPDNN_FORCE_BENCHMARKING=0` could not override a knob-enabled run.
 
@@ -427,6 +433,23 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 2. **Update documentation** to indicate the deprecation and recommend alternatives.
 
 3. **Remove only during major version updates** to maintain backward compatibility.
+
+### Saving Execution Plans from Ingestor Engines
+
+A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
+
+- **Opt in per dispatch handler.** Override `saveLaunchInputs` and `restoreLaunch` in `hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler`. The defaults return no value, which means the handler does not support saving or restoring. In the same handler, override `supportsSaving` to return true.
+- **Save launch inputs under a versioned name.** `saveLaunchInputs` returns the handler's named, typed launch inputs (never computed grid or argument values) with a versioned dispatch name. Register the handler under that versioned name as well as under the dispatch symbol its descriptors use, so a loaded plan finds the handler whose contract gives the values their meaning.
+- **Change the version when the contract changes.** The version identifies the contract between the saved values and the launch. It is not the format version of the saved file. A saved plan can pair an older code object with the current launch. Use a new version when one of these items changes:
+  - The names, types, or meanings of the values.
+  - The kernel arguments that the launch passes: their order, count, kinds, sizes, or meanings.
+  - How the launch calculates the grid, the block, or the dynamic LDS from the values.
+
+  Keep the handler of the old version registered while plans saved with that version must load.
+- **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
+- **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
+- **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must have a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
+- **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
 
 ## Plugin Architecture
 
@@ -655,7 +678,7 @@ your_kernel_plugin_project/
 
 Unit tests focus on the internal implementation of your plugin components:
 
-- **Location**: `plugins/<plugin_name>/tests/`
+- **Location**: `<plugin_root>/tests/`
 - **Purpose**: Test individual components in isolation (engines, utilities, kernel logic)
 - **Requirements**:
   - Must be fast-running
@@ -665,23 +688,22 @@ Unit tests focus on the internal implementation of your plugin components:
 
 ### Integration Tests
 
-Integration tests validate end-to-end functionality of your plugin:
+Integration tests validate end-to-end functionality of your plugin. They come in two kinds.
 
-- **Location**: `plugins/<plugin_name>/integration_tests/`
-- **Purpose**: Validate correctness of graph execution and accuracy of results
+**Graph correctness (shared suite).** Test that a graph runs on your engine and produces correct results with bundles in the shared integration test suite, not with plugin-local C++ tests. Add your provider as an engine lane and add or extend bundles and support claims. See [Adding tests](../../../dnn-providers/integration-tests/docs/adding-tests.md#add-an-engine-lane) and [Running the integration tests](../../../dnn-providers/integration-tests/docs/running-tests.md). The shared suite's C++ graph tests are kept for special cases and build only with `-DBUILD_CPP_GRAPH_TESTS=ON`.
+
+**Provider-specific cases.** Keep tests for behavior that only your plugin has in `<plugin_root>/integration_tests/`:
+
+- **Location**: `<plugin_root>/integration_tests/`
+- **Purpose**: Validate plugin behavior that bundles cannot express
 - **Requirements**:
-  - Test complete operation graphs
-  - Validate against reference implementations
-  - Test different data types, layouts, dimensions, and edge-cases for each
   - Enable tests for all supported ASICs
   - GPU typically required for meaningful validation
   - Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-For a comprehensive example of an integration test, see: [`dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
-
-Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#principles).
+Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#methodology).
 
 ## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 
@@ -694,8 +716,8 @@ At a high level, it:
 - Coordinates streams and handles synchronization
 
 ### Structure
-- **Main Plugin**: [`MiopenPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenPlugin.cpp) - Entry point and plugin registration
-- **Engine Manager**: [`EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp) - Manages MIOpen engines
+- **Main Plugin**: [`MiopenPluginPublic.cpp`](../../../dnn-providers/miopen-provider/MiopenPluginPublic.cpp) - Entry point and plugin registration
+- **Container**: [`MiopenContainer.cpp`](../../../dnn-providers/miopen-provider/MiopenContainer.cpp) - Owns the `EngineManager` that manages MIOpen engines
 - **MIOpen Engine**: [`MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
 
 ## Troubleshooting

@@ -175,7 +175,7 @@ void testing_hybmv(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // ELL width limit
-    int width_limit = (m > 0) ? ((2 * nnz - 1) / m + 1) : 0;
+    int width_limit = (m > 0) ? ((2 * (nnz - 1)) / m + 1) : 0;
 
     // Limit ELL user width
     if(part == HIPSPARSE_HYB_PARTITION_USER)
@@ -185,24 +185,8 @@ void testing_hybmv(Arguments argus)
     }
 
     // Convert CSR to HYB
-    hipsparseStatus_t status
-        = hipsparseXcsr2hyb(handle, m, n, descr, dval, dptr, dcol, hyb, user_ell_width, part);
-
-    if(part == HIPSPARSE_HYB_PARTITION_MAX)
-    {
-        // Compute max ELL width
-        int ell_max_width = 0;
-        for(int i = 0; i < m; ++i)
-        {
-            ell_max_width = std::max(hcsr_row_ptr[i + 1] - hcsr_row_ptr[i], ell_max_width);
-        }
-
-        if(ell_max_width > width_limit)
-        {
-            verify_hipsparse_status_invalid_value(status, "ell_max_width > width_limit");
-            return;
-        }
-    }
+    CHECK_HIPSPARSE_ERROR(
+        hipsparseXcsr2hyb(handle, m, n, descr, dval, dptr, dcol, hyb, user_ell_width, part));
 
     if(argus.unit_check)
     {

@@ -196,6 +196,10 @@ def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
         # ``v_sub`` pair pre-canonicalisation.
         return b.fneg(x)
     if op == "abs":
+        if x.type.name == "f64":
+            # ``llvm.fabs.f64`` clears the sign bit in one instruction;
+            # ``max(x, -x)`` would cost three ``v_max_f64`` under IEEE mode.
+            return b.fabs(x)
         # ``|x| = max(x, -x)`` is the AMDGPU-friendly form; the
         # ``v_max3_f32`` family selects the max directly without the
         # ``fsub(0.0, x)`` constant load.

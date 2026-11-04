@@ -1,5 +1,5 @@
 import pytest
-from Tensile.SolutionStructs.segment_interleave import evaluate, aligned_budget_ok, SEG
+from tensilelite.SolutionStructs.segment_interleave import evaluate, aligned_budget_ok, SEG
 
 pytestmark = pytest.mark.unit
 
@@ -545,8 +545,8 @@ def _tc_mt(state, tc):
 
 def _piece_lds_addrs(state, tc):
     """LDS address of every TDM piece of `tc`, run through the writer's SGPR arithmetic."""
-    from Tensile.Components.TDMFuse import tdmWavePartition
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.Components.TDMFuse import tdmWavePartition
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
     class _Writer:
         tdmWaveLdsAddr = KernelWriterAssembly.tdmWaveLdsAddr
@@ -590,7 +590,7 @@ def test_tdmfuse_rows_keep_the_two_component_layout(tdmFuse, mode, layout):
 @pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
 @pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
 def test_tdm_pieces_land_where_the_local_reads_expect_them(tdmFuse, layout):
-    from Tensile.Components.TDMFuse import tdmWavePartition
+    from tensilelite.Components.TDMFuse import tdmWavePartition
 
     state = _tdmfuse_state(tdmFuse, LDSSegmentInterleave=1, **_TDMFUSE_LAYOUTS[layout])
     r = evaluate(state)
@@ -604,7 +604,7 @@ def test_tdm_pieces_land_where_the_local_reads_expect_them(tdmFuse, layout):
 
 
 # ---- LDSSegmentBRotate gate (b_rotate_reason) ----
-from Tensile.SolutionStructs.segment_interleave import b_rotate_reason
+from tensilelite.SolutionStructs.segment_interleave import b_rotate_reason
 
 def _brot_state(**ovr):
     # F8 MT128x128x256 [2,2] aligned layout: A0,B0 fit seg0, so the oracle pads comp 1 to 64K.

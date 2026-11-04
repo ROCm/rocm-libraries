@@ -41,17 +41,18 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 import pytest
 
-from Tensile.Common.GlobalParameters import (
+
+from tensilelite.Common.GlobalParameters import (
     defaultBenchmarkCommonParameters,
     defaultInternalSupportParams,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     getAllCustomKernelNames,
     getCustomKernelContents,
     readCustomKernelConfig,
 )
-from Tensile.Components.TDMFuse import tdmWavePartition
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.TDMFuse import tdmWavePartition
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from rocisa.code import Module
 
 
@@ -538,15 +539,15 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # checks but are not counted here, so adding either kind does not edit this
 # census.
 EXPECTED_CENSUS = {
-    # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
-    "declaredNonZero": 28,
+    # Explicit non-zero StaggerU: 24 at 8 and 3 at 4.
+    "declaredNonZero": 27,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
     # baked into the code, which is exactly why they declare
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
-    "declaredNonZeroReadingPackedArgument": 4,
+    "declaredNonZeroReadingPackedArgument": 3,
     # No StaggerU key at all, so they inherit the default of 32.
-    "undeclared": 32,
+    "undeclared": 18,
 }
 
 

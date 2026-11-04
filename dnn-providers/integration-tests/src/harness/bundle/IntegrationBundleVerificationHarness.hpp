@@ -228,9 +228,8 @@ public:
         commitClaims(claims.observation.results, outcome);
         // Unconditional: both rules are self-guarding, so neither needs a surrounding
         // condition here.
-        raiseComplaints(
-            {claims.complaint,
-             shallowPassComplaint(outcome, bundleRequiredDepth(), _bundlePath.string())});
+        raiseComplaints({claims.complaint,
+                         shallowPassComplaint(outcome, depthOwedByPass(), _bundlePath.string())});
         // Before the disposition, which returns: a pass must say what it was compared
         // against, or "auto" landing on a reference is indistinguishable from a skip.
         _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
@@ -357,6 +356,18 @@ private:
     {
         return _bundle != nullptr ? requiredDepth(_bundle->metadata.enforcementLevel)
                                   : VerificationDepth::VERIFIED;
+    }
+
+    // How far a test may go and still be a pass rather than a shallow one: the bundle's
+    // own depth, unless --skip-graph-validation asked for the applicability rung alone.
+    //
+    // Deliberately not folded into bundleRequiredDepth(). That one decides whether a
+    // claim is confirmed, and a run that never executed the graph must leave it merely
+    // accepted, not publish support nothing verified.
+    VerificationDepth depthOwedByPass() const
+    {
+        return _deps.policy.skipGraphValidation ? VerificationDepth::APPLICABLE
+                                                : bundleRequiredDepth();
     }
 
     enum class RefStatus

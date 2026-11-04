@@ -25,7 +25,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -50,6 +53,9 @@ bool contains(const std::string& text, const std::string& needle) {
 
 constexpr const char* kSmemRule = "SmemSelfOverlapUnderXnackReplay";
 constexpr const char* kAlignRule = "ScalarTupleAlignment";
+constexpr const char* kVectorAlignRule = "VectorTupleAlignment";
+constexpr const char* kWmmaRule = "WmmaAccumulatorReuse";
+constexpr const char* kPinRule = "ProducerPinMatrix";
 
 /// Looked up by name rather than by index, so adding a rule does not renumber
 /// every other test.
@@ -117,7 +123,7 @@ class Gfx1250AllocationRulesTest : public ::testing::Test {
 
 }  // namespace
 
-TEST_F(Gfx1250AllocationRulesTest, DeclaresBothRulesWithTheRightKinds) {
+TEST_F(Gfx1250AllocationRulesTest, DeclaresEveryRuleWithTheRightKind) {
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
     EXPECT_TRUE(rules.problems().empty()) << rules.toString();
 
@@ -128,22 +134,34 @@ TEST_F(Gfx1250AllocationRulesTest, DeclaresBothRulesWithTheRightKinds) {
     // access reads versus writes.
     EXPECT_EQ(smem->kind(), RuleKind::Interference);
 
-    const AllocationRule* align = findRule(rules, kAlignRule);
-    ASSERT_NE(align, nullptr) << rules.toString();
-    EXPECT_FALSE(align->description.empty());
-    // Placement: it is about which index a tuple may start on, full stop.
-    EXPECT_EQ(align->kind(), RuleKind::Placement);
+    // Both alignment rows are about which index a tuple may start on, full stop.
+    for (const char* name : {kAlignRule, kVectorAlignRule}) {
+        const AllocationRule* align = findRule(rules, name);
+        ASSERT_NE(align, nullptr) << name << " missing from " << rules.toString();
+        EXPECT_FALSE(align->description.empty()) << name;
+        EXPECT_EQ(align->kind(), RuleKind::Placement) << name;
+    }
+
+    const AllocationRule* wmma = findRule(rules, kWmmaRule);
+    ASSERT_NE(wmma, nullptr) << rules.toString();
+    EXPECT_FALSE(wmma->description.empty());
+    EXPECT_EQ(wmma->kind(), RuleKind::Pairing);
+
+    const AllocationRule* pin = findRule(rules, kPinRule);
+    ASSERT_NE(pin, nullptr) << rules.toString();
+    EXPECT_FALSE(pin->description.empty());
+    EXPECT_EQ(pin->kind(), RuleKind::Pin);
 }
 
-TEST_F(Gfx1250AllocationRulesTest, BothRulesAreActive) {
-    // The SMEM one was promoted after its audit came back silent; alignment is an
-    // encoding requirement that was never optional. Demoting either should have
-    // to change this line and say why.
+TEST_F(Gfx1250AllocationRulesTest, EveryRuleIsActive) {
+    // The SMEM one was promoted after its audit came back silent; both alignment
+    // rows are encoding requirements that were never optional. Demoting any of
+    // them should have to change this line and say why.
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
-    ASSERT_NE(findRule(rules, kSmemRule), nullptr);
-    ASSERT_NE(findRule(rules, kAlignRule), nullptr);
-    EXPECT_EQ(findRule(rules, kSmemRule)->status, RuleStatus::Active);
-    EXPECT_EQ(findRule(rules, kAlignRule)->status, RuleStatus::Active);
+    for (const char* name : {kSmemRule, kAlignRule, kVectorAlignRule, kPinRule}) {
+        ASSERT_NE(findRule(rules, name), nullptr) << name;
+        EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Active) << name;
+    }
 }
 
 TEST_F(Gfx1250AllocationRulesTest, WithoutXnackReplayOnlyTheGatedRuleGoesInert) {
@@ -154,10 +172,12 @@ TEST_F(Gfx1250AllocationRulesTest, WithoutXnackReplayOnlyTheGatedRuleGoesInert) 
     ASSERT_NE(findRule(rules, kSmemRule), nullptr) << rules.toString();
     EXPECT_EQ(findRule(rules, kSmemRule)->status, RuleStatus::Off);
 
-    // Alignment is an encoding requirement of every gfx1250 module, so no
-    // capability can switch it off.
-    ASSERT_NE(findRule(rules, kAlignRule), nullptr);
-    EXPECT_EQ(findRule(rules, kAlignRule)->status, RuleStatus::Active);
+    // Both alignment rows are encoding requirements of every gfx1250 module, so
+    // no capability can switch either off. The pin row is ungated the same way.
+    for (const char* name : {kAlignRule, kVectorAlignRule, kPinRule}) {
+        ASSERT_NE(findRule(rules, name), nullptr) << name;
+        EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Active) << name;
+    }
 }
 
 TEST_F(Gfx1250AllocationRulesTest, WithoutTheCapabilityNoRangeIsWidened) {
@@ -290,13 +310,85 @@ TEST_F(Gfx1250AllocationRulesTest, AlignmentForbidsExactlyTheBasesTheAssemblerRe
     EXPECT_NE(rules.forbidsBase(RegType::S, 2, 16), nullptr);
 }
 
-TEST_F(Gfx1250AllocationRulesTest, AlignmentDoesNotConstrainVectorRegisters) {
-    // gfx1250 has no alignment requirement on VGPR tuples, and the pipeline does
-    // not allocate them anyway. Constraining them would cost registers for
-    // nothing.
+// ---------------------------------------------------------------------------
+// VectorTupleAlignment
+// ---------------------------------------------------------------------------
+
+TEST_F(Gfx1250AllocationRulesTest, VectorAlignmentForbidsExactlyTheBasesTheAssemblerRejects) {
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
-    EXPECT_EQ(rules.forbidsBase(RegType::V, 1, 2), nullptr);
-    EXPECT_EQ(rules.forbidsBase(RegType::V, 3, 4), nullptr);
+
+    // A single VGPR sits anywhere.
+    EXPECT_EQ(rules.forbidsBase(RegType::V, 1, 1), nullptr);
+
+    // Every width above one needs an even base and nothing more. Probed against
+    // the assembler: v[2:9] and ds_load_b96 v[2:4] assemble, v[3:10] and v[3:5]
+    // are rejected with "vgpr tuples must be 64 bit aligned". The odd bases are
+    // the two the bf16 kernel emitted -- v[3:10] for a WMMA destination, v[9:12]
+    // for a buffer_load_b128.
+    for (uint32_t width : {2u, 3u, 4u, 8u, 16u}) {
+        EXPECT_EQ(rules.forbidsBase(RegType::V, 2, width), nullptr) << "even, width " << width;
+        for (uint32_t base : {3u, 9u}) {
+            ASSERT_NE(rules.forbidsBase(RegType::V, base, width), nullptr)
+                << "odd base " << base << ", width " << width;
+            EXPECT_EQ(rules.forbidsBase(RegType::V, base, width)->name, kVectorAlignRule);
+        }
+    }
+
+    // Flat where the scalar rule is width-based: the 4-DWORD tuple at base 2
+    // accepted above is illegal for scalars, so neither rule's answer can stand
+    // in for the other's. That is why these are two rows and not one predicate.
+    EXPECT_NE(rules.forbidsBase(RegType::S, 2, 4), nullptr);
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheVectorRangeMovesOffAnOddBase) {
+    // The reported failure, reduced. Lifting VGPRs put multi-DWORD vector ranges
+    // in front of an allocator with no vector placement rule, and a 4-DWORD load
+    // landed on v[9:12], which the assembler rejects. v0 is a live-in, so it is
+    // pinned and leaves v1 as the lowest free index for compaction to reach for.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* load = createDsReadB128InBlock(entry, kRaTestArch, /*destReg=*/40,
+                                                      /*addrReg=*/24);
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* use = builder.create(getMCIDByUOp(GFX::v_add_f32, kRaTestArch));
+    use->addDestReg(StinkyRegister("v", 5, 1));
+    use->addSrcReg(StinkyRegister("v", 40, 1));
+    use->addSrcReg(StinkyRegister("v", 0, 1));  // live-in, pinned, live across the load
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* first = ssaDefinedValue(*load, 0);
+    ASSERT_NE(first, nullptr);
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, gfx1250Rules(/*xnack=*/true));
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(setup.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, setup.context()).ok());
+
+    const RegKey base = coloured->assignmentOf(first->valueId());
+    EXPECT_EQ(base.idx % 2, 0u) << "the range landed on odd " << regKeyToString(base);
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheVerifierRejectsAMisalignedVectorRange) {
+    // The enforcement point. Before this rule existed the verifier read the same
+    // empty specification as the allocator and reported nothing, so a misaligned
+    // range reached the assembler instead of being refused here.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* load = createDsReadB128InBlock(entry, kRaTestArch, /*destReg=*/40,
+                                                      /*addrReg=*/24);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationResult misaligned = createLegacyColoring(*func);
+    for (unsigned unit = 0; unit < 4; ++unit) {
+        const StinkySSAValue* value = ssaDefinedValue(*load, unit);
+        ASSERT_NE(value, nullptr) << "unit " << unit;
+        misaligned.assign(value->valueId(), RegKey{RegType::V, 9 + unit, RegHalf::NONE});
+    }
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, gfx1250Rules(/*xnack=*/true));
+    const AllocationVerificationResult checked =
+        verifyAllocation(*func, misaligned, setup.context());
+    EXPECT_FALSE(checked.ok());
+    EXPECT_TRUE(contains(checked.toString(), kVectorAlignRule)) << checked.toString();
 }
 
 TEST_F(Gfx1250AllocationRulesTest, AlignmentSurvivesWithoutAnyCapability) {
@@ -393,4 +485,437 @@ TEST_F(Gfx1250AllocationRulesTest, TheAuditIsSilentOnADisjointProducerColouring)
 
     EXPECT_TRUE(
         auditRules(*func, createLegacyColoring(*func), gfx1250Rules(/*xnack=*/true)).empty());
+}
+
+// ---------------------------------------------------------------------------
+// WmmaAccumulatorReuse
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// `v_wmma_f32_16x16x32_bf16 dst, a, b, c` -- c is the src2 accumulator.
+StinkyInstruction* createWmmaBf16(BasicBlock* bb, int dst, int a, int b, int c) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* wmma =
+        builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kRaTestArch));
+    wmma->addDestReg(StinkyRegister("v", dst, 8));
+    wmma->addSrcReg(StinkyRegister("v", a, 8));
+    wmma->addSrcReg(StinkyRegister("v", b, 8));
+    wmma->addSrcReg(StinkyRegister("v", c, 8));
+    return wmma;
+}
+
+/// Eight `v<base+i> = v_mov_b32 0`, so a tuple is function-defined and free to
+/// move rather than a pinned live-in.
+void defineTuple(BasicBlock* bb, int base) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    for (int unit = 0; unit < 8; ++unit) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", base + unit, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
+}
+
+/// One read per DWORD of `v[base:base+count-1]`, so every member of a tuple has
+/// a use and the block carries weight.
+void useTuple(BasicBlock* bb, int base, int sink, int count = 8) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    for (int unit = 0; unit < count; ++unit) {
+        StinkyInstruction* add = builder.create(getMCIDByUOp(GFX::v_add_f32, kRaTestArch));
+        add->addDestReg(StinkyRegister("v", sink + unit, 1));
+        add->addSrcReg(StinkyRegister("v", base + unit, 1));
+        add->addSrcReg(StinkyRegister("v", base + unit, 1));
+    }
+}
+
+/// `v[base:base+3] = ds_load_b128 v<addr>` -- a four-wide vector tuple that
+/// competes for registers without asking for any pairing of its own.
+void loadQuad(BasicBlock* bb, int base, int addr) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* load = builder.create(getMCIDByUOp(GFX::ds_load_b128, kRaTestArch));
+    load->addDestReg(StinkyRegister("v", base, 4));
+    load->addSrcReg(StinkyRegister("v", addr, 1));
+}
+
+/// The shipped table with the accumulator rule forced to a known status, so
+/// these tests keep measuring the rule rather than whatever it ships as.
+AllocationRules gfx1250RulesWithAccumulatorReuse(bool on = true) {
+    AllocationRules rules = gfx1250Rules(/*xnack=*/true);
+    RuleOverrides forced;
+    if (on)
+        forced.activate = {kWmmaRule};
+    else
+        forced.disable = {kWmmaRule};
+    // ProducerPinMatrix would freeze dest at its producer index and so hide the
+    // reuse the rest of this block is about.
+    forced.disable.push_back(kPinRule);
+    rules.force(forced);
+    return rules;
+}
+
+}  // namespace
+
+TEST_F(Gfx1250AllocationRulesTest, TheAccumulatorPairingNamesEveryDwordOfTheTuple) {
+    // One preference per DWORD, destination unit i against accumulator unit i.
+    // Pairing only the bases would leave the other seven registers free to
+    // drift, and the rule would report itself satisfied having achieved little.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {},
+                          gfx1250RulesWithAccumulatorReuse());
+    const std::span<const Preference> prefs = setup.constraints().preferences();
+    ASSERT_EQ(prefs.size(), 8u) << "expected one pairing per DWORD of the tuple";
+
+    const std::vector<StinkySSAValue*> accumulator = ssaSourceUnits(*wmma, 2);
+    ASSERT_EQ(accumulator.size(), 8u);
+    for (unsigned unit = 0; unit < 8; ++unit) {
+        const StinkySSAValue* dest = ssaDefinedValue(*wmma, unit);
+        ASSERT_NE(dest, nullptr) << "unit " << unit;
+        ASSERT_NE(accumulator[unit], nullptr) << "unit " << unit;
+        EXPECT_EQ(prefs[unit].a, dest->valueId()) << "unit " << unit;
+        EXPECT_EQ(prefs[unit].b, accumulator[unit]->valueId()) << "unit " << unit;
+    }
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheDestinationReusesTheAccumulatorOnlyWithTheRuleOn) {
+    // The accumulator is a live-in that stays at v340 and dies at the WMMA, so
+    // its registers are free for the destination afterwards. The destination
+    // has no reason to take them: with v[100:107] withheld, first-fit gives it
+    // v0. The pairing is what sends it to v340 instead.
+    //
+    // Withholding its own registers is what leaves anything to observe. A block
+    // sits on its hint when the registers are free and no preference outranks
+    // that, so a destination still able to reach v[100:107] would never move.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* use = builder.create(getMCIDByUOp(GFX::v_add_f32, kRaTestArch));
+    use->addDestReg(StinkyRegister("v", 40, 1));
+    use->addSrcReg(StinkyRegister("v", 100, 1));
+    use->addSrcReg(StinkyRegister("v", 101, 1));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    ASSERT_NE(dest, nullptr);
+    GreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
+                        gfx1250RulesWithAccumulatorReuse(/*on=*/false));
+    off.target().reserve(RegType::V, 100, 8);
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    EXPECT_EQ(without->assignmentOf(dest->valueId()).idx, 0u);
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    on.target().reserve(RegType::V, 100, 8);
+    Expected<AllocationResult> with = allocator.allocate(on.context());
+    ASSERT_TRUE(with.hasValue()) << with.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());
+    EXPECT_EQ(with->assignmentOf(dest->valueId()).idx, 340u) << with->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, FoldingPairsAnAccumulatorScoringWouldHaveLost) {
+    // The shape the rule loses to when it only scores. The accumulator is
+    // placed first and packs low; a later tuple takes those registers once it
+    // dies and outlives the destination; so by the time the destination is
+    // placed, the register its preference names is no longer free for its
+    // range and the pair comes apart.
+    //
+    // Folding the two before anything is placed removes the window: one block
+    // covers both lives, so the later tuple never gets the chance.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/340);
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    // Two loads, born where the accumulator dies and gone before the
+    // destination is. Short and much used, so they are placed first.
+    loadQuad(entry, /*base=*/200, /*addr=*/400);
+    loadQuad(entry, /*base=*/204, /*addr=*/400);
+    useTuple(entry, /*base=*/200, /*sink=*/700, /*count=*/4);
+    useTuple(entry, /*base=*/204, /*sink=*/704, /*count=*/4);
+    useTuple(entry, /*base=*/320, /*sink=*/740);  // filler, to lengthen the destination
+    useTuple(entry, /*base=*/100, /*sink=*/720);  // the destination dies last
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    const std::vector<StinkySSAValue*> accumulator = ssaSourceUnits(*wmma, 2);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_EQ(accumulator.size(), 8u);
+    ASSERT_NE(accumulator[0], nullptr);
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
+                        gfx1250RulesWithAccumulatorReuse(/*on=*/false));
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    // If this ever ties on its own the test has stopped measuring anything.
+    ASSERT_NE(without->assignmentOf(dest->valueId()).idx,
+              without->assignmentOf(accumulator[0]->valueId()).idx)
+        << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    Expected<AllocationResult> with = allocator.allocate(on.context());
+    ASSERT_TRUE(with.hasValue()) << with.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());
+    EXPECT_EQ(with->assignmentOf(dest->valueId()).idx,
+              with->assignmentOf(accumulator[0]->valueId()).idx)
+        << with->toString();
+}
+
+namespace {
+
+/// Three WMMAs accumulating in turn, with loads competing for the low
+/// registers in between.
+///
+/// The competitors matter. Without them each accumulator dies exactly where
+/// the next one is born, so first-fit hands base 0 down the whole chain and a
+/// test would pass with the rule switched off. The loads take those registers
+/// first, so a scattered chain is what happens unless the rule prevents it.
+void buildCompetedChain(BasicBlock* entry, std::vector<StinkyInstruction*>& chain) {
+    defineTuple(entry, /*base=*/340);
+    defineTuple(entry, /*base=*/360);
+    chain.push_back(createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340));
+    // A second, unrelated accumulator. It is eight wide, so both placement
+    // policies weigh it against the chain rather than leaving it until last,
+    // and it lives and dies inside the first link alone. That sends the first
+    // link high while the two after it stay low.
+    createWmmaBf16(entry, /*dst=*/200, /*a=*/300, /*b=*/320, /*c=*/360);
+    useTuple(entry, /*base=*/200, /*sink=*/700);
+    useTuple(entry, /*base=*/320, /*sink=*/740);  // filler, to lengthen the link
+    chain.push_back(createWmmaBf16(entry, /*dst=*/108, /*a=*/300, /*b=*/320, /*c=*/100));
+    chain.push_back(createWmmaBf16(entry, /*dst=*/116, /*a=*/300, /*b=*/320, /*c=*/108));
+    useTuple(entry, /*base=*/116, /*sink=*/720);
+}
+
+/// How many distinct registers the chain head and every destination land on.
+/// One when the whole chain folded, more when it came apart.
+size_t basesUsedBy(const AllocationResult& coloured, StinkySSAValue* head,
+                   const std::vector<StinkyInstruction*>& chain) {
+    std::set<uint32_t> bases{coloured.assignmentOf(head->valueId()).idx};
+    for (const StinkyInstruction* wmma : chain) {
+        const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+        if (dest != nullptr) bases.insert(coloured.assignmentOf(dest->valueId()).idx);
+    }
+    return bases.size();
+}
+
+}  // namespace
+
+TEST_F(Gfx1250AllocationRulesTest, AnAccumulatorChainFoldsIntoOneBlock) {
+    // Each pairing is checked against the block as it stands, so the second
+    // link joins the block the first one built. That is what turns a run of
+    // separate tuples back into the one register range the producer uses, and
+    // pairing only the first link would not.
+    BasicBlock* entry = block("entry");
+    std::vector<StinkyInstruction*> chain;
+    buildCompetedChain(entry, chain);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> head = ssaSourceUnits(*chain.front(), 2);
+    ASSERT_EQ(head.size(), 8u);
+    ASSERT_NE(head[0], nullptr);
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
+                        gfx1250RulesWithAccumulatorReuse(/*on=*/false));
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    // If the chain ever lands on one register by itself, this test has stopped
+    // measuring the rule.
+    ASSERT_GT(basesUsedBy(*without, head[0], chain), 1u) << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+    EXPECT_EQ(basesUsedBy(*coloured, head[0], chain), 1u) << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, TheChainFoldsUnderTheShippingAllocatorToo) {
+    // greedy-compact-freedom is what the pipeline runs, and folding rewrites
+    // placementFreedom, which is the number that policy orders on. Without this
+    // the allocator that ships is covered by nothing.
+    BasicBlock* entry = block("entry");
+    std::vector<StinkyInstruction*> chain;
+    buildCompetedChain(entry, chain);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> head = ssaSourceUnits(*chain.front(), 2);
+    ASSERT_EQ(head.size(), 8u);
+    ASSERT_NE(head[0], nullptr);
+    FreedomOrderedGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
+                        gfx1250RulesWithAccumulatorReuse(/*on=*/false));
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    ASSERT_GT(basesUsedBy(*without, head[0], chain), 1u) << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+    EXPECT_EQ(basesUsedBy(*coloured, head[0], chain), 1u) << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, AnAccumulatorUnderACeilingIsNotFolded) {
+    // The accumulator doubles as a scale operand, whose field selects no
+    // s_set_vgpr_msb slot and so reaches the first bank only. That ceiling
+    // belongs to those two registers. Folding would hand it to the
+    // destination as well, and in a real kernel to a whole accumulator chain,
+    // confining all of it to v0-v255 to buy one pairing. Decline instead and
+    // let scoring try.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/340);
+    // Before the WMMA, not after, so the accumulator still dies at the WMMA.
+    // Read afterwards it would simply be live, and interference rather than
+    // the ceiling would be what declined the fold.
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* scaled =
+        builder.create(getMCIDByUOp(GFX::v_wmma_scale16_f32_16x16x128_f8f6f4, kRaTestArch));
+    scaled->addDestReg(StinkyRegister("v", 500, 8));
+    scaled->addSrcReg(StinkyRegister("v", 510, 8));
+    scaled->addSrcReg(StinkyRegister("v", 520, 8));
+    scaled->addSrcReg(StinkyRegister(0));
+    scaled->addSrcReg(StinkyRegister("v", 340, 2));  // the accumulator, as a scale
+    // Low, because a live-in scale operand has to start somewhere its own
+    // field can reach or the colouring refuses before folding is even asked.
+    scaled->addSrcReg(StinkyRegister("v", 10, 2));
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    // The same competitors as the test above. Without them the destination
+    // reuses the accumulator's registers by ordinary first-fit, and the two
+    // colourings look alike whether folding happened or not.
+    loadQuad(entry, /*base=*/200, /*addr=*/400);
+    loadQuad(entry, /*base=*/204, /*addr=*/400);
+    useTuple(entry, /*base=*/200, /*sink=*/700, /*count=*/4);
+    useTuple(entry, /*base=*/204, /*sink=*/704, /*count=*/4);
+    useTuple(entry, /*base=*/320, /*sink=*/740);
+    useTuple(entry, /*base=*/100, /*sink=*/720);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    const std::vector<StinkySSAValue*> accumulator = ssaSourceUnits(*wmma, 2);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_EQ(accumulator.size(), 8u);
+    ASSERT_NE(accumulator[0], nullptr);
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    // The fixture is only worth anything while the ceiling is really there.
+    ASSERT_LT(on.constraints().maxIndexFor(accumulator[0]->valueId()), 1024u);
+    ASSERT_EQ(on.constraints().maxIndexFor(dest->valueId()), std::numeric_limits<uint32_t>::max());
+
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+    EXPECT_NE(coloured->assignmentOf(dest->valueId()).idx,
+              coloured->assignmentOf(accumulator[0]->valueId()).idx)
+        << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, AnAccumulatorReadAgainLaterIsNotFolded) {
+    // The accumulator is read after the WMMA, so the two are live together and
+    // one register cannot hold both. Folding has to decline this: the rule is a
+    // preference, and a preference that overrode liveness would miscompile.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/340);
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    useTuple(entry, /*base=*/340, /*sink=*/700);  // the accumulator, read again
+    useTuple(entry, /*base=*/100, /*sink=*/720);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    const std::vector<StinkySSAValue*> accumulator = ssaSourceUnits(*wmma, 2);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_EQ(accumulator.size(), 8u);
+    ASSERT_NE(accumulator[0], nullptr);
+
+    CompactingGreedyAllocator allocator;
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, on.context()).ok());
+    EXPECT_NE(coloured->assignmentOf(dest->valueId()).idx,
+              coloured->assignmentOf(accumulator[0]->valueId()).idx)
+        << coloured->toString();
+}
+
+TEST_F(Gfx1250AllocationRulesTest, FollowingHintsStillReproducesTheProducer) {
+    // Folding is off wherever hints are on. The producer's numbering is what
+    // that mode exists to reproduce, and a folded pair the producer kept apart
+    // has no agreed hint left to follow.
+    BasicBlock* entry = block("entry");
+    defineTuple(entry, /*base=*/340);
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    useTuple(entry, /*base=*/100, /*sink=*/700);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    ASSERT_NE(dest, nullptr);
+
+    GreedyAllocator allocator;
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
+                       gfx1250RulesWithAccumulatorReuse());
+    Expected<AllocationResult> coloured = allocator.allocate(on.context());
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_EQ(coloured->assignmentOf(dest->valueId()).idx, 100u) << coloured->toString();
+}
+
+// ---------------------------------------------------------------------------
+// ProducerPinMatrix
+// ---------------------------------------------------------------------------
+
+namespace {
+
+AllocationRules gfx1250RulesWithProducerPin(bool on = true) {
+    AllocationRules rules = gfx1250Rules(/*xnack=*/true);
+    RuleOverrides forced;
+    if (on)
+        forced.activate = {kPinRule};
+    else
+        forced.disable = {kPinRule};
+    // Reuse would send dest onto C, which is not what this block is measuring.
+    forced.disable.push_back(kWmmaRule);
+    rules.force(forced);
+    return rules;
+}
+
+}  // namespace
+
+TEST_F(Gfx1250AllocationRulesTest, CompactionKeepsAPinnedMatrixDestinationAtTheProducerRegister) {
+    // Dest is defined by the WMMA, so it is free to move. Compaction without the
+    // pin takes v0. The pin is what keeps v[100:107]. The add is not a matrix
+    // instruction, so it stays free to pack.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    StinkyInstruction* add =
+        createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/100, /*src1=*/101);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    const StinkySSAValue* addDest = ssaDefinedValue(*add, 0);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_NE(addDest, nullptr);
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
+                        gfx1250RulesWithProducerPin(/*on=*/false));
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    EXPECT_EQ(without->assignmentOf(dest->valueId()).idx, 0u) << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWithProducerPin());
+    EXPECT_TRUE(on.constraints().isPinned(dest->valueId())) << on.constraints().toString();
+    EXPECT_FALSE(on.constraints().isPinned(addDest->valueId())) << on.constraints().toString();
+    Expected<AllocationResult> with = allocator.allocate(on.context());
+    ASSERT_TRUE(with.hasValue()) << with.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());
+    EXPECT_EQ(with->assignmentOf(dest->valueId()).idx, 100u) << with->toString();
 }

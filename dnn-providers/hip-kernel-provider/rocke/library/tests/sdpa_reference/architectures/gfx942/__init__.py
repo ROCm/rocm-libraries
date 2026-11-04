@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
+
+from reference_common.cases import index_cases
 
 from ...contract import Case
 from ...implementations import dense
@@ -29,16 +32,25 @@ CASES = tuple(
         ("fp16", 128, 16, 4, False, False),
     )
 )
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="SDPA")
 
 
 def prepare(case: Case, library_root: str) -> Gfx942AttentionDenseSpec:
     """Select the current kernel through gfx942's production dispatch policy."""
     validate_library_root(library_root)
-    from dispatch.attention import tuning_spec_with_knobs
+    import dispatch.attention as attention
 
-    return tuning_spec_with_knobs(
-        attention_request(case, NAME),
+    request = attention_request(case, NAME)
+    # Recognize published baseline sources by their own API, so a renamed
+    # current API fails on its name rather than inside the historical path.
+    if not hasattr(attention, "tuning_spec_with_knobs") and hasattr(
+        attention, "dense_spec_for_request"
+    ):
+        # Published baseline sources select this knob through the request.
+        request = replace(request, dense_persistent="on" if case.persistent else "off")
+        return attention.dense_spec_for_request(request)
+    return attention.tuning_spec_with_knobs(
+        request,
         "gfx942_dense",
         {"persistent": case.persistent},
     ).kernel_spec

@@ -4,11 +4,12 @@
 """Compare a regenerated bundle against the shipped one, UUID-blind.
 
 The no-op gate. Before a manifest or registry change can be trusted to preserve a
-shipped catalog, regeneration has to be shown to reproduce it -- and the one
-comparison that cannot be used is byte equality, because ``codegen/generator.py`` mints
-every descriptor id with ``uuid.uuid4()``: two runs of the SAME config differ in
-every id. So the ids are masked, and everything they point at is compared
-instead.
+shipped catalog, regeneration has to be shown to reproduce it. ``generate.py`` reuses
+the ids of the installed bundle (or of ``--ids-from``), so a regeneration of an
+installed engine keeps them and they can be compared (``--expect-ids``). Output with new
+ids (``--new-ids``, a bundle generated with nothing to reuse, or a catalog authored by
+hand) differs from the shipped one in every id; the ids are then masked
+(``--ignore-ids``) and everything they point at is compared instead.
 
     catalog_diff.py --shipped <a.kdp.json> --regenerated <b.kdp.json> [--ignore-ids]
                     [--strict-spec | --subset]
@@ -42,9 +43,10 @@ defaults (``test_registry_regeneration`` asserts it for the shipped engine).
 What a pass does NOT establish: that the regenerated bundle is CORRECT, only
 that it is the same catalog. A manifest that is wrong in the same way twice
 passes. And a KDP carries no UUID stability of its own -- the ``--ignore-ids``
-mask is why this exits 0 at all, so preserving the SHIPPED ids through a splice
-is a separate obligation (``extend.md``: resolve by UUID, not filename), checked
-by ``--expect-ids``.
+mask is why output with new ids exits 0 at all, so preserving the SHIPPED ids is a
+separate obligation (``extend.md``: resolve by UUID, not filename), checked by
+``--expect-ids``. ``generate.py`` makes that obligation automatic for a regeneration
+of an installed bundle; a hand splice still needs the check.
 
 KMD comparison (``--shipped-kmd`` / ``--regenerated-kmd``):
 
@@ -63,10 +65,11 @@ import json
 import sys
 from pathlib import Path
 
-#: Keys whose values are minted per run. Masked, never compared.
-#: ``engine_id`` / ``kmd_id`` appear in each consumer of the KDP's
-#: specialization_contract; they reference the same freshly-minted UED and KMD
-#: and differ for the same reason as the top-level ``id`` field.
+#: Keys whose values are assigned per generation: reused from the previous bundle
+#: (``generate.py`` default, or ``--ids-from``) or minted. Masked under ``--ignore-ids``,
+#: never compared. ``engine_id`` / ``kmd_id`` appear in each consumer of the KDP's
+#: specialization_contract; they reference the UED and KMD and differ for the same
+#: reason as the top-level ``id`` field.
 _ID_KEYS = ("id", "engine_id", "kmd_id")
 #: KDP keys that reference another descriptor by id.
 _REFERENCE_KEYS = ("engine", "dispatch", "matchers")
@@ -98,11 +101,25 @@ def _load(path: str, label: str) -> dict:
         where = f"the {label} KDP kernelDescriptors[{index}]"
         if not isinstance(entry, dict):
             raise CatalogDiffError(f"{where} must be an object")
+        if "kernel_source" in entry and "sources" in entry:
+            raise CatalogDiffError(
+                f"{where} carries both 'kernel_source' and 'sources'; a UKD names "
+                f"its kernels one way"
+            )
         source = entry.get("kernel_source", {})
         if not isinstance(source, dict):
             raise CatalogDiffError(f"{where} 'kernel_source' must be an object")
         if not isinstance(source.get("spec", {}), dict):
             raise CatalogDiffError(f"{where} 'kernel_source.spec' must be an object")
+        sources = entry.get("sources", {})
+        if not isinstance(sources, dict) or not all(
+            isinstance(launch, dict) and isinstance(launch.get("spec", {}), dict)
+            for launch in sources.values()
+        ):
+            raise CatalogDiffError(
+                f"{where} 'sources' must be an object of launch name to a "
+                f"kernel_source object whose 'spec' is an object"
+            )
         if "name" in entry and not isinstance(entry["name"], str):
             raise CatalogDiffError(f"{where} 'name' must be a string")
         for scalar in ("priority", "version"):
@@ -141,12 +158,23 @@ def _canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def _entry_sources(entry: dict) -> list[dict]:
+    """The kernel_source objects an entry names: its ``kernel_source``, or every
+    launch of its ``sources`` map. Every reader goes through here so none sees
+    one spelling and misses the other."""
+    if "sources" in entry:
+        return list(entry["sources"].values())
+    return [entry.get("kernel_source", {})]
+
+
 def _spec_fields(kdp: dict) -> frozenset:
-    """Every ``kernel_source.spec`` field name any entry of ``kdp`` carries."""
+    """Every ``kernel_source.spec`` field name any entry of ``kdp`` carries, in
+    any of its launches."""
     return frozenset().union(
         *(
-            (e.get("kernel_source", {}).get("spec") or {}).keys()
+            (source.get("spec") or {}).keys()
             for e in kdp["kernelDescriptors"]
+            for source in _entry_sources(e)
         )
     )
 
@@ -169,17 +197,28 @@ def binary_identity(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     """What names the kernel an entry ships: its whole ``kernel_source`` (every key,
     whatever the kind) with the spec reduced to ``spec_keys`` (``None``: the full
     spec), and the entry's ``arch``."""
-    source = dict(entry.get("kernel_source") or {})
-    spec = source.get("spec") or {}
-    if spec_keys is not None:
-        spec = {k: v for k, v in spec.items() if k in spec_keys}
-    source["spec"] = spec
-    return (_canonical(source), _canonical(entry.get("arch")))
+
+    def reduced(source: dict) -> dict:
+        source = dict(source or {})
+        spec = source.get("spec") or {}
+        if spec_keys is not None:
+            spec = {k: v for k, v in spec.items() if k in spec_keys}
+        source["spec"] = spec
+        return source
+
+    if "sources" in entry:
+        # Every launch is part of the identity, keyed by its name.
+        named = {name: reduced(s) for name, s in entry["sources"].items()}
+        return (_canonical({"sources": named}), _canonical(entry.get("arch")))
+    return (
+        _canonical(reduced(entry.get("kernel_source"))),
+        _canonical(entry.get("arch")),
+    )
 
 
 def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     """What makes two catalog entries the same kernel. Deliberately excludes
-    ``id`` (minted per run) and includes ``priority`` (it orders selection).
+    ``id`` (assigned per generation) and includes ``priority`` (it orders selection).
 
     ``spec_keys``: when given, only those spec fields are compared. ``None``
     compares the FULL spec (the ``--strict-spec`` mode, see ``compare_catalog``).
@@ -273,7 +312,7 @@ def find_duplicate_specs(kdp: dict) -> list[str]:
 
 
 def _masked(value, ignore_ids: bool):
-    """Recursively blank anything that is a minted id."""
+    """Recursively blank anything that is a descriptor id."""
     if not ignore_ids:
         return value
     if isinstance(value, dict):
@@ -291,7 +330,7 @@ def compare_engine_blocks(
 ) -> list[str]:
     """Everything in the KDP except the catalog: name, arch, references, and the
     specialization contract. References are masked when ids are ignored -- a
-    reference to a freshly minted UED is expected to differ -- but their
+    reference to a newly minted UED is expected to differ -- but their
     PRESENCE and arity are not: a KDP that lost its matcher list is a different
     engine, however equal the kernels are.
     """
@@ -427,8 +466,9 @@ def _contract_ids(kdp: dict) -> list[tuple]:
 def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
     """``--expect-ids``: the regenerated tree must REUSE the shipped ids.
 
-    Only meaningful after a splice, never straight off ``generate.py``. This is
-    what makes ``extend.md``'s 'preserve old names, UUIDs, symbols' checkable
+    Meaningful after a hand splice or a ``generate.py`` run that reused the previous
+    ids; with ``--new-ids`` every id is new. This is what makes ``extend.md``'s
+    'preserve old names, UUIDs, symbols' checkable
     instead of a review convention. Covers the KDP's own id and references, the
     ``engine_id`` / ``kmd_id`` of each contract consumer, and the id of
     EVERY shipped kernel descriptor -- a loader that resolves kernels by UUID
@@ -514,14 +554,15 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--ignore-ids",
         action="store_true",
-        help="mask minted UUIDs. Required for a straight generate.py output, "
-        "whose ids are new by construction.",
+        help="mask descriptor UUIDs. Required for output whose ids are new by "
+        "construction (generate.py --new-ids, or nothing to reuse).",
     )
     parser.add_argument(
         "--expect-ids",
         action="store_true",
         help="additionally require the shipped ids to be PRESERVED. For checking "
-        "a splice, where reusing the shipped UUIDs is the obligation.",
+        "a splice, or generate.py output that reused the previous ids, where "
+        "reusing the shipped UUIDs is the obligation.",
     )
     parser.add_argument(
         "--strict-spec",

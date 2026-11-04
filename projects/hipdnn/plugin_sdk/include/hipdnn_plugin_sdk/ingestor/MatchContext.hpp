@@ -5,7 +5,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -13,9 +12,12 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
@@ -29,18 +31,82 @@ using DeviceId = int;
 /// "No resolvable device"; negative so it never aliases a real ordinal.
 inline constexpr DeviceId NO_DEVICE = -1;
 
-/// A finalized graph's stable identity, preserved across serialization round trips.
-using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
+/// The `Graph`-level fields `GraphContentKey` drops as `(cache_ignore)` that a matcher
+/// can read; `name` and `id` are left out because no matcher reads them.
+struct CatalogGraphFields
+{
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType intermediateDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    std::optional<int64_t> preferredEngineId;
+    bool isOverrideShapeEnabled = false;
+    /// As stamped: absence is kept distinct from an explicit baseline version.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>
+        minRequiredEngineApiVersion;
+
+    static CatalogGraphFields of(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
+    {
+        CatalogGraphFields fields;
+        fields.computeDataType = graph.compute_data_type();
+        fields.intermediateDataType = graph.intermediate_data_type();
+        fields.ioDataType = graph.io_data_type();
+        fields.preferredEngineId = graph.preferred_engine_id();
+        fields.isOverrideShapeEnabled = graph.is_override_shape_enabled();
+        if(const auto* version = graph.min_required_engine_api_version(); version != nullptr)
+        {
+            fields.minRequiredEngineApiVersion = *version;
+        }
+        return fields;
+    }
+
+    bool operator==(const CatalogGraphFields& other) const
+    {
+        return computeDataType == other.computeDataType
+               && intermediateDataType == other.intermediateDataType
+               && ioDataType == other.ioDataType && preferredEngineId == other.preferredEngineId
+               && isOverrideShapeEnabled == other.isOverrideShapeEnabled
+               && minRequiredEngineApiVersion == other.minRequiredEngineApiVersion;
+    }
+};
 
 /// The catalog cache key. Excludes the handle: unrelated to a plan's validity.
+///
+/// `graph` alone treats a renumbered graph as the same graph, but a catalog's bound
+/// tokens carry raw tensor uids, so `tensorUids` (`Graph.tensors[i].uid`, in order)
+/// keeps a renumbered graph from being served another numbering's bindings.
+///
+/// `graph` also drops the `(cache_ignore)` graph-level fields, which suits the winner
+/// cache: they do not change whether a measurement carries over. A catalog's verdict
+/// and bound tokens can depend on anything a matcher reads, such as a graph match that
+/// declines override-shape graphs, so `graphFields` keys those fields exactly.
+/// Only build one from a usable `graph`: an unusable key never equals itself.
+///
+/// RFC 0019 §9.2's engine id is implicit in the cache's location, and @ref engineVersion
+/// replaces its inventory generation counter, since nothing re-scans the inventory.
 struct CatalogKey
 {
-    GraphId graphId;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
+    CatalogGraphFields graphFields;
+    std::vector<int64_t> tensorUids;
     DeviceId deviceId;
+    /// `EngineDescriptor::revision` of the descriptor set that ranked this catalog. Constant
+    /// in-process; keyed so an entry can never be served to a newer engine version.
+    // Explicit init avoids -Wmissing-field-initializers on partial CatalogKey{graph, device}.
+    // NOLINTNEXTLINE(readability-redundant-member-init) - see above
+    hipdnn_data_sdk::utilities::Version engineVersion{};
+    /// The ranking metric the order was computed for (RFC 0019 §11.4): every cache of a
+    /// ranked order is keyed by metric, or a `time` request is served a `tflops` order.
+    /// Always a registered name, so it views the registry's static storage.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 
-    bool operator==(const CatalogKey& other) const noexcept
+    bool operator==(const CatalogKey& other) const
     {
-        return graphId == other.graphId && deviceId == other.deviceId;
+        return deviceId == other.deviceId && graphFields == other.graphFields
+               && tensorUids == other.tensorUids && graph == other.graph
+               && engineVersion == other.engineVersion && rankingMetric == other.rankingMetric;
     }
 };
 
@@ -48,13 +114,39 @@ struct CatalogKeyHash
 {
     size_t operator()(const CatalogKey& key) const noexcept
     {
-        size_t hash = 1469598103934665603ULL;
-        for(const uint8_t byte : key.graphId)
+        size_t uidHash = 1469598103934665603ULL;
+        for(const int64_t uid : key.tensorUids)
         {
-            hash ^= static_cast<size_t>(byte);
-            hash *= 1099511628211ULL;
+            uidHash ^= static_cast<size_t>(uid);
+            uidHash *= 1099511628211ULL;
         }
-        hash ^= static_cast<size_t>(key.deviceId) + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
+        size_t hash
+            = std::hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>{}(key.graph);
+        const auto mix = [&hash](size_t value) {
+            hash ^= value + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
+        };
+        mix(uidHash);
+        mix(static_cast<size_t>(key.deviceId));
+
+        const CatalogGraphFields& fields = key.graphFields;
+        mix(static_cast<size_t>(fields.computeDataType));
+        mix(static_cast<size_t>(fields.intermediateDataType));
+        mix(static_cast<size_t>(fields.ioDataType));
+        mix(static_cast<size_t>(fields.preferredEngineId.has_value()));
+        mix(static_cast<size_t>(fields.preferredEngineId.value_or(0)));
+        mix(static_cast<size_t>(fields.isOverrideShapeEnabled));
+        mix(static_cast<size_t>(fields.minRequiredEngineApiVersion.has_value()));
+        if(fields.minRequiredEngineApiVersion.has_value())
+        {
+            mix(fields.minRequiredEngineApiVersion->major());
+            mix(fields.minRequiredEngineApiVersion->minor());
+            mix(fields.minRequiredEngineApiVersion->patch());
+        }
+        // Mixed per component: a packed major*1000+minor fold would collide 1.10.0 and 2.0.0.
+        mix(static_cast<size_t>(key.engineVersion.major));
+        mix(static_cast<size_t>(key.engineVersion.minor));
+        mix(static_cast<size_t>(key.engineVersion.patch));
+        mix(std::hash<std::string_view>{}(key.rankingMetric));
         return hash;
     }
 };
@@ -84,24 +176,11 @@ struct MatchContext
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
     DeviceId deviceId;
     const DeviceProperties& deviceProperties;
+    /// Registered ranking metric for the request (RFC 0019 §11.4); selects the
+    /// `sort_kernel_catalog` UHD and keys ranked-order caches. A view: must outlive the
+    /// context, and caches key on the registry's copy of the name, never on this view.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 };
-
-/// nullopt when absent or non-v4 (both mean "cannot cache").
-inline std::optional<GraphId>
-    tryGetGraphId(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
-{
-    const auto* id = graph.getGraph().id();
-    if(id == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto bytes = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*id);
-    if(!hipdnn_flatbuffers_sdk::utilities::isUuidV4(bytes))
-    {
-        return std::nullopt;
-    }
-    return bytes;
-}
 
 /// The graph schema version @p graph's own contents require; unstamped reads as
 /// baseline.

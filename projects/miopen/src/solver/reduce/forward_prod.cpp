@@ -212,8 +212,6 @@ ProdForward::GetSolution(const ExecutionContext& context,
                     handle_.EnableProfiling(true);
                     (void)hipEventSynchronize(stop.get());
                     (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
-                    (void)hipEventDestroy(start.get());
-                    (void)hipEventDestroy(stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
                 };

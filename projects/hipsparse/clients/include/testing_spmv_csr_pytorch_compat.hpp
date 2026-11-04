@@ -40,6 +40,7 @@
  * 4. Compares against dense matmul: expected = csr.to_dense().matmul(vec)
  */
 
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -414,8 +415,7 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     CHECK_HIP_ERROR(hipMemset(d_y, 0, sizeof(T) * m));
 
     // Setup hipSPARSE
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     // Create sparse matrix descriptor
     hipsparseSpMatDescr_t matA;

@@ -44,7 +44,7 @@ import types
 import pytest
 
 # Prime the component registry before StreamK imports (avoids circular import).
-from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
 from rocisa.code import Module
 from rocisa.instruction import (
@@ -55,8 +55,8 @@ from rocisa.instruction import (
     SSubU32,
 )
 
-from Tensile.KernelWriter import KernelWriter
-from Tensile.Components.WorkAssignment import WorkAssignment, DynamicWorkQueue, Hybrid
+from tensilelite.KernelWriter import KernelWriter
+from tensilelite.Components.WorkAssignment import WorkAssignment, DynamicWorkQueue, Hybrid
 
 
 pytestmark = pytest.mark.unit

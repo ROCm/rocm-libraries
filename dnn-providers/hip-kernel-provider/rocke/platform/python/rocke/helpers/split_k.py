@@ -270,6 +270,10 @@ def select_split_k_wgrad(
 ) -> SplitKDecision:
     """Pick a split-K degree for a wgrad GEMM, mirroring CK's formula.
 
+    Conv callers resolve split-K through a resolver that uses the split-K cost
+    model (:mod:`rocke.helpers.split_k_planner`) where an arch has one and falls
+    back to this function where it does not.
+
     CK's ``calculate_optimal_k_batch`` (``split_k_utils.hpp``) computes::
 
         grid_size    = ceil(M / tile_m) * ceil(N / tile_n)   [* batch, but batch=1 for wgrad]
@@ -287,10 +291,9 @@ def select_split_k_wgrad(
 
     ``groups`` selects between two branches.
 
-    ``groups <= 1`` (the default, and every dgrad caller) takes the legacy
-    expression above, unchanged. That is deliberate: this function is shared
-    with :mod:`conv_implicit_gemm_dgrad`, whose grouped shapes reach it through
-    the benchmark driver with ``--split-k -1``. Keeping the ungrouped answer
+    ``groups <= 1`` (the default, and every dgrad resolution) takes the legacy
+    expression above, unchanged. That is deliberate: dgrad resolves through
+    this function too, without ``groups``. Keeping the ungrouped answer
     bit-for-bit means a grouped-wgrad retune cannot perturb dgrad.
 
     ``groups > 1`` corrects two things the CK formula gets wrong for a grouped

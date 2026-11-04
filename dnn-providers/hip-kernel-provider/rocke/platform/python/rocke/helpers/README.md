@@ -814,6 +814,14 @@ inside each XCD). Together they restore L2 locality on the multi-die
 MI300X / MI350X by ensuring every contiguous stripe of workgroups
 shares one XCD's L2 slice.
 
+`chiplet_transform_chunked_dynamic` takes a runtime `num_wgs` with a
+compile-time chunk. Shape-generic (AOT) kernels whose locality unit follows
+the problem use `chiplet_transform_chunked_runtime`, where the chunk is an
+i32 SSA value as well: `max(1, num_wgs / num_xcds)` by default (one
+contiguous run of the launch per XCD), or the caller's `chunk_size` (e.g. the
+workgroups of one image row band, computed from the kernargs). Its pure-Python
+model is `python_chiplet_transform_chunked_runtime`.
+
 ### XOR-based LDS swizzles (`helpers/layouts.py`)
 
 ```python

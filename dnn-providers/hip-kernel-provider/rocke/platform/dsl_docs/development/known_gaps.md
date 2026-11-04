@@ -18,7 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green. They fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature that *is* reachable from a valid config — see that
+section for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -200,7 +202,28 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 
 ---
 
-## 5. gfx942 MLA prefill — Python-only kernel builder
+## 5. Library attention — additive bias (Python engine only)
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp`, gfx950 tiled 2D / 3D split-KV instances
+
+The gfx950 unified tiled 2D and 3D split-KV kernels accept `use_additive_bias`
+in the Python engine only (`library/kernels/common/_attention_additive_bias.py`).
+With the flag off (the default) nothing is emitted, so every bias-off kernel is
+byte-identical and the gate is unaffected. With it on, the C++ engine has no
+equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
+cannot request bias either, so Python and C++ selection agree on every problem
+the provider can express.
+
+| Area | What's missing | Why blocked / what unblocks it |
+|---|---|---|
+| Problem and spec structs | `use_additive_bias` on the unified problem and the gfx950 tiled 2D / 3D spec structs, with the spec validator's rejections (mask-limit, invariant hoist, mask-once, non-transposed 32x32, grouped-kv2, register-PV, strided KV). | Scoped out of the Python feature change. Unblocked by adding the field to the public instance headers and mirroring the validators. |
+| Selectors / spec builder | The score-bias exclusion (`_has_score_bias`) in the fast-path gates, and the gfx950-only spec-builder threading of the flag. | Same; needs the struct field first. |
+| Kernel emission | The four trailing params (`additive_bias_ptr`, `additive_bias_batch_stride`, `additive_bias_head_stride`, `additive_bias_sq_stride`), the masked load and add on the 2D 16x16, 2D transposed 32x32 and 3D score paths, and the `addb` name token. | A port of `_attention_additive_bias.py` and its three call sites. |
+| Parity coverage | Bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
+
+---
+
+## 6. gfx942 MLA prefill — Python-only kernel builder
 
 **Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
 
@@ -218,6 +241,43 @@ The Python IR itself is pinned by the MLA IR golden through `check_golden`
 
 **What unblocks a C++ twin:** a decision to restore per-family C++ builder
 mirrors; until then, keep emission changes gated by the two tests above.
+
+---
+
+## 7. Unified split-KV reduce LSE output (`emit_lse`) — Python only
+
+**Subsystem:** `instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_reduce.cpp`,
+`instances/gfx950/attention_tiled_3d_reduce.cpp`,
+`include/rocke/instance_gfx9{42,50}_attention_tiled_3d.h`,
+`instances/common/attention_unified_selectors.cpp` (and its header)
+
+`UnifiedAttentionReduceTiledSpec.emit_lse` (both arches,
+`library/kernels/gfx9{42,50}/attention_tiled_3d.py`) makes the split-KV reduce
+kernel take a trailing `lse_ptr` and write one FP32 natural-log LSE per
+(query token, query head) from lane 0 via `kernels/common/_lse_store.py`. The C
+engine does not mirror it. With `emit_lse=False` (the default) the reduce gets
+no `lse_ptr` and no store, so this gap adds nothing to an LSE-off kernel; and no
+C entry point can request LSE, so no C-built kernel reaches the missing path.
+This entry covers `emit_lse` only, not other changes to the reduce kernel.
+
+| What's missing | Where |
+|---|---|
+| `emit_lse` field (default 0) and the `lse` kernel-name suffix | `rocke_unified_attention_reduce_tiled_spec_t` and `*_reduce_tiled_spec_kernel_name()`, both arches |
+| Trailing `lse_ptr` param and the `tid == 0` LSE store | both C reduce builders |
+| A C twin of `_lse_store.py` | `helpers/`; none exists (its dense-attention users have no C twin either) |
+| Gate coverage of an LSE-on reduce | `library/tests/parity/gfx9{42,50}_attention_tiled_3d_emit.{py,c}` emit the LSE-off reduce only; neither takes `emit_lse` |
+| `emit_lse` on the unified problem and the `_reject_lse` support gate (`library/kernels/common/attention_unified.py`) | `rocke_unified_attn_problem_t`; the C selectors carry no support gates to mirror it into. No codegen selector reads `emit_lse`: the selected split-KV spec differs only in `reduce_spec.emit_lse` between LSE on and off, so C selector output is unaffected |
+
+**Why deferred:** owner decision for ROCm/rocm-libraries#13955 (time-sensitive;
+the C engine is expected to be deprecated). Python is the only engine that
+builds the LSE-on reduce until then.
+
+**What closes it:** retiring the C engine, or mirroring the rows above and
+adding an `emit_lse=True` config per arch to the emitters. Done only when
+`tools/check_byte_identity.py` is GREEN for every family at llvm20, llvm22 and
+llvm23.
+
+**Sign-off:** avirgoel (owner), 2026-10-20.
 
 ---
 

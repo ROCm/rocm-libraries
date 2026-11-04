@@ -86,6 +86,11 @@ For i in 0..3:
 
 The batch index is composed by the caller. `lane_to_output` returns only the in-atom `(row, col)`.
 
+The bf16 twin is the bare `IRBuilder.mfma_f32_4x4x4_bf16` op (not an `MfmaAtom`
+catalog entry). It uses the same lane layout and lowers through the `_1k`
+intrinsic `llvm.amdgcn.mfma.f32.4x4x4bf16.1k` with `<4 x i16>` operands
+(`v_mfma_f32_4x4x4_16b_bf16` on gfx950).
+
 ## Per-Lane K-Slice Layouts (Input A)
 
 For each f16 atom on wave64, the per-lane A operand covers the following K slice:
@@ -169,3 +174,30 @@ operands (`vec<tf32x8>`, one I32 word per element) and FP32 accumulators (four a
 sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
 `mfma_f32_32x32x16_bf16`; see the
 [emulation description](../architecture/xf32_bf16x3_emulation.md).
+
+gfx942 declares two f64 atoms in the arch catalog. Both hold one f64 value per
+lane for A and B.
+
+`mfma_f64_16x16x4_f64` uses the fp32 16x16x4 A/B lane maps
+(`row`/`col = lane % 16`, `k = lane / 16`). C/D hold four f64 values per lane
+in a different output layout from the f32 16x16 atoms:
+
+```text
+For i in 0..3:
+  row = i * 4 + lane / 16
+  col = lane % 16
+```
+
+An epilogue written for the f32 16x16 layout stores f64 results to the wrong
+rows. Take the layout from the atom's `c_layout()`.
+
+`mfma_f64_4x4x4_f64` computes four independent 4x4x4 products per wave. The
+catalog describes the blocks stacked along rows, so A, B, and C/D are each
+16x4 and block `blk` occupies rows `blk*4 .. blk*4 + 3`. C/D hold one f64
+value per lane (`IRBuilder.mma` returns `<1 x f64>`):
+
+```text
+A:   lane = 16*k + 4*blk + m  ->  (blk*4 + m, k)
+B:   lane = 16*k + 4*blk + n  ->  (blk*4 + k, n)
+C/D: lane = 16*m + 4*blk + n  ->  (blk*4 + m, n)
+```

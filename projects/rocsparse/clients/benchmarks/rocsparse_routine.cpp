@@ -229,9 +229,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_spsv_coo.hpp"
 #include "testing_spsv_csc.hpp"
 #include "testing_spsv_csr.hpp"
-#ifdef ROCSPARSE_WITH_ELL_TRSV
 #include "testing_spsv_ell.hpp"
-#endif
 #include "testing_sptrsv.hpp"
 #include "testing_v2_spmv_bsr.hpp"
 #include "testing_v2_spmv_coo.hpp"
@@ -550,9 +548,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT(spsort_csc);
 #endif
         DEFINE_CASE_IT_X(coosv, testing_spsv_coo);
-#ifdef ROCSPARSE_WITH_ELL_TRSV
         DEFINE_CASE_IT_X(ellsv, testing_spsv_ell);
-#endif
         DEFINE_CASE_IAXYT_X(coomv_aos, testing_spmv_coo_aos);
         DEFINE_CASE_IT_X(coosm, testing_spsm_coo);
         DEFINE_CASE_T_FLOAT_ONLY(coo2csr);

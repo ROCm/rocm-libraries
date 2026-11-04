@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 
 from config_harness import _isolated_globals_with_isa, _toolchain_for
-from Tensile import LibraryIO
-from Tensile.ExecutionPolicy import (
+from tensilelite import LibraryIO
+from tensilelite.ExecutionPolicy import (
     ALIASES, SELECTORS, normalize_execution_policy, normalize_execution_policy_with_defaults,
 )
-from Tensile.ExperimentalLibrary import _apply_overrides
-from Tensile.SolutionStructs.Naming import getSolutionNameFull
-from Tensile.TensileMergeLibrary import addKernel, reNameSolutions
+from tensilelite.ExperimentalLibrary import _apply_overrides
+from tensilelite.SolutionStructs.Naming import getSolutionNameFull
+from tensilelite.TensileMergeLibrary import addKernel, reNameSolutions
 
 pytestmark = pytest.mark.unit
 

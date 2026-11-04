@@ -11,7 +11,9 @@ import json
 import math
 from pathlib import Path
 
+from . import sources
 from .errors import HkpPackError
+from .kernel_signature import exported_kernels, kernel_signature
 
 
 def digest(value):
@@ -285,7 +287,18 @@ class OriginObserver:
                 raise HkpPackError(f"producer changed during compilation: {path}")
 
 
-def observe(spec_obj, builder_fn, requests, origins):
+_ABSENT = object()
+
+
+def observe(spec_obj, builder_fn, requests, origins, *, tolerate_missing=False):
+    """Read every requested binding off the spec object.
+
+    A binding naming an attribute the spec does not have raises, unless
+    `tolerate_missing`: then that field is recorded under `unreported` instead and
+    left out of `values`. The caller decides what an unreported field means; this
+    never turns an attribute that exists but is malformed (a property, an unbound
+    accessor, an unstable value) into an unreported one.
+    """
     producer = {
         "builder": origins.identity(builder_fn),
         "spec": origins.identity(type(spec_obj)),
@@ -294,9 +307,15 @@ def observe(spec_obj, builder_fn, requests, origins):
     for key, request in requests.items():
         if key != digest(request):
             raise HkpPackError("invalid observation request digest")
-        values, accessors = {}, {}
+        values, accessors, unreported = {}, {}, []
         for name, binding in request["bindings"].items():
             mode, attribute = next(iter(binding.items()))
+            if (
+                tolerate_missing
+                and inspect.getattr_static(spec_obj, attribute, _ABSENT) is _ABSENT
+            ):
+                unreported.append(name)
+                continue
             try:
                 selected = getattr(spec_obj, attribute)
                 if mode == "method":
@@ -337,13 +356,28 @@ def observe(spec_obj, builder_fn, requests, origins):
                     f"cannot observe {name} via {binding}: {exc}"
                 ) from exc
         observations[key] = {"values": values, "accessors": accessors}
+        if unreported:
+            # Only when something went unreported, so evidence in which every field
+            # was observed keeps the shape it always had.
+            observations[key]["unreported"] = sorted(unreported)
     return {"producer": producer, "requests": observations}
 
 
 def compare(consumer, kmd, metadata, observations):
+    """One launch's observations against the metadata: every declared field must
+    have been observed, and match."""
     key = digest(observation_request(consumer, kmd))
     if key not in observations["requests"]:
         raise HkpPackError("compile result lacks this consumer's observation")
+    unreported = observations["requests"][key].get("unreported") or []
+    if unreported:
+        raise HkpPackError(
+            "; ".join(
+                f"cannot observe {name} via {consumer['bindings'].get(name)}: the "
+                "spec has no such attribute"
+                for name in unreported
+            )
+        )
     actual = observations["requests"][key]["values"]
     completed = complete_metadata(metadata, kmd)
     expected = {name: completed[name] for name in consumer["metadata_fields"]}
@@ -354,10 +388,74 @@ def compare(consumer, kmd, metadata, observations):
     return key
 
 
+def compare_launches(consumer, kmd, metadata, launches):
+    """The launches of one `sources` UKD against its single metadata.
+
+    `launches` is `{launch: observations}`. Each declared `metadata_fields` entry
+    must be reported by at least one launch, and every launch that reports it must
+    match the metadata value. A launch whose spec lacks the bound attribute does
+    not report that field, which is no error by itself: the builders of different
+    stages show different fields. A field no launch reports fails, naming the
+    launches checked, so a binding misspelled for every launch cannot pass.
+
+    Each launch's evidence must account for every declared field as exactly one of
+    reported or unreported, so a report cannot be dropped out of the record to
+    hide a mismatch.
+    """
+    key = digest(observation_request(consumer, kmd))
+    fields = consumer["metadata_fields"]
+    completed = complete_metadata(metadata, kmd)
+    expected = {name: completed[name] for name in fields}
+    reporting = {name: [] for name in fields}
+    for launch, observations in launches.items():
+        if key not in observations["requests"]:
+            raise HkpPackError(
+                f"launch '{launch}': compile result lacks this consumer's observation"
+            )
+        entry = observations["requests"][key]
+        values = entry["values"]
+        unreported = entry.get("unreported") or []
+        if (
+            set(values) & set(unreported)
+            or set(values) | set(unreported) != set(fields)
+            or len(set(unreported)) != len(unreported)
+        ):
+            raise HkpPackError(
+                f"launch '{launch}': evidence accounts for reported {sorted(values)} "
+                f"and unreported {sorted(unreported)}, not the declared fields "
+                f"{sorted(fields)}"
+            )
+        for name, value in values.items():
+            if digest(value) != digest(expected[name]):
+                raise HkpPackError(
+                    f"launch '{launch}': compiled specialization disagrees with "
+                    f"metadata: {name} observed={value}, metadata={expected[name]}"
+                )
+            reporting[name].append(launch)
+    unreported_by_all = sorted(name for name, found in reporting.items() if not found)
+    if unreported_by_all:
+        raise HkpPackError(
+            f"compiled specialization field(s) {unreported_by_all} reported by no "
+            f"launch (checked launches {sorted(launches)})"
+        )
+    return key
+
+
 def descriptor_binding(ukd):
     doc = copy.deepcopy(ukd)
     doc.get("provenance", {}).pop("effective_spec", None)
     return digest(doc)
+
+
+def _evidence(authored, observations, records, binding):
+    """One launch's producing-compiler record, over its own authored input."""
+    return {
+        "schema_version": 1,
+        "authored_digest": digest(authored),
+        "observations": observations,
+        "consumers": [stored_record(record) for record in records],
+        "descriptor_digest": binding,
+    }
 
 
 def publish(ukd, observations, records):
@@ -368,16 +466,32 @@ def publish(ukd, observations, records):
     beside it: one is what was asked for, the other what was observed, and
     collapsing them loses the disagreement this check exists to find.
     `descriptor_binding` excludes the evidence from its own digest.
+
+    A UKD with `sources` takes `observations` as `{launch: observations}` and
+    carries one record per launch, `effective_spec` keyed by launch name, over
+    that launch's own authored input in `provenance.sources`. Launches sharing a
+    compile carry identical evidence.
     """
     provenance = ukd["provenance"]
-    authored = {key: provenance[key] for key in ("source", "builder", "spec")}
-    provenance["effective_spec"] = {
-        "schema_version": 1,
-        "authored_digest": digest(authored),
-        "observations": observations,
-        "consumers": [stored_record(record) for record in records],
-        "descriptor_digest": descriptor_binding(ukd),
-    }
+    binding = descriptor_binding(ukd)
+    if "sources" in ukd:
+        provenance["effective_spec"] = {
+            name: _evidence(
+                _authored(provenance["sources"][name]),
+                observations[name],
+                records,
+                binding,
+            )
+            for name in ukd["sources"]
+        }
+        return
+    provenance["effective_spec"] = _evidence(
+        _authored(provenance), observations, records, binding
+    )
+
+
+def _authored(provenance):
+    return {key: provenance[key] for key in ("source", "builder", "spec")}
 
 
 def verify(ukd, records, payload):
@@ -389,44 +503,169 @@ def verify(ukd, records, payload):
     producer, so a packed artifact can be checked where rocKE was never installed.
     Every deviation raises: a missing or unsupported record is a failure, never an
     unchecked property.
+
+    A UKD with `sources` takes `payload` as `{launch: code object bytes}` and
+    checks each launch's entry against its own evidence, authored input and code
+    object: a symbol, signature or object swapped between launches fails.
     """
-    record = ukd.get("provenance", {}).get("effective_spec")
+    entries = sources.kernel_sources(ukd)
+    provenance = ukd.get("provenance", {})
+    if None in entries:
+        _verify_launch(
+            ukd,
+            records,
+            provenance.get("effective_spec"),
+            {key: provenance.get(key) for key in ("source", "builder", "spec")},
+            provenance.get("compile_target"),
+            None,
+            entries[None],
+            payload,
+            "",
+        )
+        # A plain kernel_source speaks for the primary only: a compile that also
+        # produced companions shipped kernels nothing claims.
+        sources.check_claims(
+            "effective_spec",
+            provenance.get("builder"),
+            ["kernel_source"],
+            [None],
+            provenance["effective_spec"].get("observations", {}),
+        )
+        return
+    evidence = provenance.get("effective_spec")
+    authored = provenance.get("sources")
+    for label, found in (
+        ("effective_spec", evidence),
+        ("provenance.sources", authored),
+        ("payload", payload),
+    ):
+        if not isinstance(found, dict) or set(found) != set(entries):
+            raise HkpPackError(
+                f"{label} launches {sorted(found) if isinstance(found, dict) else found!r}"
+                f" do not match the UKD's launches {sorted(entries)}"
+            )
+    shared = {}
+    for name, ks in entries.items():
+        launch = authored[name]
+        if not isinstance(launch, dict):
+            raise HkpPackError(f"launch '{name}': provenance.sources entry is invalid")
+        _verify_launch(
+            ukd,
+            records,
+            evidence[name],
+            {key: launch.get(key) for key in ("source", "builder", "spec")},
+            launch.get("compile_target"),
+            launch.get("role"),
+            ks,
+            payload[name],
+            f"launch '{name}': ",
+            compare_records=False,
+        )
+        shipped = kernel_signature(payload[name], ks.get("symbol"), f"launch '{name}'")
+        if shipped != ks.get("signature"):
+            raise HkpPackError(
+                f"launch '{name}': signature does not match the argument list of "
+                f"'{ks.get('symbol')}' in the code object"
+            )
+        shared.setdefault((ks.get("library"), ks.get("toc_key")), []).append(name)
+    # One metadata speaks for every launch: the verdict is the one the packer
+    # reached, re-derived from what each launch reported.
+    for entry in records:
+        compare_launches(
+            entry["declaration"],
+            entry["kmd"],
+            ukd["metadata"],
+            {name: evidence[name]["observations"] for name in entries},
+        )
+    # Each compile's kernels must be claimed exactly: a launch dropped from the
+    # map leaves its kernel unclaimed, however the rest was re-stamped. A compile
+    # is one (library, toc_key); two compiles may yield identical bytes, and one
+    # kernel may be claimed by several launches.
+    for names in shared.values():
+        first = evidence[names[0]]["observations"]
+        # Launches on one code object are one compile, so one set of evidence. The
+        # claims below read it, so a sibling's copy cannot be left to disagree.
+        for name in names[1:]:
+            if evidence[name]["observations"] != first:
+                raise HkpPackError(
+                    f"launches {sorted([names[0], name])} share one code object "
+                    "but carry different compile observations"
+                )
+        sources.check_claims(
+            "effective_spec",
+            authored[names[0]].get("builder"),
+            names,
+            [authored[n].get("role") for n in names],
+            first,
+        )
+        # The evidence above is not covered by the descriptor digest, so the
+        # claims are also held to what the object itself exports.
+        exported = exported_kernels(payload[names[0]], f"launches {sorted(names)}")
+        claimed = sorted({entries[n].get("symbol") for n in names})
+        if claimed != exported:
+            raise HkpPackError(
+                f"launches {sorted(names)} claim the symbols {claimed}, but the "
+                f"code object exports {exported}"
+            )
+
+
+def _verify_launch(
+    ukd,
+    records,
+    record,
+    authored,
+    compile_target,
+    role,
+    source,
+    payload,
+    prefix,
+    compare_records=True,
+):
+    """One launch's evidence; `prefix` names the launch of a `sources` UKD."""
+
+    def fail(message):
+        raise HkpPackError(prefix + message)
+
     if not isinstance(record, dict) or record.get("schema_version") != 1:
-        raise HkpPackError("missing compiler-owned effective_spec evidence")
+        fail("missing compiler-owned effective_spec evidence")
     if record.get("descriptor_digest") != descriptor_binding(ukd):
-        raise HkpPackError("effective_spec descriptor binding mismatch")
-    authored = {
-        key: ukd["provenance"].get(key) for key in ("source", "builder", "spec")
-    }
+        fail("effective_spec descriptor binding mismatch")
     if record.get("authored_digest") != digest(authored):
-        raise HkpPackError("effective_spec authored-input binding mismatch")
+        fail("effective_spec authored-input binding mismatch")
     if record.get("consumers") != [stored_record(entry) for entry in records]:
-        raise HkpPackError("effective_spec consumer binding mismatch")
-    source = ukd["kernel_source"]
+        fail("effective_spec consumer binding mismatch")
     payload_sha = hashlib.sha256(payload).hexdigest()
     if payload_sha != source.get("sha256"):
-        raise HkpPackError("effective_spec payload binding mismatch")
+        fail("effective_spec payload binding mismatch")
     observations = record.get("observations", {})
     # The observations were taken on the object handed to the builder; these three
     # bind them to the artifact it returned, so the record describes the compile
     # whose bytes this descriptor names.
     if observations.get("code_object_sha256") != payload_sha:
-        raise HkpPackError("effective_spec code-object binding mismatch")
-    if observations.get("symbol") != source.get("symbol"):
-        raise HkpPackError("effective_spec symbol binding mismatch")
+        fail("effective_spec code-object binding mismatch")
+    # A launch naming a companion binds to that role's symbol, not the primary's.
+    expected = (
+        observations.get("symbol")
+        if role is None
+        else (observations.get("companions") or {}).get(role)
+    )
+    if expected != source.get("symbol"):
+        fail("effective_spec symbol binding mismatch")
     if [observations.get("arch")] != ukd.get("arch"):
-        raise HkpPackError("effective_spec architecture binding mismatch")
+        fail("effective_spec architecture binding mismatch")
     # The processor the object was compiled for (the shard arch, or its generic
     # family) is what provenance tells a reader; the compiler's own record of it
     # must agree, so a generic object cannot be relabelled native or vice versa.
-    if observations.get("compile_target") != ukd["provenance"].get("compile_target"):
-        raise HkpPackError("effective_spec compile-target binding mismatch")
+    if observations.get("compile_target") != compile_target:
+        fail("effective_spec compile-target binding mismatch")
     producer = observations.get("producer", {})
     for role in ("builder", "spec"):
         identity = producer.get(role, {})
         if set(identity) != {"module", "qualname", "sha256"} or not all(
             isinstance(v, str) and v for v in identity.values()
         ):
-            raise HkpPackError("missing producing-object identity")
+            fail("missing producing-object identity")
+    if not compare_records:
+        return
     for entry in records:
         compare(entry["declaration"], entry["kmd"], ukd["metadata"], observations)

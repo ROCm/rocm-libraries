@@ -37,6 +37,10 @@ GENERIC_TARGETS_JSON = (
 )
 FIXTURES = _PKG_DIR / "tests" / "fixtures"
 ROCKE_FIXTURE = FIXTURES / "rocke"
+MULTI_LAUNCH_FIXTURES = (
+    FIXTURES / "multi_launch_decode_merge",
+    FIXTURES / "multi_launch_same_kernel_twice",
+)
 MAIN_FIXTURE = FIXTURES / "main"
 EMPTY_ARCH_FIXTURE = FIXTURES / "empty_arch"
 HSACO_FIXTURES = FIXTURES / "hsaco"

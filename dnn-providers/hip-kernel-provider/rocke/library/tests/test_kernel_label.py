@@ -29,6 +29,7 @@ from kernels.conv import kernel_label as kernel_label
 from kernels.conv.direct_variants import (
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE,
+    DIRECT_DGRAD_WMMA,
 )
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.arch import ArchTarget
@@ -59,11 +60,16 @@ def _implicit_jobs(direction: str, n_geometries: int):
     )
 
 
+# Variants the grid builds only for wave32 (gfx1250): walked there.
+_WAVE32_ONLY = {DIRECT_DGRAD_WMMA: "gfx1250"}
+
+
 def _direct_cells():
-    target = ArchTarget.from_gfx(_ARCH)
     for variant, (direction, caps_list) in dks.DIRECT_CAPABILITIES.items():
+        arch = _WAVE32_ONLY.get(variant, _ARCH)
+        target = ArchTarget.from_gfx(arch)
         for caps in caps_list:
-            yield (_ARCH, target.wave_size, variant, direction, caps, "fp16")
+            yield (arch, target.wave_size, variant, direction, caps, "fp16")
 
 
 @pytest.mark.parametrize("direction", ["fwd", "wgrad", "dgrad"])
@@ -82,14 +88,15 @@ def test_implicit_grid_round_trips(direction):
 
 def test_direct_grid_round_trips():
     """Every direct identity, knobs included, before spec validation."""
-    target = ArchTarget.from_gfx(_ARCH)
     n = 0
     for variant, (direction, caps_list) in dks.DIRECT_CAPABILITIES.items():
+        arch = _WAVE32_ONLY.get(variant, _ARCH)
+        target = ArchTarget.from_gfx(arch)
         for caps in caps_list:
             for dtype in dks.DIRECT_DTYPES:
-                for knobs in dks._knob_grid(variant, _ARCH, dtype):
+                for knobs in dks._knob_grid(variant, arch, dtype):
                     ident = dks._identity(
-                        _ARCH,
+                        arch,
                         target.wave_size,
                         variant,
                         f"direct_{direction}",
@@ -105,7 +112,7 @@ def test_direct_grid_round_trips():
             ):
                 _round_trips(
                     dks._helper_identity(
-                        _ARCH, target.wave_size, helper, caps, knobs, "bf16"
+                        arch, target.wave_size, helper, caps, knobs, "bf16"
                     )
                 )
     assert n > 0

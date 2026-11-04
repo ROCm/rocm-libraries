@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -345,8 +346,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     hipDataType          aType = getDataType<A>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsr_row_ptr;

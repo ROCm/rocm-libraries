@@ -48,6 +48,16 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE descriptor is not pulled" OFF)
+# A TheRock build compiles the committed serialization headers by default.
+if(DEFINED THEROCK_SUBPROJECT_TARGET)
+    set(_hkp_generate_serialize_default OFF)
+else()
+    set(_hkp_generate_serialize_default ON)
+endif()
+option(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS
+       "Regenerate FlatBuffers serialization headers from schema during build"
+       ${_hkp_generate_serialize_default}
+)
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
@@ -314,7 +324,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # Two test descriptor roots, one per test binary. The unit root holds two packed
-    # subtrees and the integration root holds three, all five wired in
+    # subtrees and the integration root holds three. A sixth packed subtree, the unit
+    # binary's copy of archive_fixture, stages beside the two roots and not inside the unit
+    # root, so the unit engine does not discover it. All six are wired in
     # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
     # the archive beside it. An embedded_source descriptor names a kernel compiled into a
@@ -332,8 +344,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # Not a test root: the production tree's provenance sidecars install here. It shares
     # the folder with the test sets, so it must not reuse unit, integration,
-    # test_kpack_binary (src/tests/CMakeLists.txt) or the census folder HkpPackaging.cmake
-    # installs.
+    # unit_archive_fixture, test_kpack_binary (src/tests/CMakeLists.txt) or the census
+    # folder HkpPackaging.cmake installs.
     set(HIPKERNELPROVIDER_TEST_SET_PROVENANCE "provenance")
 
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
@@ -391,8 +403,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
-    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
-    # roots above directly.
+    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the roots
+    # above.
     #
     # Every set is a top-level folder under test_descriptors/, and every one is packed
     # WHOLE rather than by the set inside it. Each descriptor therefore lands in a CHILD of
@@ -408,6 +420,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # still serves, which needs the two archives to be separate files.
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
+
+    # The unit binary's own packed copy of the archive_fixture set. The integration suite
+    # corrupts the integration copy in place, so the two binaries do not share an archive.
+    set(HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR "unit_archive_fixture")
+    set(HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR}")
 
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR

@@ -82,8 +82,8 @@ def test_r4_reduction_grad_logic_emits():
 
 def test_r4_reduction_header_content():
     """Reduction header file string contains expected MTVW-loop kernel stubs."""
-    from Tensile.KernelWriterReduction import KernelWriterReduction
-    from Tensile.Common.DataType import DataType
+    from tensilelite.KernelWriterReduction import KernelWriterReduction
+    from tensilelite.Common.DataType import DataType
 
     # Build a minimal state that mirrors what initReductionKernelObjects constructs.
     # Requires: ProblemType with Gradient=True, UseBias>0, BiasDataTypeList.
@@ -130,8 +130,8 @@ def test_r4_reduction_header_content():
 
 def test_r4_reduction_kernel_name():
     """KernelWriterReduction.kernelName static method produces expected name format."""
-    from Tensile.KernelWriterReduction import KernelWriterReduction
-    from Tensile.Common.DataType import DataType
+    from tensilelite.KernelWriterReduction import KernelWriterReduction
+    from tensilelite.Common.DataType import DataType
 
     pt = {
         "NumIndicesC": 3,
@@ -195,8 +195,8 @@ def test_r4_gsu_conversion_and_betaonly_emit():
 
 def test_r4_betaonly_bias_functionSignature():
     """KernelWriterBetaOnly with BetaOnlyUseBias=True emits Bias pointer in signature."""
-    from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
-    from Tensile.Common.DataType import DataType
+    from tensilelite.KernelWriterBetaOnly import KernelWriterBetaOnly
+    from tensilelite.Common.DataType import DataType
 
     pt = {
         "NumIndicesC": 3,
@@ -243,8 +243,8 @@ def test_r4_betaonly_bias_functionSignature():
 
 def test_r4_betaonly_bias_header():
     """KernelWriterBetaOnly with BetaOnlyUseBias=True includes Bias in header."""
-    from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
-    from Tensile.Common.DataType import DataType
+    from tensilelite.KernelWriterBetaOnly import KernelWriterBetaOnly
+    from tensilelite.Common.DataType import DataType
 
     pt = {
         "NumIndicesC": 3,
@@ -278,8 +278,8 @@ def test_r4_betaonly_bias_header():
 
 def test_r4_betaonly_nobias_emit():
     """KernelWriterBetaOnly with BetaOnlyUseBias=False emits cleanly, no Bias pointer."""
-    from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
-    from Tensile.Common.DataType import DataType
+    from tensilelite.KernelWriterBetaOnly import KernelWriterBetaOnly
+    from tensilelite.Common.DataType import DataType
 
     pt = {
         "NumIndicesC": 2,
@@ -323,8 +323,8 @@ def test_r4_betaonly_nobias_emit():
 
 def test_r4_reduction_int8_hpa_datatype():
     """KernelWriterReduction int8+HPA branch sets datatype to int32."""
-    from Tensile.KernelWriterReduction import KernelWriterReduction
-    from Tensile.Common.DataType import DataType
+    from tensilelite.KernelWriterReduction import KernelWriterReduction
+    from tensilelite.Common.DataType import DataType
 
     pt = {
         "NumIndicesC": 3,

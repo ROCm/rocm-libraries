@@ -2,6 +2,11 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
+## (Unreleased) rocALUTION 4.2.0
+
+### Added
+* Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Added

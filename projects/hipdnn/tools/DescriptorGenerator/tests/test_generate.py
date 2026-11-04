@@ -8,6 +8,7 @@ mode enum file inclusion, and CLI behavior.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -74,9 +75,9 @@ class TestPreviewFilesBackend:
 
     def test_backend_file_count(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_BACKEND)
-        # 9 file templates + 12 fragment templates + 4 per generatable mode field
+        # 9 file templates + 16 fragment templates + 4 per generatable mode field
         n_mode_files = 4 * len(convolution_fwd_config.generatable_mode_fields)
-        expected = 9 + 12 + n_mode_files
+        expected = 9 + 16 + n_mode_files
         assert len(files) == expected
 
     def test_backend_contains_descriptor_header(self, convolution_fwd_config):
@@ -134,6 +135,10 @@ class TestPreviewFilesBackend:
             "fragments/node_unpack_override.txt",
             "fragments/packer_name_addition.txt",
             "fragments/descriptor_lifting_additions.txt",
+            "fragments/fbs_tensor_fields.txt",
+            "fragments/node_flops_overload.txt",
+            "fragments/logical_flops_case.txt",
+            "fragments/work_model_test_case.txt",
         ]
         for fragment in expected_fragments:
             assert fragment in files, f"Missing fragment: {fragment}"
@@ -277,12 +282,12 @@ class TestPreviewFilesWithRealConfigs:
         assert not any("mode_frontend_plumbing" in f for f in files)
 
     def test_matmul_backend_exact_count(self, matmul_config):
-        """Matmul backend: 9 files + 12 fragments = 21, no mode enums.
+        """Matmul backend: 9 files + 16 fragments = 25, no mode enums.
 
         matmul_config has constants_include set, so no constants file is generated.
         """
         files = _preview_files(matmul_config, MODE_BACKEND)
-        assert len(files) == 21
+        assert len(files) == 25
 
 
 class TestPreviewFilesConstants:
@@ -324,11 +329,8 @@ class TestCLIBehavior:
 
     @pytest.fixture
     def python_exe(self):
-        """Path to the .venv Python executable."""
-        exe = Path(__file__).parent.parent / ".venv" / "bin" / "python"
-        if not exe.exists():
-            pytest.skip("No .venv/bin/python found; CLI tests require a local venv")
-        return exe
+        """The interpreter running pytest; it already has PyYAML/Jinja2."""
+        return Path(sys.executable)
 
     def test_missing_config_file_exits(self, generate_script, python_exe, tmp_path):
         """--config pointing to a nonexistent file exits with code 1."""

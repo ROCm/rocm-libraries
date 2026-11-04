@@ -578,10 +578,9 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
                         kpg);
     }
 
-    if(s->wave_size != 64)
-    {
-        ROCKE_GM_REJECT("group_merge is MFMA-only (wave_size 64); got wave_size=%d", s->wave_size);
-    }
+    /* No wave-size term: the merge lives in the A/B addressing, the diagonal
+     * mask on the B load and the epilogue's N bound, none of which depend on
+     * the MMA family, so MFMA (wave64) and WMMA (wave32) build it alike. */
 
     if(s->async_dma)
     {

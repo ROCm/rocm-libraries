@@ -147,7 +147,7 @@ When in doubt, inspect the LLVM text via `art.llvm_text` and the generated ISA v
 - HIP typedefs for vector types;
 - builtin shims for intrinsics clang may not expose directly (e.g. `_llvm_amdgcn_raw_ptr_buffer_load_lds`, `_llvm_amdgcn_ds_read_tr16_b64`);
 - `__shared__` storage for LDS allocations;
-- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/0x00027000)`;
+- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/word3)`, where `word3` is the target ISA backend's `buffer_rsrc_word3` (the same word the LLVM route emits);
 - `__builtin_amdgcn_mfma_*`;
 - C++ `for` and `if` for structured control flow.
 

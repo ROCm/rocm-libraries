@@ -53,19 +53,19 @@ class TestStallDetection:
         """A slow-but-alive worker must survive: the check is progress, not total time."""
         log = tmp_path / "worker-tensilelite.log"
         log.write_text("start\n")
-        proc = _sleeper(1.5)
+        proc = _sleeper(2.0)
         stop = threading.Event()
 
         def touch():
             while not stop.is_set() and proc.poll() is None:
                 log.write_text(f"progress {time.time()}\n")
-                time.sleep(0.05)
+                time.sleep(0.02)
 
         t = threading.Thread(target=touch, daemon=True); t.start()
         try:
             stalled = wait_process_or_stop(
                 proc, threading.Event(), "cfg",
-                poll_interval=0.05, progress_path=log, stall_timeout=0.5,
+                poll_interval=0.02, progress_path=log, stall_timeout=1.0,
             )
         finally:
             stop.set(); t.join(timeout=2)

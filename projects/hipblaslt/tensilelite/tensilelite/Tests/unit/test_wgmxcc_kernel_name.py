@@ -12,8 +12,8 @@ from copy import deepcopy
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getKeyNoInternalArgs
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Naming import getKernelNameMin, getKeyNoInternalArgs
 
 pytestmark = pytest.mark.unit
 

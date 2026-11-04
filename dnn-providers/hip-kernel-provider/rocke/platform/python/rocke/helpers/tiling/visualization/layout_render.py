@@ -2877,16 +2877,6 @@ def flow_wave_mma(mma, **overrides):
     return MmaTee.from_mma(mma, **overrides)
 
 
-def _dtype_bits(name):
-    """Element bit width from a dtype tag ('f16'->16, 'bf16'->16, 'f32'->32, 'f64'->64, 'i8'->8).
-    RAISES on an untagged/unknown dtype -- a silent width default would render an inaccurate diagram.
-    """
-    digits = "".join(c for c in str(name) if c.isdigit())
-    if not digits:
-        raise ValueError(f"cannot infer dtype bits from {name!r} (no width in the tag)")
-    return int(digits)
-
-
 @dataclass
 class MmaTee:
     """Automated MMA-tee generator: composes the two components (A/B ``RegisterFileComponent`` wings +
@@ -2971,6 +2961,8 @@ class MmaTee:
         # `a_enc`/`b_enc` override to render a styled operand. C derives by flowing the supplied labels
         # through the refs.
         a_canon, b_canon, c_canon = canonical_layouts(t, mma.subtiles)
+        # The C/D fragment is drawn with the result's width (they differ only for "bf16f32").
+        a_bits, b_bits, _, d_bits = t.element_bits()
         base = dict(
             a_enc=a_canon,
             b_enc=b_canon,
@@ -2979,9 +2971,9 @@ class MmaTee:
             a_canon=a_canon,
             b_canon=b_canon,
             c_canon=c_canon,
-            a_dtype_bits=_dtype_bits(t.input_dtype),
-            b_dtype_bits=_dtype_bits(t.input_dtype),
-            c_dtype_bits=_dtype_bits(t.output_dtype),
+            a_dtype_bits=a_bits,
+            b_dtype_bits=b_bits,
+            c_dtype_bits=d_bits,
             in_dtype=t.input_dtype,
             out_dtype=t.output_dtype,
             op_id=mma.op_id,

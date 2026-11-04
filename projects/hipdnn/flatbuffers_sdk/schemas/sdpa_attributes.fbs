@@ -3,8 +3,9 @@
 
 include "data_types.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -29,17 +30,25 @@ table SdpaAttributes {
     o_tensor_uid:             long (cache_uid);
 
     // Optional input tensor UIDs
+    // Not work_data_dependent: the bias is added to every score whatever its values, so
+    // masking through it (-inf entries) still computes the full score matrix.
     attn_mask_tensor_uid:     long = null (cache_uid);  // Additive attention bias (Bias)
     scale_tensor_uid:         long = null (cache_uid);  // Attention scale tensor (Attn_scale)
-    seq_len_q_tensor_uid:     long = null (cache_uid);
-    seq_len_kv_tensor_uid:    long = null (cache_uid);
+    // Per-batch valid lengths: only the first seq_len rows/columns of each sequence are
+    // attended, so the values, not the padded Q/K dims, decide the score count.
+    seq_len_q_tensor_uid:     long = null (cache_uid, work_data_dependent);
+    seq_len_kv_tensor_uid:    long = null (cache_uid, work_data_dependent);
     seed_tensor_uid:          long = null (cache_uid);  // Dropout seed
     offset_tensor_uid:        long = null (cache_uid);  // Dropout offset
     dropout_mask_tensor_uid:  long = null (cache_uid);
     dropout_scale_tensor_uid: long = null (cache_uid);
-    page_table_k_tensor_uid:  long = null (cache_uid);
-    page_table_v_tensor_uid:  long = null (cache_uid);
-    block_mask_tensor_uid:    long = null (cache_uid);
+    // Paged KV cache: K/V dims describe the page pool, and the table's entries decide
+    // which pages -- and so how many keys -- each sequence attends to.
+    page_table_k_tensor_uid:  long = null (cache_uid, work_data_dependent);
+    page_table_v_tensor_uid:  long = null (cache_uid, work_data_dependent);
+    // Block-sparse attention (cuDNN parity): each entry selects whether a 128x128 score
+    // tile is computed or skipped, so the values decide the score count.
+    block_mask_tensor_uid:    long = null (cache_uid, work_data_dependent);
     sink_token_tensor_uid:    long = null (cache_uid);
 
     // FP8-specific input tensor UIDs

@@ -775,21 +775,6 @@ static void _op_tile_byte_perm(rocke_lower_t* L, const rocke_op_t* op)
 /* ds_read_tr16_b64 / ds_read_tr16_b128 / ds_read_tr_b8                   */
 /* ====================================================================== */
 
-/* Python ISABackend.ds_tr16_b128_spec: the gfx950 opcode is type-agnostic --
- * it returns <8 x i16> whatever the payload is, so the handler reinterprets. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out)
-{
-    if(strcmp(elem_type, "bf16") != 0 && strcmp(elem_type, "f16") != 0
-       && strcmp(elem_type, "fp16") != 0)
-    {
-        return false;
-    }
-    out->decl_key = "ds.read.tr16.b128";
-    out->intrinsic = "llvm.amdgcn.ds.read.tr16.b128";
-    out->ret_ty = "<8 x i16>";
-    return true;
-}
-
 /* Python Gfx1250Backend.ds_tr16_b128_spec: the gfx1250 wave32 opcode is
  * overloaded on the result element type. Select the one matching the op so an
  * f16 read does not reinterpret a bf16 payload (and vice versa). */
@@ -810,18 +795,6 @@ bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t
         return true;
     }
     return false;
-}
-
-/* Python self._backend.ds_tr16_b128_spec(elem_type), with the type-agnostic
- * gfx950 opcode as the fallback when no backend is bound. */
-static bool
-    ll_backend_tr16_spec_b128(rocke_lower_t* L, const char* elem_type, rocke_ll_tr16_spec_t* out)
-{
-    if(L && L->backend && L->backend->ds_tr16_b128_spec)
-    {
-        return L->backend->ds_tr16_b128_spec(elem_type, out);
-    }
-    return rocke_ll_tr16_spec_b128_default(elem_type, out);
 }
 
 /* Shared prologue for the b16 transpose reads: emit the getelementptr that
@@ -891,25 +864,35 @@ static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_need(L, "ds.read.tr16.b64");
     raw = rocke_ll_fresh(L, "tr.raw");
-    rocke_ll_emitf(
-        L, "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)", raw, base);
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)%s",
+                   raw,
+                   base,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_smem_global_name(L, op->operands[0], NULL)));
     elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
     rocke_ll_emitf(L, "  %s = bitcast <4 x i16> %s to <4 x %s>", ll_result_name(op), raw, elem_ty);
 }
 
-/* ds_read_b128_tr_b16. The backend chooses the opcode: gfx950 has one
- * type-agnostic <8 x i16> form that the payload is reinterpreted out of, while
- * gfx1250 has per-element-type forms that land in the right type directly. */
+/* ds_load_tr16_b128. Only gfx1250 has a wide transpose read: its backend
+ * selects an element-typed opcode that lands in the result type directly. Any
+ * other backend has no spec, because LLVM has no ds.read.tr16.b128. */
 static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
     const char* base = ll_ds_read_tr16_base(L, op, "trw.base");
     const char* elem_name = "f16";
     rocke_ll_tr16_spec_t spec;
-    const char* elem_ty;
-    char want_ty[32];
 
     if(!rocke_ll_live(L))
     {
+        return;
+    }
+    if(!L->backend || !L->backend->ds_tr16_b128_spec)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "ds_read_tr16_b128 is not available on %s: LLVM has no "
+                      "ds.read.tr16.b128 intrinsic; use ds_read_tr16_b64",
+                      L->backend ? L->backend->gfx : "(unknown)");
         return;
     }
     {
@@ -919,35 +902,22 @@ static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
             elem_name = attr;
         }
     }
-    if(!ll_backend_tr16_spec_b128(L, elem_name, &spec))
+    if(!L->backend->ds_tr16_b128_spec(elem_name, &spec))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "ds_load_tr16_b128 on %s supports f16/bf16 only, got elem_type='%s'",
-                      L->backend ? L->backend->gfx : "(unknown)",
+                      L->backend->gfx,
                       elem_name);
         return;
     }
     rocke_ll_need(L, spec.decl_key);
-    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    snprintf(want_ty, sizeof(want_ty), "<8 x %s>", elem_ty);
-    if(strcmp(spec.ret_ty, want_ty) == 0)
-    {
-        rocke_ll_emitf(L,
-                       "  %s = call %s @%s(ptr addrspace(3) %s)",
-                       ll_result_name(op),
-                       spec.ret_ty,
-                       spec.intrinsic,
-                       base);
-        return;
-    }
-    {
-        const char* raw = rocke_ll_fresh(L, "trw.raw");
-        rocke_ll_emitf(
-            L, "  %s = call %s @%s(ptr addrspace(3) %s)", raw, spec.ret_ty, spec.intrinsic, base);
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to %s", ll_result_name(op), spec.ret_ty, raw, want_ty);
-    }
+    rocke_ll_emitf(L,
+                   "  %s = call %s @%s(ptr addrspace(3) %s)",
+                   ll_result_name(op),
+                   spec.ret_ty,
+                   spec.intrinsic,
+                   base);
 }
 
 static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)

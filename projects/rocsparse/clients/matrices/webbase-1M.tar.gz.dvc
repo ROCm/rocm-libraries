@@ -1,0 +1,6 @@
+outs:
+- path: webbase-1M.tar.gz
+  remote: sparse-matrices
+  md5: 2d4c239daad6f12d66a1e6a2af44cbdb
+  size: 11360460
+  hash: md5

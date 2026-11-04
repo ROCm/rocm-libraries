@@ -11,8 +11,8 @@ import pytest
 import yaml
 
 from config_harness import emit_kernels_from_config
-from Tensile.Common import DataDirection
-from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from tensilelite.Common import DataDirection
+from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
 
 pytestmark = pytest.mark.unit
 

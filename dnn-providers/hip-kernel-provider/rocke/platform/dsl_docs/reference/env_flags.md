@@ -27,6 +27,12 @@ For setup and the most common flags in context, see
 |---|---|---|
 | `ROCKE_GEMM_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Split-K degree for CDNA UniversalGemm dispatch. `auto` runs the selection heuristic (engages split-K only for skinny / tall-N decode shapes whose grid leaves the CU-rich device idle; `1` for shapes that already fill it, keeping the default/square path byte-identical). `off` (or `0`/`1`) forces split-K disabled. `<n>` (>= 2) forces that degree, snapped down to the largest factor that evenly slices K. When engaged, the dispatcher launches a `(N_tiles, M_tiles, split_k)` grid and the caller must zero-init an f32 `[M, N]` workspace before launch and cast it back to the output dtype after. |
 
+## Convolution benchmark
+
+| Variable | Values (default) | Purpose |
+|---|---|---|
+| `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`rocke.helpers.split_k_planner`) on arches that have one and the CK-formula heuristic elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
+
 ## hipDNN provider
 
 | Variable | Values (default) | Purpose |

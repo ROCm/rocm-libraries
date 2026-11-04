@@ -75,6 +75,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
     case NA::SdpaAttributes:
     case NA::SdpaBackwardAttributes:
         return tol::sdpa::getToleranceFwd<T>();
+    case NA::ResampleFwdAttributes:
+        return tol::resample::getTolerance<T>();
     default:
         return 1e-3f;
     }

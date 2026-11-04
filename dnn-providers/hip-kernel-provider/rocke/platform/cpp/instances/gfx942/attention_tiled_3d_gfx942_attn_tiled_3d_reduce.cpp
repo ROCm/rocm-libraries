@@ -244,6 +244,7 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
  *       if in_rng is not None:
  *           ms = select(in_rng, ms, neg_inf)
  *           ls = select(in_rng, ls, zero_f)
+ *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment -> -inf
  *       cache (sv, in_rng, sv_safe), ms, ls
  *       local_max = fmax(local_max, ms)
  *   overall_max = _wave64_reduce_max(local_max)
@@ -281,6 +282,7 @@ void rocke_gfx942_attention_tiled_3d_reduce_max_pass(
         rocke_value_t* idx;
         rocke_value_t* ms;
         rocke_value_t* ls;
+        rocke_value_t* has_mass;
 
         sv = rocke_b_add(b, rocke_b_const_i32(b, (int64_t)j * THREADS), ctx->tid);
 
@@ -311,6 +313,13 @@ void rocke_gfx942_attention_tiled_3d_reduce_max_pass(
             ms = rocke_b_select(b, in_rng, ms, ctx->neg_inf);
             ls = rocke_b_select(b, in_rng, ls, ctx->zero_f);
         }
+
+        /* A segment whose tiles were all masked for this row stores max=0 with
+         * sum=0. Its max carries no mass, so it must not set overall_max (it
+         * would underflow every real segment's factor) nor get a factor in
+         * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
+        has_mass = rocke_b_fcmp(b, "ogt", ls, ctx->zero_f);
+        ms = rocke_b_select(b, has_mass, ms, ctx->neg_inf);
 
         if(s_seg_sv != NULL)
         {
@@ -457,15 +466,15 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
         iter_args[0].name = acname;
         iter_args[0].init = ctx->zero_f;
 
-        acc_loop = rocke_b_scf_for_iter(b,
-                                        rocke_b_const_i32(b, 0),
-                                        rocke_b_const_i32(b, NUM_SEG),
-                                        rocke_b_const_i32(b, 1),
-                                        iter_args,
-                                        1,
-                                        ivname,
-                                        false,
-                                        true);
+        /* Bind lb / ub / step in Python order: C++ argument evaluation order is
+         * unspecified, and each const_i32 appends an SSA value. */
+        {
+            rocke_value_t* acc_lb = rocke_b_const_i32(b, 0);
+            rocke_value_t* acc_ub = rocke_b_const_i32(b, NUM_SEG);
+            rocke_value_t* acc_step = rocke_b_const_i32(b, 1);
+            acc_loop = rocke_b_scf_for_iter(
+                b, acc_lb, acc_ub, acc_step, iter_args, 1, ivname, false, true);
+        }
 
         rocke_b_region_enter(b, acc_loop.body);
         {

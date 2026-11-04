@@ -499,6 +499,181 @@ def test_end_to_end_through_the_dispatch_result(harness):
     )
 
 
+# (fuse_conv, fuse_out_norm), heads (Hk, Hv). fuse_conv with Hk != Hv is a
+# request error (tested on CPU), so the conv modes run with equal heads only.
+_DISPATCH_CASES = [
+    pytest.param((False, False), (16, 16), id="plain-mha"),
+    pytest.param((False, False), (16, 32), id="plain-gqa"),
+    pytest.param((True, False), (16, 16), id="cv-mha"),
+    pytest.param((False, True), (16, 16), id="rn-mha"),
+    pytest.param((False, True), (16, 32), id="rn-gqa"),
+    pytest.param((True, True), (16, 16), id="cv_rn-mha"),
+]
+
+
+def _check_dispatched_launch(
+    harness, expect_tile=None, relative_state=False, **request
+):
+    """Dispatch ``request`` at two batches, launch each result from the
+    dispatch result alone, and check it against the fp32 reference: the
+    output, the written state, the written conv state, and every untouched
+    page of both pools. ``expect_tile`` pins the tile dispatch must pick.
+    ``relative_state`` takes the state error relative to ``max(1, |ref|)``,
+    as ``out_error`` does for the fused output, for requests whose state
+    grows past the range an absolute ``TOL`` was sized for."""
+    from builders.gfx950.gdn.gdn_decode import out_error, ref_conv_state_after
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    tol = harness["TOL"]
+    launchers = {}
+    for batch in (5, 64):
+        result = dispatch_gdn_decode(
+            GdnDecodeRequest(batch=batch, arch=ARCH, **request)
+        )
+        spec = result.spec
+        for field, value in request.items():
+            assert getattr(spec, field) == value, (field, getattr(spec, field))
+        if expect_tile is not None:
+            tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
+            assert tile == expect_tile, tile
+        key = result.kernel_id.compile_key
+        if key not in launchers:
+            artifact = compile_kernel(result.build(), arch=ARCH)
+            launchers[key] = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=result.signature,
+            )
+        launcher = launchers[key]
+        inp = harness["make_inputs"](spec, batch)
+        ref_out, ref_state = harness["ref_fp32"](spec, inp)
+        values, _ = harness["prepare"](spec, inp, batch)
+        cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+        with no_fence():
+            launcher(values, config=cfg)
+        torch.cuda.synchronize()
+
+        written = inp["write_indices"].long()
+        untouched = torch.ones(inp["state"].shape[0], dtype=torch.bool, device="cuda")
+        untouched[written] = False
+        assert untouched.any()
+        pools = [("state", ref_state)]
+        if spec.fuse_conv:
+            pools.append(("conv_state", ref_conv_state_after(spec, inp)))
+        out_err = out_error(spec, values["out"], ref_out)
+        assert out_err <= tol, (spec.kernel_name(), batch, out_err)
+        for name, want in pools:
+            # prepare() cloned each pool, so inp[name] is the pre-launch copy.
+            diff = (values[name].float()[written] - want).abs()
+            if relative_state and name == "state":
+                diff = diff / want.abs().clamp(min=1.0)
+            err = diff.max().item()
+            assert err <= tol, (spec.kernel_name(), batch, name, err)
+            assert torch.equal(values[name][untouched], inp[name][untouched]), name
+
+
+@requires_gfx950
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize("flags,heads", _DISPATCH_CASES)
+def test_request_fields_reach_the_launch(harness, gate, state_dtype, flags, heads):
+    """request -> dispatch -> spec -> launch for the f32 state and the fused
+    modes, driven only by what ``dispatch_gdn_decode`` hands back.
+
+    The request fields must reach the compiled kernel AND the launch: the
+    result's signature packs the fused tensors (``mixed_qkv`` in place of
+    q/k/v, ``conv_state`` / ``conv_weight``, ``out_gate`` / ``norm_weight``)
+    from the builder's inputs. Two batches, since KDA's unfused work table may
+    pick a different tile for each.
+    """
+    conv, norm = flags
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1) if conv or norm else None,
+        gate_kind=gate,
+        num_k_heads=heads[0],
+        num_v_heads=heads[1],
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param((True, False), id="cv"),
+        pytest.param((True, True), id="cv_rn"),
+    ],
+)
+def test_kda_fused_request_reaches_kimi_head_shape(harness, state_dtype, flags):
+    """KDA's real fused-conv deployment shape has Hk == Hv == 32, not 16.
+
+    The generic dispatch matrix above proves the fused ABI at a smaller MHA
+    shape; this pins the request-routed KDA/Kimi head count that the docs name.
+    """
+    conv, norm = flags
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1),
+        gate_kind="kda",
+        num_k_heads=32,
+        num_v_heads=32,
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+def test_request_fields_reach_the_launch_without_qk_l2norm(harness, gate, state_dtype):
+    """A fused request with the q/k L2 norm off runs at the fused default.
+
+    Raw (unnormalized) k lets one update grow the state to |S| ~ 18 at these
+    inputs (about 2.5 with the norm on). There one correctly rounded bf16
+    store alone moves a value by up to 0.0625, more than ``TOL``, so the state
+    error is taken relative to ``max(1, |ref|)``, like ``out_error``'s."""
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1),
+        relative_state=True,
+        gate_kind=gate,
+        num_k_heads=16,
+        num_v_heads=16,
+        state_dtype=state_dtype,
+        use_qk_l2norm=False,
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+def test_request_fields_reach_the_launch_at_the_fused_d64_fallback(
+    harness, state_dtype
+):
+    """GDN D64 cannot run the fused default (it needs head_k_dim % 128 == 0),
+    so dispatch falls back to (1, 1, 1); that tile must still be correct."""
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(1, 1, 1),
+        gate_kind="gdn",
+        num_k_heads=16,
+        num_v_heads=16,
+        head_k_dim=64,
+        head_v_dim=64,
+        state_dtype=state_dtype,
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
+
+
 @requires_gfx950
 def test_mismatched_write_skip_leaves_state_untouched(harness):
     from kernels.gfx950.gdn_decode import GdnDecodeSpec

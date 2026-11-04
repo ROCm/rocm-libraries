@@ -117,6 +117,13 @@ struct HarnessPolicy
     /// Where comparisons run; AUTO follows the reference that produced the expectation.
     ValidatorDevice validator = ValidatorDevice::AUTO;
     ClaimMode claims = ClaimMode::WARN;
+    /// --skip-graph-validation: every bundle is taken only as far as the applicability
+    /// rung -- pass once the engine accepts the graph, skip when it declines -- whatever
+    /// its own enforcement_level says. Claim enforcement is untouched: it runs before
+    /// the rung is chosen, so a broken claim still fails, and a claim is never
+    /// confirmed by a run that verified nothing.
+    bool skipGraphValidation = false;
+
     TensorPlacement placement = TensorPlacement::DEVICE;
 
     /// Full arch token as detected, e.g. "gfx942:sramecc+:xnack-". Empty when

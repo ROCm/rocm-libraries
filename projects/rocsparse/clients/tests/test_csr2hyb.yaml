@@ -42,6 +42,11 @@ Tests:
   algo: [-33, 0, 2147483647]
   matrix: [rocsparse_matrix_random]
 
+- name: csr2hyb_extra
+  category: quick
+  function: csr2hyb_extra
+  precision: *single_precision
+
 - name: csr2hyb_file
   category: quick
   function: csr2hyb

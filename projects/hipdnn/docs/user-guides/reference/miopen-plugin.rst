@@ -200,6 +200,8 @@ The MIOpen Provider plugin uses the ``global.benchmarking`` knob to control whet
 - ``0`` (Benchmarking disabled (default)): MIOpen uses heuristics to select a kernel. The first execution is relatively fast, but it may not use the optimal kernel for your specific configuration.
 - ``1`` (Benchmarking enabled): MIOpen benchmarks multiple solver candidates. The first execution is slower, but subsequent executions use the cached optimal solver which provides the best performance for production workloads. It has minimal overhead and typically results in a 10-50% performance improvement over the default heuristic selection.
 
+The ``HIPDNN_FORCE_BENCHMARKING`` environment variable overrides this knob for the whole process. See :ref:`engine-selection-variables`.
+
 Caching
 ~~~~~~~
 

@@ -9,12 +9,11 @@ of 32 mantissa elements. The dequantisation pipeline is uniform across
 the three mantissa types and across the CK Tile ``42_mx_gemm`` /
 ``38_block_scale_gemm`` mx variants::
 
- 1. Load the 8-bit unbiased E8M0 scale (one byte per 32-element
- mantissa block).
- 2. Decode the scale into an f32 multiplier: ``scale_f32 = 2^(e - 127)``
- where ``e`` is the unbiased exponent. Special cases: ``e == 0``
- -> denormal (treated as 0 for ML use); ``e == 255`` -> NaN
- (treated as 0 by AMDGPU's MX MFMA hardware path).
+ 1. Load the 8-bit E8M0 scale (one byte per 32-element mantissa
+ block). The byte is an unsigned biased exponent: no sign, no mantissa.
+ 2. Decode the scale into an f32 multiplier, as the OCP MX spec
+ defines it: codes 0..254 are exactly ``2^(code - 127)`` (code 0 is
+ ``2^-127``, an f32 subnormal) and code 255 is NaN.
  3. Apply the scale to the dequantised mantissa value via a single
  ``fmul`` before it enters the accumulator.
 
@@ -28,7 +27,7 @@ loads through the existing FP8 MFMA pipeline).
 What v1 ships:
 
 * :func:`decode_mx_scale_e8m0`: ``i8 e8m0 -> f32 multiplier`` via
- ``exp2(e - 127)``.
+ ``exp2(code - 127)``, NaN for code 255.
 * :func:`apply_mx_scale`: scalar ``fmul`` with a dequantised value.
 * :func:`load_and_decode_mx_scale_byte`: convenience wrapper that
  reads one byte from a scale buffer and decodes it.
@@ -38,6 +37,8 @@ f16/bf16)`` if the consumer wants the scale in a narrower dtype.
 """
 
 from __future__ import annotations
+
+import math
 
 from ..core.ir import I8, I32, IRBuilder, PtrType, Value
 
@@ -51,34 +52,31 @@ __all__ = [
 
 
 def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
-    """Decode an 8-bit E8M0 exponent (unbiased, no mantissa, no sign)
-    into an f32 multiplier ``2^(e - 127)``.
+    """Decode an 8-bit E8M0 scale code into its f32 multiplier, per the
+    OCP MX spec.
 
-    E8M0 layout matches IEEE-754's f32 exponent field:
+    The byte is an unsigned biased exponent (bias 127, no sign, no
+    mantissa):
 
-    * ``e == 0`` -> subnormal multiplier; we return ``0.0`` since
-    ML uses the all-zero scale as a "block disabled" sentinel.
-    * ``e == 255`` -> NaN; we return ``0.0`` so downstream
-    accumulators don't poison their row. Matches the AMDGPU MX
-    MFMA hardware path.
-    * ``1 <= e <= 254`` -> ``2^(e - 127)``, exact.
+    * ``0 <= code <= 254`` -> exactly ``2^(code - 127)``. Code 0 is
+      ``2^-127``, an f32 subnormal; it is not zero.
+    * ``code == 255`` -> NaN.
 
-    Lowering: ``sitofp(sext(e)) - 127.0`` then ``exp2``; with both
-    sentinels handled via ``select``. The AMDGPU backend fuses the
-    select chain into a single ``v_med3_f32`` + ``v_exp_f32``.
+    Lowering: ``zext`` the byte to i32 (the byte is read unsigned, so
+    codes 128..255 keep their value; the result is 0..255, so the signed
+    ``sitofp`` converts it exactly), subtract 127
+    (exact in f32), ``exp2``, then a ``select`` puts a quiet NaN on
+    code 255. The ``exp2`` lowering returns exact powers of two for the
+    integer exponents -127..127, including the subnormal for code 0; the
+    decoder test checks all 256 codes on the GPU.
     """
     if e8m0.type.name != "i8":
         raise ValueError(f"decode_mx_scale_e8m0 expects i8 input, got {e8m0.type.name}")
-    e_i32 = b.sext(e8m0, I32)
-    is_zero = b.cmp_eq(e_i32, b.const_i32(0))
-    is_nan = b.cmp_eq(e_i32, b.const_i32(255))
-    e_minus_127_f32 = b.fsub(b.sitofp_f32(e_i32), b.const_f32(127.0))
-    # ``exp2`` returns f32 here; the per-byte ML quant block size
-    # caps the exponent range to roughly +/-127 so the result fits
-    # well within f32's dynamic range.
-    raw_scale = b.exp2(e_minus_127_f32)
-    zero = b.const_f32(0.0)
-    return b.select(b.lor(is_zero, is_nan), zero, raw_scale)
+    code = b.zext(e8m0, I32)
+    is_nan_code = b.cmp_eq(code, b.const_i32(255))
+    exponent = b.fsub(b.sitofp_f32(code), b.const_f32(127.0))
+    scale = b.exp2(exponent)
+    return b.select(is_nan_code, b.const_f32(math.nan), scale)
 
 
 def apply_mx_scale(b: IRBuilder, value_f32: Value, scale_f32: Value) -> Value:

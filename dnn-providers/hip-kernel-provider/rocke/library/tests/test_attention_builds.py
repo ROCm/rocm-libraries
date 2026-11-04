@@ -129,12 +129,12 @@ _KERNEL_RESOURCE_BUDGETS = {
     # gfx950 dense persistent prefill: the 512-thread (8-wave) workgroup pins VGPR
     # at the 256 ceiling independent of waves_per_eu; it needs a hair more -> 20 B.
     # Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
-    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256": {
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256_bthkvmin": {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
     # LSE retains the same persistent occupancy/scratch limits.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256": {
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256_bthkvmin": {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
@@ -1092,6 +1092,168 @@ class TestAttentionHelpers(unittest.TestCase):
         # ALiBi kernel name suffix.
         self.assertIn("_alibi", ll)
 
+    def test_unified_attention_2d_tiled_additive_bias(self):
+        """Additive-bias variant emits the correct ABI params and kernel name token."""
+        from kernels import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=32,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            use_additive_bias=True,
+        )
+        k = build_unified_attention_2d_tiled(spec)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
+        # Additive-bias ABI: f32 pointer (opaque ptr in LLVM IR) + 3 stride scalars.
+        self.assertIn("%additive_bias_ptr", ll)
+        self.assertIn("i32 %additive_bias_batch_stride", ll)
+        self.assertIn("i32 %additive_bias_head_stride", ll)
+        self.assertIn("i32 %additive_bias_sq_stride", ll)
+        # OOB-safe masked load: select guards the GEP index.
+        self.assertIn("select i1", ll)
+        # Kernel name carries the "addb" token.
+        self.assertIn("addb", k.name)
+
+    def test_unified_attention_additive_bias_abi_matches_signature(self):
+        """gfx950 kernel param order must equal the launcher signature order.
+
+        KernelLauncher packs kernargs positionally from the signature, so any
+        drift silently feeds the wrong pointer/stride. Also pins that the
+        non-bias ABI carries no additive-bias params.
+        """
+        from kernels import (
+            UnifiedAttention2DTiledSpec,
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_2d_tiled,
+            build_unified_attention_3d_tiled,
+        )
+        from kernels.common.attention_unified import _3d_signature, _attn_signature
+
+        common = dict(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=32,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+        )
+        for use_ab in (False, True):
+            with self.subTest(kind="2d", use_additive_bias=use_ab):
+                k = build_unified_attention_2d_tiled(
+                    UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab)
+                )
+                sig = _attn_signature(
+                    "bf16",
+                    include_bt_stride=True,
+                    include_qq_bias_stride=True,
+                    include_additive_bias=use_ab,
+                )
+                self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
+                self.assertEqual(
+                    use_ab, any("additive_bias" in p.name for p in k.params)
+                )
+            with self.subTest(kind="3d", use_additive_bias=use_ab):
+                seg = build_unified_attention_3d_tiled(
+                    UnifiedAttention3DTiledSpec(
+                        **common, num_segments=4, use_additive_bias=use_ab
+                    )
+                )
+                sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                self.assertEqual([p.name for p in seg.params], [a["name"] for a in sig])
+
+    def test_unified_attention_additive_bias_must_be_bool(self):
+        """The flag appends ABI params, so a truthy non-bool must not enable it."""
+        from kernels import (
+            UnifiedAttention2DTiledSpec,
+            UnifiedAttention3DTiledSpec,
+            UnifiedAttentionProblem,
+        )
+
+        common = dict(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=32,
+            dtype="bf16",
+        )
+        spec_common = dict(common, use_sinks=False, sliding_window=0, has_softcap=False)
+        makers = {
+            "2d": lambda v: UnifiedAttention2DTiledSpec(
+                **spec_common, use_additive_bias=v
+            ),
+            "3d": lambda v: UnifiedAttention3DTiledSpec(
+                **spec_common, num_segments=4, use_additive_bias=v
+            ),
+            "problem": lambda v: UnifiedAttentionProblem(
+                **common,
+                total_q=64,
+                num_seqs=1,
+                max_seqlen_q=64,
+                max_seqlen_k=64,
+                use_additive_bias=v,
+            ),
+        }
+        for kind, make in makers.items():
+            for bad in ("false", 1, None):
+                with self.subTest(kind=kind, value=bad):
+                    with self.assertRaisesRegex(ValueError, "must be a bool"):
+                        make(bad)
+
+    def test_unified_attention_2d_additive_bias_rejects_unrouted_paths(self):
+        """Bias is emitted only on the 16x16 and plain transposed 32x32 paths,
+        the ones the selectors route a bias problem to. Hand-built specs for the
+        other 32x32 variants must be rejected rather than build untested IR."""
+        from dataclasses import replace
+
+        from kernels import UnifiedAttentionProblem
+        from kernels.common.attention_unified import _tiled_spec_from_problem
+
+        problem = UnifiedAttentionProblem(
+            total_q=812,
+            num_seqs=2,
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=512,
+            max_seqlen_k=512,
+            dtype="bf16",
+            use_additive_bias=True,
+        )
+        spec = _tiled_spec_from_problem(problem, "gfx950")
+        self.assertTrue(spec.use_mfma_32x32 and spec.use_transposed_qk_32x32)
+        variants = {
+            "mask_once": dict(
+                use_transposed_scalar_state=True, use_transposed_mask_once=True
+            ),
+            "invariant_hoist": dict(
+                use_transposed_scalar_state=True, use_transposed_invariant_hoist=True
+            ),
+            "non_transposed_32x32": dict(
+                use_transposed_qk_32x32=False,
+                use_transposed_half_local_pv=False,
+                use_transposed_scalar_state=False,
+            ),
+        }
+        for name, knobs in variants.items():
+            with self.subTest(variant=name):
+                with self.assertRaisesRegex(
+                    ValueError, "use_additive_bias does not support"
+                ):
+                    replace(spec, **knobs)
+                # The same variant without bias is still a valid spec.
+                replace(spec, use_additive_bias=False, **knobs)
+
     def test_unified_attention_3d_tiled_kernel_compiles(self):
         from kernels import (
             UnifiedAttention3DTiledSpec,
@@ -1375,6 +1537,189 @@ class TestAttentionHelpers(unittest.TestCase):
         for req in ("block_tables", "kv_lens", "block_table_stride"):
             self.assertIn(req, names)
         self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
+
+    def test_gfx950_signature_matches_the_built_kernels_params(self):
+        """gfx950 ``attention_dense_signature`` matches the built kernel's params.
+
+        The arms straddle the case where ``runtime_shape`` and
+        ``_has_shape_params`` disagree (the shape is a param AND baked), which a
+        launcher gating on the wrong predicate mis-binds on GPU only.
+        """
+        from rocke.core.ir import PtrType
+        from rocke.helpers.spec import ptr_type_str
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            _has_shape_params,
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        def type_str(param):
+            if isinstance(param.type, PtrType):
+                return ptr_type_str(param.type.pointee.name, param.type.space)
+            return param.type.name
+
+        base = dict(
+            batch=2,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+        )
+        arms = {
+            "runtime-shape": AttentionDenseSpec(**base),
+            "sliding-window": AttentionDenseSpec(**base, sliding_window=512),
+            "bottom-right": AttentionDenseSpec(
+                **{**base, "seqlen_q": 1024}, causal_bottom_right=True
+            ),
+            "persistent": AttentionDenseSpec(
+                **base, persistent=True, num_persistent=256
+            ),
+        }
+        for arm, spec in arms.items():
+            with self.subTest(arm=arm):
+                params = build_attention_dense(spec, arch="gfx950").params
+                sig = attention_dense_signature(spec)
+                self.assertEqual([a["name"] for a in sig], [p.name for p in params])
+                self.assertEqual(
+                    [a["type"] for a in sig], [type_str(p) for p in params]
+                )
+                self.assertEqual(
+                    _has_shape_params(spec), "batch" in [p.name for p in params]
+                )
+        # The predicates really diverge on these arms.
+        self.assertEqual(
+            [
+                arms[a].runtime_shape
+                for a in ("runtime-shape", "sliding-window", "bottom-right")
+            ],
+            [True, False, False],
+        )
+
+    def test_persist_decodes_build_with_distinct_names_on_both_arches(self):
+        """Every persist decode an arch supports builds and has its own name,
+        so no two decodes can share a cached binary."""
+        from kernels.gfx942 import attention_dense as k942
+        from kernels.gfx950 import attention_dense as k950
+
+        base = dict(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+            persistent=True,
+        )
+        # gqa_pair* pin num_persistent to their own work split (NQB=8, Hkv=8, gqa=4).
+        num_persistent = {"gqa_pair": 64, "gqa_pair_2phase": 128}
+        for arch, K, Spec in (
+            ("gfx942", k942, k942.Gfx942AttentionDenseSpec),
+            ("gfx950", k950, k950.Gfx950AttentionDenseSpec),
+        ):
+            with self.subTest(arch=arch):
+                names = {}
+                for decode in sorted(
+                    Spec(**base).supported_persist_decodes() - {"auto"}
+                ):
+                    spec = Spec(
+                        **base,
+                        persist_decode=decode,
+                        num_persistent=num_persistent.get(decode, 256),
+                    )
+                    K.build_attention_dense(spec, arch=arch)
+                    names[decode] = spec.kernel_name()
+                self.assertIn("bt_hkv_minor", names)
+                self.assertEqual(len(set(names.values())), len(names), names)
+
+    def test_nonpersist_auto_decode_by_shape(self):
+        """Non-persistent auto: Swizzled Head-first for large causal MHA,
+        bt_hkv_minor for other causal attention, qb_minor otherwise."""
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+        cases = [
+            # (Hq, Hkv, S, B, causal, extra) -> expected
+            ((64, 64, 8192, 4, True, {}), "hq_minor_swz"),  # 32 blocks, 8192 items
+            ((128, 128, 4096, 4, True, {}), "hq_minor_swz"),  # 16 blocks
+            ((64, 8, 8192, 4, True, {}), "bt_hkv_minor"),  # GQA
+            ((128, 128, 2048, 8, True, {}), "bt_hkv_minor"),  # only 8 blocks
+            ((32, 32, 8192, 4, True, {}), "bt_hkv_minor"),  # 4096 items
+            ((64, 64, 8192, 4, True, {"chiplet_num_xcds": 128}), "bt_hkv_minor"),
+            ((64, 64, 8192, 4, True, {"sliding_window": 512}), "qb_minor"),
+            ((64, 64, 8192, 4, False, {}), "qb_minor"),
+        ]
+        for Spec in (Gfx942AttentionDenseSpec, Gfx950AttentionDenseSpec):
+            for (hq, hkv, s, b, causal, extra), want in cases:
+                with self.subTest(
+                    spec=Spec.__name__, shape=(hq, hkv, s, b, causal), extra=extra
+                ):
+                    spec = Spec(
+                        batch=b,
+                        seqlen_q=s,
+                        seqlen_kv=s,
+                        num_query_heads=hq,
+                        num_kv_heads=hkv,
+                        head_size=128,
+                        causal=causal,
+                        dtype="fp16",
+                        block_n=64,
+                        **extra,
+                    )
+                    self.assertEqual(spec.resolved_nonpersist_decode, want)
+
+    def test_nonpersist_decode_builds_names_and_rejects_on_both_arches(self):
+        """Every nonpersist decode builds, fills the grid and gets its own name;
+        the persistent grid ignores it, and an unknown value is rejected."""
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+        from kernels.gfx942 import attention_dense as k942
+        from kernels.gfx950 import attention_dense as k950
+
+        base = dict(
+            batch=2,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+        )
+        work = (2048 // 256) * 32 * 2
+        for arch, K, Spec in (
+            ("gfx942", k942, k942.Gfx942AttentionDenseSpec),
+            ("gfx950", k950, k950.Gfx950AttentionDenseSpec),
+        ):
+            with self.subTest(arch=arch):
+                names = {}
+                for decode, impl in NONPERSIST_DECODES.items():
+                    spec = Spec(**base, nonpersist_decode=decode)
+                    K.build_attention_dense(spec, arch=arch)
+                    gx, gy, gz = K.attention_dense_grid(spec)
+                    self.assertEqual(gx * gy * gz, work, decode)
+                    names[decode] = spec.kernel_name()
+                    if impl.tag:
+                        self.assertIn(impl.tag, names[decode])
+                self.assertEqual(len(set(names.values())), len(names))
+                auto = Spec(**base)
+                self.assertEqual(
+                    auto.kernel_name(), names[auto.resolved_nonpersist_decode]
+                )
+                with self.assertRaisesRegex(ValueError, "nonpersist_decode"):
+                    Spec(**base, nonpersist_decode="nope")
+                persistent = dict(base, persistent=True, num_persistent=256)
+                self.assertEqual(
+                    Spec(**persistent, nonpersist_decode="bt_hkv_minor").kernel_name(),
+                    Spec(**persistent).kernel_name(),
+                )
 
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill
@@ -1914,13 +2259,14 @@ class TestAttentionHelpers(unittest.TestCase):
             num_queries_per_kv=8,
             use_alibi=False,
             use_qq_bias=False,
+            use_additive_bias=False,
             use_fp8=False,
             q_dtype=None,
         )
         ok_fp16, _ = supports_tiled_2d(**base)
         self.assertTrue(ok_fp16)
         # head_size in {64, 128, 256}, block_size in {16, 32, 64}, dtype=bf16,
-        # alibi, qq_bias all supported.
+        # alibi, qq_bias, additive_bias all supported.
         for accept in [
             dict(head_size=256),
             dict(head_size=64),
@@ -1929,6 +2275,7 @@ class TestAttentionHelpers(unittest.TestCase):
             dict(dtype="bf16"),
             dict(use_alibi=True),
             dict(use_qq_bias=True),
+            dict(use_additive_bias=True),
         ]:
             kwargs = dict(base)
             kwargs.update(accept)
@@ -2960,10 +3307,12 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
         # so the split above is attributable to waves_per_eu alone. The name
         # tags a non-default waves_per_eu (2 keeps the shipped symbol), so the
-        # names differ by exactly that tag.
+        # names differ by exactly that tag (wherever the block-order tags put it).
+        wpe1 = specs[1].kernel_name().split("_")
+        wpe1.remove("wpe1")
         self.assertEqual(
-            specs[1].kernel_name(),
-            specs[2].kernel_name() + "_wpe1",
+            wpe1,
+            specs[2].kernel_name().split("_"),
             "kernel_name() differed beyond the waves_per_eu tag — test setup error",
         )
 
@@ -3303,12 +3652,20 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         ).hexdigest()
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
-        """Shapes that collapse to one cache key must emit one kernel."""
+        """Shapes that collapse to one cache key must emit one kernel, for every
+        nonpersist decode (a reversed order must read NQB from the param)."""
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+
+        for decode in ("auto", *NONPERSIST_DECODES):
+            with self.subTest(nonpersist_decode=decode):
+                self._check_runtime_shape_collision(nonpersist_decode=decode)
+
+    def _check_runtime_shape_collision(self, **over):
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        base = AttentionDenseSpec(**self._BASE_KWARGS, **over)
         self.assertTrue(
             base.runtime_shape,
             "test setup error: the base spec is not on the runtime-shape path",
@@ -3339,6 +3696,35 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
             "every other shape. Either stop baking that field, or drop it from "
             "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
         )
+
+    def test_shape_dependent_auto_order_splits_the_key(self):
+        """The auto non-persistent order reads batch/seqlen (hq_minor_swz for
+        large causal MHA), so runtime-shape specs that resolve to different
+        orders must not share a key; the same order still shares one kernel."""
+        from dataclasses import replace
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = AttentionDenseSpec(**{**self._BASE_KWARGS, "num_kv_heads": 32})
+        small = replace(base, batch=1, seqlen_q=512, seqlen_kv=512)
+        large = replace(base, batch=16, seqlen_q=4096, seqlen_kv=4096)
+        larger = replace(base, batch=32, seqlen_q=4096, seqlen_kv=4096)
+        self.assertTrue(small.runtime_shape and large.runtime_shape)
+        self.assertNotEqual(
+            small.resolved_nonpersist_decode, large.resolved_nonpersist_decode
+        )
+        self.assertEqual(
+            large.resolved_nonpersist_decode, larger.resolved_nonpersist_decode
+        )
+
+        def key(spec):
+            return attention_dense_cache_key(spec, arch="gfx950")
+
+        self.assertNotEqual(key(small), key(large))
+        self.assertEqual(key(large), key(larger))
+        self.assertEqual(large.kernel_name(), larger.kernel_name())
+        self.assertEqual(self._ir_sha(large), self._ir_sha(larger))
 
     def test_baked_shape_specs_split_both_key_and_ir(self):
         """Control: off the runtime path, each shape keeps its own key and IR.
@@ -3457,11 +3843,19 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
         """Shapes that collapse to one cache key must emit one kernel -- and,
-        on gfx942, one symbol name."""
+        on gfx942, one symbol name -- for every nonpersist decode (a reversed
+        order must read NQB from the param)."""
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+
+        for decode in ("auto", *NONPERSIST_DECODES):
+            with self.subTest(nonpersist_decode=decode):
+                self._check_runtime_shape_collision(nonpersist_decode=decode)
+
+    def _check_runtime_shape_collision(self, **over):
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
 
-        base = self._spec(**self._BASE_KWARGS)
+        base = self._spec(**self._BASE_KWARGS, **over)
         self.assertTrue(
             base.runtime_shape,
             "test setup error: the base gfx942 spec is not on the runtime-shape path",
@@ -3516,6 +3910,34 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     f"runtime-shape gfx942 name still carries {tok!r}: {name}",
                 )
 
+    def test_shape_dependent_auto_order_splits_the_key(self):
+        """The auto non-persistent order reads batch/seqlen (hq_minor_swz for
+        large causal MHA), so runtime-shape specs that resolve to different
+        orders must not share a key; the same order still shares one kernel."""
+        from dataclasses import replace
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        base = self._spec(**{**self._BASE_KWARGS, "num_kv_heads": 32})
+        small = replace(base, batch=1, seqlen_q=512, seqlen_kv=512)
+        large = replace(base, batch=16, seqlen_q=4096, seqlen_kv=4096)
+        larger = replace(base, batch=32, seqlen_q=4096, seqlen_kv=4096)
+        self.assertTrue(small.runtime_shape and large.runtime_shape)
+        self.assertNotEqual(
+            small.resolved_nonpersist_decode, large.resolved_nonpersist_decode
+        )
+        self.assertEqual(
+            large.resolved_nonpersist_decode, larger.resolved_nonpersist_decode
+        )
+
+        def key(spec):
+            return attention_dense_cache_key(spec, arch="gfx942")
+
+        self.assertNotEqual(key(small), key(large))
+        self.assertEqual(key(large), key(larger))
+        self.assertEqual(large.kernel_name(), larger.kernel_name())
+        self.assertEqual(self._ir_sha(large), self._ir_sha(larger))
+
     def test_grid_still_varies_per_shape_under_one_cache_key(self):
         """One binary, but a fresh launch grid for every shape.
 
@@ -3565,9 +3987,17 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     # under test, or spec construction rejects it. Each maps to the name token its
     # order adds (qb_major adds none).
     _PERSIST_VARIANTS = {
+        "bt_hkv_minor": (
+            dict(persistent=True, num_persistent=64, persist_decode="bt_hkv_minor"),
+            "_bthkvmin",
+        ),
         "hkv_major": (
             dict(persistent=True, num_persistent=64, persist_decode="hkv_major"),
             "_hkvmaj",
+        ),
+        "hq_minor_swz": (
+            dict(persistent=True, num_persistent=64, persist_decode="hq_minor_swz"),
+            "_hqminswz",
         ),
         "qb_major": (
             dict(persistent=True, num_persistent=64, persist_decode="qb_major"),
@@ -3761,9 +4191,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertEqual(base.persist_decode, "auto")
-        # gqa=4, NP=64: hkv_major iff gqa*nqb*B >= 2*NP (nqb = Sq/256 here).
+        # Batch below the XCD count: bt_hkv_minor. Else hkv_major iff
+        # gqa*nqb*B >= 2*NP (nqb = Sq/256 here).
         shapes = {
-            "qb_major": ((1, 512, 512), (1, 1024, 1024)),
+            "bt_hkv_minor": ((1, 512, 512), (1, 1024, 1024)),
             "hkv_major": ((8, 2048, 2048), (64, 4096, 8192)),
         }
 
@@ -3797,9 +4228,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         for i, part in enumerate(("cache key", "IR", "kernel name")):
             self.assertNotEqual(
-                by_order["qb_major"][i],
+                by_order["bt_hkv_minor"][i],
                 by_order["hkv_major"][i],
-                f"auto resolving to qb_major and hkv_major share one {part}; the "
+                f"auto resolving to bt_hkv_minor and hkv_major share one {part}; the "
                 "cache would serve one decode body to the other order's shapes",
             )
 
@@ -3852,6 +4283,42 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 f"sliding windows 128 and 256 share one {part}; the window is "
                 "baked into the prune and must split identity",
             )
+
+    def test_window_balancing_is_runtime_for_every_decode(self):
+        """A window at least as long as the keys counts as plain causal, so the
+        decodes' causal balancing (longest-first, fold, pair fold) depends on the
+        launch's seqlen_kv. On the runtime path that is a select on a runtime flag,
+        not a compile-time branch: every pinned decode, on both grids, keeps ONE
+        (key, IR, name) across shapes on both sides of the window."""
+        from dataclasses import replace
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+        window = 1024
+        # (batch, seqlen): window >= keys for the first two, < keys for the rest.
+        shapes = ((2, 512), (1, 1024), (1, 2048), (3, 4096))
+        grids = [dict(nonpersist_decode=n) for n in sorted(NONPERSIST_DECODES)] + [
+            dict(persistent=True, num_persistent=64, persist_decode=n)
+            for n in sorted(
+                Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"}
+            )
+        ]
+        for kw in grids:
+            base = self._spec(**self._BASE_KWARGS, sliding_window=window, **kw)
+            arts = set()
+            for bt, sq in shapes:
+                with self.subTest(**kw, shape=(bt, sq)):
+                    spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sq)
+                    self.assertTrue(spec.runtime_shape)
+                    arts.add(
+                        (
+                            attention_dense_cache_key(spec, arch="gfx942"),
+                            self._ir_sha(spec),
+                            spec.kernel_name(),
+                        )
+                    )
+            self.assertEqual(len(arts), 1, f"{kw}: {len(arts)} distinct artifacts")
 
     def test_bf16_d128_default_is_on_the_runtime_path(self):
         """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
@@ -3922,7 +4389,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 "gfx942_dense",
             ).kernel_spec
 
-        specs = [spec_for(8, 8192, 32, 8), spec_for(2, 16384, 64, 8)]
+        specs = [spec_for(8, 8192, 32, 8), spec_for(16, 4096, 64, 8)]
         if not all(s.persistent for s in specs):
             self.skipTest(
                 "shipped gfx942 dispatch no longer selects persistent for these "
@@ -4092,6 +4559,9 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     # smallest config under test. gfx950 dense is the baked-heads control
     # (test_gfx950_baked_heads_split_key_ir_and_name).
     _PERSIST_VARIANTS = {
+        "bt_hkv_minor": dict(
+            persistent=True, num_persistent=64, persist_decode="bt_hkv_minor"
+        ),
         "hkv_major": dict(
             persistent=True, num_persistent=64, persist_decode="hkv_major"
         ),
@@ -4530,7 +5000,8 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
         self.assertEqual(
             AttentionDenseSpec(**self._BASE_KWARGS).kernel_name(),
-            "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs",
+            "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs"
+            "_npbthkvmin",
         )
         gfx950 = Gfx950AttentionDenseSpec(**self._BASE_KWARGS)
         self.assertIn("_hq128_kv8_", gfx950.kernel_name())
@@ -4720,13 +5191,17 @@ class TestDenseSpecPreflight(unittest.TestCase):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import supports_attention_dense
 
-        small = self._spec(batch=1, num_query_heads=8, num_kv_heads=8)
+        # One pinned block order: auto would pick a different one per shape.
+        small = self._spec(
+            batch=1, num_query_heads=8, num_kv_heads=8, nonpersist_decode="bt_hkv_minor"
+        )
         huge = self._spec(
             batch=64,
             seqlen_q=16384,
             seqlen_kv=16384,
             num_query_heads=8,
             num_kv_heads=8,
+            nonpersist_decode="bt_hkv_minor",
         )
         self.assertTrue(small.runtime_shape and huge.runtime_shape)
         self.assertEqual(
