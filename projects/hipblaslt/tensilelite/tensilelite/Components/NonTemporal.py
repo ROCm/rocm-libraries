@@ -65,8 +65,9 @@ def decodeNonTemporal(
     return (False, False, False, scope, temporal_hint, non_volatile)
 
 
-def tdmCacheModifiers(asm_caps, hints, decider=None):
-    """Return ``TENSORModifiers`` for one ``tensor_load_to_lds``, or ``None``.
+def tdmCacheModifiers(asm_caps, hints, decider=None, isStore=False):
+    """Return ``TENSORModifiers`` for one ``tensor_load_to_lds`` or, with
+    ``isStore``, one ``tensor_store_from_lds``, or ``None``.
 
     ``hints`` holds one ``(nt_value, temporal_hint, non_volatile)`` tuple per
     tensor the instruction loads.  Wave-separated TDM issues a single
@@ -99,7 +100,7 @@ def tdmCacheModifiers(asm_caps, hints, decider=None):
         th = TemporalHint.TH_NONE
     if (scope, th, nv) == (CacheScope.SCOPE_NONE, TemporalHint.TH_NONE, NonVolatile.NV_NONE):
         return None
-    return TENSORModifiers(scope=scope, th=th, nv=nv)
+    return TENSORModifiers(scope=scope, th=th, nv=nv, isStore=isStore)
 
 
 def _at_least_device_scope(scope):

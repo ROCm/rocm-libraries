@@ -1241,6 +1241,12 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # Store D through LDS with tensor_store_from_lds in the beta=0 epilogue's narrowest
+    # store-vector-width edge block (the odd-M block under AdaptiveGemm); every other
+    # store block keeps buffer_store. gfx1250 only.
+    # 0: Disable
+    # 1: Enable
+    "TDMStore": [0, 1],
     # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2, WmmaQueueDepth: 8}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.

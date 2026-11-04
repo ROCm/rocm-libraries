@@ -23,7 +23,7 @@
 from ..ExecutionPolicy import isPersistent
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
+  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData, DSModifiers
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicPkAddBF16, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
@@ -34,13 +34,13 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLeU32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulHIU32, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SStoreB128, SSubI32, SSubU32, \
-  SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
+  SSwapPCB64, SWaitCnt, SWaitAlu, SWaitTensorcnt, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
   VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VSubU32, VCvtBF16toFP32
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU, \
@@ -52,7 +52,9 @@ from ..SolutionStructs import Solution
 from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
+from ..AsmMemoryHelpers import dsStore
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
+from ..Components.TensorDataMover import TensorDataMoverStore
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
@@ -185,13 +187,13 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
-    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0) -> Module:
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
       codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion, numBatches,
-      inter_iter_rowInc, direct_next_rowInc).emit()
+      inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase).emit()
 
 class GlobalWriteBatchWriter:
   def __init__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
@@ -199,7 +201,7 @@ class GlobalWriteBatchWriter:
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
-    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0):
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None):
     self.kernel = kernel
     self.tPA    = tPA
     self.tPB    = tPB
@@ -272,6 +274,8 @@ class GlobalWriteBatchWriter:
     # Next batch's first-elt rowInc (look-ahead at the last emitting elt). 0 = none.
     self.inter_iter_rowInc = inter_iter_rowInc
     self.direct_next_rowInc = direct_next_rowInc
+    # VGPR holding this thread's LDS byte address in the staged D tile; None = buffer_store.
+    self.tdmStoreLdsBase = tdmStoreLdsBase
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -1877,6 +1881,107 @@ class GlobalWriteBatchWriter:
       module.add(SBranch(labelName=cvtEndLabel.getLabelName(), comment="Branch to GateCvtAll end"))
     module.add(cvtEndLabel)
 
+  def _emitTDMStoreSetup(self) -> Module:
+    """Fence the main-loop LDS and compute this thread's byte address in the staged D tile.
+
+    The tile is staged M-contiguous from LDS offset 0, over the main-loop buffers, so every wave
+    must be done with them, including in-flight tensor_load_to_lds, before the first staging store.
+    """
+    module = Module("TDMStoreSetup")
+    kw = self.parentWriter
+    if self.kernel["enableTDMA"] or self.kernel["enableTDMB"]:
+      module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
+    module.add(kw._syncThreads(self.kernel, "all waves are done with the main-loop LDS"))
+    base = self.tdmStoreLdsBase
+    mt0 = self.kernel["MacroTile0"]
+    module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr("WorkGroup1"), src1=self.kernel["MacroTile1"], comment="wg1*MT1"))
+    module.add(VSubU32(dst=vgpr(base), src0=vgpr(kw.vgprs.coord1), src1=sgpr(self.tmpS01), comment="tile column = coord1 - wg1*MT1"))
+    module.add(VMulLOU32(dst=vgpr(base), src0=vgpr(base), src1=mt0, comment="* MT0"))
+    module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kw.vgprs.coord0), comment="+ coord0"))
+    module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
+    module.add(VSubU32(dst=vgpr(base), src0=vgpr(base), src1=sgpr(self.tmpS01), comment="- wg0*MT0"))
+    module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternal)), src=vgpr(base), comment="* bpe"))
+    return module
+
+  def _emitTDMStoreStaging(self, stagedElements) -> Module:
+    """Write this batch's packed D elements to their (M, N) position in the staged tile."""
+    module = Module("TDMStoreStaging")
+    kw = self.parentWriter
+    bpe = kw.states.bpeCexternal
+    bps = bpe * self.gwvw
+    numRegs = max(1, bps // kw.states.bpr)
+    for sumIdx, coordOffset0, coordOffset1 in stagedElements:
+      addr = self.tdmStoreLdsBase
+      offset = (coordOffset1 * self.kernel["MacroTile0"] + coordOffset0) * bpe
+      if offset > 0xFFFF:
+        # The DS instruction offset has 16 bits.
+        module.add(VAddU32(dst=vgpr(self.tmpVgpr), src0=vgpr(addr), src1=hex(offset & ~0xFFFF), comment="LDS offset above 64 KiB"))
+        addr, offset = self.tmpVgpr, offset & 0xFFFF
+      module.add(dsStore(bps, dstAddr=vgpr(addr), src=vgpr(formatting(sumIdx, "ValuC+", kw.states.c.startVgprValu), numRegs),
+                         ds=DSModifiers(offset=offset), comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
+                         memToken=MemTokenData([kw.states.memTokenLdsBuffer0])))
+    return module
+
+  def _emitTDMStoreFlush(self) -> Module:
+    """Store the staged D tile with one tensor_store_from_lds per wave.
+
+    Each wave stores MacroTile1/numWaves consecutive columns of the tile. tensor_dim0/1 bound
+    the store to the part of the tile inside D; a wave whose columns all lie at or past SizeJ
+    skips its store instead of relying on a zero tensor_dim.
+    """
+    module = Module("TDMStoreFlush")
+    kw = self.parentWriter
+    bpe = kw.states.bpeCexternal
+    mt0 = self.kernel["MacroTile0"]
+    ws = self.kernel["WavefrontSize"]
+    colsPerWave = self.kernel["MacroTile1"] // (self.kernel["NumThreads"] // ws)
+    strideD1 = "StrideD%s" % kw.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
+    sizeI = kw.sizeRef(self.kernel["ProblemType"]["Index0"])
+    sizeJ = kw.sizeRef(self.kernel["ProblemType"]["Index1"])
+    skipStore = Label(kw.labels.getNameInc("TDMStoreSkip"), "no column of this wave is inside D")
+    tdm = TensorDataMoverStore()
+    tdm.setMemToken([kw.states.memTokenLdsBuffer0])
+    with kw.allocTmpSgpr(12, alignment=8, tag="tdmStoreDesc") as desc:
+      # group1 (8 SGPRs) must be 8-aligned, so it goes first; group0 (4 SGPRs) follows.
+      g1 = desc.idx
+      g0 = desc.idx + 8
+      module.add(tdm.initOperands(g0, g1))
+      module.add(tdm.setDataType(self.kernel["ProblemType"]["DestDataType"], g1))
+      with kw.allocTmpSgpr(4, alignment=2, tag="tdmStoreTmp") as tmp:
+        col, dim, offLo, offHi = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
+        module.add(VReadfirstlaneB32(dst=sgpr(col), src=vgpr("Serial"), comment="first thread id"))
+        module.add(SLShiftRightB32(dst=sgpr(col), shiftHex=int(log2(ws)), src=sgpr(col), comment="waveId"))
+        module.add(SMulI32(dst=sgpr(col), src0=sgpr(col), src1=colsPerWave, comment="first tile column of this wave"))
+        module.add(SMulI32(dst=sgpr(offLo), src0=sgpr(col), src1=mt0 * bpe, comment="its LDS address"))
+        module.add(tdm.setLdsAddr(g0, sgpr(offLo)))
+        module.add(SMulHIU32(dst=sgpr(offHi), src0=sgpr(col), src1=sgpr(strideD1), comment="hi(column*StrideD)"))
+        module.add(SMulI32(dst=sgpr(offLo), src0=sgpr(col), src1=sgpr(strideD1), comment="lo(column*StrideD)"))
+        module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
+        module.add(SAddU32(dst=sgpr(offLo), src0=sgpr(offLo), src1=sgpr(dim), comment="+ wg0*MT0"))
+        module.add(SAddCU32(dst=sgpr(offHi), src0=sgpr(offHi), src1=0, comment="carry"))
+        module.add(SLShiftLeftB64(dst=sgpr(offLo, 2), src=sgpr(offLo, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from SrdD"))
+        module.add(tdm.setGlobalAddr(g0, "SrdD"))
+        module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(offLo), comment="global address lo"))
+        module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr(offHi), comment="global address hi"))
+        module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
+        module.add(tdm.setTensorDim0(g1, dim, kw))
+        module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup1"), src1=self.kernel["MacroTile1"], comment="wg1*MT1"))
+        module.add(SAddU32(dst=sgpr(col), src0=sgpr(col), src1=sgpr(dim), comment="first D column of this wave"))
+        module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
+        module.add(tdm.setTensorDim1(g1, dim, kw))
+        module.add(tdm.setTensorTile0(g1, mt0))
+        module.add(tdm.setTensorTile1(g1, colsPerWave))
+        module.add(tdm.setTensorStride0(g1, strideD1))
+        # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
+        module.add(SWaitCnt(dscnt=0, comment="staging stores done [stinky-keep]"))
+        module.add(kw._syncThreads(self.kernel, "every wave has staged its part of the tile"))
+        module.add(SCmpLeU32(src0=sizeJ, src1=sgpr(col), comment="all columns of this wave at or past SizeJ?"))
+        module.add(SCBranchSCC1(labelName=skipStore.getLabelName(), comment="skip the store"))
+        module.add(tdm.issueStore(g0, g1, tensor=kw.tdmStoreModifiers(self.kernel)))
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store"))
+        module.add(skipStore)
+    return module
+
   def _emitNonatomicAdd(self, module: Module):
     ########################################
     # Not Atomic
@@ -2058,6 +2163,10 @@ class GlobalWriteBatchWriter:
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
+    tdmStore = self.tdmStoreLdsBase is not None
+    tdmStagedElements = []
+    if tdmStore and self.batchIdx == 0:
+      module.add(self._emitTDMStoreSetup())
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
       self._emitPlsinStageBoundary(module, element)
@@ -2535,7 +2644,7 @@ class GlobalWriteBatchWriter:
                           comment="Pack with neighbor"))
 
       if self.kernel["ExpertSchedulingMode"] > 0:
-        if self.kernel["GroupLoadStore"]:
+        if self.kernel["GroupLoadStore"] or tdmStore:
           needStoreWaitAlu = True
         else:
           packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
@@ -2713,6 +2822,8 @@ class GlobalWriteBatchWriter:
                                                    overrideAfterPrimerRows=_emitOverrideRows, comment="store TD not StoreRemapVectorWidth")
           storeCodeModule.add(tmpStoreCode)
           self.storesIssued += 1
+        elif tdmStore:
+          tdmStagedElements.append((sumIdx, addrCalc.coordOffset0, addrCalc.coordOffset1))
         else:
           # Regular store path. If UseSubtileImpl NonEdge, guard against OOB wave groups.
           skipLabel = None
@@ -2856,6 +2967,11 @@ class GlobalWriteBatchWriter:
       module.add(peel)
     else:
       module.add(storeCode)
+
+    if tdmStore:
+      module.add(self._emitTDMStoreStaging(tdmStagedElements))
+      if self.batchIdx == self.numBatches - 1:
+        module.add(self._emitTDMStoreFlush())
 
     if self.parentWriter.db["CheckStoreC"]>=0:
       useBuffer = self.kernel["BufferStore"]
