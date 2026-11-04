@@ -430,7 +430,13 @@ def _reject_additive_bias_inputs(inputs: Mapping[str, Any], where: str) -> None:
 
 def _tuning_additive_bias(request, problem, tensors: Mapping[str, Any]) -> dict:
     """``run_unified_attention_torch`` bias kwargs for ``tensors["attn_bias"]``,
-    which must be given exactly when the problem has additive bias."""
+    which must be given exactly when the problem has additive bias.
+
+    The strides are derived from the tensor's shape, then checked by the
+    runner's own ``_validate_additive_bias`` (dtype, device, unit key stride,
+    i32 index, storage reach), so a bias that binds also launches."""
+    from kernels.common.attention_unified import _validate_additive_bias
+
     attn_bias = tensors.get("attn_bias")
     if not problem.use_additive_bias:
         if attn_bias is not None:
@@ -440,19 +446,18 @@ def _tuning_additive_bias(request, problem, tensors: Mapping[str, Any]) -> dict:
         return {}
     if attn_bias is None:
         raise ValueError("an additive bias requires tensors['attn_bias']")
-    bias_kind = _dtype_kind(attn_bias, "attn_bias")
-    if bias_kind != "fp32":
-        raise ValueError(
-            f"attn_bias dtype must be fp32 for the unified kernels, got {bias_kind}"
-        )
     batch, head, query = _attn_bias_strides(request, attn_bias, None)
-    # The unified kernels read keys at stride 1 whatever Sk is, and the runner
-    # refuses any other key stride, so refuse it here too, Sk == 1 included.
-    if int(attn_bias.stride(3)) != 1:
-        raise ValueError(
-            "attn_bias key dimension must have stride 1 for the unified kernels, "
-            f"got stride {int(attn_bias.stride(3))}"
+    q = tensors.get("q")
+    try:
+        _validate_additive_bias(
+            problem, attn_bias, batch, head, query, None if q is None else q.device
         )
+    except (ValueError, NotImplementedError) as exc:
+        raise type(exc)(
+            f"tensors['attn_bias'] (strides {(batch, head, query)} derived from "
+            f"shape {tuple(attn_bias.shape)}) is refused by the unified kernels: "
+            f"{exc}"
+        ) from exc
     return {
         "additive_bias": attn_bias,
         "additive_bias_batch_stride": batch,
@@ -476,7 +481,9 @@ def bind_tuning_attention_torch(
     required: an f32 tensor shaped ``[B|1, H|1, Sq|1, Sk]`` with a unit
     stride on the key dimension; its strides are derived (0 on a size-1
     dimension) and passed through. Omitting it, or passing one when the
-    problem has no bias, raises ``ValueError``.
+    problem has no bias, raises ``ValueError``. The derived layout is checked
+    here by the runner's own bias validation, so a bias the launch would
+    refuse (e.g. past the kernels' i32 index) is refused at bind time.
     """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,

@@ -5,7 +5,7 @@
 
 Drives ``run_unified_attention_torch`` with an fp32 additive bias on both the 2D
 tiled (``backend="tiled"``) and 3D split-KV (``backend="3d"``) paths and checks
-max_abs against an fp32 torch reference of
+max_abs against ``rocke.numeric.sdpa_reference`` (fp64) of
 ``softmax(softcap(Q @ K^T * scale) + bias, causal/window) @ V`` -- the bias is
 added after the softcap, as for ALiBi/QQ bias. The 2D lane covers both score
 paths: short prefill (16x16) and long prefill (max_seqlen_q > 256, multi- and
@@ -28,16 +28,19 @@ are a graceful skip on a CPU CI box. The host-side argument-validation tests at
 the bottom need torch for real CPU tensors (``_validate_additive_bias`` checks
 a torch-specific dtype string), so they are gated with ``requires_torch`` and
 skip, rather than erroring the whole module, on an image with no torch (e.g.
-TheRock's gfx94X CI). The CI GPU lane has no torch either, so it skips this
-file; ``test_attention_additive_bias_gfx950_device_numeric.py`` runs one case
-per path there. Run standalone:
+TheRock's gfx94X CI). The installed CTest tree has no torch either, so this
+file skips there; ``test_attention_additive_bias_gfx950_device_numeric.py``
+runs one case per path in it without torch, on a gfx950 device. Run
+standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
+from rocke.numeric.sdpa_reference import sdpa_reference
 
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
@@ -165,6 +168,19 @@ def _make_bias(mode, num_seqs, hq, max_q, max_k):
     return storage, batch_stride, head_stride, sq_stride, full_view
 
 
+def _host(x):
+    return x.detach().double().cpu().numpy()
+
+
+def _unexpanded(bias):
+    """``bias`` with each broadcast (stride 0) axis cut to size 1;
+    ``sdpa_reference`` broadcasts size-1 axes itself."""
+    for dim in range(bias.dim()):
+        if bias.stride(dim) == 0:
+            bias = bias.narrow(dim, 0, 1)
+    return bias
+
+
 def _reference(
     q,
     k,
@@ -181,64 +197,69 @@ def _reference(
     sinks=None,
     return_lse=False,
 ):
-    """fp32 paged attention in the kernels' order: ``softcap(QK*scale) +
-    bias``, then the mask, then the softmax (with ``sinks`` [hq] appended as
-    extra logits).
+    """``sdpa_reference`` (fp64) over the paged K/V gathered into THD, in the
+    kernels' order: ``softcap(QK*scale) + bias``, then the mask, then the
+    softmax (with ``sinks`` [hq] as extra logits with no value).
 
     The mask is the band around the diagonal ``d = q + context`` (``context =
     kv_len - q_len`` bottom-right, 0 with ``top_left``): key ``k`` is kept iff
     ``k <= d + right_bound`` (``-1``: no right bound) and, with a window,
-    ``d - k < sliding_window``. A row with no kept key outputs 0 (LSE -inf).
-    ``return_lse`` also returns the natural-log normalizer ``[total_q, hq, 1]``.
+    ``d - k < sliding_window``. A row with no kept key, from the mask or from
+    -inf bias entries, outputs 0 with LSE -inf. ``return_lse`` also returns the
+    natural-log normalizer ``[total_q, hq, 1]`` (without the sink).
 
     ``bias_inside_softcap`` computes the other order, ``softcap(QK*scale +
     bias)``, only to show a softcap case can tell the two apart.
-
-    A row whose every logit is -inf after the bias and the mask (a key-padding
-    bias can do this) also outputs 0 with LSE -inf.
     """
     hq, hkv = q.shape[1], k.shape[2]
     block_size, head_size = k.shape[1], k.shape[3]
-    outs, lses = [], []
-    start = 0
-    for i, (q_len, kv_len) in enumerate(seq_lens):
-        n_blk = (kv_len + block_size - 1) // block_size
-        blocks = block_table[i, :n_blk].long()
-        ks = k[blocks].reshape(-1, hkv, head_size)[:kv_len].float()
-        vs = v[blocks].reshape(-1, hkv, head_size)[:kv_len].float()
-        ks = torch.repeat_interleave(ks, hq // hkv, dim=1)
-        vs = torch.repeat_interleave(vs, hq // hkv, dim=1)
-        qs = q[start : start + q_len].float()
-        s = torch.einsum("qhd,khd->hqk", qs, ks) * scale
-        if bias_full is not None and bias_inside_softcap:
-            s = s + bias_full[i, :, :q_len, :kv_len]
-        if softcap > 0:
-            s = softcap * torch.tanh(s / softcap)
-        if bias_full is not None and not bias_inside_softcap:
-            s = s + bias_full[i, :, :q_len, :kv_len]
-        context = 0 if top_left else kv_len - q_len
-        diag = torch.arange(q_len, device=q.device)[:, None] + context
-        k_pos = torch.arange(kv_len, device=q.device)[None, :]
-        mask = torch.zeros(q_len, kv_len, dtype=torch.bool, device=q.device)
-        if right_bound >= 0:
-            mask |= k_pos > diag + right_bound
-        if sliding_window > 0:
-            mask |= (diag - k_pos) >= sliding_window
-        s = s.masked_fill(mask, float("-inf"))
-        # A row with no usable key, from the mask or from -inf bias entries.
-        empty = torch.isneginf(s).all(dim=-1)
-        lses.append(torch.logsumexp(s, dim=-1).transpose(0, 1))
-        if sinks is not None:
-            sink = sinks.float()[:, None, None].expand(hq, q_len, 1)
-            p = torch.softmax(torch.cat((s, sink), dim=-1), dim=-1)[..., :-1]
-        else:
-            p = torch.softmax(s, dim=-1)
-        p = p.masked_fill(empty[:, :, None], 0.0)
-        outs.append(torch.einsum("hqk,khd->qhd", p, vs))
-        start += q_len
-    out = torch.cat(outs, dim=0)
+    ks, vs = [], []
+    for i, (_, kv_len) in enumerate(seq_lens):
+        blocks = block_table[i, : -(-kv_len // block_size)].long()
+        ks.append(k[blocks].reshape(-1, hkv, head_size)[:kv_len])
+        vs.append(v[blocks].reshape(-1, hkv, head_size)[:kv_len])
+    qs, ks, vs = _host(q), _host(torch.cat(ks)), _host(torch.cat(vs))
+    q_offsets = np.cumsum([0] + [q_len for q_len, _ in seq_lens])
+    kv_offsets = np.cumsum([0] + [kv_len for _, kv_len in seq_lens])
+    bias = None if bias_full is None else _host(_unexpanded(bias_full))
+    if softcap > 0:
+        # sdpa_reference adds its bias to Q @ K^T * scale and has no softcap,
+        # so hand it the capped logits as the bias, with Q = 0.
+        max_q = max(q_len for q_len, _ in seq_lens)
+        max_k = max(kv_len for _, kv_len in seq_lens)
+        logits = np.zeros((len(seq_lens), hq, max_q, max_k))
+        for i, (q_len, kv_len) in enumerate(seq_lens):
+            rows = slice(q_offsets[i], q_offsets[i] + q_len)
+            keys = slice(kv_offsets[i], kv_offsets[i] + kv_len)
+            kh = np.repeat(ks[keys], hq // hkv, axis=1)
+            logits[i, :, :q_len, :kv_len] = (
+                np.einsum("qhd,khd->hqk", qs[rows], kh) * scale
+            )
+        if bias is not None and bias_inside_softcap:
+            logits = logits + bias
+        logits = softcap * np.tanh(logits / softcap)
+        if bias is not None and not bias_inside_softcap:
+            logits = logits + bias
+        qs, bias = np.zeros_like(qs), logits
+    out, lse = sdpa_reference(
+        qs,
+        ks,
+        vs,
+        scale=scale,
+        bias=bias,
+        # The kernels keep sliding_window keys; sdpa_reference keeps left + 1.
+        left_bound=sliding_window - 1 if sliding_window > 0 else None,
+        right_bound=right_bound,
+        top_left=top_left,
+        q_offsets=q_offsets,
+        kv_offsets=kv_offsets,
+    )
+    if sinks is not None:
+        # The sink adds exp(sink) to each row's denominator; an empty row stays 0.
+        out = out / (1.0 + np.exp(_host(sinks)[None, :] - lse))[..., None]
+    out = torch.from_numpy(out).float().to(q.device)
     if return_lse:
-        return out, torch.cat(lses, dim=0).unsqueeze(-1)
+        return out, torch.from_numpy(lse).float().to(q.device).unsqueeze(-1)
     return out
 
 

@@ -1610,8 +1610,8 @@ def problems_gfx950_attention_tiled_2d():
         p(512, 2, 32, 32, 64, 32, 512, 4096, dtype="fp16", use_additive_bias=True),
         p(4096, 1, 16, 2, 256, 16, 4096, 4096, use_additive_bias=True),  # not D256
         p(512, 2, 64, 8, 64, 32, 512, 4096, sliding_window=512, use_additive_bias=True),
-        # #14150's single-batch d128 b16 SW cohort (above) + bias: routes to
-        # the transposed 32x32 combo on develop; had no bias row before.
+        # The single-batch d128 b16 SW cohort (above) + bias: routes to the
+        # transposed 32x32 combo; had no bias row before.
         p(
             8192,
             1,

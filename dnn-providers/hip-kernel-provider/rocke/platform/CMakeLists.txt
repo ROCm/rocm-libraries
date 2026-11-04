@@ -924,8 +924,9 @@ if(ROCKE_INSTALL_TESTS)
 
     # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
     # one above) so its runtime does not eat into that entry's timeout. The torch
-    # file skips where torch is missing (this CI lane); the device_numeric file
-    # runs one case per path there without torch.
+    # file skips where torch is missing (the installed tree); the device_numeric
+    # file runs one case per path without torch. Both need a gfx950 device; on
+    # any other device the entry reports skipped (77, below).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_device_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
     # Without a gfx950 GPU every gpu-marked case skips; report the entry as

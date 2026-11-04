@@ -4,9 +4,11 @@
 """Additive attention bias on gfx950, one case per path, without torch.
 
 ``test_attention_additive_bias_gfx950_numeric.py`` is the full numeric lane, but
-it needs ROCm torch, which the CI GPU lane does not have, so CI skips all of it.
-This file runs one bf16 case on each path in that lane: the 2D 16x16 and
+it needs ROCm torch, which the installed CTest tree does not have, so it skips
+there. This file runs one bf16 case on each path without torch: the 2D 16x16 and
 transposed 32x32 score paths, the 3D split-KV path, and 3D with the LSE output.
+Both run in ``rocke_library_attention_bias_gpu_pytest``, which needs a gfx950
+device; on any other device every case skips and the entry reports skipped.
 
 The 2D cases go through ``run_unified_attention_torch`` on ``rocke.runtime``
 device buffers (``DeviceArray``). The 3D path allocates its workspace with
@@ -15,8 +17,8 @@ segment and reduce kernels the way that path does, through the same support
 check, cache key, segment count and pipeline. Every output and workspace byte
 starts as NaN, so an element a kernel skips fails the comparison.
 
-The reference is fp64 attention over the bf16-rounded inputs:
-``softmax(Q @ K^T * scale + bias, bottom-right causal) @ V``.
+The reference is ``rocke.numeric.sdpa_reference`` (fp64) over the bf16-rounded
+inputs: ``softmax(Q @ K^T * scale + bias, bottom-right causal) @ V``.
 """
 
 import math
@@ -24,6 +26,7 @@ import math
 import numpy as np
 import pytest
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import get_device_arch
 
 from kernels.common import attention_unified as au
@@ -118,27 +121,23 @@ def _problem(seq_lens, num_blocks, emit_lse):
 
 
 def _reference(q, k, v, block_table, seq_lens, scale, bias):
-    """fp64 O ``[total_q, Hq, D]`` and LSE ``[total_q, Hq]``; ``bias`` may be None."""
-    outs, lses, start = [], [], 0
-    for i, (q_len, kv_len) in enumerate(seq_lens):
+    """``sdpa_reference`` over the paged K/V gathered into THD: fp64 O
+    ``[total_q, Hq, D]`` and LSE ``[total_q, Hq]``; ``bias`` may be None."""
+    ks, vs = [], []
+    for i, (_, kv_len) in enumerate(seq_lens):
         blocks = block_table[i, : -(-kv_len // _BLOCK_SIZE)]
-        ks = k[blocks].reshape(-1, _HKV, _HEAD_SIZE)[:kv_len].astype(np.float64)
-        vs = v[blocks].reshape(-1, _HKV, _HEAD_SIZE)[:kv_len].astype(np.float64)
-        ks = np.repeat(ks, _HQ // _HKV, axis=1)
-        vs = np.repeat(vs, _HQ // _HKV, axis=1)
-        qs = q[start : start + q_len].astype(np.float64)
-        s = np.einsum("qhd,khd->hqk", qs, ks) * scale
-        if bias is not None:
-            s = s + bias[i, :, :q_len, :kv_len]
-        diag = np.arange(q_len)[:, None] + (kv_len - q_len)
-        s = np.where(np.arange(kv_len)[None, :] <= diag, s, -np.inf)
-        m = s.max(axis=-1, keepdims=True)
-        p = np.exp(s - m)
-        denom = p.sum(axis=-1, keepdims=True)
-        outs.append(np.einsum("hqk,khd->qhd", p / denom, vs))
-        lses.append((m + np.log(denom))[..., 0].T)
-        start += q_len
-    return np.concatenate(outs), np.concatenate(lses)
+        ks.append(k[blocks].reshape(-1, _HKV, _HEAD_SIZE)[:kv_len])
+        vs.append(v[blocks].reshape(-1, _HKV, _HEAD_SIZE)[:kv_len])
+    return sdpa_reference(
+        q,
+        np.concatenate(ks),
+        np.concatenate(vs),
+        scale=scale,
+        bias=bias,
+        causal_bottom_right=True,
+        q_offsets=np.cumsum([0] + [q_len for q_len, _ in seq_lens]),
+        kv_offsets=np.cumsum([0] + [kv_len for _, kv_len in seq_lens]),
+    )
 
 
 def _bias_strides(bias):

@@ -68,13 +68,42 @@ def _pinned(candidate, **kw) -> AttentionRequest:
     return _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id, **kw)
 
 
+_ELEMENT_SIZE = {"torch.float32": 4, "torch.int32": 4, "torch.bfloat16": 2}
+
+
 class _Tensor:
-    def __init__(self, shape, dtype, values=None, *, strides=None):
+    """A stand-in for a torch tensor. Its storage backs exactly the elements
+    its strides reach unless ``storage_elems`` says otherwise."""
+
+    def __init__(
+        self,
+        shape,
+        dtype,
+        values=None,
+        *,
+        strides=None,
+        device="cuda:0",
+        storage_elems=None,
+    ):
         self.shape = tuple(shape)
         self.dtype = dtype
-        self.device = "cuda:0"
+        self.device = device
         self._values = values
         self._strides = strides
+        if storage_elems is None:
+            storage_elems = 1 + sum(
+                (extent - 1) * self.stride(dim) for dim, extent in enumerate(self.shape)
+            )
+        self._storage_bytes = storage_elems * self.element_size()
+
+    def element_size(self):
+        return _ELEMENT_SIZE[self.dtype]
+
+    def storage_offset(self):
+        return 0
+
+    def untyped_storage(self):
+        return mock.Mock(nbytes=mock.Mock(return_value=self._storage_bytes))
 
     def is_contiguous(self):
         return self._strides is None
@@ -82,7 +111,9 @@ class _Tensor:
     def detach(self):
         return self
 
-    def stride(self, dim):
+    def stride(self, dim=None):
+        if dim is None:
+            return tuple(self.stride(d) for d in range(len(self.shape)))
         if self._strides is not None:
             return self._strides[dim]
         stride = 1
@@ -388,7 +419,7 @@ class TestBinding(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"requires tensors\['attn_bias'\]"):
             self.candidate.bound_torch(self.req, self.spec, _paged_tensors())
         cases = {
-            "dtype": (_Tensor((1, 1, 1, 1024), "torch.bfloat16"), "fp32"),
+            "dtype": (_Tensor((1, 1, 1, 1024), "torch.bfloat16"), "float32"),
             "rank": (_Tensor((1, 1024), "torch.float32"), "rank-4"),
             "heads": (_Tensor((1, 4, 1, 1024), "torch.float32"), "head"),
             "keys": (_Tensor((1, 1, 1, 512), "torch.float32"), "seqlen_k"),
@@ -409,11 +440,41 @@ class TestBinding(unittest.TestCase):
         req = _req(seqlen_q=1, seqlen_k=1, batch=2)
         problem = replace(_problem(req), use_additive_bias=True)
         broadcast = _Tensor((2, 32, 1, 1), "torch.float32", strides=(0, 0, 0, 0))
-        with self.assertRaisesRegex(ValueError, "key dimension must have stride 1"):
+        with self.assertRaisesRegex(ValueError, r"contiguous along Sk"):
             _tuning_additive_bias(req, problem, {"attn_bias": broadcast})
         unit = _Tensor((2, 32, 1, 1), "torch.float32", strides=(32, 1, 1, 1))
         kwargs = _tuning_additive_bias(req, problem, {"attn_bias": unit})
         self.assertEqual(kwargs["additive_bias_head_stride"], 1)
+
+    def test_binding_refuses_what_the_runner_refuses(self):
+        # The binding runs the runner's own bias validation on the derived
+        # strides, so each of these fails at bind time, not at the launch.
+        too_far = 70_000_000  # 31 heads * 70M elements is past the i32 index
+        cases = {
+            "i32_index": (
+                _Tensor((1, 32, 1, 1024), "torch.float32", strides=(0, too_far, 0, 1)),
+                NotImplementedError,
+                "i32 bias addressing",
+            ),
+            "storage": (
+                _Tensor((1, 32, 1, 1024), "torch.float32", storage_elems=1024),
+                ValueError,
+                "only backs 1024 elements",
+            ),
+            "device": (
+                _Tensor((1, 1, 1, 1024), "torch.float32", device="cuda:1"),
+                ValueError,
+                "same device as q",
+            ),
+        }
+        for label, (bias, error, message) in cases.items():
+            tensors = _paged_tensors()
+            tensors["attn_bias"] = bias
+            with self.subTest(case=label), self.assertRaisesRegex(
+                error, r"tensors\['attn_bias'\].*" + message
+            ):
+                self.candidate.bound_torch(self.req, self.spec, tensors)
+        self.assertEqual(self.captured, {})
 
     def test_bias_off_request_refuses_a_bias_tensor(self):
         candidate = self.candidate

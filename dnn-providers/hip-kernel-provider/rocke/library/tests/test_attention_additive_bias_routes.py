@@ -7,8 +7,12 @@ The numeric lane (``test_attention_additive_bias_gfx950_numeric.py``) is GPU
 only, so a selector change that moved one of its cases onto another score path
 or compile backend would go unnoticed in CI. The route is a pure function of
 the problem, so this file pins it for every 2D case of that lane, and the knobs
-the bias must set on the two transposed 32x32 cohorts.
+the bias must set on the two transposed 32x32 cohorts. It also pins that the
+builders with no bias score site (fastKV register-P, the C++ scalar 2D kernel)
+refuse a biased spec, since nothing routes a biased problem to them.
 """
+
+from dataclasses import replace
 
 import pytest
 
@@ -141,3 +145,77 @@ def test_fp8_single_batch_cohort_route_and_knobs(head_size):
     assert spec.kv_storage_dtype == "fp8e4m3"
     for knob, want in _BIAS_KNOBS.items():
         assert getattr(spec, knob) == want, knob
+
+
+def test_fastkv_register_p_rejects_additive_bias():
+    """The fastKV register-P wrapper has no bias score site, so the wrapper
+    itself refuses a biased spec; the same spec without bias builds."""
+    from kernels import UnifiedAttention2DTiledSpec
+    from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
+        build_unified_attention_2d_fastkv_register_p,
+    )
+
+    # The fastKV parity family's base, with mask-once off: the spec refuses
+    # bias with mask-once before the wrapper is reached.
+    spec = UnifiedAttention2DTiledSpec(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        waves_per_eu=2,
+        tile_size=64,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_fast_paged_kv_desc=True,
+        use_additive_bias=True,
+    )
+    with pytest.raises(
+        ValueError, match="fastKV register-P experiment does not support additive bias"
+    ):
+        build_unified_attention_2d_fastkv_register_p(spec, arch="gfx950")
+    build_unified_attention_2d_fastkv_register_p(
+        replace(spec, use_additive_bias=False), arch="gfx950"
+    )
+
+
+@pytest.mark.parametrize(
+    ("entry", "config", "reason"),
+    [
+        (
+            "gfx950_attention_tiled_2d_fastkv_regp_lower_llvm",
+            {"use_transposed_mask_once": False},
+            "fastKV register-P experiment does not support additive bias",
+        ),
+        (
+            "attention_unified_lower_llvm",
+            {
+                "head_size": 128,
+                "block_size": 16,
+                "num_query_heads": 8,
+                "num_kv_heads": 2,
+                "total_q": 64,
+                "max_seqlen_q": 64,
+                "max_seqlen_k": 64,
+                "num_seqs": 1,
+                "dtype": "bf16",
+            },
+            "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
+        ),
+    ],
+)
+def test_native_builders_refuse_additive_bias(entry, config, reason):
+    # The C++ fastKV and scalar builders take no bias. Through the rocke_engine
+    # binding (built with ROCKE_BUILD_PYBIND=ON; CI does not build it) a biased
+    # config must hit their reject, not build a kernel that drops the bias.
+    engine = pytest.importorskip("rocke_engine")
+    lower = getattr(engine, entry)
+    assert lower(config, "gfx950")
+    with pytest.raises(RuntimeError, match=reason):
+        lower({**config, "use_additive_bias": True}, "gfx950")
