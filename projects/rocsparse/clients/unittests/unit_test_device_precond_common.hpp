@@ -262,10 +262,25 @@ namespace precond_ut
     }
 
     template <typename T>
-    void expect_finite(const std::vector<T>& v)
+    bool expect_finite(const std::vector<T>& v, const std::string& what = {})
     {
+        size_t count = 0;
+        size_t first = 0;
         for(size_t i = 0; i < v.size(); ++i)
-            EXPECT_TRUE(std::isfinite(re(v[i])) && std::isfinite(im(v[i]))) << "entry " << i;
+        {
+            if(!std::isfinite(re(v[i])) || !std::isfinite(im(v[i])))
+            {
+                if(count == 0)
+                    first = i;
+                ++count;
+            }
+        }
+        if(count == 0)
+            return true;
+        ADD_FAILURE() << (what.empty() ? std::string("result") : what) << " has " << count
+                      << " non-finite entries, first at index " << first << " (" << re(v[first])
+                      << ", " << im(v[first]) << ")";
+        return false;
     }
 
     // ------------------------------------------------------------------

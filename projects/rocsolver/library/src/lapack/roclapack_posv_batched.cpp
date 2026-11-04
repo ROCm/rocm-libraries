@@ -30,36 +30,43 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_posv_batched_impl(rocblas_handle handle,
                                            const rocblas_fill uplo,
-                                           const rocblas_int n,
-                                           const rocblas_int nrhs,
-                                           U A,
-                                           const rocblas_int lda,
-                                           U B,
-                                           const rocblas_int ldb,
-                                           rocblas_int* info,
-                                           const rocblas_int batch_count)
+                                           const I n,
+                                           const I nrhs,
+                                           U A_arg,
+                                           const I lda,
+                                           U B_arg,
+                                           const I ldb,
+                                           I* info_arg,
+                                           const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("posv_batched", "--uplo", uplo, "-n", n, "--nrhs", nrhs, "--lda", lda,
-                        "--ldb", ldb, "--batch_count", batch_count);
+                        "--ldb", ldb, "--batch_count", batch_count_arg);
 
     using S = decltype(std::real(T{}));
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st
-        = rocsolver_posv_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st
+            = rocsolver_posv_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftB = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftB = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -73,9 +80,16 @@ try
     size_t size_work1, size_work2, size_work3, size_work4;
     // extra requirements for calling POTRF and to copy B
     size_t size_pivots_savedB, size_iinfo;
-    rocsolver_posv_getMemorySize<true, false, T>(n, nrhs, uplo, batch_count, &size_scalars,
-                                                 &size_work1, &size_work2, &size_work3, &size_work4,
-                                                 &size_pivots_savedB, &size_iinfo, &optim_mem);
+
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_posv_getMemorySize<true, false, T>(
+            n, nrhs, uplo, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
+            &size_work4, &size_pivots_savedB, &size_iinfo, &optim_mem);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
@@ -100,10 +114,26 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_posv_template<true, false, T, S>(
-        handle, uplo, n, nrhs, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, info, batch_count,
-        (T*)scalars, work1, work2, work3, work4, (T*)pivots_savedB, (rocblas_int*)iinfo, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const batch_count = std::min(batch_count_arg - bid, bid_inc);
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        auto const istat = rocsolver_posv_template<true, false, T, S>(
+            handle, uplo, n, nrhs, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, info,
+            batch_count, (T*)scalars, work1, work2, work3, work4, (T*)pivots_savedB, (I*)iinfo,
+            optim_mem);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {

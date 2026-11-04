@@ -9,9 +9,12 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize(("flavor", "expected_gate_calls"), [(None, 2), ("llvm23", 1)])
+@pytest.mark.parametrize(
+    ("flavor", "supports_target_ops", "expected_gate_calls"),
+    [(None, False, 2), ("llvm23", True, 1), ("llvm24", True, 1)],
+)
 def test_differential_gate_streams_unbuffered_progress(
-    monkeypatch, tmp_path, flavor, expected_gate_calls
+    monkeypatch, tmp_path, flavor, supports_target_ops, expected_gate_calls
 ):
     if flavor is None:
         monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
@@ -35,6 +38,9 @@ def test_differential_gate_streams_unbuffered_progress(
     monkeypatch.setattr(module.subprocess, "run", run)
     monkeypatch.setattr(module, "_cxx", lambda: None)
     monkeypatch.setattr(
+        module, "_selected_profile_supports_target_ops", lambda: supports_target_ops
+    )
+    monkeypatch.setattr(
         module.sys,
         "argv",
         ["check_byte_identity.py", "--build-root", str(tmp_path)],
@@ -43,8 +49,20 @@ def test_differential_gate_streams_unbuffered_progress(
     assert module.main() == 0
     gate_calls = [call for call in calls if str(module.RUN_DIFF) in call[0]]
     assert len(gate_calls) == expected_gate_calls
+    if not supports_target_ops:
+        primary, supplemental = gate_calls
+        exclude_index = primary[0].index("--exclude")
+        excluded_families = primary[0][exclude_index + 1].split(",")
+        assert set(module.TARGET_OP_PROFILE_FAMILIES) <= set(excluded_families)
+        assert supplemental[1]["env"]["ROCKE_LLVM_FLAVOR"] == "llvm23"
+        only_index = supplemental[0].index("--only")
+        supplemental_families = supplemental[0][only_index + 1].split(",")
+        assert module.GFX1250_FAMILY in supplemental_families
+        assert set(module.TARGET_OP_PROFILE_FAMILIES) <= set(supplemental_families)
     for command, kwargs in gate_calls:
         assert command[:3] == [module.sys.executable, "-u", str(module.RUN_DIFF)]
+        if supports_target_ops:
+            assert "--exclude" not in command
         assert "capture_output" not in kwargs
         assert "stdout" not in kwargs
         assert "stderr" not in kwargs
