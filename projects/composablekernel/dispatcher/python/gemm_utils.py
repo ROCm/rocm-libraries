@@ -38,7 +38,7 @@ import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -2747,6 +2747,10 @@ def _arch_filter_accepts(
     )
 
 
+# Stream-K reduction strategies the codegen can emit (atomic/linear/tree).
+STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -2762,7 +2766,7 @@ def expand_sweep(
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
     vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
     rejects: Optional[Dict[str, int]] = None,
-    reduction_strategies: Optional[List[str]] = None,
+    reduction_strategies: Optional[Union[str, List[str]]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2794,12 +2798,15 @@ def expand_sweep(
     triple that is illegal for the tile is dropped and its reason counted in
     ``rejects`` (when given).
 
-    ``reduction_strategies`` (Stream-K only) replaces the config's
-    ``streamk_config.reduction_strategy`` list. It must be applied here rather
-    than on the returned configs, because a fixed C width that is illegal for
-    the atomic strategy is legal for linear and tree. Unknown strategies, the
-    argument with another variant, and Stream-K with a column-major C (which no
-    strategy supports) raise ValueError.
+    ``reduction_strategies`` (``variant='stream_k'`` only; one name or a list)
+    replaces the config's ``streamk_config.reduction_strategy`` list before
+    expansion, so an override never multiplies the sweep by the config's own
+    strategies. An unknown strategy name raises ``ValueError`` before any
+    codegen/build.
+    Applying it before expansion also checks each fixed vector width against the
+    strategy that runs it: a C width that is illegal for atomic is legal for
+    linear and tree. The argument with another variant, and Stream-K with a
+    column-major C (which no strategy supports), raise ``ValueError`` too.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2861,14 +2868,16 @@ def expand_sweep(
     # variants keep a single dummy value so the product is unaffected.
     if variant == "stream_k":
         sk = cfg.get("streamk_config", {})
+        if isinstance(reduction_strategies, str):
+            reduction_strategies = [reduction_strategies]
         reductions = reduction_strategies or _expand_values(
             sk.get("reduction_strategy"), ["atomic"]
         )
-        valid = _codegen_common().STREAMK_REDUCTION_STRATEGIES
-        unknown = sorted(set(reductions) - set(valid))
+        unknown = sorted(set(reductions) - set(STREAMK_REDUCTION_STRATEGIES))
         if unknown:
             raise ValueError(
-                f"Unknown Stream-K reduction strategy {unknown}; valid: {list(valid)}"
+                f"unknown Stream-K reduction strategy {unknown}; "
+                f"expected one of {STREAMK_REDUCTION_STRATEGIES}"
             )
         # The C layout rule holds for every strategy, so a column-major C has no
         # Stream-K kernel at all: say why instead of returning an empty sweep.
@@ -3021,11 +3030,6 @@ def expand_sweep(
         # 12. The previous "per-wave repeat must be a power of two" rule was too
         # broad and needlessly dropped 90 valid configs. The "default" epilogue
         # stores directly and is exempt.
-        # Match TileConfig.is_valid(): the K block must divide across all K waves.
-        if variant == "stream_k":
-            k_div = wk * wtk
-            if k_div <= 0 or tk < k_div or tk % k_div != 0:
-                continue
         m_div = wm * wtm
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:

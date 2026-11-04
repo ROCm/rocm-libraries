@@ -46,7 +46,12 @@ sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
-from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep, _resolve_arch  # noqa: E402
+from gemm_utils import (  # noqa: E402
+    STREAMK_REDUCTION_STRATEGIES,
+    _resolve_arch,
+    expand_sweep,
+    setup_multiple_gemm_dispatchers,
+)
 from smi_utils import detect_gpu_ids  # noqa: E402
 from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 
@@ -69,13 +74,13 @@ DEFAULT_PROBLEMS = [
 # so all 4 A/B/C layouts are supported. dtypes cover fp16 + bf16 + fp8 + bf8: the
 # bridge runner encodes fp16 natively, bf16 via bit-truncation, and fp8/bf8 via
 # architecture-specific OCP (gfx950/gfx12xx) or FNUZ (gfx942) formats. FP8/BF8
-# inputs accumulate in fp32 and store fp16 output. int8 is left out: it is blocked
-# at the ck_tile engine level, not the
-# bridge -- the int8 kernel codegens but fails to COMPILE for every reduction
-# strategy (atomic/linear/tree). warp_gemm_dispatcher has no
-# Dispatcher<int8,int8,float,32,32,16,...> specialization for the streamk CompV3
-# path, so WarpGemm resolves to `int` and the BlockUniversalGemmAsBsCr
-# WarpGemm::kM/kN static_asserts fail; this matches PR #8094 leaving int8 out.
+# inputs accumulate in fp32 and store fp16 output. int8 is left out: it is
+# blocked at the ck_tile engine level, not the bridge -- the int8 kernel codegens
+# but fails to COMPILE for every reduction strategy (atomic/linear/tree).
+# warp_gemm_dispatcher has no Dispatcher<int8,int8,float,32,32,16,...>
+# specialization for the streamk CompV3 path, so WarpGemm resolves to `int` and
+# the BlockUniversalGemmAsBsCr WarpGemm::kM/kN static_asserts fail; this matches
+# PR #8094 leaving int8 out.
 SUPPORTED_DTYPES = ("fp16", "bf16", "fp8", "bf8")
 SUPPORTED_LAYOUTS = ("rcr", "rrr", "ccr", "crr")
 
@@ -107,12 +112,16 @@ def resolve_devices(spec):
 
 
 def resolve_configs(args):
-    """Resolve positional configs -> concrete list of config paths."""
+    """Resolve positional configs -> concrete list of config paths.
+
+    Without explicit configs, use ``default_config_<arch>.json`` when it exists
+    and ``default_config.json`` otherwise, so a new architecture only needs a
+    config file drop.
+    """
     if args.configs:
         return args.configs
-    if args.arch == "gfx1250":
-        return [str(DEFAULT_CONFIG.with_name("gfx1250_config.json"))]
-    return [str(DEFAULT_CONFIG)]
+    arch_config = DEFAULT_CONFIG.with_name(f"{DEFAULT_CONFIG.stem}_{args.arch}.json")
+    return [str(arch_config if arch_config.exists() else DEFAULT_CONFIG)]
 
 
 def load_problems(path):
@@ -166,9 +175,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             try:
                 result = json.loads(line)
             except json.JSONDecodeError:
-                lines.append(
-                    f"  [gpu{device_id}] Warning: bad result line: {line[:50]}"
-                )
+                lines.append(f"  [gpu{device_id}] Warning: bad result line: {line[:50]}")
                 n_fail += 1
                 continue
             bidx = result.get("idx", 0)
@@ -246,16 +253,18 @@ def main():
     parser.add_argument(
         "configs",
         nargs="*",
-        help="TE sweep config JSON files (default: architecture-specific Stream-K config)",
+        help="TE sweep config JSON files (default: the architecture's Stream-K "
+        "config)",
     )
     parser.add_argument(
         "--arch", default=None, help="GPU architecture (default: detect device)"
     )
     parser.add_argument(
         "--reduction-strategy",
-        choices=("atomic", "linear", "tree"),
+        choices=STREAMK_REDUCTION_STRATEGIES,
         default=None,
-        help="Override the config's reduction strategy; linear/tree reduce partials in FP32",
+        help="Override the config's reduction strategy; linear/tree reduce "
+        "partials in FP32",
     )
     parser.add_argument(
         "--dtype",
@@ -337,8 +346,6 @@ def main():
                 dtype=args.dtype,
                 layout=args.layout,
                 variant="stream_k",
-                # Applied while expanding, so each fixed vector width is checked
-                # against the strategy that will actually run it.
                 reduction_strategies=(
                     [args.reduction_strategy] if args.reduction_strategy else None
                 ),

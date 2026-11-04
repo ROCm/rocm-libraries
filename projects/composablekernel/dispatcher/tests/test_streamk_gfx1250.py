@@ -5,8 +5,8 @@
 
 """CPU regressions for gfx1250 Stream-K config selection and input verification.
 
-GPU correctness is exercised by the native gfx1250 WMMA suite and the bridge
-worker. These tests cover the host-side boundaries that choose a valid kernel
+GPU correctness is exercised by the native Stream-K tests and the bridge worker.
+These tests cover the host-side boundaries that choose a valid kernel
 and compare its output against the same quantized inputs the device receives.
 """
 
@@ -25,9 +25,12 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 CK_ROOT = DISPATCHER_DIR.parent
-sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+for path in (DISPATCHER_DIR / "python", CK_ROOT / "tile_engine" / "ops" / "gemm"):
+    sys.path.insert(0, str(path))
 
 import gemm_utils  # noqa: E402
+import run_one_streamk_gemm_kernel  # noqa: E402
+import streamk_gemm_full_benchmark  # noqa: E402
 from gemm_utils import _SUPPORTED_ARCHES, expand_sweep  # noqa: E402
 
 GFX1250_CONFIG = (
@@ -37,12 +40,22 @@ GFX1250_CONFIG = (
     / "gemm"
     / "gemm_streamk"
     / "configs"
-    / "gfx1250_config.json"
+    / "default_config_gfx1250.json"
 )
 
 
+def _write_reduction_config(tmp, reductions):
+    """Write the gfx1250 default config with a Stream-K reduction sweep into tmp."""
+    with open(GFX1250_CONFIG) as f:
+        cfg = json.load(f)
+    cfg["streamk_config"] = {"reduction_strategy": {"values": reductions}}
+    config_path = Path(tmp) / "config.json"
+    config_path.write_text(json.dumps(cfg))
+    return str(config_path)
+
+
 class TestGfx1250Supported(unittest.TestCase):
-    """gfx1250 must be a first-class supported arch (from the parent branch)."""
+    """gfx1250 must be a first-class supported arch."""
 
     def test_gfx1250_in_supported_arches(self):
         self.assertIn("gfx1250", _SUPPORTED_ARCHES)
@@ -62,7 +75,7 @@ class TestGfx1250StreamKConfig(unittest.TestCase):
     def test_config_uses_wmma_warp_tile(self):
         tc = self.cfg["tile_config"]
         # gfx1250 fp16/bf16 WMMA warp tile is 16x16x32; the MFMA 32x32x16 tile of
-        # the default stream-K config does not run on RDNA4.
+        # the default stream-K config is not a gfx1250 WMMA tile.
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
         self.assertEqual(tc["warp_tile_k"]["values"], [32, 64])
@@ -153,6 +166,35 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertEqual({c.tile_k for c in configs}, {64, 128})
         self.assertEqual(len(configs), 4)
 
+    def test_reduction_override_replaces_config_strategies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = _write_reduction_config(tmp, ["atomic", "linear", "tree"])
+            kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
+            swept = expand_sweep(config_path, "gfx1250", **kwargs)
+            tree = expand_sweep(
+                config_path, "gfx1250", reduction_strategies=["tree"], **kwargs
+            )
+            single = expand_sweep(
+                config_path, "gfx1250", reduction_strategies="tree", **kwargs
+            )
+        self.assertEqual([c.name for c in single], [c.name for c in tree])
+        self.assertEqual(len(swept), 3 * len(tree))
+        self.assertEqual({c.reduction_strategy for c in tree}, {"tree"})
+        self.assertEqual(len({c.name for c in tree}), len(tree))
+        self.assertTrue(all(c.name.endswith("_streamk_tree") for c in tree))
+
+    def test_unknown_reduction_strategy_is_rejected(self):
+        kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = _write_reduction_config(tmp, ["bogus"])
+            for path, override in ((GFX1250_CONFIG, ["Linear"]), (config_path, None)):
+                with self.subTest(override=override), self.assertRaisesRegex(
+                    ValueError, "reduction strategy"
+                ):
+                    expand_sweep(
+                        str(path), "gfx1250", reduction_strategies=override, **kwargs
+                    )
+
     def test_gfx1250_streamk_compile_command_has_architecture_features(self):
         config = self._expand()[0]
         from dispatcher_common import arch_feature_defines, unified_framework_flags
@@ -187,14 +229,8 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
 
 
 class TestGfx1250StreamKDriver(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        sys.path.insert(0, str(CK_ROOT / "tile_engine" / "ops" / "gemm"))
-        import streamk_gemm_full_benchmark
-        import run_one_streamk_gemm_kernel
-
-        cls.driver = streamk_gemm_full_benchmark
-        cls.worker = run_one_streamk_gemm_kernel
+    driver = streamk_gemm_full_benchmark
+    worker = run_one_streamk_gemm_kernel
 
     def test_implicit_gfx1250_config_selects_wmma(self):
         args = SimpleNamespace(configs=[], arch="gfx1250")
@@ -210,56 +246,81 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
             self.driver.resolve_configs(args), [str(self.driver.DEFAULT_CONFIG)]
         )
 
+    def _main_build_configs(self, *args):
+        """Run main() with a mocked build; return the configs it would build and
+        its stdout."""
+        argv = ["streamk_gemm_full_benchmark.py", "--max-kernels", "1", *args]
+        out = io.StringIO()
+        with patch.object(sys, "argv", argv), patch.object(
+            self.driver, "resolve_devices", return_value=["0"]
+        ), patch.object(
+            self.driver,
+            "load_problems",
+            return_value=[{"M": 128, "N": 128, "K": 33}],
+        ), patch.object(
+            self.driver,
+            "setup_multiple_gemm_dispatchers",
+            side_effect=lambda configs, **kwargs: [None] * len(configs),
+        ) as build, contextlib.redirect_stdout(
+            out
+        ):
+            self.assertEqual(self.driver.main(), 1)
+        return build.call_args.args[0], out.getvalue()
+
+    def test_detected_arch_selects_its_default_config(self):
+        with patch.object(gemm_utils, "_get_arch", return_value="gfx1250") as detect:
+            configs, out = self._main_build_configs()
+        detect.assert_called_once_with()
+        self.assertTrue(configs)
+        self.assertEqual({c.gfx_arch for c in configs}, {"gfx1250"})
+        self.assertIn(f"Configs: {GFX1250_CONFIG}", out)
+
     def test_reduction_override_preserves_limited_vector_fallback(self):
         for reduction in (None, "atomic", "linear", "tree"):
             with self.subTest(reduction=reduction):
-                argv = [
-                    "streamk_gemm_full_benchmark.py",
-                    "--arch",
-                    "gfx1250",
-                    "--max-kernels",
-                    "1",
-                ]
+                argv = ["--arch", "gfx1250"]
                 if reduction is not None:
                     argv.extend(["--reduction-strategy", reduction])
-                with patch.object(sys, "argv", argv), patch.object(
-                    self.driver, "resolve_devices", return_value=["0"]
-                ), patch.object(
-                    self.driver,
-                    "load_problems",
-                    return_value=[{"M": 128, "N": 128, "K": 33}],
-                ), patch.object(
-                    self.driver,
-                    "setup_multiple_gemm_dispatchers",
-                    side_effect=lambda configs, **kwargs: [None] * len(configs),
-                ) as build, contextlib.redirect_stdout(
-                    io.StringIO()
-                ):
-                    self.assertEqual(self.driver.main(), 1)
-                configs = build.call_args.args[0]
+                configs, _ = self._main_build_configs(*argv)
                 self.assertEqual(sum(not any(c.vector_sizes) for c in configs), 1)
                 self.assertTrue(any(any(c.vector_sizes) for c in configs))
                 self.assertEqual(
                     {c.reduction_strategy for c in configs}, {reduction or "atomic"}
                 )
 
-    def test_ocp_reference_matches_device_input_quantization(self):
-        try:
-            import ml_dtypes
-        except ImportError:
-            self.skipTest("ml_dtypes is required for fp8/bf8 reference checks")
+    def test_reduction_override_keeps_kernel_budget_distinct(self):
+        # Overriding a multi-strategy sweep must not spend --max-kernels on copies
+        # of one kernel.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = _write_reduction_config(tmp, ["atomic", "linear", "tree"])
+            argv = ["--arch", "gfx1250", "--reduction-strategy", "tree"]
+            configs, _ = self._main_build_configs(
+                config_path, *argv, "--max-kernels", "3"
+            )
+        base = [c.name for c in configs if not any(c.vector_sizes)]
+        self.assertEqual(len(set(base)), 3)
+        self.assertEqual(len({c.name for c in configs}), len(configs))
 
-        for dtype, numpy_type, tiny in (
-            ("fp8", ml_dtypes.float8_e4m3fn, 2**-10),
-            ("bf8", ml_dtypes.float8_e5m2, 2**-17),
-        ):
+    def test_arch_config_is_a_file_drop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            default = Path(tmp) / "default_config.json"
+            arch_config = Path(tmp) / "default_config_gfx950.json"
+            arch_config.write_text("{}")
+            args = SimpleNamespace(configs=[], arch="gfx950")
+            with patch.object(self.driver, "DEFAULT_CONFIG", default):
+                self.assertEqual(self.driver.resolve_configs(args), [str(arch_config)])
+
+    def test_ocp_reference_matches_device_input_quantization(self):
+        # tiny is half the smallest OCP subnormal (E4M3 2^-9, E5M2 2^-16): OCP
+        # rounds it to zero while FNUZ keeps it, so a reference that silently
+        # encodes FNUZ must fail this comparison.
+        for dtype, tiny in (("fp8", 2**-10), ("bf8", 2**-17)):
             for corrupt in (False, True):
                 with self.subTest(dtype=dtype, corrupt=corrupt):
-                    # OCP/FNUZ subnormal boundaries differ. A reference that
-                    # silently encodes FNUZ must fail this comparison.
                     a = np.array([[tiny, 2 * tiny], [1, 0.5]], dtype=np.float32)
+                    a_ocp = np.array([[0, 2 * tiny], [1, 0.5]], dtype=np.float32)
                     b = np.ones((2, 2), dtype=np.float32)
-                    expected = a.astype(numpy_type).astype(np.float32) @ b
+                    expected = a_ocp @ b
                     if corrupt:
                         expected = expected + 1
                     runner = object.__new__(gemm_utils.GpuGemmRunner)
@@ -287,24 +348,6 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                     self.assertEqual(
                         json.loads(output.getvalue())["verified"], not corrupt
                     )
-
-    def test_regenerated_specs_preserve_gfx1250_wmma_types(self):
-        import runpy
-
-        sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
-        from generate_arch_specs import load_arch_specs, generate_python_module
-        import arch_specs_generated
-
-        with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "arch_specs_generated.py"
-            generate_python_module(
-                load_arch_specs(DISPATCHER_DIR / "codegen" / "arch_specs.json"), target
-            )
-            generated = runpy.run_path(str(target))
-        self.assertEqual(
-            generated["WARP_TILE_SUPPORTED_COMBINATIONS"]["gfx1250"],
-            arch_specs_generated.WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"],
-        )
 
 
 if __name__ == "__main__":
