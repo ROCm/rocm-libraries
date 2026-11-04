@@ -886,13 +886,13 @@ static void _wmma_gfx1250_a_16x16x4_f32(rocke_ir_builder_t* b,
                                         rocke_value_t** out0,
                                         rocke_value_t** out1)
 {
-    rocke_value_t *c2, *row, *k_lane, *k;
+    rocke_value_t *c2, *row, *k_lane, *k_base, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c2 = rocke_b_const_i32(b, 2);
     row = rocke_b_div(b, lane, c2);
     k_lane = rocke_b_mod(b, lane, c2);
-    k = rocke_b_mul(b, k_lane, c2);
-    k = rocke_b_add(b, k, rocke_b_const_i32(b, slot));
+    k_base = rocke_b_mul(b, k_lane, c2);
+    k = rocke_b_add(b, k_base, rocke_b_const_i32(b, slot));
     if(out0)
         *out0 = row;
     if(out1)
@@ -906,13 +906,13 @@ static void _wmma_gfx1250_b_16x16x4_f32(rocke_ir_builder_t* b,
                                         rocke_value_t** out0,
                                         rocke_value_t** out1)
 {
-    rocke_value_t *c2, *col, *k_lane, *k;
+    rocke_value_t *c2, *col, *k_lane, *k_base, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c2 = rocke_b_const_i32(b, 2);
     col = rocke_b_div(b, lane, c2);
     k_lane = rocke_b_mod(b, lane, c2);
-    k = rocke_b_mul(b, k_lane, c2);
-    k = rocke_b_add(b, k, rocke_b_const_i32(b, slot));
+    k_base = rocke_b_mul(b, k_lane, c2);
+    k = rocke_b_add(b, k_base, rocke_b_const_i32(b, slot));
     if(out0)
         *out0 = k;
     if(out1)
@@ -1397,19 +1397,19 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
 static void mfma_scaled_a(
     rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** row, rocke_value_t** k)
 {
-    rocke_value_t* base;
+    rocke_value_t *half, *base;
     *row = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
-    base = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
-    base = rocke_b_mul(b, base, rocke_b_const_i32(b, 32));
+    half = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
+    base = rocke_b_mul(b, half, rocke_b_const_i32(b, 32));
     *k = rocke_b_add(b, base, rocke_b_const_i32(b, slot));
 }
 static void mfma_scaled_f8_a(
     rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** row, rocke_value_t** k)
 {
-    rocke_value_t* base;
+    rocke_value_t *half, *base;
     *row = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
-    base = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
-    base = rocke_b_mul(b, base, rocke_b_const_i32(b, 16));
+    half = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
+    base = rocke_b_mul(b, half, rocke_b_const_i32(b, 16));
     *k = rocke_b_add(b, base, rocke_b_const_i32(b, (slot / 16) * 32 + slot % 16));
 }
 static void mfma_scaled_f8_b(

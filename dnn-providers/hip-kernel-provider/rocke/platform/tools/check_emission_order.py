@@ -17,24 +17,33 @@
 # locals in the Python twin's order and make the call with plain values.
 #
 # An argument "emits" when it calls a rocke_b_* builder function other than the
-# type and info helpers in NON_OP, or one of the wrappers in EMITTING_WRAPPERS.
-# This is a lexical scan, not a C++ parser: comments, string literals and
-# preprocessor lines are ignored, and an emitting call hidden behind a macro or
-# an unlisted wrapper is not seen.
+# type and info helpers in NON_OP, or a function whose body emits. The second
+# set is derived from every function and member function defined in the scanned
+# trees, to a fixed point: a body that calls an emitting function emits too. A
+# lambda body inside an argument does not count, since it runs when the callee
+# calls it, not while the arguments are evaluated.
 #
-# With no arguments it scans cpp/ and fails on any site not in KNOWN_SITES, and
-# on any KNOWN_SITES entry that no longer occurs. With file arguments (the
-# pre-commit hook) it checks only those files and skips the staleness check.
+# This is a lexical scan, not a C++ parser: comments, string literals and
+# preprocessor lines are ignored, functions are matched by name across files,
+# and an emitting call hidden behind a macro is not seen.
+#
+# It scans cpp/ and tests/instances/parity/ (plus any --also directories) and
+# fails on any site not in KNOWN_SITES, and on any KNOWN_SITES entry that no
+# longer occurs.
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-CPP_ROOT = Path(__file__).resolve().parents[1] / "cpp"
+PLATFORM = Path(__file__).resolve().parents[1]
+CPP_ROOT = PLATFORM / "cpp"
+DEFAULT_ROOTS = (CPP_ROOT, PLATFORM / "tests" / "instances" / "parity")
 SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
 
 # rocke_b_* functions that return a type, a name or an existing value and emit
@@ -50,44 +59,27 @@ NON_OP = frozenset(
     }
 )
 
-# Helpers that are not rocke_b_* but emit ops: the cached lane-index values
-# (they emit on first use, so whether a call emits depends on the spec) and the
-# gfx1151 vector splat. Add a wrapper here when a call passes it beside another
-# emitting argument.
-EMITTING_WRAPPERS = frozenset(
-    {
-        "fh_lane_col",
-        "fh_lane_col32",
-        "fh_lane_half32",
-        "fh_lane_rg",
-        "lane_col32_of",
-        "lane_col_of",
-        "lane_half32_of",
-        "lane_rg_of",
-        "rocke__lane_half_base",
-        "rocke_a2d_lane_col",
-        "rocke_a2d_lane_rg",
-        "rocke_g950a2d_lane_rg",
-        "rocke_gfx1151_dfcp_splat_i32",
-    }
-)
-
-# (path relative to cpp/, callee) -> occurrences allowed. Burn down only.
+# (path relative to platform/, callee) -> occurrences allowed. Burn down only.
 KNOWN_SITES: dict[tuple[str, str], int] = {
     # The 3D QQ-bias mask compares; fixed together with their parity configs
     # in a separate change. Delete both entries when it lands.
     (
-        "instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_segment_compute.cpp",
+        "cpp/instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_segment_compute.cpp",
         "rocke_b_land",
     ): 1,
     (
-        "instances/gfx950/attention_tiled_3d_segment_loop_epilogue.cpp",
+        "cpp/instances/gfx950/attention_tiled_3d_segment_loop_epilogue.cpp",
         "rocke_b_land",
     ): 1,
 }
 
 _CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 _NOT_CALLS = frozenset({"if", "for", "while", "switch", "return", "sizeof", "defined"})
+# Names that can stand before "(...) {" without being a function definition.
+_NOT_DEFINITIONS = _NOT_CALLS | {"catch"}
+# What may sit between a parameter list's ')' and the body's '{'.
+_QUALIFIERS = re.compile(r"\)\s*(?:(?:const|noexcept|override|final|mutable)\s*)*$")
+_NAME_BEFORE = re.compile(r"([A-Za-z_]\w*)\s*$")
 
 
 @dataclass(frozen=True)
@@ -134,6 +126,107 @@ def strip_source(src: str) -> str:
     return "".join(out)
 
 
+def _close(text: str, start: int) -> int:
+    """Index of the bracket closing the one at start (len(text) if none)."""
+    opening, closing = text[start], {"(": ")", "[": "]", "{": "}"}[text[start]]
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == opening:
+            depth += 1
+        elif text[i] == closing:
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(text)
+
+
+def _open(text: str, end: int) -> int:
+    """Index of the '(' matching the ')' at end (-1 if none)."""
+    depth = 0
+    for i in range(end, -1, -1):
+        if text[i] == ")":
+            depth += 1
+        elif text[i] == "(":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _header_name(text: str, brace: int) -> str | None:
+    """For the '{' at brace: the name before its "(...)" header, if any."""
+    head = _QUALIFIERS.search(text, max(0, brace - 200), brace)
+    if head is None:
+        return None
+    paren = _open(text, head.start())
+    if paren < 0:
+        return None
+    before = text[max(0, paren - 200) : paren]
+    if before.rstrip().endswith("]"):
+        return None  # a lambda: [captures](params) { ... }
+    name = _NAME_BEFORE.search(before)
+    if name is None or name.group(1) in _NOT_DEFINITIONS:
+        return None
+    return name.group(1)
+
+
+def _is_lambda_body(text: str, brace: int) -> bool:
+    """Whether the '{' at brace opens a lambda body."""
+    head = text[:brace].rstrip()
+    head = re.sub(r"(?:\bmutable\s*)$", "", head).rstrip()
+    if head.endswith("]"):
+        return True
+    if head.endswith(")"):
+        paren = _open(head, len(head) - 1)
+        return paren > 0 and head[:paren].rstrip().endswith("]")
+    return False
+
+
+def _without_lambda_bodies(arg: str) -> str:
+    """arg with the body of every lambda in it blanked out."""
+    out, i = arg, 0
+    while True:
+        i = out.find("{", i)
+        if i < 0:
+            return out
+        if _is_lambda_body(out, i):
+            j = _close(out, i)
+            out = out[:i] + " " * (j + 1 - i) + out[j + 1 :]
+        i += 1
+
+
+def function_bodies(text: str) -> Iterable[tuple[str, str]]:
+    """(name, body) of every function and member function defined in text.
+
+    text must already be stripped (see strip_source)."""
+    for brace in (m.start() for m in re.finditer(r"\{", text)):
+        name = _header_name(text, brace)
+        if name is not None:
+            yield name, text[brace : _close(text, brace) + 1]
+
+
+def _calls_an_op(names: Iterable[str]) -> bool:
+    return any(n.startswith("rocke_b_") and n not in NON_OP for n in names)
+
+
+def emitting_functions(texts: Iterable[str]) -> frozenset[str]:
+    """Names of the functions in texts (stripped sources) whose bodies emit."""
+    callees: dict[str, set[str]] = {}
+    for text in texts:
+        for name, body in function_bodies(text):
+            callees.setdefault(name, set()).update(_CALL.findall(body))
+    emitting = {name for name, calls in callees.items() if _calls_an_op(calls)}
+    while True:
+        more = {
+            name
+            for name, calls in callees.items()
+            if name not in emitting and calls & emitting
+        }
+        if not more:
+            return frozenset(emitting)
+        emitting |= more
+
+
 def _arguments(src: str, open_paren: int) -> list[str]:
     """Top-level argument texts of the call whose '(' is at open_paren."""
     depth, start, args = 0, open_paren + 1, []
@@ -152,41 +245,62 @@ def _arguments(src: str, open_paren: int) -> list[str]:
     return args
 
 
-def _emits(arg: str) -> bool:
-    return any(
-        (name.startswith("rocke_b_") and name not in NON_OP)
-        or name in EMITTING_WRAPPERS
-        for name in _CALL.findall(arg)
-    )
+def _emits(arg: str, emitters: frozenset[str]) -> bool:
+    names = _CALL.findall(_without_lambda_bodies(arg))
+    return _calls_an_op(names) or any(name in emitters for name in names)
 
 
-def find_sites(src: str) -> list[Site]:
-    """Calls in src with two or more op-emitting arguments."""
-    text = strip_source(src)
+def _sites(text: str, emitters: frozenset[str]) -> list[Site]:
     sites = []
     for m in _CALL.finditer(text):
         if m.group(1) in _NOT_CALLS:
             continue
-        if sum(_emits(a) for a in _arguments(text, m.end() - 1)) >= 2:
+        args = _arguments(text, m.end() - 1)
+        if sum(_emits(a, emitters) for a in args) >= 2:
             sites.append(Site(text.count("\n", 0, m.start()) + 1, m.group(1)))
     return sites
 
 
-def scan(paths) -> dict[str, list[Site]]:
-    """{path relative to cpp/: sites} for every C/C++ file in paths."""
+def find_sites(src: str, emitters: frozenset[str] = frozenset()) -> list[Site]:
+    """Calls in src with two or more op-emitting arguments.
+
+    emitters adds functions to count as emitting; by default only rocke_b_*
+    calls (and functions defined in src) do."""
+    text = strip_source(src)
+    return _sites(text, emitters | emitting_functions([text]))
+
+
+def _display(path: Path) -> str:
+    for base in (PLATFORM, Path.cwd()):
+        if path.is_relative_to(base):
+            return path.relative_to(base).as_posix()
+    return path.as_posix()
+
+
+def scan(roots: Iterable[Path]) -> dict[str, list[Site]]:
+    """{path relative to platform/: sites} for every C/C++ file under roots."""
+    paths = sorted(
+        {
+            p.resolve()
+            for root in roots
+            for p in Path(root).rglob("*")
+            if p.is_file() and p.suffix in SUFFIXES
+        }
+    )
+    texts = {
+        p: strip_source(p.read_text(encoding="utf-8", errors="replace")) for p in paths
+    }
+    emitters = emitting_functions(texts.values())
     found = {}
-    for path in paths:
-        path = Path(path).resolve()
-        if path.suffix not in SUFFIXES or not path.is_relative_to(CPP_ROOT):
-            continue
-        sites = find_sites(path.read_text(encoding="utf-8", errors="replace"))
+    for path, text in texts.items():
+        sites = _sites(text, emitters)
         if sites:
-            found[path.relative_to(CPP_ROOT).as_posix()] = sites
+            found[_display(path)] = sites
     return found
 
 
-def problems(found: dict[str, list[Site]], *, check_stale: bool) -> list[str]:
-    """Sites beyond KNOWN_SITES, plus stale KNOWN_SITES entries if asked."""
+def problems(found: dict[str, list[Site]]) -> list[str]:
+    """Sites beyond KNOWN_SITES, and KNOWN_SITES entries that no longer occur."""
     out = []
     counts = Counter()
     for rel, sites in sorted(found.items()):
@@ -194,26 +308,31 @@ def problems(found: dict[str, list[Site]], *, check_stale: bool) -> list[str]:
             counts[rel, site.callee] += 1
             if counts[rel, site.callee] > KNOWN_SITES.get((rel, site.callee), 0):
                 out.append(
-                    f"cpp/{rel}:{site.line}: {site.callee}(...) has two or more "
+                    f"{rel}:{site.line}: {site.callee}(...) has two or more "
                     "arguments that emit ops; bind them to locals in the Python "
                     "twin's order (C++ leaves argument evaluation order unspecified)"
                 )
-    if check_stale:
-        for (rel, callee), allowed in sorted(KNOWN_SITES.items()):
-            if counts[rel, callee] < allowed:
-                out.append(
-                    f"cpp/{rel}: KNOWN_SITES allows {allowed} {callee} site(s) but "
-                    f"{counts[rel, callee]} remain; lower or delete the entry"
-                )
+    for (rel, callee), allowed in sorted(KNOWN_SITES.items()):
+        if counts[rel, callee] < allowed:
+            out.append(
+                f"{rel}: KNOWN_SITES allows {allowed} {callee} site(s) but "
+                f"{counts[rel, callee]} remain; lower or delete the entry"
+            )
     return out
 
 
 def main(argv: list[str]) -> int:
-    if argv:
-        found = scan(argv)
-    else:
-        found = scan(p for p in CPP_ROOT.rglob("*") if p.is_file())
-    errors = problems(found, check_stale=not argv)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--also",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="DIR",
+        help="also scan the C/C++ files under DIR (e.g. library/tests/parity)",
+    )
+    args = parser.parse_args(argv)
+    errors = problems(scan([*DEFAULT_ROOTS, *args.also]))
     for line in errors:
         print(line, file=sys.stderr)
     return 1 if errors else 0

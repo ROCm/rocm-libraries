@@ -589,18 +589,17 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
                     rocke_value_t* p_row32 = rocke_b_add(B, ctx->wave_row_base, lane_col32);
                     rocke_value_t* pidx[2] = {p_row32, p_off32};
                     rocke_value_t* A_p32 = rocke_b_smem_load_vN(B, ctx->P_lds, pidx, 2, DT, 8);
-                    rocke_value_t* col_group16
-                        = rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 16));
-                    col_group16 = rocke_b_mul(B, col_group16, rocke_b_const_i32(B, 16));
-                    rocke_value_t* tr_col32 = rocke_b_mod(B, lane_col32, rocke_b_const_i32(B, 4));
-                    tr_col32 = rocke_b_mul(B, tr_col32, rocke_b_const_i32(B, 4));
-                    tr_col32 = rocke_b_add(B, col_group16, tr_col32);
-                    rocke_value_t* tr_row_base32 = rocke_b_const_i32(B, k * 16);
-                    tr_row_base32 = rocke_b_add(
-                        B, tr_row_base32, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8)));
-                    rocke_value_t* quad_row = rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 4));
-                    quad_row = rocke_b_mod(B, quad_row, rocke_b_const_i32(B, 4));
-                    tr_row_base32 = rocke_b_add(B, tr_row_base32, quad_row);
+                    rocke_value_t* group16 = rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 16));
+                    rocke_value_t* col_group16 = rocke_b_mul(B, group16, rocke_b_const_i32(B, 16));
+                    rocke_value_t* col_in4 = rocke_b_mod(B, lane_col32, rocke_b_const_i32(B, 4));
+                    rocke_value_t* col_off4 = rocke_b_mul(B, col_in4, rocke_b_const_i32(B, 4));
+                    rocke_value_t* tr_col32 = rocke_b_add(B, col_group16, col_off4);
+                    rocke_value_t* k_row_base = rocke_b_const_i32(B, k * 16);
+                    rocke_value_t* half_row_base = rocke_b_add(
+                        B, k_row_base, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8)));
+                    rocke_value_t* quad = rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 4));
+                    rocke_value_t* quad_row = rocke_b_mod(B, quad, rocke_b_const_i32(B, 4));
+                    rocke_value_t* tr_row_base32 = rocke_b_add(B, half_row_base, quad_row);
                     rocke_value_t* col0 = rocke_b_add(B, rocke_b_const_i32(B, n * 32), tr_col32);
                     rocke_value_t* r0idx[3] = {v_buf, tr_row_base32, col0};
                     rocke_value_t* B32_r0 = rocke_b_ds_read_tr16_b64(B, ctx->V_lds, r0idx, 3, DT);

@@ -332,8 +332,8 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                     rocke_value_t* elem_col
                         = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
                     rocke_value_t* valid = PADK_VALID(elem_col);
-                    rocke_value_t* lane_off = rocke_b_mul(b, vec_idx, ctx->c_load_vec);
-                    lane_off = rocke_b_add(b, lane_off, rocke_b_const_i32(b, i));
+                    rocke_value_t* vec_off = rocke_b_mul(b, vec_idx, ctx->c_load_vec);
+                    rocke_value_t* lane_off = rocke_b_add(b, vec_off, rocke_b_const_i32(b, i));
                     rocke_value_t* raw_off = rocke_b_add(b, base_off, lane_off);
                     rocke_value_t* safe_off = rocke_b_select(b, valid, raw_off, base_off);
                     rocke_value_t* raw

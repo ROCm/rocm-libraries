@@ -104,6 +104,7 @@ void rocke_block_exclusive_scan_i32(
     rocke_value_t* in_bounds;
     int stride;
     rocke_value_t* in_range_left;
+    rocke_value_t* left_off;
     rocke_value_t* left_idx;
     rocke_value_t* left_vec;
     rocke_value_t* left_val;
@@ -189,8 +190,8 @@ void rocke_block_exclusive_scan_i32(
     /* in_range_left = b.land(in_bounds, b.cmp_gt(tid, b.const_i32(0))) */
     in_range_left = rocke_b_land(b, in_bounds, rocke_b_cmp_gt(b, tid, rocke_b_const_i32(b, 0)));
     /* left_idx = b.select(in_range_left, b.sub(tid, b.const_i32(1)), b.const_i32(0)) */
-    left_idx = rocke_b_sub(b, tid, rocke_b_const_i32(b, 1));
-    left_idx = rocke_b_select(b, in_range_left, left_idx, rocke_b_const_i32(b, 0));
+    left_off = rocke_b_sub(b, tid, rocke_b_const_i32(b, 1));
+    left_idx = rocke_b_select(b, in_range_left, left_off, rocke_b_const_i32(b, 0));
     /* left_vec = b.smem_load_vN(lds_buf, left_idx, dtype=I32, n=1) */
     {
         rocke_value_t* lidx2[1];

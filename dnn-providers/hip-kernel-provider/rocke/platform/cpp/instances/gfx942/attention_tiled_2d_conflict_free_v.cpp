@@ -77,8 +77,8 @@ static rocke_value_t* rocke__max_seq_prefix_len(rocke_gfx942_attn2d_build_ctx_t*
     rocke_value_t* msp_raw = NULL;
     if(b)
     {
-        msp_raw = rocke_b_add(b, ctx->context_len, ctx->qb_start_pos);
-        msp_raw = rocke_b_add(b, msp_raw, rocke_b_const_i32(b, bm1_div_nqk + 1));
+        rocke_value_t* q_block_pos = rocke_b_add(b, ctx->context_len, ctx->qb_start_pos);
+        msp_raw = rocke_b_add(b, q_block_pos, rocke_b_const_i32(b, bm1_div_nqk + 1));
     }
     return rocke_b_select(b, rocke_b_cmp_lt(b, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
 }
@@ -132,9 +132,9 @@ void rocke_gfx942_attn2d_issue_v_transposed(rocke_gfx942_attn2d_build_ctx_t* ctx
     for(call = 0; call < V_T_ITEMS_PER_THREAD; ++call)
     {
         /* item = call*THREADS + tid */
-        rocke_value_t* item = rocke_b_const_i32(b, call);
-        item = rocke_b_mul(b, item, rocke_b_const_i32(b, ctx->THREADS));
-        item = rocke_b_add(b, item, ctx->tid);
+        rocke_value_t* call_v = rocke_b_const_i32(b, call);
+        rocke_value_t* call_base = rocke_b_mul(b, call_v, rocke_b_const_i32(b, ctx->THREADS));
+        rocke_value_t* item = rocke_b_add(b, call_base, ctx->tid);
         if(need_item_guard)
         {
             /* item = select(item < total_items, item, 0) */
@@ -351,9 +351,9 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
     for(call = 0; call < V_T_ITEMS_PER_THREAD; ++call)
     {
         /* blk = call*THREADS + tid */
-        rocke_value_t* blk = rocke_b_const_i32(b, call);
-        blk = rocke_b_mul(b, blk, rocke_b_const_i32(b, ctx->THREADS));
-        blk = rocke_b_add(b, blk, ctx->tid);
+        rocke_value_t* call_v = rocke_b_const_i32(b, call);
+        rocke_value_t* call_base = rocke_b_mul(b, call_v, rocke_b_const_i32(b, ctx->THREADS));
+        rocke_value_t* blk = rocke_b_add(b, call_base, ctx->tid);
         if(need_item_guard)
         {
             rocke_value_t* in_range = rocke_b_cmp_lt(b, blk, rocke_b_const_i32(b, total_blocks));

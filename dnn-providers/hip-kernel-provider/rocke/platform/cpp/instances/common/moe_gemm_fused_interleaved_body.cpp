@@ -92,8 +92,8 @@ rocke_value_t* rocke_moe_interleaved_load_wgateup(rocke_ir_builder_t* bb,
     /* n_tile_count = two_n / c_block_n */
     rocke_value_t* n_tile_count = rocke_b_div(bb, two_n, ctx->c_block_n);
     /* tile_offset_elements = (k_tile_idx*n_tile_count + n_tile_idx)*(block_n*block_k) */
-    rocke_value_t* tile_idx = rocke_b_mul(bb, k_tile_idx, n_tile_count);
-    tile_idx = rocke_b_add(bb, tile_idx, n_tile_idx);
+    rocke_value_t* k_tile_start = rocke_b_mul(bb, k_tile_idx, n_tile_count);
+    rocke_value_t* tile_idx = rocke_b_add(bb, k_tile_start, n_tile_idx);
     rocke_value_t* tile_offset_elements
         = rocke_b_mul(bb, tile_idx, rocke_b_const_i32(bb, block_n * block_k));
     /* base_off = batch_off_b + tile_offset_elements */
