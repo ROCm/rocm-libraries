@@ -49,7 +49,7 @@ from codegen_common import (  # noqa: E402
     gemm_lockstep_vector_bytes,
     gemm_vector_size_sweep,
     resolve_gemm_vector_sizes,
-    streamk_atomic_c_reject_reason,
+    streamk_c_reject_reason,
 )
 from unified_gemm_codegen import (  # noqa: E402
     CKTileKernelGenerator,
@@ -242,9 +242,10 @@ class TestResolution(unittest.TestCase):
         self.assertIsNone(_resolve("rrr", (8, 1, 1))[1])
 
     def test_stream_k_c_rule_follows_reduction_strategy(self):
-        # Only atomic adds partial tiles into C: it needs >= 4 bytes and a row-major
-        # C. Linear and tree store C with a plain store, None defers the check to
-        # the caller, and an unknown strategy fails closed.
+        # Every strategy needs a row-major C (CShuffle epilogue). Only atomic adds
+        # partial tiles into C and needs >= 4 bytes; linear and tree store C with a
+        # plain store, None defers the width check to the caller, and an unknown
+        # strategy fails closed.
         for strategy, layout_c, dtype_c, width in itertools.product(
             ("atomic", "linear", "tree", None, "unknown"),
             "rc",
@@ -252,10 +253,10 @@ class TestResolution(unittest.TestCase):
             (0, 1, 2),
         ):
             narrow = width == 1 and dtype_c in ("bf16", "fp16")  # 2 bytes
-            rejected = strategy in ("atomic", "unknown") and (layout_c == "c" or narrow)
+            rejected = layout_c == "c" or strategy in ("atomic", "unknown") and narrow
             args = (strategy, width, dtype_c, layout_c)
             with self.subTest(args=args):
-                reason = streamk_atomic_c_reject_reason(*args)
+                reason = streamk_c_reject_reason(*args)
                 self.assertEqual(reason is not None, rejected)
                 if not width:
                     continue  # 0 = native, which resolution never checks
@@ -679,17 +680,25 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
     )
     ALL_STRATEGIES = ["atomic", "linear", "tree"]
 
+    @contextlib.contextmanager
+    def _config(self, strategies, codegen_json=None):
+        """Write a config listing ``strategies``: the gfx1250 sweep in the Tile
+        Engine format (``{"values": [...]}``), or ``codegen_json`` as is."""
+        config = codegen_json or json.loads(self.CONFIG.read_text())
+        listed = strategies if codegen_json else {"values": strategies}
+        config["streamk_config"] = {"reduction_strategy": listed}
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            path.write_text(json.dumps(config))
+            yield path
+
     def _expand(self, layout, problem, strategies):
         from gemm_utils import expand_sweep
 
         # The config lists every strategy, so the tests also pin that
         # reduction_strategies replaces that list rather than adding to it.
-        config = json.loads(self.CONFIG.read_text())
-        config["streamk_config"] = {"reduction_strategy": self.ALL_STRATEGIES}
         vfb = VectorFallback([problem], layout, "bf16", "stream_k")
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "config.json"
-            path.write_text(json.dumps(config))
+        with self._config(self.ALL_STRATEGIES) as path:
             cfgs = expand_sweep(
                 str(path), "gfx1250", dtype="bf16", layout=layout, variant="stream_k",
                 reduction_strategies=strategies, **vfb.expand_kwargs,
@@ -730,23 +739,21 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
 
     def test_codegen_checks_c_per_strategy(self):
         # The codegen resolves the widths with the strategy deferred, then checks C
-        # for each expanded strategy: only atomic drops a 2-byte or column-major C.
-        for layout, vec, reject in (
-            ("rcr", (8, 1, 1), "vec(8, 1, 1): stream_k atomic C store needs >= 4"),
-            ("rcc", (0, 0, 0), "vec(0, 0, 0): stream_k atomic needs a row-major C"),
-            ("rcr", (8, 1, 2), None),
+        # for each expanded strategy: atomic drops a 2-byte C, every strategy drops
+        # a column-major C.
+        atomic_c = "vec(8, 1, 1): stream_k atomic C store needs >= 4"
+        for layout, vec, expected, reject in (
+            ("rcr", (8, 1, 1), ["linear", "tree"], atomic_c),
+            ("rcc", (0, 0, 0), [], "vec(0, 0, 0): stream_k needs a row-major C"),
+            ("rcr", (8, 1, 2), self.ALL_STRATEGIES, None),
         ):
             config = _bridge_config(vec, variant="stream_k")[0].to_codegen_json()
-            config["streamk_config"] = {"reduction_strategy": self.ALL_STRATEGIES}
-            with tempfile.TemporaryDirectory() as d, self.assertLogs(
+            with self._config(self.ALL_STRATEGIES, config) as path, self.assertLogs(
                 "unified_gemm_codegen", "INFO"
             ) as logs:
-                path = Path(d) / "config.json"
-                path.write_text(json.dumps(config))
-                gen = UnifiedGemmCodegen(Path(d), "bf16", layout, "gfx950", path)
+                gen = UnifiedGemmCodegen(path.parent, "bf16", layout, "gfx950", path)
                 kernels = gen._get_configs_for_variant(GemmVariant.STREAM_K)
             with self.subTest(layout=layout, vec=vec):
-                expected = ["linear", "tree"] if reject else self.ALL_STRATEGIES
                 self.assertEqual([k.reduction_strategy for k in kernels], expected)
                 self.assertTrue(all(k.trait.vector_sizes == vec for k in kernels))
                 rejected = [r for r in logs.output if f"256x256x64 {reject}" in r]
@@ -776,28 +783,28 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
         fixed = {c.effective_vector_sizes for c in configs if any(c.vector_sizes)}
         self.assertIn((8, 1, 1), fixed)
 
-    def test_atomic_needs_row_major_c(self):
-        # Atomic zeroes C with a row-major hipMemset2D and its header static_asserts
-        # a row-major C; linear and tree zero their workspace instead.
+    def test_invalid_stream_k_sweeps_raise(self):
+        # No strategy has a kernel for a column-major C (the CShuffle epilogue
+        # static_asserts a row-major C), and an unknown strategy, in the config file
+        # or the override, or the override with another variant is a caller error.
+        # All raise and say why instead of sweeping nothing.
         from gemm_utils import expand_sweep
 
-        for layout, strategy in itertools.product(("rrr", "rrc"), ("atomic", "linear")):
-            cfgs = expand_sweep(
-                str(self.CONFIG), "gfx1250", dtype="bf16", layout=layout,
-                variant="stream_k", reduction_strategies=[strategy],
-            )
-            with self.subTest(layout=layout, strategy=strategy):
-                self.assertEqual(bool(cfgs), layout == "rrr" or strategy != "atomic")
-
-    def test_strategy_override_is_validated(self):
-        from gemm_utils import expand_sweep
-
-        for variant, strategies in (("stream_k", ["linaer"]), ("standard", ["linear"])):
-            with self.subTest(variant=variant), self.assertRaises(ValueError):
-                expand_sweep(
-                    str(self.CONFIG), "gfx1250", dtype="bf16", variant=variant,
-                    reduction_strategies=strategies,
-                )
+        every = self.ALL_STRATEGIES
+        cases = [
+            ("rcr", "stream_k", ["Atomic"], None, "Unknown Stream-K"),
+            ("rcr", "stream_k", every, ["linaer"], "Unknown Stream-K"),
+            ("rcr", "standard", every, ["linear"], "Stream-K only"),
+        ] + [("rrc", "stream_k", every, [s], "row-major C") for s in every]
+        for layout, variant, listed, override, error in cases:
+            with self.subTest(layout=layout, listed=listed, override=override):
+                with self._config(listed) as path, self.assertRaisesRegex(
+                    ValueError, error
+                ):
+                    expand_sweep(
+                        str(path), "gfx1250", dtype="bf16", layout=layout,
+                        variant=variant, reduction_strategies=override,
+                    )
 
 
 class TestExpandSweep(unittest.TestCase):

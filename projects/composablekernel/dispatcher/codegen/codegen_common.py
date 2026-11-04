@@ -814,25 +814,24 @@ _STREAMK_ATOMIC_MIN_C_BYTES = 4
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
 
 
-def streamk_atomic_c_reject_reason(
+def streamk_c_reject_reason(
     reduction_strategy: Optional[str], vector_size_c: int, dtype_c: str, layout_c: str
 ) -> Optional[str]:
-    """Why a Stream-K C store is illegal for ``reduction_strategy`` (None if legal).
+    """Why Stream-K cannot store C for ``reduction_strategy`` (None if it can).
 
-    Only the atomic strategy adds partial C tiles into C. Its atomic adds need at
-    least 4 bytes per store (a narrower atomic C does not compile), and it zeroes C
-    with a row-major hipMemset2D, so its kernel header static_asserts a row-major C
-    (``layout_c`` "r"). Linear and tree reduce the partials in the accumulator-type
+    Every Stream-K kernel stores C through the CShuffle epilogue, which only
+    supports a row-major C (``layout_c`` "r"), so a column-major C is rejected for
+    every strategy. Only the atomic strategy adds partial C tiles into C, and its
+    atomic adds need at least 4 bytes per store (a narrower atomic C does not
+    compile). Linear and tree reduce the partials in the accumulator-type
     workspace and store C with a plain store (MemoryOperation ``set`` in
-    StreamKTilePartitionerBase), so any width and layout work for them.
-    ``vector_size_c`` of 0 means native, and a None strategy defers the check to
-    the caller. An unknown strategy gets the atomic rules.
+    StreamKTilePartitionerBase), so any width works for them.
+    ``vector_size_c`` of 0 means native, and a None strategy defers the width
+    check to the caller. An unknown strategy gets the atomic rules.
     """
-    if reduction_strategy in (None, "linear", "tree"):
-        return None
     if layout_c != "r":
-        return "stream_k atomic needs a row-major C"
-    if not vector_size_c:
+        return "stream_k needs a row-major C (CShuffle epilogue)"
+    if reduction_strategy in (None, "linear", "tree") or not vector_size_c:
         return None
     if vector_size_c * _VEC_ELEMENT_BYTES[dtype_c] < _STREAMK_ATOMIC_MIN_C_BYTES:
         return (
@@ -1126,9 +1125,9 @@ def resolve_gemm_vector_sizes(
     native one, and ``reject_reason`` is None when the widths are legal for
     this tile (otherwise a short human-readable string).
 
-    ``reduction_strategy`` only matters for ``variant="stream_k"``: the atomic
-    strategy needs a C store of at least 4 bytes, linear and tree do not. None
-    defers that check to the caller, which applies it per strategy.
+    ``reduction_strategy`` only matters for ``variant="stream_k"``; see
+    ``streamk_c_reject_reason``. None defers the strategy-dependent check to the
+    caller, which applies it per strategy.
     """
     native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
         dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
@@ -1167,7 +1166,7 @@ def resolve_gemm_vector_sizes(
                     f"(vector_size_{name}={width})",
                 )
     if variant == "stream_k":
-        c_reason = streamk_atomic_c_reject_reason(
+        c_reason = streamk_c_reject_reason(
             reduction_strategy, eff[2], dtype_c, layout[2]
         )
         if c_reason:

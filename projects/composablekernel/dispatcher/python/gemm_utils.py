@@ -2790,8 +2790,9 @@ def expand_sweep(
     ``reduction_strategies`` (Stream-K only) replaces the config's
     ``streamk_config.reduction_strategy`` list. It must be applied here rather
     than on the returned configs, because a fixed C width that is illegal for
-    the atomic strategy is legal for linear and tree. Unknown strategies, or
-    the argument with another variant, raise ValueError.
+    the atomic strategy is legal for linear and tree. Unknown strategies, the
+    argument with another variant, and Stream-K with a column-major C (which no
+    strategy supports) raise ValueError.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2862,6 +2863,13 @@ def expand_sweep(
             raise ValueError(
                 f"Unknown Stream-K reduction strategy {unknown}; valid: {list(valid)}"
             )
+        # The C layout rule holds for every strategy, so a column-major C has no
+        # Stream-K kernel at all: say why instead of returning an empty sweep.
+        c_reason = _codegen_common().streamk_c_reject_reason(
+            None, 0, _output_dtype(dtype), layout[2]
+        )
+        if c_reason:
+            raise ValueError(f"{c_reason}, got layout {layout!r}")
     elif reduction_strategies:
         raise ValueError(f"reduction_strategies is Stream-K only, not {variant!r}")
     else:
@@ -3050,12 +3058,6 @@ def expand_sweep(
         # Without this gate expand_sweep hands back configs whose header is
         # never emitted, which surfaces downstream as a spurious build failure.
         if variant == "stream_k" and epi != "cshuffle":
-            continue
-        # Same for atomic with a column-major C: its header static_asserts a
-        # row-major C, and the codegen rejects it with this helper.
-        if variant == "stream_k" and _codegen_common().streamk_atomic_c_reject_reason(
-            red, 0, _output_dtype(dtype), lc
-        ):
             continue
 
         for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:

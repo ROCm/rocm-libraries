@@ -48,7 +48,7 @@ from codegen_common import (
     gemm_default_epilogue_vector_size,
     gemm_vector_size_suffix,
     resolve_gemm_vector_sizes,
-    streamk_atomic_c_reject_reason,
+    streamk_c_reject_reason,
     normalize_gfx_arch,
     is_preshuffle_config_valid,  # noqa: F401 (re-exported)
     warp_size_for_arch,
@@ -1890,7 +1890,7 @@ class UnifiedGemmCodegen:
                     streamk_cfg = self.config.get("streamk_config", {})
                     strategies = streamk_cfg.get("reduction_strategy", ["atomic"])
                     for reduction_strategy in strategies:
-                        reason = streamk_atomic_c_reject_reason(
+                        reason = streamk_c_reject_reason(
                             reduction_strategy,
                             trait.vector_size_c,
                             TypeMappings.get_output_dtype(self.datatype),
