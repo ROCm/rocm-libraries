@@ -18,7 +18,7 @@ def test_both_source_superbuilds_execute_the_contracts_before_configuration():
     workflow = PROVIDER.parents[1] / ".github/workflows/hipdnn-superbuild-ci.yml"
     jobs = yaml.safe_load(workflow.read_text())["jobs"]
     checked = 0
-    for job in jobs.values():
+    for name, job in jobs.items():
         steps = job.get("steps", [])
         names = [step.get("name") for step in steps]
         if "Configure superbuild" not in names:
@@ -32,6 +32,8 @@ def test_both_source_superbuilds_execute_the_contracts_before_configuration():
         assert steps[contract]["run"].strip() == (
             '"$VENV_PYTHON" -I dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py'
         )
+        if name == "hipdnn-linux-superbuild":
+            assert steps[contract]["env"]["CMAKE_GENERATOR"] == "Ninja"
         checked += 1
     assert checked == 2
 

@@ -545,6 +545,9 @@ jobs:
 
       # These contracts need source CMake files, which installed CI cannot supply.
       - name: Check rocKE source asset contracts
+        env:
+          # Nested source-contract projects need the build tool installed here.
+          CMAKE_GENERATOR: Ninja
         run: |
           "$VENV_PYTHON" -I dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py
 
