@@ -9,9 +9,12 @@
 ``<results-dir>`` holds the shard directories of one run (``<suite>-<k>of<N>``, each a
 ``run_aotriton.py --out`` directory). A shard needs a link when work its ``--resume`` would still do
 remains: a collected case of pass 1 without a row, a case of a pass directory's ``nodeids.txt`` without
-a row, or a pass the shard's pass-1 rows call for (``run_aotriton.engine_work``, and the reference-forward
-passes of ``forward_failed``) whose directory does not exist or lacks rows. A shard whose
-``collected.txt`` is missing or empty left no list of cases and goes back whole. With
+a row, or a pass the shard's pass-1 rows call for whose directory does not exist or lacks rows. The
+passes called for follow the flags the links recorded (``run_aotriton.run_options``): with
+``--all-engines`` the pinned sweeps (``run_aotriton.engine_work``), the reference-forward passes of
+``forward_failed`` and with ``--pairs`` the pair passes; with ``--exhaustive`` the candidate passes of
+pass 1's candidate counts (``run_aotriton.candidate_passes``, EXTREME pairs with ``--all-engines``).
+A shard whose ``collected.txt`` is missing or empty left no list of cases and goes back whole. With
 ``--shards-file`` (``<suite> <k> <N>`` per line) a shard without a directory is listed too.
 
 stdout: the shards to resubmit in ``submit_chains.sh --shards-file`` format, in file (else directory)
@@ -40,21 +43,31 @@ def shard_gaps(shard):
         for d, _ in reconcile.pass_dirs(shard):
             wanted[d] = reconcile.listing(d / reconcile.NODEIDS_NAME)
 
-        def plan(rel, nodeids):
-            d = shard / reconcile.ENGINES_DIR / rel
+        def plan(d, nodeids):
             wanted[d] = list(dict.fromkeys([*wanted.get(d, ()), *nodeids]))
 
-        for (direction, engine), ids in run_aotriton.engine_work(rows).items():
-            plan(Path(direction) / run_aotriton.engine_slug(engine), ids)
-        failed = run_aotriton.forward_failed(shard)
-        if failed:
-            refwd = Path("refwd")
-            plan(refwd / "discovery", failed)
-            discovery = reconcile.read_rows(
-                shard / reconcile.ENGINES_DIR / refwd / "discovery" / reconcile.CSV_NAME
-            )
-            for (_, engine), ids in run_aotriton.engine_work(discovery).items():
-                plan(refwd / run_aotriton.engine_slug(engine), ids)
+        engines = shard / reconcile.ENGINES_DIR
+        options = run_aotriton.run_options(shard)
+        if options["all_engines"]:
+            for (direction, engine), ids in run_aotriton.engine_work(rows).items():
+                plan(engines / direction / run_aotriton.engine_slug(engine), ids)
+            bwd_lists = {}
+            failed = run_aotriton.forward_failed(shard)
+            if failed:
+                refwd = engines / "refwd"
+                plan(refwd / "discovery", failed)
+                discovery = reconcile.read_rows(
+                    refwd / "discovery" / reconcile.CSV_NAME
+                )
+                for (_, engine), ids in run_aotriton.engine_work(discovery).items():
+                    plan(refwd / run_aotriton.engine_slug(engine), ids)
+                bwd_lists = {r["nodeid"]: r["bwd_engines"] for r in discovery}
+            if options["pairs"]:
+                for (fwd, bwd), ids in run_aotriton.pair_work(rows, bwd_lists).items():
+                    plan(engines / run_aotriton.pair_rel(fwd, bwd), ids)
+        if options["exhaustive"]:
+            for p in run_aotriton.candidate_passes(rows, options["all_engines"]):
+                plan(shard / reconcile.CANDIDATES_DIR / p.rel, p.cases)
         gaps = []
         for d, ids in sorted(wanted.items()):
             name = reconcile.pass_name(shard, d)

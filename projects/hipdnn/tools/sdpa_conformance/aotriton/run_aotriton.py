@@ -94,6 +94,8 @@ full repro directory. ``--hang-timeout S`` (default 1800; 0 disables) starts
 ``--resume`` accepts a non-empty ``--out``: per pass directory it runs only the node ids of the
 pass (pass 1: the shard's collection) that have no row, from a node-id file and without
 ``--shard``. A ``crash`` row is a row, so a crashed case is never run again.
+Every link records the pass-planning flags in ``<out>/run-options.json`` (``all_engines``,
+``pairs``, ``exhaustive``), which ``completion.py`` reads to know which passes the shard calls for.
 
 Every pytest process checks that the ``libhipdnn_backend`` mapped into it is the one under
 ``--hipdnn-prefix`` (default ``$ROCM_PATH``, which dnn-benchmarking's ``setup_env.py``
@@ -111,6 +113,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 import aotriton_layout as layout
 import conformance_contract as contract
@@ -124,6 +127,10 @@ WATCHDOG_MODULE = "pytest_gpu_lease.watchdog"
 LOCK_NAME = "gpu.lock"
 CAPTURE_DIR = "capture"
 PIN_ENV = (*ENGINE_ENV.values(), *contract.CANDIDATE_ENV.values())
+RUN_OPTIONS_NAME = "run-options.json"
+# A shard written before the runner recorded its options ran --all-engines without --pairs or
+# --exhaustive.
+LEGACY_RUN_OPTIONS = {"all_engines": True, "pairs": False, "exhaustive": False}
 
 
 def parse_args(argv):
@@ -347,6 +354,88 @@ def candidate_pair_work(rows):
     return work
 
 
+def pair_rel(fwd, bwd):
+    """Directory of the (forward, backward) pair passes, under ``all-engines/`` or ``cand/``."""
+    return Path("pair") / f"{engine_slug(fwd)}__{engine_slug(bwd)}"
+
+
+class CandidatePass(NamedTuple):
+    rel: Path  # under cand/
+    kind: str
+    direction: str
+    pins: dict
+    cases: object  # node ids; {nodeid: message} for a not-enumerable pass
+    note: str
+
+
+def candidate_passes(rows, pairs):
+    """Every pass ``--exhaustive`` runs under ``cand/`` from pass-1 rows, in run order; with
+    ``pairs`` (``--all-engines``) the EXTREME pair passes follow. A ``not-enumerable`` pass runs no
+    pytest and carries ``{nodeid: message}`` as its cases.
+    """
+    for (direction, engine), (counts, messages) in sorted(candidate_work(rows).items()):
+        rel = Path(direction) / engine_slug(engine)
+        pin = {ENGINE_ENV[direction]: engine}
+        note = f"candidates {direction} {engine}"
+        for k in range(max(counts.values(), default=0)):
+            yield CandidatePass(
+                rel / str(k),
+                "candidate",
+                direction,
+                {**pin, contract.CANDIDATE_ENV[direction]: str(k)},
+                [n for n, count in counts.items() if count > k],
+                f"{note} #{k}",
+            )
+        if messages:
+            yield CandidatePass(
+                rel / contract.NOT_ENUMERABLE,
+                contract.NOT_ENUMERABLE,
+                direction,
+                pin,
+                messages,
+                note,
+            )
+    if not pairs:
+        return
+    for (fwd, bwd), (counts, messages) in sorted(candidate_pair_work(rows).items()):
+        rel = pair_rel(fwd, bwd)
+        pin = {ENGINE_ENV["fwd"]: fwd, ENGINE_ENV["bwd"]: bwd}
+        note = f"candidates pair {fwd} x {bwd}"
+        for i in range(max((c[0] for c in counts.values()), default=0)):
+            for j in range(max((c[1] for c in counts.values()), default=0)):
+                chosen = [n for n, c in counts.items() if c[0] > i and c[1] > j]
+                if chosen:
+                    yield CandidatePass(
+                        rel / f"{i}x{j}",
+                        "candidate-pair",
+                        "bwd",
+                        {
+                            **pin,
+                            contract.CANDIDATE_ENV["fwd"]: str(i),
+                            contract.CANDIDATE_ENV["bwd"]: str(j),
+                        },
+                        chosen,
+                        f"{note} #{i}x{j}",
+                    )
+        if messages:
+            yield CandidatePass(
+                rel / contract.NOT_ENUMERABLE,
+                contract.NOT_ENUMERABLE,
+                "bwd",
+                pin,
+                messages,
+                note,
+            )
+
+
+def run_options(out):
+    """The pass-planning flags the shard's links ran with, as ``main`` records them in
+    ``<out>/run-options.json``: ``all_engines``, ``pairs`` (only together with it) and ``exhaustive``.
+    """
+    path = Path(out) / RUN_OPTIONS_NAME
+    return json.loads(path.read_text()) if path.exists() else dict(LEGACY_RUN_OPTIONS)
+
+
 def forward_failed(out):
     """Node ids of backward cases whose forward failed or crashed in pass 1, a pinned or a pair pass."""
     out = Path(out)
@@ -564,7 +653,7 @@ class Runner:
     def pairs(self, work):
         for (fwd, bwd), nodeids in sorted(work.items()):
             self.extra_pass(
-                Path("pair") / f"{engine_slug(fwd)}__{engine_slug(bwd)}",
+                pair_rel(fwd, bwd),
                 "pair",
                 "bwd",
                 {ENGINE_ENV["fwd"]: fwd, ENGINE_ENV["bwd"]: bwd},
@@ -572,72 +661,35 @@ class Runner:
                 f"pair {fwd} x {bwd}",
             )
 
-    def not_enumerable(self, rel, direction, pins, messages, note):
-        """The ``not-enumerable`` pass of ``cand/<rel>``: its metadata and the message rows."""
-        pass_dir = self.out / contract.CANDIDATES_DIR / rel / contract.NOT_ENUMERABLE
+    def not_enumerable(self, p):
+        """A ``not-enumerable`` pass under ``cand/``: its metadata and the message rows."""
+        pass_dir = self.out / contract.CANDIDATES_DIR / p.rel
         pass_dir.mkdir(parents=True, exist_ok=True)
-        meta = {"kind": "candidate", "direction": direction}
+        meta = {"kind": "candidate", "direction": p.direction}
         for d, name in ENGINE_ENV.items():
-            meta[f"pin_{d}"] = pins.get(name, "")
+            meta[f"pin_{d}"] = p.pins.get(name, "")
             meta[f"{d}_candidate"] = ""
         (pass_dir / reconcile.PASS_META_NAME).write_text(json.dumps(meta) + "\n")
-        listing_file(pass_dir / reconcile.NODEIDS_NAME, list(messages))
-        _not_enumerable_rows(pass_dir, messages)
-        print(f"{note}: {len(messages)} not enumerable", flush=True)
-
-    def candidates(self, rows):
-        """One pass per (engine, candidate index) from the candidate counts of pass 1."""
-        for (direction, engine), (counts, messages) in sorted(
-            candidate_work(rows).items()
-        ):
-            rel = Path(direction) / engine_slug(engine)
-            pin = {ENGINE_ENV[direction]: engine}
-            note = f"candidates {direction} {engine}"
-            for k in range(max(counts.values(), default=0)):
-                self.extra_pass(
-                    rel / str(k),
-                    "candidate",
-                    direction,
-                    {**pin, contract.CANDIDATE_ENV[direction]: str(k)},
-                    [n for n, count in counts.items() if count > k],
-                    f"{note} #{k}",
-                    root=contract.CANDIDATES_DIR,
-                )
-            if messages:
-                self.not_enumerable(rel, direction, pin, messages, note)
-
-    def candidate_pairs(self, rows):
-        """EXTREME: one pass per (forward engine, backward engine, forward index, backward index)."""
-        for (fwd, bwd), (counts, messages) in sorted(candidate_pair_work(rows).items()):
-            rel = Path("pair") / f"{engine_slug(fwd)}__{engine_slug(bwd)}"
-            pin = {ENGINE_ENV["fwd"]: fwd, ENGINE_ENV["bwd"]: bwd}
-            note = f"candidates pair {fwd} x {bwd}"
-            for i in range(max((c[0] for c in counts.values()), default=0)):
-                for j in range(max((c[1] for c in counts.values()), default=0)):
-                    chosen = [n for n, c in counts.items() if c[0] > i and c[1] > j]
-                    if chosen:
-                        self.extra_pass(
-                            rel / f"{i}x{j}",
-                            "candidate-pair",
-                            "bwd",
-                            {
-                                **pin,
-                                contract.CANDIDATE_ENV["fwd"]: str(i),
-                                contract.CANDIDATE_ENV["bwd"]: str(j),
-                            },
-                            chosen,
-                            f"{note} #{i}x{j}",
-                            root=contract.CANDIDATES_DIR,
-                        )
-            if messages:
-                self.not_enumerable(rel, "bwd", pin, messages, note)
+        listing_file(pass_dir / reconcile.NODEIDS_NAME, list(p.cases))
+        _not_enumerable_rows(pass_dir, p.cases)
+        print(f"{p.note}: {len(p.cases)} not enumerable", flush=True)
 
     def exhaustive(self):
         """Candidate passes from pass 1's counts; with ``--all-engines`` the pair passes too."""
         rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
-        self.candidates(rows)
-        if self.args.all_engines:
-            self.candidate_pairs(rows)
+        for p in candidate_passes(rows, self.args.all_engines):
+            if p.kind == contract.NOT_ENUMERABLE:
+                self.not_enumerable(p)
+            else:
+                self.extra_pass(
+                    p.rel,
+                    p.kind,
+                    p.direction,
+                    p.pins,
+                    p.cases,
+                    p.note,
+                    root=contract.CANDIDATES_DIR,
+                )
 
     def all_engines(self):
         """Pinned sweeps, pair passes (``--pairs``), then the reference-forward passes for failed forwards."""
@@ -725,6 +777,16 @@ def main(argv=None):
         raise SystemExit(
             f"{results} already has rows; use a fresh --out per run and shard, or --resume"
         )
+    (out / RUN_OPTIONS_NAME).write_text(
+        json.dumps(
+            {
+                "all_engines": args.all_engines,
+                "pairs": args.all_engines and args.pairs,
+                "exhaustive": args.exhaustive,
+            }
+        )
+        + "\n"
+    )
     env = layout.clean_env(release=args.release)
     env.pop(FWD_NO_STATS_ENV, None)
     env[layout.LAYOUT_MODE_ENV] = args.layout_mode
