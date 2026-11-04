@@ -379,10 +379,11 @@ namespace FixedPointEmulation
         // qpi_lo = qpi_exact - qpi_hi >= 0 — a non-negative lo avoids cancellation
         // in the FMA accumulation of chunk_accum_kernel.
         //
-        // For small values (top <= 52) the CRT coefficient is an exact integer
-        // < 2^53, so it is returned exactly (qpi_lo = 0).  This is required
-        // because the kernel uses HAS_LO=false (ignoring qpi_lo) when effective_s
-        // <= 7.
+        // For values below 2^53 the CRT coefficient is an exact integer: it is
+        // returned exactly (qpi_lo = 0) when it has at most 53 - QPI_N_TZ
+        // significant bits, and split the same way otherwise, so dc*qpi_hi stays
+        // exact.  Coefficients with qpi_lo != 0 first appear at 6 moduli; the
+        // kernels use HAS_LO=false (ignoring qpi_lo) only for at most 5 moduli.
         //
         // ── Choice of QPI_N_TZ ────────────────────────────────────────────────
         // QPI_N_TZ = number of trailing zero bits forced into the 53-bit mantissa
@@ -415,10 +416,16 @@ namespace FixedPointEmulation
             int top = msb_pos();
             if(top < 0)
                 return 0.0;
-            // For top <= 52 the value is an exact integer < 2^53, perfectly
-            // representable as a double.  Return it exactly so qpi_lo = 0.
+            // For top <= 52 the value is an exact integer < 2^53.  Keep at most
+            // 53 - QPI_N_TZ significant bits (truncated toward zero, so
+            // qpi_hi <= Q); qpi_lo_val() returns the dropped low bits exactly.
             if(top <= 52)
-                return static_cast<double>(d[0]);
+            {
+                const int drop = top - (52 - QPI_N_TZ);
+                if(drop <= 0)
+                    return static_cast<double>(d[0]);
+                return static_cast<double>((d[0] >> drop) << drop);
+            }
             int      shift = top - 52;
             uint64_t m     = extract_bits(top, top - 52);
             bool     rb = bit(top - 53), st = any_bit_set_below(top - 54);
@@ -460,10 +467,15 @@ namespace FixedPointEmulation
         int top = Q.msb_pos();
         if(top < 0)
             return 0.0;
-        // to_double_aligned() returns d[0] exactly for top <= 52,
-        // so qpi_lo = Q - qpi_hi = 0 in that case.
+        // For top <= 52, to_double_aligned() keeps the high
+        // 53 - QPI_N_TZ significant bits; qpi_lo is the exact remainder.
         if(top <= 52)
-            return 0.0;
+        {
+            const int drop = top - (52 - UInt256::QPI_N_TZ);
+            if(drop <= 0)
+                return 0.0;
+            return static_cast<double>(Q.d[0] & ((uint64_t(1) << drop) - 1u));
+        }
         int      shift = top - 52;
         uint64_t m     = Q.extract_bits(top, top - 52);
         bool     rb = Q.bit(top - 53), st = Q.any_bit_set_below(top - 54);
@@ -592,7 +604,7 @@ namespace FixedPointEmulation
     // Both words are computed entirely at compile time from the CRT moduli via
     // make_P_table() / to_double_aligned() / qpi_lo_val() — see the algorithm
     // note on UInt256::to_double_aligned() (QPI_N_TZ trailing-zero split).  For
-    // s <= 6 (s_idx <= 4) the CRT coefficient is an exact integer < 2^53, so
+    // at most 5 moduli (s_idx <= 3) every CRT coefficient is below 2^40, so
     // lo = 0 (the HAS_LO=false kernel path applies).
     __device__ __forceinline__ std::pair<double, double> qpi(unsigned s_idx,
                                                              unsigned mod_idx) noexcept
