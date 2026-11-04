@@ -1258,7 +1258,7 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *  @param[in]
  *  rows          number of rows in the blocked ELL matrix.
  *  @param[in]
- *  cols          number of columns in the blocked ELL matrix
+ *  cols          number of columns in the blocked ELL matrix.
  *  @param[in]
  *  ell_block_dir \ref rocsparse_direction_row or \ref rocsparse_direction_column.
  *  @param[in]
