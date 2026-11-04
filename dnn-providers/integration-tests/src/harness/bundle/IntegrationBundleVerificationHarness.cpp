@@ -87,6 +87,12 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
         noteSkipBeforeObservation();
         GTEST_SKIP() << *reason;
     }
+
+    if(auto reason = checkArchList(_bundle->metadata, _deps.policy.arch))
+    {
+        noteSkipBeforeObservation();
+        GTEST_SKIP() << *reason;
+    }
 }
 
 // ---- support claims --------------------------------------------------------

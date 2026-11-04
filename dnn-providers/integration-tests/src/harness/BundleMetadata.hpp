@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
@@ -48,6 +49,8 @@ struct BundleMetadata
     std::optional<std::string> generatorVersion;
     std::optional<std::string> generatedAt;
     std::optional<std::string> gpuArchitecture;
+    /// Base archs (for example "gfx942") that the case runs on. Other GPUs skip the case.
+    std::optional<std::vector<std::string>> archs;
     std::optional<std::string> rocmVersion;
     std::optional<std::string> referenceSource;
     std::optional<std::string> referenceSourceHash;
@@ -85,6 +88,7 @@ inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
 /// a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
+/// an `archs` value that is not a non-empty array of base arch names,
 /// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, a
 /// feature that needs a higher `format_version`, a flag combination that contradicts
 /// the bundle's golden data, or (for a .meta.json file) unreadable or not valid JSON.
@@ -123,8 +127,14 @@ inline bool usesValuesFillKind(const nlohmann::json& metadata)
     return false;
 }
 
-inline constexpr std::array<FormatVersion2Feature, 1> K_FORMAT_VERSION_2_FEATURES = {{
+inline bool usesArchList(const nlohmann::json& metadata)
+{
+    return metadata.contains("archs");
+}
+
+inline constexpr std::array<FormatVersion2Feature, 2> K_FORMAT_VERSION_2_FEATURES = {{
     {"kind values", &usesValuesFillKind},
+    {"archs", &usesArchList},
 }};
 
 } // namespace bundle_metadata_detail
@@ -135,6 +145,7 @@ inline constexpr std::array<FormatVersion2Feature, 1> K_FORMAT_VERSION_2_FEATURE
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
 /// `format_version`, carries a format version other than 1 or 2, has an invalid
 /// `enforcement_level`, has a reference/rejection flag that is not a boolean, has an
+/// `archs` value that is not a non-empty array of base arch names, has an
 /// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
 /// spec, or uses a version-2 feature in version 1 metadata.
 /// `source` names the origin (file path or sweep case) in
@@ -209,6 +220,27 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         }
         return json[key].get<bool>();
     };
+    if(json.contains("archs"))
+    {
+        const auto& archs = json["archs"];
+        if(!archs.is_array() || archs.empty())
+        {
+            throw BundleMetadataError(where + " has invalid archs (not a non-empty array)");
+        }
+        std::vector<std::string> archList;
+        for(const auto& arch : archs)
+        {
+            if(!arch.is_string() || arch.get_ref<const std::string&>().empty()
+               || arch.get_ref<const std::string&>().find(':') != std::string::npos)
+            {
+                throw BundleMetadataError(where + " has invalid archs entry " + arch.dump()
+                                          + " (not a base arch name such as \"gfx942\")");
+            }
+            archList.push_back(arch.get<std::string>());
+        }
+        meta.archs = std::move(archList);
+    }
+
     meta.noCpuReference = readFlag("no_cpu_reference");
     meta.noGpuReference = readFlag("no_gpu_reference");
     meta.expectedRejection = readFlag("expected_rejection");
@@ -419,6 +451,32 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
                + currentArch;
     }
     return std::nullopt;
+}
+
+/// Skip if the case names the GPUs that it runs on and the current GPU is not one of them.
+///
+/// Passes (returns nullopt) when:
+///   - archs is not set in metadata
+///   - currentArch is empty (device could not be queried — skip disabled)
+///   - the base arch of currentArch is in archs ("gfx942" matches "gfx942:sramecc+:xnack-")
+inline std::optional<std::string> checkArchList(const BundleMetadata& meta,
+                                                const std::string& currentArch)
+{
+    if(!meta.archs || currentArch.empty())
+    {
+        return std::nullopt;
+    }
+    std::string listed;
+    for(const auto& arch : *meta.archs)
+    {
+        if(hipdnn_test_sdk::utilities::archMatches(
+               currentArch, arch, hipdnn_test_sdk::utilities::ArchMatchMode::PREFIX))
+        {
+            return std::nullopt;
+        }
+        listed += (listed.empty() ? "" : ", ") + arch;
+    }
+    return "case built for " + listed + "; current GPU is " + currentArch;
 }
 
 } // namespace hipdnn_integration_tests

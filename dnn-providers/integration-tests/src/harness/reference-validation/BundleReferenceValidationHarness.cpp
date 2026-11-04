@@ -51,6 +51,10 @@ void BundleReferenceValidationHarness::SetUp()
     {
         GTEST_SKIP() << *reason;
     }
+    if(auto reason = checkArchList(_bundle->metadata, TestConfig::get().getCurrentArch()))
+    {
+        GTEST_SKIP() << *reason;
+    }
 
     // Registration only creates a test when both hold, so a violation here is a
     // registration bug rather than a property of the data.

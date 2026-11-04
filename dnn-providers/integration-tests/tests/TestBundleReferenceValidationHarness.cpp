@@ -18,6 +18,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -134,6 +135,32 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("no golden data"), std::string::npos);
+}
+
+// The arch list guard reads the GPU from TestConfig, so the outcome depends on the test machine.
+// With no readable GPU the guard is off.
+TEST_F(TestBundleReferenceValidationHarness, SetUpSkipsACaseBuiltForAnotherGpu)
+{
+    auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
+    bundle->metadata.archs = std::vector<std::string>{"gfx000"};
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    driveSetUp(harness, &results);
+
+    const auto& currentArch = TestConfig::get().getCurrentArch();
+    if(currentArch.empty())
+    {
+        EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+        return;
+    }
+    ASSERT_TRUE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+    EXPECT_NE(testing_support::allMessages(results).find("case built for gfx000; current GPU is "
+                                                         + currentArch),
+              std::string::npos)
+        << testing_support::allMessages(results);
 }
 
 // The second guard covers a state the file-based fixtures cannot produce (the

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "harness/BundleMetadata.hpp"
 
@@ -15,6 +16,7 @@
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::BundleMetadataError;
 using hipdnn_integration_tests::checkArchCompatibility;
+using hipdnn_integration_tests::checkArchList;
 using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
@@ -460,6 +462,72 @@ TEST(TestCheckArchCompatibility, RejectsWhenFeatureFlagsDiffer)
 }
 
 // ---------------------------------------------------------------------------
+// checkArchList — pure guard function
+// ---------------------------------------------------------------------------
+
+TEST(TestCheckArchList, PassesWhenArchsNotSet)
+{
+    const BundleMetadata meta;
+    EXPECT_FALSE(checkArchList(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchList, PassesWhenDeviceCannotBeQueried)
+{
+    BundleMetadata meta;
+    meta.archs = std::vector<std::string>{"gfx950"};
+    EXPECT_FALSE(checkArchList(meta, "").has_value());
+}
+
+TEST(TestCheckArchList, PassesWhenTheDeviceIsListed)
+{
+    BundleMetadata meta;
+    meta.archs = std::vector<std::string>{"gfx942"};
+    EXPECT_FALSE(checkArchList(meta, "gfx942").has_value());
+    EXPECT_FALSE(checkArchList(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchList, PassesWhenAnyListedArchMatches)
+{
+    BundleMetadata meta;
+    meta.archs = std::vector<std::string>{"gfx950", "gfx942"};
+    EXPECT_FALSE(checkArchList(meta, "gfx942:sramecc+:xnack-").has_value());
+    EXPECT_FALSE(checkArchList(meta, "gfx950:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchList, SkipsAnotherDeviceNamingTheListAndTheDevice)
+{
+    BundleMetadata meta;
+    meta.archs = std::vector<std::string>{"gfx950"};
+    const auto result = checkArchList(meta, "gfx942:sramecc+:xnack-");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "case built for gfx950; current GPU is gfx942:sramecc+:xnack-");
+}
+
+TEST(TestCheckArchList, SkipMessageNamesEveryListedArch)
+{
+    BundleMetadata meta;
+    meta.archs = std::vector<std::string>{"gfx950", "gfx90a"};
+    const auto result = checkArchList(meta, "gfx942");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "case built for gfx950, gfx90a; current GPU is gfx942");
+}
+
+TEST(TestCheckArchList, RejectsPartialArchName)
+{
+    BundleMetadata meta;
+    meta.archs = std::vector<std::string>{"gfx94"};
+    EXPECT_TRUE(checkArchList(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchList, IgnoresGpuArchitecture)
+{
+    BundleMetadata meta;
+    meta.gpuArchitecture = "gfx950";
+    meta.archs = std::vector<std::string>{"gfx942"};
+    EXPECT_FALSE(checkArchList(meta, "gfx942").has_value());
+}
+
+// ---------------------------------------------------------------------------
 // loadBundleMetadata — additional corner cases
 // ---------------------------------------------------------------------------
 
@@ -808,6 +876,51 @@ TEST(TestParseBundleMetadataJson, ThrowsOnMalformedValuesSpecInFormatVersion2)
             = metadataError(std::string(R"({"format_version": 2, "inputs": {"7": )") + spec + "}}");
         EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << spec << ": " << error;
     }
+}
+
+TEST(TestParseBundleMetadataJson, ArchsParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 2, "archs": ["gfx942", "gfx950"]})"));
+    ASSERT_TRUE(meta.archs.has_value());
+    EXPECT_EQ(*meta.archs, (std::vector<std::string>{"gfx942", "gfx950"}));
+}
+
+TEST(TestParseBundleMetadataJson, ArchsAbsentLeavesTheListUnset)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_FALSE(meta.archs.has_value());
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnArchsInFormatVersion1)
+{
+    const auto error = metadataError(R"({"format_version": 1, "archs": ["gfx942"]})");
+    EXPECT_NE(error.find("case_0: archs needs format_version 2"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnArchsOfTheWrongType)
+{
+    for(const auto* archs : {R"("gfx942")",
+                             "[]",
+                             "null",
+                             "{}",
+                             "[942]",
+                             R"([["gfx942"]])",
+                             R"([""])",
+                             R"(["gfx942:sramecc+:xnack-"])",
+                             R"(["gfx942", 1])"})
+    {
+        const auto error
+            = metadataError(std::string(R"({"format_version": 2, "archs": )") + archs + "}");
+        EXPECT_NE(error.find("case_0 has invalid archs"), std::string::npos)
+            << archs << ": " << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, ArchsInAVersion1FileThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "archs": ["gfx942"]})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
 TEST(TestLoadBundleMetadata, UnknownFillKindInAFileThrows)

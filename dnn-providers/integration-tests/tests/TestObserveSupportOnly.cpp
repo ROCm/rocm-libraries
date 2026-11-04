@@ -252,6 +252,42 @@ TEST_F(TestSkipsBeforeObservation, ArchGuardSkipIsCounted)
     EXPECT_EQ(SupportObservationLog::get().graphsUnobserved(), 0u);
 }
 
+TEST_F(TestSkipsBeforeObservation, ArchListSkipIsCounted)
+{
+    HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(hostPolicy()), ENGINE_A);
+
+    auto guarded = bundle();
+    guarded->metadata.archs = std::vector<std::string>{"gfx950"}; // hostPolicy() runs gfx942
+    harness.setBundle(guarded, _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    ASSERT_TRUE(anySkipped(results));
+    EXPECT_NE(allMessages(results).find("case built for gfx950; current GPU is gfx942"),
+              std::string::npos)
+        << allMessages(results);
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 1u);
+    EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 0u);
+}
+
+TEST_F(TestSkipsBeforeObservation, ListedArchPassesTheArchListGuard)
+{
+    HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(hostPolicy()), ENGINE_A);
+
+    auto listed = bundle();
+    listed->metadata.archs = std::vector<std::string>{"gfx950", "gfx942"};
+    harness.setBundle(listed, _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    EXPECT_FALSE(anySkipped(results)) << allMessages(results);
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 0u);
+}
+
 TEST_F(TestSkipsBeforeObservation, VramGuardSkipIsCounted)
 {
     // checkVramRequirement() is inert while deviceVramMb is hostPolicy()'s 0 -- an
