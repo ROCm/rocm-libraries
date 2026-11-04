@@ -23,7 +23,8 @@
  * @file SdpaGraphMatch.hpp
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
  *        SDPA-forward node shares: finding the node and its operands, the operand checks
- *        made before anything indexes an axis, and the decline-line head.
+ *        made before anything indexes an axis, the problem shape read from Q and K, and
+ *        the decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
  * UnifiedAttentionGraphMatch.hpp.
@@ -111,6 +112,49 @@ inline bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_AXIS, headSize)
            && axisOk(SEQ_AXIS, pack_features::checkedProduct({heads, headSize}))
            && axisOk(HEAD_SIZE_AXIS, 1);
+}
+
+/// The graph facts an SDPA pack's matchers, scorer and prepare() read, from Q and K.
+struct SdpaProblem
+{
+    int64_t batch = 0;
+    int64_t seqLenQ = 0;
+    int64_t seqLenKv = 0;
+    int64_t numQueryHeads = 0;
+    int64_t numKvHeads = 0;
+    int64_t headSize = 0;
+    data_objects::DataType dataType = data_objects::DataType::UNSET;
+};
+
+/// The graph's shape, read from Q and K. Callers must have checked both operands with
+/// isWellFormedOperand(); readProblem() is the checked form.
+inline SdpaProblem problemFor(const data_objects::TensorAttributes& q,
+                              const data_objects::TensorAttributes& k)
+{
+    SdpaProblem problem;
+    problem.batch = q.dims()->Get(BATCH_AXIS);
+    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
+    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
+    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
+    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
+    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
+    problem.dataType = q.data_type();
+    return problem;
+}
+
+/// The shape of the graph whose Q and K are the tensors @p qUid and @p kUid, or nullopt when
+/// either uid names no tensor or a malformed one. Total over an UNVALIDATED graph, so a
+/// matcher or prepare() reached without graph_match never indexes a missing axis.
+inline std::optional<SdpaProblem>
+    readProblem(const MatchContext& context, int64_t qUid, int64_t kUid)
+{
+    const auto* q = findTensor(context, qUid);
+    const auto* k = findTensor(context, kUid);
+    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    {
+        return std::nullopt;
+    }
+    return problemFor(*q, *k);
 }
 
 // ---------------------------------------------------------------------------
