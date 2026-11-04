@@ -376,7 +376,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // desc- or handle-level enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                int32_t                value);
+                                bool                   value);
 
 // MX scale tensor padding on the current device. When true (gfx950) the K blocks are
 // padded to a multiple of 8 and the free dimension to a multiple of 32; otherwise only the
