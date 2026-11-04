@@ -33,11 +33,8 @@ RR_KERNEL_PREFIX = "RR_GEMM_"
 _HERE = Path(__file__).resolve().parent
 _VERIFIED = _HERE / "data" / "rocroller_uso_verified.txt"
 _KERNELS = _HERE.parents[1] / "CustomKernels" / "rocroller"
-_CORPUS = (
-    _HERE.parents[3]
-    / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full"
-    / "gfx950/gfx950_id75a3/GridBased"
-)
+_LOGIC = _HERE.parents[3] / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full"
+_CORPUS = _LOGIC / "gfx950/gfx950_id75a3/GridBased"
 
 
 def _verified():
@@ -98,6 +95,11 @@ def test_every_verified_kernel_ships_flagged(shipped):
     assert not unflagged, f"verified kernels do not declare uniformSummationOrder: {unflagged}"
 
 
+@pytest.mark.skipif(
+    not _LOGIC.is_dir(),
+    reason=f"source-tree check: no hipBLASLt logic tree at {_LOGIC}; the installed "
+    "test payload does not ship it",
+)
 def test_logic_files_agree_with_custom_config(shipped, logic_blocks):
     disagree = []
     for name, entries in logic_blocks.items():
