@@ -1104,6 +1104,10 @@ def _cell_transition(before: str, after: str) -> str:
     return _CELL_TRANSITIONS.get(before, {}).get(after, "invalid")
 
 
+def _is_nonblank_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _compare_support(committed: str, fresh: str) -> _SupportComparison:
     """Compare the support floor, retaining scope and probe-method guards.
 
@@ -1145,6 +1149,11 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
 
     method_fields = ("flavor", "arches", "generator", "probe_cflags", "probe_timeout_s")
     for label, doc in (("baseline", a), ("current", b)):
+        identity = doc["toolchain"].get("clang")
+        if not _is_nonblank_string(identity):
+            result.failures.append(
+                f"{label} toolchain clang must be a nonblank string, got {identity!r}"
+            )
         for field in method_fields:
             if field not in doc["toolchain"]:
                 result.failures.append(f"{label} toolchain has no {field}")
@@ -1220,6 +1229,19 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             ):
                 result.changes["unvalidated"].append(f"{key}/{arch}: {after}")
             for label, cell in (("baseline", before_cell), ("current", after_cell)):
+                if cell.get("status") != STATUS_OK and not _is_nonblank_string(
+                    cell.get("evidence")
+                ):
+                    result.failures.append(
+                        f"{key}/{arch}: {label} evidence must be a nonblank string for a non-ok cell, got {cell.get('evidence')!r}"
+                    )
+                if "probe_imm" in cell and (
+                    cell.get("status") != STATUS_OK
+                    or type(cell["probe_imm"]) is not int
+                ):
+                    result.failures.append(
+                        f"{key}/{arch}: {label} probe_imm must be an integer on an ok cell, got {cell['probe_imm']!r}"
+                    )
                 verified_on = cell.get("verified_on")
                 if (
                     not isinstance(verified_on, str)
@@ -1243,6 +1265,11 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
         ):
             result.failures.append(f"processor {arch}: accepted must be boolean")
             continue
+        for label, entry in (("baseline", before), ("current", after)):
+            if not entry["accepted"] and not _is_nonblank_string(entry.get("evidence")):
+                result.failures.append(
+                    f"processor {arch}: {label} evidence must be a nonblank string for a rejected processor, got {entry.get('evidence')!r}"
+                )
         if before["accepted"] and not after["accepted"]:
             result.failures.append(f"processor {arch}: accepted -> unsupported")
         elif after["accepted"] and not before["accepted"]:

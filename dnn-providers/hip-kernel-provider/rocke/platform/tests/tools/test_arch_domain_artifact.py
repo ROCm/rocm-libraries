@@ -121,7 +121,9 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                 # tell.
                 tc = doc.get("toolchain", {})
                 self.assertEqual(tc.get("flavor"), flavor)
-                clang_flavor = G.flavor_of_clang(tc.get("clang", ""))
+                self.assertIsInstance(tc.get("clang"), str)
+                self.assertTrue(tc["clang"].strip(), "no compiler identity")
+                clang_flavor = G.flavor_of_clang(tc["clang"])
                 if clang_flavor is not None:
                     self.assertEqual(clang_flavor, flavor, tc.get("clang"))
 
@@ -202,7 +204,11 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                         self.assertNotEqual(status, G.STATUS_PROBE_ERROR)
                         self.assertEqual(cell.get("verified_on"), flavor)
                         if status in _NEEDS_EVIDENCE:
-                            self.assertTrue(cell.get("evidence"), "no diagnostic")
+                            self.assertIsInstance(cell.get("evidence"), str)
+                            self.assertTrue(cell["evidence"].strip(), "no diagnostic")
+                        if "probe_imm" in cell:
+                            self.assertEqual(status, G.STATUS_OK)
+                            self.assertIs(type(cell["probe_imm"]), int)
 
     def test_every_column_records_how_it_was_measured(self):
         """`clang` says which compiler answered, not which question it was asked.
@@ -239,7 +245,8 @@ class ArchDomainProcessorSupportTest(unittest.TestCase):
                 for arch, entry in processors.items():
                     self.assertIsInstance(entry.get("accepted"), bool, arch)
                     if not entry["accepted"]:
-                        self.assertTrue(entry.get("evidence"), arch)
+                        self.assertIsInstance(entry.get("evidence"), str, arch)
+                        self.assertTrue(entry["evidence"].strip(), arch)
 
     def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
         """The two answers agree: a name the compiler rejects was never probed
@@ -382,6 +389,115 @@ class SupportComparisonTest(unittest.TestCase):
                 "processors": {arch: {"accepted": True} for arch in tc["arches"]},
             }
         )
+
+    def _assert_invalid_on_either_or_both_sides(self, valid, invalid, *diagnostics):
+        for side, before, after in (
+            ("baseline", invalid, valid),
+            ("current", valid, invalid),
+            ("both", invalid, invalid),
+        ):
+            with self.subTest(side=side):
+                comparison = G._compare_support(json.dumps(before), json.dumps(after))
+                self.assertTrue(comparison.failures, "malformed input passed")
+                failures = "; ".join(comparison.failures)
+                for diagnostic in diagnostics:
+                    self.assertIn(diagnostic, failures)
+                for label in (("baseline", "current") if side == "both" else (side,)):
+                    self.assertIn(label, failures)
+
+    def test_missing_or_invalid_compiler_identity_fails(self):
+        valid = json.loads(self._doc())
+        for identity in (
+            {},
+            *({"clang": value} for value in (None, "", " \t", 22, [], {})),
+        ):
+            with self.subTest(identity=identity):
+                invalid = json.loads(self._doc())
+                del invalid["toolchain"]["clang"]
+                invalid["toolchain"].update(identity)
+                self._assert_invalid_on_either_or_both_sides(
+                    valid,
+                    invalid,
+                    "toolchain clang",
+                    "nonblank string",
+                    f"got {identity.get('clang')!r}",
+                )
+
+    def test_non_ok_cells_require_diagnostic_evidence(self):
+        for status in sorted(_NEEDS_EVIDENCE - {G.STATUS_PROBE_ERROR}):
+            for evidence in (
+                {},
+                *({"evidence": value} for value in (None, "", " \t", 1, [], {})),
+            ):
+                with self.subTest(status=status, evidence=evidence):
+                    valid, invalid = json.loads(self._doc(status)), json.loads(
+                        self._doc(status)
+                    )
+                    del invalid["keys"]["a.b"]["gfx942"]["evidence"]
+                    invalid["keys"]["a.b"]["gfx942"].update(evidence)
+                    self._assert_invalid_on_either_or_both_sides(
+                        valid,
+                        invalid,
+                        "a.b/gfx942",
+                        "evidence",
+                        "nonblank string",
+                        f"got {evidence.get('evidence')!r}",
+                    )
+
+    def test_rejected_processors_require_diagnostic_evidence(self):
+        valid = json.loads(self._doc(G.STATUS_TARGET_UNSUPPORTED))
+        valid["processors"]["gfx942"] = {
+            "accepted": False,
+            "evidence": "processor diagnostic",
+        }
+        for evidence in (
+            {},
+            *({"evidence": value} for value in (None, "", " \t", 1, [], {})),
+        ):
+            with self.subTest(evidence=evidence):
+                invalid = json.loads(json.dumps(valid))
+                del invalid["processors"]["gfx942"]["evidence"]
+                invalid["processors"]["gfx942"].update(evidence)
+                self._assert_invalid_on_either_or_both_sides(
+                    valid,
+                    invalid,
+                    "processor gfx942",
+                    "evidence",
+                    "nonblank string",
+                    f"got {evidence.get('evidence')!r}",
+                )
+
+    def test_probe_witness_must_be_an_integer_on_an_ok_cell(self):
+        for status in sorted(_STATUSES - {G.STATUS_PROBE_ERROR}):
+            values = (None, True, False, "invalid-witness", "1", 1.0, [], {})
+            if status != G.STATUS_OK:
+                values = (*values, 1)
+            for value in values:
+                with self.subTest(status=status, witness=value):
+                    valid, invalid = json.loads(self._doc(status)), json.loads(
+                        self._doc(status)
+                    )
+                    invalid["keys"]["a.b"]["gfx942"]["probe_imm"] = value
+                    self._assert_invalid_on_either_or_both_sides(
+                        valid,
+                        invalid,
+                        "a.b/gfx942",
+                        "probe_imm",
+                        "integer on an ok cell",
+                        f"got {value!r}",
+                    )
+
+    def test_valid_optional_witnesses_and_gain_witnesses_pass(self):
+        for value in (0, 1, -1):
+            with self.subTest(witness=value):
+                supported = json.loads(self._doc())
+                supported["keys"]["a.b"]["gfx942"]["probe_imm"] = value
+                text = json.dumps(supported)
+                self.assertEqual(G._compare_support(text, text).failures, [])
+                gain = G._compare_support(self._doc(G.STATUS_ARCH_ABSENT), text)
+                self.assertEqual(gain.failures, [])
+                self.assertEqual(len(gain.changes["gain"]), 1)
+        self.assertEqual(G._compare_support(self._doc(), self._doc()).failures, [])
 
     def test_transition_matrix_covers_every_known_pair(self):
         self.assertEqual(set(G._CELL_TRANSITIONS), _STATUSES)
@@ -619,6 +735,12 @@ class SupportComparisonTest(unittest.TestCase):
         before["processors"] = {
             "gfx942": {"accepted": False, "evidence": "old wording"}
         }
+        after["processors"] = {
+            "gfx942": {"accepted": False, "evidence": "different wording"}
+        }
+        self.assertEqual(
+            G._compare_support(json.dumps(before), json.dumps(after)).failures, []
+        )
         after["processors"] = {"gfx942": {"accepted": True}}
         comparison = G._compare_support(json.dumps(before), json.dumps(after))
         self.assertEqual(comparison.failures, [])
@@ -1743,6 +1865,53 @@ sys.exit(0)
                 )
                 self.assertIn(field, stdout.getvalue())
                 self.assertEqual(out.read_text(), before)
+
+    def test_cli_rejects_invalid_provenance_diagnostics_and_witnesses(self):
+        for field in ("clang", "cell evidence", "probe_imm", "processor evidence"):
+            with self.subTest(field=field):
+                out, tools = self._baseline_from_other_compiler()
+                doc = json.loads(out.read_text())
+                cell = doc["keys"]["fabs.f32"]["gfx942"]
+                if field == "clang":
+                    del doc["toolchain"]["clang"]
+                else:
+                    # These are otherwise accepted support gains, so failure
+                    # must come from the malformed record, not the transition.
+                    cell.update(
+                        status=G.STATUS_ARCH_ABSENT, evidence="probe diagnostic"
+                    )
+                    if field == "cell evidence":
+                        del cell["evidence"]
+                    elif field == "probe_imm":
+                        cell["probe_imm"] = "invalid-witness"
+                    else:
+                        cell["status"] = G.STATUS_TARGET_UNSUPPORTED
+                        doc["processors"]["gfx942"] = {"accepted": False}
+                out.write_text(json.dumps(doc))
+                before = out.read_text()
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        "fabs.f32",
+                        "--check",
+                        "--unvalidated-exit-code",
+                        "77",
+                    )
+                self.assertEqual(
+                    rc, 1, "malformed baseline must fail, not pass or skip"
+                )
+                self.assertIn(field.split()[-1], stdout.getvalue())
+                self.assertIn("baseline", stdout.getvalue())
+                self.assertNotIn("SUPPORT OK", stdout.getvalue())
+                self.assertEqual(
+                    out.read_text(), before, "--check rewrote the baseline"
+                )
 
     def test_failure_summary_reports_total_and_omitted_count(self):
         out, tools = self._baseline_from_other_compiler()
