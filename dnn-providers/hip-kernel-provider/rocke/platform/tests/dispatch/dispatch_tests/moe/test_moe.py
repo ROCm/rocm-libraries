@@ -192,6 +192,33 @@ class TestGfx942Retile(unittest.TestCase):
                 )
 
 
+class TestFp8AtomIsCheckedAgainstTheCatalog(unittest.TestCase):
+    """The fp8 candidate checks the atom of the spec it would return, the K=128
+    hero atom included, against the target's MMA catalog."""
+
+    def test_the_gfx950_default_spec_passes_the_catalog_check(self):
+        (candidate,) = [c for c in moe_candidates() if c.spec_id == "mega_fp8"]
+        self.assertEqual(
+            candidate.admits(_moe(arch="gfx950", dtype="fp8")), (True, "ok")
+        )
+
+    def test_a_k128_spec_on_gfx942_fails_the_catalog_check(self):
+        from rocke.dispatch.families.moe import _make_candidate, _spec_fp8
+
+        # The gfx950 default spec, offered for a gfx942 request.
+        candidate = _make_candidate(
+            name="moe_fused_mega_fp8_k128",
+            spec_id="mega_fp8_k128",
+            dtypes=("fp8e4m3",),
+            spec_fn=lambda _req: _spec_fp8(_moe(arch="gfx950", dtype="fp8")),
+            priority=10,
+        )
+        self.assertEqual(
+            candidate.admits(_moe(arch="gfx942", dtype="fp8")),
+            (False, "unsupported fp8e4m3 16x16x128 MoE atom on gfx942"),
+        )
+
+
 class TestSelectedSpecIsRunnable(unittest.TestCase):
     """Whatever the dispatcher picks must build and fit the target's LDS.
 

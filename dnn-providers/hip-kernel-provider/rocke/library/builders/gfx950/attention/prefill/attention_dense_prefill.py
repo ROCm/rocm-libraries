@@ -42,9 +42,9 @@ from kernels.common.attention_dense_spec import (  # noqa: E402
 from kernels.gfx950.attention_dense import (  # noqa: E402
     GFX950_DENSE_LAYOUTS,
     Gfx950AttentionDenseSpec,
-    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
     attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
@@ -229,10 +229,7 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-    if _has_shape_params(spec):
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
+    vals.update(attention_dense_runtime_args(spec))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
 

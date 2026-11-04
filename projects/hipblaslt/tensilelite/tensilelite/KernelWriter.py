@@ -6713,6 +6713,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Tail Loop
       # which means tail loop needed.
       ########################################
+      assert not kernel["ReuseAcrossPersistent"], \
+        "ReuseAcrossPersistent tail-folds the K remainder into the main loop and has no tail loop"
       self.states.inTailLoop = True
       module.addComment2("Tail Loop")
 
@@ -7427,7 +7429,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       enableWaitCntInsertion = (stinky_opt_level != 0
                                 or dcpThickGateFromTokenPasses(kernel)
                                 or not globalParameters.get("DisableSTWaitCnt", True))
-
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
                                # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
@@ -7716,6 +7717,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.states.asmCaps  = ti.getAsmCaps()
     self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
+
+    isa = kernel["ISA"]
+    isaInfo = getattr(kernel, 'isaInfoMap', {}).get(isa) if hasattr(kernel, 'isaInfoMap') else None
+    if isaInfo:
+      # Rebuilt for the same reason as the deltas below: written in place, this
+      # key would reach the cache the caps came from, so an xnack- kernel would
+      # leave EnableXnackReplay=False behind for every later kernel in the
+      # process -- including unqualified ones, which then lose their drains
+      # without anything reporting it.
+      self.states.archCaps = {**self.states.archCaps,
+                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"]}
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
@@ -9490,10 +9502,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # ----------------------------
       # TODO: alignment hack, figure out a better solution
       vgprIdx = ((vgprIdx+1)//2)*2
-      # Avoid bank conflict between VgprA and VgprC.
+      # VGPR banks (bank = vgpr % 4).
       # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
       if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
-        if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
+        sameBank = (self.states.c.startVgprValu % 4) == (vgprIdx % 4)
+        if self.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
+          # gfx11 WMMA reads A/B/C in lockstep; A sharing C's bank costs +2 cyc.
+          if sameBank:
+            vgprIdx += 2
+        elif not sameBank:
           vgprIdx += 2
       # dot2: alignment hack for wider local read
       if kernel["UseDotInstruction"] and kernel["InnerUnroll"] > 1:
