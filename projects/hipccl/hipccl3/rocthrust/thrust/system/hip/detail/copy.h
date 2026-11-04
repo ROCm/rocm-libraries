@@ -90,7 +90,6 @@ THRUST_NAMESPACE_END
 #include <thrust/distance.h>
 #include <thrust/functional.h>
 #include <thrust/memory.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/transform.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/util.h>
