@@ -92,10 +92,12 @@ backend logs must be the candidate's (a slotted engine's `prep=..|dkdv=..|dq=..`
 the case is `declined` with `candidate_not_honored`. In a candidate pass the candidate columns hold the pinned
 index. A case whose worker died in pass 1 has no counts and gets no candidate pass; the backward on the
 reference forward is not enumerated.
-With `--all-engines` too (EXTREME) the runner also adds `cand/pair/<fwd>__<bwd>/<i>x<j>/` for backward cases:
-every forward engine against every backward engine of the case (winners included), over every pair of
-candidate indices, and `cand/pair/<fwd>__<bwd>/not-enumerable/` when either engine could not enumerate. The
-cost is the product of the two candidate counts per pair. `--exhaustive` refuses `--fake` and pre-set pins;
+With `--all-engines` too (EXTREME) the engine sweeps run beside the candidate passes; with `--pairs` as well
+the runner also adds `cand/pair/<fwd>__<bwd>/<i>x<j>/` for backward cases: every forward engine against every backward
+engine of the case (winners included), over every pair of candidate indices, and
+`cand/pair/<fwd>__<bwd>/not-enumerable/` when either engine could not enumerate. That costs the product of the
+two candidate counts per pair; without `--pairs` each candidate pass pins one direction and the cost is their
+sum. `--exhaustive` refuses `--fake` and pre-set pins;
 `reconcile.py --engines` reads `cand/` too (`source` `candidate` or `candidate-pair`, plus `fwd_candidate`,
 `bwd_candidate`).
 

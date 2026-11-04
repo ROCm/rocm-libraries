@@ -13,7 +13,7 @@ a row, or a pass the shard's pass-1 rows call for whose directory does not exist
 passes called for follow the flags the links recorded (``run_aotriton.run_options``): with
 ``--all-engines`` the pinned sweeps (``run_aotriton.engine_work``), the reference-forward passes of
 ``forward_failed`` and with ``--pairs`` the pair passes; with ``--exhaustive`` the candidate passes of
-pass 1's candidate counts (``run_aotriton.candidate_passes``, EXTREME pairs with ``--all-engines``).
+pass 1's candidate counts (``run_aotriton.candidate_passes``, EXTREME pairs with ``--pairs``).
 A shard whose ``collected.txt`` is missing or empty left no list of cases and goes back whole. With
 ``--shards-file`` (``<suite> <k> <N>`` per line) a shard without a directory is listed too.
 
@@ -66,7 +66,7 @@ def shard_gaps(shard):
                 for (fwd, bwd), ids in run_aotriton.pair_work(rows, bwd_lists).items():
                     plan(engines / run_aotriton.pair_rel(fwd, bwd), ids)
         if options["exhaustive"]:
-            for p in run_aotriton.candidate_passes(rows, options["all_engines"]):
+            for p in run_aotriton.candidate_passes(rows, options["pairs"]):
                 plan(shard / reconcile.CANDIDATES_DIR / p.rel, p.cases)
         gaps = []
         for d, ids in sorted(wanted.items()):
