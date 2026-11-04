@@ -28,9 +28,12 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import warnings
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple
@@ -2269,6 +2272,18 @@ def GetArchCaps(isaVersion):
 
   return rv
 
+# The assembler links its output to a.out in the working directory, so concurrent
+# probes each need their own directory.
+_asmProbeLocal = threading.local()
+
+def _getAsmCapsInPrivateDir(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCaps: Dict[IsaVersion, dict]) -> dict:
+  with tempfile.TemporaryDirectory(prefix="tensile-asmcaps-") as probeDir:
+    _asmProbeLocal.cwd = probeDir
+    try:
+      return GetAsmCaps(isaVersion, hipVersion, cachedAsmCaps)
+    finally:
+      _asmProbeLocal.cwd = None
+
 def tryAssembler(isaVersion, asmString, debug=False, *options):
   """
   Try to assemble the asmString for the specified target processor
@@ -2290,7 +2305,8 @@ def tryAssembler(isaVersion, asmString, debug=False, *options):
           *options,
           '-']
 
-  result = subprocess.run(args, input=asmString.encode(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+  result = subprocess.run(args, input=asmString.encode(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          cwd=getattr(_asmProbeLocal, "cwd", None))
   output = result.stdout.decode()
 
   if debug:
@@ -2528,6 +2544,8 @@ def populateCapabilities(
 
     emptyCache = not bool(globalParameters["AsmCaps"])
 
+    isas = []
+    toProbe = []
     for v in supportedISA + [(0, 0, 0)]:
         if v[0] == 12 and not (
             hipVer.major > 6 or (hipVer.major == 6 and hipVer.minor >= 3)
@@ -2535,11 +2553,24 @@ def populateCapabilities(
             printWarning(f"{gfxName(v)} isn't supported by ROCm {hipVer}, libraries will not be generated...")
             to_remove.append(v)
             continue
+        isas.append(v)
+        if (probeIsas is None or v in probeIsas) and (emptyCache or not globalParameters["CacheAsmCaps"]):
+            toProbe.append(v)
 
+    # Each ISA is probed with ~50 sequential assembler runs; probe ISAs concurrently.
+    probe = lambda v: _getAsmCapsInPrivateDir(v, hipVer, cachedAsmCaps)
+    workers = min(len(toProbe), Parallel.CPUThreadCount())
+    if workers > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            probed = dict(zip(toProbe, pool.map(probe, toProbe)))
+    else:
+        probed = {v: probe(v) for v in toProbe}
+
+    for v in isas:
         if probeIsas is not None and v not in probeIsas:
             globalParameters["AsmCaps"][v] = _DisabledAsmCaps(SupportedISA=False)
-        elif emptyCache or not globalParameters["CacheAsmCaps"]:
-            globalParameters["AsmCaps"][v] = GetAsmCaps(v, hipVer, cachedAsmCaps)
+        elif v in probed:
+            globalParameters["AsmCaps"][v] = probed[v]
 
         globalParameters["ArchCaps"][v] = GetArchCaps(v)
 
