@@ -39,17 +39,6 @@ from rocke.instances.common.gemm_universal import (
 from rocke.instances import GemmPipelinePolicy
 
 
-def _has_lane_maps(op) -> bool:
-    """Whether ``op`` has A and B lane maps, which the GEMM's operand loads need.
-    The catalog also lists instructions whose maps are not verified yet."""
-    try:
-        op.a_layout()
-        op.b_layout()
-    except NotImplementedError:
-        return False
-    return True
-
-
 def _pick_atom(target: ArchTarget, dtype: str, want):
     """Resolve the warp-tile atom: explicit (m,n,k) or the largest-K m=n=16
     catalog atom that has lane maps.
@@ -67,7 +56,7 @@ def _pick_atom(target: ArchTarget, dtype: str, want):
         for op in target.mma.enumerate(
             family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
         )
-        if _has_lane_maps(op)
+        if op.has_ab_layouts()
     ]
     if not ops:
         raise SystemExit(f"no 16x16 {family} atom for {dtype} on {target.gfx}")

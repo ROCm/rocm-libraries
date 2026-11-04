@@ -185,6 +185,55 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
             )
             lower_universal_gemm(spec, arch=ARCH, backend="both", want_ir=True)
 
+    def test_flat_and_nested_spec_dicts_read_the_same(self):
+        """The binding reads every field in one place, from a merged view.
+
+        A spec dict may be flat or carry nested tile / trait / data sub-dicts,
+        and a nested key overrides a flat one. Every GEMM entry point now goes
+        through one reader, so a flat dict, the nested form of the same dict,
+        and a nested dict overriding a contradicting flat key all lower to the
+        same kernel.
+        """
+        import dataclasses
+
+        import rocke_engine
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.core.lower_llvm import _resolve_llvm_flavor
+        from rocke.instances.common.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+        )
+
+        if _resolve_llvm_flavor() in ("llvm20", "llvm22"):
+            self.skipTest("TDM kernels need an llvm23+ flavor")
+
+        def nested(flat):
+            out = dict(flat)
+            for section, cls in (
+                ("tile", TileSpec),
+                ("trait", TraitSpec),
+                ("data", DataSpec),
+            ):
+                names = {f.name for f in dataclasses.fields(cls)}
+                out[section] = {k: out.pop(k) for k in list(out) if k in names}
+            return out
+
+        spec = _spec(**_ARMS["early_refill"])
+        flat = universal_gemm_spec_to_dict(spec)
+        want = rocke_engine.gemm_lower_llvm(flat, ARCH)
+        self.assertEqual(rocke_engine.gemm_lower_llvm(nested(flat), ARCH), want)
+
+        # A contradicting flat key loses to the nested one.
+        conflicted = nested(flat)
+        conflicted["tdm_early_refill"] = False
+        conflicted["tile_k"] = 128
+        self.assertEqual(rocke_engine.gemm_lower_llvm(conflicted, ARCH), want)
+        # ...and is read when it is the only one (counterfactual): without
+        # early refill the probe is the valid split_alternate arm.
+        no_refill = dict(flat, tdm_early_refill=False)
+        self.assertNotEqual(rocke_engine.gemm_lower_llvm(no_refill, ARCH), want)
+
     def test_both_engines_apply_the_same_storage_rule(self):
         """One fp8/bf8 storage rule per engine: same verdict and same reason."""
         import rocke_engine

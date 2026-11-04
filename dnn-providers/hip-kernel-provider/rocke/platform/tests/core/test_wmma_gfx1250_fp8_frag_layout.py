@@ -18,10 +18,8 @@ duplicate means two lanes fight over one element; a hole means an element never
 reaches the MMA. That catches a bad map without a GPU, which is the point.
 
 The accumulator half of this op is already covered by
-``test_wmma_gfx12_acc_layout.py``. This file deliberately carries its own
-evaluator rather than importing that module's: a test importing another test's
-private helper couples two files that have no reason to move together, and the
-evaluator is five lines.
+``test_wmma_gfx12_acc_layout.py``. The maps are evaluated on integers by the
+shared :mod:`rocke.tests.lane_maps` helper, as the other MMA lane-map tests do.
 
 CPU-only: no GPU, compile, or launch required.
 """
@@ -38,6 +36,7 @@ from rocke.core.arch.target import (
     _wmma_gfx1250_b_16x16x32,
     _wmma_gfx1250_b_16x16x64_f8,
 )
+from rocke.tests.lane_maps import lane_coord
 
 # The four K=64 low-bit op_ids. All of them run the same lane math: the operand
 # element type changes what the bytes *mean*, not where they live.
@@ -55,27 +54,8 @@ _FRAG_LEN = 8
 _PER_SLOT = 4  # low-bit elements packed into one i32 slot
 
 
-class _ConstBuilder:
-    """Toy IR builder that evaluates coordinate expressions as plain integers."""
-
-    def const_i32(self, v: int) -> int:
-        return int(v)
-
-    def mod(self, a: int, b: int) -> int:
-        return a % b
-
-    def div(self, a: int, b: int) -> int:
-        return a // b
-
-    def add(self, a: int, b: int) -> int:
-        return a + b
-
-    def mul(self, a: int, b: int) -> int:
-        return a * b
-
-
 def _coords(fn: Callable, lane: int, slot: int) -> tuple[int, int]:
-    return fn(_ConstBuilder(), lane, slot)
+    return lane_coord(fn, lane, slot)
 
 
 def _positions(fn: Callable, *, k_index: int) -> list[tuple[int, int]]:
