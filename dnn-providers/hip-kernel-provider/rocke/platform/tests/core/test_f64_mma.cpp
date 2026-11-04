@@ -23,7 +23,7 @@
         }                                                           \
     } while(0)
 
-static int test_rejects_incompatible_contract(bool safe_witness_only)
+static int test_rejects_incompatible_contract()
 {
     const auto* target = rocke_arch_target_from_gfx("gfx942");
     int rejected = 0;
@@ -54,8 +54,6 @@ static int test_rejects_incompatible_contract(bool safe_witness_only)
                       || !std::strcmp(field, "no_fn") || !std::strcmp(field, "wrong_map")
                       || !std::strcmp(field, "map_width") || !std::strcmp(field, "map_wave");
                 if(descriptor != (role >= 0))
-                    continue;
-                if(safe_witness_only && (role != 3 || std::strcmp(field, "width_short")))
                     continue;
                 std::vector<rocke_mma_op_t> ops(target->mma.ops,
                                                 target->mma.ops + target->mma.num_ops);
@@ -145,7 +143,7 @@ static int test_rejects_incompatible_contract(bool safe_witness_only)
                 CHECK(correct);
                 ++rejected;
             }
-    CHECK(rejected == (safe_witness_only ? 2 : 84));
+    CHECK(rejected == 84);
     std::printf("F64 contract rejections: %d\n", rejected);
     return 0;
 }
@@ -196,11 +194,9 @@ static int test_valid_copied_contracts()
     return 0;
 }
 
-int main(int argc, char** argv)
+int main()
 {
-    bool safe = argc == 2 && !std::strcmp(argv[1], "--safe-witness-only");
-    CHECK(test_rejects_incompatible_contract(safe) == 0);
-    if(!safe)
-        CHECK(test_valid_copied_contracts() == 0);
+    CHECK(test_rejects_incompatible_contract() == 0);
+    CHECK(test_valid_copied_contracts() == 0);
     return 0;
 }

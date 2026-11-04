@@ -65,7 +65,7 @@ void rocke_conv_apply_accumulator_epilogue(rocke_ir_builder_t* b,
     {
         rocke_value_t* acc = accs[a];
         int count = acc->type->count;
-        /* count is the per-lane accumulator fragment width (c_frag_len: 4/8/16);
+        /* count is the per-lane MMA result width (4/8/16);
          * 64 is generous headroom. */
         rocke_value_t* elems[64];
         for(i = 0; i < count; ++i)
@@ -257,9 +257,9 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
 /* ===================================================================== *
  * rocke_conv_emit_direct_epilogue_wmma   (Python lines 1417-1478)
  *
- * Per-lane fp16 store for the WMMA (gfx1151) accumulator layout. The (row, col)
- * of every per-lane slot comes from the op's accumulator layout map
- * (op.c_layout()) rather than the MFMA-specific MfmaAtom.lane_to_output. Each
+ * Per-lane fp16 store for the WMMA (gfx1151) result layout. The (row, col)
+ * of every per-lane slot comes from the op's result layout map
+ * (op.dst_layout()) rather than the MFMA-specific MfmaAtom.lane_to_output. Each
  * slot is one f16 store routed through the same D descriptor + OOB-safe
  * buffer-store idiom as the MFMA direct epilogue.
  * ===================================================================== */
@@ -309,7 +309,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     bool _is_pointwise = rocke_conv_problem_is_pointwise(p);
     /* Pointwise: no descriptor; the flat D offset uses the D row pitch. */
     rocke_value_t* c_K_wmma = _is_pointwise ? ir_d_pitch_pw : NULL;
-    /* c_map = op.c_layout() */
+    /* c_map = op.dst_layout() */
     const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
 
     int flat = 0;

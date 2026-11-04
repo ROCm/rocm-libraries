@@ -40,31 +40,28 @@ rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
             catalog = &target->mma;
         const rocke_mma_op_t* atom
             = rocke_mma_catalog_op_for_shape(catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
-        const int width = m == 16 ? 4 : 1;
         char expected_id[64];
         snprintf(expected_id, sizeof(expected_id), "mfma_f64_%dx%dx4_f64", m, m);
         const auto* registered = rocke_mma_catalog_by_op_id(&target->mma, expected_id);
-        auto valid_map
-            = [&](const rocke_layout_map_t* map, const rocke_layout_map_t* expected, int count) {
-                  return map && expected && map->fn && map->fn == expected->fn
-                         && map->frag_len == count && map->wave_size == 64;
-              };
-        bool valid = atom && registered && atom->op_id && !strcmp(atom->op_id, expected_id)
-                     && atom->family && !strcmp(atom->family, "mma") && atom->m == m && atom->n == m
-                     && atom->k == 4 && atom->wave_size == 64;
+        auto matches = [](const auto& desc, const auto& expected) {
+            const auto* map = desc.layout;
+            const auto* expected_map = expected.layout;
+            return desc.dtype && !strcmp(desc.dtype, expected.dtype)
+                   && desc.frag_len == expected.frag_len && map && expected_map && map->fn
+                   && map->fn == expected_map->fn && map->frag_len == expected_map->frag_len
+                   && map->wave_size == expected_map->wave_size;
+        };
+        bool valid = atom && registered && atom->op_id && !strcmp(atom->op_id, registered->op_id)
+                     && atom->family && !strcmp(atom->family, registered->family)
+                     && atom->m == registered->m && atom->n == registered->n
+                     && atom->k == registered->k && atom->wave_size == registered->wave_size;
         // Reused output indices require the fixed instruction maps, not just equal widths.
         if(valid)
         {
             for(int role = 0; role < 3; ++role)
-            {
-                const int count = role < 2 ? 1 : width;
-                const auto& src = atom->srcs[role];
-                valid = valid && src.dtype && !strcmp(src.dtype, "fp64") && src.frag_len == count
-                        && valid_map(src.layout, registered->srcs[role].layout, count);
-            }
-            valid = valid && atom->dst.dtype && !strcmp(atom->dst.dtype, "fp64")
-                    && atom->dst.frag_len == width
-                    && valid_map(atom->dst.layout, registered->dst.layout, width);
+                valid = valid && matches(atom->srcs[role], registered->srcs[role]);
+            valid = valid && matches(atom->dst, registered->dst) && atom->srcs[2].frag_len > 0
+                    && atom->srcs[2].frag_len <= 4;
         }
         if(!valid)
             return (rocke_kernel_def_t*)rocke_i_set_err(

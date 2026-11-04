@@ -61,6 +61,42 @@ from rocke.core.lower_llvm import (
 )
 from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
 
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        AsIs(VectorType(I32, 8)),
+        ZeroPadded(VectorType(I32, 8), 4),
+        EvenHalves(VectorType(F16, 16)),
+    ],
+)
+@pytest.mark.parametrize("missing_value", [False, True])
+def test_forms_require_a_typed_operand_before_emission(form, missing_value):
+    kernel = IRBuilder("untyped_operand").kernel
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor="llvm24")
+    value = None if missing_value else Value("%a", None)
+    op = Op("tile.untyped", operands=[value])
+    with pytest.raises(ValueError) as error:
+        form.check_operand(lowerer, op, "a")
+    assert str(error.value) == "MMA operand a of 'untyped' must define an IR type"
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
+@pytest.mark.parametrize(
+    "form", [AsIs(VectorType(I32, 8)), EvenHalves(VectorType(F16, 16))]
+)
+def test_forms_require_a_typed_result_before_emission(form):
+    kernel = IRBuilder("untyped_result").kernel
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor="llvm24")
+    op = Op("tile.untyped", results=[Value("%d", None)])
+    with pytest.raises(ValueError) as error:
+        form.check_result(lowerer, op)
+    assert str(error.value) == "MMA result of 'untyped' must define an IR type"
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
 A, B, C = MatrixOperand.A, MatrixOperand.B, MatrixOperand.C
 
 # The gfx1250 K=64 fp8 WMMA, described as data. Its hand-written declaration

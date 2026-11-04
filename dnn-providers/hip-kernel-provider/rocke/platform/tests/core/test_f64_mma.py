@@ -124,7 +124,7 @@ def test_probe_rejects_bad_spec(m, k):
 
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
-def test_both_builders_and_lowerers(m, k):
+def test_python_builder_and_lowerers(m, k):
     kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
@@ -135,13 +135,22 @@ def test_both_builders_and_lowerers(m, k):
         if m == 16
         else "call double @llvm.amdgcn.mfma.f64.4x4x4f64("
     )
+    for flavor in LLVM_FLAVORS:
+        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
+        assert ll.count(call) == k // 4
+        assert ll.count("store double ") == _ATOMS[m][1]
+
+
+@pytest.mark.parametrize("m", [16, 4])
+@pytest.mark.parametrize("k", [4, 8, 64])
+def test_native_builder_and_lowerers_match_python(m, k):
     native = pytest.importorskip("rocke_engine")
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
+    ir = serialize(kernel)
     assert native.f64_mma_probe_serialize_ir(m, k) == ir
     for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
         assert native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor) == ll
-        assert ll.count(call) == k // 4
-        assert ll.count("store double ") == _ATOMS[m][1]
 
 
 _CONTRACT_CASES = [

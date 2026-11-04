@@ -534,6 +534,13 @@ attention geometry headers are staged, the installed attention CPU cohort uses
 mirror check rather than skipping or using a checkout fallback. With no header
 input, standalone SDK tests retain optional provider comparisons.
 
+The complete developer runner also supplies its validated source build to
+`platform/tests/test_engine_linkage.py` through `ROCKE_LINK_TEST_BUILD_DIR`.
+The test installs and relocates that SDK, then compiles and runs C++ and C99
+consumers. An ambient or foreign build is not substituted for the runner's build.
+The test remains excluded from installed platform pytest because its CMake
+configuration and installation checks need the source build tree.
+
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
 pytest entry excludes the staged library tests, which have separate CTest

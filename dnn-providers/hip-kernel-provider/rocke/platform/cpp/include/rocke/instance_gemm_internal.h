@@ -256,7 +256,7 @@ typedef struct rocke_gemm_build_ctx
  * uniformity even when they only read spec/op, so a body TU never re-derives
  * state already on the ctx. ----- */
 
-/* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
+/* _atom_frag_lengths(op) -> (src0, src1, dst) fragment lengths. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
 
 /* _emit_zero_acc_op(b, op): zero_vec(srcs[2].dtype, srcs[2].frag_len). Used to build

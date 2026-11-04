@@ -252,6 +252,7 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     env.pop("ROCKE_ONLINE_LIB", None)
     env.pop("ROCKE_REPLAY_CLI", None)
     env.pop("ROCKE_PROVENANCE_MANIFEST", None)
+    env.pop("ROCKE_LINK_TEST_BUILD_DIR", None)
     # Only this runner may claim that its own complete corpus gate succeeded.
     # An ambient value must not suppress the standalone pytest delegation.
     env.pop(_ARCH_DOMAIN_COMPLETE_ENV, None)
@@ -323,6 +324,9 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             )
         except RuntimeError as exc:
             raise ValueError(str(exc)) from exc
+        # Relocation tests configure CMake consumers and need a complete source
+        # build, not an installed artifact or an ambient build directory.
+        env["ROCKE_LINK_TEST_BUILD_DIR"] = str(build_root.resolve())
         flavor = env.get("ROCKE_LLVM_FLAVOR", "auto")
         print(
             f"== portable-IR provenance: {engine_version} build-id={engine_id} "

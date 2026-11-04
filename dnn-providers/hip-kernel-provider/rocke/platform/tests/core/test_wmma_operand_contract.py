@@ -22,6 +22,7 @@ from rocke.core.ir import (
     PtrType,
     Value,
     VectorType,
+    type_bits,
 )
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -92,6 +93,33 @@ def test_hip_validation_uses_the_actual_target(gfx, concrete):
 
 def _type_error(case):
     return f"unscaled WMMA requires src2 and dst to be {VectorType(case[4], 8).name}"
+
+
+def _llvm_type_error(case, op, role):
+    if case[4] != I32:
+        return _type_error(case)
+    actual = op.operands[2].type if role == "src2" else op.result.type
+    element = actual.elem if isinstance(actual, VectorType) else actual
+    label = (
+        f"MMA operand c of {case[1]!r}"
+        if role == "src2"
+        else f"MMA result of {case[1]!r}"
+    )
+    verb = "takes" if role == "src2" else "returns"
+    if element != I32:
+        hint = (
+            " -- convert the values first"
+            if role == "src2"
+            else " -- declare the result in an element type it returns"
+        )
+        return f"{label} holds {element.name} values; the instruction {verb} i32{hint}"
+    hint = (
+        " -- pass a 256-bit value" if role == "src2" else " -- declare a 256-bit result"
+    )
+    return (
+        f"{label} is {actual.name} ({type_bits(actual)} bits); the instruction "
+        f"{verb} vec<i32x8> (256 bits){hint}"
+    )
 
 
 def _assert_python_rejects(lower, error):
@@ -168,7 +196,9 @@ def test_wmma_valid_llvm_bytes(case, flavor):
 def test_wmma_llvm_rejects_actual_types(case, flavor, role, kind, engine):
     kernel, op = _kernel(case)
     _corrupt_type(kernel, op, case, role, kind)
-    _assert_llvm_rejects(kernel, case[0], flavor, _type_error(case), engine)
+    _assert_llvm_rejects(
+        kernel, case[0], flavor, _llvm_type_error(case, op, role), engine
+    )
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
@@ -202,8 +232,10 @@ def test_wmma_rejects_custom_destination(case, flavor, kind, engine):
         if kind == "width"
         else replace(atom.dst, dtype="fp32" if case[4] == I32 else "i32")
     )
-    kernel, _ = _kernel(case, atom=replace(atom, dst=dst), use_result=True)
-    _assert_llvm_rejects(kernel, case[0], flavor, _type_error(case), engine)
+    kernel, op = _kernel(case, atom=replace(atom, dst=dst), use_result=True)
+    _assert_llvm_rejects(
+        kernel, case[0], flavor, _llvm_type_error(case, op, "dst"), engine
+    )
 
 
 # Python HIP has no gfx11/gfx12 bf16 handlers. Native HIP has no unscaled WMMA
@@ -420,7 +452,15 @@ def test_integer_registry_preflights_fixed_source_and_result(
 ):
     kernel, op = _kernel(case)
     _corrupt_type(kernel, op, case, role, 7)
-    _assert_llvm_rejects(kernel, case[0], flavor, _type_error(case), engine)
+    error = _llvm_type_error(case, op, role)
+    _assert_llvm_rejects(kernel, case[0], flavor, error, engine)
+    if engine == "python":
+        from rocke.core.lower_llvm import _Lowerer
+
+        lowerer = _Lowerer(kernel, arch=case[0], llvm_flavor=flavor)
+        _assert_python_rejects(lambda: lowerer.lower_op(op), error)
+        assert lowerer._needs_intrin == {}
+        assert all(block.lines == [] for block in lowerer._blocks)
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import shutil
 import sys
+from unittest.mock import Mock
 
 import pytest
 
@@ -543,6 +544,32 @@ def test_configured_portable_ir_artifacts_replace_external_cache(
 
     assert env["ROCKE_ONLINE_LIB"] == str(shared.resolve())
     assert env["ROCKE_REPLAY_CLI"] == str(replay.resolve())
+
+
+@pytest.mark.parametrize("owned_source", [False, True])
+def test_relocation_consumers_receive_only_the_owned_source_build(
+    runner, monkeypatch, tmp_path, owned_source
+):
+    from rocke.portable_ir.src import online
+
+    shared = tmp_path / "librocke.so"
+    replay = tmp_path / "tests" / "rocke_portable_ir_replay_cli"
+    replay.parent.mkdir()
+    shared.touch()
+    replay.touch()
+    monkeypatch.setenv("ROCKE_LINK_TEST_BUILD_DIR", str(tmp_path / "stale-build"))
+    monkeypatch.setattr(
+        runner, "_cmake_home", lambda _root: runner.ROCKE if owned_source else tmp_path
+    )
+    validate = Mock(return_value=(("fixture-version", "fixture-id"), "fixture"))
+    monkeypatch.setattr(online, "validate_artifact_bundle", validate)
+    env = runner.native_pytest_env(tmp_path, "Release")
+    if owned_source:
+        assert env["ROCKE_LINK_TEST_BUILD_DIR"] == str(tmp_path.resolve())
+        validate.assert_called_once_with(str(shared.resolve()), str(replay.resolve()))
+    else:
+        assert "ROCKE_LINK_TEST_BUILD_DIR" not in env
+        validate.assert_not_called()
 
 
 def test_missing_owned_portable_artifacts_clear_external_values(

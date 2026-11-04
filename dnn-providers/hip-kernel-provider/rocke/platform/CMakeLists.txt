@@ -706,6 +706,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_bwd_gemm.py"
         "tests/library/tests/test_attention_bwd_body.py"
         "tests/library/tests/test_gfx1250_attention_operand_roles.py"
+        "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"

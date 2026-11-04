@@ -17,7 +17,6 @@ maps, so the probe checks the A/B and C/D layouts as well as the instruction.
 from dataclasses import dataclass
 
 from ...core.arch import ArchTarget
-from ...core.arch.target import _frag_info
 from ...core.ir import F64, IRBuilder, KernelDef, PtrType
 
 # m -> (B slab rows, B/C/D columns) per K step of 4.
@@ -53,32 +52,36 @@ def build_f64_mma_probe(spec: F64MmaProbeSpec) -> KernelDef:
         k=4,
     )
     # Reused output indices require the actual instruction maps, not just equal widths.
-    width = 4 if spec.m == 16 else 1
     expected_id = "mfma_f64_16x16x4_f64" if spec.m == 16 else "mfma_f64_4x4x4_f64"
-    registered = _frag_info(expected_id)
+    registered = target.mma.by_op_id(expected_id)
+
+    def matches(desc, expected):
+        layout = desc.layout
+        return (
+            desc.dtype == expected.dtype
+            and type(desc.frag_len) is int
+            and desc.frag_len == expected.frag_len
+            and layout is not None
+            and type(layout.frag_len) is int
+            and layout.frag_len == expected.layout.frag_len
+            and type(layout.wave_size) is int
+            and layout.wave_size == expected.layout.wave_size
+            and callable(layout.fn)
+            and layout.fn is expected.layout.fn
+        )
+
     if (
         atom is None
-        or atom.op_id != expected_id
-        or atom.family != "mma"
-        or atom.shape != (spec.m, spec.m, 4)
-        or any(type(size) is not int for size in atom.shape)
-        or type(atom.wave_size) is not int
-        or atom.wave_size != 64
+        or registered is None
+        or atom.op_id != registered.op_id
+        or atom.family != registered.family
+        or atom.shape != registered.shape
+        or any(type(size) is not int for size in (*atom.shape, atom.wave_size))
+        or atom.wave_size != registered.wave_size
         or any(
-            desc.dtype != "fp64"
-            or type(desc.frag_len) is not int
-            or desc.frag_len != count
-            or desc.layout is None
-            or type(desc.layout.frag_len) is not int
-            or desc.layout.frag_len != count
-            or type(desc.layout.wave_size) is not int
-            or desc.layout.wave_size != 64
-            or not callable(desc.layout.fn)
-            or desc.layout.fn is not expected.fn
-            for desc, count, expected in zip(
-                (*atom.srcs, atom.dst),
-                (1, 1, width, width),
-                (*registered.srcs, registered.dst),
+            not matches(desc, expected)
+            for desc, expected in zip(
+                (*atom.srcs, atom.dst), (*registered.srcs, registered.dst)
             )
         )
     ):

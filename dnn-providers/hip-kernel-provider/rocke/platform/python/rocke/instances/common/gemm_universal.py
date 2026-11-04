@@ -737,8 +737,8 @@ def _emit_zero_acc(b: IRBuilder, spec: UniversalGemmSpec) -> Value:
 
 
 def _atom_frag_lengths(op) -> Tuple[int, int, int]:
-    """Return ``(a_frag_len, b_frag_len, c_frag_len)`` — the per-lane fragment
-    vector lengths of the resolved :class:`~rocke.core.arch.MmaOp`.
+    """Return the per-lane ``(src0, src1, dst)`` fragment lengths of the
+    resolved :class:`~rocke.core.arch.MmaOp`.
 
     These come from the MMA contract, **not** from the ``shape / wave`` formula:
     the two are equal for MFMA (wave64) but diverge for WMMA, where the

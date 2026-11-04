@@ -548,22 +548,7 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
      * hand-written handler below. */
     if(const rocke_matrix_call_t* call = rocke_matrix_call_for(op_id))
     {
-        const auto* atom = rocke_ll_require_catalog_op(L, op_id);
-        /* Preflight the integer WMMA's fixed accumulator/result signature
-         * before any declaration or operand reinterpretation is emitted.
-         * Matrix-call arity diagnostics remain with the registry emitter. */
-        if(strcmp(atom->family, "wmma") == 0 && strcmp(atom->dst.dtype, "i32") == 0
-           && op->num_operands == 3 && op->num_results == 1)
-        {
-            const auto* source = rocke_matrix_form_type_at(&L->arena, &call->a, L->flavor);
-            const auto* result = rocke_matrix_form_type_at(&L->arena, &call->result, L->flavor);
-            _validate_unscaled_wmma(L,
-                                    op,
-                                    result->elem,
-                                    result->count,
-                                    rocke_i_elem_of(source),
-                                    rocke_i_count_of(source));
-        }
+        rocke_ll_require_catalog_op(L, op_id);
         rocke_ll_emit_matrix_call(L, op, op_id, call);
         return;
     }

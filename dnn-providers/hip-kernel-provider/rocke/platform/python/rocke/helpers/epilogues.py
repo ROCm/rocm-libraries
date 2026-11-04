@@ -414,7 +414,7 @@ class CShuffleEpilogue:
         out_dtype: str = "f16",
         no_alias: bool = False,
     ) -> "CShuffleEpilogue":
-        """Construct for a WMMA (``MmaOp``) accumulator layout.
+        """Construct for a WMMA (``MmaOp``) result layout.
 
         Uses ``op.dst.frag_len`` / ``op.dst_layout()`` for the LDS scatter in
         place of the MFMA-specific ``atom.lane_to_output``.

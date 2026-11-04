@@ -33,7 +33,6 @@ from ..arch import ArchTarget, known_arches, listed_arch_for
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import BF16, F16, F32, I32, I64, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
-from ..mfma import _carrier_element
 from ..wmma import validate_unscaled_wmma
 from .matrix_call_lowering import emit_matrix_call
 from .matrix_calls import MATRIX_CALLS
@@ -148,27 +147,6 @@ class ISABackend:
         call = MATRIX_CALLS.get(op_id)
         if call is not None:
             self._require_catalog_lists(op_id)
-            atom = self.arch.mma.by_op_id(op_id)
-            # Integer WMMA keeps its exact accumulator/result ABI. Preflight
-            # all values before the register forms record declarations or IR.
-            # Matrix-call arity diagnostics remain owned by emit_matrix_call.
-            if (
-                atom.family == "wmma"
-                and atom.dst.dtype == "i32"
-                and len(named.operands) == 3
-                and len(named.results) == 1
-            ):
-                source = call.a.register_type_at(lowerer._flavor)
-                result = call.result.register_type_at(lowerer._flavor)
-                source_elem, source_count = _carrier_element(source)
-                validate_unscaled_wmma(
-                    named,
-                    result.elem,
-                    result.count,
-                    source_elem=source_elem,
-                    source_count=source_count,
-                    arch=self.arch,
-                )
             emit_matrix_call(lowerer, named, call)
             return
         if gfx950_scaled_mfma(op_id) is not None:

@@ -60,6 +60,22 @@ def _op_id(op: Op) -> str:
     return _mma_op_id(op)
 
 
+def _operand_type(op: Op, role: MmaOperandRole) -> Type:
+    """Require a typed SSA operand before any form renders it."""
+    value = mma_operand_value(op, role)
+    if value is None or not isinstance(value.type, Type):
+        raise ValueError(f"MMA operand {role} of {_op_id(op)!r} must define an IR type")
+    return value.type
+
+
+def _result_type(op: Op) -> Type:
+    """Require a typed SSA result before a form emits its instruction."""
+    ty = op.results[0].type
+    if not isinstance(ty, Type):
+        raise ValueError(f"MMA result of {_op_id(op)!r} must define an IR type")
+    return ty
+
+
 @dataclass(frozen=True)
 class FlavorType:
     """A register type whose spelling changed at a newer LLVM flavor.
@@ -136,15 +152,10 @@ class AsIs(_Form):
 
     def check_operand(self, lowerer, op: Op, role: MmaOperandRole) -> None:
         """Validate the value without recording a declaration or emitting IR."""
-        value = mma_operand_value(op, role)
-        if value is None or not isinstance(value.type, Type):
-            raise ValueError(
-                f"MMA operand {role} of {_op_id(op)!r} must define an IR type"
-            )
         mma_operand_needs_reinterpret(
             _op_id(op),
             role,
-            value.type,
+            _operand_type(op, role),
             self.register_type_at(lowerer._flavor),
             lowerer._backend.arch,
         )
@@ -156,12 +167,9 @@ class AsIs(_Form):
 
     def check_result(self, lowerer, op: Op) -> bool:
         """Validate the result without declaring an intrinsic or emitting IR."""
-        result = op.results[0]
-        if not isinstance(result.type, Type):
-            raise ValueError(f"MMA result of {_op_id(op)!r} must define an IR type")
         return mma_result_needs_reinterpret(
             _op_id(op),
-            result.type,
+            _result_type(op),
             self.register_type_at(lowerer._flavor),
             lowerer._backend.arch,
         )
@@ -216,12 +224,7 @@ class ZeroPadded(_Form):
     def check_operand(self, lowerer, op: Op, role: MmaOperandRole) -> None:
         """Check format and complete payload width before any padding emits IR."""
         register = self.register_type_at(lowerer._flavor)
-        value = mma_operand_value(op, role)
-        if value is None or not isinstance(value.type, Type):
-            raise ValueError(
-                f"MMA operand {role} of {_op_id(op)!r} must define an IR type"
-            )
-        payload = value.type
+        payload = _operand_type(op, role)
         words = self.payload_words
         for kind, ty in (("operand", payload), ("register", register)):
             if isinstance(ty, VectorType) and type(ty.count) is not int:
@@ -287,24 +290,20 @@ class EvenHalves(_Form):
         """Validate the complete logical input before any spreading emits IR."""
         register = self.register_type_at(lowerer._flavor)
         logical = self._logical(register)
-        value = mma_operand_value(op, role)
-        if value is None or not isinstance(value.type, Type):
-            raise ValueError(
-                f"MMA operand {role} of {_op_id(op)!r} must define an IR type"
-            )
+        ty = _operand_type(op, role)
         if not (
-            isinstance(value.type, VectorType)
-            and value.type.count == logical.count
-            and type_bits(value.type.elem) == 16
+            isinstance(ty, VectorType)
+            and ty.count == logical.count
+            and type_bits(ty.elem) == 16
         ):
             raise ValueError(
-                f"MMA operand {role} of {_op_id(op)!r} is {value.type.name}; the "
+                f"MMA operand {role} of {_op_id(op)!r} is {ty.name}; the "
                 f"instruction keeps {logical.count} results in the even halves of "
                 f"{_llvm_type(register)} -- pass the {logical.count} logical "
                 "accumulator values"
             )
         mma_operand_needs_reinterpret(
-            _op_id(op), role, value.type, logical, lowerer._backend.arch
+            _op_id(op), role, ty, logical, lowerer._backend.arch
         )
 
     def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
@@ -325,21 +324,19 @@ class EvenHalves(_Form):
         """Validate the logical result before the call or a gather is emitted."""
         register = self.register_type_at(lowerer._flavor)
         logical = self._logical(register)
-        result = op.results[0]
-        if not isinstance(result.type, Type):
-            raise ValueError(f"MMA result of {_op_id(op)!r} must define an IR type")
+        ty = _result_type(op)
         if not (
-            isinstance(result.type, VectorType)
-            and type_bits(result.type) == type_bits(logical)
-            and result.type.count == logical.count
+            isinstance(ty, VectorType)
+            and type_bits(ty) == type_bits(logical)
+            and ty.count == logical.count
         ):
             raise ValueError(
-                f"MMA result of {_op_id(op)!r} is {result.type.name}; the instruction "
+                f"MMA result of {_op_id(op)!r} is {ty.name}; the instruction "
                 f"returns {logical.count} results in the even halves of "
                 f"{_llvm_type(register)}"
             )
         return mma_result_needs_reinterpret(
-            _op_id(op), result.type, logical, lowerer._backend.arch
+            _op_id(op), ty, logical, lowerer._backend.arch
         )
 
     def emit_result(self, lowerer, op: Op, call: str) -> None:

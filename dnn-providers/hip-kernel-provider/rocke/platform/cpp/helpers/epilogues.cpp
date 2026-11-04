@@ -566,7 +566,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     }
 
     /* ---- step 1: publish accs to LDS. ----
-     * WMMA path: use op->c_layout().coord() for the scatter.
+     * WMMA path: use the op's result layout for the scatter.
      * MFMA path: use atom->lane_to_output(). */
     for(mi = 0; mi < mfmas_m; ++mi)
     {

@@ -130,9 +130,9 @@ rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _atom_frag_lengths(op) -> (a_frag_len, b_frag_len, c_frag_len)
+ * _atom_frag_lengths(op) -> (src0.frag_len, src1.frag_len, dst.frag_len)
  *
- * Pure read of the resolved MmaOp fragment lengths.
+ * Pure read of the resolved MmaOp multiplicand and result fragment lengths.
  * ====================================================================== */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag)
 {
