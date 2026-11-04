@@ -447,6 +447,97 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     std::vector<int64_t> heldFound(combinations.size(), 0);
     const auto isHeld = [&held](const ProblemPoint& point) { return held && held(point); };
 
+    // Workload state per combination, kept so growth draws from the same archetypes and
+    // anchors as the first pass: every point either pass returns, the archetype draws
+    // neighbourhoods perturb, and a generator continuing one reproducible stream.
+    std::vector<std::set<std::string>> seenFor(combinations.size());
+    std::vector<std::vector<ProblemPoint>> anchorsFor(combinations.size());
+    std::vector<std::mt19937_64> rngFor;
+    rngFor.reserve(combinations.size());
+    for(size_t index = 0; index < combinations.size(); ++index)
+    {
+        rngFor.emplace_back(request.seed + index + 1);
+    }
+
+    /// Appends to @p result the declared mixture's workload share of @p points (§5.2): drawn
+    /// from archetypes, then moved within their neighbourhoods. Returns how many it drew;
+    /// the region search fills the rest. Attempts are capped so archetypes the engine
+    /// declines, or whose draws are exhausted, cannot consume the budget.
+    const auto drawWorkloads = [&](size_t index, CombinationResult& result, int64_t points) {
+        if(metadata.mixture.isExplorationOnly() || points <= 0)
+        {
+            return int64_t{0};
+        }
+        auto& seen = seenFor[index];
+        auto& anchors = anchorsFor[index];
+        auto& rng = rngFor[index];
+        const auto accept = [&](const ProblemPoint& point) {
+            if(!seen.insert(detail::describe(point)).second)
+            {
+                return false;
+            }
+            if(!detail::satisfiesConstraints(metadata, point))
+            {
+                ++corpus.constraintRejections;
+                return false;
+            }
+            ++corpus.constraintAdmissions;
+            if(!admits(point))
+            {
+                return false;
+            }
+            if(isHeld(point))
+            {
+                ++heldFound[index];
+                return false;
+            }
+            return true;
+        };
+
+        const auto total = static_cast<double>(points);
+        const auto archetypeQuota
+            = static_cast<size_t>(std::max(0.0, metadata.mixture.archetypes * total));
+        const auto neighbourhoodQuota
+            = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
+
+        int64_t drawn = 0;
+        size_t fromArchetypes = 0;
+        const size_t archetypeAttempts = metadata.archetypes.empty() ? 0 : archetypeQuota * 20;
+        for(size_t attempt = 0; attempt < archetypeAttempts && fromArchetypes < archetypeQuota;
+            ++attempt)
+        {
+            const auto& archetype = metadata.archetypes[attempt % metadata.archetypes.size()];
+            const auto point
+                = detail::drawFromArchetype(metadata, archetype, result.categorical, rng);
+            if(point.has_value() && accept(*point))
+            {
+                anchors.push_back(*point);
+                result.problems.push_back(*point);
+                ++result.fromArchetypes;
+                ++fromArchetypes;
+                ++drawn;
+            }
+        }
+
+        // Perturb only admitted anchors; with none, the share goes to exploration.
+        const size_t neighbourhoodAttempts = anchors.empty() ? 0 : neighbourhoodQuota * 20;
+        size_t drawnNearby = 0;
+        for(size_t attempt = 0; attempt < neighbourhoodAttempts && drawnNearby < neighbourhoodQuota;
+            ++attempt)
+        {
+            const auto& anchor = anchors[attempt % anchors.size()];
+            auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
+            if(accept(moved))
+            {
+                result.problems.push_back(std::move(moved));
+                ++result.fromNeighbourhood;
+                ++drawnNearby;
+                ++drawn;
+            }
+        }
+        return drawn;
+    };
+
     const auto oracleFor = [&](size_t index) -> ShapeOracle {
         return [&, index](const Shape& shape) {
             auto& memo = answered[index];
@@ -532,78 +623,9 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
         // Workload half (§5.2): most points are drawn near recorded shapes; the remainder is left
         // to the region search.
-        std::mt19937_64 rng(request.seed + index + 1);
-        std::set<std::string> seen;
-        std::vector<ProblemPoint> anchored;
-
-        const auto accept = [&](const ProblemPoint& point) {
-            if(!seen.insert(detail::describe(point)).second)
-            {
-                return false;
-            }
-            if(!detail::satisfiesConstraints(metadata, point))
-            {
-                ++corpus.constraintRejections;
-                return false;
-            }
-            ++corpus.constraintAdmissions;
-            if(!admits(point))
-            {
-                return false;
-            }
-            if(isHeld(point))
-            {
-                ++heldFound[index];
-                return false;
-            }
-            return true;
-        };
-
-        size_t archetypeQuota = 0;
-        size_t neighbourhoodQuota = 0;
-        if(!metadata.mixture.isExplorationOnly())
-        {
-            const auto total = static_cast<double>(request.pointsPerCombination);
-            archetypeQuota
-                = static_cast<size_t>(std::max(0.0, metadata.mixture.archetypes * total));
-            neighbourhoodQuota
-                = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
-        }
-
-        // Capped so archetypes the engine declines cannot consume the whole budget.
-        const size_t archetypeAttempts = archetypeQuota * 20;
-        for(size_t attempt = 0; attempt < archetypeAttempts && anchored.size() < archetypeQuota;
-            ++attempt)
-        {
-            const auto& archetype = metadata.archetypes[attempt % metadata.archetypes.size()];
-            const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
-            if(!drawn.has_value())
-            {
-                continue;
-            }
-            if(accept(*drawn))
-            {
-                anchored.push_back(*drawn);
-                result.problems.push_back(*drawn);
-                ++result.fromArchetypes;
-            }
-        }
-
-        // Perturb only admitted anchors; with none, the budget goes to exploration.
-        const size_t neighbourhoodAttempts = anchored.empty() ? 0 : neighbourhoodQuota * 20;
-        size_t drawnNearby = 0;
-        for(size_t attempt = 0; attempt < neighbourhoodAttempts && drawnNearby < neighbourhoodQuota;
-            ++attempt)
-        {
-            const auto& anchor = anchored[attempt % anchored.size()];
-            const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
-            if(accept(moved))
-            {
-                result.problems.push_back(moved);
-                ++result.fromNeighbourhood;
-                ++drawnNearby;
-            }
-        }
+        drawWorkloads(index, result, request.pointsPerCombination);
+        const auto& anchored = anchorsFor[index];
+        auto& seen = seenFor[index];
 
         if(!metadata.archetypes.empty() && anchored.empty())
         {
@@ -670,8 +692,9 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     }
 
     // Growth toward corpusTarget: the first pass gave each combination a modest fixed target
-    // so declined ones stay cheap; combinations that turned out to be served are searched
-    // again for the remainder.
+    // so declined ones stay cheap; combinations that turned out to be served are grown for the
+    // remainder in the same declared mixture -- workloads first, the search for the rest --
+    // or the corpus past the first pass would be exploration only.
     const auto supplied = [&corpus]() {
         int64_t total = 0;
         for(const auto& combination : corpus.combinations)
@@ -712,6 +735,40 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             auto& result = corpus.combinations[index];
             auto& search = searches[index];
             const auto oracle = oracleFor(index);
+
+            // This round's workload share joins the anchored points, which stay at the front;
+            // a point the search already returned is not drawn again.
+            std::vector<ProblemPoint> explored(
+                std::make_move_iterator(result.problems.begin()
+                                        + static_cast<std::ptrdiff_t>(anchoredCounts[index])),
+                std::make_move_iterator(result.problems.end()));
+            result.problems.resize(anchoredCounts[index]);
+            for(const auto& point : explored)
+            {
+                seenFor[index].insert(detail::describe(point));
+            }
+            const auto exploreShare = share - drawWorkloads(index, result, share);
+            // New workloads seed the walk, as first-pass ones do, so the search sized below
+            // to return them does.
+            for(size_t i = anchoredCounts[index]; i < result.problems.size(); ++i)
+            {
+                Shape shape;
+                shape.reserve(corpus.numericParameters.size());
+                for(const auto& name : corpus.numericParameters)
+                {
+                    shape.push_back(detail::integerAt(result.problems[i], name).value_or(1));
+                }
+                search.seeds.push_back(std::move(shape));
+            }
+            anchoredCounts[index] = result.problems.size();
+            result.problems.insert(result.problems.end(),
+                                   std::make_move_iterator(explored.begin()),
+                                   std::make_move_iterator(explored.end()));
+            if(exploreShare <= 0)
+            {
+                continue;
+            }
+
             // Held points and anchored duplicates fill cells but add nothing, so they are
             // excluded from the fresh selection. Anchored draws are always kept.
             std::set<std::string> anchoredSeen;
@@ -747,11 +804,11 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
             // The new search replaces the old one's contribution, so it must resupply it plus
             // this round's share.
-            const auto wanted
-                = static_cast<int64_t>(result.problems.size() - anchoredCounts[index]) + share;
+            const auto wanted = static_cast<int64_t>(result.problems.size() - anchoredCounts[index])
+                                + exploreShare;
             // Sized to include anchored and held points, which the search also returns.
             search.targetCount
-                = static_cast<int64_t>(result.problems.size()) + heldFound[index] + share;
+                = static_cast<int64_t>(result.problems.size()) + heldFound[index] + exploreShare;
 
             // Run at the current budget first (a larger target re-tessellates what the walk
             // observed). Then grow: by a quarter for sparse regions, so saturation is cheap to
@@ -800,6 +857,19 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
             spent[index] = result.saturated || result.searchCapped;
 
+            // A search returning fewer of the anchored points than it was sized for hands the
+            // difference to exploration; thin evenly back to what was wanted so the mixture holds.
+            if(const auto fresh = static_cast<int64_t>(selection.fresh.size()); fresh > wanted)
+            {
+                std::vector<ProblemPoint> thinned;
+                thinned.reserve(static_cast<size_t>(wanted));
+                for(int64_t i = 0; i < wanted; ++i)
+                {
+                    thinned.push_back(
+                        std::move(selection.fresh[static_cast<size_t>(i * fresh / wanted)]));
+                }
+                selection.fresh = std::move(thinned);
+            }
             result.problems.resize(anchoredCounts[index]);
             result.fromExploration = static_cast<int64_t>(selection.fresh.size());
             heldFound[index] = selection.held;
