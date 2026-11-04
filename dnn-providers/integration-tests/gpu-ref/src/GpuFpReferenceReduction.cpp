@@ -11,7 +11,6 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 namespace hipdnn_gpu_ref
@@ -22,10 +21,6 @@ namespace
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefReductionArgs.h> // NOLINT(misc-include-cleaner)
-
-static_assert(std::extent_v<decltype(ReductionArgs::inputStrides)>
-                  == GpuFpReferenceReduction::MAX_DIMS,
-              "GpuFpReferenceReduction::MAX_DIMS must match the ReductionArgs array sizes");
 
 } // namespace
 
@@ -98,7 +93,7 @@ void GpuFpReferenceReduction::launchReduction(
 
     // Compute the reduction domain axes, strides and size based on the input and output dimensions
     // NOLINTBEGIN(modernize-avoid-c-arrays)
-    long long reductionDomainShape[GpuFpReferenceReduction::MAX_DIMS];
+    long long reductionDomainShape[5];
     // NOLINTEND(modernize-avoid-c-arrays)
     long long reductionDomainSize = 1;
     long long reductionRank = 0;

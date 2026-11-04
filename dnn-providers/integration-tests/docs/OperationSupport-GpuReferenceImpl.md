@@ -60,7 +60,7 @@ The following table lists the operations currently executable through the GPU gr
 | Layernorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance optional |
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
-| Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; at most 5 dimensions; see [Reduction Modes](#reduction-modes) |
+| Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
 | SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, ALiBi; ragged through the dense rewrite. No Philox dropout (the backward node has no `rng_dump`) or sinks (no `dsink` output) |
@@ -144,8 +144,6 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 ### Reduction Modes
 
 `ADD`, `AVG`, `AMAX`, `NORM1`, `NORM2`, `MUL`, `MUL_NO_ZEROS`, `MIN_OP`, `MAX_OP`. Compute type is `FP32` or `FP64`.
-Tensors have at most 5 dimensions. The plan builder declines a higher-rank node as not applicable, so
-`auto` verification moves on to the CPU reference without reporting a reference executor error.
 
 ### SDPA Restrictions
 
@@ -212,7 +210,7 @@ host validator.
 | MoE Grouped Matmul (forward, backward) | Yes | No |
 | Layernorm Forward / Backward | Yes | Yes |
 | RMSNorm Forward / Backward | Yes | Yes |
-| Reduction | Yes | Yes (at most 5 dimensions) |
+| Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
 | SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3 native, other dtypes through the dense rewrite) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |

@@ -40,9 +40,6 @@ class GpuFpReferenceReduction
 {
 public:
     static constexpr unsigned int BLOCK_SIZE = 256;
-    // ReductionArgs (GpuRefReductionArgs.h) holds this many dimensions per tensor, so reduce()
-    // rejects a higher rank.
-    static constexpr size_t MAX_DIMS = 5;
 
     // --- Reduction ---
 
@@ -105,10 +102,9 @@ private:
                 + ", output rank=" + std::to_string(outputDims.size()) + ")");
         }
 
-        if(inputDims.size() > MAX_DIMS)
+        if(inputDims.size() > 5)
         {
-            throw std::invalid_argument("Reduction supports tensors with at most "
-                                        + std::to_string(MAX_DIMS) + " dimensions");
+            throw std::invalid_argument("Reduction supports tensors with at most 5 dimensions");
         }
 
         bool hasReducedDim = false;
