@@ -210,10 +210,18 @@ class MlaDecodeSpec:
             "page_block_size",
             "heads_per_wave",
             "num_seg",
+            "num_warps",
         ):
             value = getattr(self, name)
+            # type(), not isinstance(): a bool or a float must not pass as a
+            # count (num_seg=True or 2.0 would pick a kernel variant).
+            if type(value) is not int:
+                raise ValueError(f"{name} must be an int, got {value!r}")
             if value <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
+        if self.block_k & (self.block_k - 1):
+            # The kernel divides by block_k; a power of two keeps that a shift.
+            raise ValueError(f"block_k must be a power of two, got {self.block_k}")
         if self.num_warps not in (1, 2, 4, 8):
             raise ValueError(f"num_warps must be one of 1/2/4/8, got {self.num_warps}")
         if self.page_block_size != self.block_k:

@@ -543,6 +543,11 @@ class TestNumCusResolution:
         self._host(monkeypatch, "gfx942:sramecc+:xnack-")
         assert resolve_num_cus(_decode(num_cus=0)) == 77
 
+    @pytest.mark.parametrize("arch", [None, ""])
+    def test_an_unnamed_device_supplies_nothing(self, monkeypatch, arch):
+        self._host(monkeypatch, arch)
+        assert resolve_num_cus(_decode(num_cus=0)) == 0
+
     def test_another_arch_on_the_build_box_supplies_nothing(self, monkeypatch):
         self._host(monkeypatch, "gfx950")
         assert resolve_num_cus(_decode(num_cus=0)) == 0

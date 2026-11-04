@@ -334,10 +334,15 @@ def _live_device_is(arch: str) -> bool:
     """Whether the build box's device is ``arch`` (base arch, target-ID
     features ignored): only then may dispatch read a live device property, so
     a cross-compile never takes another part's."""
+    from rocke.core.arch.target import base_arch_from_target_id
+
     try:
         from rocke.runtime.hip_module import get_device_arch
 
-        return (get_device_arch() or "").split(":")[0] == arch.split(":")[0]
+        live = get_device_arch()
+        return bool(live) and base_arch_from_target_id(
+            live
+        ) == base_arch_from_target_id(arch)
     except (ImportError, OSError, RuntimeError):
         # No HIP runtime or no device on the build box.
         return False

@@ -298,9 +298,10 @@ def main(argv=None) -> int:
         pass
     arch = args.arch
     if arch is None:
+        from rocke.core.arch.target import base_arch_from_target_id
         from rocke.runtime.hip_module import get_device_arch
 
-        arch = (get_device_arch() or "gfx942").split(":")[0]
+        arch = base_arch_from_target_id(get_device_arch() or "gfx942")
     shapes = _decode_shapes(
         args.shapes or _default_shapes(arch), model=args.model, limit=args.limit
     )

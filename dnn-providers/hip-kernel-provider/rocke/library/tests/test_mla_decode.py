@@ -72,6 +72,13 @@ class TestSpec:
             ({"num_seg": 0}, "num_seg must be positive"),
             ({"num_warps": 3}, "num_warps must be one of"),
             ({"page_block_size": 32}, "page_block_size must equal block_k"),
+            # A bool or float is not a count: True would pass "> 0", and 2.0
+            # would select the split-KV variant.
+            ({"num_seg": True}, "num_seg must be an int"),
+            ({"num_seg": 2.0}, "num_seg must be an int"),
+            ({"num_heads": 128.0}, "num_heads must be an int"),
+            ({"num_warps": True}, "num_warps must be an int"),
+            ({"block_k": 48, "page_block_size": 48}, "block_k must be a power of two"),
         ],
     )
     def test_impossible_specs_raise(self, kw, match):
@@ -345,6 +352,19 @@ class TestCombine:
         spec = mla_decode_combine_spec(MlaDecodeGfx950Spec(num_heads=64, num_seg=3))
         assert spec == MlaDecodeCombineSpec(num_heads=64)
         assert spec.cols_per_lane == 8
+
+    @pytest.mark.parametrize(
+        "kw, match",
+        [
+            ({"num_heads": 0}, "num_heads must be positive"),
+            ({"num_heads": True}, "num_heads must be an int"),
+            ({"num_heads": 128, "r_kv": 512.0}, "r_kv must be an int"),
+            ({"num_heads": 128, "num_warps": True}, "num_warps must be an int"),
+        ],
+    )
+    def test_impossible_specs_raise(self, kw, match):
+        with pytest.raises(ValueError, match=match):
+            MlaDecodeCombineSpec(**kw)
 
     def test_geometry_and_pack(self):
         spec = MlaDecodeCombineSpec(num_heads=128)

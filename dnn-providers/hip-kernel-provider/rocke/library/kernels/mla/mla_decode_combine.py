@@ -83,8 +83,11 @@ class MlaDecodeCombineSpec:
             raise ValueError(
                 f"MLA decode combine writes bf16 only, got dtype={self.dtype!r}"
             )
-        for name in ("num_heads", "r_kv"):
+        for name in ("num_heads", "r_kv", "num_warps"):
             value = getattr(self, name)
+            # type(), not isinstance(): a bool or a float must not pass as a count.
+            if type(value) is not int:
+                raise ValueError(f"{name} must be an int, got {value!r}")
             if value <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
         if self.num_warps not in (1, 2, 4, 8):
