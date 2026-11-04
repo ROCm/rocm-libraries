@@ -153,8 +153,12 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
         )
     endif()
 
-    # MIOpen internal headers (for ProblemDescription, ConvSolution, etc.)
+    # MIOpen internal headers (for ProblemDescription, ConvSolution, etc.), and the in-tree
+    # public ones ahead of hip::device's system include directory below: an older MIOpen
+    # installed there would otherwise supply <miopen/miopen.h> and redefine what this tree
+    # moved into miopen_internal.h.
     target_include_directories(${lib_name} PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src/include
         ${PROJECT_BINARY_DIR}/include
     )
