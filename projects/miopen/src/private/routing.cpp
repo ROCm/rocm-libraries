@@ -33,8 +33,15 @@ const char* const kTraceLogLevel = "6";
 const char* const kQuietLogLevel = "1";
 const char* const kFatalLogLevel = "2";
 
-// Entry points redirected to hipDNN when forwarding is enabled. To add one, list
-// it here and bump the array size.
+// Entry points redirected to hipDNN when forwarding is enabled.
+//
+// To add one:
+//   1. List it here and bump the array size.
+//   2. Add a HipdnnShim test (suite name contains HipdnnShim) that reaches the entry
+//      point through the public miopen.h API only and checks the result against a CPU
+//      reference (see "hipDNN shim surface" in test/gtest/README.md). Without one, the
+//      parity run replays nothing for it, so a swap that changes results goes unnoticed.
+//   3. Update DefaultSetIsTheConvolutionFamily in test/gtest/wrapper_routing.cpp.
 //
 // The forwarding parity tests (script/run_forwarding_parity.py) run the shim
 // tests once with forwarding disabled and once enabled and require the two runs
