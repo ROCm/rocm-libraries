@@ -255,7 +255,7 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
-  data_layout.cpp
+  data_set.cpp
   exec_info.cpp
   plan.cpp
   transform.cpp

@@ -1547,4 +1547,306 @@ TEST_F(TestBundleDiscoveryFixture, SkippingSyntheticBodySkipsWithItsMessage)
               std::string::npos);
 }
 
+// ---------------------------------------------------------------------------
+// Metadata flags that contradict the golden data a bundle declares.
+//
+// "Declared" is read from the checked-in pointer (`{Name}.tensors.dvc`, or a sweep
+// case's golden.path), not from the blobs: on a tree where `dvc pull` has not run the
+// rules must give the same answer.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+void writeFlagsMeta(const std::filesystem::path& dir,
+                    const std::string& name,
+                    const nlohmann::json& flags)
+{
+    nlohmann::json meta = {{"format_version", 1}};
+    meta.update(flags);
+    std::ofstream(dir / (name + ".meta.json")) << meta.dump(2);
+}
+
+// Merges `flags` into the first sweep case's metadata block.
+void setFirstCaseFlags(const std::filesystem::path& sweepDir, const nlohmann::json& flags)
+{
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"].update(flags);
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+}
+
+const nlohmann::json BOTH_REFERENCES_OFF = {{"no_cpu_reference", true}, {"no_gpu_reference", true}};
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingBothReferencesWithoutGoldenIsError)
+{
+    const auto dir = _tempDir / "op" / "bothoff";
+    createMinimalBundle(dir, "bothoff");
+    writeFlagsMeta(dir, "bothoff", BOTH_REFERENCES_OFF);
+
+    EXPECT_THROW(loadIntegrationTestBundle(dir / "bothoff.json"), BundleMetadataError);
+
+    // Red, naming the rule -- not a silent skip.
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    EXPECT_NE(std::get<detail::FailedLoad>(outcome).message.find("disables both references"),
+              std::string::npos);
+}
+
+// The pointer is what declares the data. The blobs it names are absent here, as on a
+// machine that has not pulled.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingBothReferencesWithGoldenPointerLoads)
+{
+    const auto dir = _tempDir / "op" / "bothoffdvc";
+    createMinimalBundle(dir, "bothoffdvc");
+    writeFlagsMeta(dir, "bothoffdvc", BOTH_REFERENCES_OFF);
+    std::ofstream(dir / "bothoffdvc.tensors.dvc") << "outs:\n";
+
+    auto result = loadIntegrationTestBundle(dir / "bothoffdvc.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+    EXPECT_TRUE(bundle.metadata.noCpuReference);
+    EXPECT_TRUE(bundle.metadata.noGpuReference);
+    EXPECT_FALSE(bundle.hasGoldenOutputs);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingBothReferencesWithGoldenBlobsLoads)
+{
+    const auto dir = _tempDir / "op" / "bothoffbin";
+    createLoadableBundle(dir, "bothoffbin");
+    writeFlagsMeta(dir, "bothoffbin", BOTH_REFERENCES_OFF);
+
+    auto result = loadIntegrationTestBundle(dir / "bothoffbin.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_TRUE(std::get<IntegrationTestBundle>(result).hasGoldenOutputs);
+}
+
+// One reference left is enough to verify the bundle, with or without golden data.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingOneReferenceWithoutGoldenLoads)
+{
+    for(const char* flag : {"no_cpu_reference", "no_gpu_reference"})
+    {
+        SCOPED_TRACE(flag);
+        const auto dir = _tempDir / "op" / flag;
+        createMinimalBundle(dir, "oneoff");
+        writeFlagsMeta(dir, "oneoff", {{flag, true}});
+
+        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+            loadIntegrationTestBundle(dir / "oneoff.json")));
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleWithoutGoldenLoads)
+{
+    const auto dir = _tempDir / "op" / "rejected";
+    createMinimalBundle(dir, "rejected");
+    writeFlagsMeta(dir, "rejected", {{"expected_rejection", true}});
+
+    auto result = loadIntegrationTestBundle(dir / "rejected.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_TRUE(std::get<IntegrationTestBundle>(result).metadata.expectedRejection);
+}
+
+// The reference flags are ignored on an expected rejection, so setting both without any
+// golden data is not the both-off error (which would make the combination unsatisfiable:
+// the golden data it demands is the golden data an expected rejection must not have).
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleIgnoresBothReferenceFlags)
+{
+    const auto dir = _tempDir / "op" / "rejectedbothoff";
+    createMinimalBundle(dir, "rejectedbothoff");
+    writeFlagsMeta(
+        dir,
+        "rejectedbothoff",
+        {{"expected_rejection", true}, {"no_cpu_reference", true}, {"no_gpu_reference", true}});
+
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(dir / "rejectedbothoff.json")));
+}
+
+// An expected rejection is never executed, so golden data beside it can only be a
+// mistake -- and would drag the bundle into the golden-data binary.
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleWithGoldenIsError)
+{
+    const auto pointerDir = _tempDir / "op" / "rejecteddvc";
+    createMinimalBundle(pointerDir, "rejecteddvc");
+    writeFlagsMeta(pointerDir, "rejecteddvc", {{"expected_rejection", true}});
+    std::ofstream(pointerDir / "rejecteddvc.tensors.dvc") << "outs:\n";
+    EXPECT_THROW(loadIntegrationTestBundle(pointerDir / "rejecteddvc.json"), BundleMetadataError);
+
+    const auto blobDir = _tempDir / "op" / "rejectedbin";
+    createLoadableBundle(blobDir, "rejectedbin");
+    writeFlagsMeta(blobDir, "rejectedbin", {{"expected_rejection", true}});
+    EXPECT_THROW(loadIntegrationTestBundle(blobDir / "rejectedbin.json"), BundleMetadataError);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadSweepCaseDisablingBothReferencesWithoutGoldenIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"bothoff_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false}});
+    setFirstCaseFlags(sweepDir, BOTH_REFERENCES_OFF);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_THROW(loadIntegrationTestBundle(discovered.front()), BundleMetadataError);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadSweepCaseDisablingBothReferencesWithGoldenPathLoads)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"bothoff_golden_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+    setFirstCaseFlags(sweepDir, BOTH_REFERENCES_OFF);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered.front())));
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadSweepCaseExpectedRejectionWithGoldenIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"rejected_golden_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+    setFirstCaseFlags(sweepDir, {{"expected_rejection", true}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_THROW(loadIntegrationTestBundle(discovered.front()), BundleMetadataError);
+}
+
+// ---------------------------------------------------------------------------
+// An expected-rejection bundle has to reach an engine to be rejected by one. One that
+// cannot even load must be red, not the quiet skip an unloadable bundle gets.
+// ---------------------------------------------------------------------------
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleFailsAnExpectedRejectionBundleThatCannotLoad)
+{
+    const auto flaggedDir = _tempDir / "op" / "flagged";
+    createMinimalBundle(flaggedDir, "flagged");
+    std::ofstream(flaggedDir / "flagged.json") << "{not json";
+    writeFlagsMeta(flaggedDir, "flagged", {{"expected_rejection", true}});
+
+    // Control: the same broken graph without the flag keeps the quiet skip.
+    const auto plainDir = _tempDir / "op" / "plain";
+    createMinimalBundle(plainDir, "plain");
+    std::ofstream(plainDir / "plain.json") << "{not json";
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+    const auto* flagged = findByTest(discovered, "flagged");
+    const auto* plain = findByTest(discovered, "plain");
+    ASSERT_NE(flagged, nullptr);
+    ASSERT_NE(plain, nullptr);
+
+    auto flaggedOutcome = detail::classifyBundle(*flagged, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(flaggedOutcome));
+    EXPECT_NE(std::get<detail::FailedLoad>(flaggedOutcome).message.find("expected_rejection"),
+              std::string::npos);
+    EXPECT_TRUE(
+        std::holds_alternative<detail::SkippedLoad>(detail::classifyBundle(*plain, _sweeps)));
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleFailsAnExpectedRejectionSweepCaseThatCannotLoad)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"flagged_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false}});
+    setFirstCaseFlags(sweepDir, {{"expected_rejection", true}});
+
+    // A case whose values no longer fill the template's placeholders is an
+    // INVALID_SWEEP_CASE, which is a skip unless the case asked to be rejected.
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0].erase("values");
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    EXPECT_NE(std::get<detail::FailedLoad>(outcome).message.find("expected_rejection"),
+              std::string::npos);
+}
+
+// Registration seeds graphsWithClaims from the same predicate the harness's
+// shouldObserveClaims() applies. A sweep's cases share one support.json, so the file
+// alone cannot exclude a flagged case: only the flag can, and a count the harness will
+// never satisfy would make the summary blame the harness for the gap.
+TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCaseAsClaimed)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"claimed_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false},
+                         {"rejected_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false}});
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][1]["metadata"]["expected_rejection"] = true;
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+    std::ofstream(sweepDir / "support.json")
+        << R"({"version": 1, "claims": {"E": [{"cases": ["claimed_fp32_nchw"],
+                "support": {"gfx942": ["linux"]}}]}})";
+
+    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir)};
+    ASSERT_EQ(set.bundles.size(), 2u);
+
+    const auto before = supportClaimCoverage();
+    const auto loadedBundles
+        = detail::loadDiscoveredBundles(set, /*countFound=*/true, /*countClaims=*/true);
+    ASSERT_TRUE(loadedBundles.has_value());
+    EXPECT_EQ(loadedBundles->size(), 2u);
+
+    EXPECT_EQ(supportClaimCoverage().graphsFound - before.graphsFound, 2u);
+    EXPECT_EQ(supportClaimCoverage().graphsWithClaims - before.graphsWithClaims, 1u);
+}
+
 // NOLINTEND(readability-identifier-naming)

@@ -80,6 +80,7 @@ namespace
 #endif
     static_assert(checkBackend<int8_t, int8_t, int32_t, 8>());
     static_assert(checkBackend<int8_t, int8_t, int32_t, 16>());
+    static_assert(checkBackend<uint8_t, uint8_t, int32_t, 8>());
     static_assert(checkBackend<uint8_t, uint8_t, int32_t, 16>());
     static_assert(checkBackend<float8_t, float8_t, float32_t, 16>());
     static_assert(checkBackend<bfloat8_t, bfloat8_t, float32_t, 16>());
@@ -210,6 +211,11 @@ TEST(Gfx117xWmma, BF8F8)
 TEST(Gfx117xWmma, SmallK)
 {
     checkTile<float16_t, float16_t, float32_t, 8>();
+}
+
+TEST(Gfx117xWmma, U8SmallK)
+{
+    checkTile<uint8_t, uint8_t, int32_t, 8>();
 }
 
 TEST(Gfx117xWmma, RepeatedK)
