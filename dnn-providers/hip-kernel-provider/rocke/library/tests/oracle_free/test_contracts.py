@@ -33,6 +33,7 @@ from ._analytical import (
     correct_uniform_observation,
     decode_bits,
     encode_bits,
+    format_uniform_result,
     legal_keys,
     require_calibration,
     residue_count,
@@ -50,6 +51,7 @@ from ._gfx942_subject import (
     _verify_resolved_spec,
     resolve_dense_subject,
 )
+from .test_analytical_gfx942 import _not_rejected
 
 
 def _small_case(mask: str, *, window: int = 0, seqlen_k: int = 8) -> UniformCase:
@@ -410,17 +412,15 @@ def test_calibration_entries_are_zero_budget_ratified_and_scoped() -> None:
     bf16_fp = _fingerprint(block_m=64)
     entry = CalibrationEntry(
         ulp_budget=0,
-        source_revision="0123456789abcdef",
         case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
         spec=fp16_fp,
-        ratified=True,
     )
     assert entry.covers(UNIFORM_CAUSAL_FP16, fp16_fp)
     assert not entry.covers(UNIFORM_WINDOW_BF16, fp16_fp)
     with pytest.raises(ValueError, match="ulp_budget=0"):
-        CalibrationEntry(1, "revision", (UNIFORM_CAUSAL_FP16.case_id,), fp16_fp, True)
-    with pytest.raises(ValueError, match="ratified"):
-        CalibrationEntry(0, "revision", (UNIFORM_CAUSAL_FP16.case_id,), fp16_fp, False)
+        CalibrationEntry(1, (UNIFORM_CAUSAL_FP16.case_id,), fp16_fp)
+    with pytest.raises(ValueError, match="case_ids"):
+        CalibrationEntry(0, (), fp16_fp)
     assert set(UNIFORM_CALIBRATION) == {
         ("gfx942", "attention_gfx942_dense", "fp16"),
         ("gfx942", "attention_gfx942_dense", "bf16"),
@@ -428,8 +428,6 @@ def test_calibration_entries_are_zero_budget_ratified_and_scoped() -> None:
     for key, installed in UNIFORM_CALIBRATION.items():
         assert len(key) == 3
         assert installed.ulp_budget == 0
-        assert installed.ratified
-        assert installed.source_revision == "b64ae3c925b9e789fe6f62663e4c4d282ffd0f05"
     assert UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].covers(
         UNIFORM_CAUSAL_FP16, fp16_fp
     )
@@ -444,10 +442,8 @@ _CALIBRATED_FP16_KEY = ("gfx942", "attention_gfx942_dense", "fp16")
 def test_calibration_mismatch_names_the_case_and_every_differing_field() -> None:
     entry = CalibrationEntry(
         ulp_budget=0,
-        source_revision="0123456789abcdef",
         case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
         spec=_fingerprint(block_m=128),
-        ratified=True,
     )
     assert entry.mismatch(UNIFORM_CAUSAL_FP16, _fingerprint(block_m=128)) == ()
 
@@ -691,7 +687,8 @@ def test_subject_accepts_only_the_shipped_uniform_cases() -> None:
         _validate_supported_case(UniformCase(1, 256, 256, 4, 4, 128, "fp16", "causal"))
 
 
-def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
+def _fake_tuning_spec(**overrides) -> SimpleNamespace:
+    """A dispatch result shaped like the calibrated fp16 causal quick case."""
     kernel_spec = SimpleNamespace(
         batch=1,
         seqlen_q=256,
@@ -713,18 +710,29 @@ def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
         causal_bottom_right=False,
         resolved_use_exp2_fast=lambda: True,
     )
-    tuning_spec = SimpleNamespace(
+    for name, value in overrides.items():
+        setattr(kernel_spec, name, value)
+    return SimpleNamespace(
         path="dense",
         arch="gfx942",
         candidate_name="attention_gfx942_dense",
         kernel_spec=kernel_spec,
     )
+
+
+def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
+    tuning_spec = _fake_tuning_spec()
+    kernel_spec = tuning_spec.kernel_spec
     expected = _fingerprint(block_m=128)
     assert _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec) == expected
+    # Launch preconditions: scope the fingerprint does not record, and buffers
+    # the adapter does not supply. These fail before any launch.
     for name, value, match in (
         ("kv_segments", 2, "single-pass"),
         ("ragged", True, "ragged"),
         ("causal_bottom_right", True, "top-left"),
+        ("use_sinks", True, "sinks"),
+        ("emit_lse", True, "LSE"),
     ):
         original = getattr(kernel_spec, name)
         setattr(kernel_spec, name, value)
@@ -732,9 +740,35 @@ def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
             _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
         setattr(kernel_spec, name, original)
     assert _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec) == expected
-    kernel_spec.resolved_use_exp2_fast = lambda: False
-    with pytest.raises(AssertionError, match="fast exp2"):
-        _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
+
+
+@pytest.mark.parametrize(
+    "name,value,match",
+    [
+        ("persistent", True, "persistent: calibrated False, resolved True"),
+        ("runtime_shape", False, "runtime_shape: calibrated True, resolved False"),
+        ("block_m", 64, "block_m: calibrated 128, resolved 64"),
+        ("block_n", 32, "block_n: calibrated 64, resolved 32"),
+        (
+            "resolved_use_exp2_fast",
+            lambda: False,
+            "use_exp2_fast: calibrated True, resolved False",
+        ),
+    ],
+)
+def test_fingerprint_drift_resolves_and_fails_at_the_calibration_gate(
+    name: str, value, match: str
+) -> None:
+    """A fingerprint-only drift is not a launch precondition: it resolves (so the
+    case launches and writes calibration records) and then fails in
+    ``require_calibration`` with the differing field and the remedy."""
+    tuning_spec = _fake_tuning_spec(**{name: value})
+    drifted = _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
+    with pytest.raises(AssertionError, match=match) as raised:
+        require_calibration(
+            "gfx942", "attention_gfx942_dense", UNIFORM_CAUSAL_FP16, drifted
+        )
+    assert "ROCKE_ORACLE_FREE_CALIBRATION_OUT" in str(raised.value)
 
 
 @pytest.mark.parametrize("case", [UNIFORM_CAUSAL_FP16, UNIFORM_WINDOW_BF16])
@@ -881,7 +915,7 @@ def test_torch_checker_accepts_torch_free_source() -> None:
     assert _torch_dependency_violations(clean, "<synthetic>") == []
 
 
-_SKIP_CALLS = frozenset({"skip", "importorskip", "xfail"})
+_SKIP_CALLS = frozenset({"skip", "skipif", "importorskip", "xfail"})
 
 
 def _gpu_lane_tree() -> ast.Module:
@@ -905,8 +939,8 @@ def test_gpu_lane_parametrizes_over_the_calibrated_case_list() -> None:
 
 
 def test_gpu_lane_never_skips_after_the_architecture_gate() -> None:
-    """The module-level gfx942 ``skipif`` is the only permitted skip; on gfx942 a
-    missing or mismatched calibration must fail, never skip."""
+    """The shared gfx942 gate is the only permitted skip; on gfx942 a missing or
+    mismatched calibration must fail, never skip."""
     escapes = [
         f"line {node.lineno}: {_dotted_name(node.func)}"
         for node in ast.walk(_gpu_lane_tree())
@@ -914,6 +948,49 @@ def test_gpu_lane_never_skips_after_the_architecture_gate() -> None:
         and _dotted_name(node.func).split(".")[-1] in _SKIP_CALLS
     ]
     assert not escapes
+
+
+def test_gpu_lane_gates_through_the_require_aware_arch_helper() -> None:
+    """The architecture gate is ``current_device_arch_in(("gfx942",), ...)``, so
+    ``ROCKE_REQUIRE_GFX942=1`` fails a lane that lost its gfx942 GPU instead of
+    letting it pass with the GPU cases skipped."""
+    gates = [
+        node
+        for node in ast.walk(_gpu_lane_tree())
+        if isinstance(node, ast.Call)
+        and _dotted_name(node.func) == "current_device_arch_in"
+    ]
+    assert len(gates) == 1, [ast.dump(gate) for gate in gates]
+    assert ast.literal_eval(gates[0].args[0]) == ("gfx942",)
+
+
+def test_unrejected_mutation_blames_a_failing_control() -> None:
+    """A kernel with a mask bug can write exactly what that mutation predicts, so
+    the mutation is not rejected. The message must then point at the control's
+    violations rather than at the checker."""
+    case = UNIFORM_CAUSAL_FP16
+    mutation = UniformMutation.INCLUDE_FUTURE_KEY
+    exposures = [f"basis@{offset}" for offset in UNIFORM_BASIS_OFFSETS] + ["folded"]
+    buggy = UniformObservation(
+        tuple(
+            (exposure, uniform_expected_bits(case, exposure, mutation))
+            for exposure in exposures
+        )
+    )
+    control = analyze_uniform_policy(case, buggy, budget=0)
+    mutated = analyze_uniform_policy(case, buggy, budget=0, mutation=mutation)
+    assert control.violations
+
+    blamed = _not_rejected(case, mutation.value, mutated, control)
+    assert "checker failed" not in blamed
+    assert "kernel output itself fails" in blamed
+    assert format_uniform_result(control) in blamed
+
+    clean = analyze_uniform_policy(case, correct_uniform_observation(case), budget=0)
+    assert not clean.violations
+    assert "checker failed to reject" in _not_rejected(
+        case, mutation.value, mutated, clean
+    )
 
 
 # Run in a fresh interpreter whose import system refuses torch, so the check holds
