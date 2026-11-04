@@ -23,6 +23,7 @@ include( ../../../cmake/sqlite.cmake )
 add_executable( rocfft-internal-test
   function_pool_test.cpp
   rtc_test.cpp
+  stockham_grid_test.cpp
   ../rocfft_stub.cpp
 )
 
