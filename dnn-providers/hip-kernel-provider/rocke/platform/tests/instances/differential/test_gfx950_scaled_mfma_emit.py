@@ -27,7 +27,7 @@ def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
     )
     assert first.output_sha == repeated.output_sha
     assert first.output_sha != last.output_sha
-    assert run_diff._is_end_emission(ended)
+    assert run_diff.is_end_emission(ended)
 
     # Compare the in-process batch with the original single-config CLI path.
     process = subprocess.run(
