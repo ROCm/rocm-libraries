@@ -945,8 +945,17 @@ enumerate:
   sweep_level: production         # the registry sweep level
   space: slice | full             # full: every sweep spec sharing the cell's feature fields
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
+  feature_fields:                 # optional: boolean spec fields a cell turns on
+    use_additive_bias:            # must be a metadata field (and in spec_fields if set), not in
+                                  # free_fields; list it in reduction.fields.feature too
+      name_token: _addb           # inserted after the template's last slot: ..._bn64_addb.gfx950
+      free_fields: [block_m]      # optional, slice only: narrows the cell's free_fields (a subset)
+      select: {block_m: 128}      # optional, slice only: keep only these values of the fields the
+                                  # cell sweeps; the cell's default is the kept spec equal to the
+                                  # registry default elsewhere. Two features' selects must agree
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
-  max_kernels: 840                # slice only: more is an error
+  max_kernels: 840                # slice only: more is an error. Every space refuses two
+                                  # kernels with one name
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
       space: full                 #   candidates/request/sweep_level/space inherited unless set
