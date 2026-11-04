@@ -31,18 +31,10 @@ if(NOT TARGET hip::hip_fortran)
     "bindings were built with ${CMAKE_Fortran_COMPILER}.")
 endif()
 
-# Standalone libhipsparse has to be found; its find_dependency(hip) needs C.
-if(NOT TARGET roc::hipsparse)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(hipsparse QUIET)
-endif()
 if(NOT TARGET roc::hipsparse)
   message(STATUS
     "hipSPARSE: no roc::hipsparse target, skipping the Fortran binding tests "
-    "(they link libhipsparse). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link libhipsparse). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
