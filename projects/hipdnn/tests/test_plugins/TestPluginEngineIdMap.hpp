@@ -84,6 +84,14 @@ HIPDNN_MAP_TO_ID(LyingEngineNamePluginErrorStatus, -28);
 // this id. See TestMismatchedNamePlugin.cpp.
 HIPDNN_MAP_TO_ID(MismatchedNamePlugin, -29);
 
+// No-solver fake: applicable for every graph, but plan creation always fails with
+// HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR. See TestNoSolverPlugin.cpp.
+HIPDNN_MAP_TO_ID(NoSolverPlugin, -31);
+
+// Resource-failure fake: applicable for every graph, but plan creation always fails with
+// HIPDNN_PLUGIN_STATUS_ALLOC_FAILED. See TestResourceFailPlugin.cpp.
+HIPDNN_MAP_TO_ID(ResourceFailPlugin, -32);
+
 namespace hipdnn_tests::plugin_constants
 {
 // Engine names reported by the named test plugins. All are deliberately absent from

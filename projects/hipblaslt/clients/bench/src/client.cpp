@@ -72,6 +72,8 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
+    hipblaslt_bench_options::apply_strict_verification(arg);
+
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
 
@@ -212,6 +214,16 @@ int hipblaslt_bench_datafile(const std::string& filter, bool any_stride, hipDevi
         ret |= run_bench_test(arg, filter, any_stride, props, true);
     test_cleanup::cleanup();
     return ret;
+}
+
+int verification_exit(int ret)
+{
+    const int code = hipblaslt_bench_options::verification_exit_code(ret);
+    if(code != ret)
+        hipblaslt_cerr << "hipblaslt-bench: " << hipblaslt_bench_options::verification_failures()
+                       << " --verify check(s) failed; exiting with code " << code
+                       << " (--verify_strict)" << std::endl;
+    return code;
 }
 
 // Replace --batch with --batch_count for backward compatibility
@@ -475,6 +487,21 @@ try
         ("verify,v",
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
+
+        ("verify_strict",
+         value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
+         "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
+         "failed). Checks D only. Implies --verify. Computes a CPU reference per problem and "
+         "copies and compares D on the host for each solution.")
+
+        ("post_bench_verify_iters",
+         value<int32_t>(&hipblaslt_bench_options::post_bench_verify_iters())->default_value(0),
+         "After timing, relaunch each solution this many more times, untimed and without host "
+         "synchronization between relaunches, and check on the GPU that every relaunch gives the "
+         "same D, bit for bit, as the first launch, which --verify compares with the CPU. The "
+         "timed launches are not checked. A difference counts as a failed check for "
+         "--verify_strict, but the solution stays in the ranking. 0 turns it off. Implies "
+         "--verify, so it also runs the CPU reference.")
 
         ("ulp",
          value<bool>(&ulp)->default_value(false),
@@ -741,7 +768,7 @@ try
          "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
+         "When omitted the bench leaves the attribute unset so the library default (on) applies.")
 
         ("help,h", "produces this help message")
 
@@ -821,6 +848,9 @@ try
     {
         return 0;
     }
+
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
 
     if(api_method_str.compare("c") == 0)
     {
@@ -1044,7 +1074,7 @@ try
         perf_monitor->setDeviceId(device_id);
 
     if(datafile)
-        return hipblaslt_bench_datafile(filter, any_stride, props);
+        return verification_exit(hipblaslt_bench_datafile(filter, any_stride, props));
 
     // single bench run
 
@@ -1305,7 +1335,14 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp)
+    if(hipblaslt_bench_options::post_bench_verify_iters() < 0)
+        throw std::invalid_argument("--post_bench_verify_iters must be 0 or more");
+    if(hipblaslt_bench_options::post_bench_verify_iters() > 0 && arg.c_equal_d && arg.beta != 0)
+        throw std::invalid_argument("--post_bench_verify_iters does not support --c_equal_d with "
+                                    "a nonzero beta, since each launch then reads the D the "
+                                    "previous launch wrote");
+
+    if(verify || ulp || hipblaslt_bench_options::post_bench_verify_iters() > 0)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1337,7 +1374,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    return run_bench_test(arg, filter, any_stride, props);
+    return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
 catch(const std::invalid_argument& exp)
 {

@@ -8,9 +8,10 @@ way in both engines; this file can.
 
 It holds two kinds of hash (format: `golden_store.py`):
 
-- `ll` -- the lowered LLVM IR text, **one section per LLVM flavor** (`llvm20`, `llvm22`,
-  `llvm23`). IR text differs between flavors, so a hash is only compared with one recorded for
-  the same flavor.
+- `ll` -- the lowered LLVM IR text, **one section per distinct emission profile**
+  (`llvm20`, `llvm22`, `llvm23`, `llvm24`). The top-level `aliases` map can represent
+  qualified lanes that intentionally share a profile; it is empty today because LLVM24's
+  named-barrier pointer ABI makes its output structurally distinct from LLVM23.
 - `ir_canonical` -- the canonical `ck.dsl.ir/v1` serialization (stable across SSA-id
   renumbering). It is produced before lowering and is the same in every flavor, so it has one
   section.
@@ -19,7 +20,7 @@ It holds two kinds of hash (format: `golden_store.py`):
 
 ```bash
 cd tests/instances/differential
-python3 run_diff.py --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23
+python3 run_diff.py --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23,llvm24
 python3 run_diff.py --mode ir --canonical --python-only --check-golden
 ```
 
@@ -40,7 +41,7 @@ reported missing. It matches by substring (`--only conv_implicit_gemm` also sele
 ## Re-bless (only for a reviewed, intended output change)
 
 ```bash
-python3 run_diff.py --mode ll --python-only --record-golden --flavor llvm20,llvm22,llvm23
+python3 run_diff.py --mode ll --python-only --record-golden --flavor llvm20,llvm22,llvm23,llvm24
 python3 run_diff.py --mode ir --canonical --python-only --record-golden
 ```
 

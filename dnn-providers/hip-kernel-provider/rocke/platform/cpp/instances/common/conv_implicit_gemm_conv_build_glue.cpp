@@ -326,6 +326,31 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->p_pW_neg = NULL;
     }
 
+    /* ---- split-K kernargs (spec.split_k > 1) ----
+     * Python: the fp32 workspace, then the slice width and degree -- the same
+     * trailing pair wgrad takes -- emitted right after the problem block. The
+     * cluster form also declares its (1, 1, S) launch shape. */
+    ctx->fwd_split = spec->split_k > 1;
+    if(ctx->fwd_split)
+    {
+        rocke_param_opts_t ws_opts;
+        memset(&ws_opts, 0, sizeof(ws_opts));
+        ws_opts.noalias = true;
+        ws_opts.noalias_set = true;
+        ws_opts.align = 16;
+        ws_opts.align_set = true;
+        ctx->fwd_p_ws
+            = rocke_b_param(b, "ws_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &ws_opts);
+        ctx->fwd_p_ws_bytes = rocke_b_param(b, "ws_bytes", rocke_i32(), NULL);
+        ctx->fwd_p_ks = rocke_b_param(b, "ks", rocke_i32(), NULL);
+        ctx->fwd_p_ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
+        if(spec->split_k_cluster && b->kernel != NULL)
+        {
+            const int64_t dims[3] = {1, 1, spec->split_k_cluster};
+            rocke_attr_set_int_list(b, &b->kernel->attrs, "cluster_dims", dims, 3);
+        }
+    }
+
     /* ---- resolve op + atom + frag widths ---- (811-815) */
     ctx->op = rocke_conv_resolve_op(b, spec, ctx->arch);
     if(ctx->op == NULL)
@@ -502,11 +527,35 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      *
      * Merged: "group" is the merged group (gridDim.z runs 0..groups/Gm) and
      * the path stays engaged even at Gm == groups -- see ctx->grouped. */
+    rocke_value_t* split_group_z = NULL;
+    if(ctx->fwd_split)
+    {
+        /* Split-K: the group and the K slice share z: z = group * ks_count +
+         * slice, as in wgrad. Slice s reduces [s*ks, (s+1)*ks); the host rounds
+         * ks to whole K tiles, and the tail past K_gemm reads zero through the
+         * descriptor bounds, so every slice runs the same bound computation. */
+        rocke_value_t* z_id = rocke_b_block_id_z(b);
+        if(ctx->grouped)
+        {
+            split_group_z = rocke_b_to_sgpr_u32(b, rocke_b_div(b, z_id, ctx->fwd_p_ks_count));
+            rocke_value_t* g_ks = rocke_b_mul(b, split_group_z, ctx->fwd_p_ks_count);
+            ctx->fwd_slice_id = rocke_b_sub(b, z_id, g_ks);
+        }
+        else
+        {
+            ctx->fwd_slice_id = z_id;
+        }
+        rocke_value_t* lo_mul = rocke_b_mul(b, ctx->fwd_slice_id, ctx->fwd_p_ks);
+        ctx->kloop_k_lo = rocke_b_to_sgpr_u32(b, lo_mul);
+        rocke_value_t* hi_add = rocke_b_add(b, ctx->kloop_k_lo, ctx->fwd_p_ks);
+        ctx->kloop_k_hi = rocke_b_to_sgpr_u32(b, hi_add);
+    }
     if(ctx->grouped)
     {
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
-         * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
-        ctx->group_idx = rocke_b_block_id_z(b);
+         * Bind subexpressions in Python's left-to-right order to pin SSA ids.
+         * Split-K: the group is the z quotient decoded above. */
+        ctx->group_idx = ctx->fwd_split ? split_group_z : rocke_b_block_id_z(b);
         /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
          * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
         ctx->k_out_group_base
@@ -895,8 +944,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         if(ctx.grouped)
         {
             /* Merged: g is the merged group and the merged kpg is Gm, so the
-             * same expression yields k_out = merged_group*Gm + g_n. */
-            rocke_value_t* bid_z = rocke_b_block_id_z(b);
+             * same expression yields k_out = merged_group*Gm + g_n. Split-K
+             * reuses the decoded group (z also carries the slice). */
+            rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
             ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
         }
         else
@@ -905,6 +955,19 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         }
         ctx.ir_always_valid_d = NULL;
         ctx.ir_d_pitch_pw = NULL;
+    }
+
+    if(ctx.fwd_split)
+    {
+        /* Stage 1 stores into slab `slice` of the [ks_count][M][K] fp32
+         * workspace. The slab is a packed N[D]HWK tensor like D, so D's
+         * descriptor addresses it; the epilogue adds only the slab base, and
+         * every store goes through the workspace resource. */
+        rocke_value_t* slab = rocke_b_mul(b, ctx.p_M, ctx.p_K);
+        ctx.fwd_slab_base = rocke_b_mul(b, ctx.fwd_slice_id, slab);
+        rocke_conv_buffer_resource_t ws_rsrc;
+        rocke_conv_make_buffer_resource(b, ctx.fwd_p_ws, ctx.fwd_p_ws_bytes, &ws_rsrc);
+        ctx.d_rsrc = ws_rsrc.rsrc;
     }
 
     /* ---- K-loop driver selection (1276-1347) ----

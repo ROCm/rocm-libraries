@@ -63,7 +63,7 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     }
 
     if(activAttr.elu_alpha().has_value() || activAttr.softplus_beta().has_value()
-       || activAttr.swish_beta().has_value() || activAttr.relu_lower_clip_slope().has_value())
+       || activAttr.swish_beta().has_value() || hasLeakyReluSlope(activAttr))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

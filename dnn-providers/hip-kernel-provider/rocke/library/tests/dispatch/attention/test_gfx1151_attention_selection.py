@@ -111,13 +111,41 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     self.assertEqual(a.candidate.name, b.candidate.name)
                     self.assertEqual(a.spec, b.spec)
 
+    def test_every_generic_member_gets_exactly_its_generics_variants(self):
+        """RDNA_WMMA_ARCHES names the generics; each member pointing at one is
+        served exactly as its generic is: the same route, spec and sweep."""
+        from rocke.core.arch.target import _load_generic_targets
+
+        for generic, members in _load_generic_targets().items():
+            for member in members:
+                for request in (
+                    _request(seqlen_q=1024, seqlen_k=1024, hdim_q=64, hdim_v=64),
+                    _request(hdim_q=192, hdim_v=128),
+                    _decode_request(),
+                ):
+                    with self.subTest(member=member, request=request):
+                        a = dispatch_attention(
+                            dataclasses.replace(request, arch=generic)
+                        )
+                        mine = dataclasses.replace(request, arch=member)
+                        b = dispatch_attention(mine)
+                        self.assertEqual(b.request.arch, member)
+                        self.assertEqual(a.candidate.name, b.candidate.name)
+                        self.assertEqual(a.spec, b.spec)
+                        self.assertEqual(
+                            a.candidate.sweep_space(a.request),
+                            b.candidate.sweep_space(b.request),
+                        )
+
     def test_device_names_route_to_their_rdna_catalog_row(self):
+        # Every member of a supported generic target has its own catalog row,
+        # so a device name keeps its processor; the generic's kernels serve it.
         for device, arch in (
-            ("gfx1100", "gfx11-generic"),
-            ("gfx1103:xnack-", "gfx11-generic"),
+            ("gfx1100", "gfx1100"),
+            ("gfx1103:xnack-", "gfx1103"),
             ("gfx1151", "gfx1151"),
-            ("gfx1200", "gfx12-generic"),
-            ("gfx1200-strict", "gfx12-generic"),
+            ("gfx1200", "gfx1200"),
+            ("gfx1200-strict", "gfx1200"),
             ("gfx1201", "gfx1201"),
         ):
             with self.subTest(device=device):
@@ -378,8 +406,13 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     self.assertEqual(_window_bounds(request), expected)
 
     def test_explicit_layout_and_score_requirements_are_not_ignored_elsewhere(self):
+        # gfx950 serves contiguous prefill with its dense kernel and a single
+        # contiguous query row with the strided decode kernel, never RDNA WMMA.
+        single_row = dispatch_attention(
+            _request(arch="gfx950", layout="dense", seqlen_q=1)
+        )
+        self.assertEqual(single_row.candidate.name, "attention_strided_decode")
         for changes in (
-            {"layout": "dense"},
             {"layout": "ragged"},
             {"layout": "paged"},
             {"use_softcap": True},
@@ -409,9 +442,13 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     plain = dispatch_attention(make(layout=layout)).spec
                     lse = dispatch_attention(make(layout=layout, emit_lse=True)).spec
                     self.assertEqual(plain, lse)
+        # On CDNA the same request routes to unified tiled 2D, whose LSE
+        # variant is a different binary (one more pointer argument).
         for arch in ("gfx950", "gfx942"):
-            with self.subTest(arch=arch), self.assertRaises(ValueError):
-                dispatch_attention(_request(arch=arch, emit_lse=True))
+            with self.subTest(arch=arch):
+                plain = dispatch_attention(_request(arch=arch)).spec
+                lse = dispatch_attention(_request(arch=arch, emit_lse=True)).spec
+                self.assertEqual(lse.kernel_name(), plain.kernel_name() + "_lse")
 
     def test_score_features_layouts_and_fp8_reach_both_kernels(self):
         features = dict(

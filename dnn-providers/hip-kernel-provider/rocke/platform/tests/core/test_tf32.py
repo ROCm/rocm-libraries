@@ -24,7 +24,7 @@ from rocke.core.ir import (
 )
 from rocke.core.ir_serialize import serialize, parse
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.verify import verify
 from rocke.examples.gfx942.tf32_numerics import rne_bits
 from rocke.tests.engines import assert_both_engines_reject
@@ -109,7 +109,7 @@ def test_both_builders_and_lowerers(m, mode):
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
     assert native.tf32_mma_probe_serialize_ir(m, mode) == ir
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
         assert native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor) == ll
         if mode != "fp32":
@@ -224,7 +224,7 @@ def test_vector_payload_operations_remain_supported():
     assert verify(kernel) == []
     assert "i32x4" in lower_kernel_to_hip(kernel)
     native = pytest.importorskip("rocke_engine")
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
@@ -247,7 +247,7 @@ def test_global_vector_load(n, align):
         assert f"{n * 4});" in hip
         assert "__builtin_memcpy" in hip
     native = pytest.importorskip("rocke_engine")
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         assert f"load <{n} x i32>" in ll
         assert f"align {expected_align}" in ll
@@ -399,7 +399,7 @@ def test_recipe_replay_preserves_ir(m, mode, tmp_path, tf32_recipe_replay_cli):
     assert serialize(recorded) == serialize(build_tf32_mma_probe(spec))
     path = tmp_path / "recipe.cbor"
     path.write_bytes(recipe_bundle.cbor_encode(recipe))
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         replayed = subprocess.run(
             [
                 str(tf32_recipe_replay_cli),
@@ -458,7 +458,7 @@ def test_global_vector_store(n, align, dtype):
     else:
         assert "*reinterpret_cast<" in hip
     native = pytest.importorskip("rocke_engine")
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         store = next(line for line in ll.splitlines() if "store <" in line)
         assert f"store <{n} x {'float' if dtype == F32 else 'i32'}>" in store
@@ -482,7 +482,7 @@ def test_global_vector_store_rejects_invalid_alignment(align):
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel)
     native = pytest.importorskip("rocke_engine")
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         with pytest.raises(ValueError, match=message):
             _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         with pytest.raises(Exception, match=message):
@@ -518,7 +518,7 @@ def test_non_xf32_mma_rejects_tf32_result(m, scalar_result):
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel, arch="gfx942")
     native = pytest.importorskip("rocke_engine")
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         with pytest.raises(ValueError, match=message):
             _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
         with pytest.raises(Exception, match=message):
@@ -546,7 +546,7 @@ def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad):
         native.lower_serialized_ir(ir, arch="gfx942")
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_numeric_harness_auto_flavor(flavor, monkeypatch, tmp_path):
     pytest.importorskip("rocke_engine")
     from rocke.examples.gfx942 import tf32_numerics
