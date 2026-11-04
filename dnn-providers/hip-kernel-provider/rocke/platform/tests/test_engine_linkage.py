@@ -112,7 +112,14 @@ def test_online_build_uses_the_cmake_shared_target(
     shutil.which("cmake") is None or shutil.which("ctest") is None,
     reason="CMake and CTest required",
 )
-def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path):
+@pytest.mark.parametrize(
+    "provider_subdir",
+    ["", "hip_kernel_provider"],
+    ids=["standalone", "provider"],
+)
+def test_installed_ctest_entries_get_scoped_environment_contracts(
+    tmp_path, provider_subdir
+):
     build = tmp_path / "build"
     subprocess.run(
         [
@@ -123,6 +130,7 @@ def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path)
             str(build),
             "-DBUILD_TESTING=ON",
             "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+            f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
         ],
         check=True,
         capture_output=True,
@@ -134,22 +142,36 @@ def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path)
         build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
     )
     executable_suffix = ".exe" if os.name == "nt" else ""
+    test_ctest_rel = "./" if provider_subdir else "../"
+
+    def native_artifact(target):
+        if provider_subdir:
+            target = f"{provider_subdir}_{target}_test"
+        return f"../{target}{executable_suffix}"
+
     expected_artifacts = {
         "ROCKE_REPLAY_CLI": (
-            f"../tests/portable_ir/rocke_portable_ir_replay_cli{executable_suffix}"
+            f"{test_ctest_rel}tests/portable_ir/"
+            f"rocke_portable_ir_replay_cli{executable_suffix}"
         ),
         "ROCKE_PROVENANCE_MANIFEST": (
-            "../tests/portable_ir/rocke_portable_ir_provenance.txt"
+            f"{test_ctest_rel}tests/portable_ir/rocke_portable_ir_provenance.txt"
         ),
-        "ROCKE_STORAGE_TEST": f"../rocke_storage{executable_suffix}",
-        "ROCKE_IR_TYPES_TEST": f"../rocke_ir_types{executable_suffix}",
-        "ROCKE_NONTEMPORAL_HIP_TEST": f"../rocke_nontemporal_hip{executable_suffix}",
-        "ROCKE_UNSIGNED_INT_OPS_CLI": f"../rocke_unsigned_int_ops{executable_suffix}",
-        "ROCKE_ARCH_TARGET_TEST_EXE": (
-            f"../rocke_arch_target_identity{executable_suffix}"
-        ),
-        "ROCKE_BUFFER_RSRC_HIP_TEST": (f"../rocke_buffer_rsrc_hip{executable_suffix}"),
+        "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
+        "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
+        "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
+        "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
+        "ROCKE_ARCH_TARGET_TEST_EXE": native_artifact("rocke_arch_target_identity"),
+        "ROCKE_BUFFER_RSRC_HIP_TEST": native_artifact("rocke_buffer_rsrc_hip"),
     }
+
+    def environment_for(tests, test_name):
+        test = next(test for test in tests if test["name"] == test_name)
+        properties = {prop["name"]: prop["value"] for prop in test["properties"]}
+        pairs = [item.split("=", 1) for item in properties["ENVIRONMENT"]]
+        names = [name for name, _ in pairs]
+        assert len(names) == len(set(names))
+        return dict(pairs)
 
     for rocm_path in (None, tmp_path / "synthetic-rocm"):
         ctest_env = dict(os.environ)
@@ -165,27 +187,31 @@ def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path)
             env=ctest_env,
         )
         tests = json.loads(listed.stdout)["tests"]
-        rocke_pytest = next(test for test in tests if test["name"] == "rocke_pytest")
-        properties = {
-            prop["name"]: prop["value"] for prop in rocke_pytest["properties"]
+        expected_platform_environment = {
+            "PYTHONPATH": ".",
+            **expected_artifacts,
         }
-        entries = properties["ENVIRONMENT"]
-        pairs = [item.split("=", 1) for item in entries]
-        names = [name for name, _ in pairs]
-        assert len(names) == len(set(names))
-        environment = dict(pairs)
-
-        assert environment.pop("PYTHONPATH") == "."
+        expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
         if sys.platform == "linux" and rocm_path is not None:
-            compiler_path = environment.pop("PATH").split(os.pathsep)
-            assert compiler_path[:2] == [
-                str(rocm_path / "bin"),
-                str(rocm_path / "lib/llvm/bin"),
-            ]
-            assert environment.pop("HIP_DEVICE_LIB_PATH") == str(
-                rocm_path / "lib/llvm/amdgcn/bitcode"
-            )
-        assert environment == expected_artifacts
+            compiler_environment = {
+                "PATH": os.pathsep.join(
+                    [
+                        str(rocm_path / "bin"),
+                        str(rocm_path / "lib/llvm/bin"),
+                        ctest_env.get("PATH", ""),
+                    ]
+                ),
+                "HIP_DEVICE_LIB_PATH": str(rocm_path / "lib/llvm/amdgcn/bitcode"),
+            }
+            expected_platform_environment.update(compiler_environment)
+            expected_mla_environment.update(compiler_environment)
+            expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
+
+        assert environment_for(tests, "rocke_pytest") == expected_platform_environment
+        assert (
+            environment_for(tests, "rocke_library_mla_pytest")
+            == expected_mla_environment
+        )
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

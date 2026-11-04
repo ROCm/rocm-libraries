@@ -7,10 +7,10 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
-from rocke.benchmark.perf import schema
-from rocke.benchmark.perf.tests.test_occupancy import _find_llvm_tool, _llc_code_object
-from rocke.benchmark.perf.tool import cli, store
 import rocke.benchmark.perf.tool.cli as cli_mod
+from rocke.benchmark.perf import schema
+from rocke.benchmark.perf.tool import cli, store
+from rocke.tests.llc import find_llvm_tool, llc_code_object
 
 
 def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None):
@@ -222,11 +222,11 @@ class TestOccupancyCmd(unittest.TestCase):
     def test_occupancy_refuses_an_unmodelled_processor(self):
         # A real code object for a processor the occupancy model has no data for:
         # the command stops with the model's reason instead of a traceback.
-        llc = _find_llvm_tool("llc")
-        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+        llc = find_llvm_tool("llc")
+        if llc is None or find_llvm_tool("llvm-readelf") is None:
             self.skipTest("llc or llvm-readelf not found")
         with tempfile.NamedTemporaryFile(suffix=".o") as f:
-            f.write(_llc_code_object(llc, "gfx1030", 64))
+            f.write(llc_code_object(llc, "gfx1030", 64))
             f.flush()
             with self.assertRaises(SystemExit) as ctx:
                 _run(["occupancy", f.name, "--arch", "gfx1030"])

@@ -47,6 +47,7 @@ from kernels.common._attention_additive_bias import (
     declare_additive_bias_params,
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_mask_type import band_mask_type
 
 from rocke.core.ir import (
     BF16,
@@ -898,6 +899,22 @@ class UnifiedAttention2DTiledSpec:
     @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
+
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value
+        (``kernels.common.attention_mask_type.band_mask_type``): 0 no mask, 1 top-left
+        causal, 2 bottom-right causal, 3 any other band (a sliding window or a right bound
+        above zero).
+
+        A bound method rather than a property so ``hkp_pack`` can observe it as an
+        effective accessor: a descriptor's metadata cannot carry ``right_bound``'s -1
+        (the generator's unset sentinel), and this is what it carries instead.
+        """
+        return band_mask_type(
+            sliding_window=self.sliding_window,
+            right_bound=self.right_bound,
+            causal_top_left=self.causal_top_left,
+        )
 
     @property
     def binary_search_iters(self) -> int:
@@ -1876,11 +1893,11 @@ def build_unified_attention_2d_tiled(
         vals = p_regs_f32
         for bit in (0, 1):
             lane_bit = _bit2(lane_col_mod4, bit)
-            reg_bit = 1 << bit
+            reg_bit = 1 << bit  # 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle
             old = vals
             vals = []
             for reg in range(4):
-                partner = b.warp_shuffle_xor(old[reg ^ reg_bit], reg_bit)
+                partner = b.warp_shuffle_xor_dpp(old[reg ^ reg_bit], reg_bit)
                 same_bit = b.cmp_eq(lane_bit, b.const_i32((reg >> bit) & 1))
                 vals.append(b.select(same_bit, old[reg], partner))
 

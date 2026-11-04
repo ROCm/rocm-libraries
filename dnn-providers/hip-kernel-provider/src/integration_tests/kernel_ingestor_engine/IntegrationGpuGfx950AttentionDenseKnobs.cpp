@@ -549,7 +549,7 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
 }
 
 /// The forward SDPA tolerance every SdpaFwd bundle of this engine is graded at
-/// (config/hipkernel_Gfx950AttentionDense.toml names no override).
+/// (config/hipkernel_Gfx950Attention.toml names no override).
 float sdpaForwardTolerance(DataType dataType)
 {
     return dataType == DataType::HALF
