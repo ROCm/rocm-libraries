@@ -237,10 +237,11 @@ noise can swap near-ties. The heuristic's own top 5 never held the best kernel
 than handing it the answer. In the replay's original, lighter noise model,
 `per_problem` seeds without a warm start did not help (88%, at 616 builds),
 a cap of 150 builds for the 8 problems took the warm-started `per_problem`
-search from 99.4% to 91%, and the deterministic TPE patch left the means
-unchanged (88.9% and 99.6%). The runs used about 356 of the 1200 builds
-allowed: keep `new_builds_per_run` from binding by scaling it with the number
-of problems (the warm-started runs built about 45 kernels per problem).
+search from 99.4% to 91%, and the deterministic TPE patch left the `shared`
+means unchanged (88.9% without and 99.6% with the warm start). The runs used
+about 356 of the 1200 builds allowed: keep `new_builds_per_run` from binding
+by scaling it with the number of problems (the warm-started runs built about
+45 kernels per problem).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -401,11 +402,12 @@ and renamed into place, so concurrent workers on any device read a complete
 entry or none. Later calls only load them and compare: 0.37 s and 0.06 s for
 the two shapes above. Measured end to end on a full MI350X (gfx950), with
 `dir` on `/dev/shm` (a tmpfs) and `max_total_gib` 12, a search's measurement
-call (worker start, host side and kernel) took 0.34 s instead of 0.62 s on the
-replay's 8 fp16 `rcr` shapes (1.8x) and 5.75 s instead of 17.2 s on 4 large
-bf16 `crr` shapes (3.0x), with the same verify outcomes and latencies. Both
-are averages over the calls, each problem's first (uncached) call included:
-8 of 62 calls for the fp16 shapes, 4 of 8 for the large ones. The default
+or confirmation call (worker start, host side and kernel) took 0.34 s instead
+of 0.62 s on the replay's 8 fp16 `rcr` shapes (1.8x) and 5.75 s instead of
+17.2 s on 4 large bf16 `crr` shapes (3.0x), with the same verify outcomes and
+latencies. Both are averages over all calls of the run, each problem's first
+(uncached) call included: 8 of 110 calls (62 measurements, 48 confirmation
+calls) for the fp16 shapes, 4 of 32 (8 and 24) for the large ones. The default
 `dir` was not measured: on that host its filesystem was too full to store
 anything (see "Host cache space" below). A key has one writer: workers that
 miss it while another writes it (a problem's first round on several devices)
@@ -438,9 +440,9 @@ the memory the build workers leave free.
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against
 the cap, measurements, active problems, elapsed time and deadline) and one
-title line per measure call, named like its `rounds/` file. A host cache that
-can store nothing (see "Host cache space") prints a `Host cache: WARNING` line
-before the first round.
+title line per measure call, named like its `rounds/` file. A host cache whose
+filesystem is already under 10% free (see "Host cache space") prints a
+`Host cache: WARNING` line before the first round.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`. If nearly every
