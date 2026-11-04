@@ -143,7 +143,13 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
     ued = _doc(documents, merged, "ued")
     assert ued["name"] == "hipkernel:flydsl_sdpa_bwd_merged"
     assert ued["sort_kernel_catalog"] == {"default": uhd["id"]}
-    assert ued["sdk_version"] == _doc(documents, sibling, "ued")["sdk_version"]
+    # The forward engines claim schema 1.4.0 after the parity merge; the merged backward stays at
+    # the 1.2.0 its matcher was written against (gen_descriptors.SDK_VERSION_BY_OP).
+    assert (
+        ued["sdk_version"]
+        == gd.SDK_VERSION_BY_OP[merged]
+        == gd.PASS_BY_VALUE_SDK_VERSION
+    )
 
 
 def test_kernel_metadata_carries_every_manifest_knob(documents):

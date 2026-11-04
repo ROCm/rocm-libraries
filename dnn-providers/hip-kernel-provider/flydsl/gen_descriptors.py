@@ -100,8 +100,9 @@ DESCRIPTOR_VERSION = "1.0"
 # computeMinimumEnginePluginApiVersion) is above it before the matcher runs. An op absent
 # here stays at the baseline (1.0.0).
 #
-# * RMSNorm reads a runtime pass-by-value epsilon: K_PASS_BY_VALUE_MIN_API_VERSION, 1.2.0.
-# * The SDPA engines read and gate every field the schema has added through
+# * RMSNorm and the SDPA backward ops read a runtime pass-by-value scalar (the epsilon, the
+#   softmax scale): K_PASS_BY_VALUE_MIN_API_VERSION, 1.2.0.
+# * The forward SDPA engines read and gate every field the schema has added through
 #   K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION, 1.4.0, which is K_MAX_SUPPORTED_API_VERSION:
 #   overridable shapes (1.1.0, declined), runtime pass-by-value tensors (1.2.0), ragged
 #   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0). COVERAGE.md's
@@ -120,7 +121,10 @@ PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 SDPA_SDK_VERSION = "1.4.0"
 SDK_VERSION_BY_OP: dict[str, str] = {
     "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
-    **{op: SDPA_SDK_VERSION for op in SDPA_OPS},
+    **{
+        op: PASS_BY_VALUE_SDK_VERSION if "_bwd_" in op else SDPA_SDK_VERSION
+        for op in SDPA_OPS
+    },
 }
 
 # The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
