@@ -97,6 +97,10 @@ is listed here.
    start (upstream fills the batch with the start's neighbours and measures
    the warm starts only in the next ask, so a budget of two trials never
    reached the second warm start). One-trial asks are unchanged.
+4. `surrogate.py`: GP maps an active one-level ordinal axis to the feature
+   0.0 instead of dividing by its zero level span. `from_configs` fixes
+   constant fields, but a hand-built `SearchSpace` may hold such an axis, and
+   GP (alone or in a portfolio) raised `ZeroDivisionError` once it fitted.
 
 ## Notes for drivers
 

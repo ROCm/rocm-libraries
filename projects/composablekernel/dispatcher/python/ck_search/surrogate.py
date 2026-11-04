@@ -608,7 +608,7 @@ class GPEI(_ModelStrategy):
         f: list[float] = []
         for i, p in enumerate(self.space.params):
             if p.kind == ORDINAL:
-                f.append(g[i] / (p.size - 1) if act[i] else 0.0)
+                f.append(g[i] / (p.size - 1) if act[i] and p.size > 1 else 0.0)  # ck_search patch 4
             elif p.kind in (CATEGORICAL, BOOL):
                 one = [0.0] * p.size
                 if act[i]:

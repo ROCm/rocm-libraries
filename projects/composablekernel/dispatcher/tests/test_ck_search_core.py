@@ -260,6 +260,22 @@ def test_every_warm_start_is_asked_before_the_strategys_own_picks(name, batch):
     assert keys[: len(warm)] == [space.key(space.encode(r)) for r in warm]
 
 
+@pytest.mark.parametrize("name", ["gp", "portfolio"])
+def test_gp_fits_a_space_with_a_singleton_ordinal_axis(name):
+    # A one-level ordinal axis is active in every config; GP must not divide by
+    # its zero level span (from_configs fixes such fields, a hand-built space
+    # need not). Past n_startup, so the model is fitted, inside a portfolio too.
+    space = cs.SearchSpace([cs.Param.ordinal("k_batch", [1]),
+                            cs.Param.ordinal("tile_m", [16 * (i + 1) for i in range(40)])])
+    strat = cs.make_strategy(name, space, seed=1)
+    for _ in range(12):
+        asked = strat.ask(BATCH)
+        strat.tell([cs.Observation(t, space.key(t.genome), cs.Status.OK,
+                                   abs(t.genome[1] - 25) + 1.0) for t in asked])
+    gp = strat if name == "gp" else next(m for m in strat.members if m.name == "gp")
+    assert gp._fits > 0
+
+
 @pytest.mark.parametrize("name", ["random", "exhaustive"])
 def test_random_and_exhaustive_ignore_warm_records(name):
     assert _drive(VENDORED_NS, name, 3, warm=WARM)[0] == _drive(VENDORED_NS, name, 3)[0]
