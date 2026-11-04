@@ -20,6 +20,7 @@ without a gfx942 GPU.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import unittest
 
@@ -368,6 +369,18 @@ class TestD128BodyBoundsReads(unittest.TestCase):
                 spec = au._tiled_spec_from_problem(problem, "gfx942")
                 kernel = t2d.build_gfx942_4warp_gqa(spec, arch="gfx942")
             yield f"{dt} {hq}/{hkv} bs{bs}", kernel
+
+    def test_rejects_non_power_of_two_block_size(self):
+        # Dispatch admits only 16/32/64; this guards the builder's lshr page split
+        # if that admission set is ever widened.
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(
+                _d256_problem(head_size=128, block_size=16, sliding_window=512),
+                "gfx942",
+            )
+            bad = dataclasses.replace(spec, block_size=48, tile_size=48)
+            with self.assertRaises(NotImplementedError):
+                t2d.build_gfx942_4warp_gqa(bad, arch="gfx942")
 
     def test_variants_cover_fold_and_plain(self):
         names = [k.name for _, k in self._kernels()]

@@ -6349,13 +6349,13 @@ def build_gfx942_4warp_gqa(
     # multiple (decode reads 127 Q rows past a 1-token sequence, off the end of the
     # Q tensor). Unlike the lean body this clamps the page, not the key, so the
     # per-lane page/offset split stays out of the KV loop (a per-tile key clamp
-    # cost 3-7% on the fold cohort); keys past klen read rows of the last valid
-    # page. Those keys are masked to -inf (P = 0) and clamped rows are never
-    # stored, so only the addresses change.
+    # was measurably slower on the fold cohort); keys past klen read rows of the
+    # last valid page. Those keys are masked to -inf (P = 0) and clamped rows are
+    # never stored, so only the addresses change.
     k_last_page = b.lshr(b.sub(klen, b.const_i32(1)), b.const_i32(BS_LOG2))
     q_last = b.sub(cu_q_stop, b.const_i32(1))
     # This lane's clamped Q row is loop-invariant, so it is computed once here
-    # rather than per KV tile (measured: the per-tile form cost up to 4% at bs64).
+    # rather than per KV tile (the per-tile form was measurably slower at bs64).
     if _FOLD:
         # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
         # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
