@@ -3,12 +3,13 @@
 """Unit tests for what TensileCreateLibrary's assembly codegen workers return:
 each worker writes and assembles its kernel's source itself, so the result sent
 back to the parent carries the kernel info but not the source."""
+import importlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-import tensilelite.TensileCreateLibrary.Run as Run
+Run = importlib.import_module("tensilelite.create_library.run")
 
 pytestmark = pytest.mark.unit
 

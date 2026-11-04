@@ -3,13 +3,15 @@
 """Unit tests for the lighter logic loading in TensileCreateLibrary: shared
 solution wrappers in matching tables, and the parse wrapper the loading
 workers run."""
+import importlib
 import pickle
 
 import pytest
 
-import tensilelite.TensileCreateLibrary.Run as Run
 from tensilelite import LibraryIO
 from tensilelite.SolutionLibrary import IndexSolutionLibrary, MasterSolutionLibrary, MatchingLibrary
+
+Run = importlib.import_module("tensilelite.create_library.run")
 
 pytestmark = pytest.mark.unit
 
