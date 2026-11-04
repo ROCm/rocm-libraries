@@ -826,12 +826,13 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                 GridwiseGemmDefault<MNRepeat_, MPerXdl_, NPerXdl_>>;
 
     static constexpr index_t MNXdlPerWave64 =
-        WaveletEnabled ? math::max(NXdlPerWave64, 1) : math::max(MXdlPerWave64, 1);
-    using GridwiseGemm64 = GridwiseGemmBase<MNXdlPerWave64, MPerXdl, NPerXdl>;
+        WaveletEnabled ? NXdlPerWave64 : MXdlPerWave64;
+    using GridwiseGemm64 = GridwiseGemmBase<math::max(MNXdlPerWave64, 1), MPerXdl, NPerXdl>;
 
     static constexpr index_t MNXdlPerWave32 =
-        WaveletEnabled ? math::max(NXdlPerWave32, 1) : math::max(MXdlPerWave32, 1);
-    using GridwiseGemm32 = GridwiseGemmBase<MNXdlPerWave32, Wave32MaxMNPerXdl, Wave32MaxMNPerXdl>;
+        WaveletEnabled ? NXdlPerWave32 : MXdlPerWave32;
+    using GridwiseGemm32 =
+        GridwiseGemmBase<math::max(MNXdlPerWave32, 1), Wave32MaxMNPerXdl, Wave32MaxMNPerXdl>;
     // Default GridwiseGemm alias for use in non-wave-size-dependent code paths
     using GridwiseGemm = GridwiseGemm64;
 
