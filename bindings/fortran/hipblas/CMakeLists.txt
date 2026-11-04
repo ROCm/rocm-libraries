@@ -25,137 +25,25 @@
 # Fortran bindings for hipBLAS. hipblas.F90 is GENERATED from the C headers by
 # the rocm-fortran generator: do not edit it, regenerate it.
 
-# Not higher: the hipBLAS root (3.17) adds this directory unconditionally.
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.19)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(hipblas-fortran LANGUAGES NONE)
-endif()
+project(hipblas-fortran LANGUAGES NONE)
 
-# Off on the CUDA backend (untested there) and on Windows (no ROCm Fortran
-# compiler). Same test as hipSOLVER: a defined USE_CUDA decides, as in the root,
-# so a standalone -DUSE_CUDA=ON is honoured; otherwise HIP_PLATFORM does.
-set(_hipblas_cuda_backend OFF)
-if(DEFINED USE_CUDA)
-  if(USE_CUDA)
-    set(_hipblas_cuda_backend ON)
-  endif()
-elseif("$ENV{HIP_PLATFORM}" STREQUAL "nvidia" OR "${HIP_PLATFORM}" STREQUAL "nvidia")
-  set(_hipblas_cuda_backend ON)
-endif()
-if(_hipblas_cuda_backend)
-  set(_hipblas_fortran_default OFF)
-else()
-  set(_hipblas_fortran_default "${UNIX}")
-endif()
-# The only option(BUILD_FORTRAN_BINDINGS) in hipBLAS: the first one fixes the cache.
-option(BUILD_FORTRAN_BINDINGS "Build the hipBLAS Fortran bindings"
-       "${_hipblas_fortran_default}")
-unset(_hipblas_fortran_default)
-
-# BUILD_FORTRAN_BINDINGS is shared by the whole monorepo; this one wins here.
-if(DEFINED HIPBLAS_BUILD_FORTRAN_BINDINGS)
-  set(BUILD_FORTRAN_BINDINGS ${HIPBLAS_BUILD_FORTRAN_BINDINGS})
-endif()
-
+# Not ON: ROCm ships no Fortran compiler on Windows.
+option(BUILD_FORTRAN_BINDINGS "Build the hipBLAS Fortran bindings" "${UNIX}")
 option(BUILD_FORTRAN_CLIENTS "Build the hipBLAS Fortran binding tests" ON)
-if(DEFINED HIPBLAS_BUILD_FORTRAN_CLIENTS)
-  set(BUILD_FORTRAN_CLIENTS ${HIPBLAS_BUILD_FORTRAN_CLIENTS})
-endif()
 
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
              none assumed-shape assumed-rank)
 
-# Standalone, PARENT_SCOPE at top level fails under -Werror=dev.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(HIPBLAS_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
-endif()
-
 if(NOT BUILD_FORTRAN_BINDINGS)
-  unset(_hipblas_cuda_backend)
   return()
 endif()
 
-if(_hipblas_cuda_backend)
-  message(WARNING
-    "hipBLAS: the Fortran bindings were requested on the CUDA backend. "
-    "hipblas.F90 is generated from the ROCm code path and is not tested "
-    "against a cuBLAS-backed libhipblas, which is why it is off by default "
-    "there. Building it is supported; vouching for it is not.")
-endif()
-unset(_hipblas_cuda_backend)
-
-# ROCM_LIBS_HAVE_FORTRAN is the root's current name; drop it once the root
-# publishes ROCM_HAVE_FORTRAN.
-if(DEFINED ROCM_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_HAVE_FORTRAN})
-elseif(DEFINED ROCM_LIBS_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_LIBS_HAVE_FORTRAN})
-else()
-  include(CheckLanguage)
-
-  # rocm-cmake's ROCMChecks would flag the CMAKE_Fortran_COMPILER cache write
-  # below (a hard error under ROCM_ERROR_TOOLCHAIN_VAR); silence it for this scope.
-  set(_rocm_warn_toolchain_var "${ROCM_WARN_TOOLCHAIN_VAR}")
-  set(_rocm_error_toolchain_var "${ROCM_ERROR_TOOLCHAIN_VAR}")
-  set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-  set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
-
-  # Prefer ROCm's amdflang over the first compiler on PATH (often gfortran); an
-  # explicit CMAKE_Fortran_COMPILER or FC wins. Must precede check_language().
-  if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-    set(_rocm_fc_hints)
-    foreach(_rocm_fc_cc "${CMAKE_CXX_COMPILER}" "${CMAKE_C_COMPILER}"
-                        "${CMAKE_HIP_COMPILER}")
-      if(_rocm_fc_cc)
-        get_filename_component(_rocm_fc_dir "${_rocm_fc_cc}" DIRECTORY)
-        list(APPEND _rocm_fc_hints "${_rocm_fc_dir}")
-      endif()
-    endforeach()
-    foreach(_rocm_fc_root "${ROCM_PATH}" "$ENV{ROCM_PATH}" "/opt/rocm")
-      if(_rocm_fc_root)
-        list(APPEND _rocm_fc_hints "${_rocm_fc_root}/bin"
-                                   "${_rocm_fc_root}/lib/llvm/bin")
-      endif()
-    endforeach()
-    # Uncached, so a changed ROCM_PATH is honoured on reconfigure.
-    unset(_rocm_amdflang CACHE)
-    find_program(_rocm_amdflang NAMES amdflang HINTS ${_rocm_fc_hints}
-                 NO_DEFAULT_PATH)
-    # A ROCm tree can carry a dangling amdflang symlink.
-    if(_rocm_amdflang)
-      execute_process(COMMAND "${_rocm_amdflang}" --version
-                      RESULT_VARIABLE _rocm_fc_rc
-                      OUTPUT_QUIET ERROR_QUIET)
-      if(_rocm_fc_rc EQUAL 0)
-        set(CMAKE_Fortran_COMPILER "${_rocm_amdflang}" CACHE FILEPATH
-            "Fortran compiler used for the ROCm Fortran bindings" FORCE)
-      endif()
-      unset(_rocm_fc_rc)
-    endif()
-    unset(_rocm_amdflang CACHE)
-    unset(_rocm_fc_hints)
-    unset(_rocm_fc_cc)
-    unset(_rocm_fc_dir)
-    unset(_rocm_fc_root)
-  endif()
-
-  check_language(Fortran)
-  set(ROCM_WARN_TOOLCHAIN_VAR "${_rocm_warn_toolchain_var}")
-  set(ROCM_ERROR_TOOLCHAIN_VAR "${_rocm_error_toolchain_var}")
-  unset(_rocm_warn_toolchain_var)
-  unset(_rocm_error_toolchain_var)
-
-  if(CMAKE_Fortran_COMPILER)
-    set(_have_fortran TRUE)
-  else()
-    set(_have_fortran FALSE)
-  endif()
-endif()
-
-if(NOT _have_fortran)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCmFortranCompiler.cmake")
+if(NOT CMAKE_Fortran_COMPILER)
   message(STATUS "hipBLAS: no Fortran compiler found, skipping the Fortran bindings")
   return()
 endif()
@@ -225,12 +113,8 @@ target_include_directories(hipblas_fortran PUBLIC
 
 # Link interface only. hipblas-config's find_dependency(hip) reaches FindThreads,
 # which needs C or CXX enabled; QUIET because the bindings build without hipBLAS.
-if(NOT TARGET roc::hipblas)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(hipblas QUIET)
-endif()
+enable_language(C)
+find_package(hipblas QUIET)
 
 # Never left empty: it is @-substituted into a bare if() in the installed config.
 if(TARGET roc::hipblas)
@@ -241,12 +125,6 @@ else()
     "hipBLAS: the C library was not found, so the Fortran bindings carry no "
     "link interface; a consumer will have to link it (-lhipblas) itself.")
   set(HIPBLAS_FORTRAN_NEEDS_C_PACKAGE FALSE)
-endif()
-
-# The parent cannot see the compiler ID; it keys its libgfortran dependency on it.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(HIPBLAS_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
-  set(HIPBLAS_FORTRAN_COMPILER_ID "${CMAKE_Fortran_COMPILER_ID}" PARENT_SCOPE)
 endif()
 
 # The uninstrumented Fortran executables cannot link an ASan libhipblas.
