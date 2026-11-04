@@ -12,7 +12,7 @@ ARG ROCMVERSION=10.1
 #     --build-arg TARBALL_PATTERN=therock-dist-linux-gfx90a
 #     --build-arg TARBALL_PATTERN=therock-dist-linux-gfx94X-dcgpu
 ARG TARBALL_URL=""
-ARG TARBALL_BASE=https://rocm.nightlies.amd.com/tarball-multi-arch
+ARG TARBALL_BASE=https://nightly.repo.amd.com/rocm/core/tarball
 ARG TARBALL_PATTERN=therock-dist-linux-multiarch
 
 ARG compiler_version=""
