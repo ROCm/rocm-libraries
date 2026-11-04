@@ -107,7 +107,7 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 
 ### Kernel Ingestor Descriptors
 
-Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` (the hip-kernel-provider) build engines from descriptor trees: JSON descriptors and the model artifacts they name. Each process reads these variables once, the first time the provider discovers its descriptors. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` read descriptor trees: JSON descriptors and the model artifacts they name. The hip-kernel-provider builds engines from them; the miopen-provider reads only the engine-level models it ships for its engines. Each process reads these variables once, the first time the provider discovers its descriptors. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
 
 #### HIPDNN_DESCRIPTOR_DIR
 
@@ -115,7 +115,7 @@ Replaces the provider's own descriptor tree. This is the only variable that can 
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
-| (unset)    | Uses the `arch_content/hip-kernel-provider` directory beside the loaded provider library, else the configure-time install location |
+| (unset)    | Uses the provider's directory beside the loaded provider library (`arch_content/hip-kernel-provider`, `arch_content/miopen-provider`), else the configure-time install location |
 | `<path>`   | Loads this directory instead of the provider's own tree |
 
 A value that is not an existing directory is ignored with a warning, and the default tree is used.
