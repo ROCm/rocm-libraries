@@ -164,16 +164,21 @@ namespace
     // a threshold.
     TEST_F(FixedPointEmulationHostTest, DeviceLookupChipAndArch)
     {
-        /* Radeon Pro W7800 and Radeon RX 9070 XT: chip rows. */
-        EXPECT_EQ(fixedPointEmulationLookupDevice(0x745eu, "gfx1100").match,
-                  FIXED_POINT_EMULATION_DEVICE_CHIP);
-        EXPECT_EQ(fixedPointEmulationLookupDevice(0x7550u, "gfx1201").match,
-                  FIXED_POINT_EMULATION_DEVICE_CHIP);
-        /* MI355X: chip row, no architecture row. */
+        /* Radeon Pro W7800 and Radeon RX 9070 XT: chip rows, integer residues
+         * (low FP64 rate relative to INT8). */
+        const auto w7800 = fixedPointEmulationLookupDevice(0x745eu, "gfx1100");
+        EXPECT_EQ(w7800.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_TRUE(w7800.int_residues);
+        const auto rx9070xt = fixedPointEmulationLookupDevice(0x7550u, "gfx1201");
+        EXPECT_EQ(rx9070xt.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_TRUE(rx9070xt.int_residues);
+        /* MI350X and MI355X: chip rows, no architecture row, FP64 residues. */
         const auto mi355x = fixedPointEmulationLookupDevice(0x75a3u, "gfx950:sramecc+:xnack-");
         EXPECT_EQ(mi355x.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
         EXPECT_EQ(mi355x.fp64_min_ai, FIXED_POINT_EMULATION_NEVER);
         EXPECT_EQ(mi355x.fp32_min_ai, FIXED_POINT_EMULATION_NEVER);
+        EXPECT_FALSE(mi355x.int_residues);
+        EXPECT_FALSE(fixedPointEmulationLookupDevice(0x75a0u, "gfx950").int_residues);
         /* Radeon targets without a chip row: architecture rows with an FP64
          * threshold, FP32 never. */
         for(const char* arch : {"gfx1100:sramecc-:xnack-",
@@ -190,6 +195,7 @@ namespace
             EXPECT_GT(sup.fp64_min_ai, 0.0) << arch;
             EXPECT_LT(sup.fp64_min_ai, FIXED_POINT_EMULATION_NEVER) << arch;
             EXPECT_EQ(sup.fp32_min_ai, FIXED_POINT_EMULATION_NEVER) << arch;
+            EXPECT_TRUE(sup.int_residues) << arch;
         }
         /* Unsupported: no chip row, no architecture row; prefixes of a gfx name
          * do not match. */
@@ -213,12 +219,13 @@ namespace
         constexpr auto NEVER   = FIXED_POINT_EMULATION_NEVER;
 
         const FixedPointEmulationDeviceSupport chip{
-            FIXED_POINT_EMULATION_DEVICE_CHIP, NEVER, NEVER};
+            FIXED_POINT_EMULATION_DEVICE_CHIP, NEVER, NEVER, false};
         const FixedPointEmulationDeviceSupport arch{
-            FIXED_POINT_EMULATION_DEVICE_ARCH, 25.0, NEVER};
+            FIXED_POINT_EMULATION_DEVICE_ARCH, 25.0, NEVER, true};
         const FixedPointEmulationDeviceSupport arch_fp32_always{
-            FIXED_POINT_EMULATION_DEVICE_ARCH, NEVER, 0.0};
-        const FixedPointEmulationDeviceSupport none{FIXED_POINT_EMULATION_DEVICE_NONE, 0.0, 0.0};
+            FIXED_POINT_EMULATION_DEVICE_ARCH, NEVER, 0.0, true};
+        const FixedPointEmulationDeviceSupport none{
+            FIXED_POINT_EMULATION_DEVICE_NONE, 0.0, 0.0, true};
 
         for(hipDataType t : {HIP_R_64F, HIP_R_32F})
         {

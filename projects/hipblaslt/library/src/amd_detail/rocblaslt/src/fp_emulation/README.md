@@ -40,6 +40,16 @@ Each emulated GEMM runs through the following GPU stages:
 6. **CRT reconstruction** — accumulate the per-modulus INT32 results (via a
    double-double / TwoSum accumulator) and finalize to the output type.
 
+Stages 4 and 6 reduce values modulo the CRT moduli. They have two versions:
+FP64 arithmetic, for GPUs with a fast FP64 rate, and integer
+and FP32 arithmetic, for GPUs whose FP64 rate makes the FP64 version
+FP64-bound. A device uses the FP64 version when its native FP64 rate is at least
+0.015 of its INT8 rate (`ai_fp64 / ai_int8` in its chip row): MI350X and MI355X
+use FP64, the Radeon chip rows and all architecture rows use integer. Both
+give the same residues for scaled values below 2^75. Above that, at the top of
+the CRT capacity, the FP64 version can return unbalanced or wrong residues and
+the integer version stays exact up to 2^88.
+
 If the input contains Inf/NaN (with detection enabled) or its dynamic range
 exceeds the CRT capacity for the maximum moduli count, the call falls back to
 native GEMM automatically.
@@ -51,7 +61,7 @@ native GEMM automatically.
 | `emulation.cpp` | Host orchestration: performance model, workspace/budget logic, kernel launch helpers, the recursive `emulated_gemm_impl`, the public `fp64EmulatedGemm` / `fp32EmulatedGemm` entry points, and env-var / descriptor-attribute resolution. Compiled as HIP. |
 | `include/emulation.hpp` | Public host-side interface (intentionally free of HIP device types so it can be included from plain C++ units). Declares the public entry points, the decision/settings structs, and the env-var parsers. |
 | `include/tables.hpp` | Compile-time CRT constant tables: the moduli, `UInt256` big-integer helper, and the derived `qpi`, `P_dd`, `inv_P`, `crt_capacity_bits`, `neg_mod`, `inv_mod`, `limb_weight`, `pad`, etc. |
-| `include/kernel_common.hpp` | Shared device helpers (`floor_log2`, `warp_reduce_max_abs`, `block_reduce_max`, `adp_atomicMaxF`), the integer residue helpers used by stages 4 and 6 (`split_int88`, `int8_residue`, `balanced_residue_i32`), and kernel tuning constants (`OZ2_PRELIM_*`, `OZ2_SCALE_*`). |
+| `include/kernel_common.hpp` | Shared device helpers (`floor_log2`, `warp_reduce_max_abs`, `block_reduce_max`, `adp_atomicMaxF`), the residue helpers used by stages 4 and 6 in their FP64 and integer versions (`fp64_int8_residue`, `fp64_balanced_residue`, `split_int88`, `int8_residue`, `balanced_residue_i32`), and kernel tuning constants (`OZ2_PRELIM_*`, `OZ2_SCALE_*`). |
 | `include/prelim_kernels.hpp` | Stage 1 — preliminary shift + INT8 extraction kernels (`accu_prelim_A/B_T/N_kernel`). |
 | `include/shift_refine_kernels.hpp` | Stage 3 — shift refinement + ADP kernels (`refine_sftA_partial_kernel`, `col_max_kernel`, `adp_reduce_A/B_kernel`, `refine_sftA_apply_kernel`, `refine_sftB_kernel`). |
 | `include/scale_kernels.hpp` | Stage 4 — multi-modulus scaling kernels (`scale_A/B_T/N_kernel`). |
@@ -204,6 +214,7 @@ match the `hipblasComputeType_t` enumerators.
 | `HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | Same as the FP64 variable, used only when that one is unset; FP64 only. CUDA-compatible name (`CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT`), but sets the ADP target rather than a fixed bit count. |
 | `HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT` | `1`..`23`, default `23` | ADP precision target for FP32. |
 | `HIPBLASLT_EMULATION_NUM_MODULI` | `2`..`20` | **Testing only.** Overrides the ADP-selected moduli count; accuracy is not guaranteed below the ADP choice. |
+| `HIPBLASLT_EMULATION_INT_RESIDUES` | `0` / `1` | **Testing only.** Forces the FP64 (`0`) or the integer (`1`) residue arithmetic of stages 4 and 6 on every device. Unset: the per-device choice. |
 | `HIPBLASLT_EMULATION_PROFILE` | file path | Append per-call profiling CSV rows to this file. |
 
 ### Per-matmul settings (emulation descriptor)
