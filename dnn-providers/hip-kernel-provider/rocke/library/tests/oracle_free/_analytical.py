@@ -17,6 +17,7 @@ from functools import cache
 from types import MappingProxyType
 
 import numpy as np
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
 _DTYPES = frozenset({"fp16", "bf16"})
 _MASKS = frozenset({"causal", "window"})
@@ -139,25 +140,23 @@ class UniformSpecFingerprint:
 
 @dataclass(frozen=True)
 class CalibrationEntry:
-    """One ratified, closed-scope zero-ULP policy entry."""
+    """One ratified, closed-scope zero-ULP policy entry.
+
+    Installing an entry in ``UNIFORM_CALIBRATION`` is the ratification; the
+    develop revision and gfx942 evidence behind it belong in the commit that
+    edits the table, not in a field nothing reads."""
 
     ulp_budget: int
-    source_revision: str
     case_ids: tuple[str, ...]
     spec: UniformSpecFingerprint
-    ratified: bool
 
     def __post_init__(self) -> None:
         if self.ulp_budget != 0:
             raise ValueError(
                 "the uniform-probability check currently supports only ulp_budget=0"
             )
-        if not self.source_revision:
-            raise ValueError("source_revision must be nonempty")
         if not self.case_ids or len(set(self.case_ids)) != len(self.case_ids):
             raise ValueError("case_ids must be nonempty and unique")
-        if not self.ratified:
-            raise ValueError("only ratified calibration entries may be installed")
 
     def mismatch(
         self, case: UniformCase, spec: UniformSpecFingerprint
@@ -215,10 +214,8 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
             "fp16",
         ): CalibrationEntry(
             ulp_budget=0,
-            source_revision="b64ae3c925b9e789fe6f62663e4c4d282ffd0f05",
             case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
             spec=_DENSE_QUICK_SPEC_FP16,
-            ratified=True,
         ),
         (
             "gfx942",
@@ -226,10 +223,8 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
             "bf16",
         ): CalibrationEntry(
             ulp_budget=0,
-            source_revision="b64ae3c925b9e789fe6f62663e4c4d282ffd0f05",
             case_ids=(UNIFORM_WINDOW_BF16.case_id,),
             spec=_DENSE_QUICK_SPEC_BF16,
-            ratified=True,
         ),
     }
 )
@@ -237,8 +232,8 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
 
 _RECALIBRATION_REMEDY = (
     "re-run the case on gfx942 with ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>, "
-    "review the records, and update UNIFORM_CALIBRATION (spec, case_ids, "
-    "source_revision) deliberately"
+    "review the records, and update UNIFORM_CALIBRATION (spec, case_ids) "
+    "deliberately"
 )
 
 
@@ -443,8 +438,8 @@ def decode_bits(bits: np.ndarray | int, dtype: str) -> np.ndarray:
     raw = np.asarray(bits, dtype=np.uint16)
     if dtype == "fp16":
         return raw.copy().view(np.float16).astype(np.float64)
-    widened = raw.astype(np.uint32) << np.uint32(16)
-    return widened.view(np.float32).astype(np.float64)
+    # The shared codec returns at least 1-D; keep a scalar input scalar.
+    return bf16_to_f32(raw).reshape(raw.shape).astype(np.float64)
 
 
 def encode_bits(values: np.ndarray, dtype: str) -> np.ndarray:
@@ -469,7 +464,9 @@ def encode_bits(values: np.ndarray, dtype: str) -> np.ndarray:
         with np.errstate(over="ignore"):
             bits = source.astype(np.float16).view(np.uint16)
     else:
-        bits = (source.view(np.uint32) >> np.uint32(16)).astype(np.uint16)
+        # Round-to-nearest-even, but an accepted value never rounds: the
+        # round-trip check below rejects anything that is not exact.
+        bits = f32_to_bf16(source).reshape(source.shape)
     round_trip = decode_bits(bits, dtype).astype(np.float32)
     inexact = round_trip.view(np.uint32) != source.view(np.uint32)
     if np.any(inexact):

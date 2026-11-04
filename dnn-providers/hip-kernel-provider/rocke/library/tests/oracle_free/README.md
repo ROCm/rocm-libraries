@@ -40,6 +40,9 @@ The suite does not use Torch. Inputs are built in FP32 and then encoded to raw
 FP16/BF16 `uint16` bits by `encode_bits`. That function rejects any value that
 would round, so the kernel reads exactly the values the expectations assume.
 Signed zero survives the encoding, and NaN or out-of-range inputs are refused.
+BF16 goes through rocKE's shared codec (`rocke.numeric.bf16`); FP16 uses numpy's
+native `float16`. Only the input and output encoding is shared; the expected
+bits come from exact rational rounding in `_analytical.py`.
 
 `run_dense_case` in `_gfx942_subject.py` launches one case:
 
@@ -109,8 +112,9 @@ entry keyed by `(arch, candidate_name, dtype)`:
 Each entry closes its scope with the exact case IDs and a `UniformSpecFingerprint`
 of the dispatch-resolved spec. The fingerprint records path, persistence,
 runtime shape, head size, `block_m`, `block_n`, fast exp2, sinks and LSE.
-`source_revision` names the develop revision whose kernel source was ratified
-on gfx942.
+Installing an entry is the ratification. The develop revision and the gfx942
+evidence behind it are recorded in the commit that edits the table, not in the
+code, so a rebase does not need a re-pin.
 
 Some fields are deliberately left out of the fingerprint: `waves_per_eu`,
 `nonpersist_decode`, `use_cfvst`, K double buffering (`lds_num_buffers`) and V
@@ -121,15 +125,25 @@ None of them is active in the calibrated cases anyway:
 - CFVST is enabled only at D128.
 - K double buffering and V prefetch require the BF16 D128 persistent body.
 
-The subject adapter additionally requires a non-persistent, single-pass
-(`kv_segments == 1`), non-ragged, top-left dense kernel without sinks or LSE.
-If the dispatch outcome moves outside that scope, resolution fails, which forces
-a recalibration instead of reusing the old one.
+Before launching, the subject adapter checks only what the launch itself needs:
+
+- the dense gfx942 candidate;
+- the requested shape, which sizes the host buffers;
+- no sinks and no LSE, because it allocates only Q, K, V and O;
+- the scope the fingerprint does not record: single-pass (`kv_segments == 1`),
+  non-ragged, top-left.
+
+If the dispatch outcome moves outside that, resolution fails. A drift in any
+other fingerprint field (persistence, runtime shape, tile, fast exp2) still
+launches and writes its calibration records, then fails at `require_calibration`
+with the remedy.
 
 ### Skip and failure semantics
 
-The GPU cases skip only when the visible device is not gfx942. The skip reason
-names the architecture HIP reports.
+The GPU cases skip only when the visible device is not gfx942. They use the
+shared `rocke.tests.gpu.current_device_arch_in` gate, so the skip reason names
+the GPU found, and a lane that sets `ROCKE_REQUIRE_GFX942=1` fails instead of
+skipping.
 
 On gfx942, the cases in `UNIFORM_QUICK_CASES` always run. The checks below are
 failures, never skips. `require_calibration` reports each one with field-level
@@ -146,9 +160,11 @@ therefore fails the gate until it is re-verified. A CPU contract pins
 drop out of the parametrization unnoticed.
 
 Mutation self-checks and calibration capture both run before the calibration
-gate, so a failing run still writes its records. Budgets are never widened from
-a run under judgment. If a ratified case stops being bit-exact, remove its
-entry and investigate.
+gate, so a failing run still writes its records. A kernel with a mask or
+denominator bug can write exactly what a mutation predicts. When that happens,
+the unrejected mutation is reported together with the control's violations,
+not as a checker failure. Budgets are never widened from a run under judgment.
+If a ratified case stops being bit-exact, remove its entry and investigate.
 
 ### Re-ratifying an entry
 
@@ -157,14 +173,16 @@ with one record per `(mutation, exposure, N_q)`: rows, compared, exact, max ULP
 and max stored row-sum residual. These records are the evidence for ratifying
 an entry.
 
-After a kernel, dispatch or base-revision change:
+When a kernel or dispatch change makes the gate fail with a calibration
+mismatch:
 
 1. Run the complete suite on gfx942 with
    `ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>` set.
 2. Confirm every control record is bit-exact (`compared == exact`, max ULP `0`,
    stored row-sum residual `0`) and that every mutation was rejected.
-3. In one reviewed change, update the affected `UNIFORM_CALIBRATION` entry:
-   `spec`, `case_ids`, and `source_revision` (the develop revision under test).
+3. In one reviewed change, update the affected `UNIFORM_CALIBRATION` entry
+   (`spec`, `case_ids`). Name the develop revision under test and the gfx942
+   run in that commit's message.
 
 ## Oracle prohibition
 

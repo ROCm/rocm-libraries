@@ -7,9 +7,11 @@ Inputs are encoded exactly into raw FP16/BF16 bits, uploaded into HIP device
 buffers and launched through the production pointer entry; outputs come back as
 raw bits. Only numpy and the rocKE HIP runtime are needed, no tensor framework.
 
-The only skip is a processor that is not gfx942. On gfx942 a missing calibration
-entry, a calibration scope mismatch, or an observation with no legal coordinate
-fails the test, so a dispatch change cannot silently remove the gate.
+The only skip is a processor that is not gfx942, through the shared
+``rocke.tests.gpu.current_device_arch_in`` gate, so ``ROCKE_REQUIRE_GFX942=1``
+turns that skip into a failure. On gfx942 a missing calibration entry, a
+calibration scope mismatch, or an observation with no legal coordinate fails the
+test, so a dispatch change cannot silently remove the gate.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.gpu import current_device_arch_in
 
 from ._analytical import (
     UNIFORM_BASIS_OFFSETS,
@@ -43,15 +45,7 @@ from ._gfx942_subject import (
     run_dense_case,
 )
 
-_ARCH = get_device_arch()
-
-pytestmark = [
-    pytest.mark.gpu,
-    pytest.mark.skipif(
-        _ARCH != "gfx942",
-        reason=f"requires a HIP-visible gfx942 GPU; HIP reports {_ARCH!r}",
-    ),
-]
+pytestmark = pytest.mark.gpu
 
 
 def _run_exposures(
@@ -98,6 +92,26 @@ def _applicable_mutations(case: UniformCase) -> tuple[UniformMutation, ...]:
     )
 
 
+def _not_rejected(
+    case: UniformCase, what: str, mutated: UniformResult, control: UniformResult
+) -> str:
+    """Explain a mutation the checker did not reject, blaming the right side.
+
+    When the real output already breaks the exact policy, a mask or denominator
+    bug in the kernel can match the mutation's prediction exactly, so the
+    control's violations are the diagnosis, not the checker."""
+    if control.violations:
+        return (
+            f"{_case_label(case)}: {what} was not rejected and the kernel output "
+            f"itself fails the exact policy, so it may match {what}; "
+            f"control: {format_uniform_result(control)}"
+        )
+    return (
+        f"{_case_label(case)}: checker failed to reject {what}; "
+        f"{format_uniform_result(mutated)}"
+    )
+
+
 def _capture_calibration(
     case: UniformCase,
     subject: ResolvedDenseSubject,
@@ -138,31 +152,28 @@ def test_uniform_masked_probabilities(case: UniformCase) -> None:
 
     Mutation self-checks and calibration capture run before the gate, so an
     uncalibrated or rescoped case still records what re-ratification needs."""
+    arch = current_device_arch_in(("gfx942",), subject="the gfx942 dense uniform gate")
     subject = resolve_dense_subject(case)
     observation = _run_exposures(case, subject)
     control = analyze_uniform_policy(case, observation, budget=0)
     results = {"none": control}
     for mutation in _applicable_mutations(case):
         mutated = analyze_uniform_policy(case, observation, budget=0, mutation=mutation)
-        assert mutated.violations, (
-            f"{_case_label(case)}: checker failed to reject {mutation.value}; "
-            f"{format_uniform_result(mutated)}"
-        )
+        assert mutated.violations, _not_rejected(case, mutation.value, mutated, control)
         results[mutation.value] = mutated
     # Head sensitivity on the same real output: head 0 written into every head
     # (one V head read for all, or one output head broadcast) must be rejected.
     broadcast = analyze_uniform_policy(
         case, broadcast_query_head(observation, 0), budget=0
     )
-    assert broadcast.violations, (
-        f"{_case_label(case)}: checker failed to reject a head-0 broadcast; "
-        f"{format_uniform_result(broadcast)}"
+    assert broadcast.violations, _not_rejected(
+        case, "a head-0 broadcast", broadcast, control
     )
 
     _capture_calibration(case, subject, results)
 
     require_calibration(
-        _ARCH,
+        arch,
         subject.candidate_name,
         case,
         subject.fingerprint,

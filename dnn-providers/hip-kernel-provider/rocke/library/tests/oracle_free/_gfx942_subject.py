@@ -102,7 +102,14 @@ def _validate_supported_case(case: UniformCase) -> None:
 
 
 def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerprint:
-    """Assert the requested dense path and return its proof fingerprint."""
+    """Check what the adapter needs to launch safely and return the fingerprint.
+
+    Only preconditions of the launch itself are asserted here: dispatch identity,
+    the request-shape echo the host buffers are sized from, the buffers the
+    adapter does not supply (sinks, LSE), and scope the fingerprint does not
+    record. Every other fingerprint field (persistence, runtime shape, tile, fast
+    exp2) is left to ``require_calibration``, so a drift there still launches,
+    writes calibration records, and fails with the re-ratification remedy."""
     if tuning_spec.path != "dense":
         raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
     if tuning_spec.arch != "gfx942":
@@ -122,7 +129,6 @@ def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerpr
         "dtype": case.dtype,
         "causal": True,
         "sliding_window": case.window if case.mask == "window" else 0,
-        "persistent": False,
     }
     for field, value in expected.items():
         actual = getattr(spec, field)
@@ -130,12 +136,8 @@ def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerpr
             raise AssertionError(
                 f"resolved spec {field}={actual!r}, expected {value!r}"
             )
-    if not spec.runtime_shape:
-        raise AssertionError("oracle-free cases require the runtime-shape kernel")
-    if spec.block_n != 64:
-        raise AssertionError(f"unexpected shipped block_n {spec.block_n}")
-    if not spec.resolved_use_exp2_fast():
-        raise AssertionError("oracle-free quick cases require the fast exp2 path")
+    # The adapter allocates only Q, K, V and O, so a spec that needs a sink or
+    # LSE buffer is outside what it can launch, not a recalibration.
     if spec.use_sinks:
         raise AssertionError(
             "the uniform-probability check requires attention sinks to be disabled"
