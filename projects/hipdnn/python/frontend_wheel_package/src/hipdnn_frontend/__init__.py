@@ -106,6 +106,7 @@ behavior_note = BehaviorNote
 diagonal_alignment = DiagonalAlignment
 attention_implementation = AttentionImplementation
 moe_grouped_matmul_mode = MoeGroupedMatmulMode
+scalar_type = ScalarType
 cudnnGraphNotSupportedError = GraphNotSupportedError
 
 # Package metadata. The installed wheel metadata is generated from pyproject.toml.

@@ -201,8 +201,11 @@ eps_t = hipdnn.Tensor().set_value(1e-5, hipdnn.DataType.DOUBLE)
 object, and lifecycle methods (`validate`, `build_operation_graph`, `execute`,
 ...) return an `Error`. That surface is unchanged. Code written for
 `cudnn.pygraph` can use the cuDNN-shaped additions below instead; all of them
-are extra overloads, methods, or names, so existing `hipdnn.Graph` code keeps
-working as before.
+are extra overloads, methods, or names. Every call that worked before behaves
+the same. A call that raised `TypeError` can now reach a new overload, which
+may accept it or raise a more specific error: `ValueError` for a dtype with no
+hipDNN `DataType`, `NotImplementedError` for a cuDNN parameter value hipDNN
+cannot honour.
 
 On `hipdnn.Graph`:
 
@@ -218,8 +221,9 @@ On `hipdnn.Graph`:
   `sigmoid`, ...). `mod`, `pow` and `cos` are not available: hipDNN has no
   pointwise mode for them.
 - `Graph.tensor(dim=, stride=, data_type=, is_virtual=, is_pass_by_value=,
-  name=, uid=)`. `data_type` here and in `Tensor.set_data_type` also takes a
-  torch or numpy dtype; a dtype with no hipDNN `DataType` raises `ValueError`.
+  ragged_offset=, name=, uid=)`. `ragged_offset` takes a `Tensor` or `None`.
+  `data_type` here and in `Tensor.set_data_type` also takes a torch or numpy
+  dtype; a dtype with no hipDNN `DataType` raises `ValueError`.
   `Tensor.set_data_type()` with no argument resets the type to `NOT_SET`, as in
   cuDNN.
 - cuDNN's keyword names next to hipDNN's: `index` for `plan_index`, and `input`
@@ -251,7 +255,7 @@ On `hipdnn.Graph`:
 The package also exports cuDNN's module-level names for the hipDNN types:
 `tensor`, `data_type`, `heur_mode`, `norm_forward_phase`, `reduction_mode`,
 `convolution_mode`, `build_plan_policy`, `behavior_note`, `diagonal_alignment`,
-`attention_implementation`, `moe_grouped_matmul_mode` and
+`attention_implementation`, `moe_grouped_matmul_mode`, `scalar_type` and
 `cudnnGraphNotSupportedError`.
 
 ```python
@@ -279,10 +283,10 @@ Remaining differences from `cudnn.pygraph`:
 
 - cuDNN parameters hipDNN cannot honour keep their position but accept only
   one value; anything else raises `NotImplementedError`. Examples are
-  `matmul(padding=)`, `tensor(ragged_offset=)`, the `pygraph` constructor's
-  `sm_count`, `sm_version`, `kernel_cache` and `device_property`, the SDPA
-  `score_mod` callbacks, and runtime shape overrides outside `execute` (and,
-  without SDPA support, in `execute` too). Each accepts cuDNN's default, except
+  `matmul(padding=)`, the `pygraph` constructor's `sm_count`, `sm_version`,
+  `kernel_cache` and `device_property`, the SDPA `score_mod` callbacks, and
+  runtime shape overrides outside `execute` (and, without SDPA support, in
+  `execute` too). Each accepts cuDNN's default, except
   `tensor(reordering_type=)`, which accepts only `None`, not cuDNN's default
   `tensor_reordering.NONE`.
 - Operations hipDNN does not implement are absent, for example
@@ -291,14 +295,14 @@ Remaining differences from `cudnn.pygraph`:
   methods. `moe_grouped_matmul_bwd` is not yet bound in Python, although the
   C++ `Graph` provides it.
 - Not provided: `backend_version*`, `get_last_error_string`, `knob` and
-  `knob_type`, `numerical_note`, `tensor_reordering`, `scalar_type`,
-  `reshape_mode`, `create_kernel_cache`, `create_device_properties`; the graph
-  methods `key`, `create_execution_plan`, `get_engine_count`,
-  `get_behavior_notes`, `get_behavior_notes_for_plan_at_index`,
-  `query_tensor_attributes_of_uid`, `select_behavior_notes`,
-  `deselect_behavior_notes`, `select_numeric_notes`, `deselect_numeric_notes`
-  and `tensor_scalar`; and the `cudnn.Graph` wrapper class (`Graph` here is
-  hipDNN's own graph).
+  `knob_type`, `numerical_note`, `tensor_reordering`, `reshape_mode`,
+  `create_kernel_cache`, `create_device_properties`; the graph methods `key`,
+  `create_execution_plan`, `get_engine_count`, `get_behavior_notes`,
+  `get_behavior_notes_for_plan_at_index`, `query_tensor_attributes_of_uid`,
+  `select_behavior_notes`,
+  `deselect_behavior_notes`, `select_numeric_notes` and
+  `deselect_numeric_notes`; and the `cudnn.Graph` wrapper class (`Graph` here
+  is hipDNN's own graph).
 - The keyword forms of `layernorm`, `layernorm_backward`, `rmsnorm`,
   `rmsnorm_backward`, `block_scale_quantize`, `sdpa` and `sdpa_backward`
   return a tuple where cuDNN returns a list.

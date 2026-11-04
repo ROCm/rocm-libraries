@@ -23,6 +23,7 @@ import hipdnn_frontend as hipdnn
         ("diagonal_alignment", "DiagonalAlignment"),
         ("attention_implementation", "AttentionImplementation"),
         ("moe_grouped_matmul_mode", "MoeGroupedMatmulMode"),
+        ("scalar_type", "ScalarType"),
         ("cudnnGraphNotSupportedError", "GraphNotSupportedError"),
     ],
 )
@@ -72,11 +73,19 @@ class TestCudnnTensor:
         tensor = hipdnn.Graph.tensor(dim=[1], stride=[1])
         assert tensor.get_data_type() == hipdnn.DataType.NOT_SET
 
-    @pytest.mark.parametrize("parameter", ["ragged_offset", "reordering_type"])
-    def test_unsupported_parameters_raise(self, parameter):
-        value = hipdnn.Tensor.create([1], hipdnn.DataType.INT32)
-        with pytest.raises(NotImplementedError, match=parameter):
-            hipdnn.Graph.tensor(dim=[1], stride=[1], **{parameter: value})
+    def test_reordering_type_raises(self):
+        with pytest.raises(NotImplementedError, match="reordering_type"):
+            hipdnn.Graph.tensor(dim=[1], stride=[1], reordering_type=0)
+
+    def test_ragged_offset_is_set_on_the_tensor(self):
+        offset = hipdnn.Tensor.create([2, 1, 1, 1], hipdnn.DataType.INT32)
+        tensor = hipdnn.Graph.tensor(dim=[1], stride=[1], ragged_offset=offset)
+        assert tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is offset
+
+    def test_ragged_offset_rejects_a_non_tensor(self):
+        with pytest.raises(TypeError):
+            hipdnn.Graph.tensor(dim=[1], stride=[1], ragged_offset=0)
 
     def test_tensor_like_input_keyword(self):
         source = hipdnn.Tensor.create([3], hipdnn.DataType.FLOAT)

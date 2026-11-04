@@ -17,7 +17,8 @@ namespace hipdnn_python
 
 // Raises NotImplementedError for a cuDNN parameter hipDNN cannot honour. The
 // cuDNN-shaped bindings keep such parameters in their cuDNN position so
-// positional calls line up, and accept only cuDNN's default value.
+// positional calls line up, and accept only one value: cuDNN's default where
+// hipDNN can express it, otherwise None.
 [[noreturn]] void throwUnsupportedParameter(const char* parameter, const char* accepted);
 
 // throwUnsupportedParameter(parameter, "None") unless value is None.

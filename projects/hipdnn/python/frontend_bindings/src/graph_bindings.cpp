@@ -194,19 +194,19 @@ std::shared_ptr<graph::TensorAttributes> tensorLikePy(nb::handle tensor, const s
     return hipdnn_python::tensorAttributesFromDlpack(tensor, name);
 }
 
-// cuDNN's pygraph.tensor(). ragged_offset and reordering_type are cuDNN features
-// hipDNN tensors do not have, so they accept only None.
-std::shared_ptr<graph::TensorAttributes> cudnnTensorPy(const std::vector<int64_t>& dim,
-                                                       const std::vector<int64_t>& stride,
-                                                       nb::handle dataType,
-                                                       bool isVirtual,
-                                                       bool isPassByValue,
-                                                       nb::handle raggedOffset,
-                                                       nb::handle reorderingType,
-                                                       const std::string& name,
-                                                       int64_t uid)
+// cuDNN's pygraph.tensor(). reordering_type is a cuDNN feature hipDNN tensors do
+// not have, so it accepts only None.
+std::shared_ptr<graph::TensorAttributes>
+    cudnnTensorPy(const std::vector<int64_t>& dim,
+                  const std::vector<int64_t>& stride,
+                  nb::handle dataType,
+                  bool isVirtual,
+                  bool isPassByValue,
+                  const std::shared_ptr<graph::TensorAttributes>& raggedOffset,
+                  nb::handle reorderingType,
+                  const std::string& name,
+                  int64_t uid)
 {
-    hipdnn_python::requireNone(raggedOffset, "ragged_offset");
     hipdnn_python::requireNone(reorderingType, "reordering_type");
 
     const auto type = hipdnn_python::dataTypeFromObject(dataType);
@@ -221,6 +221,7 @@ std::shared_ptr<graph::TensorAttributes> cudnnTensorPy(const std::vector<int64_t
         .set_data_type(*type)
         .set_is_virtual(isVirtual)
         .set_is_pass_by_value(isPassByValue)
+        .set_ragged_offset(raggedOffset)
         .set_name(name);
     if(uid != -1)
     {
@@ -1034,7 +1035,7 @@ void graphBindings(nb::module_& m)
                     nb::arg("data_type") = DataType::NOT_SET,
                     nb::arg("is_virtual") = false,
                     nb::arg("is_pass_by_value") = false,
-                    nb::arg("ragged_offset") = nb::none(),
+                    nb::arg("ragged_offset").none() = nb::none(),
                     nb::arg("reordering_type") = nb::none(),
                     nb::arg("name") = "",
                     nb::arg("uid") = -1,
