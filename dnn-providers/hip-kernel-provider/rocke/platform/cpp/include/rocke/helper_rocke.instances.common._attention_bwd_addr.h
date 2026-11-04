@@ -13,6 +13,7 @@
  *   SeqInfo                             rocke_attn_bwd_seq_info_t
  *   load_offset                         rocke_attn_bwd_load_offset
  *   decode_batched / decode_thd         rocke_attn_bwd_decode_batched / _thd
+ *   thd_token_guard                     rocke_attn_bwd_thd_token_guard
  *   RowSlab (+ methods)                 rocke_attn_bwd_row_slab_t (+ _row_slab_*)
  *   StridedTensorAddr (init, slab)      rocke_attn_bwd_strided_tensor_addr_t
  *   WsSlab (+ methods)                  rocke_attn_bwd_ws_slab_t (+ _ws_slab_*)
@@ -131,9 +132,10 @@ rocke_value_t* rocke_attn_bwd_load_offset(rocke_ir_builder_t* b,
 
 /* Keyword arguments of decode_batched / decode_thd. Fill the defaults with
  * rocke_attn_bwd_decode_args_default() (Python's keyword defaults: off64 0,
- * mult 1, div 1, has_len 0, len_stride 1, ws_seg 0, no pointers), then set the
- * fields the call passes. s_max has no default. decode_batched reads only
- * s_max, seq_ptr, has_len and len_stride. */
+ * mult 1, div 1, has_len 0, len_stride 1, ws_seg 0, no pointers, tok_rows
+ * NULL), then set the fields the call passes. s_max has no default.
+ * decode_batched reads only s_max, seq_ptr, has_len and len_stride. tok_rows
+ * (an i32 value, NULL is None) enables the token-base guard of decode_thd. */
 typedef struct rocke_attn_bwd_decode_args
 {
     rocke_attn_bwd_iv_t s_max;
@@ -145,6 +147,7 @@ typedef struct rocke_attn_bwd_decode_args
     rocke_attn_bwd_iv_t has_len;
     rocke_attn_bwd_iv_t len_stride;
     rocke_attn_bwd_iv_t ws_seg;
+    rocke_value_t* tok_rows;
 } rocke_attn_bwd_decode_args_t;
 
 rocke_attn_bwd_decode_args_t rocke_attn_bwd_decode_args_default(void);
@@ -157,6 +160,15 @@ rocke_attn_bwd_seq_info_t rocke_attn_bwd_decode_thd(rocke_ir_builder_t* b,
                                                     int* seq_guards,
                                                     rocke_value_t* batch,
                                                     const rocke_attn_bwd_decode_args_t* args);
+
+/* thd_token_guard(b, tok0, length, tok_rows=, ws_seg=): *tok0 / *length are
+ * replaced by the guarded (i64 0, i32 0) when the sequence does not fit
+ * [0, tok_rows) under ws_seg == 0 (a literal nonzero ws_seg emits nothing). */
+void rocke_attn_bwd_thd_token_guard(rocke_ir_builder_t* b,
+                                    rocke_value_t** tok0,
+                                    rocke_value_t** length,
+                                    rocke_attn_bwd_iv_t tok_rows,
+                                    rocke_attn_bwd_iv_t ws_seg);
 
 /* ------------------------------------------------------- strided tensors */
 

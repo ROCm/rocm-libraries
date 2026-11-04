@@ -619,11 +619,13 @@ rocke_kernel_def_t* emit_main(Main& m, const U& u)
                                    NULL,
                                    &c.work));
     V s_idx = c.work.batch;
-    /* q side: THD rows by token; kv side: the sequence's kv length, clamped
-     * to [0, max_seqlen_kv]. */
+    /* q side: THD rows by token, ws_rows_q = total_q also bounds the token
+     * base (a sequence outside [0, total_q) decodes as empty); kv side: the
+     * sequence's kv length, clamped to [0, max_seqlen_kv]. */
     rocke_attn_bwd_decode_args_t qa = rocke_attn_bwd_decode_args_default();
     qa.s_max = ivv(a["max_seqlen_q"]);
     qa.off_ptr = a["CU_SEQLENS_Q"];
+    qa.tok_rows = a["ws_rows_q"];
     c.seq_q = rocke_attn_bwd_decode_thd(b, &m.seq_guards, s_idx, &qa);
     need(b, true);
     rocke_attn_bwd_decode_args_t ka = rocke_attn_bwd_decode_args_default();

@@ -2737,7 +2737,16 @@ pointers. A caller that holds the tensors checks them first
 
 Device data that reaches a kernel without the checks has a defined behaviour:
 a sequence length is clamped into `[0, S_max]`, and every workspace row is
-clamped (12.4). The unified family's checks and its block-id guard are in
+clamped (12.4). Under THD with token rows (`ws_seg = 0`, both `max_total_*`
+given) the row bound also bounds the token base: a sequence whose first
+token is negative or whose end passes `max_total_q` / `max_total_kv` is
+decoded as empty at token 0 (`len = 0`), so none of its rows is read or
+written (`decode_thd(tok_rows=)` in `_attention_bwd_addr.py`; every THD
+decode whose kernargs carry the bound: main, prep, convert, slice reduce,
+work list, and the q side of the split dQ kernel). With slot rows
+(`ws_seg = 1`) no token bound reaches the device, and the kv side of the
+split dQ kernel has no `ws_rows_kv` kernarg: there the offsets are trusted.
+The unified family's checks and its block-id guard are in
 `attention_bwd_unified.md` section 8.
 
 ### 12.8 Declined features

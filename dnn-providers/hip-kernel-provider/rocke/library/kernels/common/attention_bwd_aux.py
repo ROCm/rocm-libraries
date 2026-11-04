@@ -73,6 +73,7 @@ from ._attention_bwd_addr import (
     block_table_entry,
     decode_batched,
     decode_thd,
+    thd_token_guard,
 )
 from ._attention_bwd_caps import BWD_BARRIER_FENCE
 from ._attention_bwd_worklist import (
@@ -390,12 +391,12 @@ def _zero_vec8(b: IRBuilder) -> Value:
 
 
 def _seq(b: IRBuilder, spec: AttnBwdAuxSpec, batch, *, s_max, seq_ptr, off_ptr,
-         a: dict, mult: str, div: str):  # fmt: skip
+         a: dict, mult: str, div: str, rows: str):  # fmt: skip
     if spec.seq_mode == "thd":
         return decode_thd(
             b, batch, s_max=s_max, off_ptr=off_ptr, off64=a["off64"],
             mult=a[mult], div=a[div], seq_ptr=seq_ptr, has_len=a["has_len"],
-            len_stride=a["len_stride"], ws_seg=a["ws_seg"],
+            len_stride=a["len_stride"], ws_seg=a["ws_seg"], tok_rows=a[rows],
         )  # fmt: skip
     return decode_batched(
         b, batch, s_max=s_max, seq_ptr=seq_ptr, has_len=a["has_len"],
@@ -433,7 +434,7 @@ def _prep_q_role(b, spec, a, ln: _Lanes, h, z, io) -> None:
     D = spec.head_size
     seq = _seq(
         b, spec, z, s_max=a["S_q_max"], seq_ptr=a["SEQ_Q"], off_ptr=a["OFF_Q"],
-        a=a, mult="q_mult", div="q_div",
+        a=a, mult="q_mult", div="q_div", rows="ws_rows_q",
     )  # fmt: skip
     layout = spec.ws_layout
     nh = a["h_q"] if layout == "token_major" else None
@@ -515,7 +516,7 @@ def _prep_kv_role(b, spec, a, ln: _Lanes, y, z) -> None:
     D = spec.head_size
     seq = _seq(
         b, spec, z, s_max=a["S_kv_max"], seq_ptr=a["SEQ_KV"], off_ptr=a["OFF_KV"],
-        a=a, mult="kv_mult", div="kv_div",
+        a=a, mult="kv_mult", div="kv_div", rows="ws_rows_kv",
     )  # fmt: skip
     y2 = b.sub(y, a["h_q"])
     is_dk = b.cmp_lt(y2, a["h_k"])
@@ -538,7 +539,8 @@ def _prep_kv_role(b, spec, a, ln: _Lanes, y, z) -> None:
 
 def _wl_weight(b, a, s):
     """(query length, live kv tiles) of THD sequence ``s``, decoded exactly as
-    the main kernel decodes its lengths (the workspace base is not used)."""
+    the main kernel decodes its lengths, token-base guard included (the
+    workspace base is not used)."""
     lens = []
     for side in ("q", "kv"):
         smax, off, seq = {
@@ -550,7 +552,11 @@ def _wl_weight(b, a, s):
             mult=a[f"{side}_mult"], div=a[f"{side}_div"], seq_ptr=a[seq],
             has_len=a["has_len"], len_stride=a["len_stride"],
         )  # fmt: skip
-        lens.append(info.length)
+        _tok0, length = thd_token_guard(
+            b, info.tok0, info.length, tok_rows=a[f"ws_rows_{side}"],
+            ws_seg=a["ws_seg"],
+        )  # fmt: skip
+        lens.append(length)
     return lens[0], worklist_tiles(b, lens[1], a["wl_kn0"])
 
 
@@ -692,7 +698,7 @@ def _build_convert(spec: AttnBwdAuxSpec, arch: str, stage: str) -> KernelDef:
     z = b.block_id_z()
     seq = _seq(
         b, spec, z, s_max=a["S_max"], seq_ptr=a["SEQ"], off_ptr=a["OFF"], a=a,
-        mult="tok_mult", div="tok_div",
+        mult="tok_mult", div="tok_div", rows="ws_rows",
     )  # fmt: skip
 
     def ws_slab(src):

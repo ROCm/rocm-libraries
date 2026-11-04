@@ -27,6 +27,18 @@ Sequence decode
   ``b * S_max`` (rows by sequence slot, ``ws_seg != 0``: ``B * S_max`` rows
   bound every request without knowing the offsets).
 
+Token-base guard (``tok_rows`` given, :func:`thd_token_guard`): the offsets
+are device data, so a sequence that does not fit the storage tokens must
+never reach an address.  Under ``ws_seg = 0`` the row bound ``tok_rows`` (the
+workspace rows: ``total_q`` in the unified family, ``max_total_q`` /
+``max_total_kv`` in the general one) also bounds the storage tokens; a
+sequence with ``tok0 < 0`` or ``tok0 + len > tok_rows`` is decoded as empty
+at token 0 (``len = 0``, ``tok0 = 0``), so its rows are neither read nor
+written.  Under ``ws_seg != 0`` no token bound is known and the guard is off.
+The host check (``RAGGED_RANGE``) rejects such offsets before launch; the
+guard is the defined device behaviour when they reach the kernel anyway.
+Without ``tok_rows`` no guard op is emitted.
+
 ``SEQ`` is never read when ``has_len`` is 0 (the pointer may be null): the
 read sits in a loop whose trip count is ``has_len != 0``.  An int64 offset
 table is read as two i32 words (little endian); for an int32 table the second
@@ -101,6 +113,7 @@ __all__ = [
     "decode_thd",
     "last_row",
     "load_offset",
+    "thd_token_guard",
 ]
 
 IntOrValue = int | Value
@@ -316,6 +329,7 @@ def decode_thd(
     has_len: IntOrValue = 0,
     len_stride: IntOrValue = 1,
     ws_seg: IntOrValue = 0,
+    tok_rows: IntOrValue | None = None,
 ) -> SeqInfo:
     """Valid length and token base of THD sequence ``batch``.
 
@@ -327,6 +341,9 @@ def decode_thd(
     gives ``tok0``, the storage token; nonzero gives ``batch * s_max``, the
     sequence slot, so ``B * S_max`` rows bound every sequence whatever the
     storage holds before, between or after the sequences.
+
+    ``tok_rows`` (i32, optional) enables the token-base guard of the module
+    docstring (:func:`thd_token_guard`); ``None`` emits no guard op.
     """
     smax = as_i32(b, s_max)
     o0 = load_offset(b, off_ptr, batch, off64)
@@ -351,6 +368,10 @@ def decode_thd(
     )
     if seq_len is not None:
         length = b.smin(length, seq_len)
+    if tok_rows is not None:
+        tok0, length = thd_token_guard(
+            b, tok0, length, tok_rows=tok_rows, ws_seg=ws_seg
+        )
     ws_row0 = tok0
     if not (isinstance(ws_seg, int) and ws_seg == 0):
         slot0 = b.mul(as_i64(b, batch), as_i64(b, smax))
@@ -372,6 +393,36 @@ def decode_thd(
         ws_row0=ws_row0,
         tok0=tok0,
     )
+
+
+def thd_token_guard(
+    b: IRBuilder,
+    tok0: Value,
+    length: Value,
+    *,
+    tok_rows: IntOrValue,
+    ws_seg: IntOrValue = 0,
+) -> tuple[Value, Value]:
+    """``(tok0, length)`` of a THD sequence with the token-base guard applied.
+
+    A sequence with ``tok0 < 0`` or ``tok0 > tok_rows - length`` (i64, so no
+    sum overflows) becomes ``(0, 0)``: empty, at a token every non-empty
+    problem holds.  The guard applies under ``ws_seg = 0`` only (a literal
+    nonzero ``ws_seg`` returns the inputs and emits nothing; a runtime one is
+    tested).  CTA-uniform: two compares and two selects.
+    """
+    if isinstance(ws_seg, int) and ws_seg != 0:
+        return tok0, length
+    rows = as_i64(b, tok_rows)
+    bad = b.lor(
+        b.cmp_lt(tok0, b.const_i64(0)),
+        b.cmp_gt(tok0, b.sub(rows, as_i64(b, length))),
+    )
+    if not isinstance(ws_seg, int):
+        bad = b.land(bad, b.cmp_eq(ws_seg, b.const_i32(0)))
+    tok0 = b.select(bad, b.const_i64(0), tok0)
+    length = b.select(bad, b.const_i32(0), length)
+    return tok0, length
 
 
 # ---------------------------------------------------------------------------

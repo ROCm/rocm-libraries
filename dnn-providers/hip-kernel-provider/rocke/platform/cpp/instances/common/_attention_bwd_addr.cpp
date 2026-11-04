@@ -175,6 +175,7 @@ rocke_attn_bwd_decode_args_t rocke_attn_bwd_decode_args_default(void)
     a.has_len = rocke_attn_bwd_iv_int(0);
     a.len_stride = rocke_attn_bwd_iv_int(1);
     a.ws_seg = rocke_attn_bwd_iv_int(0);
+    a.tok_rows = NULL;
     return a;
 }
 
@@ -290,6 +291,9 @@ rocke_attn_bwd_seq_info_t rocke_attn_bwd_decode_thd(rocke_ir_builder_t* b,
         = seq_len_value(b, seq_guards, args->seq_ptr, batch, args->has_len, args->len_stride, smax);
     if(seq_len != NULL)
         length = rocke_b_smin(b, length, seq_len);
+    if(args->tok_rows != NULL)
+        rocke_attn_bwd_thd_token_guard(
+            b, &tok0, &length, rocke_attn_bwd_iv_val(args->tok_rows), args->ws_seg);
     rocke_value_t* ws_row0 = tok0;
     if(!rocke_attn_bwd_iv_is_int(args->ws_seg, 0))
     {
@@ -316,6 +320,34 @@ rocke_attn_bwd_seq_info_t rocke_attn_bwd_decode_thd(rocke_ir_builder_t* b,
     out.ws_row0 = ws_row0;
     out.tok0 = tok0;
     return out;
+}
+
+/* py: thd_token_guard */
+void rocke_attn_bwd_thd_token_guard(rocke_ir_builder_t* b,
+                                    rocke_value_t** tok0,
+                                    rocke_value_t** length,
+                                    rocke_attn_bwd_iv_t tok_rows,
+                                    rocke_attn_bwd_iv_t ws_seg)
+{
+    if(ws_seg.v == NULL && ws_seg.i != 0)
+        return;
+    rocke_value_t* rows = rocke_attn_bwd_as_i64(b, tok_rows, false);
+    rocke_value_t* z64 = rocke_b_const_i64(b, 0);
+    rocke_value_t* neg = rocke_b_cmp_lt(b, *tok0, z64);
+    rocke_value_t* len64 = rocke_attn_bwd_as_i64(b, rocke_attn_bwd_iv_val(*length), false);
+    rocke_value_t* room = rocke_b_sub(b, rows, len64);
+    rocke_value_t* past = rocke_b_cmp_gt(b, *tok0, room);
+    rocke_value_t* bad = rocke_b_lor(b, neg, past);
+    if(ws_seg.v != NULL)
+    {
+        rocke_value_t* z32 = rocke_b_const_i32(b, 0);
+        rocke_value_t* on = rocke_b_cmp_eq(b, ws_seg.v, z32);
+        bad = rocke_b_land(b, bad, on);
+    }
+    rocke_value_t* t0 = rocke_b_const_i64(b, 0);
+    *tok0 = rocke_b_select(b, bad, t0, *tok0);
+    rocke_value_t* l0 = rocke_b_const_i32(b, 0);
+    *length = rocke_b_select(b, bad, l0, *length);
 }
 
 /* ====================================================================== *
