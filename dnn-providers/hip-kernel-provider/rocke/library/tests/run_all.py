@@ -463,9 +463,7 @@ def main() -> int:
     # Explicit gates clear inherited addopts before launch. Unit subprocesses do
     # inherit them, so resource and shared-output policy must inspect both.
     worker_arguments = ([] if args.gate else inherited) + extra
-    gpu_selected = args.gpu or args.gpu_only or _forwarded_gpu_marker(
-        worker_arguments
-    )
+    gpu_selected = args.gpu or args.gpu_only or _forwarded_gpu_marker(worker_arguments)
     jobs = (
         args.jobs
         if args.jobs is not None

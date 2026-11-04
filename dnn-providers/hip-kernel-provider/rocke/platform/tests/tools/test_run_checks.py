@@ -167,7 +167,9 @@ def test_pytest_stage_includes_library_gpu_files_when_a_device_is_visible(
     )
     monkeypatch.setattr(runner.sys, "argv", ["run_checks.py", "--steps", "pytest"])
     assert runner.main() == 0
-    library = next(command for label, command in calls if label == "pytest [library units]")
+    library = next(
+        command for label, command in calls if label == "pytest [library units]"
+    )
     assert "--gpu" in library
 
 
