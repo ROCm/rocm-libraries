@@ -22,11 +22,11 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_csrmv_nnzsplit_info.hpp"
 #include "rocsparse_control.hpp"
-#include "rocsparse_nnzsplit_info.hpp"
 #include "rocsparse_utility.hpp"
 
-void _rocsparse_nnzsplit_info::clear()
+void _rocsparse_csrmv_nnzsplit_info::clear()
 {
     WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
@@ -37,10 +37,10 @@ void _rocsparse_nnzsplit_info::clear()
     this->use_starting_block_ids = false;
 }
 
-rocsparse_status _rocsparse_nnzsplit_info::allocate_id_buffer(size_t      size,
-                                                              bool        use_starting_block_ids,
-                                                              size_t      index_size,
-                                                              hipStream_t stream)
+rocsparse_status _rocsparse_csrmv_nnzsplit_info::allocate_id_buffer(size_t size,
+                                                                    bool   use_starting_block_ids,
+                                                                    size_t index_size,
+                                                                    hipStream_t stream)
 {
     const size_t buffer_size = index_size * (use_starting_block_ids ? 2 : 1) * (size + 1);
 

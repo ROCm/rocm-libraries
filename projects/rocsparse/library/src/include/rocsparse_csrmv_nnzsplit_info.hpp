@@ -29,7 +29,7 @@
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 
-typedef struct _rocsparse_nnzsplit_info
+typedef struct _rocsparse_csrmv_nnzsplit_info
 {
 protected:
     bool use_starting_block_ids{};
@@ -53,9 +53,9 @@ public:
     uint32_t nnz_per_thread{}; // nnz-per-thread granularity (1 / 4 / 8)
     int64_t  max_row_nnz{}; // longest row length (row-skew signal)
 
-    _rocsparse_nnzsplit_info()                                = default;
-    _rocsparse_nnzsplit_info(const _rocsparse_nnzsplit_info&) = delete;
-    _rocsparse_nnzsplit_info& operator=(const _rocsparse_nnzsplit_info&) = delete;
+    _rocsparse_csrmv_nnzsplit_info()                                      = default;
+    _rocsparse_csrmv_nnzsplit_info(const _rocsparse_csrmv_nnzsplit_info&) = delete;
+    _rocsparse_csrmv_nnzsplit_info& operator=(const _rocsparse_csrmv_nnzsplit_info&) = delete;
 
     // Does not free the id buffer: clear() must be called before end of life.
     void clear();
@@ -88,4 +88,4 @@ public:
         return this->use_starting_block_ids ? this->get_starting_ids<J>() + (this->size + 1)
                                             : nullptr;
     }
-} * rocsparse_nnzsplit_info;
+} * rocsparse_csrmv_nnzsplit_info;

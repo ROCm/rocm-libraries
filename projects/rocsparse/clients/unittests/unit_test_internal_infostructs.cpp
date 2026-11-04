@@ -207,7 +207,7 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 {
     _rocsparse_adaptive_info adaptive;
     _rocsparse_lrb_info      lrb;
-    _rocsparse_nnzsplit_info nnzsplit;
+    _rocsparse_csrmv_nnzsplit_info nnzsplit;
 
     adaptive.clear();
     lrb.clear();
