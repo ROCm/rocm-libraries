@@ -38,4 +38,6 @@ The override applies only to this PR. A later fused mode that adds a
 `FusedA2A` value or a solution parameter will move the same goldens and needs
 its own record. Passing these snapshots establishes naming and code-generation
 status only; the A2AGemm kernels' numerical behavior is covered by the
-multi-GPU comm tests, which do not run in this CI lane.
+multi-GPU comm tests (`tox -e comm`), which this unit lane does not run.
+Math CI `preliminary` runs them on a two-GPU gfx950 node, covering world 2;
+world 4 and 8 run only on an 8-GPU host outside CI.
