@@ -269,7 +269,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Tasks (known gaps).**
 - T5.1 **Fused-MoE e2e host runtime** (largest gap): port the NOTIMPL host orchestration (`fused_moe_e2e_*`, packed/permuted weights, HIP launch chain).
-- T5.2 **RDNA WMMA op wiring** in the LLVM backend (`lower_llvm_mma.c:282`) + RDNA datalayout/triple (currently all backends share gfx950's). Unblocks `matmul_nbits`, `wmma_gemm*`, `wmma_fmha_fwd` end-to-end on gfx1151/gfx1201.
+- T5.2 **RDNA WMMA op wiring** in the LLVM backend (`lower_llvm_mma.c:282`) + RDNA datalayout/triple (currently all backends share gfx950's). Unblocks `matmul_nbits`, `wmma_gemm*`, `wmma_fmha_fwd` (since replaced by `wmma_fmha_fwd_v2` and `wmma_fmha_decode`) end-to-end on gfx1151/gfx1201.
 - T5.3 **Buffer-addrspace tensor views** (`tensor_view` f16 path intentionally unported).
 - T5.4 **smoothquant / pooling distribution helpers** (`make_naive_tensor_view_packed`, `make_lds_view`).
 - T5.5 **conv `LdsLayout`/`WarpGrid` accessors** + `validate_for_async` (currently a no-op).
@@ -590,7 +590,7 @@ Priority: **P0** = ship-critical / on the provider's E2E path; **P1** = broad us
 | MoE | fused_moe, fused_moe_e2e, moe_fused_mega(_fp8), moe_gemm_fused, moe_sorting, moe_smoothquant, topk_softmax | very high | **e2e host runtime NOTIMPL (WS5.1)** | P1 |
 | Norm / quant | layernorm2d, rmsnorm2d, add_rmsnorm2d_rdquant, smoothquant | medium | smoothquant distribution gaps | P1 |
 | Elementwise / misc | reduce, elementwise, transpose(_bc/batched), permute_nd, pooling | medium | pooling distribution gaps | P1 |
-| RDNA WMMA | wmma_gemm, wmma_gemm_int8/iu8, wmma_fmha_fwd | high | **WMMA op unwired in LLVM backend (WS5.2)** | P1 |
+| RDNA WMMA | wmma_gemm, wmma_gemm_int8/iu8, wmma_fmha_fwd (since replaced by wmma_fmha_fwd_v2 and wmma_fmha_decode) | high | **WMMA op unwired in LLVM backend (WS5.2)** | P1 |
 
 The "very high" complexity families (conv, attention, MoE) get the deepest numeric corpus and are the explicit focus of "especially the more complex ones."
 

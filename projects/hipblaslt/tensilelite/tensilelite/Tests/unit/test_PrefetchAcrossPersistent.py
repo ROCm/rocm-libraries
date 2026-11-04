@@ -38,8 +38,7 @@ from tensilelite.SolutionStructs.Solution import (
 
 pytestmark = pytest.mark.unit
 
-
-# Tensile keeps process-global, module-level default dicts (`defaultSolution`,
+# TensileLite keeps process-global, module-level default dicts (`defaultSolution`,
 # `globalParameters`) that `Solution.__init__` reads while constructing a solution.
 # Some sibling unit tests mutate these in place -- e.g. test_MatrixInstructionConversion
 # injects a "ProblemType" key into `defaultSolution`, which makes Solution.__init__'s
@@ -1318,28 +1317,39 @@ def test_rap_silences_a_unconditionally_for_the_reuse_copy_own_loads():
     """Every in-loop load in the reuse copy serves the tile A is resident for."""
     rendered = _rap_null_tdm(in_pap_next_tile_prefetch=False)
     assert "s[sgprtdmAGroup0+0]" in rendered
-    for batchState in ("sgprRAPResidentBatch", "sgprWorkGroup2"):
-        assert batchState not in rendered, (
-            "an in-loop load consulted %s; the tile it serves cannot have changed "
-            "batch mid-iteration" % batchState
+    for residentState in (
+        "sgprRAPResidentBatch", "sgprWorkGroup2",
+        "sgprRAPResidentMTile", "sgprWorkGroup0",
+    ):
+        assert residentState not in rendered, (
+            "an in-loop load consulted %s; the tile it serves cannot have needed "
+            "a different A mid-iteration" % residentState
         )
 
 
-def test_rap_lets_the_next_tile_prefetch_fetch_a_when_the_batch_changes():
+def test_rap_lets_the_next_tile_prefetch_fetch_a_when_a_changes():
     """The last load in the reuse copy is PAP's, and it feeds the next tile.
 
     Silencing A there is only right while that tile goes on reusing the resident
-    registers. When it changes batch the RAP_IterN guard diverts it to the fill
-    copy, which computes from whatever this prefetch left behind -- so A has to be
-    fetched. Silencing it unconditionally is invisible to any MX test (the client
-    generator gives every batch the same A) and to any single-batch test, which is
-    how it survived the first round of this fix.
+    registers. When it needs a different A the RAP_IterN guard diverts it to the
+    fill copy, which computes from whatever this prefetch left behind -- so A has
+    to be fetched. Silencing it unconditionally is invisible to any MX test (the
+    client generator gives every batch the same A) and to any single-batch test,
+    which is how the batch half survived the first round of this fix.
 
-    WorkGroup2 is the next tile's here: prefetchAcrossPersistent raises the flag
+    Both halves of the identity, because the guard refills on either. The M-tile
+    half fires whenever the next tile keeps the batch but not the M-tile: at
+    every phase turnover of rapPhaseWalkInit's walk, and with a runtime WGM also
+    under the plain stride, where the remapped M-tile can hold for a few tiles
+    before it changes. The guard and this prefetch have to agree on when A is
+    refilled. See rapNullTdmDescriptorForEvenWaves for the arithmetic.
+
+    WorkGroup* is the next tile's here: prefetchAcrossPersistent raises the flag
     only between setupNextTile and papRestoreCurrentTileIdentity.
     """
     rendered = _rap_null_tdm(in_pap_next_tile_prefetch=True)
     assert "s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered
+    assert "s[sgprWorkGroup0], s[sgprRAPResidentMTile]" in rendered
     assert "s[sgprtdmAGroup0+0]" in rendered
 
 

@@ -94,9 +94,7 @@ std::tuple<float, ck_tile::index_t> gemm(const ck_tile::StreamKHostArgs& args,
 
     if(!Kernel::IsSupportedArgument(kernel_args))
     {
-        // Launching anyway reads and writes past the tensors (for example an extent
-        // that is not a multiple of the vector load size), so refuse the problem.
-        throw std::runtime_error("Arguments not supported for Stream-K kernel!");
+        throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");
     }
 
     if(stream_config.log_level_ > 0)
@@ -232,9 +230,17 @@ int runGemmExample(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
+    try
+    {
 #if CK_TILE_USE_WMMA
-    return !runGemmExample<GemmConfigurationMemoryInterwaveWmma>(argc, argv);
+        return !runGemmExample<GemmConfigurationMemoryInterwaveWmma>(argc, argv);
 #else
-    return !runGemmExample<GemmConfigurationMemoryInterwave>(argc, argv);
+        return !runGemmExample<GemmConfigurationMemoryInterwave>(argc, argv);
 #endif
+    }
+    catch(const std::runtime_error& e)
+    {
+        std::cerr << "Runtime error: " << e.what() << '\n';
+        return EXIT_FAILURE;
+    }
 }

@@ -61,18 +61,35 @@ The following table lists all configuration knobs supported by the MIOpen Provid
 **Behavior**:
 
 When **disabled** (default):
-- MIOpen uses heuristics to select a kernel
-- First execution is fast
+- Convolution Find uses MIOpen's default find mode (`DYNAMIC_HYBRID`): a find-db entry is used
+  without measuring it; on a miss, only dynamic solvers are measured and nothing is tuned
+- First execution is faster than with benchmarking
 - May not use the optimal kernel for your specific configuration
 
 When **enabled**:
 - MIOpen benchmarks multiple solver candidates
+- Convolution Find runs in MIOpen's Normal find mode with exhaustive search, matching
+  PyTorch's `torch.backends.cudnn.benchmark = True`: the installed find-db is skipped, every
+  applicable solver is measured, and solvers without a perf-db entry are tuned. A result already
+  in the user find-db (`~/.config/miopen/`) is reused, including one from a run without
+  benchmarking; delete it to force a new measurement
 - First execution is significantly slower (seconds to minutes)
 - Subsequent executions use the cached optimal solver
 - Provides best performance for production workloads
 - Convolution plans without a `global.workspace_size_limit` use the range maximum across solvers
   (the knob's maximum), so every solver can be benchmarked. This can be far larger than the
   default (hundreds of MB for large problems); set `global.workspace_size_limit` to cap it.
+
+**MIOpen environment variables**: for convolution and batchnorm these apply as they do under
+PyTorch.
+- `MIOPEN_FIND_MODE` sets the convolution find mode when benchmarking is disabled. Benchmarking
+  overrides it with Normal, as `torch.backends.cudnn.benchmark = True` does.
+- `MIOPEN_FIND_ENFORCE` set to an enforcing value (`DB_UPDATE`, `SEARCH`, `SEARCH_DB_UPDATE`,
+  `DB_CLEAN` or 2-5) applies with benchmarking enabled or disabled, for every operation.
+
+Fused convolution plans (convolution, bias and activation) select their solver through MIOpen's
+fusion API, which benchmarking does not change. `MIOPEN_FIND_MODE_FUSION` (default `FAST`) sets
+their find mode; PyTorch has no equivalent fused path.
 
 **Caching**:
 - Benchmark results are cached in MIOpen's performance database

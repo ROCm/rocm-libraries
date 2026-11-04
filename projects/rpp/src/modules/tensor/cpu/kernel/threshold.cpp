@@ -146,7 +146,7 @@ RppStatus threshold_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp
                     dstPtrTempB += 16;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     Rpp32f pixelR, pixelG, pixelB;
                     bool channelCheck[3];
                     pixelR = static_cast<Rpp32f>(srcPtrTemp[0]);
@@ -434,7 +434,7 @@ RppStatus threshold_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, 
                     dstPtrTempB += 8;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     Rpp32f pixelR, pixelG, pixelB;
                     bool channelCheck[3];
                     pixelR = srcPtrTemp[0];
@@ -721,7 +721,7 @@ RppStatus threshold_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp
                     dstPtrTempB += 16;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     Rpp32f pixelR, pixelG, pixelB;
                     bool channelCheck[3];
                     pixelR = static_cast<Rpp32f>(srcPtrTemp[0] + 128);
@@ -1009,7 +1009,7 @@ RppStatus threshold_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, 
                     dstPtrTempB += 8;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     Rpp32f pixelR, pixelG, pixelB;
                     bool channelCheck[3];
                     pixelR = static_cast<Rpp32f>(srcPtrTemp[0]);

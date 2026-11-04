@@ -58,25 +58,6 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
-class CountingBytesGraph final
-    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
-{
-public:
-    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
-        : _bytesCalls(std::move(bytesCalls))
-    {
-    }
-
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
-    {
-        ++*_bytesCalls;
-        return ContentCarryingTestGraph::bytes();
-    }
-
-private:
-    std::shared_ptr<std::atomic_uint> _bytesCalls;
-};
-
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -522,6 +503,46 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsA
     EXPECT_EQ(advertised, (std::vector<int64_t>{0, 1}));
     // The caller is told these are indices; 0 and 1 are not dtypes.
     EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
+}
+
+/// The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} scored by block size, so 256 FLOAT ranks first.
+TEST(TestIngestorGenericPlanBuilder, UnslottedGoldenCustomKnobsAreBareKmdFieldIdsWithPinnedDomains)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x9B));
+    const auto knobs = builder.getCustomKnobs(0, graph);
+
+    ASSERT_EQ(knobs.size(), 2U);
+
+    const auto& blockSize = knobs[0];
+    EXPECT_EQ(blockSize.knob_id, "block_size");
+    EXPECT_EQ(blockSize.description, "Kernel metadata field 'block_size' of engine 'test:engine'");
+    ASSERT_TRUE(blockSize.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(blockSize.default_value.AsIntValue()->value, 256);
+    ASSERT_TRUE(blockSize.constraint.AsIntConstraint() != nullptr);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->min_value, 64);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->max_value, 256);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->step, 1);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->valid_values,
+              (std::vector<int64_t>{256, 64}));
+
+    const auto& dtype = knobs[1];
+    EXPECT_EQ(dtype.knob_id, "dtype");
+    EXPECT_EQ(dtype.description,
+              "Kernel metadata field 'dtype' of engine 'test:engine'"
+              " (ordinal: an index into the field's value set)");
+    ASSERT_TRUE(dtype.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(dtype.default_value.AsIntValue()->value, 0);
+    ASSERT_TRUE(dtype.constraint.AsIntConstraint() != nullptr);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->min_value, 0);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->max_value, 1);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->step, 1);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->valid_values, (std::vector<int64_t>{0, 1}));
 }
 
 TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatValue)
@@ -1113,7 +1134,13 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
-TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotReadGraphBytes)
+/// The catalog cache keys on graph content, so every catalog lookup reads the graph's
+/// bytes. With benchmarking off and the winner shard already latched by the first build,
+/// the winner-cache path must build no GraphContentKey of its own: the second build reads
+/// bytes exactly as often as one catalog lookup does (sortedCatalog's cache hit is one
+/// catalogFor call and stores nothing back).
+TEST(TestIngestorGenericPlanBuilder,
+     ASecondColdMissWithBenchmarkingOffReadsGraphBytesOnlyForTheCatalogKey)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -1137,12 +1164,20 @@ TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotRe
     context.setExecutionSettings(settings);
     builder.buildPlan(0, graph, engineConfig, context);
 
+    // What one catalog lookup costs in bytes reads, measured on the same warm entry the
+    // second build hits; a cache hit changes no state the build depends on.
+    const auto properties = testDeviceProperties();
+    bytesCalls->store(0);
+    static_cast<void>(manager->unsortedCatalog(MatchContext{graph, 0, properties}));
+    const unsigned catalogLookupReads = bytesCalls->load();
+
     bytesCalls->store(0);
     builder.buildPlan(0, graph, engineConfig, context);
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
-    EXPECT_EQ(bytesCalls->load(), 0U)
-        << "a second cold miss with benchmarking off must not read graph bytes";
+    EXPECT_EQ(bytesCalls->load(), catalogLookupReads)
+        << "with benchmarking off, a second build must read graph bytes only for its one "
+           "catalog lookup; the winner-cache path must not key the graph";
 }
 
 /// prepare() fails for one kernel and succeeds for the rest: the shape of a code object
@@ -1484,7 +1519,7 @@ RankedEntry rankedEntryFor(const KernelDefinition& kernel, double timeMs)
 
 /// Every kernel the manager admits for this graph, in catalog order.
 template <typename THandle>
-std::vector<KernelDefinition>
+std::vector<const KernelDefinition*>
     catalogFor(const KernelIngestorStateManager<THandle>& manager,
                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                const DeviceProperties& properties)
@@ -1512,10 +1547,10 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
-        record.push_back(rankedEntryFor(kernel, blockSize == 256 ? 0.1 : 9.0));
+        const auto blockSize = kernel->getIntMetadata(BLOCK_SIZE);
+        record.push_back(rankedEntryFor(*kernel, blockSize == 256 ? 0.1 : 9.0));
     }
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1532,6 +1567,42 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 256)
         << "the measured winner must beat the heuristic front";
+}
+
+/// The catalog key already holds the graph's verified content, so ordering from a record
+/// reuses it: a sort that finds a record reads graph bytes exactly as often as one catalog
+/// lookup does, not once more for a winner key of its own.
+TEST(TestIngestorGenericPlanBuilder, OrderingFromARecordReadsGraphBytesOnlyForTheCatalogKey)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
+    const CountingBytesGraph graph(bytesCalls);
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    WinnerRecord record;
+    for(const KernelDefinition* kernel : catalog)
+    {
+        record.push_back(rankedEntryFor(*kernel, 1.0 + static_cast<double>(record.size())));
+    }
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
+
+    bytesCalls->store(0);
+    static_cast<void>(manager->unsortedCatalog(context));
+    const unsigned catalogLookupReads = bytesCalls->load();
+    ASSERT_GT(catalogLookupReads, 0U);
+
+    bytesCalls->store(0);
+    const auto sorted = manager->sortedCatalog(context);
+
+    ASSERT_NE(sorted.measuredRecord, nullptr) << "the record must have ordered this catalog";
+    EXPECT_EQ(bytesCalls->load(), catalogLookupReads)
+        << "ordering from a record must reuse the catalog key's graph content, not key the "
+           "graph again";
 }
 
 /// The catalog-sort coverage rule governs every `sortedCatalog` consumer, including
@@ -1554,14 +1625,14 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
 
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
-    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+    ASSERT_EQ(catalog.front()->getIntMetadata(BLOCK_SIZE), 64)
         << "this test needs the heuristic front to differ from the record's";
 
     WinnerRecord record;
     double time = 1.0;
     for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
     {
-        record.push_back(rankedEntryFor(*kernel, time));
+        record.push_back(rankedEntryFor(**kernel, time));
         time += 1.0;
     }
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
@@ -1598,10 +1669,10 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     const auto properties = testDeviceProperties();
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
         record.push_back(
-            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 256 ? 0.1 : 9.0));
+            rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 256 ? 0.1 : 9.0));
     }
     ASSERT_EQ(record.size(), 3U);
 
@@ -1647,11 +1718,11 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackT
     const auto properties = testDeviceProperties();
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(kernel, 0.1));
+            record.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     ASSERT_EQ(record.size(), 1U);
@@ -1689,9 +1760,9 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
 
     // Right kernel ids, wrong pack: every entry fails the staleness cross-check.
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        auto entry = rankedEntryFor(kernel, 0.1);
+        auto entry = rankedEntryFor(*kernel, 0.1);
         entry.packId = testId(0xEE);
         record.push_back(entry);
     }
@@ -1735,10 +1806,10 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTrig
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        auto entry = rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0);
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        auto entry = rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0);
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
             entry.packId = testId(0xEE);
         }
@@ -1795,10 +1866,10 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     // Ranks kernel_64 (which cannot prepare) first, then kernel_128, then kernel_256.
     const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
         record.push_back(
-            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+            rankedEntryFor(*kernel, timeByBlockSize.at(kernel->getIntMetadata(BLOCK_SIZE))));
     }
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1846,10 +1917,10 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelIsMalformedRethro
     ASSERT_EQ(catalog.size(), 3U);
     const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
         record.push_back(
-            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+            rankedEntryFor(*kernel, timeByBlockSize.at(kernel->getIntMetadata(BLOCK_SIZE))));
     }
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1901,11 +1972,11 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
     otherDevice.multiProcessorCount = properties.multiProcessorCount + 1;
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(kernel, 0.1));
+            record.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     manager->recordWinner(winnerKeyFor(graph, otherDevice), record, WinnerWriteCause::FRESH_MISS);
@@ -1946,11 +2017,11 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
     const ContentCarryingTestGraph otherGraph{wider};
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(kernel, 0.1));
+            record.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     manager->recordWinner(
@@ -1990,11 +2061,11 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
     // A prior narrow run measured ONLY kernel_128.
     const auto catalog = manager->sortedDefinitions(MatchContext{graph, 0, properties});
     WinnerRecord narrow;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
-            narrow.push_back(rankedEntryFor(kernel, 0.1));
+            narrow.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
@@ -2039,22 +2110,22 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarro
     // heuristic's order, so the returned plan's workspace shows which order was used.
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
-    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+    ASSERT_EQ(catalog.front()->getIntMetadata(BLOCK_SIZE), 64)
         << "this test needs the heuristic front to differ from the record's";
     WinnerRecord partial;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        const auto blockSize = kernel->getIntMetadata(BLOCK_SIZE);
         if(blockSize == 128)
         {
-            partial.push_back(rankedEntryFor(kernel, 0.1));
+            partial.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 64)
         {
-            partial.push_back(rankedEntryFor(kernel, 9.0));
+            partial.push_back(rankedEntryFor(*kernel, 9.0));
         }
     }
     ASSERT_EQ(partial.size(), 2U) << "the record must cover the narrowed set and nothing more";
@@ -2113,10 +2184,10 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     // Rank kernel_128 first -- the MIDDLE workspace, so a served hit (128) and a
     // re-benchmark (256, the max) are distinguishable by workspace alone.
     WinnerRecord ranking;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
         ranking.push_back(
-            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0));
+            rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0));
     }
     std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -2453,7 +2524,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordSampledUnderOneNumberingIsServedForA
     // plan is built from the measured front rather than re-sampled.
     const auto ordered = manager->sortedDefinitions(MatchContext{renumbered, 0, properties});
     ASSERT_FALSE(ordered.empty());
-    EXPECT_EQ(ordered.front().kernelId, testId(0x72))
+    EXPECT_EQ(ordered.front()->kernelId, testId(0x72))
         << "the renumbered graph must be ordered by the record it hit";
 }
 
@@ -2483,11 +2554,11 @@ TEST(TestIngestorGenericPlanBuilder,
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord narrow;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
-            narrow.push_back(rankedEntryFor(kernel, 0.1));
+            narrow.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
@@ -2885,7 +2956,7 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
         << "the ranker could not bind every published name, so its model never scored";
     for(size_t index = 0; index < catalog.entries.size(); ++index)
     {
-        const auto& expected = published.at(toString(catalog.entries[index].kernelId));
+        const auto& expected = published.at(toString(catalog.entries[index]->kernelId));
         const auto& row = capturedRankerRows()[index];
         ASSERT_EQ(row.size(), names.size());
         for(size_t slot = 0; slot < names.size(); ++slot)

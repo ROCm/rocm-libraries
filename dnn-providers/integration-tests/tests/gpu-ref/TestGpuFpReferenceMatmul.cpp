@@ -426,67 +426,33 @@ TEST_P(TestGpuMatmulRefUpcastBfp16, MatchesCpuRef)
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuMatmulRefPureFp32,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefPureFp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefPureBfp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefMixedFp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefMixedBfp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefUpcastFp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefUpcastBfp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
 
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// reduced-precision and mixed types are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefPureFp32,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRefPureFp16,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRefPureBfp16,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRefMixedFp16,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRefMixedBfp16,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRefUpcastFp16,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRefUpcastBfp16,
                          ::testing::ValuesIn(getMatmulMediumTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuMatmulRefPureFp32,
-                         ::testing::ValuesIn(getMatmulLargeTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRefPureFp16,
-                         ::testing::ValuesIn(getMatmulLargeTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRefPureBfp16,
-                         ::testing::ValuesIn(getMatmulLargeTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRefMixedFp16,
-                         ::testing::ValuesIn(getMatmulLargeTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRefMixedBfp16,
-                         ::testing::ValuesIn(getMatmulLargeTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRefUpcastFp16,
-                         ::testing::ValuesIn(getMatmulLargeTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRefUpcastBfp16,
                          ::testing::ValuesIn(getMatmulLargeTestCases()));
 
 // ============================================================================

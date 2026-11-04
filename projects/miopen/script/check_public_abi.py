@@ -24,29 +24,35 @@ nm/readelf, no shell, no locale-dependent sorting) and asserts:
 flag the public surface is split: the thin wrapper libMIOpen.so re-exports only
 the miopen.h public-header contract, while a handful of baseline exports that
 were never in miopen.h (experimental miopen_internal.h APIs and the "Hidden"
-MIGraphX shims) stay on libMIOpen_private.so under their original names.
+MIGraphX shims) stay on libMIOpen_private.so under their original names. The
+wrapper also exports a few functions of its own that report on hipDNN
+forwarding; a flag-off build has no forwarding, so they are in no baseline.
 
   1. SONAME is libMIOpen.so.1 (unchanged).
-  2. The wrapper's exported public C API set equals ``baseline - excluded``.
-  3. No ``*_impl`` symbols are exported from the wrapper.
-  4. libMIOpen_private IS in DT_NEEDED, and libhipdnn_backend is NOT: the
+  2. The wrapper's exported public C API set equals
+     ``(baseline - excluded) | wrapper-only``.
+  3. No wrapper-only symbol is in the baseline. A function both builds export
+     belongs in miopen.h and the baseline, not in the wrapper-only list.
+  4. No ``*_impl`` symbols are exported from the wrapper.
+  5. libMIOpen_private IS in DT_NEEDED, and libhipdnn_backend is NOT: the
      wrapper opens the backend on first use, so a machine without hipDNN must
      still be able to load libMIOpen.so.
-  5. Every excluded symbol is genuinely absent from the installed public header
-     (``--public-header``), so the exclusion file cannot be used to silence a
-     red gate by quietly dropping a real miopen.h entry point.
-  6. Every excluded symbol is still exported, un-suffixed, from the private
+  6. With ``--public-header``, no excluded or wrapper-only symbol is declared in
+     miopen.h, so the exclusion file cannot be used to silence a red gate by
+     quietly dropping a real miopen.h entry point, and a function both builds
+     export cannot hide in the wrapper-only list.
+  7. Every excluded symbol is still exported, un-suffixed, from the private
      library (``--private-lib``), so the carve-out cannot delete a symbol from
      the whole installed surface.
-  7. With ``--private-lib``, the two libraries are co-versioned: their SONAME
+  8. With ``--private-lib``, the two libraries are co-versioned: their SONAME
      majors agree and the wrapper's DT_NEEDED entry names that same major, so a
      wrapper cannot bind to an implementation it was not built against.
-  8. With ``--private-lib``, every ``miopenFoo_impl`` the private library
+  9. With ``--private-lib``, every ``miopenFoo_impl`` the private library
      exports has a matching ``miopenFoo`` on the wrapper. A renamed private
      entry point with no wrapper stub is unreachable through libMIOpen.so.
-  9. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
-     committed baseline. Opt-in because the list names ROCm soversions and the
-     platform's loader, so it changes with routine ROCm updates.
+  10. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
+      committed baseline. Opt-in because the list names ROCm soversions and the
+      platform's loader, so it changes with routine ROCm updates.
 
 ``check-installed-headers`` -- run on the staged include tree of a flag-on
 build. Fails if the private rename spelling (``miopenFoo_impl``) appears in any
@@ -76,6 +82,15 @@ cover this: it is compiled out under NDEBUG, it never fires for a stub nothing
 calls, and a stub missing the macro entirely has no assert to fire at all. Such
 a stub silently loses the ability to ever route to hipDNN, which is invisible
 until the entry point joins the forwarding set and keeps running MIOpen anyway.
+
+The wrapper's own functions, exported only by a flag-on build, follow different
+rules. They are declared in include_wrapper/miopen/hipdnn_forwarding.h, never in
+miopen.h, and listed in test/public_abi/wrapper_only_symbols.txt for
+``check-wrapper``; the header and the list must name the same functions. Each
+has a stub in wrapper.cpp that must match that header's signature but does the
+work itself: it calls no _impl and carries no dispatch macro. None of the other
+artifacts lists them. The header and the list are optional: if the commit tracks
+neither, there are no wrapper-only functions and every other check still runs.
 
 The provider mirror lives in a sibling project that a MIOpen-only checkout does
 not ship, so it is the one artifact that can be skipped. It is skipped only once
@@ -323,8 +338,12 @@ def read_symbol_list(path_str: str, what: str) -> set[str]:
     path = Path(path_str)
     if not path.is_file():
         raise AbiError(f"{what} not found: {path}")
+    return parse_symbol_list(path.read_text(encoding="utf-8"))
+
+
+def parse_symbol_list(text: str) -> set[str]:
     out = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
             out.add(line)
@@ -343,7 +362,10 @@ If this change to the public C API is intentional, regenerate the baseline with:
       -o projects/miopen/test/public_abi/public_symbols.baseline
 and update src/private/miopen_private_rename.h + src/private/miopen_impl.h to match.
 A baseline change is an ABI change and requires API review -- do not regenerate
-the baseline just to turn this gate green.""".rstrip()
+the baseline just to turn this gate green.
+A function that only the flag-on wrapper exports does not go in the baseline:
+list it in projects/miopen/test/public_abi/wrapper_only_symbols.txt and declare
+it in include_wrapper/miopen/hipdnn_forwarding.h, not in miopen.h.""".rstrip()
 
 
 HEADERS_REMEDY = """
@@ -356,7 +378,11 @@ Every public entry point must be spelled identically in all five places:
   <repo>/dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp
                                        #define miopenFoo miopenFoo_impl
 Update the private files and the provider's mirror to match the public header.
-Do not edit miopen.h to match them -- that changes the public C API.""".rstrip()
+Do not edit miopen.h to match them -- that changes the public C API.
+A function only the flag-on wrapper exports is declared instead in
+include_wrapper/miopen/hipdnn_forwarding.h, listed in
+test/public_abi/wrapper_only_symbols.txt, and given a stub in wrapper.cpp that
+calls no _impl and carries no dispatch macro; it goes in none of the other files.""".rstrip()
 
 DISPATCH_REMEDY = """
 Every stub in src/private/wrapper.cpp must open with exactly one dispatch macro,
@@ -909,6 +935,32 @@ def check_excluded_not_public(excluded: set[str], header_path: str) -> bool:
     return False
 
 
+def check_wrapper_only_not_public(wrapper_only: set[str], header_path: str) -> bool:
+    path = Path(header_path)
+    if not path.is_file():
+        raise AbiError(f"public header not found: {path}")
+    # Comments are stripped so miopen.h docs can mention a wrapper-only function
+    # without it counting as a declaration.
+    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+    offenders = sorted(
+        s for s in wrapper_only if re.search(rf"\b{re.escape(s)}\b", text)
+    )
+    if not offenders:
+        print(
+            f"PASS: no wrapper-only symbol appears in {path.name} "
+            f"({len(wrapper_only)} checked)"
+        )
+        return True
+    print(
+        f"FAIL: wrapper-only symbols file lists entry points that ARE declared in "
+        f"{path.name}. A function both builds export belongs in the baseline, not "
+        "in the wrapper-only list:"
+    )
+    for sym in offenders:
+        print(f"  {sym}")
+    return False
+
+
 def check_excluded_on_private(excluded: set[str], private: Elf) -> bool:
     exported = private.defined_dynamic_functions()
     missing = sorted(excluded - exported)
@@ -1077,15 +1129,56 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
     return False
 
 
-def check_entry_point_set(public: set[str], other: set[str], what: str) -> bool:
+def check_entry_point_set(
+    public: set[str], other: set[str], what: str, reference: str = "miopen.h"
+) -> bool:
     if public == other:
-        print(f"PASS: {what} covers exactly the {len(public)} miopen.h entry points")
+        print(f"PASS: {what} covers exactly the {len(public)} {reference} entry points")
         return True
-    print(f"FAIL: {what} does not match the miopen.h entry point set")
+    print(f"FAIL: {what} does not match the {reference} entry point set")
     for sym in sorted(public - other):
-        print(f"  - declared in miopen.h, absent from {what}: {sym}")
+        print(f"  - declared in {reference}, absent from {what}: {sym}")
     for sym in sorted(other - public):
-        print(f"  + present in {what}, not declared in miopen.h: {sym}")
+        print(f"  + present in {what}, not declared in {reference}: {sym}")
+    return False
+
+
+def check_headers_disjoint(
+    public: dict[str, tuple[str, ...]], wrapper_only: dict[str, tuple[str, ...]]
+) -> bool:
+    both = sorted(public.keys() & wrapper_only.keys())
+    if not both:
+        print(
+            "PASS: no entry point is declared in both miopen.h and hipdnn_forwarding.h"
+        )
+        return True
+    print(
+        "FAIL: entry points declared in both miopen.h and hipdnn_forwarding.h. A "
+        "function both builds export belongs in miopen.h alone:"
+    )
+    for name in both:
+        print(f"  {name}")
+    return False
+
+
+def check_wrapper_only_list(declared: set[str], listed: set[str]) -> bool:
+    """The header and the list describe the same functions to two different gates.
+
+    check-wrapper reads the list because a built tree has no source headers, so a
+    function declared but not listed would fail that gate only once someone builds
+    with the flag on.
+    """
+    if declared == listed:
+        print(
+            f"PASS: wrapper_only_symbols.txt lists exactly the {len(declared)}"
+            " hipdnn_forwarding.h entry points"
+        )
+        return True
+    print("FAIL: wrapper_only_symbols.txt does not match hipdnn_forwarding.h")
+    for sym in sorted(declared - listed):
+        print(f"  - declared in hipdnn_forwarding.h, not listed: {sym}")
+    for sym in sorted(listed - declared):
+        print(f"  + listed, not declared in hipdnn_forwarding.h: {sym}")
     return False
 
 
@@ -1214,6 +1307,36 @@ def check_wrapper_dispatch(dispatches: dict[str, list[str]]) -> bool:
     return False
 
 
+def check_wrapper_only_stubs(
+    names: set[str], forwards: dict[str, set[str]], dispatches: dict[str, list[str]]
+) -> bool:
+    """A wrapper-only stub does the work itself.
+
+    There is no _impl for it to call. A dispatch macro does not fit either: its
+    MIOpen route expects to fall through to an _impl, and it clears the record of
+    the last forwarded failure, which miopenGetLastForwardedError reads.
+    """
+    findings: list[str] = []
+    for name in sorted(names & forwards.keys()):
+        if forwards[name]:
+            findings.append(
+                f"  {name} calls {', '.join(sorted(forwards[name]))};"
+                " a wrapper-only function has no _impl"
+            )
+        if dispatches[name]:
+            findings.append(f"  {name} carries a dispatch macro")
+    if not findings:
+        print(
+            f"PASS: all {len(names & forwards.keys())} wrapper-only stubs call no"
+            " _impl and carry no dispatch macro"
+        )
+        return True
+    print("FAIL: wrapper-only stubs must not forward to the private library:")
+    for line in findings:
+        print(line)
+    return False
+
+
 # --------------------------------------------------------------------------
 # Subcommands
 # --------------------------------------------------------------------------
@@ -1273,6 +1396,7 @@ def cmd_check_wrapper(args) -> int:
     elf = open_elf(args.lib, "wrapper library")
     baseline = read_symbol_list(args.baseline, "baseline symbols file")
     excluded = read_symbol_list(args.excluded, "excluded symbols file")
+    wrapper_only = read_symbol_list(args.wrapper_only, "wrapper-only symbols file")
 
     ok = check_soname(elf)
 
@@ -1284,11 +1408,20 @@ def cmd_check_wrapper(args) -> int:
         for sym in stray:
             print(f"  {sym}")
         ok = False
+    shared = sorted(wrapper_only & baseline)
+    if shared:
+        print(
+            "FAIL: wrapper-only symbols file lists symbols that are in the baseline."
+            " A symbol the flag-off build also exports does not belong in this list:"
+        )
+        for sym in shared:
+            print(f"  {sym}")
+        ok = False
 
     ok &= check_symbols(
         elf,
-        baseline - excluded,
-        "wrapper public API set == baseline - excluded",
+        (baseline - excluded) | wrapper_only,
+        "wrapper public API set == (baseline - excluded) + wrapper-only",
         BASELINE_REMEDY,
     )
     ok &= check_no_impl(elf, "wrapper")
@@ -1300,6 +1433,7 @@ def cmd_check_wrapper(args) -> int:
 
     if args.public_header:
         ok &= check_excluded_not_public(excluded, args.public_header)
+        ok &= check_wrapper_only_not_public(wrapper_only, args.public_header)
     if args.private_lib:
         private = open_elf(args.private_lib, "private library")
         ok &= check_excluded_on_private(excluded, private)
@@ -1346,6 +1480,16 @@ def cmd_check_headers(args) -> int:
     )
     wrapper_source = resolve(
         args.wrapper, f"{miopen_rel}/src/private/wrapper.cpp", "wrapper.cpp"
+    )
+    wrapper_header_source = resolve(
+        args.wrapper_header,
+        f"{miopen_rel}/include_wrapper/miopen/hipdnn_forwarding.h",
+        "hipdnn_forwarding.h",
+    )
+    wrapper_only_source = resolve(
+        args.wrapper_only,
+        f"{miopen_rel}/test/public_abi/wrapper_only_symbols.txt",
+        "wrapper_only_symbols.txt",
     )
     range_defs_source = resolve(
         args.range_definitions,
@@ -1397,6 +1541,35 @@ def cmd_check_headers(args) -> int:
     renames = parse_renames(rename_source)
     wrapper, forwards, dispatches = parse_wrapper(wrapper_source)
 
+    # Not part of the skip above: either file can be removed on its own (the
+    # function moves into miopen.h, or the list empties), and skipping then would
+    # switch off every other check. An untracked one means no wrapper-only
+    # functions, so a stub in wrapper.cpp that nothing declares still fails below.
+    for rel, source in (
+        (
+            f"{miopen_rel}/include_wrapper/miopen/hipdnn_forwarding.h",
+            wrapper_header_source,
+        ),
+        (f"{miopen_rel}/test/public_abi/wrapper_only_symbols.txt", wrapper_only_source),
+    ):
+        if source is None:
+            print(
+                f"NOTE: {rel} is not part of this tree ({reasons.get(rel, 'unreadable')});"
+                " treating it as empty"
+            )
+    wrapper_only = (
+        parse_declarations(
+            wrapper_header_source, EXPORT_ANCHOR_RE, "hipdnn_forwarding.h"
+        )
+        if wrapper_header_source is not None
+        else {}
+    )
+    wrapper_only_listed = (
+        parse_symbol_list(wrapper_only_source)
+        if wrapper_only_source is not None
+        else set()
+    )
+
     # The private declarations carry the suffix; strip it so every comparison
     # below is against the public header under one common set of names. An
     # unsuffixed declaration is a defect, not something to silently rekey.
@@ -1412,8 +1585,19 @@ def cmd_check_headers(args) -> int:
     ok &= check_prototypes(public, impl, "miopen_impl.h")
     ok &= check_entry_point_set(set(public), set(renames), "miopen_private_rename.h")
     ok &= check_rename_targets(renames)
-    ok &= check_entry_point_set(set(public), set(wrapper), "wrapper.cpp")
+    ok &= check_headers_disjoint(public, wrapper_only)
+    ok &= check_wrapper_only_list(set(wrapper_only), wrapper_only_listed)
+    ok &= check_entry_point_set(
+        set(public) | set(wrapper_only),
+        set(wrapper),
+        "wrapper.cpp",
+        "miopen.h + hipdnn_forwarding.h",
+    )
     ok &= check_prototypes(public, wrapper, "wrapper.cpp")
+    ok &= check_prototypes(wrapper_only, wrapper, "wrapper.cpp", "hipdnn_forwarding.h")
+    ok &= check_wrapper_only_stubs(set(wrapper_only), forwards, dispatches)
+    forwards = {n: c for n, c in forwards.items() if n not in wrapper_only}
+    dispatches = {n: d for n, d in dispatches.items() if n not in wrapper_only}
     ok &= check_wrapper_forwards(forwards)
     # Kept out of ``ok`` until the remedies are printed: a routing defect is not
     # the five-artifact drift HEADERS_REMEDY talks about and has its own fix.
@@ -1532,6 +1716,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--wrapper", help="override path to src/private/wrapper.cpp")
     p.add_argument(
+        "--wrapper-header",
+        help="override path to include_wrapper/miopen/hipdnn_forwarding.h",
+    )
+    p.add_argument(
+        "--wrapper-only",
+        help="override path to test/public_abi/wrapper_only_symbols.txt",
+    )
+    p.add_argument(
         "--provider-rename",
         help="override path to the hipDNN provider's MiopenApiPrivateRename.hpp, "
         "which must then exist; by default it is located relative to the "
@@ -1567,6 +1759,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--baseline", required=True, help="committed public symbol baseline")
     p.add_argument("--excluded", required=True, help="committed excluded symbol list")
     p.add_argument(
+        "--wrapper-only",
+        required=True,
+        help="committed list of the symbols only the wrapper exports, which "
+        "the baseline does not list",
+    )
+    p.add_argument(
         "--private-lib",
         help="path to libMIOpen_private.so; when given, every excluded symbol "
         "must still be exported from it under its original name, the two "
@@ -1575,8 +1773,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--public-header",
-        help="path to include/miopen/miopen.h; when given, no excluded symbol "
-        "may be declared there",
+        help="path to include/miopen/miopen.h; when given, no excluded or "
+        "wrapper-only symbol may be declared there",
     )
     p.add_argument(
         "--needed-baseline",

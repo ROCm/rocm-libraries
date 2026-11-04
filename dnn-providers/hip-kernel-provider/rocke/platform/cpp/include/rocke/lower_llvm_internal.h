@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/lower_llvm_internal.h -- PRIVATE shared declarations for the C99 port of
- * rocke.core.lower_llvm. NOT a public API: only the lower_llvm_*.c translation
+ * rocke.core.lower_llvm. NOT a public API: only the lower_llvm translation
  * units include this. The public contract is rocke/lower_llvm.h.
  *
  * The Python lowerer is one stateful object, ``_Lowerer``, with ~140 per-op
@@ -34,47 +34,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/ir.h"
+#include "rocke/llvm_profile_internal.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
 namespace ckc
 {
-
-/* ====================================================================== */
-/* Constants (module-level Python data)                                   */
-/* ====================================================================== */
-
-/* Verbatim datalayout / triple copied from clang for gfx950 (Python
- * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23 / _TRIPLE).
- * Shared by all CDNA backends per flavor, but the AMDGPU datalayout is
- * FLAVOR-KEYED: the buffer-resource address space (p8, the 128-bit buffer
- * descriptor, not the p7 fat pointer) drifts between LLVM 20 (ROCm 7.0/7.1) and
- * LLVM 22 (ROCm 7.2), and the ELF symbol-mangling spec (m:e) is present in
- * LLVM 23 (ROCm 7.13+) but absent in LLVM 20 / 22. ROCKE_LL_DATALAYOUT is a
- * back-compat alias
- * for the LLVM20 form; new code keys on the flavor via
- * rocke_ll_datalayout_for_flavor. */
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM20;
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM22;
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM23; /* LLVM22 p8 layout + m:e */
-extern const char* const ROCKE_LL_DATALAYOUT; /* == ROCKE_LL_DATALAYOUT_LLVM20 */
-extern const char* const ROCKE_LL_TRIPLE;
-
-/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, LLVM23 => its m:e
- * form, anything else (incl. unexpected values) => the modern LLVM22 layout. */
-const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor);
-
-/* Python _is_modern_flavor: true for LLVM 21+ IR shapes (llvm22 / llvm23),
- * which share the same datalayout + intrinsic declares.
- *
- * Reads the datalayout-generation column of the flavor ladder in
- * lower_llvm/core.cpp rather than naming the members here, mirroring Python,
- * where the answer comes from _DATALAYOUT_KIND_FLAVORS. Spelling the pair out
- * in an expression is what leaves a new flavor silently classed as legacy. */
-bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor);
 
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
@@ -101,18 +70,37 @@ typedef struct rocke_ll_decl
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 
-/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): same keys,
- * different decl text. */
+/* Per-generation overrides: each array holds only the entries whose text
+ * changed AT that declaration ABI generation (same keys as the base table,
+ * different decl text). A generation inherits every older generation's array
+ * in rocke_ll_declaration_abi_t order. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
- * set plus declarations whose ABI changed again. */
-extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
-extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
+/* LLVM24's own overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES):
+ * the named-barrier declarations with addrspace(15) pointers. */
+extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[];
+extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
-const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+/* One declaration ABI generation's own override array (NULL/0 for LLVM20,
+ * which is the base, and for a generation with no text of its own). */
+const rocke_ll_decl_t* rocke_ll_declaration_abi_own_overrides(rocke_ll_declaration_abi_t abi,
+                                                              int* out_count);
+
+/* The resolved declaration table of one flavor (Python _decls_for_flavor):
+ * rocke_ll_decl_text gives one key's text -- the newest override at or below
+ * the generation `flavor`'s emission profile selects, else the base text, else
+ * a matrix call's derived declaration; NULL for an unknown key or a flavor
+ * without a profile. rocke_ll_decl_at gives entry `index` in emit order, which
+ * is the base table's order, index in [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key);
+rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index);
+
+/* The keys the matrix-call table adds after the base table, in emit order
+ * (Python _decls_for_flavor's last rung): the first call per key, in table
+ * order, skipping keys the base table holds. NULL past the end;
+ * rocke_ll_decl_text resolves each key's text. */
+const char* rocke_ll_matrix_decl_key_at(int index);
 
 /* ---------------------------------------------------------- anyptr overloads */
 
@@ -218,11 +206,18 @@ typedef struct rocke_isa_backend
      * is one the opcode cannot carry (the caller then fails with the same
      * message Python raises). */
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
+    /* Python ISABackend.has_fp8_scale_conversion: the fused scale-and-convert
+     * fp8/bf8 instructions (v_cvt_scalef32_pk_f32_fp8 / _bf8). True only on
+     * gfx950. Elsewhere LLVM may still select the intrinsic and write an
+     * encoding the GPU does not have, so the lowerer refuses the ops. */
+    bool has_fp8_scale_conversion;
 } rocke_isa_backend_t;
 
-/* Resolve a gfx string to its backend (Python backend_for). Returns NULL and
- * sets *st to ROCKE_ERR_VALUE for a NULL arch (there is no default) and to
- * ROCKE_ERR_KEY for an unknown one. */
+/* Resolve a gfx string to its backend (Python backend_for). Returns the
+ * target's shared, read-only table row, whose datalayout and triple are unset
+ * (a lowering fills them in its own copy, rocke_lower.backend_resolved); safe
+ * to call from any thread. Returns NULL and sets *st to ROCKE_ERR_VALUE for a
+ * NULL arch (there is no default) and to ROCKE_ERR_KEY for an unknown one. */
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st);
 
 /* The two CDNA waitcnt encoders (Python _encode_waitcnt_gfx9_10 /
@@ -237,10 +232,9 @@ int rocke_ll_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem);
 void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem);
 
-/* The two ds_read_tr16_b128 opcode selections (Python
- * ISABackend.ds_tr16_b128_spec and the Gfx1250Backend override). Defined in
- * the crosslane bucket alongside the handler. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out);
+/* The gfx1250 ds_read_tr16_b128 opcode selection (Python
+ * Gfx1250Backend.ds_tr16_b128_spec). Defined in the crosslane bucket alongside
+ * the handler. Other backends leave the pointer NULL. */
 bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out);
 
 /* ====================================================================== */
@@ -396,8 +390,11 @@ struct rocke_lower
 {
     rocke_arena_t arena; /* owns blocks, lines, fresh names    */
     const rocke_kernel_def_t* kernel;
-    const rocke_isa_backend_t* backend;
+    const rocke_isa_backend_t* backend; /* &backend_resolved once running  */
+    rocke_isa_backend_t backend_resolved; /* the target's row + datalayout/triple */
     rocke_llvm_flavor_t flavor; /* resolved (never AUTO once running) */
+    /* The arch-domain lane's mode, read once per lowering at entry. */
+    rocke_arch_domain_mode_t arch_domain_mode;
 
     /* block model */
     ROCKE_VEC(rocke_ll_block_t*) blocks; /* blocks[len-1] is _current()       */

@@ -26,11 +26,14 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
@@ -75,6 +78,37 @@ AllocationRules selfOverwriteTable(RuleStatus status) {
     rule.description = "this instruction must not write a register it reads";
     rule.status = status;
     rule.clobbersEarly = [](const StinkyInstruction&) { return true; };
+    return AllocationRules({rule});
+}
+
+/// `v<dest> = v_mov_b32 v<src>` -- one source, so it asks for no pairing and
+/// can scaffold a fixture without adding to the count under test.
+StinkyInstruction* vMov(BasicBlock* bb, int dest, int src) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+    mov->addDestReg(StinkyRegister("v", dest, 1));
+    mov->addSrcReg(StinkyRegister("v", src, 1));
+    return mov;
+}
+
+/// Pairs a destination with its second source, wherever there is one.
+///
+/// A stand-in for the shipped WMMA rule. What the report has to explain is why
+/// a pairing went unmet, and that reasoning does not depend on which rule asked
+/// or on an instruction only one chip has.
+AllocationRules destReusesSrc1() {
+    AllocationRule rule;
+    rule.name = "DestReusesSrc1";
+    rule.description = "a destination should reuse its second source's register";
+    rule.status = RuleStatus::Active;
+    rule.satisfiedBy = [](RegKey dest, RegKey source) { return dest == source; };
+    rule.addPreferences = [](const StinkyInstruction&, const OperandValues& values,
+                             std::vector<Preference>& preferences) {
+        const std::span<const SSAValueID> dest = values(0, true);
+        const std::span<const SSAValueID> source = values(1, false);
+        if (dest.empty() || source.empty()) return;
+        preferences.push_back({dest[0], source[0], 0, 1.0});
+    };
     return AllocationRules({rule});
 }
 
@@ -260,6 +294,31 @@ TEST_F(RegisterAllocationPassTest, PassReportsAMissingGraph) {
     EXPECT_EQ(physicalIR(*func), before);
 }
 
+TEST_F(RegisterAllocationPassTest, TheNotRunPassReportsAsTheAllocationPassWould) {
+    // For a pipeline that decides while being built not to allocate: the same
+    // NotAllocated remark, and nothing else.
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    const std::string before = physicalIR(*func);
+
+    PassContext passCtx;
+    passCtx.setRemarksEnabled(true);
+    AnalysisManager am;
+    registerAllAnalyses(am);
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    createRegisterAllocationNotRunPass("register allocation config 'x' does not parse")
+        ->run(*func, passCtx, am);
+    std::cerr.rdbuf(previous);
+
+    const std::string text = captured.str();
+    EXPECT_TRUE(contains(text,
+                         "missed: RegisterAllocation: @kernel: register allocation config "
+                         "'x' does not parse"))
+        << text;
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
 TEST_F(RegisterAllocationPassTest, AuditRemarksOnAProducerViolationAndStillColours) {
     // Audit is the pre-flight check that keeps a new rule from silently
     // uncolouring kernels: it reports against the producer's own registers and
@@ -319,6 +378,22 @@ TEST_F(RegisterAllocationPassTest, AnUnknownForcedRuleNameIsAnError) {
     EXPECT_TRUE(contains(result.getError(), "SelfOverwrit")) << result.getError();
 }
 
+TEST_F(RegisterAllocationPassTest, ForcingARuleBothOnAndOffIsAnError) {
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Off));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.activate.push_back("SelfOverwrite");
+    options.rules.disable.push_back("SelfOverwrite");
+
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(result.hasError());
+    EXPECT_TRUE(contains(result.getError(), "activate and to disable")) << result.getError();
+    EXPECT_TRUE(contains(result.getError(), "SelfOverwrite")) << result.getError();
+}
+
 TEST_F(RegisterAllocationPassTest, ForcingARuleActiveIgnoresTheArchGate) {
     // The testing hatch: a standalone run has no rocisa capabilities, so a
     // filecheck test has to be able to switch a rule on by name.
@@ -347,6 +422,75 @@ TEST_F(RegisterAllocationPassTest, NoRulesRestoresThePreFrameworkBehaviour) {
     LegacyIdentityAllocator allocator;
     Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
     EXPECT_TRUE(result.hasValue()) << result.getError();
+}
+
+// ---------------------------------------------------------------------------
+// Why a pairing went unmet
+// ---------------------------------------------------------------------------
+//
+// The legacy allocator hands back the registers as written, so these fixtures
+// set the colouring the report has to read rather than hoping an allocator
+// produces one. Both shapes leave the pairing unmet; they differ only in
+// whether the shared register was there to be had.
+
+TEST_F(RegisterAllocationPassTest, AnUnmetPairingWithRoomReportsAsMissed) {
+    // v1 dies at the add and nothing else ever names it, so the destination
+    // could have been put there. Nothing was in the way, so the colouring is
+    // the only thing left to blame.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    vMov(entry, /*dest=*/3, /*src=*/2);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 0/1 unmet 0 blocked 1 missed]"))
+        << report;
+}
+
+TEST_F(RegisterAllocationPassTest, AnUnmetPairingWithNoRoomEitherWayReportsAsBlocked) {
+    // Both ends walled in. A live-in on v2 reaches past the point where v1 is
+    // born, so v1 cannot move up; and a fresh value takes v1 while the add's v2
+    // is still live, so v2 cannot move down.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    vMov(entry, /*dest=*/4, /*src=*/2);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    vMov(entry, /*dest=*/1, /*src=*/0);
+    vMov(entry, /*dest=*/5, /*src=*/2);
+    vMov(entry, /*dest=*/6, /*src=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 0/1 unmet 1 blocked 0 missed]"))
+        << report;
+}
+
+TEST_F(RegisterAllocationPassTest, ASatisfiedPairingAddsNoUnmetBreakdown) {
+    // The breakdown explains a loss, so with nothing lost it must stay out of
+    // the line. Otherwise every clean report carries two zeroes.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/1, /*src0=*/0, /*src1=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 1/1]")) << report;
 }
 
 TEST_F(RegisterAllocationPassTest, PassReportsAnUnknownAllocator) {
@@ -473,4 +617,289 @@ TEST_F(RegisterAllocationPassTest, ShadowReportIncludesRegionPeak) {
 
     ASSERT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
     EXPECT_TRUE(contains(report, "regionPeak=")) << report;
+}
+
+namespace {
+
+/// `v_wmma_scale16 dst, a, b, 0, scaleA, scaleB`. Its two scale fields select
+/// no s_set_vgpr_msb slot, so they reach the first bank only.
+StinkyInstruction* createWmmaScale16(BasicBlock* bb, int dst, int a, int b, int scaleA,
+                                     int scaleB) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* wmma =
+        builder.create(getMCIDByUOp(GFX::v_wmma_scale16_f32_16x16x128_f8f6f4, kRaTestArch));
+    wmma->addDestReg(StinkyRegister("v", dst, 8));
+    wmma->addSrcReg(StinkyRegister("v", a, 8));
+    wmma->addSrcReg(StinkyRegister("v", b, 8));
+    wmma->addSrcReg(StinkyRegister(0));
+    wmma->addSrcReg(StinkyRegister("v", scaleA, 2));
+    wmma->addSrcReg(StinkyRegister("v", scaleB, 2));
+    return wmma;
+}
+
+/// A scale operand the producer left at v300, which no bank selector can name,
+/// defined in the function so that a policy is free to move it.
+StinkyInstruction* outOfReachScaleOperand(Function& func, BasicBlock* entry) {
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    for (int i = 0; i < 2; ++i) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 300 + i, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
+    return createWmmaScale16(entry, /*dst=*/100, /*a=*/110, /*b=*/120, /*scaleA=*/300,
+                             /*scaleB=*/130);
+}
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, OnlyAllocateBringsAnOutOfReachScaleOperandBackIntoTheBank) {
+    // The case a hold cannot fix, and the reason the Allocate policy exists.
+    //
+    // Hold keeps whatever register the producer chose, which is only right while
+    // the producer chooses reachable ones. Asked to freeze v300, a register no
+    // selector can name, it now refuses instead: the ceiling is collected under
+    // either policy, so the contradiction is caught rather than emitted. That is
+    // as far as holding can get, since it has no other register to offer.
+    //
+    // Allocate owes the producer nothing. It places the value under the ceiling
+    // like any other constrained block, which brings it back into the bank.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = outOfReachScaleOperand(*func, entry);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> scale = ssaSourceUnits(*wmma, 3);
+    ASSERT_EQ(scale.size(), 2u);
+    ASSERT_NE(scale[0], nullptr);
+    const SSAValueID outOfReach = scale[0]->valueId();
+
+    RegisterAllocationOptions options;
+    options.allocator = "greedy-compact";
+    options.allocate = RegClassSet::only(RegType::V);
+
+    GreedyAllocator allocator;
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Hold;
+    Expected<AllocationResult> held = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(held.hasError()) << "holding an unreachable register cannot be honoured";
+    EXPECT_TRUE(contains(held.getError(), "v300")) << held.getError();
+
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Allocate;
+    Expected<AllocationResult> allocated = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(allocated.hasValue()) << allocated.getError();
+    EXPECT_LT(allocated->assignmentOf(outOfReach).idx, kVgprBankSize) << allocated->toString();
+}
+
+TEST_F(RegisterAllocationPassTest, AutoAllocatesAnOutOfReachScaleOperandBeforeTryingToHoldIt) {
+    // Hold refuses this kernel, so Auto has to reach the colouring through
+    // its first attempt, and the report says the treatment was found by trying.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = outOfReachScaleOperand(*func, entry);
+    ASSERT_TRUE(liftForAllocation(*func));
+    const SSAValueID outOfReach = ssaSourceUnits(*wmma, 3)[0]->valueId();
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.report = true;
+    ASSERT_EQ(options.unbankableOperands, RegisterAllocationOptions::UnbankableOperands::Auto);
+    CompactingGreedyAllocator allocator;
+    std::string report;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options, &report);
+
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+    EXPECT_LT(result->assignmentOf(outOfReach).idx, kVgprBankSize) << result->toString();
+    EXPECT_TRUE(contains(report, "unbankable[auto allocated")) << report;
+    EXPECT_FALSE(contains(report, "was refused")) << report;
+}
+
+namespace {
+
+/// A scale operand at v140, which its field can reach, defined in the function
+/// so a policy is free to move it. The other scale field reads v130.
+void inReachScaleOperand(Function& func, BasicBlock* entry) {
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    for (int i = 0; i < 2; ++i) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 140 + i, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
+    createWmmaScale16(entry, /*dst=*/100, /*a=*/110, /*b=*/120, /*scaleA=*/140, /*scaleB=*/130);
+}
+
+/// Colours only while \p heldRegister is held, as the unbankable operands are
+/// under Hold, and refuses otherwise. The shape of the bank-0 conflict: the
+/// matrix pins leave Allocate no room under the ceiling, while the producer's
+/// own registers for the scale operands still fit.
+class ColoursOnlyWhenHeld : public RegisterAllocator {
+   public:
+    explicit ColoursOnlyWhenHeld(uint32_t heldRegister) : heldRegister_(heldRegister) {}
+    const char* name() const override {
+        return "colours-only-when-held";
+    }
+    AllocatorCapabilities capabilities() const override {
+        return {};
+    }
+    Expected<AllocationResult> allocate(const AllocationContext& context) override {
+        ++attempts;
+        if (!context.scope.isPinnedRegister(RegType::V, heldRegister_)) {
+            return Expected<AllocationResult>::Error("@" + context.function.getName() +
+                                                     ": no room under the ceiling");
+        }
+        return createLegacyColoring(context.function);
+    }
+    int attempts = 0;
+
+   private:
+    uint32_t heldRegister_;
+};
+
+class AlwaysRefuses : public RegisterAllocator {
+   public:
+    const char* name() const override {
+        return "always-refuses";
+    }
+    AllocatorCapabilities capabilities() const override {
+        return {};
+    }
+    Expected<AllocationResult> allocate(const AllocationContext& context) override {
+        ++attempts;
+        dumpPaths.push_back(context.blockDumpPath);
+        return Expected<AllocationResult>::Error("@" + context.function.getName() + ": refused");
+    }
+    int attempts = 0;
+    std::vector<std::string> dumpPaths;
+};
+
+std::string runPassCapturingRemarks(Function& func, RegisterAllocationOptions options) {
+    PassContext passCtx;
+    passCtx.setRemarksEnabled(true);
+    AnalysisManager am;
+    registerAllAnalyses(am);
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    createRegisterAllocationPass(std::move(options))->run(func, passCtx, am);
+    std::cerr.rdbuf(previous);
+    return captured.str();
+}
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, AutoHoldsTheScaleOperandsWhenAllocatingThemIsRefused) {
+    BasicBlock* entry = block("entry");
+    inReachScaleOperand(*func, entry);
+    const std::string before = physicalIR(*func);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.applyToOperands = true;
+    options.report = true;
+    ColoursOnlyWhenHeld allocator(/*heldRegister=*/140);
+    std::string report;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options, &report);
+
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+    EXPECT_EQ(allocator.attempts, 2);
+    EXPECT_TRUE(contains(report, "unbankable[auto held v130:131 v140:141]")) << report;
+    EXPECT_TRUE(contains(report,
+                         "held them because the allocate attempt was refused: no room under the "
+                         "ceiling"))
+        << report;
+    // The refused attempt changed nothing; the identity colouring that won
+    // was applied once.
+    EXPECT_FALSE(func->hasAttachedSSA());
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
+TEST_F(RegisterAllocationPassTest, AnExplicitPolicyIsTheOnlyAttempt) {
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Allocate;
+    ColoursOnlyWhenHeld allocator(/*heldRegister=*/140);
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(result.getError(), "@kernel: no room under the ceiling");
+    EXPECT_EQ(allocator.attempts, 1);
+}
+
+TEST_F(RegisterAllocationPassTest, AutoNamesBothRefusalsWhenNeitherColours) {
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    AlwaysRefuses allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(allocator.attempts, 2);
+    EXPECT_EQ(result.getError(),
+              "@kernel: refused whether the operands that cannot name a bank are allocated or "
+              "held\n  allocate: refused\n  hold: refused");
+}
+
+TEST_F(RegisterAllocationPassTest, EachAttemptWritesItsOwnPlacementTable) {
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.blockDumpPrefix = "dump/blocks.";
+    AlwaysRefuses allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options).hasError());
+
+    EXPECT_EQ(allocator.dumpPaths,
+              (std::vector<std::string>{"dump/blocks.always-refuses.allocate.tsv",
+                                        "dump/blocks.always-refuses.hold.tsv"}));
+}
+
+TEST_F(RegisterAllocationPassTest, AutoIsOneAttemptWhenNoOperandIsUnbankable) {
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    AlwaysRefuses allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(allocator.attempts, 1) << "holding nothing is the same attempt again";
+    EXPECT_EQ(result.getError(), "@kernel: refused");
+}
+
+TEST_F(RegisterAllocationPassTest, AChainAppliesTheFirstAllocatorThatColours) {
+    // Registered for the rest of the run. The conformance suite took its list
+    // of allocators before any test ran, so it never sees this one.
+    AllocatorRegistry::registerAllocator("test-always-refuses",
+                                         [] { return std::make_unique<AlwaysRefuses>(); });
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    const std::string before = physicalIR(*func);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.allocator = "test-always-refuses+legacy";
+    const std::string text = runPassCapturingRemarks(*func, options);
+
+    EXPECT_TRUE(contains(text, "with legacy after always-refuses refused")) << text;
+    EXPECT_FALSE(contains(text, "NotAllocated")) << text;
+    EXPECT_FALSE(func->hasAttachedSSA());
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
+TEST_F(RegisterAllocationPassTest, AChainThatEveryAllocatorRefusesNamesEachRefusal) {
+    AllocatorRegistry::registerAllocator("test-always-refuses",
+                                         [] { return std::make_unique<AlwaysRefuses>(); });
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.allocator = "test-always-refuses+test-always-refuses";
+    const std::string text = runPassCapturingRemarks(*func, options);
+
+    EXPECT_TRUE(contains(text,
+                         "every allocator in test-always-refuses+test-always-refuses "
+                         "refused\n  always-refuses: refused\n  always-refuses: refused"))
+        << text;
+    EXPECT_TRUE(func->hasAttachedSSA()) << "nothing was applied";
 }

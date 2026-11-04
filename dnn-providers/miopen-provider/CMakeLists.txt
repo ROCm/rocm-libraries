@@ -347,8 +347,6 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     if(TARGET hipdnn_integration_tests)
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
     endif()
-    set(DNN_PROVIDER_CHECK_EXCLUDE_LABELS ex_gpu_gfx110X)
-
 
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -475,6 +473,7 @@ install(TARGETS miopen_plugin EXPORT miopen-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 add_clang_tidy_custom_target()
 

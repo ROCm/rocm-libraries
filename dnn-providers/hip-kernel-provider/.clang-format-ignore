@@ -3,3 +3,6 @@
 # templates for the kernel inlining -- clang-format breaks the
 # syntax of varialbes by adding a space after the second @ character
 src/cmake/templates/*
+
+# FlatBuffers output, generated from ingestor_plan.fbs by flatc
+src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h
