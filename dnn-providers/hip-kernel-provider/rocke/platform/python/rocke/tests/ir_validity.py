@@ -27,9 +27,11 @@ test that pins the instruction LLVM selected and its operands.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tempfile
+from functools import cache
 from os import environ
 from pathlib import Path
 from types import ModuleType
@@ -50,6 +52,8 @@ __all__ = [
     "target_mnemonics",
 ]
 
+_TOOL_FILE = "check_ir_validity.py"
+
 
 def _validity_tool() -> ModuleType | None:
     """The IR-validity tool module, or None when the platform tools are not
@@ -65,20 +69,53 @@ def _validity_tool() -> ModuleType | None:
     override = environ.get("ROCKE_PLATFORM_TOOLS_DIR")
     if override:
         tools = Path(override).resolve()
-        if not (tools / "check_ir_validity.py").is_file():
+        if not (tools / _TOOL_FILE).is_file():
             raise FileNotFoundError(
-                f"ROCKE_PLATFORM_TOOLS_DIR={override!r} holds no check_ir_validity.py "
+                f"ROCKE_PLATFORM_TOOLS_DIR={override!r} holds no {_TOOL_FILE} "
                 f"(resolved to {tools}); point it at a directory that does, or unset it"
             )
     else:
-        tools = platform_root() / "tools"
-        if not (tools / "check_ir_validity.py").is_file():
+        tools = platform_root().resolve() / "tools"
+        if not (tools / _TOOL_FILE).is_file():
             return None
-    if str(tools) not in sys.path:
-        sys.path.insert(0, str(tools))
-    import check_ir_validity
+    return _load_tool(tools / _TOOL_FILE)
 
-    return check_ir_validity
+
+@cache
+def _load_tool(tool_path: Path) -> ModuleType:
+    """Import the tool at ``tool_path`` (resolved) as a module of its own,
+    once per path.
+
+    A bare ``import check_ir_validity`` would return whichever copy the process
+    imported first, so a second tools directory would get the first one's tool.
+    The tool imports the helper modules beside it (``_flavor_gate`` and others)
+    by bare name, so while it loads its directory leads ``sys.path`` and any
+    module of the same name imported from elsewhere is set aside, then put back.
+    """
+    tools = tool_path.parent
+    beside = {path.stem for path in tools.glob("*.py")}
+    set_aside = {
+        name: module
+        for name, module in sys.modules.items()
+        if name in beside and _module_dir(module) != tools
+    }
+    for name in set_aside:
+        del sys.modules[name]
+    spec = importlib.util.spec_from_file_location(tool_path.stem, tool_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(tools))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(tools))
+        sys.modules.update(set_aside)
+    return module
+
+
+def _module_dir(module: ModuleType) -> Path | None:
+    """The resolved directory of ``module``'s file, or None when it has none."""
+    file = getattr(module, "__file__", None)
+    return Path(file).resolve().parent if file else None
 
 
 def arbiter_verdict(ir_text: str, target: str) -> tuple[Verdict, str]:

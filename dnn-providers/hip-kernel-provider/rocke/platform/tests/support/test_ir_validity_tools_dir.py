@@ -3,15 +3,18 @@
 
 """``ROCKE_PLATFORM_TOOLS_DIR`` tells the compile-and-link test helper where the
 IR-validity tool is. A directory without the tool is refused, so a wrong path in
-a CI entry fails loudly instead of turning every compile check into a skip."""
+a CI entry fails loudly instead of turning every compile check into a skip, and
+each directory's own copy of the tool is used."""
 
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 from unittest import mock
 
 import pytest
-from rocke.tests.ir_validity import arbiter_verdict
+from rocke.tests.ir_validity import _validity_tool, arbiter_verdict
 
 _MODULE = """\
 target triple = "amdgcn-amd-amdhsa"
@@ -32,3 +35,23 @@ def test_a_tools_dir_without_the_tool_is_refused(tmp_path):
         f"(resolved to {tmp_path.resolve()}); point it at a directory that does, "
         "or unset it"
     )
+
+
+def test_each_tools_dir_gets_its_own_copy_of_the_tool(tmp_path):
+    """Two directories each hold a copy of the tool and the modules it imports.
+    The helper loads the tool from whichever directory the variable names, also
+    after loading the other, and the tool's imports come from its own
+    directory."""
+    tool = _validity_tool()
+    if tool is None:
+        pytest.skip("rocke platform tools not found")
+    source = Path(tool.__file__).parent
+    for directory in (tmp_path / "first", tmp_path / "second"):
+        directory.mkdir()
+        for module_file in source.glob("*.py"):
+            shutil.copy(module_file, directory)
+        with mock.patch.dict(os.environ, {"ROCKE_PLATFORM_TOOLS_DIR": str(directory)}):
+            loaded = _validity_tool()
+        assert Path(loaded.__file__).parent == directory.resolve()
+        imported = Path(loaded._requires_newer_flavor.__code__.co_filename)
+        assert imported.parent == directory.resolve()
