@@ -572,6 +572,11 @@ inline bool isTensorLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_TENSORLoadToLds);
 }
 
+// tensor_store_from_lds reads LDS and writes global memory: an LDS consumer.
+inline bool isTensorStore(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_TENSORStoreFromLds);
+}
+
 // Async memory ops tracked by ASYNCcnt (s_wait_asynccnt). Shared FIFO counter
 // across the whole async family; extend this predicate as async loads /
 // cluster-async / ds_atomic_async_barrier_arrive are added.
