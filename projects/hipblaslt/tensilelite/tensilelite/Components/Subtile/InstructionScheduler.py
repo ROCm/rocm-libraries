@@ -1456,6 +1456,23 @@ def _vmemSourceSpans(setup, load):
     return spans
 
 
+def _instructionDestSpans(inst):
+    return [
+        span for role, span in _instructionRegisterSpans(inst)
+        if role == "dst"
+    ]
+
+
+def _readsSpans(inst, spans) -> bool:
+    if not spans:
+        return False
+    for role, span in _instructionRegisterSpans(inst):
+        if role == "src" and any(
+                _spansOverlap(span, wanted) for wanted in spans):
+            return True
+    return False
+
+
 def _vmemSlideBlocker(inst, sourceSpans) -> bool:
     """Whether moving a VMEM bundle past inst would break the bundle."""
     if isinstance(inst, TextBlock):
@@ -1554,8 +1571,11 @@ def _rightAlignM0AndVmem(placer):
     instruction toward its first, and each instruction lands strictly before
     the one already placed behind it, so an m0 cannot pass another m0 and a
     load cannot pass the address update that belongs on its other side. A
-    load and the m0 directly before it occupy slot 0 and slot 1 of one
-    interval. Any other instruction in the list takes one slot under the
+    load and the m0 directly before it occupy the last two slots of one
+    interval. In the five-slot MXFP8 shadow those are the fourth and fifth
+    positions. An instruction already in either slot is pushed to a later
+    slot when one is free before the instruction anchored behind the
+    bundle. Any other instruction in the list takes one slot under the
     same interval cap. A placement stays at or after the forward pass
     unless every such slot is already taken, in which case the instruction
     is inserted immediately before the one behind it. Nothing crosses a
@@ -1594,19 +1614,100 @@ def _rightAlignM0AndVmem(placer):
             limit, _firstScheduleBlocker(placer, setupPos + 1, sources))
         earliest = _bundleEarliestSlot(setupPos, width)
         latest = (hardLimit - 2) // width if hardLimit >= 2 else -1
+
+        def take(slot, item):
+            held = placer._placed[slot]
+            for index, candidate in enumerate(held):
+                if candidate is item:
+                    del held[index]
+                    return
+            raise RuntimeError("pushed instruction is not in its slot")
+
+        def undo(records):
+            for origin, dest_slot, moved_item in reversed(records):
+                take(dest_slot, moved_item)
+                placer._placed[origin].append(moved_item)
+
+        def push_past(slot, reserved):
+            """Move this slot's instructions to a later free slot.
+
+            The destination is the earliest slot after the bundle's home
+            that still accepts the instruction. Barriers, waits, and the
+            direct-to-LDS stream stay put. A moved instruction also stops
+            before a later read of the register it writes.
+            """
+            moved = []
+            for item in list(placer._placed[slot]):
+                inst = item[1]
+                if isinstance(inst, TextBlock):
+                    blocker_at = hardLimit
+                elif (_isBarrier(inst) or _isWaitCnt(inst)
+                        or _isM0Update(inst) or _isBufferLoad(inst)):
+                    undo(moved)
+                    return None
+                else:
+                    blocker_at = _firstScheduleBlocker(
+                        placer, slot + 1, _vmemSourceSpans(inst, inst))
+                    dests = _instructionDestSpans(inst)
+                    for pos in range(slot + 1, min(hardLimit, blocker_at)):
+                        occupant = next(
+                            (placed for placed in placer._placed[pos]
+                             if not isinstance(placed[1], TextBlock)),
+                            None)
+                        if occupant is None:
+                            continue
+                        if (_readsSpans(occupant[1], dests)
+                                or _vmemSlideBlocker(occupant[1], dests)):
+                            blocker_at = pos
+                            break
+                ceiling = min(hardLimit, blocker_at)
+                dest = None
+                for pos in range(slot + 1, ceiling):
+                    if pos in reserved:
+                        continue
+                    if (placer.maxInstructionsPerInterval is not None
+                            and placer._intervalInstructionCount(pos) + 1
+                            > placer.maxInstructionsPerInterval):
+                        continue
+                    if placer._canPlace(pos, inst):
+                        dest = pos
+                        break
+                if dest is None:
+                    undo(moved)
+                    return None
+                take(slot, item)
+                placer._placed[dest].append(item)
+                moved.append((slot, dest, item))
+            return moved
+
         for interval in range(latest, earliest // width - 1, -1):
-            slot0 = interval * width
-            slot1 = slot0 + 1
-            if slot0 < earliest or slot1 >= hardLimit:
+            # Fourth and fifth follower positions. The placer counts
+            # from zero, so a five-slot shadow uses offsets 3 and 4.
+            setupSlot = interval * width + width - 2
+            loadSlot = setupSlot + 1
+            if setupSlot < earliest or loadSlot >= hardLimit:
                 continue
-            if (placer.maxInstructionsPerInterval is not None
-                    and placer._intervalInstructionCount(slot0) + 2
-                    > placer.maxInstructionsPerInterval):
-                continue
-            if placer._canPlace(slot0, setup) and placer._canPlace(slot1, load):
-                placer.place(slot0, setupItem)
-                placer.place(slot1, loadItem)
-                return slot0, setupItem
+            reserved = {setupSlot, loadSlot}
+            moved = []
+            failed = False
+            for slot in (loadSlot, setupSlot):
+                pushed = push_past(slot, reserved)
+                if pushed is None:
+                    failed = True
+                    break
+                moved.extend(pushed)
+            fits = (
+                not failed
+                and (placer.maxInstructionsPerInterval is None
+                     or placer._intervalInstructionCount(setupSlot) + 2
+                     <= placer.maxInstructionsPerInterval)
+                and placer._canPlace(setupSlot, setup)
+                and placer._canPlace(loadSlot, load))
+            if fits:
+                placer.place(setupSlot, setupItem)
+                placer.place(loadSlot, loadItem)
+                return setupSlot, setupItem
+            undo(moved)
         if (setupPos < hardLimit and loadPos < hardLimit
                 and setupPos < loadPos
                 and placer._canPlace(setupPos, setup)
@@ -1940,7 +2041,8 @@ def _schedulePartitionZeroIssueOrder(
 
     # Right-align m0, direct-to-LDS loads, and the SALU that writes their
     # global or LDS address. A load and the m0 directly before it take
-    # slot 0 and slot 1 of one shadow.
+    # the last two slots of one shadow. An instruction already there is
+    # pushed to a later slot when one is free.
     _rightAlignM0AndVmem(placer)
 
     scheduled = Module()
