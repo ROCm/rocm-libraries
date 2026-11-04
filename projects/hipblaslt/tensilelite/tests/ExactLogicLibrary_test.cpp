@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -11,6 +12,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 
@@ -217,4 +219,56 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKSchedulin
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
               (std::vector<std::string>{"equality", "range", "prediction"}));
+}
+
+TEST(ExactLogicLibraryTest, EqualityTableKeysOnWorld)
+{
+    using Key   = std::array<int64_t, 6>;
+    using Table = Matching::DistanceMatchingTable<Key,
+                                                  ContractionProblemGemm,
+                                                  std::shared_ptr<ContractionLibrary>,
+                                                  std::shared_ptr<ContractionSolution>,
+                                                  Matching::Equality<Key>>;
+
+    auto freeA   = std::make_shared<Contraction::FreeSizeA>();
+    auto freeB   = std::make_shared<Contraction::FreeSizeB>();
+    auto batch   = std::make_shared<Contraction::BatchSize>();
+    auto bound   = std::make_shared<Contraction::BoundSize>();
+    freeA->index = freeB->index = batch->index = bound->index = 0;
+
+    auto table        = std::make_shared<Table>();
+    table->properties = {freeA,
+                         freeB,
+                         batch,
+                         bound,
+                         std::make_shared<Contraction::World>(),
+                         std::make_shared<Contraction::FusedA2AExtent>()};
+    table->table.push_back({Key{3072, 512, 1, 2048, 2, 2048},
+                            std::make_shared<StubTopLibrary>(makeSolution("world2", 1)),
+                            0.0});
+    table->table.push_back({Key{3072, 512, 1, 2048, 4, 2048},
+                            std::make_shared<StubTopLibrary>(makeSolution("world4", 2)),
+                            0.0});
+
+    ContractionProblemMatchingLibrary lib;
+    lib.table = table;
+
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         problem = ContractionProblemGemm::GEMM(
+        true, false, 3072, 512, 2048, 2048, 2048, 3072, 0.0, false, 1);
+    problem.setFusedGemmA2A(true);
+    problem.setFusedA2AExtent(2048);
+
+    problem.setWorld(2);
+    auto solution = lib.findBestSolution(problem, device);
+    ASSERT_TRUE(solution);
+    EXPECT_EQ(solution->solutionName, "world2");
+
+    problem.setWorld(4);
+    solution = lib.findBestSolution(problem, device);
+    ASSERT_TRUE(solution);
+    EXPECT_EQ(solution->solutionName, "world4");
+
+    problem.setWorld(8);
+    EXPECT_FALSE(lib.findBestSolution(problem, device));
 }
