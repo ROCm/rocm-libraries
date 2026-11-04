@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 def gtest_results(log, unavailable=None, expected=()):
     unavailable = unavailable or {}
     results = {}
+    starts = collections.Counter()
     reasons = {}
     context = []
     for line in log.read_text().splitlines():
@@ -22,6 +23,7 @@ def gtest_results(log, unavailable=None, expected=()):
             context.append(line)
             continue
         if match[1] == "RUN":
+            starts[match[2]] += 1
             context = []
         elif match[1] == "SKIPPED" and match[2] not in reasons:
             reasons[match[2]] = "\n".join(context).strip()
@@ -41,9 +43,16 @@ def gtest_results(log, unavailable=None, expected=()):
             pattern = unavailable.get(case["case"])
             case["unavailable"] = bool(pattern and re.search(pattern, case["reason"]))
     fast = [case for case in cases if "fast_check_streamk" in case["case"]]
-    complete = bool(fast) and all(case["status"] == "passed" for case in cases)
+    invalid_execution = sorted(name for name in results if starts[name] != 1)
+    complete = (
+        bool(fast)
+        and not invalid_execution
+        and set(expected).issubset(results)
+        and all(case["status"] == "passed" for case in cases)
+    )
     available_complete = (
         bool(fast)
+        and not invalid_execution
         and any(case["status"] == "passed" for case in fast)
         and set(expected).issubset(results)
         and all(
@@ -56,6 +65,7 @@ def gtest_results(log, unavailable=None, expected=()):
         "cases": cases,
         "fast_check_streamk": fast,
         "missing_cases": sorted(set(expected) - results.keys()),
+        "invalid_execution_cases": invalid_execution,
         "coverage_complete": complete,
         "available_coverage_complete": available_complete,
     }
