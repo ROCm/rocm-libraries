@@ -23,7 +23,7 @@ import pytest
 from tensilelite.Contractions import ProblemPredicate
 from tensilelite.CustomKernels import customKernelOrigin, getAllCustomKernelNames
 
-_RR_KERNEL = "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_"
+_RR_KERNEL = "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2"
 # A rocRoller capture that predates the RR_GEMM_ naming.
 _LEGACY_RR_KERNEL = (
     "RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_"
