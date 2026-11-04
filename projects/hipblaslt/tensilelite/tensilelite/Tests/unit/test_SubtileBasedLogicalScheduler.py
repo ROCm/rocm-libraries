@@ -5119,6 +5119,48 @@ class TestPartitionZeroIssueOrder:
         assert payload_order == [2]
         assert [inst.comment for _, inst in payload] == ["A next"]
 
+        retained = _splitPartitionZeroPrefetch(
+            [list(range(5))], modules, retainAllLocalReads=True)
+        assert [inst.comment for _, inst in retained[1]] == [
+            "SA tile 0", "A current", "A next",
+            "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert retained[2] == []
+
+    def test_hoisted_overwrite_reads_stay_ahead_of_the_wait(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _splitPartitionZeroPrefetch,
+        )
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+
+        def lr(tensor, target, protect=False):
+            placement = LRPlacement(
+                tensor=tensor, mtIteration=0,
+                tiles=MFMATileRange(0, 1, 2, 4),
+                subIterK_slot=0, partition=0, targetPartition=target)
+            placement.mustPrecedeP0Overwrite = protect
+            return placement
+
+        hoisted = self._read("A tile 3")
+        prefetch = self._read("A later")
+        wait = SWaitCnt(dscnt=-1, comment="Wait for LR to complete")
+        barrier = SBarrier(comment="Barrier")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[hoisted], source=lr("A", 1, True),
+                          instructionMetadata=[(2, 1)]),
+            EmittedModule(moduleId=1, instructions=[prefetch], source=lr("A", 1),
+                          instructionMetadata=[(4, 1)]),
+            EmittedModule(moduleId=2, instructions=[wait], source=WaitLROp()),
+            EmittedModule(moduleId=3, instructions=[barrier], source=SyncOp()),
+        ]
+        split = _splitPartitionZeroPrefetch([list(range(4))], modules)
+        assert split is not None
+        _order, prefix, payload_order, payload, _sync = split
+        assert [inst.comment for _, inst in prefix] == [
+            "A tile 3", "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert payload_order == [1]
+        assert [inst.comment for _, inst in payload] == ["A later"]
+
     def test_reads_across_a_wait_require_the_mxfp8_exception(self):
         from rocisa.instruction import SWaitCnt
         from tensilelite.Components.Subtile.InstructionScheduler import (

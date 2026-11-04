@@ -1194,25 +1194,35 @@ def _findPartitionZeroPrefetchOrder(preMfmaOrders, emittedModules):
     return None
 
 
-def _isCurrentPartitionLocalRead(em) -> bool:
-    """A local read consumed by the partition that issues it.
+def _localReadStaysAheadOfWait(em, retainAllLocalReads=False) -> bool:
+    """A local read the partition-zero wait has to cover.
 
     Scale reads and the current cell's A/B reads carry the issuing
-    partition as their target. Next-partition prefetch does not.
+    partition as their target. A hoisted read overlaps LDS the barrier
+    is about to release. When one tile axis is a single partition, every
+    local read on this path shares that LDS with the other waves, so the
+    whole path stays ahead of the wait.
     """
     if em.opType != "lr":
         return False
+    if retainAllLocalReads:
+        return True
     source = em.source
+    if getattr(source, "mustPrecedeP0Overwrite", False):
+        return True
     return getattr(source, "targetPartition", None) == getattr(source, "partition", None)
 
 
-def _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules):
+def _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules,
+                                retainAllLocalReads=False):
     """Split partition 0's prefetch into a pre-MFMA prefix and its reads.
 
     Reads this cell consumes stay in the prefix, ahead of the local-read
-    wait. Only next-partition prefetch becomes payload. The returned sync
-    list is the barrier the phase scheduler may move to after the first
-    MFMA, once the epoch wait owns the ordering.
+    wait, as do hoisted reads of LDS the following barrier will release.
+    A single-partition axis keeps every local read on the path there too:
+    the other waves overwrite that LDS after the barrier. The returned
+    sync list is the barrier the phase scheduler may move to after the
+    first MFMA, once the epoch wait owns the ordering.
     """
     order = _findPartitionZeroPrefetchOrder(preMfmaOrders, emittedModules)
     if order is None:
@@ -1223,7 +1233,7 @@ def _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules):
     payloadOrder = []
     for mid in order:
         em = emittedModules[mid]
-        if _isCurrentPartitionLocalRead(em):
+        if _localReadStaysAheadOfWait(em, retainAllLocalReads):
             for inst in em.instructions:
                 prefixInsts.append((mid, inst))
             continue
@@ -1682,7 +1692,8 @@ def _orderReadsAroundLiveSourceWrites(pathInsts, earliestWriteShadow, mfmaBase):
 def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch,
-        earliestWriteShadow=None, mfmaBase=0):
+        earliestWriteShadow=None, mfmaBase=0,
+        retainAllLocalReads=False):
     """Issue partition-zero reads by consumer in five follower slots.
 
     Local reads and global-read bundles are ordered by first-consumer rank.
@@ -1693,7 +1704,8 @@ def _schedulePartitionZeroIssueOrder(
     two ds_reads. Local-read spreading stays off.
     """
     n = len(emittedModules)
-    p0Split = _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules)
+    p0Split = _splitPartitionZeroPrefetch(
+        preMfmaOrders, emittedModules, retainAllLocalReads)
     p0Payload = p0Split[3] if p0Split is not None else None
     p0Sync = p0Split[4] if p0Split is not None else []
     p0PayloadReordered = False
@@ -2085,7 +2097,8 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
                       partitionPrefetch: bool = False,
                       uniformPgrEpoch: bool = False,
                       earliestWriteShadow=None,
-                      mfmaBase: int = 0):
+                      mfmaBase: int = 0,
+                      retainAllLocalReads: bool = False):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):
@@ -2122,7 +2135,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
         return _schedulePartitionZeroIssueOrder(
             emittedModules, pathOrders, preMfmaOrders, mfmas,
             minGapDsReadToWait, uniformPgrEpoch,
-            earliestWriteShadow, mfmaBase)
+            earliestWriteShadow, mfmaBase, retainAllLocalReads)
 
     def _emitPreMfma(result):
         for order in preMfmaOrders:
