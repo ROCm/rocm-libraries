@@ -144,7 +144,7 @@ def test_buffer_checked_sides_drop_exactly_the_named_sides_and_refuse_any_other(
 
 
 def _imports_of(path: Path, name: str) -> bool:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and any(a.name == name for a in node.names):
             return True
@@ -343,7 +343,7 @@ _MARKER_CALLERS = {"runtime_value", "exit_if_tile_outside", "slice_tensor"}
 
 
 def _unchecked_marker_calls(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     found = []
 
     def visit(node: ast.AST, function: str | None) -> None:
