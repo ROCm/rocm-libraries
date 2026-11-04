@@ -140,10 +140,11 @@ HOST_S_PER_INPUT = {"fp16": 75e-9, "bf16": 75e-9, "fp32": 75e-9,
 # 4 for a dtype not listed) and its fp32 value while the reference is
 # computed; per output element the fp32 reference, C and its comparison
 # (HOST_OUTPUT_BYTES); plus HOST_FIXED_BYTES for the interpreter, numpy, one
-# block's temporaries and the GPU runtime.
+# block's temporaries and the GPU runtime (a measure worker on an MI350X
+# (gfx950) held about 0.9 GB besides its host data).
 HOST_INPUT_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "fp8": 1, "bf8": 1}
 HOST_OUTPUT_BYTES = 16
-HOST_FIXED_BYTES = 512 << 20
+HOST_FIXED_BYTES = 1 << 30
 
 
 def host_entry_bytes(problem, dtype) -> int:

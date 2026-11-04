@@ -502,11 +502,13 @@ reference, C and its comparison. So an fp8 256x768x874159 problem
 62 GB host, now needs about 4.5 GB.
 
 The host memory guard: before a problem's first call, the search estimates
-the bytes a worker needs for its host data, `(M+N)*K*(e+4) + 16*M*N + 512
-MiB` to compute it (`e` the encoded element size: 1 for fp8 and bf8, 2 for
-fp16 and bf16, 4 otherwise; `host_compute_bytes` in `gemm_search.py`), plus
-the entry itself when the cache is on a tmpfs, and `12*M*N + 512 MiB` to read
-an entry (`host_read_bytes`). It compares that with the memory available:
+the bytes a worker needs for its host data, `(M+N)*K*(e+4) + 16*M*N + 1 GiB`
+to compute it (`e` the encoded element size: 1 for fp8 and bf8, 2 for fp16
+and bf16, 4 otherwise; `host_compute_bytes` in `gemm_search.py`), plus the
+entry itself when the cache is on a tmpfs, and `12*M*N + 1 GiB` to read an
+entry (`host_read_bytes`). The 1 GiB covers the interpreter, one block's
+temporaries and the GPU runtime: a measure worker on an MI350X (gfx950) held
+about 0.9 GB besides its host data. It compares that with the memory available:
 `MemAvailable` from `/proc/meminfo` (or the room left under the `memory.max`
 of the run's cgroup, when that is less), less 10% of the total. The problem's
 preparation must fit, and then one call per device at once, reading its

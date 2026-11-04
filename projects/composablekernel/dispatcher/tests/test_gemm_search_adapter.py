@@ -622,15 +622,22 @@ def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
     assert ("not stored" in out) == (case in ("over the caps", "failed"))
 
 
-BIG = {"M": 1024, "N": 1024, "K": 65536}  # fp8: 1.1 GiB of host data to compute
+BIG = {"M": 1024, "N": 1024, "K": 65536}  # fp8: 0.6 GiB of host data and 1 GiB fixed
 KBIG = "1024x1024x65536"
 
 
+def _between(n):
+    """MemAvailable (GiB, with 8 GiB in all) for which ``n`` workers computing
+    P1's fp8 host data at once fit, and ``n`` computing BIG's do not."""
+    p1, big = (GS.host_compute_bytes(p, "fp8") for p in (P1, BIG))
+    return n * (p1 + big) / 2 / AS.GIB + AS.HOST_MEMORY_MARGIN * 8
+
+
 @pytest.mark.parametrize("case, devices, avail, cached", [
-    ("preparation", 1, 1.5, True),  # 0.7 GiB left: the preparation does not fit
-    ("calls without an entry", 2, 2.6, "refused"),  # 1.8 GiB: 1 call fits, 2 do not
-    ("cache off", 2, 2.6, False),
-    ("cache off, one device", 1, 2.6, False),
+    ("preparation", 1, _between(1), True),
+    ("calls without an entry", 2, _between(2), "refused"),
+    ("cache off", 2, _between(2), False),
+    ("cache off, one device", 1, _between(2), False),
 ])
 def test_host_memory_guard_skips_a_problem_that_does_not_fit(
         tmp_path, monkeypatch, capsys, case, devices, avail, cached):
@@ -639,6 +646,7 @@ def test_host_memory_guard_skips_a_problem_that_does_not_fit(
     # per device at once (reading the entry, or computing it all without
     # one), must fit; a problem that does not is never prepared nor
     # measured: its requests get host_memory and one console line names it.
+    # BIG fits on one device in the last case.
     monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "ext4")
     tc = Toolchain(tmp_path, monkeypatch)
     if cached == "refused":
@@ -656,13 +664,10 @@ def test_host_memory_guard_skips_a_problem_that_does_not_fit(
         out += ad.measure_pairs([_req(KBIG, A, 4)])
     budget = ad.memory()
     each = GS.host_compute_bytes(BIG, "fp8")
-    want = {
-        "preparation": AS.host_memory_error(each, budget),
-        "calls without an entry": AS.host_memory_error(2 * each, budget, (
-            "2 calls at once without a cache entry, 1.1 GiB each")),
-        "cache off": AS.host_memory_error(2 * each, budget, (
-            "2 calls at once without a cache entry, 1.1 GiB each")),
-    }.get(case)
+    two = AS.host_memory_error(2 * each, budget, (
+        f"2 calls at once without a cache entry, {each / AS.GIB:.1f} GiB each"))
+    want = {"preparation": AS.host_memory_error(each, budget),
+            "calls without an entry": two, "cache off": two}.get(case)
     if want is None:  # it fits
         assert [o.status for o in out] == ["unattempted"] * 4 and seen == [P1, BIG, BIG, BIG]
         return
@@ -755,7 +760,7 @@ def test_search_skips_a_problem_whose_host_data_does_not_fit(tmp_path, monkeypat
     # reason; P1 gets its winner, and the run is partial.
     monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "ext4")
     tc = Toolchain(tmp_path, monkeypatch)
-    monkeypatch.setattr(AS, "host_memory", _memory(tmp_path, 8, 1.5))
+    monkeypatch.setattr(AS, "host_memory", _memory(tmp_path, 8, _between(1)))
     out = tmp_path / "out"
     settings = AS.SearchSettings.from_json({
         "schema_version": 1, "strategy": "exhaustive", "trials_per_problem": 3,
