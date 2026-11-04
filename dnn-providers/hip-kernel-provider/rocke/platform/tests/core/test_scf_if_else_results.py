@@ -10,10 +10,12 @@ HIP lowering declares the results before the ``if`` and assigns them at the end
 of both branches. Covers both lowerings in both engines (same text), an if/else
 nested in a loop that carries a value, the builder's, the verifier's and the
 lowerers' refusals of a branch that does not yield the results or yields a
-buffer descriptor, of an LDS allocation as a result and of an if/else without
-one condition and two branches,
-and, when a GPU is present, a kernel whose lanes take both branches on the LLVM
-and the hipcc route.
+buffer descriptor, of a yield in a branch of an if/else without results (alone
+and in a loop) or before the end of a branch of one with results, of an LDS
+allocation or a packed-only type as a result, of an if/else without one
+condition and two branches and of a yield outside any loop or if/else with
+results, and, when a GPU is present, a kernel whose lanes take both branches on
+the LLVM and the hipcc route.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import numpy as np
 import pytest
 from rocke.core.ir import (
     F32,
+    I4,
     I32,
     IRBuilder,
     Op,
@@ -312,15 +315,14 @@ def test_builder_refuses_an_lds_allocation_result():
     assert str(error.value) == LDS_RESULT_MESSAGE
 
 
-def test_both_lowerings_and_the_verifier_refuse_an_lds_allocation_result():
-    """The same if/else written past the builder, its branches yielding two
-    allocations, is refused by the verifier and every lowering of both
-    engines instead of lowering to a phi of undefined names."""
-    b = IRBuilder("if_else_lds")
+def _raw_lds_result_if_else(elem):
+    """An if/else with one result, an LDS tile of ``elem``, its branches
+    yielding two such allocations, written past the builder."""
+    b = IRBuilder(f"if_else_lds_{elem.name}")
     lane = b.thread_id_x()
     first = b.smem_alloc(F32, (64,), name_hint="first")
     second = b.smem_alloc(F32, (64,), name_hint="second")
-    result = Value("%if_lds0", first.type)
+    result = Value("%if_lds0", SmemType(elem, (64,)))
     then_r, else_r = Region("then"), Region("else")
     op = Op(
         name="scf.if_else",
@@ -335,9 +337,134 @@ def test_both_lowerings_and_the_verifier_refuse_an_lds_allocation_result():
         b.scf_yield(value)
         b.pop_region()
     b.ret()
-    assert_both_engines_reject(b.kernel, "gfx942", ValueError, LDS_RESULT_MESSAGE)
-    assert_both_engines_reject_hip(b.kernel, "gfx942", ValueError, LDS_RESULT_MESSAGE)
-    assert LDS_RESULT_MESSAGE in [d.message for d in verify(b.kernel)]
+    return b.kernel
+
+
+def test_both_lowerings_and_the_verifier_refuse_an_lds_allocation_result():
+    """The same if/else written past the builder, its branches yielding two
+    allocations, is refused by the verifier and every lowering of both
+    engines instead of lowering to a phi of undefined names."""
+    kernel = _raw_lds_result_if_else(F32)
+    assert_both_engines_reject(kernel, "gfx942", ValueError, LDS_RESULT_MESSAGE)
+    assert_both_engines_reject_hip(kernel, "gfx942", ValueError, LDS_RESULT_MESSAGE)
+    assert LDS_RESULT_MESSAGE in [d.message for d in verify(kernel)]
+
+
+def test_a_packed_only_lds_result_is_refused_as_packed_only_first():
+    """Both engines check an if/else result's type in one order: the
+    packed-only rule (TypeError) before the LDS rule (ValueError), so an LDS
+    tile of i4 gets the packed-only refusal from the verifier and both
+    engines' lowerings. ``test_packed_only.py`` checks the same order in both
+    builders."""
+    kernel = _raw_lds_result_if_else(I4)
+    message = (
+        "scf.if_else: i4 values travel packed in 32-bit words and have no scalar "
+        "or vector form -- keep them in i32 storage and unpack explicitly"
+    )
+    assert_both_engines_reject(kernel, "gfx942", TypeError, message)
+    assert_both_engines_reject_hip(kernel, "gfx942", TypeError, message)
+    assert message in [d.message for d in verify(kernel)]
+
+
+STRAY_YIELD_MESSAGE = (
+    "scf.if_else has no results, so its then branch cannot contain scf.yield"
+)
+
+
+def test_builder_refuses_a_yield_in_an_if_else_without_results():
+    """Nothing takes the values of a yield in a branch of an if/else without
+    results, so leaving the ``with`` refuses one."""
+    b, branch = _open_if_else([])
+    with pytest.raises(ValueError) as error, branch as (then_ctx, else_ctx):
+        with then_ctx:
+            b.scf_yield(b.const_i32(1))
+        with else_ctx:
+            pass
+    assert str(error.value) == STRAY_YIELD_MESSAGE
+
+
+def _stray_yield_if_else(b, cond):
+    """Build an if/else without results whose then branch yields one value,
+    past the builder's check, as serialized IR can reach the lowerers."""
+    then_ctx, _ = b.scf_if_else(cond).__enter__()
+    with then_ctx:
+        b.scf_yield(b.const_i32(1))
+
+
+def test_both_lowerings_and_the_verifier_refuse_a_yield_in_an_if_else_without_results():
+    """The same if/else written past the builder is refused by the verifier
+    and every lowering of both engines, not with a stale loop error."""
+    b = IRBuilder("if_else_stray_yield")
+    _stray_yield_if_else(b, b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT)))
+    b.ret()
+    assert_both_engines_reject(b.kernel, "gfx942", ValueError, STRAY_YIELD_MESSAGE)
+    assert_both_engines_reject_hip(b.kernel, "gfx942", ValueError, STRAY_YIELD_MESSAGE)
+    assert STRAY_YIELD_MESSAGE in [d.message for d in verify(b.kernel)]
+
+
+def test_a_yield_in_an_if_else_without_results_in_a_loop_is_refused_as_such():
+    """In a loop body the stray value is not counted toward the loop's yields:
+    the if/else rule refuses it before the loop's yield count is checked."""
+    b = IRBuilder("if_else_stray_yield_loop")
+    lane = b.thread_id_x()
+    loop = b.scf_for_iter(
+        b.const_i32(0), b.const_i32(LOOP_TRIPS), b.const_i32(1), [("acc", lane)]
+    )
+    with loop as (k, (acc,)):
+        _stray_yield_if_else(b, b.cmp_lt(k, lane))
+        b.scf_yield(acc)
+    b.ret()
+    assert_both_engines_reject(b.kernel, "gfx942", ValueError, STRAY_YIELD_MESSAGE)
+    assert_both_engines_reject_hip(b.kernel, "gfx942", ValueError, STRAY_YIELD_MESSAGE)
+    assert STRAY_YIELD_MESSAGE in [d.message for d in verify(b.kernel)]
+
+
+EARLY_YIELD_MESSAGE = (
+    "scf.if_else has 1 results, so its then branch must yield only at its end"
+)
+
+
+def _early_yield_if_else_kernel():
+    """An if/else with one result whose then branch yields before the
+    ``scf.yield`` that ends it, written past the builder's check."""
+    b, branch = _open_if_else([I32])
+    then_ctx, else_ctx = branch.__enter__()
+    with then_ctx:
+        b.scf_yield(b.const_i32(5))
+        b.scf_yield(b.const_i32(1))
+    with else_ctx:
+        b.scf_yield(b.const_i32(2))
+    b.ret()
+    return b, branch
+
+
+def test_builder_refuses_a_yield_before_the_end_of_a_branch():
+    """Only the yield that ends a branch gives the results their values, so
+    an earlier one is refused rather than silently dropped."""
+    _, branch = _early_yield_if_else_kernel()
+    with pytest.raises(ValueError) as error:
+        branch.__exit__(None, None, None)
+    assert str(error.value) == EARLY_YIELD_MESSAGE
+
+
+def test_both_lowerings_and_the_verifier_refuse_a_yield_before_the_end_of_a_branch():
+    b, _ = _early_yield_if_else_kernel()
+    assert_both_engines_reject(b.kernel, "gfx942", ValueError, EARLY_YIELD_MESSAGE)
+    assert_both_engines_reject_hip(b.kernel, "gfx942", ValueError, EARLY_YIELD_MESSAGE)
+    assert EARLY_YIELD_MESSAGE in [d.message for d in verify(b.kernel)]
+
+
+ORPHAN_YIELD_MESSAGE = "scf.yield outside an scf.for or an scf.if_else with results"
+
+
+def test_both_lowerings_refuse_a_yield_outside_any_loop_or_if_else_with_results():
+    """Nothing takes the values of a yield in the kernel body; both lowerings
+    of both engines refuse it (the C++ LLVM lowering used to accept it)."""
+    b = IRBuilder("orphan_yield")
+    b.scf_yield(b.const_i32(1))
+    b.ret()
+    assert_both_engines_reject(b.kernel, "gfx942", ValueError, ORPHAN_YIELD_MESSAGE)
+    assert_both_engines_reject_hip(b.kernel, "gfx942", ValueError, ORPHAN_YIELD_MESSAGE)
 
 
 @pytest.mark.parametrize("operands,regions", [(0, 2), (1, 1), (1, 0), (2, 2)])
