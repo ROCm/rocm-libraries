@@ -1054,7 +1054,7 @@ TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnBadShapes)
 
     EXPECT_EQ(shapeError(d, d, d, d), "");
     expectError(shapeError({2, 4, 64}, d, d, d), "rank-4 [B, H, S, D]");
-    expectError(shapeError(d, d, d, d, /*offsetRows=*/2), "[B+1, 1, 1, 1]");
+    expectError(shapeError(d, d, d, d, /*offsetRows=*/2), "must have shape [B + 1, 1, 1, 1]");
     expectError(shapeError(raggedDims(2, 4, 4, 0), raggedDims(2, 4, 4, 0), d, d),
                 "all dimensions must be positive");
     expectError(shapeError(d, raggedDims(1, 4, 4, 16), d, d), "batch dimension mismatch");
