@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446.
+# TheRock ref: pinned to ROCm/TheRock commit d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -132,7 +132,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: amontoison/TheRock
-          ref: f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+          ref: d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -174,7 +174,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -217,7 +217,7 @@ jobs:
           'off'
         }}
       repository: amontoison/TheRock
-      ref: f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+      ref: d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -248,7 +248,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -262,7 +262,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: amontoison/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+      ref: d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
     permissions:
       contents: read
       id-token: write
@@ -275,7 +275,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_windows.yml@f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_windows.yml@d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -288,7 +288,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: amontoison/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+      ref: d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
     permissions:
       contents: read
       id-token: write
@@ -396,7 +396,7 @@ jobs:
         with:
           repository: "amontoison/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: f42b656db9e3cf7f58032bf48dd117d69bfb8643 # TEST ONLY: ROCm/TheRock#9446
+          ref: d251b98b153531e4771b47c2c1a34bd1dd092541 # TEST ONLY: ROCm/TheRock#9446
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
