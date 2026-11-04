@@ -15,12 +15,13 @@ Checks:
 
 * On the host, on the kernel's LLVM IR for gfx942 and gfx950, fp8 and bf8,
   and A scale groups of one and two rows (with the C++ engine importable,
-  each engine builds and lowers the kernel from the spec with its own
-  builder, ``build_block_scale_gemm`` and ``rocke_build_block_scale_gemm``,
-  and the two texts must be the same byte for byte): every output gets one
-  term per K group ``kg``, each term scaled with exactly one A scale, from
-  ``AScale[row // gm, kg]``, and one B scale, from ``BScale[kg, col // gn]``,
-  where ``(row, col)`` is the cell the kernel stores that output to.
+  each engine's builder, ``build_block_scale_gemm`` and
+  ``rocke_build_block_scale_gemm``, builds the kernel from the spec, both
+  kernels are lowered, and the two texts must be the same byte for byte):
+  every output gets one term per K group ``kg``, each term scaled with
+  exactly one A scale, from ``AScale[row // gm, kg]``, and one B scale, from
+  ``BScale[kg, col // gn]``, where ``(row, col)`` is the cell the kernel
+  stores that output to.
 * On a gfx942 or gfx950 GPU, running that same LLVM IR, with A scales that
   differ per row and per K group and B scales that differ per column and per
   K group, the output matches an f32 reference within the runbook GEMM
@@ -59,10 +60,12 @@ _GEMM_TOLERANCE = 7e-2
 def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
     """The kernel's LLVM IR for ``spec`` on ``arch``.
 
-    With the C++ engine importable, each engine builds the kernel from the
-    spec with its own builder and lowers it, and the two texts must be the
-    same byte for byte (``BackendMismatch`` otherwise); without it, the
-    Python engine's text."""
+    With the C++ engine importable, each engine's builder builds the kernel
+    from the spec, both kernels are lowered (the Python builder's by the
+    default lowerer, which is the C++ one unless ``ROCKE_BACKEND`` names
+    another), and the two texts must be the same byte for byte
+    (``BackendMismatch`` otherwise); without it, the Python builder's kernel,
+    lowered by the Python lowerer (``ROCKE_BACKEND=both`` raises instead)."""
     if all_engines_backend() == "both":
         return lower_block_scale_gemm(spec, arch=arch, backend="both").llvm_text
     return lower_kernel_to_llvm(build_block_scale_gemm(spec, arch=arch), arch=arch)
@@ -71,7 +74,7 @@ def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
 # ---------------------------------------------------------------------------
 # Host check on the lowered kernel.
 #
-# It reads the kernel's LLVM IR, as both engines emit it, and evaluates the
+# It reads the kernel's LLVM IR, as ``_lowered_llvm`` returns it, and evaluates the
 # address of every scale load and every store for every lane, output tile and
 # K group, so it follows the kernel: any change to how the kernel picks a
 # scale changes what it checks.
