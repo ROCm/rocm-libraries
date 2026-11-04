@@ -128,7 +128,7 @@ class InstructionEmitter:
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':           lambda em, ui: self.emit_lr(em.source, ui),
             'gr':           lambda em, ui: self.emit_gr(em.source, ui),
-            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
+            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source, ui),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
             'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
@@ -301,9 +301,13 @@ class InstructionEmitter:
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_wait_gr(self, source):
+    def emit_wait_gr(self, source, unroll_iter=0):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
-        counts = source.wait_gr_counts
+        counts_by_unroll = getattr(source, 'wait_gr_counts_by_unroll', None)
+        if counts_by_unroll:
+            counts = counts_by_unroll[unroll_iter % len(counts_by_unroll)]
+        else:
+            counts = source.wait_gr_counts
         if counts is None:
             return []
 
