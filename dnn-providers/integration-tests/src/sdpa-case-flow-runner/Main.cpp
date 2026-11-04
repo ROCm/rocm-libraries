@@ -146,7 +146,8 @@ void printUsage(std::ostream& os)
           "  --cpu-ref-max-mflop X         run the CPU reference only up to X MFLOP (default "
           "300)\n"
           "  --warmup N / --iterations N   engine benchmark warm-up and timed runs (3 / 10)\n"
-          "  --seed N                      input fill seed\n"
+          "  --seed N                      input fill seed for rows without a case_key (rows\n"
+          "                                with one use a seed taken from the case_key)\n"
           "  --no-gpu-ref                  do not run the GPU reference\n"
           "  --descale-form FORM           by-value (default) or device\n"
           "  --progress FILE               write the index of the row in progress to FILE\n"
@@ -1021,86 +1022,167 @@ double tensorBytes(const hipdnn_frontend::graph::TensorAttributes& attr)
 
 // ------------------------------------------------------------------ input contents
 
-template <typename T>
-void writeIntegers(hipdnn_data_sdk::utilities::ITensor& tensor, const std::vector<int64_t>& values)
+// Every non-virtual tensor of a graph, ragged offset tensors included, and the uids that a
+// node writes.
+struct GraphTensors
 {
-    auto* data = static_cast<T*>(tensor.rawHostData());
-    for(size_t i = 0; i < values.size() && i < tensor.elementSpace(); ++i)
+    std::map<int64_t, TensorPtr> attrs;
+    std::set<int64_t> outputs;
+};
+
+GraphTensors collectGraphTensors(hipdnn_frontend::graph::Graph& graph)
+{
+    GraphTensors found;
+    const auto add = [&](const TensorPtr& attr) {
+        if(attr != nullptr && !attr->get_is_virtual())
+        {
+            found.attrs.emplace(attr->get_uid(), attr);
+        }
+    };
+    graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+        for(const auto& attr : node.getNodeOutputTensorAttributes())
+        {
+            add(attr);
+            if(attr != nullptr && !attr->get_is_virtual())
+            {
+                found.outputs.insert(attr->get_uid());
+            }
+        }
+        for(const auto& attr : node.getNodeInputTensorAttributes())
+        {
+            add(attr);
+        }
+    });
+    for(const auto& [uid, attr] : std::map<int64_t, TensorPtr>(found.attrs))
     {
-        data[i] = static_cast<T>(values[i]);
+        add(attr->get_ragged_offset());
     }
-    tensor.markHostModified();
+    return found;
 }
 
-bool writeIndexTensor(hipdnn_data_sdk::utilities::ITensor& tensor,
-                      hipdnn_frontend::DataType type,
-                      const std::vector<int64_t>& values)
+// The tensors no node writes, in ascending uid order.
+std::vector<int64_t> leafInputUids(const GraphTensors& tensors)
 {
-    if(type == hipdnn_frontend::DataType::INT32)
+    std::vector<int64_t> uids;
+    for(const auto& [uid, attr] : tensors.attrs)
     {
-        writeIntegers<int32_t>(tensor, values);
-        return true;
+        if(tensors.outputs.count(uid) == 0)
+        {
+            uids.push_back(uid);
+        }
     }
-    if(type == hipdnn_frontend::DataType::INT64)
-    {
-        writeIntegers<int64_t>(tensor, values);
-        return true;
-    }
-    if(type == hipdnn_frontend::DataType::UINT8)
-    {
-        writeIntegers<uint8_t>(tensor, values);
-        return true;
-    }
-    return false;
+    return uids;
 }
 
-// Set element i of a tensor to values[i % values.size()]. Returns the content note suffix.
-std::string writeFloatCycle(hipdnn_data_sdk::utilities::ITensor& tensor,
-                            const std::vector<float>& values)
+bool isCaseKey(const std::string& key)
 {
-    if(values.size() == 1)
-    {
-        tensor.fillTensorWithValue(values.front());
-        return ":class-value " + jsonNumber(static_cast<double>(values.front()));
-    }
-    std::string text = ":cycle";
-    for(const auto value : values)
-    {
-        text += " " + jsonNumber(static_cast<double>(value));
-    }
-    if(values.empty() || tensor.elementSize() != sizeof(float))
-    {
-        return ":not-written(needs a float tensor)";
-    }
-    auto* data = static_cast<float*>(tensor.rawHostData());
-    for(size_t i = 0; i < tensor.elementSpace(); ++i)
-    {
-        data[i] = values[i % values.size()];
-    }
-    tensor.markHostModified();
-    return text;
+    return key.size() == 16 && key.find_first_not_of("0123456789abcdef") == std::string::npos;
 }
 
-// Write one tensor's class contents. Returns the content note suffix.
-std::string writeContents(hipdnn_data_sdk::utilities::ITensor& tensor,
-                          hipdnn_frontend::DataType type,
-                          const sdpa_case_flow::Contents& contents)
+// The per-case input seed: the first 8 hex digits of the case_key, masked to 31 bits.
+int64_t caseSeed(const std::string& caseKey)
+{
+    return static_cast<int64_t>(std::stoull(caseKey.substr(0, 8), nullptr, 16) & 0x7fffffffULL);
+}
+
+// Gives every leaf input its own seed, drawn in ascending uid order from a generator seeded
+// with `seed`: the same draws fillInputs makes from that global seed. A tensor keeps its seed
+// when its uid changes.
+void setInputSeeds(it::InputFillRecipes& recipes,
+                   const std::vector<int64_t>& sortedLeafUids,
+                   unsigned int seed)
+{
+    recipes.setGlobalSeed(seed);
+    std::mt19937 generator(seed);
+    for(const auto uid : sortedLeafUids)
+    {
+        recipes.setSeed(uid, static_cast<unsigned int>(generator()));
+    }
+}
+
+// The content that becomes a FIXED fill. Every other content becomes a VALUES fill.
+constexpr const char* FIXED_CONTENT_NAME = "attn_scale";
+
+it::FillRecipe contentRecipe(const std::string& name, const sdpa_case_flow::Contents& contents)
 {
     if(const auto* reals = std::get_if<std::vector<double>>(&contents.values))
     {
-        return writeFloatCycle(tensor, std::vector<float>(reals->begin(), reals->end()));
-    }
-    const auto& integers = std::get<std::vector<int64_t>>(contents.values);
-    std::vector<int64_t> values = integers;
-    if(contents.repeat && !integers.empty())
-    {
-        values.resize(tensor.elementSpace());
-        for(size_t i = 0; i < values.size(); ++i)
+        if(name == FIXED_CONTENT_NAME && reals->size() == 1)
         {
-            values[i] = integers[i % integers.size()];
+            return it::FillRecipe::fixed(static_cast<float>(reals->front()));
+        }
+        return it::FillRecipe::values(*reals, contents.repeat);
+    }
+    return it::FillRecipe::values(std::get<std::vector<int64_t>>(contents.values), contents.repeat);
+}
+
+struct ContentInput
+{
+    std::string name;
+    int64_t uid = 0;
+};
+
+// Sets one recipe per BuiltCase content on the leaf input of that name. Throws
+// std::runtime_error when a content names no leaf input, or more than one.
+std::vector<ContentInput> setContentRecipes(it::InputFillRecipes& recipes,
+                                            const sdpa_case_flow::BuiltCase& built,
+                                            const GraphTensors& tensors)
+{
+    std::vector<ContentInput> placed;
+    for(const auto& [name, contents] : built.contents)
+    {
+        std::vector<int64_t> uids;
+        for(const auto& [uid, attr] : tensors.attrs)
+        {
+            if(attr->get_name() == name && tensors.outputs.count(uid) == 0)
+            {
+                uids.push_back(uid);
+            }
+        }
+        if(uids.size() != 1)
+        {
+            throw std::runtime_error("contents for '" + name + "' match "
+                                     + std::to_string(uids.size())
+                                     + " input tensors of the graph, not 1");
+        }
+        recipes.set(uids.front(), contentRecipe(name, contents));
+        placed.push_back({name, uids.front()});
+    }
+    return placed;
+}
+
+// A short description of a recipe for the result records.
+std::string recipeNote(const it::FillRecipe& recipe)
+{
+    constexpr size_t MAX_LISTED = 64;
+    if(recipe.kind == it::FillRecipe::Kind::FIXED)
+    {
+        return "fixed " + jsonNumber(static_cast<double>(recipe.value));
+    }
+    if(recipe.kind != it::FillRecipe::Kind::VALUES || recipe.list == nullptr)
+    {
+        return "free";
+    }
+    std::string text = "values [";
+    const size_t count
+        = std::visit([](const auto& numbers) { return numbers.size(); }, *recipe.list);
+    for(size_t i = 0; i < count && i < MAX_LISTED; ++i)
+    {
+        text += i == 0 ? "" : ",";
+        if(const auto* integers = std::get_if<std::vector<int64_t>>(recipe.list.get()))
+        {
+            text += std::to_string((*integers)[i]);
+        }
+        else
+        {
+            text += jsonNumber(std::get<std::vector<double>>(*recipe.list)[i]);
         }
     }
-    return writeIndexTensor(tensor, type, values) ? ":class-contents" : ":random(unsupported type)";
+    if(count > MAX_LISTED)
+    {
+        text += ",... " + std::to_string(count) + " values";
+    }
+    return text + (recipe.repeat ? "] repeat" : "] exact");
 }
 
 // ------------------------------------------------------------------ one case
@@ -1595,38 +1677,17 @@ std::string runCase(size_t index,
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                 blob.data(), blob.size());
 
-        std::map<int64_t, TensorPtr> attrs;
-        std::vector<int64_t> outputUids;
+        const auto graphTensors = collectGraphTensors(graph);
+        const auto& attrs = graphTensors.attrs;
+        const std::vector<int64_t> outputUids(graphTensors.outputs.begin(),
+                                              graphTensors.outputs.end());
         Bundle engineBundle;
-        const auto addAttr = [&](const TensorPtr& attr, bool output) {
-            if(attr == nullptr || attr->get_is_virtual() || attrs.count(attr->get_uid()) != 0)
-            {
-                return;
-            }
-            attrs[attr->get_uid()] = attr;
+        for(const auto& [uid, attr] : attrs)
+        {
             engineBundle.addTensor(
                 *attr, hipdnn_test_sdk::utilities::createTensorFromAttribute(*attr, true));
-            if(output)
-            {
-                engineBundle.outputTensorIds.insert(attr->get_uid());
-                outputUids.push_back(attr->get_uid());
-            }
-        };
-        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& attr : node.getNodeOutputTensorAttributes())
-            {
-                addAttr(attr, true);
-            }
-            for(const auto& attr : node.getNodeInputTensorAttributes())
-            {
-                addAttr(attr, false);
-            }
-        });
-        for(const auto& [uid, attr] : std::map<int64_t, TensorPtr>(attrs))
-        {
-            addAttr(attr->get_ragged_offset(), false);
         }
-        std::sort(outputUids.begin(), outputUids.end());
+        engineBundle.outputTensorIds.insert(outputUids.begin(), outputUids.end());
 
         double tensorMb = 0.0;
         for(const auto& [uid, attr] : attrs)
@@ -1642,44 +1703,35 @@ std::string runCase(size_t index,
 
         stageStart = Clock::now();
         std::vector<std::string> contentNotes;
+        const unsigned int seed = isCaseKey(extra("case_key"))
+                                      ? static_cast<unsigned int>(caseSeed(extra("case_key")))
+                                      : ctx.opts.seed;
+        line.integer("seed", seed);
         try
         {
-            std::vector<int64_t> leafInputs;
-            for(const auto& [uid, tensor] : engineBundle.tensors)
-            {
-                if(!engineBundle.isOutput(uid))
-                {
-                    leafInputs.push_back(uid);
-                }
-            }
+            const auto leafInputs = leafInputUids(graphTensors);
             it::InputFillRecipes recipes;
-            recipes.setGlobalSeed(ctx.opts.seed);
+            setInputSeeds(recipes, leafInputs, seed);
+            for(const auto& placed : setContentRecipes(recipes, built, graphTensors))
+            {
+                contentNotes.push_back(placed.name + ":" + recipeNote(recipes.fill(placed.uid)));
+            }
             const auto fill
                 = it::fillInputs(*fbGraph, engineBundle.tensors, leafInputs, recipes, nullptr);
             if(!fill.filled)
             {
-                line.num("t_fill_us", microsSince(stageStart));
-                return finish(graphOutcome, "fill", fill.reason);
-            }
-            for(const auto& [name, contents] : built.contents)
-            {
-                std::string note = ":not-in-bundle";
-                for(const auto& [uid, attr] : attrs)
-                {
-                    if(attr->get_name() == name && engineBundle.tensors.count(uid) != 0)
-                    {
-                        note = writeContents(
-                            *engineBundle.tensors.at(uid), attr->get_data_type(), contents);
-                    }
-                }
-                contentNotes.push_back(name + note);
+                line.num("t_fill_us", microsSince(stageStart))
+                    .raw("content_notes", jsonStringArray(contentNotes));
+                const bool invalid = fill.status == it::FillResult::Status::INVALID;
+                return finish(invalid ? "error" : graphOutcome, "fill", fill.reason);
             }
             engineBundle.sentinelFillOutputTensors();
         }
         catch(const std::exception& e)
         {
-            line.num("t_fill_us", microsSince(stageStart));
-            return finish(graphOutcome, "fill", std::string("exception: ") + e.what());
+            line.num("t_fill_us", microsSince(stageStart))
+                .raw("content_notes", jsonStringArray(contentNotes));
+            return finish("error", "fill", std::string("exception: ") + e.what());
         }
         line.num("t_fill_us", microsSince(stageStart))
             .raw("content_notes", jsonStringArray(contentNotes));
@@ -1795,7 +1847,7 @@ std::string runCase(size_t index,
             }
             else
             {
-                writeSyntheticKeepMask(target, rngDump->dropoutProbability, ctx.opts.seed);
+                writeSyntheticKeepMask(target, rngDump->dropoutProbability, seed);
             }
         };
         const auto comparedUids = it::bundle::comparedOutputUids(outputUids, rngDump);
@@ -1947,8 +1999,12 @@ constexpr const char* EXPORT_REFERENCE_SOURCE
     = "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in "
       "test-plans/sdpa-fwd/cases.csv";
 
-// The only tensor contents a bundle expresses for these graphs: a fixed attn_scale.
-constexpr const char* EXPORT_FIXED_CONTENT = "attn_scale";
+// The contents a bundle carries for these graphs: a fixed attn_scale and the sequence lengths.
+// Every other content keeps the row out of bundles.
+bool isBundleContent(const std::string& name)
+{
+    return name == FIXED_CONTENT_NAME || name == "seq_len_q" || name == "seq_len_kv";
+}
 
 struct ExportResult
 {
@@ -1957,17 +2013,6 @@ struct ExportResult
     std::string message;
     std::string inputsNote;
 };
-
-bool isCaseKey(const std::string& key)
-{
-    return key.size() == 16 && key.find_first_not_of("0123456789abcdef") == std::string::npos;
-}
-
-// The per-case input seed: the first 8 hex digits of the case_key, masked to 31 bits.
-int64_t caseSeed(const std::string& caseKey)
-{
-    return static_cast<int64_t>(std::stoull(caseKey.substr(0, 8), nullptr, 16) & 0x7fffffffULL);
-}
 
 bool writeText(const std::filesystem::path& path, const std::string& text)
 {
@@ -2013,11 +2058,13 @@ ExportResult exportCase(const CaseInput& input,
         for(const auto& [name, contents] : built.contents)
         {
             const auto* reals = std::get_if<std::vector<double>>(&contents.values);
-            if(name != EXPORT_FIXED_CONTENT || reals == nullptr || reals->size() != 1)
+            const size_t count = reals != nullptr
+                                     ? reals->size()
+                                     : std::get<std::vector<int64_t>>(contents.values).size();
+            const bool fixedScale = name == FIXED_CONTENT_NAME && reals != nullptr && count == 1;
+            const bool lengths = name != FIXED_CONTENT_NAME && reals == nullptr;
+            if(!isBundleContent(name) || !(fixedScale || lengths))
             {
-                const size_t count = reals != nullptr
-                                         ? reals->size()
-                                         : std::get<std::vector<int64_t>>(contents.values).size();
                 notExpressible.push_back(
                     name + "(" + std::to_string(count)
                     + (reals != nullptr ? " float values)" : " index values)"));
@@ -2039,6 +2086,22 @@ ExportResult exportCase(const CaseInput& input,
             return fail("frontend-rejected", validated.get_message());
         }
 
+        result.stage = "contents";
+        const auto graphTensors = collectGraphTensors(graph);
+        for(const auto& [uid, attr] : graphTensors.attrs)
+        {
+            if(attr->get_ragged_offset() != nullptr)
+            {
+                return fail("content-not-expressible",
+                            "ragged tensor " + attr->get_name()
+                                + ": the harness does not verify ragged graphs");
+            }
+        }
+        const auto leafInputs = leafInputUids(graphTensors);
+        it::InputFillRecipes recipes;
+        setInputSeeds(recipes, leafInputs, static_cast<unsigned int>(caseSeed(caseKey)));
+        const auto placed = setContentRecipes(recipes, built, graphTensors);
+
         result.stage = "serialise";
         auto [jsonText, serialised] = graph.to_json();
         if(!serialised.is_good() || jsonText.empty())
@@ -2047,8 +2110,32 @@ ExportResult exportCase(const CaseInput& input,
         }
         const auto graphJson = nlohmann::json::parse(jsonText);
 
+        result.stage = "contents";
+        std::map<int64_t, std::string> jsonNames;
+        if(graphJson.contains("tensors") && graphJson["tensors"].is_array())
+        {
+            for(const auto& tensor : graphJson["tensors"])
+            {
+                if(tensor.contains("uid") && tensor["uid"].is_number_integer())
+                {
+                    jsonNames[tensor["uid"].get<int64_t>()] = tensor.value("name", std::string());
+                }
+            }
+        }
+        for(const auto uid : leafInputs)
+        {
+            const auto found = jsonNames.find(uid);
+            if(found == jsonNames.end() || found->second != graphTensors.attrs.at(uid)->get_name())
+            {
+                return fail("content-not-expressible",
+                            "input uid " + std::to_string(uid) + " ("
+                                + graphTensors.attrs.at(uid)->get_name()
+                                + ") is not a tensor of that name in the graph JSON");
+            }
+        }
+
         nlohmann::json meta;
-        meta["format_version"] = 1;
+        meta["format_version"] = it::requiredFormatVersion(recipes);
         meta["generator"] = EXPORT_GENERATOR;
         meta["generator_version"] = SDPA_CASE_FLOW_RUNNER_SOURCE_HASH;
         meta["reference_source"] = EXPORT_REFERENCE_SOURCE;
@@ -2056,34 +2143,13 @@ ExportResult exportCase(const CaseInput& input,
         meta["case_key"] = caseKey;
         meta["csv_case_id"] = extra("case_id");
         meta["generated_from_sha256"] = opts.sourceSha256;
+        meta["inputs"] = recipes.toJson();
 
-        const auto fixed = built.contents.find(EXPORT_FIXED_CONTENT);
-        if(fixed != built.contents.end())
+        for(const auto& content : placed)
         {
-            result.stage = "contents";
-            std::vector<int64_t> uids;
-            if(graphJson.contains("tensors") && graphJson["tensors"].is_array())
-            {
-                for(const auto& tensor : graphJson["tensors"])
-                {
-                    if(tensor.value("name", std::string()) == EXPORT_FIXED_CONTENT
-                       && tensor.contains("uid") && tensor["uid"].is_number_integer())
-                    {
-                        uids.push_back(tensor["uid"].get<int64_t>());
-                    }
-                }
-            }
-            if(uids.size() != 1)
-            {
-                return fail("content-not-expressible",
-                            "the graph JSON has " + std::to_string(uids.size())
-                                + " tensors named attn_scale");
-            }
-            const double value = static_cast<double>(
-                static_cast<float>(std::get<std::vector<double>>(fixed->second.values).front()));
-            meta["inputs"][std::to_string(uids.front())] = {{"kind", "fixed"}, {"value", value}};
-            result.inputsNote
-                = "attn_scale uid " + std::to_string(uids.front()) + " fixed " + jsonNumber(value);
+            result.inputsNote += (result.inputsNote.empty() ? "" : "; ") + content.name + " uid "
+                                 + std::to_string(content.uid) + " "
+                                 + recipeNote(recipes.fill(content.uid));
         }
 
         result.stage = "write";

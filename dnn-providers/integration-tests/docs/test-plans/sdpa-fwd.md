@@ -481,7 +481,6 @@ yet. It stays in the generated CSV, and the selection step
 
 | Reason | Why a bundle cannot express it | Rows |
 |---|---|---|
-| `seq_len_contents` | Per-sequence lengths are tensor contents (also needed by every paged row). | 3,553 |
 | `page_table_contents` | Page tables are tensor contents. | 1,702 |
 | `block_mask_bits` | The block-mask bits are tensor contents. | 1,449 |
 | `dropout_mask_cycle` | A caller-supplied dropout mask is tensor contents. | 1,213 |

@@ -467,6 +467,24 @@ TEST(TestCaseGraph, OffsetAboveInt32Throws)
     EXPECT_THROW(build(row, sizes(4, int64_t{1} << 20, 64)), CaseRealisationError);
 }
 
+TEST(TestCaseGraph, RepeatedListIsCutToItsTensor)
+{
+    auto row = baseRow();
+    row["descale_k"] = "per_head";
+    auto z = sizes(1, 64, 64);
+    z.hq = 1;
+    z.hk = 1;
+    z.hv = 1;
+
+    const auto oneElement = contentsOf(build(row, z), "descale_k");
+    EXPECT_EQ(std::get<std::vector<double>>(oneElement.values), (std::vector<double>{0.25}));
+    EXPECT_TRUE(oneElement.repeat);
+
+    z.b = 2;
+    const auto twoElements = contentsOf(build(row, z), "descale_k");
+    EXPECT_EQ(std::get<std::vector<double>>(twoElements.values), (std::vector<double>{0.25, 0.5}));
+}
+
 TEST(TestCaseGraph, LengthAndOffsetAxesAreRealised)
 {
     for(const char* axis : {"per_seq_len_q", "per_seq_len_kv", "ragged_offsets", "stats_packing"})

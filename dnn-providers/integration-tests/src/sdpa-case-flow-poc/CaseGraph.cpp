@@ -2061,6 +2061,26 @@ private:
             auto& values = std::get<std::vector<int64_t>>(mask->second.values);
             values.resize(static_cast<size_t>(elementCount(_named.at("block_mask")->get_dim())), 1);
         }
+
+        // A repeated list holds at most one value per element of its tensor.
+        for(auto& [name, contents] : _contents)
+        {
+            const auto tensor = _named.find(name);
+            if(!contents.repeat || tensor == _named.end())
+            {
+                continue;
+            }
+            const auto count = static_cast<size_t>(
+                std::max<int64_t>(1, elementCount(tensor->second->get_dim())));
+            std::visit(
+                [count](auto& values) {
+                    if(values.size() > count)
+                    {
+                        values.resize(count);
+                    }
+                },
+                contents.values);
+        }
     }
 
     std::string realisedText() const

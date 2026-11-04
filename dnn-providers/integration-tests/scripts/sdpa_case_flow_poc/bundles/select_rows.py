@@ -53,32 +53,31 @@ DESCALE_AXES = ("descale_q", "descale_k", "descale_v")
 
 # Counts for the CSV named by levels.csv.sha256, with the default parameters.
 EXPECTED = {
-    "rows": 16729,
+    "rows": 21992,
     "content_reasons": {
-        "seq_len_contents": 3553,
-        "page_table_contents": 1702,
-        "block_mask_bits": 1449,
-        "dropout_mask_cycle": 1213,
-        "ragged_offsets": 1082,
-        "descale_lists": 950,
-        "tensor_overlap": 540,
-        "arch_dtype": 323,
+        "ragged_offsets": 2518,
+        "page_table_contents": 1946,
+        "block_mask_bits": 1625,
+        "dropout_mask_cycle": 1401,
+        "tensor_overlap": 1218,
+        "descale_lists": 1110,
+        "arch_dtype": 355,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 6,
+        "zero_stride_needs_pr14709": 686,
         "dropout_without_rng_dump": 8,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1330, 749, 23, 56, 286, 3, 20.0, 19.7),
-        "standard": (6782, 4152, 102, 222, 1358, 3, 232.4, 165.2),
-        "comprehensive": (3080, 1582, 59, 113, 639, 20, 564.6, 498.7),
-        "full": (5537, 3400, 109, 231, 971, 17, 2309.4, 1687.8),
+        "quick": (1599, 866, 32, 75, 304, 8, 29.8, 23.1),
+        "standard": (9004, 5580, 123, 270, 1713, 3, 315.6, 235.4),
+        "comprehensive": (4208, 2321, 87, 174, 715, 19, 912.6, 648.8),
+        "full": (7181, 4244, 130, 278, 1268, 19, 2119.1, 1515.8),
     },
-    "bundle_rows": 9883,
-    "sweeps": 293,
-    "sweeps_alignment_split": 622,
+    "bundle_rows": 13011,
+    "sweeps": 372,
+    "sweeps_alignment_split": 797,
 }
 
 
@@ -218,12 +217,6 @@ def content_reasons(row):
     why = []
     if active(row, "ragged_offsets"):
         why.append("ragged_offsets")
-    if (
-        active(row, "per_seq_len_q")
-        or active(row, "per_seq_len_kv")
-        or row["paged_kv"] != "absent"
-    ):
-        why.append("seq_len_contents")
     if row["block_mask"] == "present":
         why.append("block_mask_bits")
     if row["dropout"] == "caller_mask":
