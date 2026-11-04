@@ -9909,7 +9909,8 @@
             "hi": 1
           }
         },
-        "notes": "rejection probe (layer U): both deprecated flags; expected: typed rejection"
+        "notes": "rejection probe (layer U): both deprecated flags; expected: typed rejection",
+        "expected_rejection": true
       }
     },
     {

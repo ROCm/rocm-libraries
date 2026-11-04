@@ -241,7 +241,8 @@
             "hi": 1
           }
         },
-        "notes": "rejection probe (layer U): dBias without matching bias; expected: typed rejection"
+        "notes": "rejection probe (layer U): dBias without matching bias; expected: typed rejection",
+        "expected_rejection": true
       }
     }
   ]

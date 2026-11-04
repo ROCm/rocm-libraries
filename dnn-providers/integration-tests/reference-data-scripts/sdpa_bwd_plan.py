@@ -57,11 +57,17 @@ LEVEL_DIR = {
 NOTRUN = "notrun"  # declared, not written: the case waits for a gate (plan §4.1)
 
 # The generator's baseline is develop, which has #14312 (O and Stats derived
-# from the forward in the fill) and #14483 (SEM-001: left_bound = L keeps L
-# keys). Each switch flips when its pull request lands.
+# from the forward in the fill), #14483 (SEM-001: left_bound = L keeps L
+# keys), #14358 (CPU and GPU references for the whole API, rule R14) and
+# #14346 (metadata.expected_rejection). Each switch flipped when its pull
+# request landed.
 WINDOW_SEMANTICS = "after_sem001"  # "develop": left_bound = W - 1; "after_sem001": W
-WRITE_EXPECTED_REJECTION = False  # #14346 adds metadata.expected_rejection
-WRITE_GOLDEN_POINTERS = False  # gate GT1: golden data lands after #14358's lane
+WRITE_EXPECTED_REJECTION = (
+    True  # #14346: a rejection probe fails the lane if an engine accepts it
+)
+WRITE_GOLDEN_POINTERS = (
+    False  # gate GT1: the golden data for this plan's list is not generated yet
+)
 
 # --------------------------------------------------------------------------
 # Data types, tensors and topologies
@@ -569,6 +575,7 @@ def fits_level(cost):
 # --------------------------------------------------------------------------
 
 SEMANTICS = ("develop", "after_14287", "after_14358")
+BASELINE_SEMANTICS = "after_14358"  # the frontend of the baseline: F_active = F_R13R14
 
 # fmt: off
 # (reason, rule, source). The first failing rule names the case's reason.
@@ -619,7 +626,8 @@ EXT_RULES = [
     ("right_bound < 0 when set", "right_bound = -1 (unset)", "PlanUtils.hpp:37-42"),
     ("head dim not a multiple of 8", "always: engines decide", "SdpaBwdNode.hpp:118-125"),
     ("FLOAT dropout mask", "always: the references need FLOAT", "SEM-015"),
-    ("dropout_probability without RNG state", "dropout_probability = 0", "develop references: no-op"),
+    ("dropout_probability without RNG state", "dropout_probability = 0",
+     "the fill and engines read it as no dropout; the references decline it (ALMIOPEN-3149, ALMIOPEN-3150)"),
 ]
 # fmt: on
 
@@ -837,7 +845,13 @@ def layer(r, semantics="develop"):
 def legality_violations(r):
     """Violations of the write rule for one record (§2.8)."""
     out = []
-    lay, why = layer(r, "develop")
+    lay, why = layer(r, BASELINE_SEMANTICS)
+    if r.get("oracle_status") == "frontend":  # a frontend unit test, never written
+        return (
+            []
+            if lay == "illegal"
+            else [("FRONTEND UNIT TEST CASE IS LEGAL", f"{lay} {why}")]
+        )
     rej = r.get("expected_rejection")
     if lay == "illegal":
         out.append(("ILLEGAL", why))
@@ -847,9 +861,6 @@ def legality_violations(r):
         out.append(("U CASE NOT A REJECTION PROBE", why))
     if r.get("purpose") in ("claim", "regression") and lay not in ("WF", "EXT"):
         out.append(("CLAIM OR REGRESSION OUTSIDE WF AND EXT", f"{lay} {why}"))
-    for sem in ("after_14287", "after_14358"):
-        if layer(r, sem)[0] == "illegal" and not rej:
-            out.append(("ILLEGAL UNDER " + sem, ""))
     return out
 
 
@@ -862,34 +873,40 @@ def legality_violations(r):
 READY = ("ready", "ready [I]", "rejection")  # [I]: inferred; the first run confirms it
 UNASSIGNED_GATE = "no non-vacuous class (needs the per-tensor validator HG6)"
 
+# A key that starts with "14358" names a gate whose cases run on the GPU
+# reference #14358 added; the --report reserve leaves them out of the CPU
+# reference budget.
 # fmt: off
 GATES = {
-    "14358": ("#14358: GPU backward reference; dBias and rank-3 Stats in the references",
-              "ALMIOPEN-2103, ALMIOPEN-2695"),
-    "14358+derivation": ("#14358 and the #14312 derivation extension (ALiBi)", "#14358; derivation: to file"),
-    "14358+derivation+HG4": ("#14358, the #14312 derivation extension and HG4 (per-batch lists, Bernoulli masks)",
+    "14358+derivation": ("the #14312 derivation extension (ALiBi)", "to file"),
+    "14358+derivation+HG4": ("the #14312 derivation extension and HG4 (per-batch lists, Bernoulli masks)",
                              "ALMIOPEN-2861, ALMIOPEN-2862 (partial); derivation: to file"),
-    "14358+derivation+HG20": ("#14358, the derivation extension and HG20 (ragged fill)", "to file"),
-    "14358+I4": ("#14358 and I4 (structured -inf injection)", "ALMIOPEN-2948 (design only); to file"),
-    "14358+gpufwd": ("#14358 and a GPU forward derivation (X-size shapes)", "ALMIOPEN-2855 (partial)"),
-    "14358+timing": ("#14358 and a timing run that re-sizes the shape", "to file"),
+    "14358+derivation+HG20": ("the derivation extension and HG20 (ragged fill)", "to file"),
+    "14358+I4": ("I4 (structured -inf injection)", "ALMIOPEN-2948 (design only); to file"),
+    "14358+gpufwd": ("a GPU forward derivation (X-size shapes)", "ALMIOPEN-2855 (partial)"),
+    "14358+timing": ("a timing run that re-sizes the shape", "to file"),
+    "14358+derivation-rank3": ("the #14312 derivation extension for rank-3 Stats (the CPU forward that derives "
+                               "O and Stats needs [B, Hq, Sq, 1])", "to file"),
     "I3": ("I3: base pointers placed at exactly the declared alignment", "ALMIOPEN-2948 (design only); to file"),
     "I4": ("I4: structured value injection", "ALMIOPEN-2948 (design only); to file"),
     "HG9": ("HG9: exact-zero check", "to file"),
     "HG18": ("HG18: finite-only validator", "to file"),
-    "harness: zero strides rejected": ("HG17: zero input strides", "to file"),
+    "harness: zero strides rejected": ("HG17: zero input strides (#14709 lets the data SDK Tensor hold them; "
+                                       "H62 needs a GPU run to confirm)", "to file"),
     "none": ("no oracle (Philox: the backward schema has no rng_dump)", "to file"),
     "p0": ("a SEM entry for dropout_probability = 0 without RNG state, and a reference that models it "
            "(the references decline any dropout_probability since #14358)", "ALMIOPEN-3149 or ALMIOPEN-3150"),
     "none (decline-only probe mode)": ("a decline-only probe mode that does not allocate", "to file"),
     "unit": ("descriptor-only: a unit test, not a sweep case", "#14075"),
+    "frontend": ("a frontend rule (R14): TestSdpaBwdNode.PreValidateChecksDiagonalBandBounds, not a sweep case",
+                 "#14358"),
     UNASSIGNED_GATE: ("HG6: per-tensor magnitude-relative validator", "ALMIOPEN-2704 (partial); to file"),
 }
 # fmt: on
 
 
 def oracle_of(c):
-    if c.get("rejection"):
+    if c.get("rejection") and not c.get("oracle"):
         return "rejection"
     return c.get("oracle") or "ready"
 
@@ -2137,8 +2154,7 @@ GOLDEN = OrderedDict([
     ("GL-13", ("pr", "regression", "G-E G-C", "D", dict(_GL, align="BR", attrs=_CM, regression_of="#13065"))),
     ("GL-14", ("pr", "probe", "G-B", "P", dict(_GL64, align="BR", R=0, bias=bias_spec([1, 4, 64, 96], "bf16"),
                                               dbias=True,
-                                              topology="AdditiveMaskDBias", oracle="14358",
-                                              gate="GT1 (live dBias cases open at #14358 too)"))),
+                                              topology="AdditiveMaskDBias", gate="GT1"))),
     ("GL-15", ("pr", "probe", "G-B", "P", dict(_GL64, align="BR", R=0, inputs=DOMAIN["u01"], dropout=_DROP,
                                               topology="DropoutMask", oracle="14358+derivation+HG4",
                                               gate=_GT1_DROPOUT))),

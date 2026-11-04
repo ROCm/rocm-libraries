@@ -760,15 +760,17 @@ M_EDIT = {
     "M20.n": {"level": "full"},
     "M36.n": {"level": "full"},
     "M43.n": {"level": "full"},
+    # Applied again when the five dBias probes and GL-14 entered PR (#14358 opened their gate).
+    "M07.pr": {"level": "nightly"},
+    "M26.n": {"level": "full"},
 }
 
 # Not-run items: the level each enters when its gate opens (default: pr; M
 # and X: full)
 TARGET_LEVEL = {
-    "pr": "PRB-B11 PRB-B12 PRB-B13 PRB-B14 PRB-B16 PRB-M04 PRB-P01 PRB-P02 PRB-P03 PRB-P04 PRB-R04 REG-08 REG-14 "
-          "S46 S47 H93 H91 M40.pr",
+    "pr": "PRB-M04 PRB-P01 PRB-P02 PRB-P03 PRB-P04 PRB-R04 REG-08 REG-14 S46 S47 H93 H91 M40.pr",
     "nightly": "PRB-P06 M40.n",
-    "none": "PRB-R03 H62",
+    "none": "PRB-R03 H62 PRB-M02 PRB-M02f",
     "out-of-level": "X03",
 }
 # fmt: on
@@ -851,8 +853,10 @@ DEFECT_GATE = {
     "DEF-03": "kernel precision (AITER code object): ASM_SDPA_ENGINE.toml [[test_skips]] row (tracking: to file)",
 }
 
-# Expected outcomes and the verdict of a rejection probe on the baseline
-# (before #14346 adds expected_rejection).
+# Expected outcomes, and the verdict each rejection probe had before #14346
+# (kept in the --spec record). Since #14346 every rejection probe carries
+# metadata.expected_rejection: the harness never executes it, and an engine
+# that accepts it fails the lane.
 E_ANY = "typed rejection, or correct accept"
 E_OR = "correct accept, or typed rejection"
 E_GROUPS = "dK/dV reduced over each head group, or typed rejection"
@@ -891,7 +895,8 @@ def regression_and_defect_items():
              expected="bias applied in its declared dtype", **bias),
         item("REG-07b", "quick", "regression", "DT4 AW13", (1, 2, 2, 2, 64, 96), bias=P.bias_spec("1h", "fp16"),
              expected="HALF bias read as HALF with BF16 IO", **bias),
-        item("REG-08", "notrun", "probe", "T6 S56", (1, 1, 1, 1, 128, 128), stats="rank3", oracle="14358",
+        item("REG-08", "notrun", "probe", "T6 S56", (1, 1, 1, 1, 128, 128), stats="rank3",
+             oracle="14358+derivation-rank3",
              regression_of="#12933", expected="plan decision (rank-3 Stats in or out of the well-formed set)"),
         item("REG-13a", "quick", "regression", "A4 H64", (1, 1, 1, 1, 64, 128), W=2, R=0, regression_of="SEM-001",
              expected="exactly 2 keys per row"),
@@ -984,7 +989,8 @@ def probe_items():
         item("PRB-R02", "pr", "probe", "A10 IVP7", nb, attrs={"dropout_probability": 0.1}, verdict=NOV, **rj),
         item("PRB-T04", "pr", "probe", "T4 DT2 IVP14", nb, dtype_over={"O": "fp16"}, verdict=NOV, **rj),
         item("PRB-R05", "pr", "probe", "T16 IVP8", nb, topology="DropoutScaleInv", verdict=NOV, **rj),
-        item("PRB-M02", "pr", "probe", "A3 IV14", nb, attrs={"right_bound_raw": -2}, verdict=FOV, **rj),
+        item("PRB-M02", "notrun", "probe", "A3 IV14", nb, attrs={"right_bound_raw": -2}, oracle="frontend",
+             verdict=FOV, **rj),
         item("PRB-T05", "pr", "probe", "DT3 IVP2", nb, dtype_over={"Stats": "bf16"}, verdict=NOV, **rj),
         item("PRB-B10", "pr", "probe", "DT4 IVP15", (1, 2, 2, 2, 64, 96), topology="AdditiveMask",
              bias=P.bias_spec("11", "bool"), verdict=NOV, **rj),
@@ -999,8 +1005,8 @@ def probe_items():
              dtype_over={"O": "bf16"}, verdict=NOV, **rj),
         item("PRB-B15n", "nightly", "probe", "T11 IVP4", (1, 2, 2, 2, 64, 96), "fp16", align="BR",
              topology="DBiasOnly", dbias=True, verdict=FOV, **rj),
-        item("PRB-M02f", "full", "probe", "A3 IV14", (1, 1, 1, 1, 1, 65537), attrs={"right_bound_raw": -2},
-             verdict=FOV, **rj),
+        item("PRB-M02f", "notrun", "probe", "A3 IV14", (1, 1, 1, 1, 1, 65537), attrs={"right_bound_raw": -2},
+             oracle="frontend", verdict=FOV, **rj),
         item("PRB-R02f", "full", "probe", "A10 IVP7", (1, 1, 1, 1, 1, 65537), attrs={"dropout_probability": 0.5},
              verdict=NOV, **rj),
         item("PRB-T02", "pr", "probe", "DT2 IVP14", nb, dtype_over={"dQ": "fp32", "dK": "fp32", "dV": "fp32"},
@@ -1022,14 +1028,13 @@ def probe_items():
         # oracle not ready on the baseline (declared, not written)
         item("PRB-M04", "notrun", "probe", "A8 S51", (1, 4, 4, 4, 64, 64), R=0, attrs={"alibi_mask": True},
              oracle="14358+derivation", expected=E_OR),
-        *[item(f"PRB-{k}", "notrun", "probe", "T11 G11 " + extra, (*bb, 64, 96), bias=P.bias_spec(dims), dbias=True,
-               inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias", oracle="14358",
-               expected="dBias correct, or typed rejection")
+        *[item(f"PRB-{k}", "pr", "probe", "T11 G11 " + extra, (*bb, 64, 96), bias=P.bias_spec(dims), dbias=True,
+               inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias", expected="dBias correct, or typed rejection")
           for k, dims, bb, extra in (("B11", "11", (1, 2, 2, 2), "H80"), ("B12", "1h", (1, 2, 2, 2), "S50"),
                                      ("B13", "b1", (2, 1, 1, 1), ""), ("B14", "full", (2, 2, 2, 2), ""))],
-        item("PRB-B16", "notrun", "probe", "T11 G11", (1, 2, 2, 2, 64, 96),
+        item("PRB-B16", "pr", "probe", "T11 G11", (1, 2, 2, 2, 64, 96),
              bias=dict(P.bias_spec("1h"), stride="rowpad8"), dbias=True, dbias_stride="rowpad8",
-             inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias", oracle="14358",
+             inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias",
              expected="dBias correct at its strides, or typed rejection"),
         item("PRB-R01", "quick", "probe", "A10", nb, attrs={"dropout_probability": 0.0}, oracle="p0",
              expected="same as no dropout, or typed rejection"),
@@ -1581,7 +1586,7 @@ def record(c):
     d["axis_values"] = c["axis_values"]
     layers = {sem: P.layer(d, sem) for sem in P.SEMANTICS}
     d["legality"] = {sem: layers[sem][0] for sem in P.SEMANTICS}
-    d["legality"]["why"] = layers["develop"][1]
+    d["legality"]["why"] = layers[P.BASELINE_SEMANTICS][1]
     return d
 
 
@@ -1843,15 +1848,8 @@ def report(cases):
         (c["case_id"], v) for c in cases for v in P.legality_violations(c["record"])
     ]
     print(f"  violations: {len(viol)} {viol[:5]}")
-    later = sorted(
-        {
-            c["id"]
-            for c in cases
-            for s in ("after_14287", "after_14358")
-            if c["legality"][s] == "illegal"
-        }
-    )
-    print(f"  illegal under a later frontend (leave the bundles then): {later}")
+    unit = sorted({c["id"] for c in cases if c["oracle_status"] == "frontend"})
+    print(f"  frontend unit tests (illegal on the baseline, never written): {unit}")
 
     print("\nTolerance classes (written cases)")
     print(

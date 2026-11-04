@@ -31,6 +31,11 @@ BUNDLES = SCRIPTS.parent / "integration-test-bundles"
 ENGINE_TOML = (
     SCRIPTS.parents[1] / "hip-kernel-provider" / "config" / "ASM_SDPA_ENGINE.toml"
 )
+ENGINE_TIER_YAML = (
+    SCRIPTS.parents[1]
+    / "hip-kernel-provider"
+    / "ASM_SDPA_ENGINE_test_categories_integration.yaml"
+)
 NUMPY_MISSING = importlib.util.find_spec("numpy") is None
 
 
@@ -122,7 +127,7 @@ def test_every_written_case_is_legal(written):
             c["case_id"],
             P.legality_violations(rec),
         )
-        layer = P.layer(rec, "develop")[0]
+        layer = P.layer(rec, P.BASELINE_SEMANTICS)[0]
         assert layer == "U" if c.get("rejection") else layer in ("WF", "EXT"), (
             c["case_id"],
             layer,
@@ -259,6 +264,18 @@ def test_test_skips_match_written_cases(written):
     for block in text.split("[[test_skips]]")[1:]:
         for f in re.findall(r'"([^"]*SdpaBackward[^"]*)"', block.split("[[")[0]):
             assert any(fnmatch.fnmatchcase(n, f) for n in names), f
+
+
+def test_quarantined_cases_are_rejection_probes(written):
+    """Every SdpaBackward exclude of the engine's tier YAML selects a written
+    rejection probe (RFC 0022 §6 quarantines only those), and never a claim."""
+    text = ENGINE_TIER_YAML.read_text(encoding="utf-8")
+    excludes = re.findall(r'^\s*-\s*"([^"]*SdpaBackward[^"]*)"', text, flags=re.M)
+    assert excludes
+    for f in excludes:
+        hit = [c for c in written if fnmatch.fnmatchcase(G.gtest_name(c), f)]
+        assert hit, f
+        assert all(c.get("rejection") for c in hit), (f, [c["case_id"] for c in hit])
 
 
 def test_plan_items_are_traceable(cases):

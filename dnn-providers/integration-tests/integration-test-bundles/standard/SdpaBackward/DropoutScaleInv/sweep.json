@@ -245,7 +245,8 @@
             "value": 0.8
           }
         },
-        "notes": "rejection probe (layer U): dropout scale without a mask; expected: typed rejection"
+        "notes": "rejection probe (layer U): dropout scale without a mask; expected: typed rejection",
+        "expected_rejection": true
       }
     }
   ]

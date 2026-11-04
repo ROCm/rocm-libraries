@@ -1475,7 +1475,8 @@
             "hi": 1
           }
         },
-        "notes": "rejection probe (layer U): bias rank/broadcast/dtype; expected: typed rejection"
+        "notes": "rejection probe (layer U): bias rank/broadcast/dtype; expected: typed rejection",
+        "expected_rejection": true
       }
     },
     {
@@ -1723,7 +1724,8 @@
             "hi": 0
           }
         },
-        "notes": "rejection probe (layer U): bias rank/broadcast/dtype; expected: typed rejection"
+        "notes": "rejection probe (layer U): bias rank/broadcast/dtype; expected: typed rejection",
+        "expected_rejection": true
       }
     }
   ]

@@ -245,7 +245,8 @@
             "value": 64
           }
         },
-        "notes": "rejection probe (layer U): one seq_len; expected: typed rejection"
+        "notes": "rejection probe (layer U): one seq_len; expected: typed rejection",
+        "expected_rejection": true
       }
     }
   ]
