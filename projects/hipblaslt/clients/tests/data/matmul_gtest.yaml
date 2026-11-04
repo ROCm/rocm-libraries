@@ -1328,6 +1328,35 @@ Tests:
   unit_check: 1
   gpu_arch: '1250'
 
+# AIHPBLAS-5416: on gfx125x a scale vector under 128 bytes (M or N <= 31) was read as a null
+# pointer and replaced by 1.0. Cover both sides of the 32-element boundary for A and B, and the
+# ScaleAlphaVec SRD that now uses the same gfx125x num_records encoding.
+- name: matmul_f8_dst_bf16_scale_ab_vec_small_mn
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 1,    N: 4096, K: 5632 }
+    - { M: 16,   N: 4096, K: 5632 }
+    - { M: 31,   N: 4096, K: 5632 }
+    - { M: 32,   N: 4096, K: 5632 }
+    - { M: 4096, N: 1,    K: 5632 }
+    - { M: 4096, N: 16,   K: 5632 }
+    - { M: 4096, N: 31,   K: 5632 }
+    - { M: 4096, N: 32,   K: 5632 }
+    - { M: 16,   N: 16,   K: 512 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  scaleA: [2]
+  scaleB: [2]
+  scaleAlpha_vector: [0, 1]
+  bias_vector: [0, 1]
+  bias_type: bf16_r
+  unit_check: 1
+  gpu_arch: '1250'
+
 
 - name: matmul_stride_lt_ld
   category: pre_checkin

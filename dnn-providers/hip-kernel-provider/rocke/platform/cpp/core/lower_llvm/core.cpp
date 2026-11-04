@@ -1970,15 +1970,9 @@ static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_att
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
     }
     const char* strategy = v->u.s;
-    if(!rocke_scheduler_strategy_is_valid(strategy))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "unsupported scheduler_strategy '%s'; expected one of: "
-                      "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
-                      "max-memory-clause, or None",
-                      strategy);
-    }
+    char why[ROCKE_ERR_MSG_CAP];
+    if(rocke_scheduler_strategy_reason(strategy, why, sizeof why))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", why);
     return strategy;
 }
 

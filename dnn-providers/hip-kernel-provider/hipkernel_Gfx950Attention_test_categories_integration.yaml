@@ -1,9 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hip-kernel-provider hipkernel:Gfx950AttentionDense external integration test categories.
+# hip-kernel-provider gfx950 attention external integration test categories, shared by
+# hipkernel:Gfx950AttentionDense, hipkernel:Gfx950AttentionUnified2D and
+# hipkernel:Gfx950AttentionUnified3D.
 #
-# Pinned to hipkernel:Gfx950AttentionDense via --test-engine. Selects the shared sweeps
+# Each entry is pinned to its engine via --test-engine. Selects the shared sweeps
 # integration-test-bundles/{quick,standard,comprehensive,full}/SdpaFwd/Default/ by suite,
 # not by text in the case id: import_graph.py names cases in its own format, so a name
 # pattern would miss the cases it adds. Engine pinning and support claims do the rest: a
@@ -18,7 +20,7 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Quick gfx950 dense attention BSHD bundle coverage"
+    description: "Quick gfx950 attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
     exclude: *common_excludes
@@ -28,7 +30,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Standard gfx950 dense attention BSHD bundle coverage"
+    description: "Standard gfx950 attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
       - "standard_SdpaFwd_Default.*"
@@ -39,7 +41,7 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Comprehensive gfx950 dense attention coverage: quick + standard + comprehensive-tier bundles"
+    description: "Comprehensive gfx950 attention coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
       - "standard_SdpaFwd_Default.*"
@@ -51,7 +53,7 @@ test_categories:
       - "extended"
 
   full:
-    description: "Full gfx950 dense attention coverage"
+    description: "Full gfx950 attention coverage"
     test_patterns:
       - "*_SdpaFwd_Default.*"
     exclude: *common_excludes
