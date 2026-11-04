@@ -100,6 +100,9 @@ def _run(case):
     else:
         spec = au._tiled_spec_from_problem(problem, ARCH, overrides=case["overrides"])
     assert spec.use_i64_kv_addr == case["i64"]
+    # A dropped knob would run the default loader instead of the one the case names.
+    for knob, value in case["overrides"].items():
+        assert getattr(spec, knob) == value, f"{knob}={value} did not take effect"
     tuning_spec = AttentionTuningSpec(
         path=case["path"],
         arch=ARCH,

@@ -76,7 +76,23 @@ def _prefill(case):
     data["query"] = q_tail
     out, _ = H.run_unified("rocke", s, data)
     torch.cuda.synchronize()  # an out-of-bounds read surfaces here as a HIP error
+    _assert_ran_4warp_kernel(case)
     return H.compare(ref, out)["max_abs"]
+
+
+def _assert_ran_4warp_kernel(case):
+    """Default dispatch ran the 4-warp kernel the case is named after; a routing change would
+    otherwise move the case to another kernel and it would still pass. Each case runs in a fresh
+    process, so the kernel caches hold only the kernels it launched."""
+    from kernels.common import attention_unified as au
+
+    names = [name for _, name in au._ATTN_TILED_CACHE.values()]
+    assert (
+        names and not au._ATTN_3D_TILED_CACHE
+    ), f"2D {names}, 3D {au._ATTN_3D_TILED_CACHE}"
+    for name in names:
+        assert "_4wgqa" in name, name
+        assert name.endswith("_fold") == ("_fold" in case["id"]), name
 
 
 def _pinned_decode(case):
