@@ -158,6 +158,8 @@ namespace TensileLite
 
         // Searches that got as far as tuning-start, whatever their outcome.
         std::atomic<uint64_t> attempts{0};
+        // Lookups the solution cache passed to tuning-cache replay.
+        std::atomic<uint64_t> replayChecks{0};
 
         std::string summary() const
         {

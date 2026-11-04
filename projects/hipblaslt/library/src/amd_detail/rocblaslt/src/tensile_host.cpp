@@ -3522,6 +3522,14 @@ namespace
                                      "mapping"
                                   << std::endl;
                     }
+                    // Tuning-cache replay answers what the solution cache
+                    // misses, so the cache keeps a replayed answer like any
+                    // other. The layer passes every problem replay did not tag
+                    // straight through, so it stays in place in every mode.
+                    using Cache = TensileLite::CachingLibrary<TensileLite::ContractionProblemGemm>;
+                    if(auto cache = std::dynamic_pointer_cast<Cache>(m_library->library))
+                        m_library->library = std::make_shared<Cache>(
+                            tuning_replay_library(cache->library(), *m_library));
                     m_tensileLibPath = tensileLibPath.string();
                 }
                 return 0;
@@ -5808,47 +5816,57 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(tuning.mode() != TensileLite::TuningMode::Off && tuning.cachePath().empty())
             TensileLite::announceTuningModeOnce(TensileLite::TuningLoadStatus::NoPath);
 
-        // Built by whichever of replay and the tuner needs it first.
+        // Built by the tuner when it needs it.
         std::optional<TensileLite::ProblemOverride> tuningKey;
 
+        // Cache replay for a call that passed no algo. hipblasLtMatmul accepts
+        // algo == nullptr and then runs getBestSolutions without ever entering
+        // hipblasLtMatmulAlgoGetHeuristic, so without this such a call would
+        // never be served from the cache. Replay answers below the solution
+        // cache, so a problem it has answered costs what default selection's
+        // cache hit costs. A miss that may go on to tune is counted by the
+        // tuner, by what the call finds once it can tune.
+        std::optional<TuningReplayRequest> replay;
         if(!callerSuppliedAlgo && keyed)
         {
-            // Cache replay for a call that passed no algo. hipblasLtMatmul
-            // accepts algo == nullptr and then runs getBestSolutions below
-            // without ever entering hipblasLtMatmulAlgoGetHeuristic, so without
-            // this such a call would never be served from the cache.
             try
             {
                 // A matmul-only caller never reaches the heuristic entry
                 // point, which is the only other place that loads the file.
                 TensileLite::loadTuningFileForReplay(tuning.cachePath());
-                tuningKey = RocblasltContractionProblem2ProblemOverride(prob);
-
-                // A miss that may go on to tune is counted by the tuner, by
-                // what the call finds once it can tune.
-                if(tuning_cache_replay(
-                       handle, *tuningKey, prob, gemmData, &heuristicResult.algo, !tunes)
-                   >= 0)
-                    algo = &heuristicResult.algo;
+                replay = TuningReplayRequest{!tunes};
             }
             catch(...)
             {
-                // The cache is an optimisation: a lookup that throws leaves the
+                // The cache is an optimisation: a load that throws leaves the
                 // call on default selection rather than failing it.
                 static_cast<void>(hipGetLastError());
-                algo = nullptr;
             }
         }
-        const bool replayed = !callerSuppliedAlgo && algo != nullptr;
 
         if(algo == nullptr)
         {
             int returnAlgoCount = 0;
-            status = getBestSolutions(
-                prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
+            status              = getBestSolutions(prob,
+                                      handle,
+                                      gemmData,
+                                      1,
+                                      &heuristicResult,
+                                      &returnAlgoCount,
+                                      prob.workspaceSize,
+                                      replay ? &*replay : nullptr);
             if(returnAlgoCount == 0)
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
+        }
+        const bool replayed = replay && replay->served;
+        if(replay && (replayed || replay->countMiss))
+        {
+            auto& counters = TensileLite::TuningCounters::instance();
+            if(replayed)
+                counters.hits++;
+            else
+                counters.misses++;
         }
         updateTensileProblem(prob, data->problem);
 
@@ -7537,7 +7555,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes)
+                                  size_t                             maxWorkSpaceBytes,
+                                  TuningReplayRequest*               replay)
 {
     *returnAlgoCount = 0;
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -7575,8 +7594,16 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    auto solutions
-        = getSolutions(prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+    auto solutions = [&] {
+        if(!replay)
+            return getSolutions(
+                prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+        TuningReplayScope scope(handle, prob, gemmData, data->problem, replay->countMiss);
+        auto              found = getSolutions(
+            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
+        replay->served = !found.empty() && TuningReplayScope::served(found.front());
+        return found;
+    }();
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)

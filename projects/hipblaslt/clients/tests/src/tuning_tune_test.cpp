@@ -398,7 +398,8 @@ namespace
                      int*               launched,
                      bool               verifyProduct = false,
                      hipblasOperation_t opA           = HIPBLAS_OP_N,
-                     int32_t            streamKMode   = -1)
+                     int32_t            streamKMode   = -1,
+                     int32_t            biasStride    = 0)
     {
         *launched = -1;
 
@@ -458,6 +459,12 @@ namespace
                             HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                             &streamKMode,
                             sizeof(streamKMode))
+                            == HIPBLAS_STATUS_SUCCESS)
+                 && (biasStride == 0
+                     || hipblasLtMatmulDescSetAttribute(desc,
+                                                        HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE,
+                                                        &biasStride,
+                                                        sizeof(biasStride))
                             == HIPBLAS_STATUS_SUCCESS)
                  && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
                  && hipblasLtMatmulPreferenceSetAttribute(
@@ -2009,6 +2016,144 @@ namespace
         enterMode("cache", m_path);
         ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
         EXPECT_EQ(launched, finished.first) << "a later process chose differently";
+    }
+
+    // A row the tuner adds for a shape that replay has already served is
+    // launched from then on. The solution cache keeps which entry the shape's
+    // calls can run, and that has to go when the shape's entries change.
+    TEST_F(TuningTune_pre_checkin, NullAlgoLaunchesARowAddedAfterItsShapeWasReplayed)
+    {
+        // The fixture searches the top sixteen, so the recorded row names a
+        // solution well past them, which the search is unlikely to pick.
+        const auto identities = candidateIdentities(1024, 512, 1024, 64);
+        if(identities.size() <= 16)
+            GTEST_SKIP() << "this device offers no solution past the searched prefix";
+        const auto& recorded = identities.back();
+
+        // A real row first, so every key column is what the writer emits, made
+        // into a finished search of one candidate that names another solution.
+        enterMode("tune", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_index", std::to_string(recorded.first)));
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", recorded.second));
+        ASSERT_TRUE(rewriteColumn(m_path, "search_max_candidates", "1"));
+
+        // Replay serves the shape from that row, then the wider search this run
+        // makes adds a row for it, all in the first call.
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+        const auto indexes = columnValues(m_path, "solution_index");
+        ASSERT_EQ(indexes.size(), 2u) << "the narrower finished search was not widened";
+        const int added = std::stoi(indexes.back());
+        if(added == recorded.first)
+            GTEST_SKIP() << "the wider search chose the recorded solution again";
+        EXPECT_EQ(launched, added);
+
+        for(int call = 0; call < 2; call++)
+        {
+            SCOPED_TRACE(call);
+            ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+            EXPECT_EQ(launched, added) << "replay went back to the row it served before";
+        }
+    }
+
+    // Calls can make one Tensile problem under two tuning keys: the key holds
+    // the bias stride as given, while the problem leaves it out without a bias
+    // epilogue. The solution cache keeps replay's answers per problem, and
+    // still must not let one key's row serve the other key's call.
+    TEST_F(TuningTune_pre_checkin, NullAlgoCallsWithOneProblemButTwoKeysKeepTheirOwnRows)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 64);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        const auto& recorded = identities.back();
+
+        // A real row, so every key column is what the writer emits, made to
+        // name a solution default selection does not pick.
+        enterMode("tune", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_index", std::to_string(recorded.first)));
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", recorded.second));
+
+        constexpr int32_t kBiasStride = 1024;
+        auto              runOtherKey = [&](int* index) {
+            return runGemmWith(
+                1024, 512, 1024, AlgoFrom::Null, -1, index, true, HIPBLAS_OP_N, -1, kBiasStride);
+        };
+
+        // The other key has no row, so its call launches default selection.
+        enterMode("cache", m_path);
+        int alone = -1;
+        ASSERT_TRUE(runOtherKey(&alone));
+        ASSERT_NE(alone, recorded.first) << "the row served a call of another key";
+
+        enterMode("cache", m_path);
+        for(int round = 0; round < 2; round++)
+        {
+            SCOPED_TRACE(round);
+            ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+            EXPECT_EQ(launched, recorded.first);
+            ASSERT_TRUE(runOtherKey(&launched));
+            EXPECT_EQ(launched, alone) << "one key's answer served the other key's call";
+        }
+    }
+
+    // Replay's answer is kept by the solution cache, which default selection,
+    // the heuristic query and the tuner's candidate list also read. It is kept
+    // under its own entry, so once a call has been served a row, those still
+    // see the heuristic's own ranking for the same problem.
+    TEST_F(TuningTune_pre_checkin, ReplayedRowStaysOutOfTheHeuristicsRanking)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 64);
+        if(identities.size() < 5)
+            GTEST_SKIP() << "the heuristic offers too few solutions for this problem";
+        const auto& recorded = identities.back();
+
+        const Fp16Problem problem(1024, 512, 1024);
+        ASSERT_TRUE(problem.ok);
+
+        // The untuned answers, before any row exists.
+        enterMode(nullptr, m_path);
+        int defaultPick = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &defaultPick));
+        ASSERT_NE(defaultPick, recorded.first);
+        const auto ranking = problem.offered(4);
+        ASSERT_EQ(ranking.size(), 4u);
+        enterMode("cache", m_path);
+        const auto candidates = problem.tuningCandidates();
+        ASSERT_FALSE(candidates.empty());
+
+        // A real row, so every key column is what the writer emits, made to
+        // name a solution default selection does not pick.
+        enterMode("tune", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_index", std::to_string(recorded.first)));
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", recorded.second));
+
+        enterMode("cache", m_path);
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
+        ASSERT_EQ(launched, recorded.first) << "the row was not replayed";
+
+        // The tuner searches the heuristic's list, not the row.
+        EXPECT_EQ(problem.tuningCandidates(), candidates);
+
+        // The heuristic query puts the row first, as it always has, and then
+        // the heuristic's own ranking.
+        const auto             queried = problem.offered(4);
+        const std::vector<int> expected{recorded.first, ranking[0], ranking[1], ranking[2]};
+        EXPECT_EQ(queried, expected);
+
+        // Default selection is untouched once the mode is off.
+        enterMode(nullptr, m_path);
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
+        EXPECT_EQ(launched, defaultPick) << "the replayed row leaked into default selection";
+        EXPECT_EQ(problem.offered(4), ranking);
     }
 
     // A search the budget stops keeps its best candidate only once the kernel

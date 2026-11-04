@@ -599,9 +599,10 @@ namespace
      * A key's entries that still name the kernel their index resolves to, in
      * the order lookups try them. Neither resolving an index nor comparing
      * names depends on the call, so replay does both once per key, again only
-     * after the loaded entries change. Support is still checked on every call:
-     * it also depends on values the key leaves out, such as beta and C/D
-     * aliasing.
+     * after the loaded entries change. Which of them supports a call also
+     * depends on values the key leaves out, such as beta and the workspace, so
+     * replay checks that per Tensile problem, and the solution cache keeps the
+     * answer (TuningReplayLibrary).
      */
     struct ReplayCandidates
     {
@@ -754,35 +755,258 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
         handle, *candidates, problem, gemmData, max_workspace_bytes, &algo);
 }
 
-int tuning_cache_replay(rocblaslt_handle                    handle,
-                        const TensileLite::ProblemOverride& key,
-                        const RocblasltContractionProblem&  problem,
-                        std::shared_ptr<void>               gemmData,
-                        rocblaslt_matmul_algo*              algo,
-                        bool                                countMiss)
+namespace
 {
-    const auto candidates = ReplayCandidatesByKey::instance().find(handle, key);
-    const int  index      = first_supported_candidate(
-        handle, *candidates, problem, gemmData, problem.workspaceSize, algo);
-    if(index < 0 && !countMiss)
-        return index;
+    thread_local TuningReplayScope* t_replayScope = nullptr;
 
-    auto& counters = TensileLite::TuningCounters::instance();
-    if(index >= 0)
-        counters.hits++;
-    else
-        counters.misses++;
-
-    const int tally = index >= 0 ? 2 : 1;
-    int       told  = candidates->tallied.load(std::memory_order_relaxed);
-    while(told < tally && !candidates->tallied.compare_exchange_weak(told, tally))
+    /**
+     * Owns a cache row's solution on behalf of the pointer the replay layer
+     * returns, so that the CachingLibrary entry holding that pointer still says
+     * where its answer came from on every later hit.
+     */
+    struct ReplayedSolution
     {
-    }
-    if(told < tally)
-        TensileLite::recordTuningLookup(key, index >= 0);
+        std::shared_ptr<TensileLite::ContractionSolution> solution;
 
-    log_lookup(__func__, key, index >= 0, index);
-    return index;
+        void operator()(TensileLite::ContractionSolution*) const {}
+    };
+
+    /**
+     * The tag a replay-enabled lookup puts on its Tensile problem. The
+     * generation of the loaded rows keeps an answer, a row's or the fallback,
+     * from outliving them. The rest is what RocblasltContractionProblem2ProblemOverride
+     * reads that two calls making equal Tensile problems can still differ in,
+     * so one CachingLibrary entry never spans two tuning keys:
+     *  - the epilogue, of which the problem keeps only the parts, so that for
+     *    example DEFAULT and BIAS without a bias pointer look alike, and the
+     *    gradient flag and aux type, which it may not keep at all;
+     *  - the bias stride;
+     *  - the scale formats and which scales are set: the problem has one mode
+     *    for A and B together, one flag for C and D, nothing for E, and no
+     *    block format for B;
+     *  - whether the SM count is adaptive, which the key reads as no target.
+     * countMiss gets its own bit because a fallback is tallied only when it is
+     * set, and a tallied lookup must not be served from one that was not.
+     */
+    TensileLite::ContractionProblemGemm::CacheTag replay_tag(const RocblasltContractionProblem& p,
+                                                             bool countMiss)
+    {
+        const uint64_t scales = uint64_t(p.scaleA != nullptr) | uint64_t(p.scaleB != nullptr) << 1
+                                | uint64_t(p.scaleC != nullptr) << 2
+                                | uint64_t(p.scaleD != nullptr) << 3
+                                | uint64_t(p.scaleE != nullptr) << 4;
+        return {TensileLite::OverrideMap::getMap().generation(),
+                uint64_t(uint32_t(p.epilogue)) | uint64_t(uint32_t(p.bias_stride)) << 32,
+                uint64_t(uint32_t(p.aux_type)) | uint64_t(uint16_t(p.scaleAType)) << 32
+                    | uint64_t(uint16_t(p.scaleBType)) << 48,
+                scales | uint64_t(p.gradient) << 5 | uint64_t(p.adaptive_sm_count) << 6
+                    | uint64_t(countMiss) << 7 | uint64_t(1) << 63};
+    }
+
+    /**
+     * The first row for the scope's call that supports it, or -1, tallied and
+     * logged per key as before. Runs once per CachingLibrary miss.
+     */
+    int tuning_cache_replay(const TuningReplayScope& call)
+    {
+        TensileLite::TuningCounters::instance().replayChecks++;
+        // The support check rewrites gemmData's problem, which is the problem
+        // the CachingLibrary goes on to file this answer under.
+        const TensileLite::ContractionProblemGemm tagged = call.tensileProblem;
+        int                                       index  = -1;
+        try
+        {
+            const auto key        = RocblasltContractionProblem2ProblemOverride(call.problem);
+            const auto candidates = ReplayCandidatesByKey::instance().find(call.handle, key);
+            rocblaslt_matmul_algo algo;
+            index = first_supported_candidate(call.handle,
+                                              *candidates,
+                                              call.problem,
+                                              call.gemmData,
+                                              call.problem.workspaceSize,
+                                              &algo);
+            if(index >= 0 || call.countMiss)
+            {
+                const int tally = index >= 0 ? 2 : 1;
+                int       told  = candidates->tallied.load(std::memory_order_relaxed);
+                while(told < tally && !candidates->tallied.compare_exchange_weak(told, tally))
+                {
+                }
+                if(told < tally)
+                    TensileLite::recordTuningLookup(key, index >= 0);
+                log_lookup(__func__, key, index >= 0, index);
+            }
+        }
+        catch(...)
+        {
+            // The cache is an optimisation: a lookup that throws leaves the
+            // call on default selection rather than failing it.
+            static_cast<void>(hipGetLastError());
+            index = -1;
+        }
+        call.tensileProblem = tagged;
+        return index;
+    }
+
+    class TuningReplayLibrary
+        : public TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>
+    {
+    public:
+        using Problem  = TensileLite::ContractionProblemGemm;
+        using Solution = TensileLite::ContractionSolution;
+        using Library  = TensileLite::SolutionLibrary<Problem>;
+
+        TuningReplayLibrary(std::shared_ptr<Library> library, const Library& master)
+            : m_library(std::move(library))
+            , m_master(master)
+        {
+        }
+
+        TensileLite::SolutionVector<Solution>
+            findTopSolutions(Problem const&               problem,
+                             TensileLite::Hardware const& hardware,
+                             int                          numSolutions) const override
+        {
+            TuningReplayScope* call = t_replayScope;
+            if(!call || problem.cacheTag() != call->tag)
+                return m_library->findTopSolutions(problem, hardware, numSolutions);
+
+            // Nothing the support check looks up may be taken for the call's.
+            t_replayScope   = nullptr;
+            const int index = tuning_cache_replay(*call);
+            t_replayScope   = call;
+            if(index >= 0)
+                if(auto solution = m_master.getSolutionByIndex(problem, hardware, index))
+                {
+                    Solution* row = solution.get();
+                    return {std::shared_ptr<Solution>(row, ReplayedSolution{std::move(solution)})};
+                }
+
+            // The libraries below key their own caches on the problem, and the
+            // tag would only make them hold the same answer once per tag.
+            Problem untagged = problem;
+            untagged.setCacheTag({});
+            return m_library->findTopSolutions(untagged, hardware, numSolutions);
+        }
+
+        bool lastFindTopAlreadyRetAll() const override
+        {
+            return m_library->lastFindTopAlreadyRetAll();
+        }
+
+        std::shared_ptr<Solution> getSolutionByIndex(Problem const&               problem,
+                                                     TensileLite::Hardware const& hardware,
+                                                     const int index) const override
+        {
+            return m_library->getSolutionByIndex(problem, hardware, index);
+        }
+
+        std::shared_ptr<Solution> getSolutionByIndex(const int index) const override
+        {
+            return m_library->getSolutionByIndex(index);
+        }
+
+        std::shared_ptr<Solution> getSolutionByIndex(TensileLite::Hardware const& hardware,
+                                                     const int index) const override
+        {
+            return m_library->getSolutionByIndex(hardware, index);
+        }
+
+        std::shared_ptr<Solution> findBestSolution(Problem const&               problem,
+                                                   TensileLite::Hardware const& hardware,
+                                                   double* fitness = nullptr) const override
+        {
+            return m_library->findBestSolution(problem, hardware, fitness);
+        }
+
+        std::shared_ptr<Solution> findBestSolution(std::vector<Problem> const&  problems,
+                                                   TensileLite::Hardware const& hardware,
+                                                   double* fitness = nullptr) const override
+        {
+            return m_library->findBestSolution(problems, hardware, fitness);
+        }
+
+        TensileLite::SolutionSet<Solution>
+            findAllSolutions(Problem const&                         problem,
+                             TensileLite::Hardware const&           hardware,
+                             TensileLite::SolutionLibrarySearchType searchType
+                             = TensileLite::SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return m_library->findAllSolutions(problem, hardware, searchType);
+        }
+
+        TensileLite::SolutionSet<Solution> findAllSolutionsGroupedGemm(
+            std::vector<Problem> const&            problems,
+            TensileLite::Hardware const&           hardware,
+            TensileLite::SolutionLibrarySearchType searchType
+            = TensileLite::SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return m_library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
+        }
+
+        TensileLite::SolutionVector<Solution>
+            findTopSolutionsGroupedGemm(std::vector<Problem> const&  problems,
+                                        TensileLite::Hardware const& hardware,
+                                        int                          numSolutions) const override
+        {
+            return m_library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+        }
+
+        std::string type() const override
+        {
+            return "Tuning Replay Library";
+        }
+
+        std::string description() const override
+        {
+            return "Tuning Replay Library";
+        }
+
+        std::string getLibraryFileName() const override
+        {
+            return m_library->getLibraryFileName();
+        }
+
+    private:
+        std::shared_ptr<Library> m_library;
+        const Library&           m_master;
+    };
+} // namespace
+
+std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>
+    tuning_replay_library(
+        std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>> library,
+        const TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>&           master)
+{
+    return std::make_shared<TuningReplayLibrary>(std::move(library), master);
+}
+
+TuningReplayScope::TuningReplayScope(rocblaslt_handle                     handle,
+                                     const RocblasltContractionProblem&   problem,
+                                     const std::shared_ptr<void>&         gemmData,
+                                     TensileLite::ContractionProblemGemm& tensileProblem,
+                                     bool                                 countMiss)
+    : handle(handle)
+    , problem(problem)
+    , gemmData(gemmData)
+    , tensileProblem(tensileProblem)
+    , countMiss(countMiss)
+    , tag(replay_tag(problem, countMiss))
+    , m_outer(t_replayScope)
+{
+    tensileProblem.setCacheTag(tag);
+    t_replayScope = this;
+}
+
+TuningReplayScope::~TuningReplayScope()
+{
+    t_replayScope = m_outer;
+    tensileProblem.setCacheTag({});
+}
+
+bool TuningReplayScope::served(const std::shared_ptr<TensileLite::ContractionSolution>& solution)
+{
+    return std::get_deleter<ReplayedSolution>(solution) != nullptr;
 }
 
 /******************************************************************************
@@ -3788,6 +4012,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.tuned         = 0;
     counters.skipped       = 0;
     counters.attempts      = 0;
+    counters.replayChecks  = 0;
 
     tuningInjectFailureForTest(0);
     static_cast<void>(tuningLastLaunchedIndexForTest());
@@ -3923,6 +4148,9 @@ extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 //       lines are bounded per shape, so they cannot show a retry.
 //   10 tuned shapes
 //       Distinct shapes this process tuned, as the summary line counts them.
+//   11 replay checks
+//       Lookups the solution cache passed to tuning-cache replay, each checking
+//       the rows' support for its call; the cache answers repeats of them.
 //
 // Fills up to count values in that order and returns how many there are, so a
 // test expecting a different list notices instead of misreading it. New values
@@ -3943,7 +4171,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
                             c.tuned.load(),
                             c.skipped.load(),
                             c.attempts.load(),
-                            tunedShapes};
+                            tunedShapes,
+                            c.replayChecks.load()};
 
     constexpr size_t known = sizeof(all) / sizeof(all[0]);
     for(size_t i = 0; values && i < count && i < known; i++)

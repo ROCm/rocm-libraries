@@ -242,6 +242,18 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         int                                requestedAlgoCount,
                         size_t                             maxWorkSpaceBytes);
 
+/**
+ * Asks getBestSolutions to let tuning-cache replay answer, for a matmul that
+ * passed no algo in a tuning mode that reads the cache. countMiss is as for the
+ * lookup tally: false for a call that can go on to tune, which the tuner counts.
+ * served comes back true when the solution returned is a cache row's.
+ */
+struct TuningReplayRequest
+{
+    bool countMiss = true;
+    bool served    = false;
+};
+
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *
@@ -252,7 +264,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  TuningReplayRequest*               replay = nullptr);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
@@ -317,17 +330,56 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   size_t                              max_workspace_bytes);
 
 /**
- * Cache replay for a matmul that passed no algo: tuning_cache_find_valid_entry
- * within the problem's workspace, filling *algo to launch the entry it finds.
- * Counts the lookup, except a miss when countMiss is false: a call that can go
- * on to tune is counted by what it finds once it can.
+ * Tuning-cache replay as a layer of the solution library, to sit between the
+ * CachingLibrary and the library it wraps.
+ *
+ * The CachingLibrary answers first. When it misses on a problem a
+ * TuningReplayScope tagged, the layer answers with the first row for the call's
+ * key that supports the call, found as tuning_cache_find_valid_entry finds it
+ * and resolved through master, and otherwise passes the untagged problem down.
+ * The CachingLibrary keeps either answer under the tagged problem, so replay
+ * runs once per Tensile problem, tuning-key inputs and set of loaded rows. Every
+ * other problem passes straight through.
  */
-int tuning_cache_replay(rocblaslt_handle                    handle,
-                        const TensileLite::ProblemOverride& key,
-                        const RocblasltContractionProblem&  problem,
-                        std::shared_ptr<void>               gemmData,
-                        rocblaslt_matmul_algo*              algo,
-                        bool                                countMiss);
+std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>
+    tuning_replay_library(
+        std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>> library,
+        const TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>&           master);
+
+/**
+ * One replay-enabled lookup, for the thread that makes it. It tags
+ * tensileProblem, gemmData's problem as updateTensileProblem made it from
+ * problem, with the generation of the loaded rows and what the call's tuning
+ * key reads that the Tensile problem does not, and removes the tag again when
+ * it ends. While it lives, the replay layer can answer that problem.
+ */
+class TuningReplayScope
+{
+public:
+    TuningReplayScope(rocblaslt_handle                     handle,
+                      const RocblasltContractionProblem&   problem,
+                      const std::shared_ptr<void>&         gemmData,
+                      TensileLite::ContractionProblemGemm& tensileProblem,
+                      bool                                 countMiss);
+    ~TuningReplayScope();
+
+    TuningReplayScope(const TuningReplayScope&)            = delete;
+    TuningReplayScope& operator=(const TuningReplayScope&) = delete;
+
+    /** Whether a solution a tagged lookup returned is a cache row's. */
+    static bool served(const std::shared_ptr<TensileLite::ContractionSolution>& solution);
+
+    rocblaslt_handle                     handle;
+    const RocblasltContractionProblem&   problem;
+    const std::shared_ptr<void>&         gemmData;
+    TensileLite::ContractionProblemGemm& tensileProblem;
+    bool                                 countMiss;
+    // Never all zero, so never a plain problem's.
+    TensileLite::ContractionProblemGemm::CacheTag tag;
+
+private:
+    TuningReplayScope* m_outer;
+};
 
 /**
  * The solution index this thread last launched through runContractionProblem,
