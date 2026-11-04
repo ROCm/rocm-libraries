@@ -32,10 +32,6 @@
 #include <thrust/system/detail/sequential/partition.h>
 #include <thrust/system/detail/sequential/stable_radix_sort.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
 {

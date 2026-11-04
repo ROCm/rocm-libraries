@@ -40,6 +40,8 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/detail/copy_if.h>
 
+#  include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {

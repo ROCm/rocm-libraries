@@ -34,7 +34,7 @@
 #include <thrust/detail/reference.h>
 #include <thrust/system/omp/detail/execution_policy.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::omp

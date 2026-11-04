@@ -29,9 +29,9 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/pair.h>
 #include <thrust/random/detail/random_core_access.h>
 
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 #include <iostream>
@@ -105,7 +105,7 @@ public:
   /*! \typedef param_type
    *  \brief The type of the object encapsulating this \p uniform_int_distribution's parameters.
    */
-  using param_type = thrust::pair<IntType, IntType>;
+  using param_type = _THRUST_STD::pair<IntType, IntType>;
 
   // constructors and reset functions
 

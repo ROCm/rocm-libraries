@@ -21,8 +21,6 @@
 #  include <cuda/std/__iterator/distance.h>
 #  include <cuda/std/tuple>
 
-#  include <iterator>
-
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {

@@ -31,9 +31,7 @@
 #include <thrust/system/detail/generic/swap_ranges.h>
 #include <thrust/tuple.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(utility)
-#endif
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
@@ -48,11 +46,7 @@ struct swap_pair_elements
   THRUST_HOST_DEVICE void operator()(Tuple t)
   {
     // use unqualified swap to allow ADL to catch any user-defined swap
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     using _THRUST_STD::swap;
-#else
-    using thrust::swap;
-#endif
     swap(thrust::get<0>(t), thrust::get<1>(t));
   }
 }; // end swap_pair_elements

@@ -25,7 +25,6 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/iterator/detail/device_system_tag.h>
@@ -36,8 +35,11 @@
 #include <thrust/iterator/iterator_categories.h>
 #include <thrust/iterator/iterator_traversal_tags.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -99,42 +101,42 @@ inline constexpr bool is_iterator_category = is_host_iterator_category<T> || is_
 
 // standard system iterators
 template <typename Traversal>
-using iterator_facade_default_category_std = ::internal::If<
+using iterator_facade_default_category_std = _THRUST_STD::_If<
   _THRUST_STD::is_convertible_v<Traversal, forward_traversal_tag>,
-  ::internal::If<_THRUST_STD::is_convertible_v<Traversal, random_access_traversal_tag>,
+  _THRUST_STD::_If<_THRUST_STD::is_convertible_v<Traversal, random_access_traversal_tag>,
                    _THRUST_STD::random_access_iterator_tag,
-                   ::internal::If<_THRUST_STD::is_convertible_v<Traversal, bidirectional_traversal_tag>,
+                   _THRUST_STD::_If<_THRUST_STD::is_convertible_v<Traversal, bidirectional_traversal_tag>,
                                     _THRUST_STD::bidirectional_iterator_tag,
                                     _THRUST_STD::forward_iterator_tag>>,
-  ::internal::If< // we differ from Boost here
+  _THRUST_STD::_If< // we differ from Boost here
     _THRUST_STD::is_convertible_v<Traversal, single_pass_traversal_tag>,
     _THRUST_STD::input_iterator_tag,
     Traversal>>;
 
 // host system iterators (basically same as standard system iterators)
 template <typename Traversal>
-using iterator_facade_default_category_host = ::internal::If<
+using iterator_facade_default_category_host = _THRUST_STD::_If<
   _THRUST_STD::is_convertible_v<Traversal, forward_traversal_tag>,
-  ::internal::If<_THRUST_STD::is_convertible_v<Traversal, random_access_traversal_tag>,
+  _THRUST_STD::_If<_THRUST_STD::is_convertible_v<Traversal, random_access_traversal_tag>,
                    random_access_host_iterator_tag,
-                   ::internal::If<_THRUST_STD::is_convertible_v<Traversal, bidirectional_traversal_tag>,
+                   _THRUST_STD::_If<_THRUST_STD::is_convertible_v<Traversal, bidirectional_traversal_tag>,
                                     bidirectional_host_iterator_tag,
                                     forward_host_iterator_tag>>,
-  ::internal::If< // we differ from Boost here
+  _THRUST_STD::_If< // we differ from Boost here
     _THRUST_STD::is_convertible_v<Traversal, single_pass_traversal_tag>,
     input_host_iterator_tag,
     Traversal>>;
 
 // device system iterators
 template <typename Traversal>
-using iterator_facade_default_category_device = ::internal::If<
+using iterator_facade_default_category_device = _THRUST_STD::_If<
   _THRUST_STD::is_convertible_v<Traversal, forward_traversal_tag>,
-  ::internal::If<_THRUST_STD::is_convertible_v<Traversal, random_access_traversal_tag>,
+  _THRUST_STD::_If<_THRUST_STD::is_convertible_v<Traversal, random_access_traversal_tag>,
                    random_access_device_iterator_tag,
-                   ::internal::If<_THRUST_STD::is_convertible_v<Traversal, bidirectional_traversal_tag>,
+                   _THRUST_STD::_If<_THRUST_STD::is_convertible_v<Traversal, bidirectional_traversal_tag>,
                                     bidirectional_device_iterator_tag,
                                     forward_device_iterator_tag>>,
-  ::internal::If<
+  _THRUST_STD::_If<
     // XXX note we differ from Boost here
     _THRUST_STD::is_convertible_v<Traversal, single_pass_traversal_tag>,
     input_device_iterator_tag,
@@ -146,15 +148,15 @@ using iterator_facade_default_category_any =
   iterator_category_with_system_and_traversal<iterator_facade_default_category_std<Traversal>, any_system_tag, Traversal>;
 
 template <typename System, typename Traversal>
-using iterator_facade_default_category = ::internal::If<
+using iterator_facade_default_category = _THRUST_STD::_If<
   _THRUST_STD::is_convertible_v<System, any_system_tag>,
   iterator_facade_default_category_any<Traversal>,
   // check for host system
-  ::internal::If<
+  _THRUST_STD::_If<
     _THRUST_STD::is_convertible_v<System, host_system_tag>,
     iterator_facade_default_category_host<Traversal>,
     // check for device system
-    ::internal::If<
+    _THRUST_STD::_If<
       _THRUST_STD::is_convertible_v<System, device_system_tag>,
       iterator_facade_default_category_device<Traversal>,
       // if we don't recognize the system, get a standard iterator category and combine it with System & Traversal
@@ -166,17 +168,18 @@ struct iterator_facade_category_impl
   using category = iterator_facade_default_category<System, Traversal>;
 
   // we must be able to deduce both Traversal & System from category, otherwise, munge them all together
-  using type = ::internal::If<_THRUST_STD::is_same_v<Traversal, typename iterator_category_to_traversal<category>::type>
-                                && _THRUST_STD::is_same_v<System, typename iterator_category_to_system<category>::type>,
-                              category,
-                              iterator_category_with_system_and_traversal<category, System, Traversal>>;
+  using type =
+    _THRUST_STD::_If<_THRUST_STD::is_same_v<Traversal, typename iterator_category_to_traversal<category>::type>
+                       && _THRUST_STD::is_same_v<System, typename iterator_category_to_system<category>::type>,
+                     category,
+                     iterator_category_with_system_and_traversal<category, System, Traversal>>;
 };
 
 template <typename CategoryOrSystem, typename CategoryOrTraversal>
 using iterator_facade_category_t =
-  typename ::internal::If<is_iterator_category<CategoryOrTraversal>,
-                          _THRUST_STD::type_identity<CategoryOrTraversal>,
-                          iterator_facade_category_impl<CategoryOrSystem, CategoryOrTraversal>>::type;
+  typename _THRUST_STD::_If<is_iterator_category<CategoryOrTraversal>,
+                            _THRUST_STD::type_identity<CategoryOrTraversal>,
+                            iterator_facade_category_impl<CategoryOrSystem, CategoryOrTraversal>>::type;
 
 } // namespace detail
 THRUST_NAMESPACE_END

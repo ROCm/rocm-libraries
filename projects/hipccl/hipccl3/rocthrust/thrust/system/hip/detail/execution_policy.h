@@ -42,16 +42,26 @@
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/detail/execution_policy.h>
+#include <thrust/detail/seq.h>
 #include <thrust/iterator/detail/any_system_tag.h>
+#include <thrust/system/hip/detail/util.h>
 #include <thrust/version.h>
 
 THRUST_NAMESPACE_BEGIN
-
 namespace hip_rocprim
 {
+//! \addtogroup execution_policies
+//! \{
 
+// note: the tag and execution policy need to be defined in the same namespace as the algorithms for ADL to find them
+
+//! \p thrust::hip::tag is a type representing Thrust's HIP backend system in C++'s type system.
+//! Iterators "tagged" with a type which is convertible to \p hip::tag assert that they may be
+//! "dispatched" to algorithm implementations in the \p hip system.
 struct tag;
 
+//! \p thrust::hip::execution_policy is the base class for all Thrust parallel execution
+//! policies which are derived from Thrust's HIP backend system.
 template <class>
 struct execution_policy;
 
@@ -63,52 +73,328 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
 
 struct tag
     : execution_policy<tag>
-    , detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
+    , thrust::detail::allocator_aware_execution_policy<execution_policy>
 {};
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
   using tag_type = tag;
+
+  // allow conversion to tag when it is not a successor
   THRUST_HOST_DEVICE operator tag() const
   {
-    return tag();
+    return {};
   }
 };
 
+template <class Derived>
+struct execute_on_stream_base : execution_policy<Derived>
+{
+private:
+  hipStream_t stream;
+
+public:
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_HOST_DEVICE execute_on_stream_base(hipStream_t stream_ = default_stream())
+      : stream(stream_)
+  {}
+
+  THRUST_HIP_RUNTIME_FUNCTION Derived on(hipStream_t const& s) const
+  {
+    Derived result = derived_cast(*this);
+    result.stream  = s;
+    return result;
+  }
+
+private:
+  friend THRUST_HOST_DEVICE hipStream_t get_stream(const execute_on_stream_base& exec)
+  {
+    return exec.stream;
+  }
+};
+
+template <class Derived>
+struct execute_on_stream_nosync_base : execution_policy<Derived>
+{
+private:
+  hipStream_t stream;
+
+public:
+  THRUST_HOST_DEVICE execute_on_stream_nosync_base(hipStream_t stream_ = default_stream())
+      : stream(stream_)
+  {}
+
+  THRUST_HIP_RUNTIME_FUNCTION Derived on(hipStream_t const& s) const
+  {
+    Derived result = derived_cast(*this);
+    result.stream  = s;
+    return result;
+  }
+
+private:
+  friend THRUST_HOST_DEVICE hipStream_t get_stream(const execute_on_stream_nosync_base& exec)
+  {
+    return exec.stream;
+  }
+
+  friend THRUST_HOST_DEVICE bool must_perform_optional_stream_synchronization(const execute_on_stream_nosync_base&)
+  {
+    return false;
+  }
+};
+
+struct execute_on_stream : execute_on_stream_base<execute_on_stream>
+{
+  execute_on_stream() = default;
+
+  THRUST_HOST_DEVICE execute_on_stream(hipStream_t stream)
+      : execute_on_stream_base(stream) {};
+};
+
+struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_stream_nosync>
+{
+  execute_on_stream_nosync() = default;
+
+  THRUST_HOST_DEVICE execute_on_stream_nosync(hipStream_t stream)
+      : execute_on_stream_nosync_base(stream) {};
+};
+
+//! Execution policy type, optionally prescribing with HIP stream to use for execution.
+//! @see thrust::hip::par
+struct par_t
+    : execution_policy<par_t>
+    , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
+{
+  using stream_attachment_type = execute_on_stream;
+
+  //! Sets the stream on which to execute algorithm with this policy.
+  THRUST_HIP_RUNTIME_FUNCTION stream_attachment_type on(hipStream_t const& stream) const
+  {
+    return execute_on_stream(stream);
+  }
+};
+
+//! Execution policy type, optionally prescribing with HIP stream to use for execution. Omits any optional stream
+//! synchronization. The HIP stream is still synchronized when required for algorithmic correctness.
+//! @see thrust::hip::par_nosync
+struct par_nosync_t
+    : execution_policy<par_nosync_t>
+    , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
+{
+  using stream_attachment_type = execute_on_stream_nosync;
+
+  THRUST_HIP_RUNTIME_FUNCTION stream_attachment_type on(hipStream_t const& stream) const
+  {
+    return execute_on_stream_nosync(stream);
+  }
+
+private:
+  // this function is defined to allow non-blocking calls on the default_stream() with thrust::hip::par_nosync
+  // without explicitly using thrust::hip::par_nosync.on(default_stream())
+  friend THRUST_HOST_DEVICE bool must_perform_optional_stream_synchronization(const par_nosync_t&)
+  {
+    return false;
+  }
+};
+
+template <class Derived>
+struct execute_on_stream_deterministic_base : execute_on_stream_base<Derived>
+{
+private:
+  using base_t = execute_on_stream_base<Derived>;
+
+public:
+  THRUST_HOST_DEVICE execute_on_stream_deterministic_base()
+      : base_t() {};
+  THRUST_HOST_DEVICE execute_on_stream_deterministic_base(hipStream_t stream)
+      : base_t(stream) {};
+
+private:
+  friend THRUST_HOST_DEVICE integral_constant<bool, false>
+  allows_nondeterminism(const execute_on_stream_deterministic_base&)
+  {
+    return {};
+  }
+};
+
+struct execute_on_stream_deterministic : execute_on_stream_deterministic_base<execute_on_stream_deterministic>
+{
+  execute_on_stream_deterministic() = default;
+
+  THRUST_HOST_DEVICE execute_on_stream_deterministic(hipStream_t stream)
+      : execute_on_stream_deterministic_base(stream) {};
+};
+
+struct par_det_t
+    : execution_policy<par_det_t>
+    , thrust::detail::allocator_aware_execution_policy<execute_on_stream_deterministic_base>
+{
+  using stream_attachment_type = execute_on_stream_deterministic;
+
+  THRUST_HIP_RUNTIME_FUNCTION
+  stream_attachment_type on(hipStream_t const& stream) const
+  {
+    return execute_on_stream_deterministic(stream);
+  }
+
+private:
+  friend THRUST_HOST_DEVICE integral_constant<bool, false> allows_nondeterminism(const par_det_t&)
+  {
+    return {};
+  }
+};
+
+template <class Derived>
+struct execute_on_stream_nosync_deterministic_base : execute_on_stream_nosync_base<Derived>
+{
+private:
+  using base_t = execute_on_stream_nosync_base<Derived>;
+
+public:
+  THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic_base()
+      : base_t() {};
+  THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic_base(hipStream_t stream)
+      : base_t(stream) {};
+
+private:
+  friend THRUST_HOST_DEVICE integral_constant<bool, false>
+  allows_nondeterminism(const execute_on_stream_nosync_deterministic_base&)
+  {
+    return {};
+  }
+};
+
+struct execute_on_stream_nosync_deterministic
+    : execute_on_stream_nosync_deterministic_base<execute_on_stream_nosync_deterministic>
+{
+  execute_on_stream_nosync_deterministic() = default;
+
+  THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic(hipStream_t stream)
+      : execute_on_stream_nosync_deterministic_base(stream) {};
+};
+
+struct par_det_nosync_t
+    : execution_policy<par_det_nosync_t>
+    , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_deterministic_base>
+{
+  using stream_attachment_type = execute_on_stream_nosync_deterministic;
+
+  THRUST_HIP_RUNTIME_FUNCTION
+  stream_attachment_type on(hipStream_t const& stream) const
+  {
+    return execute_on_stream_nosync_deterministic(stream);
+  }
+
+private:
+  friend THRUST_HOST_DEVICE integral_constant<bool, false> allows_nondeterminism(const par_det_nosync_t&)
+  {
+    return {};
+  }
+};
+
+//! HIP execution policy type with optional stream selection.
+//!
+//! @code
+//! #include <thrust/reduce.h>
+//! #include <thrust/system/hip/execution_policy.h>
+//!
+//! thrust::device_vector<int> vec{ 0, 1, 2 };
+//! hipStream_t stream = ...;
+//! const auto sum = thrust::reduce(thrust::hip::par.on(stream), vec.begin(), vec.end());
+//! @endcode
+//! @see thrust::hip::par_t
+THRUST_GLOBAL_CONSTANT par_t par;
+
+/*! \p thrust::hip::par_nosync is a parallel execution policy targeting Thrust's CUDA device backend.
+ *  Similar to \p thrust::hip::par it allows execution of Thrust algorithms in a specific CUDA stream.
+ *
+ *  \p thrust::hip::par_nosync indicates that an algorithm is free to avoid any synchronization of the
+ *  associated stream that is not strictly required for correctness. Additionally, algorithms may return
+ *  before the corresponding kernels are completed, similar to asynchronous kernel launches via <<< >>> syntax.
+ *  The user must take care to perform explicit synchronization if necessary.
+ *
+ *  The following code snippet demonstrates how to use \p thrust::hip::par_nosync :
+ *
+ *  \code
+ *    #include <thrust/device_vector.h>
+ *    #include <thrust/for_each.h>
+ *    #include <thrust/execution_policy.h>
+ *
+ *    struct IncFunctor{
+ *        __host__ __device__
+ *        void operator()(std::size_t& x){ x = x + 1; };
+ *    };
+ *
+ *    int main(){
+ *        std::size_t N = 1000000;
+ *        thrust::device_vector<std::size_t> d_vec(N);
+ *
+ *        hipStream_t stream;
+ *        hipStreamCreate(&stream);
+ *        auto nosync_policy = thrust::hip::par_nosync.on(stream);
+ *
+ *        thrust::for_each(nosync_policy, d_vec.begin(), d_vec.end(), IncFunctor{});
+ *        thrust::for_each(nosync_policy, d_vec.begin(), d_vec.end(), IncFunctor{});
+ *        thrust::for_each(nosync_policy, d_vec.begin(), d_vec.end(), IncFunctor{});
+ *
+ *        //for_each may return before completion. Could do other cpu work in the meantime
+ *        // ...
+ *
+ *        //Wait for the completion of all for_each kernels
+ *        hipStreamSynchronize(stream);
+ *
+ *        std::size_t x = thrust::reduce(nosync_policy, d_vec.begin(), d_vec.end());
+ *        //Currently, this synchronization is not necessary. reduce will still perform
+ *        //implicit synchronization to transfer the reduced value to the host to return it.
+ *        hipStreamSynchronize(stream);
+ *        hipStreamDestroy(stream);
+ *    }
+ *  \endcode
+ *
+ */
+THRUST_GLOBAL_CONSTANT par_nosync_t par_nosync;
+THRUST_GLOBAL_CONSTANT par_det_t par_det;
+THRUST_GLOBAL_CONSTANT par_det_nosync_t par_det_nosync;
+
+//! \}
+
+template <class Policy>
+auto THRUST_HOST_DEVICE cvt_to_seq(Policy&) -> thrust::detail::seq_t
+{
+  // TODO(bgruber): we completely discard the previous policy, including any allocators it contains. A proper
+  // implementation would carry over this information to the sequential policy. However, AFAIK no sequential algorithm
+  // uses any such information for now.
+  return {};
+}
 } // namespace hip_rocprim
 
-namespace system
+// aliases:
+
+namespace system::hip
 {
-namespace hip
-{
+using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::par;
+using thrust::hip_rocprim::par_det;
+using thrust::hip_rocprim::par_det_nosync;
+using thrust::hip_rocprim::par_nosync;
+using thrust::hip_rocprim::tag;
 namespace detail
 {
-
-using thrust::hip_rocprim::execution_policy;
-using thrust::hip_rocprim::tag;
-
+using thrust::hip_rocprim::par_det_nosync_t;
+using thrust::hip_rocprim::par_det_t;
+using thrust::hip_rocprim::par_nosync_t;
+using thrust::hip_rocprim::par_t;
 } // namespace detail
-} // namespace hip
-} // namespace system
-
-namespace system
-{
-namespace hip
-{
-
-using thrust::hip_rocprim::execution_policy;
-using thrust::hip_rocprim::tag;
-
-} // namespace hip
-} // namespace system
+} // namespace system::hip
 
 namespace hip
 {
-
 using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::par;
+using thrust::hip_rocprim::par_det;
+using thrust::hip_rocprim::par_det_nosync;
+using thrust::hip_rocprim::par_nosync;
 using thrust::hip_rocprim::tag;
-
 } // namespace hip
-
 THRUST_NAMESPACE_END

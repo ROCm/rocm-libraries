@@ -37,31 +37,31 @@ struct is_commutative : public _THRUST_STD::false_type
 {};
 
 template <typename T>
-struct is_commutative<typename _THRUST_STD::plus<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::plus<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_STD::multiplies<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::multiplies<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_LIBCXX::minimum<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_LIBCXX::minimum<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_LIBCXX::maximum<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_LIBCXX::maximum<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_STD::logical_or<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::logical_or<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_STD::logical_and<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::logical_and<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_STD::bit_or<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::bit_or<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_STD::bit_and<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::bit_and<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 template <typename T>
-struct is_commutative<typename _THRUST_STD::bit_xor<T>> : public ::internal::is_arithmetic<T>
+struct is_commutative<typename _THRUST_STD::bit_xor<T>> : public _THRUST_STD::is_arithmetic<T>
 {};
 } // end namespace detail
 THRUST_NAMESPACE_END

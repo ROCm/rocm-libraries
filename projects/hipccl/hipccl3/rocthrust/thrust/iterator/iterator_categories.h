@@ -42,7 +42,7 @@
 #include <thrust/iterator/detail/iterator_category_with_system_and_traversal.h>
 #include <thrust/iterator/iterator_traversal_tags.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 
 THRUST_NAMESPACE_BEGIN
 

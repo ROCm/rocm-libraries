@@ -29,9 +29,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_member_function.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
 
 // inspired by Roman Perepelitsa's presentation from comp.lang.c++.moderated
 // based on the implementation here: http://www.rsdn.ru/forum/cpp/2759773.1.aspx
