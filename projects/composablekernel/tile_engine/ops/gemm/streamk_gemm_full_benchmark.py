@@ -47,6 +47,7 @@ sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import (  # noqa: E402
+    STREAMK_REDUCTION_STRATEGIES,
     _resolve_arch,
     expand_sweep,
     setup_multiple_gemm_dispatchers,
@@ -260,7 +261,7 @@ def main():
     )
     parser.add_argument(
         "--reduction-strategy",
-        choices=("atomic", "linear", "tree"),
+        choices=STREAMK_REDUCTION_STRATEGIES,
         default=None,
         help="Override the config's reduction strategy; linear/tree reduce "
         "partials in FP32",

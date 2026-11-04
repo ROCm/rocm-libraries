@@ -175,6 +175,22 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertEqual(len({c.name for c in tree}), len(tree))
         self.assertTrue(all(c.name.endswith("_streamk_tree") for c in tree))
 
+    def test_unknown_reduction_strategy_is_rejected(self):
+        with open(GFX1250_CONFIG) as f:
+            cfg = json.load(f)
+        cfg["streamk_config"] = {"reduction_strategy": {"values": ["bogus"]}}
+        kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps(cfg))
+            for path, override in ((GFX1250_CONFIG, ["Linear"]), (config_path, None)):
+                with self.subTest(override=override), self.assertRaisesRegex(
+                    ValueError, "reduction strategy"
+                ):
+                    expand_sweep(
+                        str(path), "gfx1250", reduction_strategies=override, **kwargs
+                    )
+
     def test_gfx1250_streamk_compile_command_has_architecture_features(self):
         config = self._expand()[0]
         from dispatcher_common import arch_feature_defines, unified_framework_flags

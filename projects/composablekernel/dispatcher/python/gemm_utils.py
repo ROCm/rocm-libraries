@@ -2739,6 +2739,10 @@ def _arch_filter_accepts(
     )
 
 
+# Stream-K reduction strategies the codegen can emit (atomic/linear/tree).
+STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -2788,7 +2792,8 @@ def expand_sweep(
 
     ``reduction_strategies`` (``variant='stream_k'`` only) replaces the
     config's ``streamk_config.reduction_strategy`` list before expansion, so an
-    override never multiplies the sweep by the config's own strategies.
+    override never multiplies the sweep by the config's own strategies. An
+    unknown strategy name raises ``ValueError`` before any codegen/build.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2853,6 +2858,12 @@ def expand_sweep(
         reductions = reduction_strategies or _expand_values(
             sk.get("reduction_strategy"), ["atomic"]
         )
+        unknown = sorted(set(reductions) - set(STREAMK_REDUCTION_STRATEGIES))
+        if unknown:
+            raise ValueError(
+                f"unknown Stream-K reduction strategy {unknown}; "
+                f"expected one of {STREAMK_REDUCTION_STRATEGIES}"
+            )
     else:
         reductions = ["atomic"]
 
