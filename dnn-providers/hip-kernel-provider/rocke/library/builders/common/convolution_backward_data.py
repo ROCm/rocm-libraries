@@ -1520,8 +1520,8 @@ def _direct_plan(
     (``identity_supports_problem``, then ``direct_spec_for_problem``'s per-shape
     re-validation), its steps and scratch, plus the launch bounds rocKE does not
     check."""
-    from dispatch.grouped_convolution import direct_dgrad_kernarg_direction
     from kernels.conv.direct_variants import (
+        direct_dgrad_kernarg_direction,
         direct_dgrad_weight_transforms,
         direct_dgrad_workspaces,
         direct_spec_for_problem,
@@ -1556,9 +1556,9 @@ def _direct_plan(
     )
     if not spec.is_mfma:
         grid, block = _direct.direct_launch_geometry(rocke_spec)
-        # See dispatch.grouped_convolution.direct_dgrad_kernarg_direction: which
+        # See kernels.conv.direct_variants.direct_dgrad_kernarg_direction: which
         # problem orientation this instance's kernargs come from must agree with
-        # launch_plan_for's copy of this same decision.
+        # launch_plan_for's and the benchmark sweep's copies of this same decision.
         if direct_dgrad_kernarg_direction(spec.algorithm) == "fwd":
             # A forward kernel over the transposed problem that reads the original
             # weights itself: the forward ABI, transposed extents.

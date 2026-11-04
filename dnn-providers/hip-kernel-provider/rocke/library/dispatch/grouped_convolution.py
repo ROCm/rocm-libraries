@@ -100,8 +100,8 @@ from kernels.conv.direct_aot_jobs import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
-    DIRECT_DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD,
+    direct_dgrad_kernarg_direction,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
@@ -611,10 +611,13 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
     # for the MFMA ones, which run weight-transform kernels first), silently
     # mislabeling the FPROP_SINGLE pair's dgrad-shaped kernargs as the fwd
     # names until the v3 dgrad catalog first registered one for a request this
-    # test suite exercises (test_launch_plan_matches_the_aot_run_path).
+    # test suite exercises (test_launch_plan_matches_the_aot_run_path). See
+    # direct_dgrad_kernarg_direction for the FPROP_SINGLE half of this check,
+    # shared with launch_plan_for, the AOT adapter and the benchmark sweep.
     direction = (
         "fwd"
-        if spec.helpers or spec.identity.algorithm in DIRECT_DGRAD_FPROP_SINGLE
+        if spec.helpers
+        or direct_dgrad_kernarg_direction(spec.identity.algorithm) == "fwd"
         else spec.direction
     )
     return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
@@ -739,24 +742,6 @@ class ConvLaunchPlan:
         return step.args.to_launch_values(
             ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d], **extras
         )
-
-
-def direct_dgrad_kernarg_direction(algorithm: str) -> str:
-    """Which problem orientation and :class:`ConvArgs` direction a direct dgrad
-    instance's kernargs come from: ``"fwd"``, over the transposed problem, for a
-    FPROP_SINGLE algorithm (``direct_grouped_dgrad_4c``/``_fused``: a forward pass
-    over the transposed problem with no weight-transform helpers to gate on, reading
-    the original weights itself -- see ``_signature()``'s matching branch);
-    ``"dgrad"`` otherwise.
-
-    The one place :func:`launch_plan_for` and the AOT adapter
-    (``builders.common.convolution_backward_data``) both read, so the two cannot
-    independently drift on which orientation an instance's kernargs are built
-    from -- the two already agreed only by coincidence once (cpg == kpg for every
-    registered row), until a correction (f192e4c8) made the AOT adapter's copy of
-    this same decision agree by hand.
-    """
-    return "fwd" if algorithm in DIRECT_DGRAD_FPROP_SINGLE else "dgrad"
 
 
 def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaunchPlan:
