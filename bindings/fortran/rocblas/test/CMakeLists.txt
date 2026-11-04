@@ -45,16 +45,9 @@ if(NOT TARGET hip::hip_fortran)
 endif()
 
 if(NOT TARGET roc::rocblas)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(rocblas QUIET)
-endif()
-if(NOT TARGET roc::rocblas)
   message(STATUS
     "rocBLAS: no roc::rocblas target, skipping the Fortran binding tests "
-    "(they link librocblas). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link librocblas). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
