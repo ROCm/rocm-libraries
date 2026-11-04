@@ -16,9 +16,10 @@
  */
 
 #include <thrust/host_vector.h>
-#include <thrust/pair.h>
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include <unittest/unittest.h>
 
@@ -29,9 +30,9 @@
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  THRUST_HOST_DEVICE _THRUST_STD::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
-    return thrust::make_pair(x, y);
+    return _THRUST_STD::make_pair(x, y);
   } // end operator()()
 }; // end make_pair_functor
 
@@ -43,7 +44,7 @@ struct add_pairs
     using T1 = typename _THRUST_STD::common_type<typename Pair1::first_type, typename Pair2::first_type>::type;
     using T2 = typename _THRUST_STD::common_type<typename Pair1::second_type, typename Pair2::second_type>::type;
 
-    return thrust::make_pair(static_cast<T1>(x.first + y.first), static_cast<T2>(x.second + y.second));
+    return _THRUST_STD::make_pair(static_cast<T1>(x.first + y.first), static_cast<T2>(x.second + y.second));
   } // end operator()
 }; // end add_pairs
 
@@ -52,7 +53,7 @@ struct TestPairTransform
 {
   void operator()(const size_t n)
   {
-    using P = thrust::pair<T, T>;
+    using P = _THRUST_STD::pair<T, T>;
 
     thrust::host_vector<T> h_p1 = unittest::random_integers<T>(n);
     thrust::host_vector<T> h_p2 = unittest::random_integers<T>(n);

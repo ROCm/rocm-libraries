@@ -28,11 +28,10 @@
 
 #include <thrust/detail/type_traits.h>
 
-#include _THRUST_STD_INCLUDE(algorithm)
+#include _THRUST_STD_INCLUDE(__algorithm/max.h)
+#include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#include _THRUST_STD_INCLUDE(cstddef)
 #include _THRUST_STD_INCLUDE(limits)
-#include _THRUST_STD_INCLUDE(type_traits)
-
-#include <cstddef>
 
 THRUST_NAMESPACE_BEGIN
 namespace random::detail

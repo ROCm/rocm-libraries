@@ -29,14 +29,9 @@
 #  pragma system_header
 #endif // no system header
 
+#include _THRUST_LIBCXX_INCLUDE(__cmath/ceil_div.h)
+#include _THRUST_STD_INCLUDE(__type_traits/alignment_of.h)
 #include _THRUST_STD_INCLUDE(cstddef) // For `std::size_t` and `std::max_align_t`.
-#include _THRUST_STD_INCLUDE(type_traits) // For `std::alignment_of`.
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(cmath)
-#elif _THRUST_USE_ROCPRIM
-#  include <rocprim/detail/various.hpp>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -80,13 +75,7 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
 
 THRUST_HOST_DEVICE inline _THRUST_STD::size_t aligned_storage_size(_THRUST_STD::size_t n, _THRUST_STD::size_t align)
 {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   return _THRUST_LIBCXX::ceil_div(n, align) * align;
-#elif _THRUST_USE_ROCPRIM
-  return ::rocprim::detail::ceiling_div(n, align) * align;
-#else
-  return (n / align + (n % align > 0 ? 1 : 0)) * align;
-#endif
 }
 } // end namespace detail
 THRUST_NAMESPACE_END

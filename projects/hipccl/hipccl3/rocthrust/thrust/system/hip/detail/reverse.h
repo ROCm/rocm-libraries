@@ -59,7 +59,9 @@ THRUST_NAMESPACE_END
 #  include <thrust/system/hip/detail/copy.h>
 #  include <thrust/system/hip/detail/swap_ranges.h>
 
-#  include _THRUST_STD_INCLUDE(iterator)
+#  include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__iterator/reverse_iterator.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

@@ -28,14 +28,12 @@
 
 #include <cstdio>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
 #include <type_traits>
 #include <vector>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <limits>
-#endif
 
 #include "meta.h"
 #include "util.h"
@@ -226,13 +224,11 @@ struct numeric_limits<custom_numeric> : numeric_limits<int>
 {};
 } // namespace std
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_STD_NAMESPACE_BEGIN
 template <>
 struct numeric_limits<custom_numeric> : numeric_limits<int>
 {};
 _THRUST_STD_NAMESPACE_END
-#endif
 
 using NumericTypes = unittest::type_list<
   char,

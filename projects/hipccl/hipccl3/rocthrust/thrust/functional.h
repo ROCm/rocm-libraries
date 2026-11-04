@@ -31,12 +31,15 @@
 #endif // no system header
 
 #include <thrust/detail/functional/actor.h>
-#include <thrust/detail/libcxx_wrapper/__functional/maximum.h>
-#include <thrust/detail/libcxx_wrapper/__functional/minimum.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/not_fn.h>
 
-#include _THRUST_LIBCXX_INCLUDE(functional)
-#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_LIBCXX_INCLUDE(__functional/maximum.h)
+#include _THRUST_LIBCXX_INCLUDE(__functional/minimum.h)
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__type_traits/decay.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_constructible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_move_constructible.h)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
 
 THRUST_NAMESPACE_BEGIN
 

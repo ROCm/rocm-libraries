@@ -33,6 +33,8 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/error_code.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+
 THRUST_NAMESPACE_BEGIN
 
 namespace system

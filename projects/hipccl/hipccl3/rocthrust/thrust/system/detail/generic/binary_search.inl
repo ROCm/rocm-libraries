@@ -29,14 +29,14 @@
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/distance.h>
 #include <thrust/for_each.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/system/detail/generic/scalar/binary_search.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -345,7 +345,7 @@ THRUST_HOST_DEVICE OutputIterator binary_search(
 }
 
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   thrust::execution_policy<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -355,7 +355,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
 }
 
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   thrust::execution_policy<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -364,7 +364,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
 {
   ForwardIterator lb = thrust::lower_bound(exec, first, last, value, comp);
   ForwardIterator ub = thrust::upper_bound(exec, first, last, value, comp);
-  return thrust::make_pair(lb, ub);
+  return _THRUST_STD::make_pair(lb, ub);
 }
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

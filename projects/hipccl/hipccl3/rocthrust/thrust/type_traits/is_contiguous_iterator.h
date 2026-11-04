@@ -33,11 +33,10 @@
 #endif // no system header
 #include <thrust/detail/type_traits/is_thrust_pointer.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER > 2020
-#  include _THRUST_STD_INCLUDE(iterator)
-#else
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__iterator/concepts.h)
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_pointer.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -83,7 +82,7 @@ namespace detail
 template <typename Iterator>
 inline constexpr bool is_libcxx_wrap_iter_v = false;
 
-#if defined(_LIBCPP_VERSION)
+#if _CCCL_HOST_STD_LIB(LIBCXX)
 template <typename Iterator>
 inline constexpr bool is_libcxx_wrap_iter_v<
 #  if _LIBCPP_VERSION < 14000
@@ -92,24 +91,23 @@ inline constexpr bool is_libcxx_wrap_iter_v<
   std::__wrap_iter<Iterator>
 #  endif
   > = true;
-#endif
+#endif // _CCCL_HOST_STD_LIB(LIBCXX)
 
 template <typename Iterator>
 inline constexpr bool is_libstdcxx_normal_iterator_v = false;
 
-#if defined(__GLIBCXX__)
+#if _CCCL_HOST_STD_LIB(LIBSTDCXX)
 template <typename Iterator, typename Container>
 inline constexpr bool is_libstdcxx_normal_iterator_v<::__gnu_cxx::__normal_iterator<Iterator, Container>> = true;
-#endif
+#endif // _CCCL_HOST_STD_LIB(LIBSTDCXX)
 
-// Use defined(_MSC_VER) due to Windows CI failures
-#if defined(_MSC_VER)
+#if _CCCL_HOST_STD_LIB(STL)
 template <typename Iterator>
 inline constexpr bool is_msvc_contiguous_iterator_v = _THRUST_STD::is_pointer_v<::std::_Unwrapped_t<Iterator>>;
-#else
+#else // ^^^ _CCCL_HOST_STD_LIB(STL) ^^^ / vvv !_CCCL_HOST_STD_LIB(STL) vvv
 template <typename Iterator>
 inline constexpr bool is_msvc_contiguous_iterator_v = false;
-#endif
+#endif // ^^^ !_CCCL_HOST_STD_LIB(STL) ^^^
 
 template <typename Iterator>
 inline constexpr bool is_contiguous_iterator_impl_v =

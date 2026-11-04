@@ -223,11 +223,11 @@ void TestScalarEqualRangeSimple()
 DECLARE_VECTOR_UNITTEST(TestScalarEqualRangeSimple);
 
 template <typename ForwardIterator, typename LessThanComparable>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 equal_range(my_system& system, ForwardIterator first, ForwardIterator /*last*/, const LessThanComparable& /*value*/)
 {
   system.validate_dispatch();
-  return thrust::make_pair(first, first);
+  return _THRUST_STD::make_pair(first, first);
 }
 
 void TestScalarEqualRangeDispatchExplicit()
@@ -242,11 +242,11 @@ void TestScalarEqualRangeDispatchExplicit()
 DECLARE_UNITTEST(TestScalarEqualRangeDispatchExplicit);
 
 template <typename ForwardIterator, typename LessThanComparable>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 equal_range(my_tag, ForwardIterator first, ForwardIterator /*last*/, const LessThanComparable& /*value*/)
 {
   *first = 13;
-  return thrust::make_pair(first, first);
+  return _THRUST_STD::make_pair(first, first);
 }
 
 void TestScalarEqualRangeDispatchImplicit()

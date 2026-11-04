@@ -31,17 +31,12 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/reverse.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 #include <thrust/system/detail/sequential/stable_merge_sort.h>
 #include <thrust/system/detail/sequential/stable_primitive_sort.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential

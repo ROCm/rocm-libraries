@@ -28,9 +28,7 @@
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(utility)
-#endif
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
@@ -38,11 +36,7 @@ namespace system::detail::sequential
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
 THRUST_HOST_DEVICE void iter_swap(sequential::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
 {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || !_THRUST_USE_ROCPRIM
   using _THRUST_STD::swap;
-#else
-  using thrust::swap;
-#endif
   swap(*thrust::raw_pointer_cast(a), *thrust::raw_pointer_cast(b));
 } // end iter_swap()
 } // namespace system::detail::sequential

@@ -19,9 +19,10 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
-#include <thrust/pair.h>
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include <unittest/unittest.h>
 
@@ -410,9 +411,9 @@ DECLARE_VARIABLE_UNITTEST(TestTransformUnaryToDiscardIterator);
 struct repeat2
 {
   template <typename T>
-  THRUST_HOST_DEVICE thrust::pair<T, T> operator()(T x)
+  THRUST_HOST_DEVICE _THRUST_STD::pair<T, T> operator()(T x)
   {
-    return thrust::make_pair(x, x);
+    return _THRUST_STD::make_pair(x, x);
   }
 };
 

@@ -42,21 +42,18 @@
 #endif // no system header
 
 #include <thrust/detail/functional/actor.h>
-#include <thrust/detail/libcxx_wrapper/std/__memory/construct_at.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(functional)
-#endif
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(__functional/identity.h)
+#include _THRUST_STD_INCLUDE(__functional/invoke.h)
+#include _THRUST_STD_INCLUDE(__memory/construct_at.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_copy_assignable.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_copy_constructible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_reference.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -92,7 +89,7 @@ struct make_transform_iterator_base
 {
 private:
   using reference  = replace_if_use_default<Reference, transform_iterator_reference<UnaryFunc, Iterator>>;
-  using value_type = replace_if_use_default<Value, ::internal::remove_cvref<reference>>;
+  using value_type = replace_if_use_default<Value, _THRUST_STD::remove_cvref<reference>>;
 
 public:
   using type =
@@ -279,8 +276,8 @@ public:
     }
     else if constexpr (_THRUST_STD::is_copy_constructible_v<AdaptableUnaryFunction>)
     {
-      ::internal::__destroy_at(&m_f);
-      ::internal::__construct_at(&m_f, other.m_f);
+      _THRUST_STD::__destroy_at(&m_f);
+      _THRUST_STD::__construct_at(&m_f, other.m_f);
     }
     else
     {

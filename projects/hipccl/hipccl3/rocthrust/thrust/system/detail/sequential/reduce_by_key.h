@@ -26,8 +26,9 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
@@ -40,7 +41,7 @@ template <typename DerivedPolicy,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   sequential::execution_policy<DerivedPolicy>&,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -90,7 +91,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
     ++values_output;
   }
 
-  return thrust::make_pair(keys_output, values_output);
+  return _THRUST_STD::make_pair(keys_output, values_output);
 }
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END

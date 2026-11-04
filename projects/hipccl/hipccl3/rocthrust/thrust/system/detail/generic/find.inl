@@ -32,13 +32,8 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/tuple.h>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <thrust/detail/algorithm_wrapper.h>
-#endif
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-#endif
+#include _THRUST_STD_INCLUDE(__algorithm/min.h)
 
 // Contributed by Erich Elsen
 

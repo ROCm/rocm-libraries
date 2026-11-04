@@ -57,8 +57,6 @@
 #  include <cuda/std/__iterator/distance.h>
 #  include <cuda/std/cstdint>
 
-#  include <iterator>
-
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {

@@ -28,7 +28,7 @@
 
 #include <thrust/random/uniform_real_distribution.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__cmath/lerp.h)
 
 THRUST_NAMESPACE_BEGIN
 

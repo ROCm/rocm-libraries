@@ -25,7 +25,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/pair.h>
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -48,7 +48,7 @@ THRUST_HOST_DEVICE RandomAccessIterator
 upper_bound(RandomAccessIterator first, RandomAccessIterator last, const T& val, BinaryPredicate comp);
 
 template <typename RandomAccessIterator, typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE pair<RandomAccessIterator, RandomAccessIterator>
+THRUST_HOST_DEVICE _THRUST_STD::pair<RandomAccessIterator, RandomAccessIterator>
 equal_range(RandomAccessIterator first, RandomAccessIterator last, const T& val, BinaryPredicate comp);
 
 template <typename RandomAccessIterator, typename T, typename Compare>

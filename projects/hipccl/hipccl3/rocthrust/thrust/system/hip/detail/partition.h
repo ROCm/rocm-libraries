@@ -45,13 +45,15 @@
 #  include <thrust/distance.h>
 #  include <thrust/pair.h>
 #  include <thrust/partition.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/find.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/reverse.h>
 #  include <thrust/system/hip/detail/uninitialized_copy.h>
 #  include <thrust/system/hip/detail/util.h>
 
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
@@ -65,7 +67,7 @@ namespace detail
 {
 
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<SelectedOutIt, RejectedOutIt> partition(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -86,7 +88,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
 
   if (num_items <= 0)
   {
-    return thrust::make_pair(selected_result, rejected_result);
+    return _THRUST_STD::make_pair(selected_result, rejected_result);
   }
 
   // Determine temporary device storage requirements.
@@ -123,11 +125,11 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
 
   thrust::copy_n(policy, d_partition_out, num_items, selected_result);
 
-  return thrust::make_pair(selected_result + num_selected, rejected_result);
+  return _THRUST_STD::make_pair(selected_result + num_selected, rejected_result);
 }
 
 template <class Derived, class InputIt, class StencilIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
+_THRUST_STD::pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -150,7 +152,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
 
   if (num_items <= 0)
   {
-    return thrust::make_pair(selected_result, rejected_result);
+    return _THRUST_STD::make_pair(selected_result, rejected_result);
   }
 
   // Determine temporary device storage requirements.
@@ -187,11 +189,11 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
 
   thrust::copy_n(policy, d_partition_out, num_items, selected_result);
 
-  return thrust::make_pair(selected_result + num_selected, rejected_result);
+  return _THRUST_STD::make_pair(selected_result + num_selected, rejected_result);
 }
 
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<SelectedOutIt, RejectedOutIt> partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -210,7 +212,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
 
   if (num_items <= 0)
   {
-    return thrust::make_pair(selected_result, rejected_result);
+    return _THRUST_STD::make_pair(selected_result, rejected_result);
   }
 
   hip_rocprim::throw_on_error(
@@ -260,11 +262,11 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
 
   size_type num_selected = get_value(policy, d_num_selected_out);
 
-  return thrust::make_pair(selected_result + num_selected, rejected_result + num_items - num_selected);
+  return _THRUST_STD::make_pair(selected_result + num_selected, rejected_result + num_items - num_selected);
 }
 
 template <class Derived, class InputIt, class StencilIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<SelectedOutIt, RejectedOutIt> partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -285,7 +287,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
 
   if (num_items <= 0)
   {
-    return thrust::make_pair(selected_result, rejected_result);
+    return _THRUST_STD::make_pair(selected_result, rejected_result);
   }
 
   hip_rocprim::throw_on_error(
@@ -335,7 +337,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
 
   size_type num_selected = get_value(policy, d_num_selected_out);
 
-  return thrust::make_pair(selected_result + num_selected, rejected_result + num_items - num_selected);
+  return _THRUST_STD::make_pair(selected_result + num_selected, rejected_result + num_items - num_selected);
 }
 
 template <typename Derived, typename InputIt, typename Predicate>
@@ -356,7 +358,7 @@ inplace_partition(execution_policy<Derived>& policy, InputIt first, InputIt last
   hip_rocprim::uninitialized_copy(policy, first, last, tmp.begin());
 
   // Partition input from temporary storage to the user-provided range [`first`, `last`)
-  pair<InputIt, InputIt> result =
+  _THRUST_STD::pair<InputIt, InputIt> result =
     partition(policy, tmp.data().get(), tmp.data().get() + num_items, first, first, predicate);
 
   std::size_t num_selected = result.first - first;
@@ -382,7 +384,7 @@ THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
   hip_rocprim::uninitialized_copy(policy, first, last, tmp.begin());
 
   // Partition input from temporary storage to the user-provided range [`first`, `last`)
-  pair<InputIt, InputIt> result =
+  _THRUST_STD::pair<InputIt, InputIt> result =
     partition(policy, tmp.data().get(), tmp.data().get() + num_items, stencil, first, first, predicate);
 
   std::size_t num_selected = result.first - first;
@@ -398,7 +400,7 @@ THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class StencilIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
+_THRUST_STD::pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -410,7 +412,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_HOST static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     par(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -423,7 +425,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
     }
 
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_DEVICE static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -446,7 +448,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
+_THRUST_STD::pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -457,7 +459,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_HOST static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     par(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -469,7 +471,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
     }
 
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_DEVICE static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -491,7 +493,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class StencilIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
+_THRUST_STD::pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -503,7 +505,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_HOST static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     par(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -515,7 +517,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
       return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_DEVICE static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -538,7 +540,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
+_THRUST_STD::pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -549,7 +551,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_HOST static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     par(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,
@@ -561,7 +563,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     }
 
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
+    THRUST_DEVICE static _THRUST_STD::pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
         InputIt last,

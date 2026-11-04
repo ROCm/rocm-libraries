@@ -15,18 +15,21 @@
 #endif // no system header
 
 // OMP parallel scan implementation
-#include <thrust/advance.h>
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/omp/detail/execution_policy.h>
 #include <thrust/system/omp/detail/pragma_omp.h>
 
-#include _THRUST_STD_INCLUDE(algorithm)
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(numeric)
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_LIBCXX_INCLUDE(__cmath/ceil_div.h)
+#include _THRUST_STD_INCLUDE(__functional/invoke.h)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__numeric/exclusive_scan.h)
+#include _THRUST_STD_INCLUDE(__numeric/inclusive_scan.h)
+#include _THRUST_STD_INCLUDE(__numeric/reduce.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
 
 #include <omp.h>
 
@@ -93,7 +96,7 @@ OutputIterator scan_impl(
     }
   }
 
-  // Parallel scan requires multiple threads (num_threads > 1 is guaranteed above).
+  _CCCL_ASSERT(num_threads > 1, "Parallel scan requires multiple threads");
 
   temporary_array<accum_t, DerivedPolicy> block_sums(exec, num_threads);
 
@@ -101,7 +104,7 @@ OutputIterator scan_impl(
   THRUST_PRAGMA_OMP(parallel num_threads(num_threads))
   {
     const int tid         = omp_get_thread_num();
-    const Size block_size = (n + num_threads - 1) / num_threads;
+    const Size block_size = _THRUST_LIBCXX::ceil_div(n, num_threads);
     const Size start      = tid * block_size;
     const Size end        = _THRUST_STD::min(start + block_size, n);
 
@@ -130,7 +133,7 @@ OutputIterator scan_impl(
   THRUST_PRAGMA_OMP(parallel num_threads(num_threads))
   {
     const int tid         = omp_get_thread_num();
-    const Size block_size = (n + num_threads - 1) / num_threads;
+    const Size block_size = _THRUST_LIBCXX::ceil_div(n, num_threads);
     const Size start      = tid * block_size;
     const Size end        = _THRUST_STD::min(start + block_size, n);
 

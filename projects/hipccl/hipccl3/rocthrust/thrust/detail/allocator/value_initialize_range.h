@@ -32,9 +32,7 @@
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/is_trivially_default_constructible.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

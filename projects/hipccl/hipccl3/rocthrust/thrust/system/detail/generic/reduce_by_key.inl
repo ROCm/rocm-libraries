@@ -27,7 +27,6 @@
 #endif // no system header
 
 #include <thrust/detail/internal_functional.h>
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -37,10 +36,9 @@
 #include <thrust/scatter.h>
 #include <thrust/transform.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(iterator)
-#endif
-
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
@@ -74,7 +72,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -93,7 +91,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
 
   if (keys_first == keys_last)
   {
-    return thrust::make_pair(keys_output, values_output);
+    return _THRUST_STD::make_pair(keys_output, values_output);
   }
 
   // input size
@@ -134,7 +132,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   thrust::scatter_if(
     exec, scanned_values.begin(), scanned_values.end(), scanned_tail_flags.begin(), tail_flags.begin(), values_output);
 
-  return thrust::make_pair(keys_output + N, values_output + N);
+  return _THRUST_STD::make_pair(keys_output + N, values_output + N);
 } // end reduce_by_key()
 
 template <typename ExecutionPolicy,
@@ -142,7 +140,7 @@ template <typename ExecutionPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -163,7 +161,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -172,9 +170,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   OutputIterator2 values_output,
   BinaryPredicate binary_pred)
 {
-  using T = ::internal::
-
-    If<thrust::detail::is_output_iterator<OutputIterator2>,
+  using T = _THRUST_STD::_If<thrust::detail::is_output_iterator<OutputIterator2>,
        thrust::detail::it_value_t<InputIterator2>,
        thrust::detail::it_value_t<OutputIterator2>>;
 

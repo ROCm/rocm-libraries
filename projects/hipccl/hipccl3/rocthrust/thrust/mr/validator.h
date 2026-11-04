@@ -29,7 +29,7 @@
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/mr/memory_resource.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/is_base_of.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr

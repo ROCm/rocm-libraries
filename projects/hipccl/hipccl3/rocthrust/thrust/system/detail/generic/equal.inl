@@ -29,7 +29,7 @@
 #include <thrust/mismatch.h>
 #include <thrust/system/detail/generic/equal.h>
 
-#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic

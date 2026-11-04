@@ -26,10 +26,11 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/functional.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/scan.h>
 #include <thrust/system/detail/generic/scan.h>
+
+#include _THRUST_LIBCXX_INCLUDE(functional)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
