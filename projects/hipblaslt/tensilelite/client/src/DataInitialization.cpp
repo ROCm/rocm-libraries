@@ -43,6 +43,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <list>
 #include <map>
@@ -2474,24 +2475,41 @@ namespace TensileLite
                       }
                       else
                       {
+                          // An exception escaping an OpenMP region terminates the
+                          // process, so keep the first one and rethrow after the loop.
+                          std::exception_ptr swizzleError;
 #pragma omp parallel for if(batchCount > 1)
                           for(size_t b = 0; b < batchCount; b++)
                           {
-                              auto const natural = naturalMXScaleFromCanonical(
-                                  static_cast<uint8_t const*>(pristineScale.cpuInput.valid.get())
-                                      + b * scaleBatchStrideBytes,
-                                  naturalBytes,
-                                  kFast,
-                                  compactFree,
-                                  compactKBlocks,
-                                  paddedKBlocks,
-                                  scaleElemSize);
-                              auto const swizzled = swizzleNaturalMXScale(
-                                  natural, swizzleLayout, rows, cols, mxBlock, kIsRows);
-                              std::memcpy(gpuScaleBuf.data() + b * scaleBatchStrideBytes,
-                                          swizzled.data(),
-                                          swizzled.size());
+                              try
+                              {
+                                  auto const natural = naturalMXScaleFromCanonical(
+                                      static_cast<uint8_t const*>(
+                                          pristineScale.cpuInput.valid.get())
+                                          + b * scaleBatchStrideBytes,
+                                      naturalBytes,
+                                      kFast,
+                                      compactFree,
+                                      compactKBlocks,
+                                      paddedKBlocks,
+                                      scaleElemSize);
+                                  auto const swizzled = swizzleNaturalMXScale(
+                                      natural, swizzleLayout, rows, cols, mxBlock, kIsRows);
+                                  std::memcpy(gpuScaleBuf.data() + b * scaleBatchStrideBytes,
+                                              swizzled.data(),
+                                              swizzled.size());
+                              }
+                              catch(...)
+                              {
+#pragma omp critical(mxScaleSwizzleError)
+                                  {
+                                      if(!swizzleError)
+                                          swizzleError = std::current_exception();
+                                  }
+                              }
                           }
+                          if(swizzleError)
+                              std::rethrow_exception(swizzleError);
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
@@ -3193,8 +3211,14 @@ namespace TensileLite
                     {
                         // The selected kernel explicitly wants canonical scales, so
                         // uploading cpuInput.valid must also invalidate any prior
-                        // "gpuInput.valid is swizzled" cache state for this tensor.
+                        // "gpuInput.valid is swizzled" cache state for this tensor,
+                        // including the MFMA K that lets preSolution skip re-init.
                         m_mxSwizzledDescriptor.erase(i);
+                        if(isMXSA)
+                            m_mxPreswizzledA = false;
+                        if(isMXSB)
+                            m_mxPreswizzledB = false;
+                        m_mxPreswizzleMiK = -1;
                         ptr = copyInputBuffers(desc,
                                                p.gpuInput.valid.get(),
                                                p.cpuInput.valid.get(),

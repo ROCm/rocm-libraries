@@ -182,7 +182,7 @@ namespace TensileLite
             ~DataInitialization();
 
             // True when the CPU reference must be recomputed for this solution
-            // because DataInitialization refreshes MX inputs per solution
+            // because DataInitialization may refresh MX inputs for it
             // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
             // gfx1250, gfx942, non-MX) the per-problem reference is still valid
             // and can be reused across all solutions.
@@ -932,7 +932,6 @@ namespace TensileLite
                     ScopedDevice device(m_deviceId);
                     m_mxPreswizzleMiK
                         = static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2]);
-                    m_cpuInputsReadyForProblem = true;
                     initializeMXData(*m_currentGemmProblem);
                     copyValidToGPUBuffer(*m_currentGemmProblem);
                     copyInputs(m_gpuPtrs,

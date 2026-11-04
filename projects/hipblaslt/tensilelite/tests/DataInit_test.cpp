@@ -453,6 +453,130 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
 
     EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
 }
+
+namespace
+{
+    // Exposes the state DataInitialization keeps to reuse MX inputs across solutions.
+    class MXReuseProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+
+        bool preswizzledA() const
+        {
+            return m_mxPreswizzledA;
+        }
+        TensorDescriptor const& initDescriptor(int tensor) const
+        {
+            return m_vdata[tensor].pristine.begin()->second.initDescriptor[0];
+        }
+    };
+
+    bool deviceIsGfx950()
+    {
+        hipDeviceProp_t prop{};
+        return hipGetDeviceProperties(&prop, 0) == hipSuccess
+               && std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
+    }
+
+    TensileLite::Client::po::variables_map
+        makeMXLaunchArgs(std::vector<std::vector<size_t>> const& problemSizes)
+    {
+        using TensileLite::Client::InitMode;
+
+        auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+        setOption(args, "problem-size", problemSizes);
+        setOption(args, "mx-a-block", 32);
+        setOption(args, "mx-b-block", 32);
+        setOption(args, "mx-a-free-block", 1);
+        setOption(args, "mx-b-free-block", 1);
+        setOption(args, "uniform-summation-order", 0);
+        setOption(args, "bias-type-args", std::vector<rocisa::DataType>{rocisa::DataType::Float});
+        // Random keeps every scale at 1.0, which makes swizzled and canonical
+        // scales identical; RandomNarrow varies them.
+        for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+            setOption(args, name, InitMode::RandomNarrow);
+        return args;
+    }
+
+    void setMXSolution(ContractionSolution& solution, int mxScaleFormat, int miK)
+    {
+        solution.problemType.mxScaleFormat     = mxScaleFormat;
+        solution.sizeMapping.matrixInstruction = {16, 16, miK, 1};
+    }
+
+    std::vector<uint8_t> deviceMXScaleA(std::shared_ptr<TensileLite::ProblemInputs> const& inputs,
+                                        ContractionProblemGemm const&                    problem)
+    {
+        auto const* gemmInputs
+            = dynamic_cast<TensileLite::ContractionInputs const*>(inputs.get());
+        std::vector<uint8_t> bytes(problem.mxsa().totalAllocatedBytes());
+        HIP_CHECK_EXC(
+            hipMemcpy(bytes.data(), gemmInputs->mxsa, bytes.size(), hipMemcpyDeviceToHost));
+        return bytes;
+    }
+}
+
+// From the second problem on, preSolution re-initializes the MX inputs before
+// prepareGPUInputs runs. With validation off, the non-MX tensors must still be
+// initialized for the new problem.
+TEST(DataInitializationMXReuse, LaterProblemsInitializeNonMXInputs)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "solution-dependent MX preswizzle only runs on gfx950";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}, {256, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    ContractionSolution                       solution;
+    setMXSolution(solution, /*mxScaleFormat=*/1, /*miK=*/128);
+
+    for(auto const& problem : factory.problems())
+    {
+        auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*problem);
+        dataInit.preProblem(problem.get());
+        dataInit.preSolution(&solution);
+        dataInit.prepareGPUInputs(problem.get());
+        EXPECT_EQ(dataInit.initDescriptor(ContractionProblemGemm::TENSOR::C), gemm.c());
+        dataInit.postSolution();
+        dataInit.postProblem();
+    }
+}
+
+// A NoSwizzle solution uploads the canonical scales. The next HostPreSwizzle
+// solution with the same MFMA K must get the swizzled scales back.
+TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "solution-dependent MX preswizzle only runs on gfx950";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    auto*       problem = factory.problems()[0].get();
+    auto const& gemm    = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    ContractionSolution preswizzle;
+    ContractionSolution noSwizzle;
+    setMXSolution(preswizzle, /*mxScaleFormat=*/1, /*miK=*/128);
+    setMXSolution(noSwizzle, /*mxScaleFormat=*/0, /*miK=*/128);
+
+    auto run = [&](ContractionSolution& solution) {
+        dataInit.preSolution(&solution);
+        auto bytes = deviceMXScaleA(dataInit.prepareGPUInputs(problem), gemm);
+        dataInit.postSolution();
+        return bytes;
+    };
+
+    dataInit.preProblem(problem);
+    // The first prepareGPUInputs builds the swizzled scales; the second
+    // solution goes through preSolution's re-init and records its MFMA K.
+    auto const swizzled = run(preswizzle);
+    EXPECT_EQ(run(preswizzle), swizzled);
+    ASSERT_NE(run(noSwizzle), swizzled) << "the layouts must differ for this test to be meaningful";
+    EXPECT_EQ(run(preswizzle), swizzled);
+    EXPECT_TRUE(dataInit.preswizzledA());
+    dataInit.postProblem();
+}
 #endif
 
 // =============================================================================
