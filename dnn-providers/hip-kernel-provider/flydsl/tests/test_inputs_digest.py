@@ -206,6 +206,9 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
                 "sdpa_bwd_prep",
                 "sdpa_bwd_dkdv",
                 "sdpa_bwd_dq",
+                "sdpa_bwd_merged",
+                "sdpa_bwd_dbias_reduce",
+                "sdpa_bwd_dsink_reduce",
             },
         ),
         (

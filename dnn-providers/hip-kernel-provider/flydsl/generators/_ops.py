@@ -40,9 +40,21 @@ OP_KERNEL_DIRS = {
     "sdpa_bwd_prep": _SDPA_BWD_SPLIT_DIRS,
     "sdpa_bwd_dkdv": _SDPA_BWD_SPLIT_DIRS,
     "sdpa_bwd_dq": _SDPA_BWD_SPLIT_DIRS,
-    "sdpa_bwd_merged": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_dbias_reduce": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_dsink_reduce": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_merged": (
+        "attention_bwd_cdna",
+        "attention_cdna",
+        "attention_rdna4/philox.py",
+    ),
+    "sdpa_bwd_dbias_reduce": (
+        "attention_bwd_cdna",
+        "attention_cdna",
+        "attention_rdna4/philox.py",
+    ),
+    "sdpa_bwd_dsink_reduce": (
+        "attention_bwd_cdna",
+        "attention_cdna",
+        "attention_rdna4/philox.py",
+    ),
     # The RNG dump's keep-mask writer draws the attention kernels' counters through the same
     # Philox, so that file is its input too; its own directory keeps it out of sdpa_aiw's.
     "sdpa_dropout_mask": ("dropout_mask", "attention_rdna4/philox.py"),
