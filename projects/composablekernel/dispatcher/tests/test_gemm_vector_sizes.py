@@ -795,11 +795,12 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
         from gemm_utils import expand_sweep
 
         every = self.ALL_STRATEGIES
+        row_major_c = r"row-major C .*'rrc'; valid: \['ccr', 'crr', 'rcr', 'rrr'\]"
         cases = [
             ("rcr", "stream_k", ["Atomic"], None, "Unknown Stream-K"),
             ("rcr", "stream_k", every, ["linaer"], "Unknown Stream-K"),
             ("rcr", "standard", every, ["linear"], "Stream-K only"),
-        ] + [("rrc", "stream_k", every, [s], "row-major C") for s in every]
+        ] + [("rrc", "stream_k", every, [s], row_major_c) for s in every]
         for layout, variant, listed, override, error in cases:
             with self.subTest(layout=layout, listed=listed, override=override):
                 with self._config(listed) as path, self.assertRaisesRegex(

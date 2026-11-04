@@ -2869,7 +2869,10 @@ def expand_sweep(
             None, 0, _output_dtype(dtype), layout[2]
         )
         if c_reason:
-            raise ValueError(f"{c_reason}, got layout {layout!r}")
+            raise ValueError(
+                f"{c_reason}, got layout {layout!r}; "
+                f"valid: {list(_codegen_common().STREAMK_GEMM_LAYOUTS)}"
+            )
     elif reduction_strategies:
         raise ValueError(f"reduction_strategies is Stream-K only, not {variant!r}")
     else:

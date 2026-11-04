@@ -939,6 +939,14 @@ def gemm_vector_size_sweep(
 
 #: The eight layouts gemm_contiguous_dims resolves: A, B and C each r or c.
 _GEMM_LAYOUTS = frozenset(a + b + c for a in "rc" for b in "rc" for c in "rc")
+#: The ones Stream-K can build (streamk_c_reject_reason; width 0 reads no dtype).
+STREAMK_GEMM_LAYOUTS = tuple(
+    sorted(
+        lay
+        for lay in _GEMM_LAYOUTS
+        if not streamk_c_reject_reason(None, 0, "", lay[2])
+    )
+)
 
 
 def gemm_contiguous_dims(layout: str) -> Tuple[str, str, str]:
