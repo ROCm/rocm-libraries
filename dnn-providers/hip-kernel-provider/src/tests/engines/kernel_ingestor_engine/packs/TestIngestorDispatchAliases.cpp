@@ -45,7 +45,23 @@ TEST(TestIngestorDispatchAliases, EachVersionedAliasResolvesToTheSameHandler)
     expectOneHandler("hipkernel.pointwise.dispatch", POINTWISE_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.conv_fwd.dispatch", CONV_FWD_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
-                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+}
+
+// A superseded contract keeps its own handler, so a plan saved under it still restores
+// and launches the arguments its code object takes, not the current contract's.
+TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
+{
+    registerNativeIngestorSymbols();
+
+    const auto* current
+        = DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch");
+    const auto* v1 = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1));
+
+    ASSERT_NE(v1, nullptr) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1 << " is not registered";
+    EXPECT_NE(v1, current) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+                           << " resolves to the current contract's handler";
 }
 
 } // namespace

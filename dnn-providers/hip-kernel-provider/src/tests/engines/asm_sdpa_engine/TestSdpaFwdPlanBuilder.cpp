@@ -3,10 +3,17 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "ConfigHelpers.hpp"
@@ -32,6 +39,54 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
+
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+flatbuffers::FlatBufferBuilder mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
+                                           const std::function<void(GraphT&)>& mutate)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
+    mutate(*graph);
+    flatbuffers::FlatBufferBuilder mutated;
+    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
+    return mutated;
+}
+
+TensorAttributesT& findTensor(GraphT& graph, const std::string& name)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->name == name)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor named " + name);
+}
+
+TensorAttributesT& findTensorByUid(GraphT& graph, int64_t uid)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor with uid " + std::to_string(uid));
+}
+
+int64_t maxTensorUid(const GraphT& graph)
+{
+    int64_t maxUid = 0;
+    for(const auto& tensor : graph.tensors)
+    {
+        maxUid = std::max(maxUid, tensor->uid);
+    }
+    return maxUid;
+}
 
 class TestSdpaFwdPlanBuilder : public ::testing::Test
 {
@@ -260,6 +315,239 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
     }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest aligned{createSdpaFwdGraph(), "All tensors 16-byte aligned"};
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, aligned.graphWrapper())) << aligned.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
+{
+    const GraphTest misaligned{
+        hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaFwdGraph(), 8),
+        "Q aligned to 8 bytes"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, misaligned.graphWrapper()))
+        << misaligned.message;
+}
+
+// =============================================================================
+// Ragged tensors / group mode
+// =============================================================================
+
+auto createBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                            const std::vector<int64_t>& vDims = {4, 8, 256, 128},
+                            bool withStats = false)
+{
+    const std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> bshd = {3, 1, 2, 0};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims, bshd),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims, bshd),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims, bshd),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims, bshd),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        false,
+        false,
+        withStats);
+}
+
+auto createRaggedBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                                  const std::vector<int64_t>& vDims = {4, 8, 256, 128})
+{
+    return sdpa::withRaggedTensors(createBshdSdpaFwdGraph(qDims, vDims), {"q", "k", "v", "o"});
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createRaggedBshdSdpaFwdGraph(), "All of Q, K, V, O ragged -> group mode"}, true},
+        {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 192}, {4, 8, 256, 128}),
+                   "Group mode with q head dim 192 and v head dim 128"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
+                                                                  {4, 8, 256, 128},
+                                                                  /*withStats=*/true),
+                                           {"q", "k", "v", "o"}),
+                   "Group mode with generate_stats"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
+                   "Q, K, V ragged but not O"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q"}), "Only Q ragged"}, false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
+                   "K, V, O ragged but not Q"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
+                                                                  {4, 8, 256, 128},
+                                                                  /*withStats=*/true),
+                                           {"q", "k", "v", "o", "stats"}),
+                   "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      /*withStats=*/true),
+                   "Dense Q, K, V, O with stats (baseline for the stats-only ragged case)"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph({4, 8, 256, 128},
+                                                              {4, 8, 256, 128},
+                                                              DataType::BFLOAT16,
+                                                              DataType::FLOAT,
+                                                              false,
+                                                              false,
+                                                              /*withStats=*/true),
+                                           {"stats"}),
+                   "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
+                   "tensor"},
+         false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto withMultiplier = [](const std::string& name, int64_t multiplier) {
+        return mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+            findTensor(graph, name).ragged_offset_multiplier = multiplier;
+        });
+    };
+    const auto withOwnOffset = [](const std::string& name) {
+        return mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+            auto& tensor = findTensor(graph, name);
+            auto offset = std::make_unique<TensorAttributesT>(
+                findTensorByUid(graph, tensor.ragged_offset_tensor_uid.value()));
+            offset->uid = maxTensorUid(graph) + 1;
+            offset->name = name + "_own_ragged_offset";
+            tensor.ragged_offset_tensor_uid = offset->uid;
+            graph.tensors.push_back(std::move(offset));
+        });
+    };
+
+    // Mutates one ragged offset tensor of an otherwise valid group-mode graph.
+    const auto withOffset
+        = [](const std::string& offsetName, const std::function<void(TensorAttributesT&)>& mutate) {
+              return mutateGraph(createRaggedBshdSdpaFwdGraph(),
+                                 [&](GraphT& graph) { mutate(findTensor(graph, offsetName)); });
+          };
+
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createRaggedBshdSdpaFwdGraph(), "Baseline group mode"}, true},
+           {GraphTest{withMultiplier("q", 1), "Q multiplier 1 (element-unit offsets)"}, false},
+           {GraphTest{withMultiplier("q", 128), "Q multiplier != Q sequence stride"}, false},
+           {GraphTest{withMultiplier("k", 128), "K multiplier != K sequence stride"}, false},
+           {GraphTest{withMultiplier("v", 128), "V multiplier != V sequence stride"}, false},
+           {GraphTest{withMultiplier("o", 128), "O multiplier != O sequence stride"}, false},
+           {GraphTest{withOwnOffset("o"), "O does not share Q's ragged offset tensor"}, false},
+           {GraphTest{withOwnOffset("v"), "V does not share K's ragged offset tensor"}, false}};
+
+    // The Q/O offset and the K/V offset are validated separately, so every defect is
+    // exercised on both. The graph has B = 4, so a valid offset tensor is [5, 1, 1, 1].
+    // Each dims/strides case violates exactly one clause of isTokenSeqstartTensor.
+    const std::vector<std::pair<std::string, std::vector<std::string>>> offsetTensors
+        = {{"qo_ragged_offset", {"q", "o"}}, {"kv_ragged_offset", {"k", "v"}}};
+    for(const auto& offsetTensor : offsetTensors)
+    {
+        const std::string& offsetName = offsetTensor.first;
+        const std::vector<std::string>& users = offsetTensor.second;
+        const auto addRejected
+            = [&](const std::string& defect, flatbuffers::FlatBufferBuilder&& graph) {
+                  std::string message = offsetName;
+                  message += ": ";
+                  message += defect;
+                  applicabilityTests.emplace_back(GraphTest{std::move(graph), message}, false);
+              };
+        const auto addShape = [&](const std::string& defect,
+                                  std::vector<int64_t> dims,
+                                  std::vector<int64_t> strides) {
+            addRejected(defect, withOffset(offsetName, [&](TensorAttributesT& t) {
+                            t.dims = dims;
+                            t.strides = strides;
+                        }));
+        };
+        addRejected("INT64", withOffset(offsetName, [](TensorAttributesT& t) {
+                        t.data_type = DataType::INT64;
+                    }));
+        addRejected("virtual",
+                    withOffset(offsetName, [](TensorAttributesT& t) { t.virtual_ = true; }));
+        addShape("B rather than B+1 entries", {4, 1, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[1] == 2", {5, 2, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[2] == 2", {5, 1, 2, 1}, {1, 1, 1, 1});
+        addShape("dims[3] == 2", {5, 1, 1, 2}, {1, 1, 1, 1});
+        addShape("stride[0] == 2", {5, 1, 1, 1}, {2, 1, 1, 1});
+        addRejected("uid missing from the tensor map",
+                    mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+                        const int64_t missingUid = maxTensorUid(graph) + 1;
+                        for(const auto& user : users)
+                        {
+                            findTensor(graph, user).ragged_offset_tensor_uid = missingUid;
+                        }
+                    }));
+    }
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenQ)
+{
+    const GraphTest test{sdpa::withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenKv)
+{
+    const GraphTest test{sdpa::withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
 }
 
 // =============================================================================

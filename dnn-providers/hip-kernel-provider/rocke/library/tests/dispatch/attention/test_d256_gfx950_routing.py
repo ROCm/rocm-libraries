@@ -106,6 +106,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         "use_mfma32_skip_legacy_qreg",
         "use_kq_lds_pad",
         "kq_lds_pad_halves",
+        "use_qblock_reverse",
     }
 
     def setUp(self):
@@ -121,6 +122,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         self.assertIs(ov["use_softmax_mfma_interleave"], True)
         self.assertEqual(ov["softmax_interleave_mode"], 2)
         self.assertIs(ov["use_register_pv"], False)
+        self.assertIs(ov["use_qblock_reverse"], True)
 
     def test_dispatched_spec_carries_overrides(self):
         # the candidate declares the knobs on the dispatched spec (via the SSOT).

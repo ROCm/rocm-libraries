@@ -135,6 +135,7 @@ void Arguments::init()
     fast_check_repeat = 1;
     fast_check_inject = -1;
     requires_streamk  = 0;
+    skip_launch_solution = -1;
     integer_exact_pattern[0] = 0;
     allow_no_solution        = 0;
     timing         = 0;

@@ -76,7 +76,7 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # validators on other targets.
 # ---------------------------------------------------------------------------
 
-from benchmarks.common import batched_timing  # noqa: E402
+from benchmarks.common import batched_timing, conv_fill  # noqa: E402
 from benchmarks.common.case_results import (  # noqa: E402
     RUNNERS_UP,
     ResultsWriter,
@@ -565,6 +565,7 @@ def _verify_kernel(
     u8,
     arch: str,
     compute_dtype: "str | None" = None,
+    ref_floor: float = 1.0,
 ) -> bool:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
@@ -586,6 +587,9 @@ def _verify_kernel(
     extra_tensors:
         Additional {name: tensor} pairs saved alongside out/ref/diff when
         ``dump_fail`` is set (e.g. ``{"dY": dY_t, "X": X_t}`` for wgrad).
+    ref_floor:
+        Floor of the reference peak in the error's denominator
+        (:func:`conv_fill.ref_floor` of the direction; 1 for U(-1, 1) data).
 
     Returns
     -------
@@ -612,11 +616,11 @@ def _verify_kernel(
     if arch == "gfx1250":
         out_f32 = out_cpu.float()
         abs_diff = out_f32.sub(ref_out.cpu()).abs()
-        ref_scale = ref_out.cpu().abs().max().clamp(min=1.0)
+        ref_scale = ref_out.cpu().abs().max().clamp(min=ref_floor)
     else:
         out_f32 = out_cpu.float().cuda()
         abs_diff = out_f32.sub(ref_out).abs()
-        ref_scale = ref_out.abs().max().clamp(min=1.0)
+        ref_scale = ref_out.abs().max().clamp(min=ref_floor)
     rel_err = float(abs_diff.max() / ref_scale)
     # Peak-normalised relative error: max|out-ref| / max|ref|.
     # Caveat: a large relative error on a small-magnitude weight can be masked
@@ -1647,7 +1651,15 @@ def main() -> int:
         help="AOT only: stop after building this many kernels (smoke tests).",
     )
 
+    conv_fill.add_argument(parser)
+    parser.add_argument(
+        "--kernels-file",
+        default=None,
+        help="--run-from-cache only: run just the cached kernels whose labels the file "
+        "lists (a label without its fwd-/dgrad-/wgrad- prefix names every direction)",
+    )
     args = parser.parse_args()
+    conv_fill.set_mode(args.fill)
     if args.skip_measured and not args.run_from_cache:
         print(
             "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
@@ -2786,6 +2798,19 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
     return artifact_map
 
 
+def _fwd_sweep_inputs(a_shape: tuple, b_shape: tuple, dtype: str, args):
+    """The forward sweep's fp32 ``(A, B)`` (activations, weights), A first:
+    the ``--debug-init`` constant when given, else filled per ``--fill``
+    (:mod:`benchmarks.common.conv_fill`; ``dtype`` is the io dtype)."""
+    import torch
+
+    if args.debug_init is not None:
+        return torch.full(a_shape, args.debug_init), torch.full(
+            b_shape, args.debug_init
+        )
+    return conv_fill.fwd_operands(a_shape, b_shape, dtype)
+
+
 def _run_sweep(
     *,
     args,
@@ -2823,20 +2848,15 @@ def _run_sweep(
     }[dtype]
     torch.manual_seed(42)
 
-    def _make(*shape):
-        return (
-            torch.full(shape, args.debug_init)
-            if args.debug_init is not None
-            else torch.empty(*shape).uniform_(-1.0, 1.0)
-        )
-
     if p.is_3d:
-        _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
+        _A_f32, _B_f32 = _fwd_sweep_inputs(
+            (p.N, p.Di, p.Hi, p.Wi, p.C), (p.K, p.Z, p.Y, p.X, p.cpg), dtype, args
+        )
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
-        _A_f32 = _make(p.N, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Y, p.X, p.cpg)
+        _A_f32, _B_f32 = _fwd_sweep_inputs(
+            (p.N, p.Hi, p.Wi, p.C), (p.K, p.Y, p.X, p.cpg), dtype, args
+        )
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     A_t = _A_f32.to(_torch_dtype)
     B_t = _B_f32.to(_torch_dtype)
@@ -3121,6 +3141,7 @@ def _run_sweep(
                 dump_fail=args.dump_fail,
                 u8=_u8,
                 arch=arch,
+                ref_floor=conv_fill.ref_floor(),
             )
             if stopped:
                 rt.free(A_dev)
@@ -4713,6 +4734,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     overall_rc = 0
     # Stage 2 reduce launchers for two-stage wgrad, compiled once per dW dtype.
     stage2_kernels: dict = {}
+    # --kernels-file: only the cached kernels named there (labels as the
+    # results print them, with or without the direction prefix)
+    kernel_map = conv_fill.load_kernels_file(getattr(args, "kernels_file", None))
     for case_idx, case in enumerate(cases, 1):
         problem = case[0]
         case_dtype = case[1] if len(case) > 1 else args.dtype
@@ -4724,7 +4748,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # otherwise open with a few thousand lines of nothing.
                 n_skipped += 1
                 continue
-            # The problem the kernels launch on (dgrad runs width-folded, as
+            # The problem the kernels launch on (fwd and dgrad run width-folded, as
             # the dispatcher launches it); the tensors, the reference and the
             # FLOP count stay the case's own -- the fold keeps every byte.
             run_problem = _launch_problem(direction, problem)
@@ -4740,12 +4764,20 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # A kernel launches on one batch slice at a time, so it is offered
             # against the largest slice: the grid limits apply to that.
             fit_problem = dc_replace(run_problem, N=batch_chunks[0][1])
+            keep = (
+                None
+                if kernel_map is None
+                else conv_fill.kernels_for(
+                    kernel_map, case_key(problem, case_dtype, direction)
+                )
+            )
             candidates = [
                 (ident, path, meta)
                 for ident, path, meta in cache.compatible(
                     fit_problem, direction=direction
                 )
                 if ident.dtype_a == case_dtype
+                and (keep is None or ident.label() in keep)
             ]
             if not candidates:
                 _, why = next(
@@ -4881,8 +4913,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             else:
                 a_shape, b_shape, d_shape = nhwc, krsc, nhwk
 
-            A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
-            B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
+            if direction == "fwd":
+                A_t = conv_fill.fill_x(torch.empty(*a_shape, dtype=torch_dt))
+                B_t = conv_fill.fill_w(
+                    torch.empty(*b_shape, dtype=torch_dt), case_dtype
+                )
+            else:
+                A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
+                B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
             D_t = torch.empty(*d_shape, dtype=torch_dt)
 
             rt = Runtime()
@@ -5086,6 +5124,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                                 u8=_u8,
                                 arch=arch,
                                 compute_dtype=case_dtype,
+                                ref_floor=conv_fill.ref_floor(direction),
                             )
                         except (HipError, RuntimeError) as e:
                             print(f"  verify {label}: FAIL({e})", flush=True)
@@ -5213,20 +5252,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
 def _launch_problem(direction, problem):
     """The problem the cached kernels of ``direction`` launch on for ``problem``.
 
-    A dgrad whose width folds into its channels runs folded
+    A forward or dgrad pass whose width folds into its channels runs folded
     (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`) -- the same
-    bytes in all three tensors, in fewer and wider sub-GEMMs -- exactly as
-    ``dispatch.grouped_convolution`` launches it, so what is benchmarked here
-    is what dispatch runs.
-
-    A forward folds the same way: the identity behind ``fold_width`` does not
-    depend on the direction, so a patch embedding (stride = filter, no
-    padding) or a 2x2 stride-2 downsample runs as a ``Y x 1`` convolution
-    over ``X * C`` contiguous channels -- vector-wide A loads instead of
-    ``C``-element gathers -- on exactly the case's tensors. Every other
-    problem launches as it is.
+    bytes in all three tensors, fewer and wider sub-GEMMs (dgrad) or
+    vector-wide patch rows (fwd) -- exactly as ``dispatch.grouped_convolution``
+    launches it, so what is benchmarked here is what dispatch runs. Every
+    other problem (and wgrad) launches as it is.
     """
-    if direction not in ("dgrad", "fwd"):
+    if direction not in ("fwd", "dgrad"):
         return problem
     from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
@@ -5438,6 +5471,7 @@ def _fast_rank_candidates(
                 u8=u8,
                 arch=arch,
                 compute_dtype=case_dtype,
+                ref_floor=conv_fill.ref_floor(direction),
             )
         except (HipError, RuntimeError) as e:
             print(f"  verify {labels[i]}: FAIL({e})", flush=True)

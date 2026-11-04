@@ -23,9 +23,11 @@ def test_mma_is_target_agnostic_authorship_swap_target() -> None:
     # Same authored intent, different bound target -> distinct valid resolution.
     on_gfx90a = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
     on_gfx942 = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx942")
-    assert on_gfx90a.op_id == on_gfx942.op_id == "mfma_f32_16x16x16f16"
+    on_gfx950 = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx950")
+    assert on_gfx90a.op_id == on_gfx942.op_id == on_gfx950.op_id
+    assert on_gfx90a.op_id == "mfma_f32_16x16x16f16"
     # (both CDNA MFMA here; the point is authorship carries no gfx branch)
-    assert on_gfx90a.wave_size == 64
+    assert on_gfx90a.wave_size == on_gfx942.wave_size == on_gfx950.wave_size == 64
 
 
 def test_default_atom_picks_native_32x32_single_atom() -> None:
@@ -115,15 +117,16 @@ def test_atom_name_unknown_fails_fast() -> None:
     assert "mfma_f32_16x16x16_does_not_exist" in str(excinfo.value)
 
 
-def test_atom_name_wrong_target_fails_fast() -> None:
-    # A real gfx950-only wide atom named while bound to gfx90a must fail fast.
+@pytest.mark.parametrize("target", ["gfx90a", "gfx942"])
+def test_atom_name_wrong_target_fails_fast(target: str) -> None:
+    # A real gfx950-only wide atom named while bound to another target must fail fast.
     with pytest.raises(ValueError) as excinfo:
         TileMma(
             (16, 16, 32),
             a="f16",
             b="f16",
             c="f32",
-            target="gfx90a",
+            target=target,
             tiling=Tiling(atom_shape="mfma_f32_16x16x32_f16"),
         )
     assert "mfma_f32_16x16x32_f16" in str(excinfo.value)
