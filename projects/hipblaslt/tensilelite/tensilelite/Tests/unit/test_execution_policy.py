@@ -8,13 +8,15 @@ import itertools
 
 import pytest
 
-from Tensile.ExecutionPolicy import (
+from tensilelite.ExecutionPolicy import (
     normalize_execution_policy,
+    normalize_execution_policy_with_defaults,
     normalize_hybrid_assignment_policy,
     resolve_policy,
     hasStaticAssignment,
     hasDynamicAssignment,
     hasHybridAssignment,
+    isStreamKSpatialCluster,
 )
 
 pytestmark = pytest.mark.unit
@@ -215,7 +217,7 @@ def test_explicit_reduction_controls_require_streamk(strategy, option):
 
 
 
-@pytest.mark.parametrize("version", (-1, 2, False, True, "1"))
+@pytest.mark.parametrize("version", (-1, 3, False, True, "1"))
 def test_unknown_persistent_argument_layout_is_rejected(version):
     with pytest.raises(ValueError, match="Unsupported PersistentLoopArgsVersion"):
         normalize_execution_policy({"TileProcessingStrategy": "DataParallel", "InternalSupportParams": {"PersistentLoopArgsVersion": version}}, regenerate=False)
@@ -277,3 +279,79 @@ def test_data_parallel_selects_layout_at_the_generation_boundary(outer, regenera
         "KernArgsVersion": 3 if regenerate else outer,
         "PersistentLoopArgsVersion": int(regenerate),
     }
+
+
+@pytest.mark.parametrize("strategy,assignment,shape,spatial,version", (
+    ("StreamK", "StaticGrid", [2, 1], True, 2),
+    ("StreamK", "StaticGrid", [2, 2], True, 2),
+    ("StreamK", "StaticGrid", [1, 1], False, 0),
+    ("StreamK", "StaticGrid", [1, 2], True, 2),
+    ("StreamK", "DynamicWorkQueue", [2, 1], False, 0),
+    ("StreamK", "Hybrid", [2, 1], False, 0),
+    ("DataParallel", "StaticGrid", [2, 1], False, 1),
+    ("None", "StaticGrid", [2, 1], False, 0),
+))
+def test_streamk_spatial_schedule_uses_the_public_policy_and_geometry(strategy, assignment, shape, spatial, version):
+    raw = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment, "ClusterDim": shape}
+    assert isStreamKSpatialCluster(raw) is spatial
+    state = normalize_execution_policy(raw)
+    assert isStreamKSpatialCluster(state) is spatial
+    assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == version
+
+
+@pytest.mark.parametrize("outer", (0, 1, 2, 3))
+@pytest.mark.parametrize("version", (None, 0))
+def test_streamk_cluster_legacy_payload_upgrades_only_on_source_regeneration(outer, version):
+    support = {"KernArgsVersion": outer}
+    if version is not None:
+        support["PersistentLoopArgsVersion"] = version
+    source = {"StreamK": 3, "ClusterDim": [2, 1], "InternalSupportParams": support,
+              "AssignedDerivedParameters": True, "AssignedProblemIndependentDerivedParameters": True}
+    prebuilt = normalize_execution_policy(source, regenerate=False)
+    assert prebuilt["InternalSupportParams"] == {"KernArgsVersion": outer, "PersistentLoopArgsVersion": 0}
+    assert prebuilt["AssignedDerivedParameters"] is True
+    regenerated = normalize_execution_policy(source)
+    assert regenerated["InternalSupportParams"] == {"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2}
+    assert regenerated["AssignedDerivedParameters"] is False
+    assert regenerated["AssignedProblemIndependentDerivedParameters"] is False
+
+
+@pytest.mark.parametrize("version", (0, 2))
+def test_streamk_cluster_artifact_uses_its_declared_payload(version):
+    source = {"TileProcessingStrategy": "StreamK", "ClusterDim": [2, 1],
+              "InternalSupportParams": {"KernArgsVersion": 3, "PersistentLoopArgsVersion": version}}
+    state = normalize_execution_policy(source, regenerate=False)
+    assert state["InternalSupportParams"] == source["InternalSupportParams"]
+
+
+@pytest.mark.parametrize("override", (
+    {"TileProcessingStrategy": "DataParallel"}, {"TileProcessingStrategy": "None"},
+    {"WorkAssignment": "DynamicWorkQueue"}, {"WorkAssignment": "Hybrid"},
+    {"ClusterDim": [1, 1]}, {"ClusterDim": [1, 2]},
+))
+@pytest.mark.parametrize("regenerate", (False, True))
+def test_explicit_streamk_cluster_payload_requires_matching_policy(override, regenerate):
+    source = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid", "ClusterDim": [2, 1],
+              "InternalSupportParams": {"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2}}
+    source.update(override)
+    if override == {"ClusterDim": [1, 2]}:
+        state = normalize_execution_policy(source, regenerate=regenerate)
+        assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
+        return
+    with pytest.raises(ValueError, match="PersistentLoopArgsVersion=2 requires StreamK/StaticGrid"):
+        normalize_execution_policy(source, regenerate=regenerate)
+
+
+@pytest.mark.parametrize("override,version", (
+    ({"ClusterDim": [1, 1]}, 0),
+    ({"TileProcessingStrategy": "DataParallel"}, 1),
+    ({"WorkAssignment": "Hybrid"}, 0),
+))
+def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_changes(override, version):
+    defaults = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid", "ClusterDim": [2, 1],
+                "InternalSupportParams": {"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2},
+                "AssignedDerivedParameters": True, "AssignedProblemIndependentDerivedParameters": True}
+    state = normalize_execution_policy_with_defaults(override, defaults)
+    assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == version
+    assert state["AssignedDerivedParameters"] is False
+    assert state["AssignedProblemIndependentDerivedParameters"] is False

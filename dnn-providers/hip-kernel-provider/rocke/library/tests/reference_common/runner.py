@@ -67,14 +67,19 @@ def run_worker(
         )
         if completed.returncode:
             raise RuntimeError(
-                f"GPU reference {request['mode']} worker failed:\n"
+                f"GPU reference {request['mode']} worker failed with exit code "
+                f"{completed.returncode}:\n"
                 f"{completed.stdout[-4000:]}{completed.stderr[-12000:]}"
             )
     report = json.loads((work / "report.json").read_text())
     if report.get("torch_imported"):
-        raise RuntimeError("GPU reference worker imported Torch")
+        raise RuntimeError(f"GPU reference {request['mode']} worker imported Torch")
     if report["launches"] != request["repetitions"]:
-        raise RuntimeError("required GPU reference launches did not execute")
+        raise RuntimeError(
+            f"required GPU reference launches did not execute: the {request['mode']} "
+            f"worker reported {report['launches']} launches for "
+            f"{request['repetitions']} repetitions, one kernel launch each"
+        )
     with np.load(work / "outputs.npz", allow_pickle=False) as archive:
         outputs = [archive[f"out_{i}"] for i in range(request["repetitions"])]
     return outputs, report

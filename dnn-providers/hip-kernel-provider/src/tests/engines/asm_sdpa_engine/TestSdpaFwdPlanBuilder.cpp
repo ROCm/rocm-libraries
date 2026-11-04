@@ -3,10 +3,17 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "ConfigHelpers.hpp"
@@ -19,17 +26,67 @@
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <optional>
+#include <utility>
 
 namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
+
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+flatbuffers::FlatBufferBuilder mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
+                                           const std::function<void(GraphT&)>& mutate)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
+    mutate(*graph);
+    flatbuffers::FlatBufferBuilder mutated;
+    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
+    return mutated;
+}
+
+TensorAttributesT& findTensor(GraphT& graph, const std::string& name)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->name == name)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor named " + name);
+}
+
+TensorAttributesT& findTensorByUid(GraphT& graph, int64_t uid)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor with uid " + std::to_string(uid));
+}
+
+int64_t maxTensorUid(const GraphT& graph)
+{
+    int64_t maxUid = 0;
+    for(const auto& tensor : graph.tensors)
+    {
+        maxUid = std::max(maxUid, tensor->uid);
+    }
+    return maxUid;
+}
 
 class TestSdpaFwdPlanBuilder : public ::testing::Test
 {
@@ -222,8 +279,22 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       false,
                                       DataType::HALF),
-                   "mma_core_mode = HALF"},
-         false},
+                   "mma_core_mode = HALF (cuDNN-frontend default) on bf16 inputs"},
+         true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      DataType::BFLOAT16),
+                   "mma_core_mode = BFLOAT16 on bf16 inputs"},
+         true},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       DataType::BFLOAT16,
@@ -244,6 +315,239 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
     }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest aligned{createSdpaFwdGraph(), "All tensors 16-byte aligned"};
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, aligned.graphWrapper())) << aligned.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
+{
+    const GraphTest misaligned{
+        hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaFwdGraph(), 8),
+        "Q aligned to 8 bytes"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, misaligned.graphWrapper()))
+        << misaligned.message;
+}
+
+// =============================================================================
+// Ragged tensors / group mode
+// =============================================================================
+
+auto createBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                            const std::vector<int64_t>& vDims = {4, 8, 256, 128},
+                            bool withStats = false)
+{
+    const std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> bshd = {3, 1, 2, 0};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims, bshd),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims, bshd),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims, bshd),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims, bshd),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        false,
+        false,
+        withStats);
+}
+
+auto createRaggedBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                                  const std::vector<int64_t>& vDims = {4, 8, 256, 128})
+{
+    return sdpa::withRaggedTensors(createBshdSdpaFwdGraph(qDims, vDims), {"q", "k", "v", "o"});
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createRaggedBshdSdpaFwdGraph(), "All of Q, K, V, O ragged -> group mode"}, true},
+        {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 192}, {4, 8, 256, 128}),
+                   "Group mode with q head dim 192 and v head dim 128"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
+                                                                  {4, 8, 256, 128},
+                                                                  /*withStats=*/true),
+                                           {"q", "k", "v", "o"}),
+                   "Group mode with generate_stats"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
+                   "Q, K, V ragged but not O"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q"}), "Only Q ragged"}, false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
+                   "K, V, O ragged but not Q"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
+                                                                  {4, 8, 256, 128},
+                                                                  /*withStats=*/true),
+                                           {"q", "k", "v", "o", "stats"}),
+                   "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      /*withStats=*/true),
+                   "Dense Q, K, V, O with stats (baseline for the stats-only ragged case)"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph({4, 8, 256, 128},
+                                                              {4, 8, 256, 128},
+                                                              DataType::BFLOAT16,
+                                                              DataType::FLOAT,
+                                                              false,
+                                                              false,
+                                                              /*withStats=*/true),
+                                           {"stats"}),
+                   "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
+                   "tensor"},
+         false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto withMultiplier = [](const std::string& name, int64_t multiplier) {
+        return mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+            findTensor(graph, name).ragged_offset_multiplier = multiplier;
+        });
+    };
+    const auto withOwnOffset = [](const std::string& name) {
+        return mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+            auto& tensor = findTensor(graph, name);
+            auto offset = std::make_unique<TensorAttributesT>(
+                findTensorByUid(graph, tensor.ragged_offset_tensor_uid.value()));
+            offset->uid = maxTensorUid(graph) + 1;
+            offset->name = name + "_own_ragged_offset";
+            tensor.ragged_offset_tensor_uid = offset->uid;
+            graph.tensors.push_back(std::move(offset));
+        });
+    };
+
+    // Mutates one ragged offset tensor of an otherwise valid group-mode graph.
+    const auto withOffset
+        = [](const std::string& offsetName, const std::function<void(TensorAttributesT&)>& mutate) {
+              return mutateGraph(createRaggedBshdSdpaFwdGraph(),
+                                 [&](GraphT& graph) { mutate(findTensor(graph, offsetName)); });
+          };
+
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createRaggedBshdSdpaFwdGraph(), "Baseline group mode"}, true},
+           {GraphTest{withMultiplier("q", 1), "Q multiplier 1 (element-unit offsets)"}, false},
+           {GraphTest{withMultiplier("q", 128), "Q multiplier != Q sequence stride"}, false},
+           {GraphTest{withMultiplier("k", 128), "K multiplier != K sequence stride"}, false},
+           {GraphTest{withMultiplier("v", 128), "V multiplier != V sequence stride"}, false},
+           {GraphTest{withMultiplier("o", 128), "O multiplier != O sequence stride"}, false},
+           {GraphTest{withOwnOffset("o"), "O does not share Q's ragged offset tensor"}, false},
+           {GraphTest{withOwnOffset("v"), "V does not share K's ragged offset tensor"}, false}};
+
+    // The Q/O offset and the K/V offset are validated separately, so every defect is
+    // exercised on both. The graph has B = 4, so a valid offset tensor is [5, 1, 1, 1].
+    // Each dims/strides case violates exactly one clause of isTokenSeqstartTensor.
+    const std::vector<std::pair<std::string, std::vector<std::string>>> offsetTensors
+        = {{"qo_ragged_offset", {"q", "o"}}, {"kv_ragged_offset", {"k", "v"}}};
+    for(const auto& offsetTensor : offsetTensors)
+    {
+        const std::string& offsetName = offsetTensor.first;
+        const std::vector<std::string>& users = offsetTensor.second;
+        const auto addRejected
+            = [&](const std::string& defect, flatbuffers::FlatBufferBuilder&& graph) {
+                  std::string message = offsetName;
+                  message += ": ";
+                  message += defect;
+                  applicabilityTests.emplace_back(GraphTest{std::move(graph), message}, false);
+              };
+        const auto addShape = [&](const std::string& defect,
+                                  std::vector<int64_t> dims,
+                                  std::vector<int64_t> strides) {
+            addRejected(defect, withOffset(offsetName, [&](TensorAttributesT& t) {
+                            t.dims = dims;
+                            t.strides = strides;
+                        }));
+        };
+        addRejected("INT64", withOffset(offsetName, [](TensorAttributesT& t) {
+                        t.data_type = DataType::INT64;
+                    }));
+        addRejected("virtual",
+                    withOffset(offsetName, [](TensorAttributesT& t) { t.virtual_ = true; }));
+        addShape("B rather than B+1 entries", {4, 1, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[1] == 2", {5, 2, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[2] == 2", {5, 1, 2, 1}, {1, 1, 1, 1});
+        addShape("dims[3] == 2", {5, 1, 1, 2}, {1, 1, 1, 1});
+        addShape("stride[0] == 2", {5, 1, 1, 1}, {2, 1, 1, 1});
+        addRejected("uid missing from the tensor map",
+                    mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+                        const int64_t missingUid = maxTensorUid(graph) + 1;
+                        for(const auto& user : users)
+                        {
+                            findTensor(graph, user).ragged_offset_tensor_uid = missingUid;
+                        }
+                    }));
+    }
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenQ)
+{
+    const GraphTest test{sdpa::withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenKv)
+{
+    const GraphTest test{sdpa::withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
 }
 
 // =============================================================================
@@ -377,9 +681,16 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
 // Build an fp8-in / bf16-out forward SDPA graph, optionally with q/k/v descale
 // tensors, to exercise the fp8 applicability policy. descaleDims defaults to a
 // per-tensor scalar ([1,1,1,1]); pass a larger shape (e.g. [B,H_kv,1,1]) to build
-// the non-scalar descales the engine must reject.
+// the non-scalar descales the engine must reject. qStrides and vStrides override
+// the contiguous Q and V strides, which is what the fp8 Ts and byte-stride
+// boundary cases need.
 flatbuffers::FlatBufferBuilder
-    createSdpaFwdFp8Graph(bool withDescale, const std::vector<int64_t>& descaleDims = {1, 1, 1, 1})
+    createSdpaFwdFp8Graph(bool withDescale,
+                          const std::vector<int64_t>& descaleDims = {1, 1, 1, 1},
+                          const std::vector<int64_t>& qStrides = {},
+                          const std::vector<int64_t>& vStrides = {},
+                          hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+                          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -388,20 +699,22 @@ flatbuffers::FlatBufferBuilder
 
     const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t>& qStridesUsed = qStrides.empty() ? strides : qStrides;
+    const std::vector<int64_t>& vStridesUsed = vStrides.empty() ? strides : vStrides;
     const std::vector<int64_t>& scalarDims = descaleDims;
     const std::vector<int64_t> scalarStrides
         = hipdnn_data_sdk::utilities::generateStrides(scalarDims);
 
     int64_t uid = 1;
     const auto qUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, qUid, "q", DataType::FP8_E4M3_FNUZ, &qStridesUsed, &dims));
     const auto kUid = uid++;
     tensorAttributes.push_back(
         CreateTensorAttributesDirect(builder, kUid, "k", DataType::FP8_E4M3_FNUZ, &strides, &dims));
     const auto vUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, vUid, "v", DataType::FP8_E4M3_FNUZ, &vStridesUsed, &dims));
     const auto oUid = uid++;
     tensorAttributes.push_back(
         CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
@@ -463,7 +776,7 @@ flatbuffers::FlatBufferBuilder
                                flatbuffers::nullopt, // right_bound
                                flatbuffers::nullopt, // max_seq_len_kv
                                DiagonalAlignment::TOP_LEFT,
-                               DataType::UNSET, // mma_core_mode (engine requires unset)
+                               mmaCoreMode,
                                AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -783,6 +1096,33 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
         << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
 }
 
+// The fp8 kernels run fp8 MFMA, so a 16-bit mma_core_mode (HALF, the cuDNN-frontend
+// default that is accepted for bf16 inputs) does not describe them and must decline.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    auto unsetBuilder = createSdpaFwdFp8Graph(
+        /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, DataType::UNSET);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper unsetGraph(
+        unsetBuilder.GetBufferPointer(), unsetBuilder.GetSize());
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, unsetGraph))
+        << "control: fp8 inputs with scalar descales and UNSET mma_core_mode are accepted";
+
+    auto halfBuilder = createSdpaFwdFp8Graph(
+        /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, DataType::HALF);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfGraph(
+        halfBuilder.GetBufferPointer(), halfBuilder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, halfGraph))
+        << "fp8 inputs with mma_core_mode = HALF must be rejected";
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 {
     // Create an SDPA graph with known dimensions (withStats = false by default)
@@ -873,6 +1213,35 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestSdpaFwdDeprecatedCausalMask,
                          ::testing::ValuesIn(deprecatedCausalMaskCases()),
                          deprecatedCausalMaskCaseName);
+
+// The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+// included); the band the kernels take is FlashAttention's window_size_left, L - 1.
+TEST(TestSdpaFwdResolveDiagonalBand, ConvertsCudnnLeftBoundToWindowLeft)
+{
+    // Literal expectations, so the test does not restate the conversion it checks.
+    for(const auto& [leftBound, expectedWindowLeft] : {std::pair<int64_t, int64_t>{-1, -1},
+                                                       std::pair<int64_t, int64_t>{1, 0},
+                                                       std::pair<int64_t, int64_t>{2, 1},
+                                                       std::pair<int64_t, int64_t>{64, 63}})
+    {
+        auto builder = createSdpaFwdGraphWithMask(
+            /*causalMask=*/false,
+            /*causalMaskBottomRight=*/false,
+            leftBound,
+            /*rightBound=*/0,
+            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& attrs
+            = graphWrapper.nodeWrappers()
+                  .front()
+                  ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+
+        const auto band = plan_utils::resolveDiagonalBand(attrs);
+        EXPECT_EQ(band.leftBound, expectedWindowLeft) << "left_bound=" << leftBound;
+        EXPECT_EQ(band.rightBound, 0);
+    }
+}
 
 // =============================================================================
 // plan_utils::makeCoveringBoundsUnbound
@@ -1184,6 +1553,464 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(
         builderOk.GetBufferPointer(), builderOk.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSinkToken)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // The same graph is accepted without the sink and declined with it: the vendored kernels
+    // cannot add the sink logit to the softmax denominator.
+    auto base = createSdpaFwdGraph();
+    auto withSinkBuilder = addSinkToken(base);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withSink(
+        withSinkBuilder.GetBufferPointer(), withSinkBuilder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withoutSink(
+        base.GetBufferPointer(), base.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, withoutSink));
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, withSink));
+}
+
+// =============================================================================
+// Kernarg range guards
+// =============================================================================
+
+// The predicates every per-field guard is built from, at their exact
+// boundaries. Pure functions, so these run without a device.
+
+TEST(TestSdpaKernargRanges, DimFitsU32AcceptsItsLimit)
+{
+    EXPECT_TRUE(plan_utils::dimFitsU32("batch", static_cast<int64_t>(UINT32_MAX)));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsU32RejectsOnePastItsLimit)
+{
+    EXPECT_FALSE(plan_utils::dimFitsU32("batch", static_cast<int64_t>(UINT32_MAX) + 1));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsU32RejectsANegativeDimension)
+{
+    EXPECT_FALSE(plan_utils::dimFitsU32("batch", -1));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsI32AcceptsItsLimit)
+{
+    EXPECT_TRUE(plan_utils::dimFitsI32("seqlen_q", static_cast<int64_t>(INT32_MAX)));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsI32RejectsOnePastItsLimit)
+{
+    EXPECT_FALSE(plan_utils::dimFitsI32("seqlen_q", static_cast<int64_t>(INT32_MAX) + 1));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsI32RejectsANegativeDimension)
+{
+    EXPECT_FALSE(plan_utils::dimFitsI32("seqlen_q", -1));
+}
+
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32AcceptsItsLimit)
+{
+    EXPECT_TRUE(plan_utils::byteStrideFitsU32("stride_q", static_cast<int64_t>(UINT32_MAX) / 2, 2));
+}
+
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32RejectsOnePastItsLimit)
+{
+    EXPECT_FALSE(
+        plan_utils::byteStrideFitsU32("stride_q", static_cast<int64_t>(UINT32_MAX) / 2 + 1, 2));
+}
+
+// The predicate divides instead of multiplying, so an element count whose byte
+// product does not even fit in int64 is declined rather than wrapped into
+// range.
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32DeclinesAnElementCountThatOverflowsTheProduct)
+{
+    EXPECT_FALSE(plan_utils::byteStrideFitsU32("stride_q", (int64_t{1} << 62) + 1, 2));
+}
+
+// Both Ts kernargs fold a tile size into the element size, which shrinks the
+// accepted element range by that factor.
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32FoldsInATileFactor)
+{
+    constexpr int64_t K_TILE_BYTES = int64_t{2} * 192;
+    EXPECT_TRUE(plan_utils::byteStrideFitsU32(
+        "Ts", static_cast<int64_t>(UINT32_MAX) / K_TILE_BYTES, K_TILE_BYTES));
+    EXPECT_FALSE(plan_utils::byteStrideFitsU32(
+        "Ts", static_cast<int64_t>(UINT32_MAX) / K_TILE_BYTES + 1, K_TILE_BYTES));
+}
+
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32RejectsANonPositiveElementSize)
+{
+    EXPECT_FALSE(plan_utils::byteStrideFitsU32("Ts", 1, 0));
+}
+
+// Build a forward graph with per-tensor dims and one explicit stride set, so a
+// dimension can be driven to the limit of its field without the contiguous
+// stride for that shape tripping the byte-stride guard first. The strides
+// describe a [1, 1, 256, 128] tile; applicability ties nothing else to them.
+// Only descriptors are built, so the dims cost no memory.
+auto createSdpaFwdGraphForDims(const std::vector<int64_t>& qDims,
+                               const std::vector<int64_t>& kDims,
+                               const std::vector<int64_t>& vDims)
+{
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> strides = {32768, 32768, 128, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        strides,
+        kDims,
+        strides,
+        vDims,
+        strides,
+        oDims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
+struct FwdDimRangeCase
+{
+    const char* label;
+    std::vector<int64_t> qDims;
+    std::vector<int64_t> kDims;
+    std::vector<int64_t> vDims;
+};
+
+constexpr int64_t K_U32_DIM_LIMIT = static_cast<int64_t>(UINT32_MAX);
+constexpr int64_t K_I32_DIM_LIMIT = static_cast<int64_t>(INT32_MAX);
+
+// Batch and the head counts reach the kernel through a uint32 field or an
+// unsigned grid dimension; the sequence lengths take the signed limit because
+// the launch grid's ceil-division is evaluated in unsigned int.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<FwdDimRangeCase> cases = {
+        {"batch at UINT32_MAX",
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128}},
+        {"nhead_q at UINT32_MAX",
+         {4, K_U32_DIM_LIMIT, 256, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"nhead_kv at UINT32_MAX",
+         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT, 256, 128},
+         {4, K_U32_DIM_LIMIT, 256, 128}},
+        {"seqlen_q at INT32_MAX", {4, 8, K_I32_DIM_LIMIT, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"seqlen_kv at INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaFwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<FwdDimRangeCase> cases = {
+        {"batch one past UINT32_MAX",
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128}},
+        {"nhead_q one past UINT32_MAX",
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"nhead_kv one past UINT32_MAX",
+         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128}},
+        {"seqlen_q one past INT32_MAX",
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"seqlen_kv one past INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaFwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+// The head dims are narrowed to int for the kernel-registry lookup, so a head
+// dim whose low 32 bits are a supported value used to resolve a kernel built
+// for that supported value. The registry set {64, 128, 192} is what bounds the
+// head dims in practice, which is why there is no case at INT32_MAX here.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_WRAPS_TO_128 = (int64_t{1} << 32) + 128;
+
+    const std::vector<FwdDimRangeCase> cases = {
+        {"supported head dims (control)", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"hdim_qk wraps to 128",
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, 128}},
+        {"hdim_v wraps to 128", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, K_WRAPS_TO_128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaFwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        const bool isControl = testCase.label == std::string("supported head dims (control)");
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, gw), isControl);
+    }
+}
+
+// ts_qo of the row isApplicable resolves for an hd128 no-mask batch graph of
+// `dtype`, selected by the same rule getKernelNameKey applies. gfx942 also
+// matches bf16_cvt, which getBf16ConvertMode sets to RTNE (0) for bf16 and
+// RTNA (1) for fp8.
+std::optional<int> resolveFwdTileSizeQo(const std::string& archId, const std::string& dtype)
+{
+    const int expectedBf16Cvt = (dtype == "fp8bf16") ? 1 : 0;
+    for(const auto& entry : cfg_fmha_fwd)
+    {
+        const auto& cfg = entry.second;
+        if(cfg.arch == archId && cfg.dtype == dtype && cfg.hdim_q == 128 && cfg.hdim_v == 128
+           && cfg.mask == 0 && cfg.mode == 0
+           && (archId == "gfx950" || cfg.bf16_cvt == expectedBf16Cvt))
+        {
+            return cfg.ts_qo;
+        }
+    }
+    return std::nullopt;
+}
+
+// s_Ts is tileSizeQo * stride_q * bytes-per-element, computed in unsigned int.
+// The per-field stride guard only bounds stride_q * bytes-per-element, so the
+// tile factor is what this guard adds: the accepted stride shrinks by ts_qo.
+// The element size is the resolved input size, two bytes for bf16 and one for
+// fp8, so the fp8 boundary sits at twice the bf16 one for the same ts_qo.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSize)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto tileSizeQo = resolveFwdTileSizeQo(deviceString, "bf16");
+    ASSERT_TRUE(tileSizeQo.has_value()) << "no bf16 hd128 no-mask row for " << deviceString;
+
+    constexpr int64_t K_BF16_BYTES = 2;
+    const int64_t limit = static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *tileSizeQo);
+    // One past the Ts limit must still clear the per-field stride guard, or the
+    // test would prove nothing about Ts.
+    ASSERT_LE((limit + 1) * K_BF16_BYTES, static_cast<int64_t>(UINT32_MAX));
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    const std::vector<int64_t> atLimit = {limit, limit, limit, 1};
+    auto builderAtLimit
+        = createSdpaFwdGraphWithStrides(dims, atLimit, normalStrides, normalStrides, normalStrides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
+        builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
+
+    const std::vector<int64_t> pastLimit = {limit + 1, limit + 1, limit + 1, 1};
+    auto builderPastLimit = createSdpaFwdGraphWithStrides(
+        dims, pastLimit, normalStrides, normalStrides, normalStrides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
+        builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
+
+    // fp8 forward kernels ship for gfx942 only. Their kernarg builder scales the
+    // strides by one byte, so bounding the fp8 Ts at the bf16 size would decline
+    // descriptors the kernel runs.
+    if(deviceString != "gfx942")
+    {
+        return;
+    }
+
+    const auto fp8TileSizeQo = resolveFwdTileSizeQo(deviceString, "fp8bf16");
+    ASSERT_TRUE(fp8TileSizeQo.has_value()) << "no fp8bf16 hd128 no-mask row for " << deviceString;
+
+    constexpr int64_t K_FP8_BYTES = 1;
+    const int64_t fp8Limit = static_cast<int64_t>(UINT32_MAX) / (K_FP8_BYTES * *fp8TileSizeQo);
+    ASSERT_LE((fp8Limit + 1) * K_FP8_BYTES, static_cast<int64_t>(UINT32_MAX));
+    // The bf16 element size would have cut this in half, which is the reach the
+    // resolved element size restores.
+    ASSERT_GT(fp8Limit, static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *fp8TileSizeQo));
+
+    const std::vector<int64_t> fp8AtLimit = {fp8Limit, fp8Limit, fp8Limit, 1};
+    auto fp8BuilderAtLimit
+        = createSdpaFwdFp8Graph(/*withDescale=*/true, /*descaleDims=*/{1, 1, 1, 1}, fp8AtLimit);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwFp8AtLimit(
+        fp8BuilderAtLimit.GetBufferPointer(), fp8BuilderAtLimit.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwFp8AtLimit));
+
+    const std::vector<int64_t> fp8PastLimit = {fp8Limit + 1, fp8Limit + 1, fp8Limit + 1, 1};
+    auto fp8BuilderPastLimit
+        = createSdpaFwdFp8Graph(/*withDescale=*/true, /*descaleDims=*/{1, 1, 1, 1}, fp8PastLimit);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwFp8PastLimit(
+        fp8BuilderPastLimit.GetBufferPointer(), fp8BuilderPastLimit.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwFp8PastLimit));
+}
+
+// The forward byte-stride guard checks the batch, head and sequence stride of V
+// one field at a time (batch_stride_v, nhead_stride_v, stride_v). Each case
+// moves one V stride to its bound and leaves every other tensor contiguous, so
+// the at-limit graph is accepted and the past-limit graph can only be declined
+// by that one V field. Q, K and O stay normal, which keeps the Ts guard (a Q
+// property) out of the picture.
+struct VStrideFieldCase
+{
+    const char* label;
+    size_t strideIndex;
+};
+
+const std::vector<VStrideFieldCase> K_V_STRIDE_FIELDS = {
+    {"batch_stride_v", 0},
+    {"nhead_stride_v", 1},
+    {"stride_v", 2},
+};
+
+std::vector<int64_t>
+    contiguousStridesWithField(const std::vector<int64_t>& dims, size_t strideIndex, int64_t value)
+{
+    std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    strides[strideIndex] = value;
+    return strides;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachBf16VByteStrideField)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // bf16 scales the element stride by two bytes, so the largest accepted
+    // element stride is UINT32_MAX / 2.
+    constexpr int64_t K_BF16_STRIDE_LIMIT = static_cast<int64_t>(UINT32_MAX) / 2;
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    for(const auto& field : K_V_STRIDE_FIELDS)
+    {
+        SCOPED_TRACE(field.label);
+
+        auto atLimitBuilder = createSdpaFwdGraphWithStrides(
+            dims,
+            normalStrides,
+            normalStrides,
+            contiguousStridesWithField(dims, field.strideIndex, K_BF16_STRIDE_LIMIT),
+            normalStrides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
+            atLimitBuilder.GetBufferPointer(), atLimitBuilder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
+
+        auto pastLimitBuilder = createSdpaFwdGraphWithStrides(
+            dims,
+            normalStrides,
+            normalStrides,
+            contiguousStridesWithField(dims, field.strideIndex, K_BF16_STRIDE_LIMIT + 1),
+            normalStrides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
+            pastLimitBuilder.GetBufferPointer(), pastLimitBuilder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
+    }
+}
+
+// fp8 forward kernels ship for gfx942 only. The kernarg builder scales the Q/K/V
+// strides by one byte, so V's bound is UINT32_MAX elements, twice the bf16 one.
+// The element stride that bf16 declines (UINT32_MAX / 2 + 1) is therefore a
+// case fp8 must still accept, which is what the resolved element size restores.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachFp8VByteStrideField)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr auto K_FP8_STRIDE_LIMIT = static_cast<int64_t>(UINT32_MAX);
+    constexpr int64_t K_BF16_PAST_LIMIT = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+
+    const auto isApplicableWithV = [&](size_t strideIndex, int64_t value) {
+        auto builder = createSdpaFwdFp8Graph(/*withDescale=*/true,
+                                             /*descaleDims=*/{1, 1, 1, 1},
+                                             /*qStrides=*/{},
+                                             contiguousStridesWithField(dims, strideIndex, value));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_handle, gw);
+    };
+
+    for(const auto& field : K_V_STRIDE_FIELDS)
+    {
+        SCOPED_TRACE(field.label);
+        EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_BF16_PAST_LIMIT));
+        EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT));
+        EXPECT_FALSE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT + 1));
+    }
 }
 
 // =============================================================================

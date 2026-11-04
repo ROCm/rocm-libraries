@@ -71,17 +71,22 @@ _F32_MIN_NORMAL = 2.0**-126
 def launcher_for(spec: GdnDecodeSpec, arch: str = _ARCH) -> KernelLauncher:
     """Compile ``spec`` and wrap it in a launcher, memoised per spec.
 
+    The spec is validated before the cache is read. A flag of the wrong type
+    (``dpp_reduce="false"`` is truthy) gets the same ``kernel_name()`` as the
+    valid spec it imitates, so a cache hit would hand it that spec's launcher
+    instead of raising.
+
     Keyed on ``kernel_name()`` because that string is what the compiled code
     object is identified by; every field that changes emitted code is encoded
-    in it, so two specs cannot collide on one cache entry.
+    in it, so two valid specs cannot collide on one cache entry.
     """
+    ok, why = is_valid_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid gdn_decode spec for {arch}: {why}")
     key = (spec.kernel_name(), arch)
     cached = _LAUNCHER_CACHE.get(key)
     if cached is not None:
         return cached
-    ok, why = is_valid_spec(spec, arch=arch)
-    if not ok:
-        raise ValueError(f"invalid gdn_decode spec for {arch}: {why}")
     artifact = compile_kernel(build_gdn_decode(spec, arch=arch), arch=arch)
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
@@ -631,7 +636,9 @@ def run(spec: GdnDecodeSpec, inp, launcher: KernelLauncher, batch: int):
     return values["out"], values["state"]
 
 
-def check(spec: GdnDecodeSpec, batch: int, seed: int = 0) -> Tuple[float, float]:
+def check(
+    spec: GdnDecodeSpec, batch: int, seed: int = 0, *, disjoint_writes: bool = True
+) -> Tuple[float, float]:
     """Run and compare against the reference. Returns ``(out_err, state_err)``.
 
     ``state_err`` covers the WHOLE pool, not only the written pages: the pages
@@ -640,9 +647,11 @@ def check(spec: GdnDecodeSpec, batch: int, seed: int = 0) -> Tuple[float, float]
     the wrong slot -- the slot written checks out and the slot damaged is never
     looked at -- and a misplaced write is the failure mode a paged state pool
     invites. For ``fuse_conv`` specs it also covers the conv-state pool, by the
-    same written/untouched rule.
+    same written/untouched rule. ``disjoint_writes=False`` updates every
+    sequence in place (write slot == read slot); the default pool depth still
+    leaves ``batch + 1`` untouched pages.
     """
-    inp = make_inputs(spec, batch, seed=seed)
+    inp = make_inputs(spec, batch, seed=seed, disjoint_writes=disjoint_writes)
     ref_out, ref_state = ref_fp32(spec, inp)
     values = run_values(spec, inp, launcher_for(spec), batch)
     out_err = out_error(spec, values["out"], ref_out)

@@ -21,7 +21,7 @@
 ################################################################################
 
 from typing import Any, Optional
-from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
+from tensilelite.Components.CMSValidator import add_gr_not_too_early_constraints
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
 

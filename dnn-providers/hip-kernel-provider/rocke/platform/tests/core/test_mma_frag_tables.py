@@ -203,6 +203,8 @@ class TestMmaFragTables(unittest.TestCase):
         # Spot-check representative 16x16 vs 32x32 accumulator widths.
         self.assertEqual(_mma_c_frag_len("mfma_f32_16x16x16_f16"), 4)
         self.assertEqual(_mma_c_frag_len("mfma_f32_32x32x8_f16"), 16)
+        self.assertEqual(_mma_c_frag_len("mfma_f64_16x16x4_f64"), 4)
+        self.assertEqual(_mma_c_frag_len("mfma_f64_4x4x4_f64"), 1)
         self.assertEqual(_mma_c_frag_len("wmma_f32_16x16x16_f16"), 8)
 
 

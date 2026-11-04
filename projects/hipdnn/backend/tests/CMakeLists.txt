@@ -104,6 +104,7 @@ add_executable(
     descriptors/TestNodeFactory.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
+    TestBackendExecuteDeviceCheck.cpp
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
     TestGraphAndPlanSerializationApi.cpp
@@ -130,6 +131,7 @@ add_executable(
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
     heuristics/TestStaticOrderingBuiltIn.cpp
+    heuristics/TestPredictionPolicies.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp
@@ -196,6 +198,7 @@ target_compile_definitions(
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
             TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
             TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
+            TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -316,6 +319,7 @@ add_dependencies(hipdnn_backend_tests
     ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
     ${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}
     ${TEST_MISMATCHED_NAME_PLUGIN_NAME}
+    ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
 )
 
 add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

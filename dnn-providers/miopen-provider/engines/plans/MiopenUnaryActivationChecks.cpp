@@ -37,15 +37,14 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
 {
     const auto lowerClip = attrs.relu_lower_clip();
     const auto upperClip = attrs.relu_upper_clip();
-    const auto lowerClipSlope = attrs.relu_lower_clip_slope();
+    const bool leaky = miopen_utils::hasLeakyReluSlope(attrs);
 
     if(lowerClip && upperClip)
     {
         // Clamp. MIOpen's CLAMP floors at lower_clip and has no slope parameter, and this
         // branch wins over the leaky one below, so a non-zero slope would be silently dropped
-        // and the op would compute a flat floor instead of a ramp. A zero slope is a no-op
-        // that CLAMP already represents exactly, so it stays allowed.
-        if(lowerClipSlope && *lowerClipSlope != 0.f)
+        // and the op would compute a flat floor instead of a ramp.
+        if(leaky)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -57,7 +56,7 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
     if(upperClip)
     {
         // Clipped ReLU is likewise flat below the knee, so the same reasoning applies.
-        if(lowerClipSlope && *lowerClipSlope != 0.f)
+        if(leaky)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -66,7 +65,7 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
         }
         return; // Clipped ReLU
     }
-    if(lowerClipSlope)
+    if(leaky)
     {
         // Leaky ReLU. MIOpen's LEAKYRELU is parameterized by slope alone, with the knee fixed
         // at 0; it cannot represent a non-zero lower_clip (a shifted knee). Accepting such a

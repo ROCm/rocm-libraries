@@ -610,6 +610,34 @@ def test_a_subset_of_the_shipped_selection_writes_and_reloads(tmp_path):
         assert kernel.metadata == subset[kernel.name].metadata
 
 
+def test_a_multi_launch_selection_writes_and_reloads_its_launches(tmp_path):
+    """A role-only launch inherits each variant's spec. Written back as a full
+    override, its spec differed per kernel, so the launches could not be
+    factorised into kernel_defaults and the round trip failed."""
+    shipped_path = (
+        Path(__file__).resolve().parents[1] / "configs/gfx950_attention_dense.yaml"
+    )
+    raw = yaml.safe_load(shipped_path.read_text(encoding="utf-8"))
+    raw["packs"][0]["kernel_defaults"]["launches"] = {
+        "main": {},
+        "merge": {"role": "merge"},
+    }
+    selection = tmp_path / "selection.yaml"
+    selection.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    shipped = load_config(selection).packs[0].kernels
+    subset = {k.name: k for k in shipped[::97]}
+    assert len(subset) > 1
+
+    variant_reduce.write_selection(selection, list(subset), tmp_path / "reduced.yaml")
+
+    reduced = load_config(tmp_path / "reduced.yaml").packs[0].kernels
+    assert [k.name for k in reduced] == list(subset)
+    for kernel in reduced:
+        assert (
+            kernel.kernel_source.launches == subset[kernel.name].kernel_source.launches
+        )
+
+
 @pytest.mark.parametrize(
     "edit, reduction, extra, message",
     [

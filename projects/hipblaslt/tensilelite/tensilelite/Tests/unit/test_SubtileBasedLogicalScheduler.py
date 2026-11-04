@@ -15,10 +15,10 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 import pytest
-from Tensile.Components.Subtile.Kernel import (
+from tensilelite.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
     LogicalScheduler,
     MFMATileRange,
@@ -132,7 +132,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                          grSA_k_gran=1, grSA_mn_gran=1, grSB_k_gran=1, grSB_mn_gran=1, pgr=2,
-                         miWaveGroup=None):
+                         miWaveGroup=None, isMxf4Subtile=False):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B.
     grSA/SB_k_gran and grSA/SB_mn_gran are multipliers on the tile-info-derived values."""
     kernel = create_kernel(256, 256, fp4=True, depthU=depthU, miWaveGroup=miWaveGroup)
@@ -159,6 +159,7 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=pgr,
+        isMxf4Subtile=isMxf4Subtile,
     )
 
 
@@ -298,7 +299,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from rocisa import rocIsa
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
-    from Tensile.Common.RegisterPool import allocTmpGpr
+    from tensilelite.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
     import shutil
@@ -330,6 +331,8 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         unrollIdx=0,
         laneSGPRCount=1 if is_gfx1250 else 2,
         subtileLdsSwizzle=not is_gfx1250,
+        # D-tile ranges the subtile store spilled to scratch; none in this stub.
+        subtileSpilledDRanges=[],
     )
     if is_gfx1250:
         writer.sgprPool.checkOut(12)
@@ -668,6 +671,65 @@ class TestPlaceLRs:
         _assert_slot_lrs(p3[3], ['A', 'B', 'SB'])
         _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
         _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
+
+    def test_2x2_k1_DU512_mxf4_retains_across_partitions(self):
+        """Same config as test_2x2_k1_DU512, but on the MXF4 subtile path.
+
+        At DepthU 512 A and B have four k chunks per unroll iteration, more
+        than the two register sets the deterministic allocator gives a tile
+        group, so each overwrites its own earliest chunks before the partition
+        loop comes back around and a later partition cannot read it out of
+        registers. Only the scales, at two chunks, survive. Recognising that
+        makes A and B reload in every partition -- 4.4% more ds_read at DepthU
+        512 (2.6% at 256) -- in exchange for the idle slots going away.
+
+        Off the MXF4 path the scheduler must not make this trade -- see
+        test_2x2_k1_DU512, which asserts the unchanged schedule for the same
+        tile. The two together are the scope gate.
+        """
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4,
+                                   isMxf4Subtile=True)
+        sched = LogicalScheduler(cfg)
+
+        assert sched._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
+
+        partitions = sched.place_LRs()
+        p0 = partitions[0]
+        _assert_slot_lrs(p0[0], ['A', 'B', 'SA'])
+        _assert_slot_lrs(p0[1], ['A', 'B', 'SB'])
+        _assert_slot_lrs(p0[2], ['A', 'B', 'SA'])
+        _assert_slot_lrs(p0[3], ['A', 'B', 'SB'])
+
+        # No idle slots: A and B issue in every slot, and both MT n+1 scales
+        # land in the final one.
+        p3 = partitions[3]
+        _assert_slot_lrs(p3[0], ['A', 'B'])
+        _assert_slot_lrs(p3[1], ['A', 'B'])
+        _assert_slot_lrs(p3[2], ['A', 'B'])
+        _assert_slot_lrs(p3[3], ['A', 'B', 'SA', 'SB'])
+        _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
+        _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
+
+    def test_retention_is_gated_on_mxf4_subtile_path(self):
+        """The ungated path retains everything, which is what develop did.
+
+        Returning the full set is not a claim about register lifetimes; it is
+        what makes the load decision fall back to the tile range alone and the
+        dedup pool stay shared, i.e. the pre-existing schedule.
+        """
+        off = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4))
+        on  = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4,
+                                                    isMxf4Subtile=True))
+        assert off._lr_tensors_retained_across_partitions() == {'A', 'B', 'SA', 'SB'}
+        assert on._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
+
+        # pgr=0 short-circuits to "nothing retained" -- but only on the gated
+        # path; off it the answer stays "all" so the schedule is untouched.
+        # (pgr=0 forces a single partition, so no partition sizes here.)
+        off0 = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, pgr=0))
+        on0  = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, pgr=0, isMxf4Subtile=True))
+        assert off0._lr_tensors_retained_across_partitions() == {'A', 'B', 'SA', 'SB'}
+        assert on0._lr_tensors_retained_across_partitions() == set()
 
     def test_2x2_k2_DU256(self):
         """MT=256x256, DU=256, FP4, k=2, 2x2 partition.
@@ -2334,6 +2396,444 @@ class TestFromTileInfo:
         assert not cfg.hasScale
 
 
+def _mfma(comment="mfma"):
+    from rocisa.instruction import MFMAInstruction
+    from rocisa.container import vgpr
+    from rocisa.enum import InstType
+    return MFMAInstruction(InstType.INST_F32, InstType.INST_F32, [16, 16, 4],
+                           False, vgpr(0, 4), vgpr(4), vgpr(5), 0, comment=comment)
+
+
+def _text(label):
+    from rocisa.code import TextBlock
+    return TextBlock(f"// {label}\n")
+
+
+def _labels(module):
+    """Each item identified by its trailing comment, in emission order."""
+    return [str(it).rsplit('//', 1)[-1].strip() for it in module.flatitems()]
+
+
+class TestHoistSetupBeforeLastMFMA:
+    """Loop-control setup moves above the body's last MFMA."""
+
+    @staticmethod
+    def _body(*items):
+        body = Module("body")
+        for it in items:
+            body.add(it)
+        return body
+
+    def test_setup_lands_before_the_last_mfma(self):
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        body = self._body(_mfma("mfma0"), _text("filler"), _mfma("mfma1"))
+        out = _hoistSetupBeforeLastMFMA(body, [_text("sub"), _text("cmp")])
+        assert _labels(out) == ["mfma0", "filler", "sub", "cmp", "mfma1"]
+
+    def test_body_without_mfma_appends_setup(self):
+        """A skip branch has no compute to hide the branch behind, so the
+        setup just follows the body."""
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        body = self._body(_text("a"), _text("b"))
+        out = _hoistSetupBeforeLastMFMA(body, [_text("sub")])
+        assert _labels(out) == ["a", "b", "sub"]
+
+    def test_input_module_is_not_mutated(self):
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        body = self._body(_mfma("mfma0"))
+        before = _labels(body)
+        _hoistSetupBeforeLastMFMA(body, [_text("sub")])
+        assert _labels(body) == before
+
+
+class TestEmitBodySetupBranch:
+    """The loop body, its dec+compare, and the control branch, in order."""
+
+    @staticmethod
+    def _parts():
+        body = Module("body")
+        body.add(_mfma("mfma0"))
+        body.add(_text("tail"))
+        return body, [_text("sub"), _text("cmp")], _text("branch")
+
+    def test_without_hoist_setup_follows_the_body(self):
+        from tensilelite.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
+        module = Module("loop")
+        body, setup, branch = self._parts()
+        _emitBodySetupBranch(module, body, setup, branch, hoist=False)
+        assert _labels(module) == ["mfma0", "tail", "sub", "cmp", "branch"]
+
+    def test_with_hoist_setup_moves_above_the_last_mfma(self):
+        from tensilelite.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
+        module = Module("loop")
+        body, setup, branch = self._parts()
+        _emitBodySetupBranch(module, body, setup, branch, hoist=True)
+        assert _labels(module) == ["sub", "cmp", "mfma0", "tail", "branch"]
+
+
+class TestLrTileSetCount:
+    """Register sets per tile group, by pgr / merged-tail / partition split."""
+
+    def test_pgr0_needs_one_set(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4(pgr=0))
+        assert sched._lr_tile_set_count(num_k_groups=3) == 1
+
+    def test_without_merged_tail_two_sets_suffice(self, monkeypatch):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        monkeypatch.setattr(sched, '_span_ngll_merge_enabled', lambda: False)
+        assert sched._lr_tile_set_count(num_k_groups=3) == 2
+
+    def test_tensor_reloaded_per_partition_keeps_two(self, monkeypatch):
+        """A partition-varying tensor's iteration-i tiles are dead by the time
+        the next partition runs, so the extra sets would buy nothing."""
+        sched = LogicalScheduler(make_cfg_256x256_fp4(partSizeN=4))
+        monkeypatch.setattr(sched, '_span_ngll_merge_enabled', lambda: True)
+        assert sched.config.numPartitionsN > 1
+        assert sched._lr_tile_set_count(num_k_groups=3, tensor='B') == 2
+
+    def test_shared_tensor_scales_with_k_groups(self, monkeypatch):
+        """Both unroll iterations are live at once, so iteration i takes
+        [0, nkg) and i+1 takes [nkg, 2*nkg)."""
+        sched = LogicalScheduler(make_cfg_256x256_fp4(partSizeN=4))
+        monkeypatch.setattr(sched, '_span_ngll_merge_enabled', lambda: True)
+        assert sched._lr_tile_set_count(num_k_groups=3, tensor='A') == 6
+        assert sched._lr_tile_set_count(num_k_groups=1, tensor=None) == 2
+
+
+class TestReleaseUnusedTailTiles:
+    """Tile slots dead for the tail go back to the vgpr pool exactly once."""
+
+    @staticmethod
+    def _tile():
+        pool = MagicMock()
+        return MagicMock(regList=MagicMock(pool=pool, indices=[7])), pool
+
+    def _sched(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        self.tiles = {}
+        for tensor, attr in (('A', 'vgprTilesA'), ('B', 'vgprTilesB'),
+                             ('SA', 'vgprTilesSA'), ('SB', 'vgprTilesSB')):
+            t, pool = self._tile()
+            self.tiles[tensor] = (t, pool)
+            setattr(sched, attr, [t, t])
+        return sched
+
+    def test_releases_only_the_unused_ids(self):
+        sched = self._sched()
+        sched._tail_unused_tile_ids = {'A': {0}, 'B': set(), 'SA': {1}, 'SB': set()}
+        sched._release_unused_tail_tiles(MagicMock())
+        assert sched._tail_freed_tile_ids['A'] == {0}
+        assert sched._tail_freed_tile_ids['SA'] == {1}
+        assert sched._tail_freed_tile_ids['B'] == set()
+        self.tiles['A'][1].checkIn.assert_called_once_with(7)
+        self.tiles['B'][1].checkIn.assert_not_called()
+
+    def test_nothing_unused_frees_nothing(self):
+        sched = self._sched()
+        sched._tail_unused_tile_ids = {}
+        sched._release_unused_tail_tiles(MagicMock())
+        assert all(not v for v in sched._tail_freed_tile_ids.values())
+
+    def test_second_call_asserts(self):
+        sched = self._sched()
+        sched._tail_unused_tile_ids = {'A': {0}}
+        sched._release_unused_tail_tiles(MagicMock())
+        with pytest.raises(AssertionError, match="called twice"):
+            sched._release_unused_tail_tiles(MagicMock())
+
+
+class TestPlacementPrinters:
+    """The schedule dump prints preOps, deps and postOps under each placement."""
+
+    @staticmethod
+    def _sched():
+        return LogicalScheduler(make_cfg_256x256_fp4())
+
+    @staticmethod
+    def _lr(tensor='A', slot=1, partition=0):
+        tiles = MFMATileRange(subIterK_start=0, subIterK_end=1,
+                              tileId_start=0, tileId_end=1)
+        p = LRPlacement(tensor=tensor, mtIteration=0, tiles=tiles,
+                        subIterK_slot=slot)
+        p.partition = partition
+        return p
+
+    def test_deps_printer_emits_nothing_extra_without_deps(self):
+        import io
+        buf = io.StringIO()
+        p = self._lr()
+        p.deps = []
+        self._sched()._print_placement_with_deps(buf, p, MagicMock())
+        assert buf.getvalue().strip() == str(p)
+
+    def test_deps_printer_lists_each_dep(self):
+        import io
+        buf = io.StringIO()
+        p = self._lr()
+        p.deps = [Dep(ref=self._lr('B', slot=2, partition=1), mt_offset=1)]
+        self._sched()._print_placement_with_deps(buf, p, MagicMock())
+        out = buf.getvalue()
+        assert "deps:" in out
+        assert "- LR B @P1:subIterK=2 (MT1)" in out
+
+    def test_preops_printer_lists_all_three_sections(self):
+        import io
+        buf = io.StringIO()
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+        p = self._lr()
+        p.preOps = [WaitLROp()]
+        p.deps = [Dep(ref=self._lr('B', slot=0), mt_offset=0)]
+        p.postOps = [SyncOp()]
+        self._sched()._print_placement_with_preops(buf, p, MagicMock())
+        out = buf.getvalue()
+        assert "preOps:" in out and "deps:" in out and "postOps:" in out
+        assert "- LR B @P0:subIterK=0" in out
+
+    def test_preops_printer_skips_empty_sections(self):
+        import io
+        buf = io.StringIO()
+        p = self._lr()
+        p.preOps, p.deps, p.postOps = [], [], []
+        self._sched()._print_placement_with_preops(buf, p, MagicMock())
+        out = buf.getvalue()
+        assert "preOps:" not in out and "deps:" not in out and "postOps:" not in out
+
+    def test_gr_dep_ref_shows_unroll_id(self):
+        tiles = MFMATileRange(subIterK_start=0, subIterK_end=1,
+                              tileId_start=0, tileId_end=1)
+        gr = GRPlacement(tensor='SA', mtIteration=1, tiles=tiles,
+                         subIterK_slot=3, unrollId=1)
+        gr.partition = 2
+        ref = self._sched()._format_dep_ref(Dep(ref=gr, mt_offset=0))
+        assert ref == "GR SA @P2:subIterK=3 uid=1"
+
+
+def _tailInfo(numGRTotal, loadRatioGR=1.0):
+    from types import SimpleNamespace
+    return SimpleNamespace(numGRTotal=numGRTotal, loadRatioGR=loadRatioGR)
+
+
+def _tailGr(tensor, tileId_start=0, tileId_end=1):
+    """An emitted 'gr' entry as _tailEntryInflightBound reads it."""
+    from types import SimpleNamespace
+    tiles = MFMATileRange(subIterK_start=0, subIterK_end=1,
+                          tileId_start=tileId_start, tileId_end=tileId_end)
+    return SimpleNamespace(opType='gr',
+                           source=SimpleNamespace(tensor=tensor, tiles=tiles))
+
+
+class TestTailEntryInflightBound:
+    """The entry wait only has to cover loads issued after the last scale."""
+
+    @staticmethod
+    def _sched(grs, tileInfoMap):
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched._emitter = MagicMock(tileInfoMap=tileInfoMap)
+        # one partition, one slot
+        sched._emitted = [[grs]]
+        return sched
+
+    def test_no_emitter_waits_for_everything(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._emitter = None
+        sched._emitted = [[[]]]
+        assert sched._tailEntryInflightBound() == 0
+
+    def test_no_emitted_schedule_waits_for_everything(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._emitter = MagicMock()
+        sched._emitted = None
+        assert sched._tailEntryInflightBound() == 0
+
+    def test_no_scale_reads_waits_for_everything(self):
+        sched = self._sched([_tailGr('A'), _tailGr('B')],
+                            {'A': _tailInfo(1), 'B': _tailInfo(1)})
+        assert sched._tailEntryInflightBound() == 0
+
+    def test_trailing_loads_after_last_scale(self):
+        """A A SA SB B B with unit ratios: the two trailing B loads are the bound."""
+        grs = [_tailGr('A', 0, 2), _tailGr('A', 2, 4), _tailGr('SA'), _tailGr('SB'),
+               _tailGr('B', 0, 2), _tailGr('B', 2, 4)]
+        info = {'A': _tailInfo(4), 'B': _tailInfo(4),
+                'SA': _tailInfo(1), 'SB': _tailInfo(1)}
+        assert self._sched(grs, info)._tailEntryInflightBound() == 4
+
+    def test_scale_last_leaves_nothing_trailing(self):
+        grs = [_tailGr('A', 0, 2), _tailGr('B', 0, 2), _tailGr('SA'), _tailGr('SB')]
+        info = {'A': _tailInfo(2), 'B': _tailInfo(2),
+                'SA': _tailInfo(1), 'SB': _tailInfo(1)}
+        assert self._sched(grs, info)._tailEntryInflightBound() == 0
+
+    def test_load_total_disagreement_waits_for_everything(self):
+        """_loads not modelling this geometry must not produce a guessed count."""
+        grs = [_tailGr('A', 0, 2), _tailGr('SA'), _tailGr('B', 0, 2)]
+        info = {'A': _tailInfo(99), 'B': _tailInfo(2), 'SA': _tailInfo(1)}
+        assert self._sched(grs, info)._tailEntryInflightBound() == 0
+
+    def test_unknown_tensor_contributes_no_loads(self):
+        grs = [_tailGr('SA'), _tailGr('D', 0, 2)]
+        info = {'SA': _tailInfo(1)}
+        assert self._sched(grs, info)._tailEntryInflightBound() == 0
+
+
+class TestTailEntryResidentBound:
+    """With a second barrier the entry wait only covers the resident half."""
+
+    def test_no_emitter_waits_for_everything(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._emitter = None
+        assert sched._tailEntryResidentBound() == 0
+
+    def test_batch_size_is_the_sum_of_per_tensor_totals(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._emitter = MagicMock(tileInfoMap={
+            'A': _tailInfo(8), 'B': _tailInfo(8),
+            'SA': _tailInfo(1), 'SB': _tailInfo(1)})
+        assert sched._tailEntryResidentBound() == 18
+
+    def test_zero_batch_waits_for_everything(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._emitter = MagicMock(tileInfoMap={'A': _tailInfo(0)})
+        assert sched._tailEntryResidentBound() == 0
+
+
+class TestTailUidSyncSlot:
+    """Where the in-flight unroll half is first read."""
+
+    @staticmethod
+    def _sched(numUnroll, numSubIterK=4):
+        from types import SimpleNamespace
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._tail_merged_scheduler = SimpleNamespace(
+            config=SimpleNamespace(numUnroll=numUnroll, numSubIterK=numSubIterK))
+        return sched
+
+    @staticmethod
+    def _lr(tensor, subIterK_start):
+        from types import SimpleNamespace
+        tiles = MFMATileRange(subIterK_start=subIterK_start,
+                              subIterK_end=subIterK_start + 1,
+                              tileId_start=0, tileId_end=1)
+        return SimpleNamespace(opType='lr',
+                               source=SimpleNamespace(tensor=tensor, tiles=tiles))
+
+    def test_no_tail_scheduler(self):
+        sched = LogicalScheduler(make_cfg_256x256_fp4())
+        sched._tail_merged_scheduler = None
+        assert sched._tailUidSyncSlot([[[self._lr('A', 2)]]]) is None
+
+    def test_no_emitted_schedule(self):
+        assert self._sched({'A': 2})._tailUidSyncSlot(None) is None
+
+    def test_unrolled_zero_means_no_split(self):
+        sched = self._sched({'A': 2, 'B': 0})
+        assert sched._tailUidSyncSlot([[[self._lr('A', 2)]]]) is None
+
+    def test_empty_unroll_map_means_no_split(self):
+        assert self._sched({})._tailUidSyncSlot([[[self._lr('A', 2)]]]) is None
+
+    def test_first_read_of_second_half_is_returned(self):
+        """numSubIterK=4, numUnroll=2 -> span 2; k_start 2 is the second half."""
+        sched = self._sched({'A': 2, 'B': 2})
+        emitted = [[[self._lr('A', 0)], [self._lr('A', 2)]]]
+        assert sched._tailUidSyncSlot(emitted) == (0, 1)
+
+    def test_reads_of_the_resident_half_only(self):
+        sched = self._sched({'A': 2, 'B': 2})
+        emitted = [[[self._lr('A', 0), self._lr('B', 1)]]]
+        assert sched._tailUidSyncSlot(emitted) is None
+
+    def test_non_lr_and_unknown_tensor_are_skipped(self):
+        sched = self._sched({'A': 2})
+        emitted = [[[_tailGr('A'), self._lr('B', 2)], [self._lr('A', 2)]]]
+        assert sched._tailUidSyncSlot(emitted) == (0, 1)
+
+
+class TestGr1WaitCounts:
+    """_gr1_wait_counts picks the count mode from numPartitions."""
+
+    def test_single_partition_uses_num_gr_total(self):
+        cfg = make_cfg_256x256_fp4()
+        assert cfg.numPartitions == 1
+        counts = LogicalScheduler(cfg)._gr1_wait_counts([])
+        assert counts.use_num_gr_total
+        assert not counts.use_gr_placement_counts
+        assert str(counts) == "num_gr_total"
+
+    def test_multi_partition_counts_gr_placement_atoms(self):
+        """Multi-partition tallies one atom per GRPlacement, per tensor."""
+        cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
+        assert cfg.numPartitions > 1
+        tiles = MFMATileRange(subIterK_start=0, subIterK_end=1,
+                              tileId_start=0, tileId_end=1)
+        gr1_ops = [GRPlacement(tensor=t, mtIteration=1, tiles=tiles,
+                               subIterK_slot=0, unrollId=0)
+                   for t in ('A', 'A', 'B', 'SA')]
+        counts = LogicalScheduler(cfg)._gr1_wait_counts(gr1_ops)
+        assert counts.use_gr_placement_counts
+        assert not counts.use_num_gr_total
+        assert (counts.A, counts.B, counts.SA, counts.SB) == (2, 1, 1, 0)
+        assert str(counts) == "mt1_gr_placements(A=2 B=1 SA=1 SB=0)"
+
+    def test_multi_partition_ignores_non_gr_ops(self):
+        cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
+        counts = LogicalScheduler(cfg)._gr1_wait_counts([MagicMock()])
+        assert (counts.A, counts.B, counts.SA, counts.SB) == (0, 0, 0, 0)
+
+
+class TestEmitWaitGrPlacementCounts:
+    """emit_wait_gr converts GRPlacement atom counts to buffer_load counts."""
+
+    @staticmethod
+    def _emitter(loadRatioA=1.0, loadRatioB=1.0, loadRatioSA=1.0, loadRatioSB=1.0,
+                 withScale=True):
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+        cfg = make_cfg_256x256_fp4()
+        mk = lambda r: MagicMock(subtileShape=[1, 1], loadRatioGR=r)
+        return InstructionEmitter(
+            writer=MagicMock(), kernel={}, config=cfg,
+            tileInfoA=mk(loadRatioA), tileInfoB=mk(loadRatioB),
+            dtileInfo=MagicMock(), vgprTilesA=[], vgprTilesB=[],
+            scaleTileInfoA=mk(loadRatioSA) if withScale else None,
+            scaleTileInfoB=mk(loadRatioSB) if withScale else None,
+        )
+
+    @staticmethod
+    def _source(**kw):
+        from types import SimpleNamespace
+        counts = WaitGRCounts(use_gr_placement_counts=True, **kw)
+        return SimpleNamespace(wait_gr_counts=counts, force_drain=False,
+                               adjustVmcnt=True)
+
+    def test_atom_counts_convert_by_ceil_of_load_ratio(self):
+        """A partition boundary need not land on a GR-subtile boundary, so each
+        tensor's atom count rounds up rather than going through grMap."""
+        emitter = self._emitter(loadRatioA=2.0, loadRatioB=4.0)
+        waits = emitter.emit_wait_gr(self._source(A=3, B=3, SA=2, SB=2))
+        assert len(waits) == 1
+        # ceil(3/2)=2, ceil(3/4)=1, ceil(2/1)=2, ceil(2/1)=2
+        assert waits[0].vlcnt == 7
+        assert "mt1-partition-0: A=2 B=1 SA=2 SB=2" in waits[0].comment
+
+    def test_zero_scale_counts_contribute_nothing(self):
+        emitter = self._emitter()
+        waits = emitter.emit_wait_gr(self._source(A=1, B=1, SA=0, SB=0))
+        assert waits[0].vlcnt == 2
+        assert "SA=0 SB=0" in waits[0].comment
+
+    def test_missing_scale_tile_info_contributes_nothing(self):
+        """No scale tensors: SA/SB resolve to 0 without consulting a tileInfo."""
+        emitter = self._emitter(withScale=False)
+        waits = emitter.emit_wait_gr(self._source(A=2, B=2, SA=5, SB=5))
+        assert waits[0].vlcnt == 4
+
+    def test_all_zero_counts_assert(self):
+        emitter = self._emitter()
+        with pytest.raises(AssertionError, match="buffer_load sum is 0"):
+            emitter.emit_wait_gr(self._source())
+
+
 class TestInstructionEmitterPerUidK:
     """LR emit uses numSubIterK/numUnroll per uid, not grGran.k (single-DU bug)."""
 
@@ -2344,7 +2844,7 @@ class TestInstructionEmitterPerUidK:
         assert cfg.numUnroll == {'A': 1, 'B': 1, 'SA': 1, 'SB': 1}
         assert cfg.lrA.k < cfg.numSubIterK  # LR steps per subIterK; emit spans full range
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         emitter = InstructionEmitter(
             writer=MagicMock(), kernel={}, config=cfg,
             tileInfoA=MagicMock(subtileShape=[1, 1]),
@@ -2361,7 +2861,7 @@ class TestInstructionEmitterPerUidK:
         assert cfg.numSubIterK == 4
         assert cfg.numUnroll == {'A': 2, 'B': 2, 'SA': 1, 'SB': 1}
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         emitter = InstructionEmitter(
             writer=MagicMock(), kernel={}, config=cfg,
             tileInfoA=MagicMock(subtileShape=[1, 1]),
@@ -2825,7 +3325,7 @@ class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
         """Full pipeline: emit → populate_instructions → instructionSchedule."""
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from tensilelite.Components.Subtile.InstructionScheduler import instructionSchedule
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
@@ -3732,7 +4232,7 @@ class TestBuildNll:
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
                     if em.opType == 'wait_gr':
-                        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
+                        from tensilelite.Components.Subtile.LogicalScheduler import WaitGROp
                         if isinstance(src, WaitGROp) and src.wait_gr_counts:
                             cnts = src.wait_gr_counts
                             slot_has_lr = any(
@@ -4102,7 +4602,7 @@ class _InitCTileInfo:
 
 
 def _zero_range(writer, firstReg, totalRegs, isAgpr):
-    from Tensile.Components.Subtile.Kernel import _zeroRegRange
+    from tensilelite.Components.Subtile.Kernel import _zeroRegRange
     module = Module()
     _zeroRegRange(module, writer, _InitCTileInfo([]), firstReg, totalRegs, isAgpr)
     return str(module)
@@ -4169,7 +4669,7 @@ class TestInitCInitVgprTilesToZero:
     """initVgprTilesToZero: no scratch needed, uses D self-reuse."""
 
     def test_single_range_uses_mfma(self):
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         dtile = _InitCTileInfo([_InitCTile(0, 96, pool=w.agprPool)])
 
@@ -4178,7 +4678,7 @@ class TestInitCInitVgprTilesToZero:
 
     def test_split_pool_groups(self):
         """A range split across agpr + vgpr pools emits MFMAs for both groups."""
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         vgpr_pool = object()
         dtile = _InitCTileInfo([
@@ -4191,7 +4691,7 @@ class TestInitCInitVgprTilesToZero:
         assert src.count("initD: [") == 4, f"expected 4 matrix ops across 2 groups:\n{src[:600]}"
 
     def test_empty_tiles_is_noop(self):
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         src = str(initVgprTilesToZero(w, {}, _InitCTileInfo([])))
         assert "initD: [" not in src

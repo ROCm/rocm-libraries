@@ -8,7 +8,7 @@
   "matchers": [
     "umd-attention"
   ],
-  "engine": "ued-attention",
+  "engine": "2c206f3a-aceb-53b8-8e7b-c3e3217758c0",
   "dispatch": "udd-attention",
   "kernelDescriptors": [
     {
@@ -42,8 +42,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "ued-attention",
-              "kmd_id": "kmd-attention",
+              "engine_id": "2c206f3a-aceb-53b8-8e7b-c3e3217758c0",
+              "kmd_id": "708868ca-ec18-5137-a483-6afd39449ec2",
               "metadata_fields": [
                 "batch",
                 "head_size"
@@ -96,8 +96,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "ued-attention",
-              "kmd_id": "kmd-attention",
+              "engine_id": "2c206f3a-aceb-53b8-8e7b-c3e3217758c0",
+              "kmd_id": "708868ca-ec18-5137-a483-6afd39449ec2",
               "metadata_fields": [
                 "batch",
                 "head_size"

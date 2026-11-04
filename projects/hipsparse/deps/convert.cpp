@@ -220,17 +220,17 @@ int write_bin_matrix(
         return -1;
     }
 
-    int err;
-    err = fwrite(&m, sizeof(int), 1, f);
-    err |= fwrite(&n, sizeof(int), 1, f);
-    err |= fwrite(&nnz, sizeof(int), 1, f);
-    err |= fwrite(ptr, sizeof(int), m + 1, f);
-    err |= fwrite(col, sizeof(int), nnz, f);
-    err |= fwrite(val, sizeof(double), nnz, f);
+    bool ok = fwrite(&m, sizeof(int), 1, f) == 1;
+    ok      = ok && fwrite(&n, sizeof(int), 1, f) == 1;
+    ok      = ok && fwrite(&nnz, sizeof(int), 1, f) == 1;
+    ok      = ok && fwrite(ptr, sizeof(int), m + 1, f) == static_cast<size_t>(m + 1);
+    ok      = ok && fwrite(col, sizeof(int), nnz, f) == static_cast<size_t>(nnz);
+    ok      = ok && fwrite(val, sizeof(double), nnz, f) == static_cast<size_t>(nnz);
 
-    fclose(f);
+    // fclose flushes the buffered data, so its result is part of the write
+    ok = (fclose(f) == 0) && ok;
 
-    return 0;
+    return ok ? 0 : -1;
 }
 
 int coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
@@ -277,7 +277,7 @@ int main(int argc, char* argv[])
 
     if(write_bin_matrix(argv[2], m, n, nnz, ptr.data(), col.data(), val.data()) != 0)
     {
-        fprintf(stderr, "Cannot open [write] %s.\n", argv[2]);
+        fprintf(stderr, "Cannot write %s.\n", argv[2]);
         return -1;
     }
 

@@ -27,7 +27,10 @@
 // numbers is covered by DAGSchedulerPassTest.cpp and tests/filecheck/dag_*.stir.
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
@@ -214,4 +217,25 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
         EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
     }
+}
+
+// archName disambiguates steppings sharing a triple (gfx1250 vs gfx1250v0).
+TEST(ArchResolve, ArchNameDisambiguatesSharedTriple) {
+    const auto& helper = ArchHelper::getInstance();
+    if (helper.getArchInfo(std::string("gfx1250v0")) == nullptr ||
+        helper.getArchInfo(std::string("gfx1250")) == nullptr) {
+        GTEST_SKIP() << "build does not register both gfx1250 and gfx1250v0";
+    }
+
+    const std::array<int, 3> triple = {12, 5, 0};
+
+    // Empty name: resolve by triple alone -> the first-registered stepping.
+    EXPECT_EQ(resolveArchId(triple, ""), getGfxArchID(12, 5, 0));
+
+    // A concrete name picks the matching stepping within the same triple.
+    EXPECT_EQ(resolveArchId(triple, "gfx1250v0"), getGfxArchID("gfx1250v0"));
+    EXPECT_EQ(resolveArchId(triple, "gfx1250"), getGfxArchID("gfx1250"));
+
+    // The two steppings are distinct identities, so v0 is not the triple default.
+    EXPECT_NE(resolveArchId(triple, "gfx1250v0"), resolveArchId(triple, ""));
 }

@@ -270,7 +270,13 @@ RocKE **wins every row, 1.16x–1.27x**; geomean **≈1.20x** — re-measured
 This is the algorithmically-honest comparison (same split-KV algorithm, same
 timer, same stream), and the campaign's rework of the 3D segment kernel is
 what carries it. The CK Tile lessons ported into the segment kernel are what
-keep RocKE ahead:
+keep RocKE ahead. The list below is a snapshot of the kernel when this table was
+measured; the 3D decode series
+([#13492](https://github.com/ROCm/rocm-libraries/pull/13492)) has since replaced the
+`P_lds` publish with register-resident P, added a `permlane32_swap` cross-half step and
+dropped the binary search for all-decode batches (`use_decode_grid`); see
+[`ALGORITHM.md` §5](ALGORITHM.md#5-the-3d-split-kv-path--many-ctas-share-a-query-block)
+and [§5.1](ALGORITHM.md#51-inside-the-segment-kernel). The lessons as measured:
 
 - `ds_read_b64_tr_b16` for the PV operand using
   `TransposeLDSLayout<16,K>` lane formulas
@@ -766,7 +772,7 @@ product overflows i32 once the cache exceeds **2 GiB** (~65 K bf16 /
 caches are much larger (the captured traces have ~350 K blocks ≈ 11 GiB),
 so this would have silently corrupted real deployments.
 
-**Fixed, across all load paths, gated on cache size.** A `global_ptr_add`
+**Fixed on the load paths below, gated on cache size.** A `global_ptr_add`
 primitive (IR + LLVM + HIP lowerings) plus two descriptor helpers
 (`TensorDescriptor.offset_i64_split` for buffer loads, `offset_i64` for
 flat global loads) fold `physical_block * stride` into **64-bit
@@ -782,17 +788,37 @@ field:
 * **fp8-in-LDS** (decode) — per-block i64 buffer base.
 
 The dispatcher enables it automatically (`_enable_i64_kv_addr`) only when
-`num_kv_blocks × block_stride > 2³¹` (filled from `k.shape[0]`), so caches
-≤2 GiB keep the exact fast i32 path (zero change, bf16 1.1x preserved) and
-only larger caches pay the tiny per-block-base cost. Validated:
+`num_kv_blocks × block_stride > 0x7FFF0000` bytes (filled from `k.shape[0]`),
+so caches up to that size keep the exact fast i32 path (zero change, bf16 1.1x
+preserved) and only larger caches pay the tiny per-block-base cost. Validated
+at the original 2³¹-byte cut-off, before it moved to `0x7FFF0000`:
 
-| cache | bf16 | fp8 |
+| cache (measured at the old cut-off) | bf16 | fp8 |
 |---|---|---|
 | ≤2 GiB (i32) | 1.12x, correct | 0.98x, correct |
 | >2 GiB (i64) | **correct** (was garbage), 1.06x | **correct** (was garbage), SW 1.10x |
 
 all bit-accurate vs Triton (`max_abs ≤ 7.8e-3`). The HBM-bound speedup
 now carries to production-scale (11 GiB) caches.
+
+Only `run_unified_attention_torch` fills `num_kv_blocks` from the K cache. A
+harness that builds `UnifiedAttentionProblem` and launches directly must pass
+`num_kv_blocks=key_cache.shape[0]` itself, since `0` means "unknown" and keeps
+the i32 path. `_attn_values` in
+[`attention_unified.py`](../../../kernels/common/attention_unified.py) checks the
+real K cache on production 2D and scalar launches and the torch direct-launch
+harnesses against what the compiled kernel addresses, and raises `ValueError`
+instead of reading zeros or wrong data. Every caller passes `kv_addr_limit`,
+from `_spec_kv_addr_limit(problem, spec)` for a hand-built spec. The tiled
+builders' i32 path stops at `0x7FFF0000` bytes (their buffer `num_records`), so
+the cache switches to i64 strictly above that. Some tiled K/V loaders have no
+i64 branch yet, so an i64 spec that enables one keeps that loader's i32 limit:
+2^31 bytes for the flat loads of gfx942 cfv, cfvst and vhbm, and `0x7FFF0000`
+for the buffer loads of gfx942 khbm and of fp8-PV on both arches. The scalar,
+gfx942 4-warp GQA and gfx1250 kernels have no i64 path and index K/V with i32
+element offsets, so their limit is 2^31 elements. Not checked: the 3D split-KV
+path and the gfx1250 `tiled_2d_verify.py` harness, which pack their own
+kernargs.
 
 The sliding-window jump (0.67x → 0.91x) came from recognising SW prefill
 is **prelude-bound**, not compute-bound: the window prunes the KV loop to
@@ -877,6 +903,7 @@ parity + benchmark harnesses and their captured data.
 |---|---|
 | `README.md` | this document — parity methodology + prefill-2D optimization history + results + spec-knob reference |
 | `ALGORITHM.md` | the math + kernel strategy (2D vs 3D split-KV, online softmax, bias/mask order, CDNA mapping) |
+| [`../../common/attention_3d_decode/CASE_STUDY.md`](../../common/attention_3d_decode/CASE_STUDY.md) | case study of the gfx942/gfx950 3D split-KV decode series: mechanisms, what ships by default, per-lever outcomes, honest losses, the replay recipe |
 | [`../common/README.md`](../../common/README.md) | spec-builder knob reference — dispatch branches, per-knob documentation for `use_fast_paged_kv_desc`, `use_transposed_half_local_pv`, `use_mfma32_skip_legacy_qreg`, `use_register_pv`, `use_agpr_alloc_zero`, etc. |
 | `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and RocKE in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
 | `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of RocKE 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |

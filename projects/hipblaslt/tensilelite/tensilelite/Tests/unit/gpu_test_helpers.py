@@ -47,10 +47,10 @@ from rocisa.container import vgpr, sgpr
 from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SMovB32, SMovB64, SWaitCnt, SBarrier, VLShiftLeftB32, VMovB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
-from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
-from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
-from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
+from tensilelite.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
+from tensilelite.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- GPU target detection ----
 def _detect_gfx_target():
@@ -374,7 +374,7 @@ def init_rocisa(target=None, wavesize=None):
     """
     import shutil
     from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
     gfx_target = target if target is not None else GFX_TARGET
     if not gfx_target:
@@ -721,7 +721,6 @@ def assemble_and_run(asm, tmp_path, label, output_size, inputs=(), scalars=(), l
     return run_on_gpu(co_path, output_size, inputs=inputs, scalars=scalars, lds_size=lds_size, num_threads=num_threads)
 
 
-
 def run_scalar_kernel(writer, instructions, inputs, outputs, tmp_path):
     """Execute scalar control flow and return each output SGPR from all 64 lanes.
 
@@ -750,7 +749,6 @@ def run_scalar_kernel(writer, instructions, inputs, outputs, tmp_path):
                            scalars=tuple(inputs.values()), num_threads=64)
     words = struct.unpack(f"<{len(outputs) * 64}I", raw)
     return {name: words[i * 64:(i + 1) * 64] for i, name in enumerate(outputs)}
-
 
 
 # ---- Roundtrip kernel helpers ----

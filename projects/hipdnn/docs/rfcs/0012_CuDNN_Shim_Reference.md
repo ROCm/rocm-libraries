@@ -1,5 +1,8 @@
 # RFC 0012 — Supporting Reference: Verified cuDNN FE v1.24 Surface
 
+- **Status**: see [RFC 0012](./0012_CuDNN_Shim.md)
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 This document is the long-form companion to
 [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md). It collects the
 verbose, source-verified material that the main RFC summarises: the full
@@ -336,10 +339,10 @@ the engine/knob plumbing — which the shim builds on as it lands. The shim
 will:
 
 - Accept all `HeurMode_t` values without error in
-  `create_execution_plans()`. **Interim**: map `A`, `B`, `FALLBACK`,
-  `OPENSOURCE` all to hipDNN's fallback/default selection, and **WARN on
-  first use per process** that the requested mode was not honored. Remap as
-  real hipDNN heuristics arrive.
+  `create_execution_plans()`. Map `A` and `B` to hipDNN's
+  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2),
+  and `FALLBACK` and `OPENSOURCE` to hipDNN's fallback/default selection,
+  **WARN**ing that `OPENSOURCE` was not honored.
 
 **Per-note triage.** Upstream `select_*` keeps only plans carrying the note;
 `deselect_*` drops plans carrying it. Each note is classified by what happens if
@@ -387,9 +390,9 @@ typedef for `error_object` in the same header. hipDNN's `Error` (in
   `hipdnn_frontend::Error`, preserving the full public surface name-for-name
   (both fields and methods). `error_t` is exposed as a typedef.
 - The shim's `error_code_t` is an `enum class` mirroring cuDNN FE's set of
-  16 codes (full list in main RFC §4.3). `detail/status_translation.hpp`
-  provides `to_hipdnn(error_code_t) -> hipdnn_frontend::ErrorCode` and the
-  reverse.
+  16 codes (full list in main RFC §4.3). `detail/status_translation.h`
+  provides `toCudnnStatus(hipdnnStatus_t)` and `toHipdnnStatus(cudnnStatus_t)`
+  for the C-style status codes. The `to_hipdnn(error_code_t)` form proposed for `error_code_t` is not built.
 - Codes with no exact hipDNN counterpart (e.g., `NVRTC_COMPILATION_FAILED`,
   `INVALID_CUDA_DEVICE`) collapse to the nearest hipDNN value on the way
   down, and synthesize the cuDNN code on the way up if we can distinguish

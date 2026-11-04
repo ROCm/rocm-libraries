@@ -11,8 +11,8 @@ import pytest
 import yaml
 
 from config_harness import emit_kernels_from_config
-from Tensile.Common import DataDirection
-from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from tensilelite.Common import DataDirection
+from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
 
 pytestmark = pytest.mark.unit
 
@@ -27,11 +27,16 @@ def test_interleaved_wait_preserves_unconsumed_loads(bias, sav, multi_du):
         "_GlobalAccumulation": None, "GroupLoadStore": False,
         "ProblemType": {"UseScaleAlphaVec": sav, "UseScaleAB": ""},
     }
-    writer.parentWriter = SimpleNamespace(states=SimpleNamespace(
-        useBias=DataDirection.READ if bias else DataDirection.NONE,
-        useGateResidual=False,
-        asmCaps={"SeparateVscnt": False, "SeparateVMcnt": False},
-    ))
+    writer.parentWriter = SimpleNamespace(
+        states=SimpleNamespace(
+            useBias=DataDirection.READ if bias else DataDirection.NONE,
+            useGateResidual=False,
+            asmCaps={"SeparateVscnt": False, "SeparateVMcnt": False},
+        ),
+        # This kernel is not on the fused path, so neither epilogue term is skipped.
+        _plsinFusedSkipBias=lambda kernel: False,
+        _plsinFusedSkipEpilogueMul=lambda: False,
+    )
     writer.ss = SimpleNamespace(emitGateResidual=False)
     writer.beta = writer.loadE = False
     writer.biasLoadIssued = writer.scaleAlphaVecLoadIssued = [1, 2]

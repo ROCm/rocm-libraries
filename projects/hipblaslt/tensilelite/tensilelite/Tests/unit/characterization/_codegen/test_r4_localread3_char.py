@@ -40,7 +40,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 _PROJ_ROOT = os.path.dirname(  # .../tensilelite (project root)
-    os.path.dirname(  # .../Tensile
+    os.path.dirname(  # .../tensilelite
         os.path.dirname(  # .../Tests
             os.path.dirname(  # .../unit
                 os.path.dirname(  # .../characterization
@@ -77,8 +77,8 @@ _ARCH_950 = "gfx950"
 @contextlib.contextmanager
 def _isolated_globals_with_isa(isaInfoMap):
     """Isolate process-global state while populating ISA entries."""
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -94,9 +94,9 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 def _toolchain_for(arch):
     """Return (assembler, isaInfoMap) for a single arch. Not cached — test isolation."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     isa = gfxToIsa(arch)
     cxx = validateToolchain("amdclang++")
@@ -112,16 +112,13 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
     Returns [(basename, src, err), ...] sorted by basename.
     """
     import rocisa  # noqa: F401
-    from Tensile import LibraryIO
-    from Tensile.BenchmarkProblems import _generateForkedSolutions
-    from Tensile.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
-    from Tensile.Common.Types import makeDebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.TensileCreateLibrary.Run import (
-        generateKernelObjectsFromSolutions,
-        processKernelSource,
-    )
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite import LibraryIO
+    from tensilelite.BenchmarkProblems import _generateForkedSolutions
+    from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
+    from tensilelite.Common.Types import makeDebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
     import codegen_harness as _ch
 
     assembler, iim = _toolchain_for(arch)
@@ -161,16 +158,11 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
         kwa = KernelWriterAssembly(assembler, debug_config)
 
         for kernel in kernels:
-            ri = _ch._init_rocisa_for(kernel)
-            data = ri.getData()
-            outOptions = ri.getOutputOptions()
             base = _ch._prepare_kernel(kernel, False)
             try:
-                res = processKernelSource(kwa, data, outOptions, False, kernel)
-                src = res.src
-                if isinstance(src, (bytes, bytearray)):
-                    src = src.decode(errors="replace")
-                results.append((base, src, res.err))
+                # gfx942 leaves a stinkytofu process; the worker still re-raises CheckValue1's AttributeError.
+                _base, src, err = _ch.emit_one_kernel(kwa, kernel, canonical=False)
+                results.append((_base, src, err))
             except Exception as exc:
                 # CheckValue1 debug path may raise AttributeError (RegisterContainer
                 # has no .split) — the code WAS entered (coverage recorded).
@@ -196,7 +188,7 @@ def test_r4_localread_checkvalue1_debug_hhs():
     Expected: >=1 kernel emits with err==0; source contains debug wait markers
     from the CheckValue1 arm (SWaitCnt for lgkmcnt + isHalf assert).
     """
-    from Tensile.Common.Types import DebugConfig
+    from tensilelite.Common.Types import DebugConfig
 
     debug_cfg = DebugConfig(
         enableDebugA=True,

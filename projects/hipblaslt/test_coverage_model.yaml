@@ -1,0 +1,208 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# hipBLASLt + TensileLite coverage model
+#
+# A description of the space of ways the library gets called, split into axes and classes, with a
+# risk rating on each class. It answers "which parts of the space matter most?"; the inventory
+# (test_inventory.yaml) says which suites are meant to reach which classes through `covers`.
+#
+# This is documentation data: no CI job reads it. Every rating is a proposal for the team to review,
+# and the ratings are ordinal on purpose. They should be recalibrated against escaped defects: when
+# a defect escapes, record the class it lived in, and a High-impact escape from a class rated Low
+# means the rating is wrong.
+#
+# Rating scale: likelihood and impact are each H, M or L. priority = likelihood x impact, with
+# H = 3, M = 2, L = 1, so priority runs from 1 to 9.
+#
+# `fields` names the hipblaslt-test argument keys (clients/tests/data/*.yaml) that place a test
+# case on an axis, so a script can later map every generated case to its classes.
+
+schema_version: 1
+status: proposed
+products: [hipblaslt, tensilelite]
+
+scale:
+  likelihood: {H: "new or exotic code path, or a history of defects here", M: "moderate complexity or churn", L: "mature and simple"}
+  impact: {H: "silent wrong results, or heavy real-world use", M: "a crash or error status, or moderate use", L: "rare use and a loud failure"}
+
+axes:
+  type_combo:
+    description: "Input, output, compute and scale types together"
+    fields: [a_type, b_type, c_type, d_type, compute_type, scale_type]
+    classes:
+      hpa_f16: {examples: "f16 in, f32 compute", likelihood: L, impact: H}
+      hpa_bf16: {examples: "bf16 in, f32 compute", likelihood: L, impact: H}
+      f32: {examples: "f32 throughout", likelihood: L, impact: M}
+      xf32: {examples: "c_xf32_r compute", likelihood: M, impact: M}
+      fast_accumulate: {examples: "c_f32_fast_f16_r, c_f32_fast_bf16_r", likelihood: M, impact: M}
+      f16_compute: {examples: "c_f16_r", likelihood: M, impact: L}
+      int8: {examples: "i8 in, i32 compute", likelihood: M, impact: M}
+      fp8_ocp: {examples: "f8_r, bf8_r and mixed", likelihood: M, impact: H}
+      fp8_fnuz: {examples: "f8_fnuz_r, bf8_fnuz_r and mixed", likelihood: M, impact: H}
+      microscaled: {examples: "f4_r, f6_r, bf6_r with e8 or e5m3 scales", likelihood: H, impact: M}
+      complex: {examples: "f32_c, f64_c", likelihood: M, impact: L}
+      f64: {examples: "f64_r", likelihood: M, impact: L}
+
+  shape:
+    description: "Problem dimensions M, N, K"
+    fields: [M, N, K, matrix_size]
+    classes:
+      degenerate: {examples: "any of M, N, K equal to 0 or 1", likelihood: M, impact: M}
+      tiny: {examples: "all dimensions under 16", likelihood: M, impact: M}
+      tile_unaligned: {examples: "not a multiple of the selected macro tile", likelihood: H, impact: H}
+      tuned_sizes: {examples: "sizes present in the library logic YAML", likelihood: L, impact: H}
+      large_k: {examples: "K large enough for accumulation error to matter", likelihood: M, impact: H}
+      past_2_31: {examples: "element or byte offsets past 2^31", likelihood: H, impact: H, tickets: [AIHPBLAS-4988]}
+      past_2_32: {examples: "element or byte offsets past 2^32, buffers across 4 GiB", likelihood: H, impact: H, tickets: [AIHPBLAS-4988]}
+      launch_limits: {examples: "grid dimensions near hardware launch limits", likelihood: M, impact: H, tickets: [AIHPBLAS-4988]}
+    boundaries:
+      - "Macro-tile edges: test one below, at, and one above a tile multiple"
+      - "Points in the logic YAML where solution selection switches kernels: test both sides"
+      - "2^31 and 2^32 elements and bytes, per operand and per batch offset"
+
+  layout:
+    description: "Transposes, leading dimensions and strides"
+    fields: [transA, transB, transA_transB, lda, ldb, ldc, ldd, stride_a, stride_b, stride_c, stride_d, c_equal_d]
+    classes:
+      nn: {likelihood: L, impact: H}
+      nt: {likelihood: L, impact: H}
+      tn: {likelihood: L, impact: H}
+      tt: {likelihood: M, impact: M}
+      packed_ld: {examples: "leading dimension equal to the row count", likelihood: L, impact: H}
+      padded_ld: {examples: "leading dimension larger than the row count", likelihood: M, impact: H}
+      unaligned_ld: {examples: "leading dimension not a multiple of the vector width", likelihood: H, impact: M}
+      in_place: {examples: "C and D share a buffer", likelihood: M, impact: M}
+      distinct_cd_layout: {examples: "C and D with different leading dimensions", likelihood: M, impact: M}
+
+  batching:
+    description: "How many GEMMs one call computes"
+    fields: [batch_count, batch_mode, grouped_gemm, batch_offset_a, batch_offset_b, batch_offset_c, batch_offset_d]
+    classes:
+      single: {likelihood: L, impact: H}
+      strided_batched: {likelihood: M, impact: H}
+      grouped: {examples: "grouped GEMM with per-group sizes", likelihood: H, impact: M}
+      batch_offsets: {examples: "nonzero batch offsets", likelihood: M, impact: M}
+
+  epilogue:
+    description: "Work fused after the multiply"
+    fields: [bias_vector, bias_source, bias_type, activation_type, use_e, aux_type, gradient, scaleA, scaleB, scaleC, scaleD, scaleAlpha_vector]
+    classes:
+      none: {likelihood: L, impact: H}
+      bias: {examples: "bias from A, B or D, in each bias type", likelihood: M, impact: H}
+      activation: {examples: "relu, gelu, swish, clamp, sigmoid", likelihood: M, impact: H}
+      aux_output: {examples: "use_e, an auxiliary output", likelihood: M, impact: M}
+      gradient: {examples: "backward epilogues and bias gradients", likelihood: H, impact: M}
+      amax: {examples: "amax of D", likelihood: M, impact: M}
+      scale_scalar: {examples: "scalar scaleA, scaleB, scaleC, scaleD", likelihood: M, impact: H}
+      scale_vector: {examples: "per-row or per-column scales, scaleAlpha_vector", likelihood: H, impact: H}
+      block_scale: {examples: "block scales for microscaled types", likelihood: H, impact: M}
+
+  scalars:
+    description: "alpha and beta"
+    fields: [alpha, beta, alpha_beta, alphai, betai]
+    classes:
+      alpha_zero: {likelihood: M, impact: M}
+      beta_zero: {examples: "C must not be read", likelihood: M, impact: H}
+      beta_one: {likelihood: L, impact: M}
+      general: {likelihood: L, impact: H}
+      complex_scalars: {examples: "nonzero alphai or betai", likelihood: M, impact: L}
+
+  values:
+    description: "What the input data looks like"
+    fields: [initialization, integer_exact_pattern]
+    classes:
+      typical: {examples: "rand_int, trig_float, hpl, norm_dist, uniform_01", likelihood: L, impact: H}
+      exact: {examples: "integer_exact, which makes large sizes exactly checkable", likelihood: L, impact: H}
+      special_values: {examples: "nan, inf, neg_inf, neg_zero, special", likelihood: M, impact: H}
+      zero: {likelihood: L, impact: M}
+      accumulator_probe: {examples: "fp16_accumulator_probe", likelihood: M, impact: H}
+      low_precision_range: {examples: "uniform_low_precision", likelihood: M, impact: M}
+
+  api_path:
+    description: "Which entry point, and how a solution is chosen"
+    fields: [function, use_ext, use_ext_setproblem, requested_solution_num, algo_method, requires_streamk]
+    classes:
+      core_c_api: {examples: "hipblasLtMatmul with heuristic selection", likelihood: L, impact: H}
+      ext_api: {examples: "the C++ extension API", likelihood: M, impact: M}
+      ext_setproblem: {likelihood: M, impact: M}
+      all_solutions: {examples: "every solution the heuristic offers, not just the first", likelihood: H, impact: H}
+      user_args: {examples: "grouped GEMM with device-side user arguments", likelihood: H, impact: M}
+      tuning_override: {examples: "a tuning file or override selecting a solution", likelihood: M, impact: M}
+      streamk: {likelihood: H, impact: H}
+      public_headers: {examples: "compiling against the public headers from C and other toolchains", likelihood: M, impact: M, tickets: [AIHPBLAS-3579]}
+
+  kernel_source:
+    description: "Where the executed kernel came from"
+    fields: []
+    classes:
+      tensilelite_generated: {likelihood: M, impact: H}
+      rocroller: {examples: "HIPBLASLT_ENABLE_ROCROLLER kernels", likelihood: M, impact: M}
+      kernel_parameters: {examples: "TensileLite Tests/common configs walking generation parameters", likelihood: H, impact: H}
+
+  device:
+    description: "Architecture the test runs on"
+    fields: [gpu_arch]
+    classes:
+      gfx90a: {likelihood: L, impact: M}
+      gfx942: {likelihood: L, impact: H}
+      gfx950: {likelihood: M, impact: H}
+      gfx110X: {likelihood: M, impact: L}
+      gfx115X: {likelihood: M, impact: L}
+      gfx120X: {likelihood: M, impact: M}
+      gfx1250: {likelihood: H, impact: M}
+
+  system:
+    description: "Process and machine conditions"
+    fields: []
+    classes:
+      single_gpu: {likelihood: L, impact: H}
+      multi_gpu: {likelihood: H, impact: M, tickets: [AIHPBLAS-4625]}
+      multi_thread: {examples: "concurrent calls on shared handles", likelihood: M, impact: H, tickets: [AIHPBLAS-5035]}
+      managed_memory: {examples: "HMM", likelihood: M, impact: L}
+      memory_safety: {examples: "under a sanitizer", likelihood: M, impact: H}
+
+# Combinations that are not valid, so they do not count as gaps. Entries marked `confirm` need a
+# check against the library's own capability tables before anything relies on them.
+constraints:
+  - {when: {type_combo: [fp8_fnuz]}, devices: [gfx942]}
+  - {when: {type_combo: [fp8_ocp]}, devices: [gfx950, gfx120X, gfx1250], confirm: true}
+  - {when: {type_combo: [microscaled]}, devices: [gfx950, gfx1250], confirm: true}
+  - {when: {type_combo: [xf32]}, devices: [gfx942], confirm: true}
+  - {when: {epilogue: [block_scale]}, requires: {type_combo: [microscaled]}}
+  - {when: {scalars: [complex_scalars]}, requires: {type_combo: [complex]}}
+
+# Pairs of axes whose classes should be covered pairwise (every class of one against every valid
+# class of the other). Most interaction defects involve two factors.
+pairwise_focus:
+  - [type_combo, epilogue]
+  - [type_combo, device]
+  - [type_combo, values]
+  - [shape, layout]
+  - [batching, epilogue]
+  - [api_path, batching]
+
+# How coverage of this model will be measured. Each is follow-on work under the Inventory
+# workstream; kernel coverage has started, through the kernel corpus.
+measurement:
+  static_expansion:
+    status: planned
+    description: >-
+      Expand the client test data the way the build does, map every generated case to its classes
+      through `fields`, and report per-class and pairwise coverage by tier and architecture, plus
+      the uncovered classes ranked by priority.
+  kernel_coverage:
+    status: in_progress
+    tickets: [AIHPBLAS-3894]
+    description: >-
+      For each architecture, the fraction of shipped solutions any test executes. The kernel corpus
+      tests shipped solutions directly, and its reports record which solutions ran, on which device,
+      and which no available device can reach. Still to measure: which shipped solutions the client
+      suite and Tests/common execute today. That needs the selected solution recorded per case;
+      confirm whether bench-mode logging already records it.
+  usage_overlay:
+    status: planned
+    description: >-
+      Map real calls onto the same classes, from the sizes in the library logic YAML, the nightly
+      performance problem lists, and bench-mode traces of framework workloads, so coverage can be
+      weighted by how the library is actually used.

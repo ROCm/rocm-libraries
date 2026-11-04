@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +60,7 @@ namespace rocsparse
 
         const uint32_t sliceid = hipGridDim_x * hipBlockIdx_y + hipBlockIdx_x;
 
-        const J row = sell_slice_size * sliceid + tidx;
+        const int64_t row = static_cast<int64_t>(sell_slice_size) * sliceid + tidx;
 
         const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
         const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
@@ -133,7 +133,7 @@ namespace rocsparse
         {
             const J local_row = (BLOCKSIZE * p + tid);
 
-            const J row = sell_slice_size * sliceid + (BLOCKSIZE * p + tid);
+            const int64_t row = static_cast<int64_t>(sell_slice_size) * sliceid + local_row;
 
             const bool row_in_range = (row < m && local_row < sell_slice_size);
 
@@ -195,12 +195,12 @@ namespace rocsparse
 
         const uint32_t sliceid = hipGridDim_x * hipBlockIdx_y + hipBlockIdx_x;
 
-        const J row = sell_slice_size * sliceid + tidx;
+        const int64_t row = static_cast<int64_t>(sell_slice_size) * sliceid + tidx;
 
         const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
         const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
-        T row_val = alpha * x[row];
+        const T row_val = (row < m) ? alpha * x[row] : static_cast<T>(0);
 
         for(I j = start + idx; j < end; j += (sell_slice_size * THREADS_PER_ROW))
         {
@@ -251,7 +251,7 @@ namespace rocsparse
         {
             const J local_row = (BLOCKSIZE * p + tid);
 
-            const J row = sell_slice_size * sliceid + (BLOCKSIZE * p + tid);
+            const int64_t row = static_cast<int64_t>(sell_slice_size) * sliceid + local_row;
 
             const bool row_in_range = (row < m && local_row < sell_slice_size);
 
