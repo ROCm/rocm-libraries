@@ -99,12 +99,14 @@ def _load_tool(tool_path: Path) -> ModuleType:
         for name, module in sys.modules.items()
         if name in beside and _module_dir(module) != tools
     }
-    for name in set_aside:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(tool_path.stem, tool_path)
-    module = importlib.util.module_from_spec(spec)
     sys.path.insert(0, str(tools))
     try:
+        for name in set_aside:
+            del sys.modules[name]
+        spec = importlib.util.spec_from_file_location(tool_path.stem, tool_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load the IR-validity tool from {tool_path}")
+        module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     finally:
         sys.path.remove(str(tools))
