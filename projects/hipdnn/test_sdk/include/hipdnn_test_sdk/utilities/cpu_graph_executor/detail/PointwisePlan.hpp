@@ -103,8 +103,7 @@ public:
 private:
     void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
-            _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
+        auto shallowIn0Tensor = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
@@ -121,8 +120,8 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
-                _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+            auto shallowIn1Tensor
+                = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
 
             utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
                 pointwiseCompute(
@@ -138,10 +137,10 @@ private:
                         "Ternary pointwise operation requires in1 and in2 tensors");
                 }
 
-                auto shallowIn1Tensor = createShallowTensor<Input1Type>(
-                    _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
-                auto shallowIn2Tensor = createShallowTensor<Input2Type>(
-                    _params.in2Tensor.value(), variantPack.at(_params.in2Tensor.value().uid));
+                auto shallowIn1Tensor
+                    = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
+                auto shallowIn2Tensor
+                    = bindOperandOrScalar<Input2Type>(_params.in2Tensor.value(), variantPack);
 
                 utilities::CpuReferencePointwiseImpl<
                     OutputType,
@@ -167,8 +166,7 @@ private:
 
     void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
-            _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
+        auto shallowIn0Tensor = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
@@ -194,8 +192,8 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
-                _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+            auto shallowIn1Tensor
+                = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
 
             utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
                 pointwiseCompute(

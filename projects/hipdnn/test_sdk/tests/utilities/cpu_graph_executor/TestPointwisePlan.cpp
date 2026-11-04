@@ -1130,3 +1130,92 @@ TEST(TestPointwisePlanBuilder, MissingPlanBuilderIsNotApplicable)
 
     EXPECT_THROW(registry.getPlanBuilder(unregistered), CpuReferenceNotApplicableError);
 }
+
+TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
+{
+    const std::vector<int64_t> dims = {1, 2, 2, 2};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "x", hipdnn_frontend::DataType::FLOAT, dims, strides);
+    xAttr.set_uid(1);
+    auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+
+    // Baked constant, runtime scalar with a default, and pure runtime scalar
+    auto baked = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(2.0f);
+    auto runtimeWithDefault = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+        4.0f, hipdnn_frontend::graph::ScalarType::RUNTIME_PARAM);
+    auto pureRuntime = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    pureRuntime->set_dim({1}).set_stride({1});
+    pureRuntime->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    baked->set_uid(2);
+    runtimeWithDefault->set_uid(3);
+    pureRuntime->set_uid(4);
+
+    hipdnn_frontend::graph::PointwiseAttributes addAttrs;
+    addAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+    hipdnn_frontend::graph::PointwiseAttributes mulAttrs;
+    mulAttrs.set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    hipdnn_frontend::graph::PointwiseAttributes subAttrs;
+    subAttrs.set_mode(hipdnn_frontend::PointwiseMode::SUB);
+
+    // added = x + baked, multiplied = added * runtimeWithDefault, out = pureRuntime - multiplied.
+    // Each intermediate is also an output so every operation can be checked on its own.
+    auto added = graph->pointwise(x, baked, addAttrs);
+    auto multiplied = graph->pointwise(added, runtimeWithDefault, mulAttrs);
+    auto out = graph->pointwise(pureRuntime, multiplied, subAttrs);
+    int64_t outUid = 5;
+    for(const auto& output : {added, multiplied, out})
+    {
+        output->set_uid(outUid++)
+            .set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_dim(dims)
+            .set_stride(strides)
+            .set_output(true);
+    }
+
+    auto validateResult = graph->validate();
+    ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    // Distinct value per element: 1..8
+    Tensor<float> xData(dims);
+    for(int64_t i = 0; i < 8; ++i)
+    {
+        xData.setHostValue(static_cast<float>(i + 1), 0, i / 4, (i / 2) % 2, i % 2);
+    }
+    xData.markHostModified();
+    Tensor<float> addData(dims);
+    Tensor<float> mulData(dims);
+    Tensor<float> outData(dims);
+    float pureRuntimeValue = 10.0f;
+    // The baked and defaulted scalars have no entry in the variant pack
+    const std::unordered_map<int64_t, void*> variantPack = {{1, xData.rawHostData()},
+                                                            {4, &pureRuntimeValue},
+                                                            {5, addData.rawHostData()},
+                                                            {6, mulData.rawHostData()},
+                                                            {7, outData.rawHostData()}};
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    for(int64_t i = 0; i < 8; ++i)
+    {
+        const auto xValue = static_cast<float>(i + 1);
+        const auto c = i / 4;
+        const auto h = (i / 2) % 2;
+        const auto w = i % 2;
+        EXPECT_EQ(xData.getHostValue(0, c, h, w), xValue) << "input changed at element " << i;
+        EXPECT_EQ(addData.getHostValue(0, c, h, w), xValue + 2.0f) << "element " << i;
+        EXPECT_EQ(mulData.getHostValue(0, c, h, w), (xValue + 2.0f) * 4.0f) << "element " << i;
+        EXPECT_EQ(outData.getHostValue(0, c, h, w), 10.0f - ((xValue + 2.0f) * 4.0f))
+            << "element " << i;
+    }
+}
