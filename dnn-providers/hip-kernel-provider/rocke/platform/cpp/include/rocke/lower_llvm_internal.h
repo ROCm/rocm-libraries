@@ -682,10 +682,10 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L);
  * alignment: the emitters print it, and the pool layout aligns each segment
  * to the largest value its accesses claim. Never more than
  * ROCKE_SMEM_POOL_ALIGN: a wider vector access claims the pool alignment.
- * A store whose `align` attribute is not an integer fails the lowering
- * through L with ROCKE_ERR_TYPE, and one that is not a positive power of two
- * with ROCKE_ERR_VALUE. */
-int rocke_ll_lds_access_align(rocke_lower_t* L, const rocke_op_t* op);
+ * A store whose `align` attribute is not an integer or not a positive power
+ * of two is refused by rocke_i_align_attr (ckc::TypeError / ckc::ValueError,
+ * reported as ROCKE_ERR_TYPE / ROCKE_ERR_VALUE). */
+int rocke_ll_lds_access_align(const rocke_op_t* op);
 
 /* Emit a byte-level GEP to the start of the smem segment for `gname` inside
  * the unified pool. Returns the pool name directly when offset == 0;

@@ -29,7 +29,11 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.verify import verify, verify_or_raise
 from rocke.examples.gfx942.tf32_numerics import rne_bits
-from rocke.tests.engines import assert_both_engines_reject
+from rocke.tests.engines import (
+    assert_both_engines_reject,
+    assert_both_engines_reject_hip,
+    available_engines,
+)
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
     Tf32MmaProbeSpec,
@@ -577,27 +581,41 @@ def test_global_vector_store(n, align, dtype):
         assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
-@pytest.mark.parametrize("align", [0, -4, 3, 12])
-def test_global_vector_store_rejects_invalid_alignment(align):
+@pytest.mark.parametrize(
+    ("align", "error_type", "refusal"),
+    [
+        (0, ValueError, "align=0, expected a positive power of two"),
+        (-4, ValueError, "align=-4, expected a positive power of two"),
+        (3, ValueError, "align=3, expected a positive power of two"),
+        (12, ValueError, "align=12, expected a positive power of two"),
+        (True, TypeError, "align=bool, expected an integer"),
+        (24.0, TypeError, "align=float, expected an integer"),
+    ],
+)
+def test_global_vector_store_rejects_invalid_alignment(align, error_type, refusal):
+    """Every lowerer refuses the same ``align`` values with the same text, and
+    never reads a bool or a float as an integer alignment."""
     b = IRBuilder("invalid_store_alignment")
     p = b.param("p", PtrType(TF32, "global"))
     zero = b.const_i32(0)
     value = b.bitcast(zero, TF32)
-    b.global_store_vN(p, zero, b.vec_pack([value] * 4, TF32), 4, align=align)
-    # The builder treats zero as its default; serialized IR can contain it literally.
+    b.global_store_vN(p, zero, b.vec_pack([value] * 4, TF32), 4)
+    # The builder never emits these; serialized IR can contain them literally.
     b.kernel.body.ops[-1].attrs["align"] = align
     b.ret()
-    ir = serialize(b.kernel)
-    kernel = parse(ir)
-    message = "global_store_vN: alignment must be a positive power of two"
-    with pytest.raises(ValueError, match=message):
-        lower_kernel_to_hip(kernel)
-    native = pytest.importorskip("rocke_engine")
+    kernel = parse(serialize(b.kernel))
+    message = f"memref.global_store_vN failed - {refusal}"
+    with pytest.raises(error_type, match=f"^{re.escape(message)}$"):
+        lower_kernel_to_hip(kernel, arch="gfx950")
     for flavor in LLVM_FLAVORS:
-        with pytest.raises(ValueError, match=message):
+        with pytest.raises(error_type, match=f"^{re.escape(message)}$"):
             _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
-        with pytest.raises(Exception, match=message):
-            native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor)
+    if "cpp" in available_engines():
+        assert_both_engines_reject_hip(kernel, "gfx950", error_type, message)
+        for flavor in LLVM_FLAVORS:
+            assert_both_engines_reject(
+                kernel, "gfx950", error_type, message, llvm_flavor=flavor
+            )
 
 
 @pytest.mark.parametrize("m", [16, 32])

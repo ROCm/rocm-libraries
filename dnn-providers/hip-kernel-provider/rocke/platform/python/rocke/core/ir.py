@@ -25,6 +25,7 @@ Design constraints:
 from __future__ import annotations
 
 import enum
+import operator
 import os
 import sys
 from dataclasses import dataclass, field
@@ -1019,27 +1020,83 @@ def type_bytes(t: Type) -> int:
     return bits // 8
 
 
-def smem_vec_align_elems(smem_type: Type, vec: int) -> int:
-    """The element count every ``vec``-wide access into LDS tile type
-    ``smem_type`` is guaranteed to start on a multiple of.
+def vector_access_align(lanes: int, elem: Type) -> int:
+    """The natural alignment, in bytes, of one access of ``lanes`` ``elem``
+    values: its byte width when that is a power of two, else the element width
+    (a 12-byte ``<3 x float>`` guarantees only element alignment).
 
-    The natural answer is ``vec``, but that only holds if every address the
-    access can land on is that aligned. An LDS tile is indexed
-    ``(..., row, col)`` with ``col`` a multiple of ``vec``, so the address
-    advances by the innermost dimension per row. When that dimension is not a
-    multiple of ``vec`` -- which is exactly what a bank-conflict pad such as
-    ``lds_k_pad`` does -- alternate rows start off the natural boundary.
-    ``gcd(vec, innermost)`` bounds the claim; outer strides are products that
-    include the innermost dimension, so they never bind tighter. A type with no
-    shape gives ``vec``. Multiply by the element size for bytes.
+    Raises ``ValueError`` through :func:`type_bytes` for an element with no
+    whole-byte width. The C++ engine's twin is ``rocke_i_vector_access_align``.
+    """
+    elem_bytes = type_bytes(elem)
+    width = lanes * elem_bytes
+    return width if (width & (width - 1)) == 0 else elem_bytes
+
+
+def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
+    """The alignment, in bytes, of one access of ``lanes`` ``elem`` values
+    into LDS tile type ``smem_type``: :func:`vector_access_align`, bounded by
+    what every row start of the tile guarantees.
+
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
+    ``lanes``, so the address advances by the innermost dimension per row.
+    When that dimension is not a multiple of ``lanes`` -- which is exactly what
+    a bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary. ``gcd(lanes, innermost)`` elements is what every row
+    start guarantees; outer strides are products that include the innermost
+    dimension, so they never bind tighter. A type with no shape (or a
+    non-positive innermost dimension) gives no row bound.
 
     An alignment attribute is an assertion to LLVM: overstating it is undefined
     behaviour even where the hardware tolerates the access, while understating
     it only costs instruction selection. The C++ engine's twin is
-    ``rocke_i_smem_vec_align_elems``.
+    ``rocke_i_smem_vector_access_align``.
     """
+    natural = vector_access_align(lanes, elem)
     shape = getattr(smem_type, "shape", None)
-    return _gcd(int(vec), int(shape[-1])) if shape else int(vec)
+    innermost = int(shape[-1]) if shape else 0
+    if innermost <= 0:
+        return natural
+    return min(natural, _gcd(int(lanes), innermost) * type_bytes(elem))
+
+
+def align_attr(op: Op) -> int | None:
+    """The ``align`` attribute of memory op ``op``, in bytes, or ``None`` when
+    the op carries none.
+
+    Raises ``TypeError`` for an attribute that is not an integer (``True`` and
+    ``8.0`` included) and ``ValueError`` for one that is not a positive power
+    of two: converting or capping it would turn an invalid claim into a valid
+    one. The C++ engine's twin is ``rocke_i_align_attr``, which returns 0 for
+    an absent attribute.
+    """
+    if "align" not in op.attrs:
+        return None
+    value = op.attrs["align"]
+    # bool is an int subclass, so operator.index alone would read True as 1.
+    if isinstance(value, bool):
+        raise TypeError(f"{op.name} failed - align=bool, expected an integer")
+    try:
+        align = operator.index(value)
+    except TypeError:
+        raise TypeError(
+            f"{op.name} failed - align={type(value).__name__}, expected an integer"
+        ) from None
+    if align <= 0 or align & (align - 1):
+        raise ValueError(
+            f"{op.name} failed - align={align}, expected a positive power of two"
+        )
+    return align
+
+
+def claimed_align(op: Op, lanes: int, elem: Type) -> int:
+    """The alignment, in bytes, that vector access ``op`` of ``lanes`` ``elem``
+    values claims: its :func:`align_attr` when it carries one, else
+    :func:`vector_access_align`. The C++ engine's twin is
+    ``rocke_i_claimed_align``.
+    """
+    align = align_attr(op)
+    return vector_access_align(lanes, elem) if align is None else align
 
 
 def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
@@ -3990,9 +4047,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                # Bounded by what every row start of a padded tile guarantees.
-                "align": smem_vec_align_elems(smem.type, n)
-                * type_bytes(value.type.elem),
+                "align": smem_vector_access_align(smem.type, n, value.type.elem),
             },
         )
 

@@ -311,6 +311,90 @@ int rocke_i_type_bytes(const rocke_type_t* t)
     return bits / 8;
 }
 
+/* Python type(value).__name__ for an attribute value that is not an int. */
+static const char* rocke_attr_kind_name(const rocke_attr_value_t* attr)
+{
+    switch(attr->kind)
+    {
+    case ROCKE_ATTR_FLOAT:
+        return "float";
+    case ROCKE_ATTR_STR:
+        return "str";
+    case ROCKE_ATTR_BOOL:
+        return "bool";
+    default:
+        return "list";
+    }
+}
+
+/* Mirrors core/ir.py::vector_access_align. */
+int64_t rocke_i_vector_access_align(int64_t lanes, const rocke_type_t* elem)
+{
+    const int64_t elem_bytes = rocke_i_type_bytes(elem);
+    const int64_t width = lanes * elem_bytes;
+    return (width & (width - 1)) == 0 ? width : elem_bytes;
+}
+
+/* Mirrors core/ir.py::smem_vector_access_align. */
+int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
+                                         int64_t lanes,
+                                         const rocke_type_t* elem)
+{
+    const int64_t natural = rocke_i_vector_access_align(lanes, elem);
+    const int64_t innermost = (smem_type != NULL && smem_type->shape != NULL && smem_type->rank > 0)
+                                  ? smem_type->shape[smem_type->rank - 1]
+                                  : 0;
+    if(innermost <= 0)
+    {
+        return natural;
+    }
+    int64_t row_start_elems = lanes; /* gcd(lanes, innermost), as Python math.gcd */
+    int64_t remainder = innermost;
+    while(remainder != 0)
+    {
+        const int64_t next = row_start_elems % remainder;
+        row_start_elems = remainder;
+        remainder = next;
+    }
+    const int64_t row_bound = row_start_elems * rocke_i_type_bytes(elem);
+    return natural < row_bound ? natural : row_bound;
+}
+
+/* Mirrors core/ir.py::align_attr (0 stands for its None); the refusal texts are
+ * the Python engine's. */
+int64_t rocke_i_align_attr(const rocke_op_t* op)
+{
+    const rocke_attr_value_t* attr = rocke_attr_get(&op->attrs, "align");
+    if(!attr)
+    {
+        return 0;
+    }
+    /* A non-integer align (a bool, a float, ...) is refused, never read as
+     * missing. */
+    if(attr->kind != ROCKE_ATTR_INT)
+    {
+        throw ckc::TypeError(ckc::format_error("%s failed - align=%s, expected an integer",
+                                               rocke_opcode_name(op->opcode),
+                                               rocke_attr_kind_name(attr)));
+    }
+    const int64_t align = attr->u.i;
+    if(align <= 0 || (align & (align - 1)) != 0)
+    {
+        throw ckc::ValueError(
+            ckc::format_error("%s failed - align=%lld, expected a positive power of two",
+                              rocke_opcode_name(op->opcode),
+                              (long long)align));
+    }
+    return align;
+}
+
+/* Mirrors core/ir.py::claimed_align. */
+int64_t rocke_i_claimed_align(const rocke_op_t* op, int64_t lanes, const rocke_type_t* elem)
+{
+    const int64_t align = rocke_i_align_attr(op);
+    return align != 0 ? align : rocke_i_vector_access_align(lanes, elem);
+}
+
 /* Python core/ir.py::_buffer_access_bytes; the texts are the Python engine's. */
 int rocke_i_buffer_access_bytes(
     const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap)

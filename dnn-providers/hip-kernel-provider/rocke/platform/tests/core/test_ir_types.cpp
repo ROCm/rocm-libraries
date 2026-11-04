@@ -638,6 +638,104 @@ static int test_type_bytes()
     return 0;
 }
 
+/* A vector is made of its element type and lanes; a scalar is its own element
+ * and one lane (core/ir.py::element_type and lane_count). */
+static int test_element_type_and_lane_count()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "element_and_lanes") == ROCKE_OK);
+    const rocke_type_t* vector = rocke_vector_type(&b, rocke_f16(), 8);
+    CHECK(rocke_i_elem_of(vector) == rocke_f16());
+    CHECK(rocke_i_count_of(vector) == 8);
+    CHECK(rocke_i_elem_of(rocke_f32()) == rocke_f32());
+    CHECK(rocke_i_count_of(rocke_f32()) == 1);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
+/* The natural alignment of a vector access: its byte width when that is a
+ * power of two, else the element width (core/ir.py::vector_access_align). */
+static int test_vector_access_align()
+{
+    CHECK(rocke_i_vector_access_align(4, rocke_f32()) == 16);
+    CHECK(rocke_i_vector_access_align(3, rocke_f32()) == 4);
+    CHECK(rocke_i_vector_access_align(6, rocke_f16()) == 2);
+    CHECK(rocke_i_vector_access_align(16, rocke_fp8e4m3()) == 16);
+    CHECK(rocke_i_vector_access_align(1, rocke_f64()) == 8);
+    return 0;
+}
+
+/* rocke_i_align_attr of `store` as text, or the refusal (prefixed with its
+ * exception class) when it refuses. */
+static std::string align_attr_outcome(const rocke_op_t* store)
+{
+    try
+    {
+        return std::to_string(rocke_i_align_attr(store));
+    }
+    catch(const ckc::TypeError& error)
+    {
+        return std::string("TypeError: ") + error.what();
+    }
+    catch(const ckc::ValueError& error)
+    {
+        return std::string("ValueError: ") + error.what();
+    }
+}
+
+/* The align attribute a memory op carries, with core/ir.py::align_attr's
+ * answers and refusal texts: an integer power of two as given, 0 (Python's
+ * None) when absent, anything else refused rather than converted or capped.
+ * rocke_i_claimed_align falls back to the natural vector alignment only when
+ * the attribute is absent. */
+static int test_align_attr()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "align_attr_probe") == ROCKE_OK);
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    rocke_value_t* values = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), 4, 16);
+    rocke_b_global_store_vN(&b, out, zero, values, 4, 8);
+    CHECK(rocke_ir_builder_ok(&b));
+    rocke_op_t* store = NULL;
+    for(int i = 0; i < b.kernel->body->num_ops; i++)
+    {
+        if(b.kernel->body->ops[i]->opcode == ROCKE_OP_MEMREF_GLOBAL_STORE_VN)
+            store = b.kernel->body->ops[i];
+    }
+    CHECK(store != NULL);
+
+    CHECK(align_attr_outcome(store) == "8");
+    CHECK(rocke_i_claimed_align(store, 4, rocke_f32()) == 8);
+    rocke_attr_set_int(&b, &store->attrs, "align", int64_t(1) << 40);
+    CHECK(align_attr_outcome(store) == "1099511627776");
+    rocke_op_t without_align = *store;
+    without_align.attrs = rocke_attr_map_t{NULL, 0, 0};
+    CHECK(align_attr_outcome(&without_align) == "0");
+    CHECK(rocke_i_claimed_align(&without_align, 4, rocke_f32()) == 16);
+    CHECK(rocke_i_claimed_align(&without_align, 3, rocke_f32()) == 4);
+
+    const char* const power_of_two = ", expected a positive power of two";
+    for(const int64_t align : {int64_t(24), int64_t(12), int64_t(0), int64_t(-16)})
+    {
+        rocke_attr_set_int(&b, &store->attrs, "align", align);
+        CHECK(align_attr_outcome(store)
+              == "ValueError: memref.global_store_vN failed - align=" + std::to_string(align)
+                     + power_of_two);
+    }
+    rocke_attr_set_bool(&b, &store->attrs, "align", true);
+    CHECK(align_attr_outcome(store)
+          == "TypeError: memref.global_store_vN failed - align=bool, expected an integer");
+    rocke_attr_set_float(&b, &store->attrs, "align", 8.0);
+    CHECK(align_attr_outcome(store)
+          == "TypeError: memref.global_store_vN failed - align=float, expected an integer");
+    rocke_attr_set_str(&b, &store->attrs, "align", "16");
+    CHECK(align_attr_outcome(store)
+          == "TypeError: memref.global_store_vN failed - align=str, expected an integer");
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 /* A dtype's logical IR type, as core/ir.py::dtype_to_ir_type gives it: any
  * accepted spelling resolves, and an unknown name is refused with
  * core/dtypes.py's text. */
@@ -767,6 +865,9 @@ int main(int argc, char** argv)
     CHECK(test_bitcast_width() == 0);
     CHECK(test_scalar_widths() == 0);
     CHECK(test_type_bytes() == 0);
+    CHECK(test_element_type_and_lane_count() == 0);
+    CHECK(test_vector_access_align() == 0);
+    CHECK(test_align_attr() == 0);
     CHECK(test_ir_type_of_dtype() == 0);
     CHECK(test_mma_refusals() == 0);
     CHECK(test_scalar_kinds_are_covered() == 0);
