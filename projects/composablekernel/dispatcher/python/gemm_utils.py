@@ -1375,8 +1375,12 @@ class GpuGemmRunner:
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
     ) -> GemmResult:
-        M, N, K = problem.M, problem.N, problem.K
+        return self.run_encoded(*self.encode_inputs(A, B), problem)
 
+    def encode_inputs(
+        self, A: np.ndarray, B: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """The host A/B buffers run() hands the kernel for logical A and B."""
         # Caller passes logical A (MxK) and B (KxN) row-major. The compiled
         # kernel dictates both the element dtype and the memory layout of each
         # operand (encoded in its name, e.g. gemm_bf16_rcr_...). The C ABI sizes
@@ -1390,11 +1394,10 @@ class GpuGemmRunner:
         # Likewise column-major C (MxN) lands in memory as NxM row-major, so we
         # allocate (N,M) and transpose the result back to logical MxN.
         dtype = _dtype_from_kernel_name(self._kernel_name)
-        la, lb, lc = _layout_from_kernel_name(self._kernel_name)
+        la, lb, _ = _layout_from_kernel_name(self._kernel_name)
 
         A_lay = A if la == "r" else A.T
         B_lay = B if lb == "r" else B.T
-        C_shape = (M, N) if lc == "r" else (N, M)
 
         # Build A/B host buffers in the kernel's element dtype. The encode
         # helpers (bf16/fp8/bf8) already force a contiguous float32 source, so an
@@ -1419,6 +1422,16 @@ class GpuGemmRunner:
                 f"unsupported A/B dtype {dtype!r} in kernel {self._kernel_name!r}; "
                 "add it to _NATIVE_NP or an encode branch"
             )
+        return A_h, B_h
+
+    def run_encoded(
+        self, A_h: np.ndarray, B_h: np.ndarray, problem: GemmProblem
+    ) -> GemmResult:
+        """run() on host buffers that encode_inputs() made."""
+        M, N, K = problem.M, problem.N, problem.K
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        lc = _layout_from_kernel_name(self._kernel_name)[2]
+        C_shape = (M, N) if lc == "r" else (N, M)  # column-major C: see above
 
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.

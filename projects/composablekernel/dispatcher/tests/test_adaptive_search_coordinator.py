@@ -38,15 +38,18 @@ sys.path.insert(0, str(COMMON_DIR))
 
 import adaptive_search as AS  # noqa: E402
 import ck_search  # noqa: E402
+import host_cache as HC  # noqa: E402
 from _py38_check import py38_problems  # noqa: E402
 
 KERNELS = "ABCDEFGHIJKL"
 # The modules this change adds (also ASCII only) or edits, besides ck_search.
-NEW_MODULES = (COMMON_DIR / "adaptive_search.py", TE_OPS / "gemm" / "gemm_search.py")
+NEW_MODULES = (COMMON_DIR / "adaptive_search.py", COMMON_DIR / "host_cache.py",
+               TE_OPS / "gemm" / "gemm_search.py")
 EDITED_MODULES = (
     TE_OPS / "gemm" / "gemm_full_benchmark.py",
     TE_OPS / "gemm" / "run_one_gemm_kernel.py",
     DISPATCHER_DIR / "python" / "ctypes_utils.py",
+    DISPATCHER_DIR / "python" / "gemm_utils.py",
 )
 
 
@@ -1173,6 +1176,11 @@ BASE = {"schema_version": 1, "strategy": "tpe", "trials_per_problem": 4,
     ({"warm_start": {"pairs_file": "missing.json"}}, "no such file"),
     ({"warm_start": {"pairs_file": 7}}, "expected type str"),
     ({"warm_start": None}, "expected a JSON object"),
+    ({"host_cache": {"dir": "missing-dir"}}, "no such directory"),
+    ({"host_cache": {"max_entry_gib": 0}}, "> 0"),
+    ({"host_cache": {"max_total_gib": -1}}, ">= 0"),
+    ({"host_cache": {"max_total_gib": "8"}}, "expected type float"),
+    ({"host_cache": {"enabled": False}}, "unknown key"),
 ])
 def test_settings_errors(change, match):
     d = {**BASE, **change}
@@ -1222,6 +1230,13 @@ def test_settings_defaults_paths_and_round_trip(tmp_path):
     assert AS.SearchSettings.from_json(timed.to_json()).build_timeout_s == 240
     assert AS.SearchSettings.from_json(BASE).to_json()["confirm"] == {
         "finalists": 2, "fresh_calls": 3}
+    assert s.host_cache == AS.HostCacheSettings(None, 4.0, None)
+    assert s.to_json()["host_cache"] == {"max_entry_gib": 4.0}
+    (tmp_path / "cache").mkdir()
+    cached = AS.SearchSettings.from_json({**BASE, "host_cache": {
+        "dir": str(tmp_path / "cache"), "max_total_gib": 0}})
+    assert cached.host_cache == AS.HostCacheSettings(str(tmp_path / "cache"), 4.0, 0.0)
+    assert AS.SearchSettings.from_json(cached.to_json()) == cached
 
 
 # ------------------------------------------------- seeds, warm, prior
@@ -1433,3 +1448,134 @@ def test_real_strategies_end_to_end(tmp_path, name):
         assert co.ledger.trials[p] == sum(r.problem_key == p for r in ad.measured)
         assert co.ledger.trials[p] <= 10
     assert len(events(tmp_path / "out", "result")) == len(ad.measured)
+
+
+# ------------------------------------------------------------- host cache
+
+
+def _cache_calls(spec, fields, value=1.0, shape=(3, 4)):
+    """HC.cached(spec, fields, compute) and how many times compute ran."""
+    import numpy as np
+
+    ran = []
+
+    def compute():
+        ran.append(1)
+        return {"x": np.full(shape, value, np.float32), "s": np.float64(value)}
+
+    got = HC.cached(spec, fields, compute)
+    return got, len(ran)
+
+
+def _entries(cache):
+    return HC.usage(cache.dir)[0]
+
+
+def test_host_cache_computes_once_per_key(tmp_path):
+    cache = HC.HostCache(tmp_path)
+    a = {"problem": {"M": 8, "N": 4, "K": 2}, "dtype": "bf16", "layout": "rcr"}
+    first, ran1 = _cache_calls(cache.spec, a)
+    again, ran2 = _cache_calls(cache.spec, dict(reversed(list(a.items()))))
+    assert (ran1, ran2, _entries(cache)) == (1, 0, 1)
+    assert set(again) == {"x", "s"} and (again["x"] == first["x"]).all()
+    assert float(again["s"]) == 1.0
+    # Every field is part of the key: another layout, dtype or problem misses.
+    for change in ({"layout": "crr"}, {"dtype": "fp16"},
+                   {"problem": {"M": 8, "N": 4, "K": 4}}):
+        assert _cache_calls(cache.spec, {**a, **change}, 2.0)[1] == 1
+    assert _entries(cache) == 4
+    # Without a spec there is no cache.
+    assert _cache_calls(None, a)[1] == _cache_calls(None, a)[1] == 1
+    cache.close()
+    assert not cache.dir.exists()
+
+
+def test_host_cache_caps_fall_back_to_computing(tmp_path, monkeypatch):
+    # An entry holds 48 + 8 bytes of arrays (x and s).
+    small = HC.HostCache(tmp_path, max_entry_bytes=55)
+    assert [_cache_calls(small.spec, {"k": 1})[1] for _ in range(2)] == [1, 1]
+    assert _entries(small) == 0
+    # The total counts what the directory holds already (files on disk).
+    full = HC.HostCache(tmp_path)
+    assert _cache_calls(full.spec, {"k": 1})[1] == 1
+    spec = {**full.spec, "max_total_bytes": HC.usage(full.dir)[1] + 56}
+    assert _cache_calls(spec, {"k": 2})[1] == 1 and _entries(full) == 2
+    got, ran = _cache_calls(spec, {"k": 3}, 3.0)
+    assert ran == 1 and (got["x"] == 3.0).all() and _entries(full) == 2
+    assert _cache_calls(spec, {"k": 3})[1] == 1
+    # A write that would leave the filesystem less than 10% free is skipped.
+    disk = HC.shutil.disk_usage(tmp_path)
+    low = disk._replace(free=int(disk.total * HC.MIN_FREE_FRACTION))
+    monkeypatch.setattr(HC.shutil, "disk_usage", lambda p: low)
+    assert _cache_calls(full.spec, {"k": 4})[1] == 1 and _entries(full) == 2
+    # The default total: a quarter of the free space at the start.
+    default = HC.HostCache(tmp_path)
+    assert default.spec["max_total_bytes"] == low.free // 4
+    for cache in (small, full, default):
+        cache.close()
+
+
+def test_host_cache_bad_entries_are_misses(tmp_path):
+    cache = HC.HostCache(tmp_path)
+    fields = {"k": 1}
+    path = cache.dir / HC.entry_key(fields)
+    path.mkdir()
+    for meta in ("{", '{"fields": {"k": 2}, "arrays": ["x"]}', "[]",
+                 '{"fields": {"k": 1}, "arrays": ["missing"]}'):
+        (path / "meta.json").write_text(meta)
+        got, ran = _cache_calls(cache.spec, fields, 5.0)
+        assert ran == 1 and (got["x"] == 5.0).all()
+    # A write that fails (the run removed the dir) leaves the result alone.
+    cache.close()
+    got, ran = _cache_calls(cache.spec, {"k": 9}, 6.0)
+    assert ran == 1 and (got["x"] == 6.0).all() and not cache.dir.exists()
+
+
+def test_host_cache_concurrent_writers_publish_one_entry(tmp_path):
+    import threading
+
+    import numpy as np
+
+    cache, start, out = HC.HostCache(tmp_path), threading.Barrier(8), []
+
+    def compute():
+        start.wait()  # all 8 miss together, then all publish
+        return {"x": np.arange(1000, dtype=np.float32)}
+
+    def worker():
+        out.append(HC.cached(cache.spec, {"k": "same"}, compute)["x"])
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(out) == 8 and all((x == out[0]).all() for x in out)
+    assert [p.name for p in cache.dir.iterdir()] == [HC.entry_key({"k": "same"})]
+    assert _cache_calls(cache.spec, {"k": "same"})[1] == 0
+    cache.close()
+
+
+def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path):
+    lines = []
+    settings = AS.HostCacheSettings(str(tmp_path), 1.0, 1.0)
+    with HC.run_cache(settings, lines.append) as cache:
+        assert cache.spec["max_entry_bytes"] == cache.spec["max_total_bytes"] == 2**30
+        _cache_calls(cache.spec, {"k": 1})
+    assert not cache.dir.exists() and lines == [
+        f"  Host cache: 1 entries, 0.00 GiB, removed ({cache.dir})"]
+    with pytest.raises(KeyboardInterrupt):
+        with HC.run_cache(settings, lines.append) as cache:
+            _cache_calls(cache.spec, {"k": 1})
+            raise KeyboardInterrupt
+    assert not cache.dir.exists()
+    with HC.run_cache(AS.HostCacheSettings(str(tmp_path), 1.0, 0.0)) as off:
+        assert off is None
+    # A cache never closed is removed when the interpreter exits.
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); import host_cache; "
+            "c = host_cache.HostCache(sys.argv[2]); (c.dir / 'f').write_text('x'); "
+            "print(c.dir); sys.exit(3)")
+    run = subprocess.run([sys.executable, "-c", code, str(COMMON_DIR), str(tmp_path)],
+                         capture_output=True, text=True, timeout=60)
+    assert run.returncode == 3 and not Path(run.stdout.strip()).exists()
+    assert list(tmp_path.iterdir()) == []

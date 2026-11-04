@@ -41,6 +41,7 @@ sys.path.insert(0, str(GEMM_TE_DIR.parent / "common"))
 import adaptive_search as AS  # noqa: E402
 import gemm_full_benchmark as drv  # noqa: E402
 import gemm_search as GS  # noqa: E402
+import host_cache as HC  # noqa: E402
 import run_one_gemm_kernel as worker  # noqa: E402
 from gemm_utils import GemmKernelConfig  # noqa: E402
 
@@ -71,6 +72,12 @@ class _Runner:
 
     def reference(self, A, B):
         return A @ B
+
+    def encode_inputs(self, A, B):
+        return A, B
+
+    def run_encoded(self, A_h, B_h, problem):
+        return self.run(A_h, B_h, problem)
 
 
 class _InProcess:
@@ -158,12 +165,13 @@ def _hooks(build, measure=drv.benchmark_on_devices):
 
 
 def _adapter(tmp_path, build, measure=drv.benchmark_on_devices, problems=(P1, P2),
-             eligible=None, devices=("0",), timeout=None, configs=CFGS, **args):
+             eligible=None, devices=("0",), timeout=None, configs=CFGS, cache=None,
+             **args):
     eligible = eligible or [[A, B, C, D]] * len(problems)
     return GS.GemmSearchAdapter(
         _args(**args), _hooks(build, measure), list(problems), configs, eligible,
         list(devices), (Path("worker.py"), {}), tmp_path / "out", {"arch": "gfx950"},
-        **({} if timeout is None else {"build_timeout": timeout}),
+        **({} if timeout is None else {"build_timeout": timeout}), cache=cache,
     )
 
 
@@ -460,6 +468,37 @@ def test_attribution_holds_across_devices(tmp_path, monkeypatch):
     prob = {K1: P1, K2: P2}
     assert got == {(k, n): ("timeout", None) if (n, k) == (B, K2)
                    else ("ok", ms(n, prob[k])) for n in (A, B, C) for k in (K1, K2)}
+
+
+def test_workers_share_the_host_cache_with_unchanged_outcomes(tmp_path, monkeypatch):
+    # The real worker gets the run's host cache in its payload and fills one
+    # entry per problem; outcomes and rows (latency, max_rel, verified) are
+    # those of workers without it. B is wrong on P2.
+    reqs = [_req(k, n, i) for i, (k, n) in enumerate(
+        ((K1, A), (K2, A), (K1, B), (K2, B)), 1)]
+    got = {}
+    for name in ("plain", "cached"):
+        root = tmp_path / name
+        root.mkdir()
+        tc = Toolchain(root, monkeypatch, wrong={(B, P2["M"])})
+        with HC.HostCache(root) as cache:
+            ad = _adapter(root, tc.build, cache=cache if name == "cached" else None)
+            ad.build_missing([ad.cands[n] for n in (A, B)])
+            outs = ad.measure_pairs(reqs) + ad.measure_pairs(reqs)
+            outs += ad.confirm([AS.PairRequest(K2, A, A, f"{K2}:2", "c9")])
+            entries = HC.usage(cache.dir)[0]
+            specs = [p.get("host_cache") for p in tc.payloads]
+        with open(root / "out" / "rounds" / "0002-measure.csv", newline="") as f:
+            rows = [{k: v for k, v in r.items() if k != "device"}
+                    for r in csv.DictReader(f)]
+        got[name] = [(o.status, o.latency_ms, o.diag) for o in outs], rows
+        if name == "cached":
+            assert entries == 2 and specs == [cache.spec] * len(specs) == [
+                ad.extra["host_cache"]] * 9
+        else:
+            assert entries == 0 and specs == [None] * 9
+    assert got["plain"] == got["cached"]
+    assert [o[0] for o in got["plain"][0]] == ["ok", "ok", "ok", "numeric_fail"] * 2 + ["ok"]
 
 
 def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):

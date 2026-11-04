@@ -45,7 +45,7 @@ PROBLEMS = [
 # the pairing rule shows up on it (the aligned problems pair with every native).
 MISALIGNED = {"M": 1000, "N": 520, "K": 250}
 KEYS = [drv.problem_key(p) for p in PROBLEMS]
-SEARCH_MODULES = ("gemm_search", "adaptive_search", "ck_search")
+SEARCH_MODULES = ("gemm_search", "adaptive_search", "ck_search", "host_cache")
 LEGACY_CSV = ["kernel", "problem_idx", "M", "N", "K", "device", "latency_ms",
               "tflops", "non_zero", "max_rel", "verified"]
 
@@ -218,10 +218,14 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     eligible = _listing(monkeypatch, capsys, tmp_path)
     rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path)
     assert rc == 0, cap.out
-    # Every measurement is one verified kernel with the identity check.
+    # Every measurement is one verified kernel with the identity check, and
+    # its worker gets the run's host cache: a temp dir, gone after the run.
+    cache = calls[0]["extra"]["host_cache"]
     assert calls and all(
         len(c["names"]) == 1 and c["verify"] and c["batch_size"] == 1
-        and c["extra"] == {"check_identity": True} for c in calls)
+        and c["extra"] == {"check_identity": True, "host_cache": cache} for c in calls)
+    assert Path(cache["dir"]).name.startswith("ck_search_host_cache-")
+    assert not Path(cache["dir"]).exists() and "Host cache: 0 entries" in cap.out
     _assert_worker(calls)
     assert len(set(built)) == len(built) <= 12
     assert {p.name for p in (out / "artifacts").iterdir()} == {f"{n}.so" for n in built}
@@ -249,6 +253,46 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     assert {(c["prob"]["M"], c["prob"]["N"], c["prob"]["K"], n)
             for c in recalls for n in c["names"]} == {
         (p["M"], p["N"], p["K"], winners[k][0]) for k, p in zip(KEYS, PROBLEMS)}
+
+
+@pytest.mark.parametrize("off", [False, True])
+def test_host_cache_settings_reach_the_workers(monkeypatch, capsys, tmp_path, off):
+    # host_cache.dir holds the run's cache dir; max_total_gib 0 turns it off.
+    where = tmp_path / "scratch"
+    where.mkdir()
+    host = {"dir": str(where), "max_entry_gib": 0.5, "max_total_gib": 0 if off else 2}
+    rc, cap, _, calls, out = _search(monkeypatch, capsys, tmp_path, host_cache=host)
+    assert rc == 0, cap.out
+    specs = [c["extra"].get("host_cache") for c in calls]
+    if off:
+        assert specs == [None] * len(calls) and "Host cache" not in cap.out
+    else:
+        assert all(s == specs[0] for s in specs)
+        assert Path(specs[0]["dir"]).parent == where
+        assert (specs[0]["max_entry_bytes"], specs[0]["max_total_bytes"]) == (
+            2**29, 2**31)
+    assert _read(out, "run.json")["context"]["measurement"]["host_cache"] == specs[0]
+    assert list(where.iterdir()) == []
+
+
+def test_interrupted_search_removes_its_host_cache(monkeypatch, capsys, tmp_path):
+    # Ctrl-C or SIGTERM reaches the run as KeyboardInterrupt (here from the
+    # build): it exits 130 and its host cache directory is gone.
+    where = tmp_path / "scratch"
+    where.mkdir()
+
+    def build(cfgs, **kw):
+        (cache,) = where.iterdir()
+        (cache / "entry").mkdir()
+        (cache / "entry" / "a.npy").write_bytes(b"x" * 100)
+        raise KeyboardInterrupt
+
+    rc, cap = run_stub_driver(
+        drv, monkeypatch, capsys, tmp_path, PROBLEMS, "--search-config",
+        _settings(tmp_path, host_cache={"dir": str(where)}), "--search-output-dir",
+        str(tmp_path / "run"), build=build, run_batch=None)
+    assert rc == 130 and list(where.iterdir()) == []
+    assert "Host cache: 0 entries, 0.00 GiB, removed" in cap.out
 
 
 @pytest.mark.parametrize("problems", [PROBLEMS, [MISALIGNED], PROBLEMS[:1] + [MISALIGNED]],

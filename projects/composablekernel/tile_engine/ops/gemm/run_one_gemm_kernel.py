@@ -17,6 +17,10 @@ Optional top-level keys ``verify`` (bool) and ``verify_tol`` (float) enable an
 fp32 numpy reference check; when set, each OK result also carries ``verified``
 and ``max_rel``. With ``check_identity`` (bool) a library whose own kernel name
 is not the requested ``kernel_name`` is refused (the adaptive search sets it).
+With ``host_cache`` (a ``host_cache.HostCache.spec``, also set by the search
+only) a standard kernel's host inputs and fp32 reference come from the search
+run's cache when the problem has an entry there, else they are computed and
+stored: the same values, computed once per problem instead of once per call.
 
 Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, "ms": 0.123, "tflops": 456.7, "non_zero": 1, "kernel": "..."}
@@ -45,8 +49,14 @@ from gemm_utils import (  # noqa: E402
     GpuGemmRunner,
     GpuMultiABDRunner,
     _dtype_from_kernel_name,
+    _layout_from_kernel_name,
+    _resolve_use_ocp,
 )
 import numpy as np  # noqa: E402
+
+INPUT_SEED, INPUT_SCALE = 42, 0.1  # the random host inputs: randn * scale
+_COMMON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                           "common")
 
 
 def _is_multi_abd(kernel_name):
@@ -64,6 +74,53 @@ def _check_identity(runner, kernel_name):
         )
 
 
+def _inputs(problem):
+    """The fp32 host A (MxK) and B (KxN) every GEMM measurement uses."""
+    rng = np.random.RandomState(INPUT_SEED)
+    return (
+        (rng.randn(problem.M, problem.K) * INPUT_SCALE).astype(np.float32),
+        (rng.randn(problem.K, problem.N) * INPUT_SCALE).astype(np.float32),
+    )
+
+
+def _host_data(runner, problem, spec):
+    """A and B as ``runner``'s kernel reads them, the fp32 reference and its
+    max |ref| (``a``, ``b``, ``ref``, ``denom``), from the host cache ``spec``.
+    The entry's key holds everything they depend on: the problem, the
+    kernel's dtype and layout (its packed strides follow from the layout and
+    the extents), the fp8/bf8 format and the input generator."""
+    if _COMMON_DIR not in sys.path:
+        sys.path.insert(0, _COMMON_DIR)
+    import host_cache
+
+    dtype = _dtype_from_kernel_name(runner.kernel_name)
+    fields = {
+        "op": "gemm",
+        "problem": problem.to_dict(),
+        "dtype": dtype,
+        "layout": _layout_from_kernel_name(runner.kernel_name),
+        "fp8_ocp": _resolve_use_ocp(runner._use_ocp) if dtype in ("fp8", "bf8") else None,
+        "inputs": [INPUT_SEED, INPUT_SCALE],
+    }
+
+    def compute():
+        A, B = _inputs(problem)
+        a, b = runner.encode_inputs(A, B)
+        ref = runner.reference(A, B)
+        return {"a": a, "b": b, "ref": ref,
+                "denom": np.float64(float(np.max(np.abs(ref))) or 1.0)}
+
+    return host_cache.cached(spec, fields, compute)
+
+
+def _check(out, output, ref, denom, verify_tol):
+    """Add ``max_rel`` of ``output`` against ``ref`` and ``verified`` to ``out``."""
+    got = output.astype(np.float32)
+    max_rel = float(np.max(np.abs(got - ref)) / denom)
+    out["max_rel"] = max_rel
+    out["verified"] = bool(max_rel <= verify_tol)
+
+
 def _run_one(
     idx,
     so_path,
@@ -76,6 +133,7 @@ def _run_one(
     b_op=None,
     cde_op=None,
     check_identity=False,
+    host_cache=None,
 ):
     """Run a single kernel and emit its result as one JSON line.
 
@@ -111,26 +169,28 @@ def _run_one(
             # operands), so verification flows through the runner, not the A@B
             # check below.
             result = runner.run(problem, verify=verify, verify_tol=verify_tol)
-            A = B = None
+            A = B = host = None
         else:
-            # Cache host matrices per shape so batch mode doesn't regenerate huge
-            # inputs per kernel.
-            cache = getattr(_run_one, "_ab_cache", {})
-            key = (problem.M, problem.N, problem.K)
-            if key not in cache:
-                rng = np.random.RandomState(42)
-                cache[key] = (
-                    (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32),
-                    (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32),
-                )
-                _run_one._ab_cache = cache
-            A, B = cache[key]
+            A = B = host = None
+            if host_cache is None:
+                # Cache host matrices per shape so batch mode doesn't regenerate
+                # huge inputs per kernel.
+                cache = getattr(_run_one, "_ab_cache", {})
+                key = (problem.M, problem.N, problem.K)
+                if key not in cache:
+                    cache[key] = _inputs(problem)
+                    _run_one._ab_cache = cache
+                A, B = cache[key]
 
             # CRITICAL: load the library ONLY inside this subprocess.
             runner = GpuGemmRunner(lib_path=so_path)
             if check_identity:
                 _check_identity(runner, kernel_name)
-            result = runner.run(A, B, problem)
+            if host_cache is None:
+                result = runner.run(A, B, problem)
+            else:
+                host = _host_data(runner, problem, host_cache)
+                result = runner.run_encoded(host["a"], host["b"], problem)
 
         if result.success:
             non_zero = (
@@ -154,6 +214,8 @@ def _run_one(
                 if result.max_rel is not None:
                     out["max_rel"] = result.max_rel
                     out["verified"] = bool(result.max_rel <= verify_tol)
+            elif verify and host is not None:
+                _check(out, result.output, host["ref"], float(host["denom"]), verify_tol)
             elif verify and A is not None and B is not None:
                 # Reference uses the SAME quantized inputs the device sees, so the
                 # metric isolates compute error from input quantization (fp8/bf8
@@ -170,11 +232,7 @@ def _run_one(
                     ref = runner.reference(A, B)
                     refs[ref_key] = (ref, float(np.max(np.abs(ref))) or 1.0)
                     _run_one._ref_cache = refs
-                ref, denom = refs[ref_key]
-                got = result.output.astype(np.float32)
-                max_rel = float(np.max(np.abs(got - ref)) / denom)
-                out["max_rel"] = max_rel
-                out["verified"] = bool(max_rel <= verify_tol)
+                _check(out, result.output, *refs[ref_key], verify_tol)
             print(json.dumps(out), flush=True)
         else:
             print(
@@ -212,6 +270,7 @@ def main():
     verify = bool(d.get("verify", False))
     verify_tol = float(d.get("verify_tol", 2e-2))
     check_identity = bool(d.get("check_identity", False))
+    host_cache = d.get("host_cache")
 
     if "items" in d:
         for i, item in enumerate(d["items"]):
@@ -227,6 +286,7 @@ def main():
                 b_op=item.get("b_elementwise_op"),
                 cde_op=item.get("cde_elementwise_op"),
                 check_identity=check_identity,
+                host_cache=host_cache,
             )
     else:
         _run_one(
@@ -241,6 +301,7 @@ def main():
             b_op=d.get("b_elementwise_op"),
             cde_op=d.get("cde_elementwise_op"),
             check_identity=check_identity,
+            host_cache=host_cache,
         )
 
 

@@ -10,6 +10,9 @@
 * ``GpuBatchedGemmRunner`` shares it, and the GEMM, stream-K and batched
   workers use it.
 * A sweep with failed measurements exits 1.
+* The adaptive search's host cache hands the GEMM worker the inputs and the
+  reference it would compute: the same outcome, computed once per problem,
+  dtype and layout.
 
 The ctypes lib is replaced by a host model of an exact kernel.
 """
@@ -26,8 +29,10 @@ DISPATCHER_DIR = Path(__file__).resolve().parent.parent
 GEMM_TE_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(GEMM_TE_DIR))
+sys.path.insert(0, str(GEMM_TE_DIR.parent / "common"))
 
 import gemm_full_benchmark as drv  # noqa: E402
+import host_cache as HC  # noqa: E402
 import run_one_batched_gemm_kernel  # noqa: E402
 import run_one_gemm_kernel  # noqa: E402
 import run_one_streamk_gemm_kernel  # noqa: E402
@@ -213,6 +218,81 @@ def test_gemm_worker_reuses_the_reference_per_shape_and_encoding(monkeypatch, ca
 
 def _dtype_of(runner):
     return runner.kernel_name.split("_")[1]
+
+
+# ------------------------------------------------------------- host cache
+
+
+@pytest.fixture
+def gemm_worker(monkeypatch, capsys):
+    """run(runner, problem, **kw): the GEMM worker's JSON line for ``runner``
+    (fresh in-process caches); ``counts`` of inputs and references made."""
+    worker = run_one_gemm_kernel
+    counts = {"inputs": 0, "reference": 0}
+    inputs, reference = worker._inputs, GpuGemmRunner.reference
+
+    def count(what, fn):
+        def wrapped(*a):
+            counts[what] += 1
+            return fn(*a)
+        return wrapped
+
+    monkeypatch.setattr(worker, "_inputs", count("inputs", inputs))
+    monkeypatch.setattr(GpuGemmRunner, "reference", count("reference", reference))
+
+    def run(runner, problem=PROBLEM, **kw):
+        monkeypatch.setattr(worker, "GpuGemmRunner", lambda **k: runner)
+        for cache in ("_ab_cache", "_ref_cache"):
+            if hasattr(worker._run_one, cache):
+                monkeypatch.delattr(worker._run_one, cache)
+        worker._run_one(0, "fake.so", problem, runner.kernel_name, verify=True, **kw)
+        return capsys.readouterr().out.strip()
+
+    run.counts = counts
+    return run
+
+
+@pytest.mark.parametrize("layout", ["rcr", "crr", "rrr", "ccr"])
+@pytest.mark.parametrize("dtype,use_ocp", CASES)
+def test_host_cache_gives_the_uncached_outcome(gemm_worker, tmp_path, dtype, use_ocp,
+                                               layout):
+    runner = _runner(dtype, use_ocp, layout)
+    legacy = gemm_worker(runner)
+    with HC.HostCache(tmp_path) as cache:
+        miss = gemm_worker(runner, host_cache=cache.spec)
+        hit = gemm_worker(runner, host_cache=cache.spec)
+        assert HC.usage(cache.dir)[0] == 1
+    assert legacy == miss == hit and json.loads(hit)["verified"], (legacy, hit)
+    # The hit read everything: inputs and reference made by the first two only.
+    assert gemm_worker.counts == {"inputs": 2, "reference": 2}
+
+
+def test_host_cache_keeps_dtypes_layouts_and_problems_apart(gemm_worker, tmp_path):
+    # One entry per (problem, dtype, layout, fp8 format): a crr kernel handed
+    # an rcr entry's buffers (or bf16 an fp16 one's) would fail verification.
+    other = {"M": 96, "N": 64, "K": 256}
+    kernels = [(_runner("bf16", None, lay), PROBLEM) for lay in ("rcr", "crr", "ccr")]
+    kernels += [(_runner("fp16", None), PROBLEM), (_runner("fp8", False), PROBLEM),
+                (_runner("fp8", True), PROBLEM), (_runner("bf16", None), other)]
+    with HC.HostCache(tmp_path) as cache:
+        first = [gemm_worker(r, p, host_cache=cache.spec) for r, p in kernels]
+        again = [gemm_worker(r, p, host_cache=cache.spec) for r, p in kernels]
+        assert HC.usage(cache.dir)[0] == len(kernels)
+    assert first == again
+    for line, (runner, _) in zip(first, kernels):
+        out = json.loads(line)
+        assert out["verified"] and out["max_rel"] < _c_eps(_dtype_of(runner)), out
+    assert gemm_worker.counts["reference"] == len(kernels)
+
+
+def test_host_cache_over_its_cap_computes_as_without_it(gemm_worker, tmp_path):
+    runner = _runner("bf16", None, "crr")
+    legacy = gemm_worker(runner)
+    with HC.HostCache(tmp_path, max_entry_bytes=1) as cache:
+        lines = [gemm_worker(runner, host_cache=cache.spec) for _ in range(2)]
+        assert HC.usage(cache.dir) == (0, 0)
+    assert lines == [legacy, legacy]
+    assert gemm_worker.counts == {"inputs": 3, "reference": 3}
 
 
 # ------------------------------------------------------------- exit code

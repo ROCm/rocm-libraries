@@ -20,9 +20,11 @@ driver's own build and measure functions, which the driver passes in as
 - measurements: ``benchmark_on_devices`` with --verify on, one kernel per worker
   and one problem entry per request, so every row and failure record belongs to
   exactly one request; the worker also checks that the library reports the
-  requested kernel (``check_identity``). Each call writes its own CSV under
-  ``<out>/rounds/``, next to a JSON file mapping its ``problem_idx`` to the
-  request (call id, trial) and holding its failure records;
+  requested kernel (``check_identity``) and reads the problem's inputs and
+  reference from the run's host cache (``host_cache.py``) instead of computing
+  them on every call. Each call writes its own CSV under ``<out>/rounds/``,
+  next to a JSON file mapping its ``problem_idx`` to the request (call id,
+  trial) and holding its failure records;
 - confirmation: the same path with fresh calls, each problem's on one device
   (problem i on device i mod n), so its finalists run on the same GPU.
 
@@ -50,6 +52,7 @@ if _COMMON_DIR not in sys.path:
     sys.path.insert(0, _COMMON_DIR)
 
 import adaptive_search  # noqa: E402
+import host_cache  # noqa: E402
 from adaptive_search import (  # noqa: E402
     ArtifactStore,
     BuildResult,
@@ -93,9 +96,11 @@ RUN_STATUS = {
 }
 # A verified one-kernel worker also pays the host side of verification (random
 # inputs, the fp32 numpy reference GEMM, the comparison), which a batched
-# --verify run pays once per batch. Each call's timeout is --kernel-timeout
-# plus that time, budgeted at 50 GFLOP/s for the reference: a rate the host
-# keeps with several device workers sharing its cores.
+# --verify run pays once per batch. With the host cache only the comparison is
+# left once the problem has an entry, but a problem's first call, or one over
+# the cache's caps, pays it all. Each call's timeout is --kernel-timeout plus
+# that time, budgeted at 50 GFLOP/s for the reference: a rate the host keeps
+# with several device workers sharing its cores.
 VERIFY_HOST_FLOPS = 5e10
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # A search round measures once all its builds end, so a kernel that never
@@ -212,11 +217,14 @@ class GemmSearchAdapter:
     ``worker`` is the driver's ``(worker_path, base_env)``; ``context`` adds
     the driver's build context (arch, layout, variant, configs) to run.json;
     ``build_timeout`` (seconds) limits each step of every kernel's build, and
-    ``None`` means the search default (``_build_timeout_for``).
+    ``None`` means the search default (``_build_timeout_for``); the workers
+    share ``cache`` (a ``host_cache.HostCache``; None: each computes its own
+    inputs and reference).
     """
 
     def __init__(self, args, hooks: DriverHooks, problems, configs, eligible,
-                 devices, worker, out_dir, context=None, build_timeout=None):
+                 devices, worker, out_dir, context=None, build_timeout=None,
+                 cache=None):
         if len(problems) != len(eligible):
             raise ValueError(f"{len(problems)} problems, {len(eligible)} pair lists")
         self.args = args
@@ -225,8 +233,12 @@ class GemmSearchAdapter:
         self.worker_path, self.base_env = worker
         self._context = dict(context or {})
         self.build_timeout = build_timeout
+        self.host_cache = None if cache is None else cache.spec
         # Verified, one kernel per worker: a batch failure names one request.
         self.margs = argparse.Namespace(**{**vars(args), "verify": True, "batch_size": 1})
+        self.extra = {"check_identity": True}
+        if self.host_cache:
+            self.extra["host_cache"] = self.host_cache
         by_name = {}
         for cfg in configs:
             by_name.setdefault(cfg.name, cfg)
@@ -282,7 +294,7 @@ class GemmSearchAdapter:
                             "batch_size": 1, "kernel_timeout": a.kernel_timeout,
                             "timeout_s": "kernel_timeout + ceil(2*M*N*K / "
                                          f"{VERIFY_HOST_FLOPS:g}) per call",
-                            "check_identity": True},
+                            "check_identity": True, "host_cache": self.host_cache},
             "build": {"workers": a.workers,
                       "build_timeout": self.build_timeout or SEARCH_BUILD_TIMEOUT_S,
                       "build_timeout_applies_to": "every kernel" if self.build_timeout
@@ -360,7 +372,7 @@ class GemmSearchAdapter:
         self.hooks.measure(
             problems, [[index[r.candidate_key]] for r in reqs],
             built, self.devices, margs, self.worker_path, self.base_env,
-            csv_path, extra={"check_identity": True},
+            csv_path, extra=self.extra,
             record_failures=fails.extend, measured=rows, title=title, **pin,
         )
         self.calls.write_json(csv_path, {
@@ -389,9 +401,10 @@ def run_gemm_search(args, settings: SearchSettings, hooks: DriverHooks, *,
                     problems, configs, eligible, devices, worker,
                     context=None) -> int:
     """The driver's search mode (``adaptive_search.run_search``): its exit code."""
-    adapter = GemmSearchAdapter(args, hooks, problems, configs, eligible, devices,
-                                worker, args.search_output_dir, context,
-                                settings.build_timeout_s)
-    return adaptive_search.run_search(adapter, settings, args.search_output_dir,
-                                      devices, pair_loader=hooks.load_pairs,
-                                      prior_loader=read_ranked_csv)
+    with host_cache.run_cache(settings.host_cache) as cache:
+        adapter = GemmSearchAdapter(args, hooks, problems, configs, eligible, devices,
+                                    worker, args.search_output_dir, context,
+                                    settings.build_timeout_s, cache)
+        return adaptive_search.run_search(adapter, settings, args.search_output_dir,
+                                          devices, pair_loader=hooks.load_pairs,
+                                          prior_loader=read_ranked_csv)

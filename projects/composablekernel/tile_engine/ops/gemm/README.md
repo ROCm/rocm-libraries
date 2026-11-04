@@ -233,6 +233,7 @@ builds).
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
 | `measurement_policy` | `full` | the only value |
+| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache. `max_total_gib` `0` turns it off. See "Host cache" below |
 
 Unknown keys are an error; relative warm-start paths are read from the settings
 file's directory.
@@ -265,10 +266,11 @@ Option rules:
   is rejected too: the search's limit is `build_timeout_s`.
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
-  Each call therefore also pays the host side of verification (random inputs
-  and an fp32 numpy reference GEMM: about 1 s at 4096^3 and 4 s at 8192^3 on
-  a 16-core host), which a batched `--verify` run pays once per batch; its
-  timeout is `--kernel-timeout` plus `ceil(2*M*N*K / 5e10)` s for it.
+  The host side of verification (random inputs, an fp32 numpy reference
+  GEMM) comes from the run's host cache (see below) after a problem's first
+  call; that call, or every call of a problem the cache cannot hold, pays it
+  in full, so a call's timeout is `--kernel-timeout` plus
+  `ceil(2*M*N*K / 5e10)` s.
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
   confirmation calls run on one device (problem `i` on device `i mod n`), so
@@ -357,8 +359,24 @@ unconfirmed result. A search run asks the worker to check each library's
 identity (`check_identity`): a library whose own name
 (`GpuGemmRunner.kernel_name`, the codegen `KERNEL_NAME` that
 `GemmKernelConfig.name` reproduces) is not the requested kernel is refused
-with an error naming both. Without `check_identity` (every run without
-`--search-config`) the worker's input and output are unchanged.
+with an error naming both. Without `check_identity` and `host_cache` (every
+run without `--search-config`) the worker's input and output are unchanged.
+
+Host cache: without it, every verified call regenerates the problem's random
+inputs, encodes them for the kernel and recomputes the fp32 reference in its
+own worker; on a 16-core host that took 15 s per call at bf16 `rcr`
+8192x8192x8192 and 4.7 s at 2048x256x49152 (7.8 s in `crr`). In a search,
+the first call of a problem computes them as before and stores the encoded A
+and B, the reference and its maximum as `.npy` files: one entry per key (the
+problem, dtype, layout, fp8 format and input seed), written under a temp name
+and renamed into place, so concurrent workers on any device read a complete
+entry or none. Later calls only load them and compare: 0.37 s and 0.06 s for
+the two shapes above. An entry holds what each worker would compute itself,
+so verification results are the same with or without it. The directory goes
+when the run ends (the run prints its entries and size), also on an error,
+Ctrl-C or SIGTERM; a run killed with SIGKILL leaves its
+`ck_search_host_cache-*` directory behind. A tmpfs such as `/dev/shm` is
+faster but holds the entries in RAM.
 
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against

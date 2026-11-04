@@ -194,13 +194,15 @@ def _get(data, where, name, kind, default=_REQUIRED, ok=None, want=""):
     return float(v) if kind is float else v
 
 
-def _get_file(data, where, name, base):
+def _get_file(data, where, name, base, kind="file"):
+    """``data[name]``, a path relative to ``base``, of an existing ``kind``
+    ("file" or "directory")."""
     v = _get(data, where, name, str, None, bool, "a path")
     if v is None:
         return None
     p = Path(v) if base is None else base / v  # an absolute v ignores base
-    if not p.is_file():
-        raise SettingsError(f"{where}.{name}={v!r}: no such file ({p})")
+    if not (p.is_file() if kind == "file" else p.is_dir()):
+        raise SettingsError(f"{where}.{name}={v!r}: no such {kind} ({p})")
     return str(p)
 
 
@@ -244,15 +246,27 @@ class ConfirmSettings:
 
 
 @dataclass(frozen=True)
+class HostCacheSettings:
+    """The run's cache of each problem's verification inputs and reference
+    (``host_cache.py``; the op binding uses it). ``dir`` None: the system temp
+    directory; ``max_total_gib`` None: a quarter of its free space; 0: off."""
+
+    dir: Optional[str] = None
+    max_entry_gib: float = 4.0
+    max_total_gib: Optional[float] = None
+
+
+@dataclass(frozen=True)
 class SearchSettings:
     """A validated ``--search-config`` (schema_version 1).
 
-    Relative warm-start paths are resolved against the settings file's directory
-    (against the working directory when the settings come as a dict). There is
-    no deadline unless ``deadline_s`` is given: the trial and build budgets
-    bound a run. ``build_timeout_s`` limits each step of a kernel's build in
-    the search; None leaves it to the op's search default (the coordinator
-    does not read it: the op binding passes it to its build).
+    Relative warm-start and host-cache paths are resolved against the settings
+    file's directory (against the working directory when the settings come as
+    a dict). There is no deadline unless ``deadline_s`` is given: the trial
+    and build budgets bound a run. ``build_timeout_s`` limits each step of a
+    kernel's build in the search; None leaves it to the op's search default.
+    The coordinator reads neither it nor ``host_cache``: the op binding
+    passes them to its build and its workers.
     """
 
     strategy: str
@@ -268,6 +282,7 @@ class SearchSettings:
     warm_start: Optional[WarmStartSettings] = None
     confirm: ConfirmSettings = field(default_factory=ConfirmSettings)
     measurement_policy: str = "full"
+    host_cache: HostCacheSettings = field(default_factory=HostCacheSettings)
 
     @classmethod
     def from_json(cls, source) -> "SearchSettings":
@@ -318,6 +333,8 @@ class SearchSettings:
                 )
         cd, cw = data.get("confirm", {}), w + ".confirm"
         _check_keys(cd, [f for f in ConfirmSettings.__dataclass_fields__], cw)
+        hd, hw = data.get("host_cache", {}), w + ".host_cache"
+        _check_keys(hd, [f for f in HostCacheSettings.__dataclass_fields__], hw)
         return cls(
             strategy=strategy,
             trials_per_problem=trials,
@@ -341,12 +358,21 @@ class SearchSettings:
                 data, w, "measurement_policy", str, "full",
                 lambda v: v in MEASUREMENT_POLICIES, f"one of {MEASUREMENT_POLICIES}",
             ),
+            host_cache=HostCacheSettings(
+                dir=_get_file(hd, hw, "dir", base, "directory"),
+                max_entry_gib=_get(hd, hw, "max_entry_gib", float, 4.0,
+                                   lambda v: v > 0, "> 0"),
+                max_total_gib=_get(hd, hw, "max_total_gib", float, None,
+                                   lambda v: v >= 0, ">= 0"),
+            ),
         )
 
     def to_json(self) -> dict:
         """The settings as accepted by ``from_json`` (paths resolved)."""
         d = {f: getattr(self, f) for f in self.__dataclass_fields__}
         d["confirm"] = vars(self.confirm).copy()
+        d["host_cache"] = {k: v for k, v in vars(self.host_cache).items()
+                           if v is not None}
         for name in ("deadline_s", "build_timeout_s"):
             if d[name] is None:
                 del d[name]
