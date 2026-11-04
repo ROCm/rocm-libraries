@@ -3379,7 +3379,7 @@ void case_buffer_rsrc_refusals()
         ROCKE_LLVM_FLAVOR_LLVM20,
         &err);
     if(st != ROCKE_ERR_VALUE
-       || err.find("tile.buffer_rsrc num_bytes must be i32 at llvm20, got i64; the llvm20 "
+       || err.find("buffer_rsrc num_bytes must be i32 at llvm20, got i64; the llvm20 "
                    "make.buffer.rsrc takes an i32 num_records, so pass the byte count as i32")
               == std::string::npos)
         fail(("i64 num_bytes at llvm20: " + err).c_str(), __LINE__);
@@ -3407,7 +3407,7 @@ void case_buffer_rsrc_refusals()
         "gfx942",
         &hip_err);
     if(hip_st != ROCKE_ERR_VALUE
-       || hip_err.find("tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
+       || hip_err.find("buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
                        "the HIP lowering casts num_records to (int), so a wider byte count "
                        "would be truncated; pass it as i32")
               == std::string::npos)

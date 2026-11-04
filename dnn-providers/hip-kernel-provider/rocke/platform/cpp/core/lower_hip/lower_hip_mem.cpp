@@ -1086,7 +1086,7 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
         {
             return rocke_h_fail(lw,
                                 ROCKE_ERR_VALUE,
-                                "tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                                "buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
                                 "%s; the HIP lowering casts num_records to (int), so a wider byte "
                                 "count would be truncated; pass it as i32",
                                 nb_ty);

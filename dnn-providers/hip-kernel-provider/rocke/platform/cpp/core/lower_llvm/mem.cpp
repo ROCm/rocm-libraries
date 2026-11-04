@@ -1044,7 +1044,7 @@ static void op_tile_buffer_rsrc(rocke_lower_t* L, const rocke_op_t* op)
         else
         {
             rocke_ll_fail(
-                L, ROCKE_ERR_VALUE, "tile.buffer_rsrc num_bytes must be i32 or i64, got %s", nb_ty);
+                L, ROCKE_ERR_VALUE, "buffer_rsrc num_bytes must be i32 or i64, got %s", nb_ty);
         }
         nb_text = rocke_arena_printf(&L->arena, "i64 %s", nb_arg);
     }
@@ -1059,7 +1059,7 @@ static void op_tile_buffer_rsrc(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_fail(
                 L,
                 ROCKE_ERR_VALUE,
-                "tile.buffer_rsrc num_bytes must be i32 at llvm20, got %s; the llvm20 "
+                "buffer_rsrc num_bytes must be i32 at llvm20, got %s; the llvm20 "
                 "make.buffer.rsrc takes an i32 num_records, so pass the byte count as i32",
                 nb_ty);
         }
@@ -1690,7 +1690,7 @@ static void op_tile_global_load_async_to_lds(rocke_lower_t* L, const rocke_op_t*
     const char* idx_ty;
     rocke_strbuf_t gep;
     int i;
-    rocke_ll_require_global_header_ptr(L, "global_load_async_to_lds", src_ptr, "ptr");
+    rocke_ll_require_global_header_ptr(L, "global_load_async_to_lds", src_ptr, "src_ptr");
 
     if(width == 1)
         suffix = "b8";
@@ -2049,7 +2049,7 @@ static void op_tile_global_load_lds(rocke_lower_t* L, const rocke_op_t* op)
     int64_t aux = ll_attr_int(op, "aux", 0);
     const char* gep;
     const char* ptr_name;
-    rocke_ll_require_global_header_ptr(L, "global_load_lds", src_ptr, "ptr");
+    rocke_ll_require_global_header_ptr(L, "global_load_lds", src_ptr, "src_ptr");
     rocke_ll_need(L, "global.load.lds");
     gep = rocke_ll_fresh(L, "gld_src");
     rocke_ll_emitf(L,

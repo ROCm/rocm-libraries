@@ -5590,7 +5590,9 @@ class _Lowerer:
         src_index = op.operands[1]
         lds_smem = op.operands[2]
         lds_indices = op.operands[3:]
-        self._require_global_header_ptr("global_load_async_to_lds", src_ptr)
+        self._require_global_header_ptr(
+            "global_load_async_to_lds", src_ptr, operand="src_ptr"
+        )
         width = int(op.attrs["width_bytes"])
         cpol = int(op.attrs.get("cpol", 0))
         ioff = int(op.attrs.get("offset_bytes", 0))
@@ -6041,7 +6043,7 @@ class _Lowerer:
                 )
             else:
                 raise ValueError(
-                    f"tile.buffer_rsrc num_bytes must be i32 or i64, got {nb_ty}"
+                    f"buffer_rsrc num_bytes must be i32 or i64, got {nb_ty}"
                 )
             nb_text = f"i64 {nb_arg}"
         else:
@@ -6049,7 +6051,7 @@ class _Lowerer:
             nb_ty = _llvm_type(num_bytes.type)
             if nb_ty != "i32":
                 raise ValueError(
-                    f"tile.buffer_rsrc num_bytes must be i32 at llvm20, got {nb_ty}; "
+                    f"buffer_rsrc num_bytes must be i32 at llvm20, got {nb_ty}; "
                     "the llvm20 make.buffer.rsrc takes an i32 num_records, so pass "
                     "the byte count as i32"
                 )
@@ -6466,7 +6468,7 @@ class _Lowerer:
 
     def _op_tile_global_load_lds(self, op: Op) -> None:
         src_ptr, byte_off, lds_addr = op.operands
-        self._require_global_header_ptr("global_load_lds", src_ptr)
+        self._require_global_header_ptr("global_load_lds", src_ptr, operand="src_ptr")
         size_bytes = int(op.attrs["size_bytes"])
         aux = int(op.attrs.get("aux", 0))
         self._need("global.load.lds")

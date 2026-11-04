@@ -89,7 +89,7 @@ def test_the_llvm_lowering_refuses_an_i64_num_bytes_at_llvm20(engine):
         ARCH,
         engine=engine,
         error_type=ValueError,
-        message="tile.buffer_rsrc num_bytes must be i32 at llvm20, got i64; the llvm20 "
+        message="buffer_rsrc num_bytes must be i32 at llvm20, got i64; the llvm20 "
         "make.buffer.rsrc takes an i32 num_records, so pass the byte count as i32",
         llvm_flavor="llvm20",
     )
@@ -130,7 +130,7 @@ def test_the_hip_lowering_refuses_an_i64_num_bytes(engine):
         ARCH,
         engine=engine,
         error_type=ValueError,
-        message="tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
+        message="buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
         "the HIP lowering casts num_records to (int), so a wider byte count "
         "would be truncated; pass it as i32",
     )

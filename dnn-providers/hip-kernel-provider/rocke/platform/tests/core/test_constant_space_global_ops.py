@@ -256,7 +256,7 @@ REFUSALS = {
         lambda b, x: b.global_load_lds(x, b.const_i32(0), _lds_address(b, F32), 4),
         ARCH,
         None,
-        _header_refusal("global_load_lds"),
+        _header_refusal("global_load_lds", "src_ptr"),
     ),
     "global_load_async_to_lds": (
         I32,
@@ -269,7 +269,7 @@ REFUSALS = {
         ),
         "gfx1250",
         "llvm23",
-        _header_refusal("global_load_async_to_lds"),
+        _header_refusal("global_load_async_to_lds", "src_ptr"),
     ),
     "global_store_async_from_lds": (
         I16,

@@ -2405,7 +2405,7 @@ class _Lowerer:
         # Signature on ROCm 7.1 amdclang:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
         # int num_records, int flags)``; later clang takes a 64-bit
-        # ``num_records`` (``int64_t`` in LLVM 22, ``uint64_t`` after).
+        # ``num_records``: ``int64_t`` in LLVM 22 and 23, ``uint64_t`` after.
         #
         # The flags word is the rsrc DWORD3. Its format / out-of-bounds
         # encoding is ISA-specific (the gfx9 value makes every raw buffer
@@ -2425,7 +2425,7 @@ class _Lowerer:
         nb_ty = op.operands[1].type.name
         if nb_ty != "i32":
             raise ValueError(
-                f"tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                f"buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
                 f"{nb_ty}; the HIP lowering casts num_records to (int), so a wider "
                 "byte count would be truncated; pass it as i32"
             )
