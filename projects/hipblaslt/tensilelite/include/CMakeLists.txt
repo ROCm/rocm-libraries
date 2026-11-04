@@ -84,6 +84,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionBlobCache.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary_fwd.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/StreamK.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Task.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Tensile.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Tensile_fwd.hpp"
