@@ -30,6 +30,10 @@
 #include <gtest/gtest.h>
 #include <rocalution/rocalution.hpp>
 
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+#include <omp.h>
+#endif
+
 using namespace rocalution;
 
 template <typename T>
@@ -1186,6 +1190,66 @@ void testing_amax(const Arguments& argus)
 
     EXPECT_EQ(max_index, argus.size / 2);
     EXPECT_EQ(max_value, static_cast<T>(2 * argus.size));
+}
+
+template <typename T>
+void testing_amax_ties(void)
+{
+    // Above the OpenMP threshold, with 2 threads, so that the host backend runs threaded and
+    // the static schedule splits the vector at size / 2
+    int64_t size = 1 << 16;
+    int64_t half = size / 2;
+
+    set_omp_threads_rocalution(2);
+    set_omp_threshold_rocalution(0);
+
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    // With dynamic teams the runtime may run the scan on one thread, which hides the race
+    int def_dynamic = omp_get_dynamic();
+    omp_set_dynamic(0);
+#endif
+
+    LocalVector<T> vec;
+    vec.Allocate("TestVector", size);
+
+    T       max_value;
+    int64_t max_index;
+
+    // All entries equal: the first one is the maximum
+    vec.Ones();
+    max_value = 0;
+    max_index = vec.Amax(max_value);
+    EXPECT_EQ(max_index, 0);
+    EXPECT_EQ(max_value, static_cast<T>(1));
+
+    // Tied maxima on both sides of the chunk boundary
+    vec[half - 1] = static_cast<T>(2);
+    vec[half]     = static_cast<T>(2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    // Tied in magnitude only
+    vec[half - 1] = static_cast<T>(-2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    vec[half - 1] = static_cast<T>(2);
+    vec[half]     = static_cast<T>(-2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    omp_set_dynamic(def_dynamic);
+#endif
+
+    // Default threshold; the thread count is reset by the next init_rocalution()
+    set_omp_threshold_rocalution(10000);
 }
 
 // Helper function to read binary file contents into a vector
