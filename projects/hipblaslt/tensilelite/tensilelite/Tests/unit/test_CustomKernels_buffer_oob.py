@@ -137,6 +137,45 @@ NO_BUFFER_OOB_KERNELS = {
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_": "rocRoller",
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_": "rocRoller",
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_4": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_4_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_4": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_4_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_4": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_4_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP4_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_": "rocRoller",
+    "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2": "rocRoller",
     "wave_bf16_gemm_256x256x64": "Wave, global_store only",
     "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
@@ -149,8 +188,9 @@ NO_BUFFER_OOB_KERNELS = {
     },
 }
 # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
-# mask against the free size taken at entry.
-NO_BUFFER_OOB_GLOB = "RuntimeGroup_Decode_*"
+# mask against the free size taken at entry. rocRoller GEMMs bound stores with
+# buffer_store and never emit the generator's BufferOOB symbol.
+NO_BUFFER_OOB_GLOBS = ("RuntimeGroup_Decode_*", "RR_GEMM_*")
 
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)
 _STORE_SRD_NUM_RECORDS = re.compile(
@@ -265,8 +305,10 @@ def test_every_kernel_without_a_recognized_store_bound_is_listed():
         checked, _ = store_bound_findings(_kernel_text(name), generator_buffer_oob())
         if not any("BufferOOB" in kind or "num_records" in kind for kind in checked):
             unrecognized.add(name)
-    listed = set(NO_BUFFER_OOB_KERNELS) | set(
-        fnmatch.filter(custom_kernel_names(), NO_BUFFER_OOB_GLOB))
+    names = custom_kernel_names()
+    listed = set(NO_BUFFER_OOB_KERNELS)
+    for pattern in NO_BUFFER_OOB_GLOBS:
+        listed |= set(fnmatch.filter(names, pattern))
     assert unrecognized == listed, (
         f"no store bound recognized, not listed: {sorted(unrecognized - listed)}; "
         f"listed, but a store bound is recognized or the kernel is gone: "
