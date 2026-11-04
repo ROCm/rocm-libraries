@@ -48,6 +48,7 @@ from . import (
 )
 from .candidate import (
     DENSE_ALGORITHM,
+    DENSE_ALGORITHMS,
     DENSE_GRID_ALGORITHM,
     DENSE_PERSIST_ALGORITHM,
 )
@@ -66,7 +67,6 @@ from .common import (
     AttentionTuningSpec,
     FAMILY,
     _device_num_cus,
-    _problem,
     _request_errors,
     _resolve_num_cus,
     _selector_matches,
@@ -564,6 +564,7 @@ __all__ = [
     "D256_DECODE_ALGORITHM",
     "D256_GFX950_ALGORITHM",
     "DENSE_ALGORITHM",
+    "DENSE_ALGORITHMS",
     "DENSE_GRID_ALGORITHM",
     "DENSE_PERSIST_ALGORITHM",
     "GFX942_DENSE_PIPE_ALGORITHM",

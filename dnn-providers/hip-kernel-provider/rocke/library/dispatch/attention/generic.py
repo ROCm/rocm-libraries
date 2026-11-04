@@ -42,7 +42,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -101,7 +101,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         # The scalar gate is the coverage check; it refuses LSE (the scalar
         # kernel writes none), so ask it about the LSE-off problem and let the
         # path's own gate rule on LSE below.
@@ -139,7 +139,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path=path,
             head_size=problem.head_size,
@@ -196,7 +196,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -213,7 +213,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="3d",
             head_size=problem.head_size,

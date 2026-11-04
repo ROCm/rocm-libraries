@@ -138,28 +138,24 @@ def test_padded_rows_are_zero_and_neg_inf():
 
 # seq_len_q / seq_len_kv become cu_seqlens_q / seqused_k, which bound the
 # kernel's Q and K/V reads on the device; a bad value must be refused at bind.
+# The range/count/dtype rule itself is ``validate_lengths``'s (shared with
+# ``sdpa_seqlens`` / ``sdpa_cu_seqlens``, covered torch-free in
+# ``tests/test_sdpa_seqlen.py``); these pin that ``sdpa_unified_bind`` reaches
+# it before any kernel launch.
 _BAD_LENGTHS = [
-    ("seq_len_q", [2, 1], r"seq_len_q: need 2 lengths in \[0, 1\]"),
-    ("seq_len_q", [-1, 1], r"seq_len_q: need 2 lengths in \[0, 1\]"),
-    ("seq_len_q", [1, 1, 1], "seq_len_q: need 2 lengths"),
-    ("seq_len_kv", [17, 16], r"seq_len_kv: need 2 lengths in \[0, 16\]"),
-    ("seq_len_kv", [-1, 16], r"seq_len_kv: need 2 lengths in \[0, 16\]"),
-    ("seq_len_kv", [16], "seq_len_kv: need 2 lengths"),
+    ("seq_len_q", [2, 1], r"seq_len_q: every length must satisfy 0 <= len <= 1"),
+    ("seq_len_q", [-1, 1], "seq_len_q: every length must be >= 0"),
+    ("seq_len_q", [1, 1, 1], "seq_len_q: expected 2 per-batch lengths, got 3"),
+    ("seq_len_kv", [17, 16], r"seq_len_kv: every length must satisfy 0 <= len <= 16"),
+    ("seq_len_kv", [-1, 16], "seq_len_kv: every length must be >= 0"),
+    ("seq_len_kv", [16], "seq_len_kv: expected 2 per-batch lengths, got 1"),
 ]
 
 
 @pytest.mark.parametrize(
     "key,values,match", _BAD_LENGTHS, ids=[f"{k}={v}" for k, v, _ in _BAD_LENGTHS]
 )
-def test_invalid_seq_len_is_refused_before_launch(monkeypatch, key, values, match):
-    from kernels.common import attention_unified
-
-    def must_not_launch(**_kw):
-        raise AssertionError("kernel launched with invalid lengths")
-
-    monkeypatch.setattr(
-        attention_unified, "run_unified_attention_torch", must_not_launch
-    )
+def test_invalid_seq_len_is_refused_before_launch(key, values, match):
     req = replace(
         make_request(d=64, s_q=1, s_kv=16),
         padding_mask=True,

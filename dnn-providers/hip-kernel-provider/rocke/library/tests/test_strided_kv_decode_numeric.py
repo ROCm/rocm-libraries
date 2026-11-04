@@ -97,7 +97,7 @@ def _paged_cache(torch, logical, block_size):
 )
 def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     from dispatch.attention import AttentionRequest, dispatch_attention
-    from dispatch.attention.common import _problem
+    from dispatch.attention.common import attention_problem
     from kernels.common import attention_unified as au
 
     torch, arch = gpu
@@ -117,7 +117,7 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
         kv_block_size=block,
         target_ctas=8,
     )
-    problem = _problem(request)
+    problem = attention_problem(request)
     torch.manual_seed(314)
     storage_dtype = torch.float16 if dtype == "fp16" else torch.bfloat16
     q_cpu = torch.randn(3, 8, dim).to(storage_dtype)

@@ -33,13 +33,9 @@ from rocke.runtime.torch_interop import empty_workspace, resolve_stream, torch_d
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
+    DENSE_ALGORITHMS,
     AttentionRequest,
     dense_scale_range,
-)
-from dispatch.attention.candidate import (
-    DENSE_ALGORITHM,
-    DENSE_GRID_ALGORITHM,
-    DENSE_PERSIST_ALGORITHM,
 )
 from dispatch.attention.common import Alignment, AttentionBand
 
@@ -66,9 +62,10 @@ __all__ = [
     "sdpa_dense_candidates",
 ]
 
-_DENSE_ALGORITHMS = frozenset(
-    {DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM}
-)
+# Named by the module that registers them (``dispatch.attention.DENSE_ALGORITHMS``),
+# rather than duplicated here as literals, so a renamed or added dense algorithm
+# breaks this import instead of silently leaving the gate unaware of it.
+_DENSE_ALGORITHMS = DENSE_ALGORITHMS
 
 # The binding's ``supports_features``: what the dense launch path carries.
 # Layouts other than contiguous BSHD are carried by copying Q/K/V into, and O

@@ -25,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from kernels.common._sdpa_seqlen import validate_lengths
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
 from rocke.runtime.torch_interop import (
@@ -77,8 +78,6 @@ __all__ = [
 # tests/dispatch/attention/test_review_followups.py for the full partition of
 # ``ATTENTION_ROUTE_REGISTRY`` by launch path).
 _UNIFIED_ALGORITHMS = UNIFIED_ALGORITHMS
-# Only the split-KV (3D) path writes LSE.
-_LSE_ALGORITHMS = frozenset({"unified_3d", "d256_decode"})
 
 # The binding's ``supports_features``: what the unified launch path carries.
 # Layouts other than packed BSHD are carried by copying Q/O to and from a
@@ -142,11 +141,11 @@ def _computed_band(req: SdpaRequest) -> AttentionBand:
     cannot serve.
     """
     attn = to_attention_request(req)
-    top_left, right_bound = attention_band(attn)
+    band = attention_band(attn)
     return AttentionBand(
         left_bound=attn.sliding_window if attn.sliding_window > 0 else None,
-        right_bound=None if right_bound < 0 else right_bound,
-        alignment=Alignment.TOP_LEFT if top_left else Alignment.BOTTOM_RIGHT,
+        right_bound=None if band.kernel_right_bound < 0 else band.kernel_right_bound,
+        alignment=Alignment.TOP_LEFT if band.top_left else Alignment.BOTTOM_RIGHT,
     )
 
 
@@ -192,15 +191,20 @@ def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
 
 
 def _unified_supported(req: SdpaRequest) -> tuple[KernelCandidate, ...]:
-    """Unified route candidates that admit the translated request."""
-    supported = tuple(
+    """Unified route candidates that admit the translated request.
+
+    No separate LSE filter: ``to_attention_request`` already carries
+    ``emit_lse`` into the translated request, and each unified candidate's own
+    ``Capability`` and ``support()`` (see ``dispatch/attention/generic.py``)
+    already decide which arches/paths can write it -- both the tiled 2D and
+    split-KV (3D) paths do, on gfx942/gfx950. Filtering again here by a static
+    algorithm set only ever drops candidates the registry already admitted.
+    """
+    return tuple(
         c
         for c in ATTENTION_ROUTE_REGISTRY.supported(to_attention_request(req))
         if c.algorithm in _UNIFIED_ALGORITHMS
     )
-    if req.stats is not None:
-        supported = tuple(c for c in supported if c.algorithm in _LSE_ALGORITHMS)
-    return supported
 
 
 def sdpa_unified_admits(req: SdpaRequest) -> tuple[bool, str]:
@@ -215,7 +219,7 @@ def sdpa_unified_admits(req: SdpaRequest) -> tuple[bool, str]:
         return rejected
     if _unified_supported(req):
         return True, "ok"
-    path = "split-KV (LSE) " if req.stats is not None else ""
+    path = "LSE " if req.stats is not None else ""
     return False, (
         f"no unified {path}candidate covers arch={req.arch!r} "
         f"dtype={req.dtype!r} d_qk={req.d_qk} d_v={req.d_v} "
@@ -238,12 +242,18 @@ def sdpa_unified_candidates(req: SdpaRequest) -> tuple[str, ...]:
 
 
 def _lengths(req_tensor, tensors, key: str, operand: Operand, batch: int, extent: int):
-    """Per-batch lengths: ``seq_len_*`` when set, else ragged, else the extent."""
+    """Per-batch lengths: ``seq_len_*`` when set, else ragged, else the extent.
+
+    The range/dtype/count check is ``kernels.common._sdpa_seqlen``'s host-side
+    adapter (:func:`validate_lengths`), shared with ``sdpa_seqlens`` /
+    ``sdpa_cu_seqlens`` so the rule lives in one place and is covered torch-free
+    in ``tests/test_sdpa_seqlen.py``.
+    """
     if req_tensor is None:
         return list(operand.lengths) if operand.lengths else [extent] * batch
-    values = host_ints(tensors[key])
-    if len(values) != batch or any(n < 0 or n > extent for n in values):
-        raise ValueError(f"{key}: need {batch} lengths in [0, {extent}], got {values}")
+    values = validate_lengths(
+        host_ints(tensors[key]), batch=batch, s_max=extent, name=key
+    ).tolist()
     if operand.lengths and any(n > r for n, r in zip(values, operand.lengths)):
         raise ValueError(f"{key} {values} exceeds the ragged lengths {operand.lengths}")
     return values
@@ -398,8 +408,9 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     offsets). A dense operand is its logical BHSD tensor with the request's
     strides; a ragged one is its contiguous packed buffer. The launch runs on
     Torch's current stream through the production route
-    (``run_unified_attention_torch`` with no tuning spec; ``backend="3d"``
-    when LSE is requested, the only path that writes it).
+    (``run_unified_attention_torch`` with no tuning spec, ``backend="auto"``):
+    tiled 2D and split-KV (3D) both write LSE on gfx942/gfx950, so the launch
+    defers to the kernel's own path selection rather than re-deciding it here.
 
     Lengths and offsets are read once, here; rebind after changing them.
     Raises ``ValueError`` with the admission reason for a declined request.
@@ -414,7 +425,6 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     plan = _LaunchPlan(req, tensors)
     if plan.problem.total_q:
         validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
-    backend = "3d" if req.stats is not None else "auto"
     scale = float(req.scale)
 
     def launch(**_kw: Any) -> None:
@@ -426,7 +436,7 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
                 **plan.kernel_tensors(),
                 softmax_scale=scale,
                 softcap=0.0,
-                backend=backend,
+                backend="auto",
                 stream=resolve_stream(0, device=device),
                 lse=plan.lse,
             )

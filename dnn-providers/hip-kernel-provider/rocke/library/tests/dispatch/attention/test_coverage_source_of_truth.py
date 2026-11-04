@@ -24,7 +24,7 @@ from __future__ import annotations
 import unittest
 
 from dispatch.attention import ATTENTION_REGISTRY, AttentionRequest
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from kernels.common import attention_unified as au
 from kernels.gfx1250 import wmma_attention_fwd as wmma
 
@@ -90,7 +90,7 @@ class TestUnifiedCoverageIsImportedNotCopied(unittest.TestCase):
                         dtype=dtype,
                     )
                     backend_ok, _ = au.supports_native_unified_attention(
-                        _problem(req), req.arch
+                        attention_problem(req), req.arch
                     )
                     if not backend_ok:
                         continue
@@ -107,7 +107,7 @@ class TestUnifiedCoverageIsImportedNotCopied(unittest.TestCase):
         for head_size in (32, 48, 64, 96, 128, 192, 256, 512):
             req = _req(hdim_q=head_size, hdim_v=head_size)
             backend_ok, _ = au.supports_native_unified_attention(
-                _problem(req), req.arch
+                attention_problem(req), req.arch
             )
             with self.subTest(hdim_q=head_size):
                 self.assertEqual(self.candidate.capability.check(req)[0], backend_ok)

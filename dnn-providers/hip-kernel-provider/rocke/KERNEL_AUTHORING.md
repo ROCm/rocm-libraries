@@ -635,19 +635,20 @@ contract, plus this binding-layer checklist for the gate that sits in front of
 - **[A](#a-new-kernel-family) step 4, for a routed family**: registering a new
   candidate in `ATTENTION_ROUTE_REGISTRY` is not enough by itself — a routed
   family's gate names which algorithms it routes among (e.g.
-  `bind_unified.py`'s `_UNIFIED_ALGORITHMS`, `bind_dense.py`'s
-  `_DENSE_ALGORITHMS`), so a new route candidate stays unreachable through the
-  family until it is added there too.
+  `bind_unified.py`'s `_UNIFIED_ALGORITHMS`, built from the exported
+  `dispatch.attention.UNIFIED_ALGORITHMS`; `bind_dense.py`'s
+  `_DENSE_ALGORITHMS`, built from `dispatch.attention.DENSE_ALGORITHMS`), so a
+  new route candidate stays unreachable through the family until it is added
+  there too.
 
 Known gaps in the current SDPA routing (tracked as "Not in this PR" on the
 introducing change, not silently): choosing between the unified and dense
 families for one request is not modeled — a request both admit goes to
 whichever the caller picks; `sdpa_dense_bind` always launches the first
-serving dense candidate in registry order, not the fastest; LSE is served only
-on the shapes that route to the split-KV (3D) unified path, even though
-forcing 3D could serve more; and the unified binding always copies K and V
-into the paged cache rather than viewing them in place when the layout and
-block size would allow it (Q already has the in-place path).
+serving dense candidate in registry order, not the fastest; and the unified
+binding always copies K and V into the paged cache rather than viewing them in
+place when the layout and block size would allow it (Q already has the
+in-place path).
 
 ### Attention specifics — quick reference
 

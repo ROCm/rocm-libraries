@@ -13,16 +13,14 @@ from benchmarks.common.attention_flops import attended_pairs
 from dispatch.attention import (
     ATTENTION_EXECUTION_REGISTRY,
     ATTENTION_ROUTE_REGISTRY,
-    DENSE_ALGORITHM,
-    DENSE_GRID_ALGORITHM,
-    DENSE_PERSIST_ALGORITHM,
+    DENSE_ALGORITHMS,
     UNIFIED_ALGORITHMS,
     AttentionRequest,
     attention_dispatch_result,
     attention_tuning_spec,
 )
 from dispatch.attention.bindings import bind_dense_attention_torch
-from dispatch.attention.common import AttentionTuningSpec, _problem
+from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from dispatch.attention.gfx1151 import DECODE_ALGORITHM, PREFILL_ALGORITHM
 from dispatch.attention.unified_rules import (
     TUNING_ALGORITHM,
@@ -70,7 +68,7 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(attended_pairs(4, 8, causal=True, sliding_window=3), 12)
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
-        problem = _problem(_req(arch="gfx950", seqlen_q=1, seqlen_k=4096))
+        problem = attention_problem(_req(arch="gfx950", seqlen_q=1, seqlen_k=4096))
         with mock.patch.dict("os.environ", {}, clear=False):
             import os
 
@@ -107,9 +105,9 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(calls, ["fence", ("pipe", 7)])
 
     def test_4warp_grid_matches_the_launch_helper(self):
-        fold = _problem(_req(sliding_window=16, dtype="bf16"))
+        fold = attention_problem(_req(sliding_window=16, dtype="bf16"))
         self.assertEqual(au.gfx942_4warp_launch_grid(fold), (8, 5, 1))
-        plain = _problem(_req(dtype="fp16", sliding_window=0))
+        plain = attention_problem(_req(dtype="fp16", sliding_window=0))
         self.assertEqual(au.gfx942_4warp_launch_grid(plain), (32, 2, 1))
 
         candidate = next(
@@ -123,7 +121,7 @@ class TestReviewFollowups(unittest.TestCase):
         spec = candidate.select_spec(pinned)
         self.assertEqual(
             candidate.grid(spec, pinned),
-            au.gfx942_4warp_launch_grid(_problem(pinned)),
+            au.gfx942_4warp_launch_grid(attention_problem(pinned)),
         )
 
     def test_pinned_gfx950_dense_spec_is_its_candidate_default(self):
@@ -186,7 +184,7 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(auto.algorithm, "auto")
 
     def test_unknown_arch_tuning_profiles_raise(self):
-        problem = _problem(_req(arch="gfx950"))
+        problem = attention_problem(_req(arch="gfx950"))
         variant = AttentionGeometryVariant(
             arch="gfx1250",
             path="2d",
@@ -200,7 +198,7 @@ class TestReviewFollowups(unittest.TestCase):
             list(_explicit_configs(problem, replace(variant, path="3d")))
 
     def test_explicit_path_support_is_not_skipped(self):
-        problem = _problem(_req(hdim_q=7, hdim_v=7, arch="gfx950"))
+        problem = attention_problem(_req(hdim_q=7, hdim_v=7, arch="gfx950"))
         ok, _why = au._explicit_path_supported(problem, None, "2d", "gfx950")
         self.assertFalse(ok)
         ok, _why = au._explicit_path_supported(
@@ -223,7 +221,7 @@ class TestReviewFollowups(unittest.TestCase):
             au._RESOLVED_ATTENTION_ARCH = "gfx950"
             with self.assertRaisesRegex(ValueError, "conflicts"):
                 au.run_unified_attention_torch(
-                    problem=_problem(_req(arch="gfx950")),
+                    problem=attention_problem(_req(arch="gfx950")),
                     q=None,
                     k=None,
                     v=None,
@@ -260,12 +258,9 @@ class TestRouteAlgorithmCoverage(unittest.TestCase):
     }
 
     def test_every_route_algorithm_is_accounted_for(self):
-        dense_algorithms = frozenset(
-            {DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM}
-        )
         accounted = (
             UNIFIED_ALGORITHMS
-            | dense_algorithms
+            | DENSE_ALGORITHMS
             | {TUNING_ALGORITHM}
             | self._NOT_SERVED_BY_SDPA
         )

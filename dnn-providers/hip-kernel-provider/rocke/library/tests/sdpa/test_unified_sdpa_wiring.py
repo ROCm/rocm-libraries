@@ -258,13 +258,44 @@ def test_sliding_window_is_admitted():
 
 
 def test_lse_is_admitted_on_a_decode_shape():
-    """Only the split-KV (3D) path writes LSE."""
-    _admitted(replace(_unified_request(s_q=1, s_kv=4096), stats=packed((2, 4, 1, 1))))
+    """A decode shape (one query token) reaches the split-KV (3D) path, which
+    writes LSE on gfx942/gfx950."""
+    req = replace(_unified_request(s_q=1, s_kv=4096), stats=packed((2, 4, 1, 1)))
+    _admitted(req)
+    assert sdpa_unified_candidates(req) == ("attention_unified_3d",)
 
 
-def test_lse_is_declined_on_a_prefill_shape():
-    reason = _declined(replace(_BASE, stats=packed((2, 4, 8, 1))))
-    assert "split-KV" in reason
+def test_lse_is_admitted_on_a_prefill_shape_via_tiled_2d():
+    """A prefill shape reaches the tiled 2D path, which also writes LSE on
+    gfx942/gfx950 (``_reject_lse`` in ``kernels/common/attention_unified.py``
+    gates both paths, not only split-KV)."""
+    req = replace(_BASE, stats=packed((2, 4, 8, 1)))
+    _admitted(req)
+    assert sdpa_unified_candidates(req) == ("attention_unified_2d",)
+
+
+# --- hipDNN's left_bound (#14483) ---------------------------------------------
+
+
+@pytest.mark.parametrize("left_bound", (1, 4, 63, 64))
+def test_sliding_window_keeps_exactly_left_bound_keys(left_bound):
+    """hipDNN's ``left_bound = L`` keeps exactly the L keys ending at the
+    diagonal -- NOT FlashAttention's ``window = W`` keeping W + 1 (the
+    off-by-one #14483 fixed). ``kept_keys`` must agree with the reference
+    oracle's own conversion (``hipdnn_left_to_window``) at these L values, or
+    a reintroduced ``+ 1`` here would silently admit one extra key.
+    """
+    from rocke.numeric.sdpa_reference import hipdnn_left_to_window, keep
+
+    s_kv = 128
+    window = hipdnn_left_to_window(left_bound)
+    first, last = kept_keys(s_q=1, s_kv=s_kv, top_left=False, left=window, right=0)
+    reference_kept = [
+        k for k in range(s_kv) if keep(0, k, 1, s_kv, "bottom_right", window, 0)
+    ]
+    assert reference_kept
+    assert (first[0], last[0]) == (reference_kept[0], reference_kept[-1])
+    assert last[0] - first[0] + 1 == left_bound
 
 
 # --- band faithfulness -------------------------------------------------------
@@ -392,11 +423,11 @@ def test_d256_decode_reaches_the_dedicated_decode_candidate(arch):
 
 
 def _gfx942_d256_fast(req) -> bool:
-    from dispatch.attention.common import _problem
+    from dispatch.attention.common import attention_problem
     from dispatch.sdpa.bind_shared import to_attention_request
     from kernels.common.attention_unified import _d256_gfx942_fast
 
-    return _d256_gfx942_fast(_problem(to_attention_request(req)), "gfx942")
+    return _d256_gfx942_fast(attention_problem(to_attention_request(req)), "gfx942")
 
 
 def test_gfx942_bf16_d256_prefill_lands_in_the_fast_cohort():

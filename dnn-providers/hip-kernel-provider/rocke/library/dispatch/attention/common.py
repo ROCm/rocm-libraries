@@ -753,32 +753,27 @@ def normalize_band(
     return AttentionBand(left_bound, right_bound, align)
 
 
-def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
-    """``(causal_top_left, right_bound)`` the unified kernels compute for ``req``.
+def attention_band(req: AttentionRequest) -> AttentionBand:
+    """The band the unified kernels compute for ``req``.
 
     Requests the unified family does not serve (other arches, and the explicit
     ``window_*`` fields, which carry their own bounds) get the default mask: the
     problem is then only a geometry carrier, e.g. for the gfx1151 launch grid.
+    The single home for this decision -- callers outside this package (e.g. the
+    SDPA gates) use the same function internal callers do.
     """
     explicit = req.window_left is not None or (
         req.window_right is not None and int(req.window_right) >= 0
     )
     if not _uses_band_dispatch(req, explicit):
-        return False, 0
-    band = normalize_band(req)
-    return band.top_left, band.kernel_right_bound
-
-
-def attention_band(req: AttentionRequest) -> Tuple[bool, int]:
-    """Public name for :func:`_attention_band`, for callers outside this
-    package (e.g. the SDPA gates) that must not depend on a private symbol."""
-    return _attention_band(req)
+        return AttentionBand(None, 0, Alignment.BOTTOM_RIGHT)
+    return normalize_band(req)
 
 
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
-    top_left, right_bound = _attention_band(req)
+    band = attention_band(req)
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
         total_q=int(req.batch) * int(req.seqlen_q),
@@ -796,21 +791,19 @@ def _problem_with_num_cus(
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
-        causal_top_left=top_left,
-        right_bound=right_bound,
+        causal_top_left=band.top_left,
+        right_bound=band.kernel_right_bound,
         emit_lse=bool(req.emit_lse),
     )
 
 
-def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
-    """The production-routing problem, including the live-device CU policy."""
-    return _problem_with_num_cus(req, _resolve_num_cus(req))
-
-
 def attention_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
-    """Public name for :func:`_problem`, for callers outside this package
-    (e.g. the SDPA gates) that must not depend on a private symbol."""
-    return _problem(req)
+    """The production-routing problem, including the live-device CU policy.
+
+    The single home for this decision -- callers outside this package (e.g.
+    the SDPA gates) use the same function internal callers do.
+    """
+    return _problem_with_num_cus(req, _resolve_num_cus(req))
 
 
 def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:

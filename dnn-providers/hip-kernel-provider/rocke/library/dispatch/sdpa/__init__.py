@@ -81,9 +81,16 @@ def _kernel_id(req: SdpaRequest, candidate: KernelCandidate, spec: Any) -> Kerne
 
 def _serves(req: SdpaRequest):
     """Which attention ``(candidate, spec)`` combos serve ``req``: the unified
-    tuning variants when the unified gate admits it (split-KV only when it asks
-    for LSE, as that gate requires), and the dense candidates the dense gate
-    names. ``None`` when both gates decline it."""
+    tuning variants when the unified gate admits it, and the dense candidates
+    the dense gate names. ``None`` when both gates decline it.
+
+    A tuning variant's own precheck (``dispatch.attention.candidate._tuning_precheck``)
+    already gates LSE per its path -- both tiled 2D and split-KV (3D) write it
+    on gfx942/gfx950 -- so nothing here re-decides which path an LSE request
+    may reach; that would only drop combos the variant's own gate already
+    admitted (see ``dispatch.sdpa.bind_unified._unified_supported``, which
+    trusts the same per-candidate gate for the production route).
+    """
     unified = bool(sdpa_unified_candidates(req))
     dense = frozenset(sdpa_dense_candidates(req))
     if not unified and not dense:
@@ -91,7 +98,7 @@ def _serves(req: SdpaRequest):
 
     def serves(candidate: KernelCandidate, spec: Any) -> bool:
         if candidate.algorithm == TUNING_ALGORITHM:
-            return unified and (req.stats is None or spec.path == "3d")
+            return unified
         return candidate.name in dense
 
     return serves
