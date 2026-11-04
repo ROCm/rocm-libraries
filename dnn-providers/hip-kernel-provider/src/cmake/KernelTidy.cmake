@@ -9,10 +9,25 @@ include(${PROJECT_SOURCE_DIR}/../cmake/CheckToolVersion.cmake)
 # An embedded kernel is otherwise never compiled by the build: embed_kernel_sources()
 # reads it at configure time and pastes its text into a raw string literal. The object
 # library created below is intentionally not linked; its compile commands give
-# clang-tidy the hipRTC-compatible context and let the compiler track included headers.
+# clang-tidy the hipRTC-compatible context, and the headers it is given are explicit
+# dependencies (see add_kernel_tidy_target).
 
 # List of kernel tidy targets created
 define_property(GLOBAL PROPERTY KERNELTIDY_TARGETS)
+
+# kernel_tidy_skip(<message>...)
+#
+#   The message parts are joined as list elements, so they must not contain semicolons.
+#   Report that clang-tidy is enabled but cannot check the embedded kernels. With
+#   HIPKERNELPROVIDER_REQUIRE_KERNEL_TIDY ON this fails the configure, so a CI job that
+#   relies on the check cannot pass while silently skipping it.
+function(kernel_tidy_skip)
+    string(JOIN "" _message ${ARGN})
+    if(HIPKERNELPROVIDER_REQUIRE_KERNEL_TIDY)
+        message(FATAL_ERROR "${_message} (HIPKERNELPROVIDER_REQUIRE_KERNEL_TIDY is ON)")
+    endif()
+    message(WARNING "${_message}")
+endfunction()
 
 
 # hiprtc_runtime_header(<out-var>)
@@ -115,9 +130,8 @@ function(add_kernel_tidy_target)
     # real hipRTC compile gives them, so clang-tidy would drown in bogus diagnostics
     # instead of reporting anything useful. Skip the check rather than report noise.
     if(NOT HIPRTC_RUNTIME_HEADER)
-        message(WARNING
-                "hipRTC runtime header not available; skipping kernel tidy target "
-                "${KERNEL_TIDY_NAME}")
+        kernel_tidy_skip("hipRTC runtime header not available, skipping kernel tidy target "
+                         "${KERNEL_TIDY_NAME}")
         return()
     endif()
 
@@ -128,8 +142,8 @@ function(add_kernel_tidy_target)
     # host C++ one, an older LLVM.
     findAndCheckRocmClangTidy()
     if(NOT ROCM_CLANG_TIDY_EXE)
-        message(WARNING
-                "ROCm clang-tidy not found. The '${KERNEL_TIDY_NAME}' target will not be available.")
+        kernel_tidy_skip("ROCm clang-tidy ${EXPECTED_ROCM_CLANG_TIDY_VERSION} not available, "
+                         "skipping kernel tidy target ${KERNEL_TIDY_NAME}")
         return()
     endif()
     get_filename_component(KERNEL_TIDY_PRELUDE "${KERNEL_TIDY_PRELUDE}" ABSOLUTE)
@@ -183,10 +197,11 @@ function(add_kernel_tidy_target)
     if(NOT _gpu_targets)
         set(_gpu_targets "${CMAKE_HIP_ARCHITECTURES}")
     endif()
+    # One device job is enough for clang-tidy, and a device-only compile with several
+    # --offload-arch flags cannot write its outputs to the single -o object.
     if(_gpu_targets)
-        foreach(_gpu_target IN LISTS _gpu_targets)
-            list(APPEND _kernel_tidy_compiler_flags "--offload-arch=${_gpu_target}")
-        endforeach()
+        list(GET _gpu_targets 0 _kernel_tidy_arch)
+        list(APPEND _kernel_tidy_compiler_flags "--offload-arch=${_kernel_tidy_arch}")
     endif()
 
     # The driver writes no depfile for --offload-device-only compiles, so depend on the
@@ -196,9 +211,13 @@ function(add_kernel_tidy_target)
             "${KERNEL_TIDY_PRELUDE};${HIPRTC_RUNTIME_HEADER};${_tidy_config};${_kernel_headers}"
     )
     add_library(${KERNEL_TIDY_NAME} OBJECT ${_kernel_sources})
+    # The kernels are tidied here, with the ROCm clang-tidy and the hipRTC header excluded.
+    # Keep them out of compile_commands.json so the run-clang-tidy `tidy` targets, which use
+    # the host clang-tidy and no such exclusion, do not check them a second time.
     set_target_properties(${KERNEL_TIDY_NAME} PROPERTIES
         CXX_STANDARD "${CMAKE_CXX_STANDARD}"
         CXX_STANDARD_REQUIRED ON
+        EXPORT_COMPILE_COMMANDS OFF
         CXX_CLANG_TIDY
             "${ROCM_CLANG_TIDY_EXE};-config-file=${_tidy_config};--quiet;--exclude-header-filter=hiprtc_runtime.h"
     )

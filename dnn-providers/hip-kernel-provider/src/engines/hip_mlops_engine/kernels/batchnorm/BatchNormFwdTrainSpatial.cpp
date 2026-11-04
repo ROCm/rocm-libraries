@@ -1114,7 +1114,7 @@ struct BatchNormFwdTrainSpatialImplVar2
             for(unsigned int batch = 0; batch < hip_plugin_bn_config::BATCH_ELEMENTS; batch++)
             {
                 index = indexBase + batch * hip_plugin_bn_config::BATCH_SIZE;
-                auto read4 = hip_kernel_provider::cast<ComputeVecType>(
+                const auto read4 = hip_kernel_provider::cast<ComputeVecType>(
                     *reinterpret_cast<const InputVecType*>(in + index));
 
                 hip_kernel_provider::batchnorm::accumulate(mean, read4);

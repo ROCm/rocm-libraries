@@ -464,7 +464,7 @@ struct BatchNormBwdSpatialImpl<1>
                      LAUNCH_DIM // NOLINT(readability-static-accessed-through-instance)
                          .GRP0) // NOLINT(readability-static-accessed-through-instance)
             {
-                auto in = hip_kernel_provider::cast<ComputeType>(xIn[getTensorIndex(k)]);
+                const auto in = hip_kernel_provider::cast<ComputeType>(xIn[getTensorIndex(k)]);
                 mean += in;
                 variance = fma(in, in, variance);
             }
@@ -473,9 +473,9 @@ struct BatchNormBwdSpatialImpl<1>
                 if(lid < REM)
                 {
                     const unsigned int index = getTensorIndex(lid + LESS);
-                    auto in = (index < hip_plugin_bn_config::TENSOR_SIZE)
-                                  ? hip_kernel_provider::cast<ComputeType>(xIn[index])
-                                  : hip_kernel_provider::cast<ComputeType>(0.0);
+                    const auto in = (index < hip_plugin_bn_config::TENSOR_SIZE)
+                                        ? hip_kernel_provider::cast<ComputeType>(xIn[index])
+                                        : hip_kernel_provider::cast<ComputeType>(0.0);
                     mean += in;
                     variance = fma(in, in, variance);
                 }
@@ -513,8 +513,8 @@ struct BatchNormBwdSpatialImpl<1>
             if(l < LESS4)
             {
                 const unsigned int index = getTensorIndex(l);
-                auto xread = *reinterpret_cast<const InputReadVecType*>(xIn + index);
-                auto dyRead = *reinterpret_cast<const OutputReadVecType*>(dyIn + index);
+                const auto xread = *reinterpret_cast<const InputReadVecType*>(xIn + index);
+                const auto dyRead = *reinterpret_cast<const OutputReadVecType*>(dyIn + index);
                 auto dyValue = hip_kernel_provider::cast<ComputeReadVecType>(dyRead);
                 const ComputeReadVecType xhat
                     = (hip_kernel_provider::cast<ComputeReadVecType>(xread) - mean) * invVariance;
@@ -534,10 +534,10 @@ struct BatchNormBwdSpatialImpl<1>
                 + LESS4);
             if(index + READ_SIZE - 1 < hip_plugin_bn_config::TENSOR_SIZE)
             {
-                auto xread = *reinterpret_cast<const InputReadVecType*>(xIn + index);
-                auto dyRead = *reinterpret_cast<const OutputReadVecType*>(dyIn + index);
+                const auto xread = *reinterpret_cast<const InputReadVecType*>(xIn + index);
+                const auto dyRead = *reinterpret_cast<const OutputReadVecType*>(dyIn + index);
                 auto dyValue = hip_kernel_provider::cast<ComputeReadVecType>(dyRead);
-                auto xhat
+                const auto xhat
                     = (hip_kernel_provider::cast<ComputeReadVecType>(xread) - mean) * invVariance;
 
                 dyValue = vectorizedBwdActivationOp<ComputeReadVecType>(
@@ -573,8 +573,8 @@ struct BatchNormBwdSpatialImpl<1>
             const unsigned int index = getTensorIndex(l);
             if(l < LESSOUT)
             {
-                auto xread = *reinterpret_cast<const InputWriteVecType*>(xIn + index);
-                auto dyRead = *reinterpret_cast<const OutputWriteVecType*>(dyIn + index);
+                const auto xread = *reinterpret_cast<const InputWriteVecType*>(xIn + index);
+                const auto dyRead = *reinterpret_cast<const OutputWriteVecType*>(dyIn + index);
                 auto value1 = hip_kernel_provider::cast<ComputeWriteVecType>(dyRead);
                 const ComputeWriteVecType xhat1
                     = (hip_kernel_provider::cast<ComputeWriteVecType>(xread) - mean) * invVariance;
@@ -695,7 +695,7 @@ struct BatchNormBwdSpatialImpl<3>
                 }
                 else
                 {
-                    auto in = hip_kernel_provider::cast<ComputeType>(xIn[index]);
+                    const auto in = hip_kernel_provider::cast<ComputeType>(xIn[index]);
                     mean += in;
                     variance = fma(in, in, variance);
                 }
@@ -1088,7 +1088,7 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.BO
         for(unsigned int batch = 0; batch < hip_plugin_bn_config::BATCH_ELEMENTS; batch++)
         {
             const unsigned int index = indexBase + batch * hip_plugin_bn_config::BATCH_SIZE;
-            auto value = hip_kernel_provider::cast<ComputeVecType>(
+            const auto value = hip_kernel_provider::cast<ComputeVecType>(
                 *reinterpret_cast<const InputVecType*>(in + index));
 
             hip_kernel_provider::batchnorm::accumulate(mean, value);
@@ -1274,7 +1274,7 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.BO
             const unsigned int index = indexBase + batch * hip_plugin_bn_config::BATCH_SIZE;
             auto value1 = hip_kernel_provider::cast<ComputeVecType>(
                 *reinterpret_cast<const OutputVecType*>(dyIn + index));
-            auto value2 = hip_kernel_provider::cast<ComputeVecType>(
+            const auto value2 = hip_kernel_provider::cast<ComputeVecType>(
                 *reinterpret_cast<const InputVecType*>(xIn + index));
             const ComputeVecType xhat = (value2 - mean) * invVar;
             // apply activation function on dy
@@ -1621,7 +1621,7 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.BO
         for(unsigned int batch = 0; batch < hip_plugin_bn_config::BATCH_ELEMENTS; batch++)
         { // apply normalization
             const unsigned int index = indexBase + batch * hip_plugin_bn_config::BATCH_SIZE;
-            auto xI = hip_kernel_provider::cast<ComputeVecType>(
+            const auto xI = hip_kernel_provider::cast<ComputeVecType>(
                 *reinterpret_cast<const InputVecType*>(xIn + index));
             const ComputeVecType xhat = (xI - mean) * invVar; // recalculating this again...
             auto value1 = hip_kernel_provider::cast<ComputeVecType>(

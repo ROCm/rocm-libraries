@@ -48,7 +48,7 @@
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
 | clang-tidy | 20.x | Static analysis tool |
-| clang-tidy (ROCm) | 23.x | Static analysis tool for the embedded HIP kernels |
+| clang-tidy (ROCm) | 24.x | Static analysis tool for the embedded HIP kernels |
 | LLVM Tools | 20.x | LLVM tools for code_coverage, and ASAN enabled builds |
 
 #### Optional Dependencies
@@ -494,7 +494,7 @@ Different versions of Clang tools are required. For example, clang-format versio
 Two clang-tidy binaries are used, and they are discovered independently:
 
 * **Host C++** uses the clang-tidy on the system path, pinned by `EXPECTED_CLANG_TIDY_VERSION`.
-* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION`. When available on Linux, the kernels are compiled and tidied through unlinked object libraries as part of a normal build; the objects are not linked into the provider. If the ROCm tool or hipRTC runtime header is unavailable, the kernel checks are skipped with a warning.
+* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION` (the major version in the ROCm SDK that CI installs). With `ENABLE_CLANG_TIDY=ON` on Linux, the kernels are compiled for the first entry of `GPU_TARGETS` and tidied through unlinked object libraries as part of a normal build; the objects are not linked into the provider. If the ROCm clang-tidy of that version, libhiprtc-builtins or Python 3 is not found, the kernel checks are skipped with a warning; set `HIPKERNELPROVIDER_REQUIRE_KERNEL_TIDY=ON` to fail the configure instead, as CI does. `ALLOW_TOOL_VERSION_MISMATCH` does not apply to this tool, because the kernel fixes hold for one clang-tidy version only.
 
 Both binaries share `projects/hipdnn/.clang-tidy`.
 

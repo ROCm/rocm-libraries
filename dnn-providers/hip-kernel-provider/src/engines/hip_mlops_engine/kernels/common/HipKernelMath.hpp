@@ -117,8 +117,8 @@ __forceinline__ __device__ _Float16 tanh(_Float16 x)
     const float a = __builtin_amdgcn_exp2f(xScaled);
     const float b = __builtin_amdgcn_exp2f(-xScaled);
 
-    auto ret = static_cast<_Float16>((a - b) * __builtin_amdgcn_rcpf(a + b));
-    auto one = static_cast<_Float16>(__builtin_copysignf(1.0f, x));
+    const auto ret = static_cast<_Float16>((a - b) * __builtin_amdgcn_rcpf(a + b));
+    const auto one = static_cast<_Float16>(__builtin_copysignf(1.0f, x));
 
     return __ocml_fabs_f16(x) > 4.5f ? one : ret;
 }

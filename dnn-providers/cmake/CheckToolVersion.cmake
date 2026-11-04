@@ -9,7 +9,8 @@ if(NOT EXPECTED_CLANG_TIDY_VERSION)
     set(EXPECTED_CLANG_TIDY_VERSION "20")
 endif()
 if(NOT EXPECTED_ROCM_CLANG_TIDY_VERSION)
-    set(EXPECTED_ROCM_CLANG_TIDY_VERSION "23")
+    # The major version shipped by the whl-next ROCm SDK that hipdnn-superbuild-ci.yml installs.
+    set(EXPECTED_ROCM_CLANG_TIDY_VERSION "24")
 endif()
 if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
@@ -21,10 +22,11 @@ endif()
 option(ALLOW_TOOL_VERSION_MISMATCH
     "Allow any tool version different from its expected version (warn but continue)" OFF
 )
+# ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH is deliberately not set here: the embedded kernels'
+# fixes and NOLINTs hold for one ROCm clang-tidy major only, and another major fails the build.
 if(ALLOW_TOOL_VERSION_MISMATCH)
     set(ALLOW_CLANG_FORMAT_VERSION_MISMATCH ON)
     set(ALLOW_CLANG_TIDY_VERSION_MISMATCH ON)
-    set(ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH ON)
     set(ALLOW_LLVM_VERSION_MISMATCH ON)
 endif()
 
@@ -253,12 +255,10 @@ function(findAndCheckRocmClangTidy)
     )
 
     if(NOT clang-tidy_VERSION_MATCHED AND NOT ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH)
-        message(WARNING
-            "ROCm clang-tidy disabled due to version mismatch (expected "
-            "${EXPECTED_ROCM_CLANG_TIDY_VERSION}). Set EXPECTED_ROCM_CLANG_TIDY_VERSION to "
-            "the version you have, after reviewing the CheckOptions comments in "
-            "projects/hipdnn/.clang-tidy, or "
-            "set ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH=ON to use it as-is."
+        message(STATUS
+            "ROCm clang-tidy ${clang-tidy_MAJOR_VERSION} found at ${ROCM_CLANG_TIDY_EXE}, but the "
+            "embedded kernels are checked with ROCm clang-tidy "
+            "${EXPECTED_ROCM_CLANG_TIDY_VERSION}; not using it."
         )
         unset(ROCM_CLANG_TIDY_EXE CACHE)
         unset(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION CACHE)
