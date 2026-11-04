@@ -394,3 +394,19 @@ def test_defaults_do_not_recheck(monkeypatch):
     dev.install(monkeypatch)
     _rank(dev, 2, finalists=2)
     assert dev.interleaved == []
+
+
+@pytest.mark.parametrize("n", range(1, 8))
+def test_balanced_orders_are_williams_designs(n):
+    from collections import Counter
+
+    rows = batched_timing.balanced_orders(n)
+    assert len(rows) == (n if n % 2 == 0 or n == 1 else 2 * n)
+    assert all(sorted(r) == list(range(n)) for r in rows)
+    pairs = Counter((r[j], r[j + 1]) for r in rows for j in range(n - 1))
+    assert len(pairs) == n * (n - 1)
+    assert len(set(pairs.values())) <= 1
+
+
+def test_balanced_orders_keep_ab_ba_for_two():
+    assert batched_timing.balanced_orders(2) == [[0, 1], [1, 0]]

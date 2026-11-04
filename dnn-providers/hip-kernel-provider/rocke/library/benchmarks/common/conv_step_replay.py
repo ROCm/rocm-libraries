@@ -386,6 +386,10 @@ def main(argv=None) -> int:
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=10)
     ap.add_argument("--rounds", type=int, default=1, help="staged/parts: interleaved rounds over the cases")
+    ap.add_argument("--ab-order", choices=["rotate", "balanced"], default="rotate",
+                    help="ab: variant visiting order per round -- rotations (each variant keeps its predecessor) or a "
+                         "Williams design (every variant follows every other one equally often; use rounds that are "
+                         "a multiple of the variant count, twice it when odd)")
     ap.add_argument("--steps", type=int, default=20)
     ap.add_argument("--warmup-steps", type=int, default=3)
     ap.add_argument("--step-reps", type=int, default=1, help="step mode: repetitions (each its own drain)")
@@ -637,7 +641,8 @@ def main(argv=None) -> int:
             # one timing per distinct (label, env) callable; identical pins of a
             # pins-variant reuse the base timing
             t = time_interleaved_staged(
-                [variants[n][k].run for n in names], rounds=args.rounds, iters=args.iters, warmup=args.warmup
+                [variants[n][k].run for n in names], rounds=args.rounds, iters=args.iters, warmup=args.warmup,
+                order=args.ab_order,
             )
             out["ab"][k] = {n: (round(x, 4) if x else None) for n, x in zip(names, t)}
             out["ab"][k]["labels"] = labels

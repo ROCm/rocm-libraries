@@ -364,6 +364,24 @@ def time_batch_staged(
     return out
 
 
+def balanced_orders(n: int) -> List[List[int]]:
+    """Visiting orders of a Williams design for ``n`` candidates: ``n`` rows for an
+    even ``n``, ``2 n`` (the rows and their reverses) for an odd one. Every row
+    holds every candidate once and, over all rows, each ordered pair of distinct
+    candidates is adjacent equally often."""
+    if n <= 1:
+        return [[0] * n]
+    first, lo, hi = [0], 1, n - 1
+    while len(first) < n:
+        first.append(lo)
+        lo += 1
+        if len(first) < n:
+            first.append(hi)
+            hi -= 1
+    rows = [[(x + r) % n for x in first] for r in range(n)]
+    return rows if n % 2 == 0 else rows + [row[::-1] for row in rows]
+
+
 def time_interleaved_staged(
     runs: Sequence[Callable[[], None]],
     *,
@@ -371,6 +389,7 @@ def time_interleaved_staged(
     iters: int,
     warmup: int = 1,
     stream: int = 0,
+    order: str = "rotate",
 ) -> List[Optional[float]]:
     """Per-candidate median of staged samples taken in interleaved rounds.
 
@@ -384,6 +403,13 @@ def time_interleaved_staged(
     then ``iters`` kept ones), the visiting order rotated each round, so each
     candidate sees the same clock states; the result is the median of its
     ``rounds * iters`` kept samples. ``None`` for a candidate that failed.
+
+    ``order="balanced"`` visits the candidates in the rows of a Williams design
+    instead of rotations (:func:`balanced_orders`): a rotation keeps each
+    candidate's predecessor fixed, so a candidate that always follows one that
+    leaves the caches or the clock in another state carries that offset in every
+    round; over a whole cycle of the design every candidate follows every other
+    one equally often.
     """
     from statistics import median
 
@@ -392,10 +418,13 @@ def time_interleaved_staged(
 
     n = len(runs)
     samples: List[Optional[list]] = [[] for _ in range(n)]
+    if order not in ("rotate", "balanced"):
+        raise ValueError(f"order {order!r}: rotate | balanced")
+    rows = balanced_orders(n) if order == "balanced" else None
     for r in range(max(1, int(rounds))):
         shift = r % max(1, n)
         for j in range(n):
-            i = (j + shift) % n
+            i = rows[r % len(rows)][j] if rows else (j + shift) % n
             if samples[i] is None:
                 continue
             try:
