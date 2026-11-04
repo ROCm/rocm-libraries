@@ -140,6 +140,42 @@ layout conversion. Performance can differ between physically different arrangeme
 depending on the GPU, data type, transpose choices, dimensions, and available kernels. The default
 ``HIPBLASLT_ORDER_COL`` does not identify the fastest arrangement for every problem.
 
+Each matmul entry point accepts these orders. Any other order returns
+``HIPBLAS_STATUS_NOT_SUPPORTED``, and ``matmulIsTuned`` returns ``-1``. Grouped layouts in the C
+API return ``HIPBLAS_STATUS_INVALID_VALUE`` instead, and so does a row-major D with a fused
+all-to-all epilogue.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 34,40,26
+
+    * - **API**
+      - **A and B**
+      - **C and D**
+
+    * - ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic``
+      - | ``HIPBLASLT_ORDER_COL``
+        | ``HIPBLASLT_ORDER_ROW``, with ``HIPBLAS_OP_N`` or ``HIPBLAS_OP_T``, no scale or a scalar
+          scale, and a type other than ``HIP_R_4I``
+        | Swizzled orders, for the combinations the API reference lists
+      - ``HIPBLASLT_ORDER_COL``
+
+    * - The same calls with a grouped layout (``HIPBLASLT_BATCH_MODE_GROUPED``)
+      - ``HIPBLASLT_ORDER_COL``
+      - ``HIPBLASLT_ORDER_COL``
+
+    * - ``hipblaslt_ext`` ``Gemm``, ``GroupedGemm``, ``matmulIsAlgoSupported``,
+        ``isSolutionSupported``, and ``matmulIsTuned``
+      - | ``HIPBLASLT_ORDER_COL``
+        | Swizzled orders, for the combinations the API reference lists
+      - ``HIPBLASLT_ORDER_COL``
+
+With row-major A or B, a bias epilogue, an alpha vector, strided and pointer-array batches, and
+layout offsets keep their usual meaning: a bias still applies per row of D. To use
+a row-major C or D, or row-major data in the extension API, keep column-major layouts and use the
+identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`. A per-row vector of D then applies per
+column of A * B.
+
 Precision: types, compute modes, and scaling
 ============================================
 
