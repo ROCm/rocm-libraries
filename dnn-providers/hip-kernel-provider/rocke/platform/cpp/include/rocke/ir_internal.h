@@ -298,7 +298,7 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
  * it, "%<name>") when that name is taken by another value of the same loop or
  * of a loop it is nested in, and returns `buf`. The serialized IR refers to a
  * value by its name, so a reused name is ambiguous inside the inner body. The
- * builder and the IR parser use it. */
+ * builder, the IR parser and the verifier use it. */
 const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
 
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for

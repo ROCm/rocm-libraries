@@ -27,6 +27,7 @@ import pytest
 from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm
+from rocke.core.verify import verify
 from rocke.tests.engines import lower_with_both_engines
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_target_accepts
@@ -435,6 +436,52 @@ def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
     with pytest.raises(RuntimeError) as native:
         engine.lower_serialized_ir(text, arch="gfx942", flavor="llvm22")
     assert str(native.value).endswith(": " + _reuse_message(reused)), str(native.value)
+
+
+def _nested_loops_renaming(inner_name, reused):
+    """A rolled loop ``k`` over ``acc`` whose body holds a rolled loop ``j``
+    over ``s``, built by the builder; then, past it, the inner loop's value
+    named ``inner_name`` is renamed to ``reused``, in the loop's attrs and in
+    the value every read of it sees."""
+    b, _, z, lane = _kernel("verify_reuse")
+    outer = _inner_loop(b, "k", "acc", lane, unroll=False)
+    with outer as (_, (acc,)):
+        inner = _inner_loop(b, "j", "s", acc, unroll=False)
+        with inner as (j, (s,)):
+            b.scf_yield(b.add(s, j))
+        b.scf_yield(inner.results[0])
+    b.global_store(z, lane, outer.results[0])
+    b.ret()
+    loop = inner.op
+    if loop.attrs["iv"] == inner_name:
+        loop.attrs["iv"] = reused
+    for meta in loop.attrs["iter_args"]:
+        if meta["name"] == inner_name:
+            meta["name"] = reused
+    for value in (j, s):
+        if value.name == inner_name:
+            value.name = reused
+    return b.kernel
+
+
+@pytest.mark.parametrize(
+    "reused, inner_name",
+    [("%k", "%j"), ("%acc", "%s"), ("%j", "%s")],
+    ids=["outer_induction_variable", "outer_carried_value", "same_loop"],
+)
+def test_the_verifier_reports_a_reused_loop_name(reused, inner_name):
+    """IR built past the builder can reuse a loop name the builder and the
+    parsers refuse. The verifier reports it with their message and nothing
+    else; ``tests/core/test_scf_for_name_reuse.cpp`` checks that the C++
+    verifier reports the same."""
+    diagnostics = verify(_nested_loops_renaming(inner_name, reused))
+    assert [(d.severity, d.message) for d in diagnostics] == [
+        ("error", _reuse_message(reused))
+    ]
+
+
+def test_the_verifier_accepts_the_names_the_builder_gave():
+    assert verify(_nested_loops_renaming("%s", "%s")) == []
 
 
 def test_one_loop_may_not_name_two_of_its_values_alike():

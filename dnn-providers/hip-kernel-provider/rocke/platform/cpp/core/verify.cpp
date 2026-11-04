@@ -88,6 +88,9 @@ typedef struct vscope_entry
 {
     const char* name;
     const rocke_type_t* type;
+    /* An induction variable or carried value of an scf.for whose body is being
+     * checked (or of the loop being entered): its name is taken. */
+    bool is_loop_name;
 } vscope_entry_t;
 
 typedef struct verifier
@@ -135,7 +138,8 @@ static int scope_has(verifier_t* v, const char* name)
     return scope_get(v, name) != NULL;
 }
 
-static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
+/* Bring `name` into scope; returns its entry, or NULL when out of memory. */
+static vscope_entry_t* scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
 {
     if(v->scope_count >= v->scope_cap)
     {
@@ -144,14 +148,52 @@ static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
         if(!ne)
         {
             v->db.oom = 1;
-            return;
+            return NULL;
         }
         v->scope = ne;
         v->scope_cap = nc;
     }
     v->scope[v->scope_count].name = name;
     v->scope[v->scope_count].type = t;
-    v->scope_count++;
+    v->scope[v->scope_count].is_loop_name = false;
+    return &v->scope[v->scope_count++];
+}
+
+/* True when `name` is taken by a loop value in scope (see vscope_entry). */
+static bool scope_has_loop_name(const verifier_t* v, const char* name)
+{
+    for(int i = v->scope_count - 1; i >= 0; --i)
+    {
+        if(v->scope[i].is_loop_name && strcmp(v->scope[i].name, name) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Bring `name`, an induction variable or carried value of the scf.for `loop`,
+ * into scope. Hand-built IR can reuse a loop name the builder and parsers
+ * refuse: the first name `loop` reuses -- one of a loop it is nested in, or an
+ * earlier one of its own -- is reported with rocke_i_reused_loop_name_message
+ * (Python: _first_reused_loop_name), and `*reuse_reported` is set so later
+ * names are not. */
+static void scope_put_loop_name(verifier_t* v,
+                                const rocke_op_t* loop,
+                                const char* name,
+                                const rocke_type_t* t,
+                                bool* reuse_reported)
+{
+    if(!*reuse_reported && scope_has_loop_name(v, name))
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        v_errf(v, loop, "%s", rocke_i_reused_loop_name_message(name, msg, sizeof msg));
+        *reuse_reported = true;
+    }
+    if(vscope_entry_t* entry = scope_put(v, name, t))
+    {
+        entry->is_loop_name = true;
+    }
 }
 
 /* legal pointer address spaces */
@@ -803,6 +845,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
 
     /* body scope: snapshot + iv + iter-arg block values */
     int saved = v->scope_count;
+    bool reuse_reported = false;
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
@@ -818,7 +861,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         {
             t = lower; /* compound / unknown: use the loop bound type */
         }
-        scope_put(v, iv, t);
+        scope_put_loop_name(v, op, iv, t, &reuse_reported);
     }
     if(have_iter_meta && iter_meta_count > 0)
     {
@@ -828,7 +871,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             const char* nm = rocke_attr_get_str(iter_meta->u.list.items[i], "name");
             if(nm)
             {
-                scope_put(v, nm, op->operands[3 + i]->type);
+                scope_put_loop_name(v, op, nm, op->operands[3 + i]->type, &reuse_reported);
             }
         }
     }

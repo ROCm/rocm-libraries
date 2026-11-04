@@ -811,6 +811,23 @@ def _reused_loop_name_message(name: str) -> str:
     )
 
 
+def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str | None:
+    """The first of ``names`` that is already taken, or None when all are free.
+
+    ``names`` are the names an ``scf.for`` gives its induction variable and
+    carried values, in that order; ``taken`` are those of the loops it is
+    nested in. A name is taken when it is in ``taken`` or repeats an earlier
+    one of ``names``. The builder and the verifier both apply this rule and
+    refuse with :func:`_reused_loop_name_message`.
+    """
+    seen = set(taken)
+    for name in names:
+        if name in seen:
+            return name
+        seen.add(name)
+    return None
+
+
 def _loop_with_body(region: Region, body: Region) -> Op | None:
     """Return the ``scf.for`` of ``region`` whose body is ``body``, or None.
 
@@ -6345,12 +6362,10 @@ class IRBuilder:
         """Refuse the names a new ``scf.for`` gives its induction variable and
         carried values (``names``, in that order) when one is already taken by
         a value of a loop the builder is emitting inside, or by an earlier name
-        in ``names`` (see :func:`_reused_loop_name_message`)."""
-        taken = set(self._enclosing_loop_value_names())
-        for name in names:
-            if name in taken:
-                raise ValueError(_reused_loop_name_message(name))
-            taken.add(name)
+        in ``names`` (see :func:`_first_reused_loop_name`)."""
+        reused = _first_reused_loop_name(self._enclosing_loop_value_names(), names)
+        if reused is not None:
+            raise ValueError(_reused_loop_name_message(reused))
 
     def _enclosing_loop_value_names(self) -> list[str]:
         """The names of the induction variables and carried values of every

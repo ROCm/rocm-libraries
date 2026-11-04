@@ -11,8 +11,9 @@
  * two engines would read different values. The builder refuses such a name with
  * the Python engine's text; loops side by side may share names. Serialized IR
  * can name values that way past the builder, and the parser refuses it with the
- * same text. tests/core/test_unrolled_for_nested_regions.py covers the Python
- * builder and parser.
+ * same text; IR built past the builder can too, and the verifier reports it with
+ * the same text. tests/core/test_unrolled_for_nested_regions.py covers the
+ * Python builder, parser and verifier.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,7 @@
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/verify.h"
 
 namespace
 {
@@ -221,6 +223,79 @@ void parser_accepts_the_names_the_builder_gave()
               + rocke_ir_builder_error(&parsed.b));
 }
 
+/* Every diagnostic the verifier reports for `kernel`, as "<severity>: <text>"
+ * lines. */
+std::string diagnostics(const rocke_kernel_def_t* kernel)
+{
+    rocke_diag_t* diags = NULL;
+    size_t n = 0;
+    if(rocke_verify(kernel, &diags, &n) != ROCKE_OK)
+    {
+        return "rocke_verify failed";
+    }
+    std::string all;
+    for(size_t i = 0; i < n; ++i)
+    {
+        all += std::string(diags[i].severity == ROCKE_DIAG_ERROR ? "error: " : "warning: ")
+               + diags[i].message + "\n";
+    }
+    rocke_diags_free(diags, n);
+    return all;
+}
+
+/* The diagnostics for a rolled loop "k0" over "acc" whose body holds a rolled
+ * loop "j" over "s", built by the builder; then, past it, the inner loop's
+ * value named `inner_name` is renamed to `reused`, in the loop's attrs and in
+ * the value every read of it sees. */
+std::string diagnostics_renaming(const std::string& inner_name, const char* reused)
+{
+    Kernel k("verify_reuse");
+    rocke_for_t outer = k.loop("k0", "acc");
+    rocke_b_region_enter(&k.b, outer.body);
+    rocke_for_t inner = k.loop("j", "s");
+    rocke_b_region_enter(&k.b, inner.body);
+    rocke_value_t* sum = rocke_b_add(&k.b, inner.iter_vars[0], inner.iv);
+    rocke_b_scf_yield(&k.b, &sum, 1);
+    rocke_b_region_leave(&k.b);
+    rocke_b_scf_yield(&k.b, inner.op->results, 1);
+    rocke_b_region_leave(&k.b);
+    rocke_b_ret(&k.b);
+    if(inner_name == inner.iv->name)
+    {
+        rocke_attr_set_str(&k.b, &inner.op->attrs, "iv", reused);
+        inner.iv->name = reused;
+    }
+    rocke_attr_map_t* carried = rocke_attr_get(&inner.op->attrs, "iter_args")->u.list.items[0];
+    if(inner_name == inner.iter_vars[0]->name)
+    {
+        rocke_attr_set_str(&k.b, carried, "name", reused);
+        inner.iter_vars[0]->name = reused;
+    }
+    return diagnostics(rocke_ir_builder_kernel(&k.b));
+}
+
+void verifier_reports_reused_loop_names()
+{
+    const std::pair<const char*, const char*> cases[] = {
+        {"%k0", "%j"}, /* the outer induction variable */
+        {"%acc", "%s"}, /* the outer carried value */
+        {"%j", "%s"}, /* a value of the same loop */
+    };
+    for(const auto& [reused, inner_name] : cases)
+    {
+        const std::string reported = diagnostics_renaming(inner_name, reused);
+        check(reported == "error: " + message(reused) + "\n",
+              std::string("verifying ") + inner_name + " renamed to " + reused + ": '" + reported
+                  + "'");
+    }
+}
+
+void verifier_accepts_the_names_the_builder_gave()
+{
+    const std::string reported = diagnostics_renaming("%s", "%s");
+    check(reported.empty(), "verifying the verify_reuse kernel: '" + reported + "'");
+}
+
 } // namespace
 
 int main()
@@ -233,6 +308,8 @@ int main()
     accepts_new_names_and_loops_side_by_side();
     parser_refuses_reused_loop_names();
     parser_accepts_the_names_the_builder_gave();
+    verifier_reports_reused_loop_names();
+    verifier_accepts_the_names_the_builder_gave();
     if(g_failures)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);
