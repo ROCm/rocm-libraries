@@ -2035,6 +2035,7 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterNarrowsASetSharedAcrossPack
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
     std::vector<DescriptorId> survivingIds;
+    survivingIds.reserve(catalog.entries.size());
     for(const KernelDefinition* entry : catalog.entries)
     {
         survivingIds.push_back(entry->kernelId);
