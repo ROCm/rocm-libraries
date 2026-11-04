@@ -44,10 +44,12 @@ namespace FixedPointEmulation
     static constexpr int OZ2_SCALE_SHMEM_TILE_M   = 16; /* TILE_M for SHMEM kernels */
     /* SHMEM kernels (A_N, B_T) also use K_UNROLL=4: each thread loads/stores 4
      * consecutive k-positions, packs 4 int8 bytes as uint32_t per store.
-     * blockDim = (TILE_K / 4) * TILE_M = 16 * 16 = 256 threads.
-     * LDS bank conflicts drop from 4-way to 2-way.    */
+     * TILE_K = 128: one row of the tile writes 32 threads × 4 bytes = 128 bytes
+     * (one full cache line) per modulus.
+     * blockDim = (TILE_K / 4) * TILE_M = 32 * 16 = 512 threads.               */
+    static constexpr int OZ2_SCALE_SHMEM_TILE_K = 128;
     static constexpr int OZ2_SCALE_SHMEM_BLOCK_DIM
-        = (OZ2_SCALE_TILE_K / 4) * OZ2_SCALE_SHMEM_TILE_M; /* 256 */
+        = (OZ2_SCALE_SHMEM_TILE_K / 4) * OZ2_SCALE_SHMEM_TILE_M; /* 512 */
 
     /* =========================================================================
      * Device-side reduction helpers
