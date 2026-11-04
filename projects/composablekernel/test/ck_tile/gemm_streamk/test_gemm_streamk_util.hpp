@@ -11,10 +11,12 @@
 #include <tuple>
 #include <type_traits>
 
-#include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
+// After the umbrella headers: as a TU's first ck_tile include it enters numeric.hpp's include
+// cycle, which on gfx125 reaches mxfp_convert.hpp before numeric_traits is declared.
+#include "ck_tile/core/utility/type_traits.hpp"
 
 enum struct GemmPipelineType
 {

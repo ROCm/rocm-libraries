@@ -309,10 +309,12 @@ class TestGfx1250StreamKPC : public TestCkTileStreamK<Params>
         if(fill == Fill::Ones)
         {
             std::size_t mismatches = 0;
+            const auto expected    = ck_tile::bit_cast<uint32_t>(static_cast<float>(K));
             for(const auto& c : c_m_n.mData)
             {
-                // `!=` is true for NaN, unlike `fabs(x - K) > 0`.
-                mismatches += ck_tile::type_convert<float>(c) != static_cast<float>(K);
+                // Bitwise equality: a NaN never matches.
+                mismatches +=
+                    ck_tile::bit_cast<uint32_t>(ck_tile::type_convert<float>(c)) != expected;
             }
             EXPECT_EQ(mismatches, 0u) << "expected every element of C to be exactly K";
             return;
