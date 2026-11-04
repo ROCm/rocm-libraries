@@ -3116,16 +3116,12 @@ namespace TensileLite
         rv.workGroupSize.y = customKernel.threads.y;
         rv.workGroupSize.z = customKernel.threads.z;
 
-        if(T_Debug)
+        if constexpr(T_Debug)
         {
             std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
             std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
             std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
             std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
-        }
-
-        if(T_Debug)
-        {
             std::cout << "Tiles: " << tiles.x << ", " << tiles.y << ", " << tiles.z << std::endl;
         }
 
@@ -3233,7 +3229,7 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        if(T_Debug)
+        if constexpr(T_Debug)
         {
             std::cout << "Num work groups: " << rv.numWorkGroups.x << ", " << rv.numWorkGroups.y << ", " << rv.numWorkGroups.z << std::endl;
         }
@@ -3321,8 +3317,10 @@ namespace TensileLite
             return s;
         };
 
-        if(T_Debug)
+        if constexpr(T_Debug)
+        {
             std::cout << "Custom call arguments:" << std::endl;
+        }
 
         // rocRoller workgroup-mapping kernels read M, N, the macrotile, and
         // WGM. hipBLASLt supplies DEFAULT_WGM (2). Computed only if a custom
@@ -3346,8 +3344,10 @@ namespace TensileLite
 
         for(auto arg : customKernel.args)
         {
-            if(T_Debug)
+            if constexpr(T_Debug)
+            {
                 std::cout << "Type: " << toString(arg.type) << " Semantic: " << toString(arg.semantic) << std::endl;
+            }
 
             switch(arg.semantic)
             {

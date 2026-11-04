@@ -12251,9 +12251,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       _reg("uint32", "MagicNumberItersPerTile")
       _reg("uint32", "MagicShiftItersPerTile")
       _reg("uint32", "SKItersPerWG")
-      if isPersistent(kernel):
-        _reg("uint32", "SKGrid")
-        _reg("uint32", "SKTilesAndSplit")
+      _reg("uint32", "SKGrid")
+      _reg("uint32", "SKTilesAndSplit")
 
     if isPersistentDataParallel(kernel):
       # DataParallel uses KernArgsVersion=3, including its permanent beta slot.
