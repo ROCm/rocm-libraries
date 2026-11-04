@@ -48,7 +48,7 @@ constexpr int kTileK          = 64;
 constexpr int kTileW          = 128;
 constexpr int kTileC          = 8;
 constexpr int kBlockSize      = 256;
-constexpr std::size_t kLdsMax = 64 * 1024;
+constexpr std::size_t kLdsMax = std::size_t{64} * 1024;
 // Below this many output channels per group most of the 64-wide channel tile idles, and Find
 // does not pick the solver; skip it rather than compile and benchmark it.
 constexpr std::size_t kMinOutChannelsPerGroup = 16;
@@ -58,8 +58,10 @@ constexpr std::size_t kMaxGridYZ = 0xffff;
 
 std::size_t LdsBytes(int r, int stride, int dil)
 {
-    const auto span = static_cast<std::size_t>((kTileW - 1) * stride + (r - 1) * dil + 1);
-    return sizeof(float) * kTileC * (span + static_cast<std::size_t>(r) * kTileK);
+    const auto r_sz = static_cast<std::size_t>(r);
+    const auto span = static_cast<std::size_t>(kTileW - 1) * static_cast<std::size_t>(stride) +
+                      (r_sz - 1) * static_cast<std::size_t>(dil) + 1;
+    return sizeof(float) * kTileC * (span + r_sz * kTileK);
 }
 
 } // namespace
