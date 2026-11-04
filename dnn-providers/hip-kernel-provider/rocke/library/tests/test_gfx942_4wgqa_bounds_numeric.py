@@ -23,6 +23,7 @@ Output is checked against an fp32 reference. The structural CPU twins are
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import pytest
 from kernels.common import attention_unified as au
@@ -50,21 +51,18 @@ requires_gfx942_gpu = pytest.mark.skipif(
 _PAD_COLS = 8
 
 
-def _run(seqs, hq, hkv, d, bs, dt="bf16", window=0, pinned=False, seed=0):
-    """Launch one case; return (max_abs vs the fp32 reference, kernel name).
-
-    ``pinned`` launches the 4-warp tuning spec through the dispatcher (the only way
-    to reach a 4-warp body on decode); otherwise the production route runs."""
+def _paged_inputs(seqs, hq, hkv, d, bs, dt, seed):
+    """Random Q/K/V, a permuted block table whose padding columns hold the
+    poison page id, sequence lengths, and a NaN-filled output."""
     import torch
-    import torch.nn.functional as F
-    from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
     tdt = {"bf16": torch.bfloat16, "fp16": torch.float16}[dt]
     pages = [-(-k // bs) for _, k in seqs]
     nblocks = sum(pages) + 3
     g = torch.Generator(device="cuda").manual_seed(seed)
-    total_q = sum(s for s, _ in seqs)
-    q = torch.randn(total_q, hq, d, device="cuda", dtype=tdt, generator=g)
+    q = torch.randn(
+        sum(s for s, _ in seqs), hq, d, device="cuda", dtype=tdt, generator=g
+    )
     kc = torch.randn(nblocks, bs, hkv, d, device="cuda", dtype=tdt, generator=g)
     vc = torch.randn(nblocks, bs, hkv, d, device="cuda", dtype=tdt, generator=g)
     perm = torch.randperm(nblocks, device="cuda", generator=g).to(torch.int32)
@@ -80,85 +78,111 @@ def _run(seqs, hq, hkv, d, bs, dt="bf16", window=0, pinned=False, seed=0):
         [0] + [s for s, _ in seqs], dtype=torch.int32, device="cuda"
     ).cumsum(0, dtype=torch.int32)
     kl = torch.tensor([k for _, k in seqs], dtype=torch.int32, device="cuda")
-    scale = 1.0 / math.sqrt(d)
-    out = torch.full_like(q, float("nan"))
-    if pinned:
-        from dispatch.attention import AttentionRequest, dispatch_attention
+    return SimpleNamespace(
+        q=q,
+        k=kc,
+        v=vc,
+        bt=bt,
+        cu=cu,
+        kl=kl,
+        pages=pages,
+        nblocks=nblocks,
+        out=torch.full_like(q, float("nan")),
+    )
 
-        assert len({s for s, _ in seqs}) == 1, "pinned cases use one query length"
-        result = dispatch_attention(
-            AttentionRequest(
-                batch=len(seqs),
-                nhead_q=hq,
-                nhead_k=hkv,
-                seqlen_q=seqs[0][0],
-                seqlen_k=max(k for _, k in seqs),
-                hdim_q=d,
-                hdim_v=d,
-                arch="gfx942",
-                mask_type=2,
-                sliding_window=window,
-                dtype=dt,
-                kv_block_size=bs,
-                algorithm="unified_tuning",
-                spec_id=_4WARP_SPEC,
-            )
-        )
-        name = build_gfx942_4warp_gqa(result.spec.kernel_spec, arch="gfx942").name
-        tensors = {
-            "q": q,
-            "out": out,
-            "k": kc,
-            "v": vc,
-            "cu_seqlens_q": cu,
-            "seqused_k": kl,
-            "block_table": bt,
-        }
-        result.bind_torch(tensors).launch()
-    else:
-        problem = au.UnifiedAttentionProblem(
-            total_q=total_q,
-            num_seqs=len(seqs),
-            num_query_heads=hq,
-            num_kv_heads=hkv,
-            head_size=d,
-            block_size=bs,
-            max_seqlen_q=max(s for s, _ in seqs),
-            max_seqlen_k=max(k for _, k in seqs),
-            dtype=dt,
+
+def _launch_production(x, seqs, hq, hkv, d, bs, dt, window):
+    """Launch through the production route; return the kernel name it builds."""
+    import torch
+    from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+    problem = au.UnifiedAttentionProblem(
+        total_q=sum(s for s, _ in seqs),
+        num_seqs=len(seqs),
+        num_query_heads=hq,
+        num_kv_heads=hkv,
+        head_size=d,
+        block_size=bs,
+        max_seqlen_q=max(s for s, _ in seqs),
+        max_seqlen_k=max(k for _, k in seqs),
+        dtype=dt,
+        sliding_window=window,
+        num_cus=torch.cuda.get_device_properties(0).multi_processor_count,
+        num_kv_blocks=x.nblocks,
+    )
+    assert (
+        au._gfx942_4warp_route(problem, "gfx942") is not None
+    ), "case must exercise a 4-warp body"
+    spec = au._tiled_spec_from_problem(problem, "gfx942")
+    au.run_unified_attention_torch(
+        problem=problem,
+        q=x.q,
+        k=x.k,
+        v=x.v,
+        out=x.out,
+        cu_seqlens_q=x.cu,
+        seqused_k=x.kl,
+        softmax_scale=1.0 / math.sqrt(d),
+        block_table=x.bt,
+        softcap=0.0,
+        backend="auto",
+    )
+    return build_gfx942_4warp_gqa(spec, arch="gfx942").name
+
+
+def _launch_pinned(x, seqs, hq, hkv, d, bs, dt, window):
+    """Launch the 4-warp tuning spec through the dispatcher (the only way to reach
+    a 4-warp body on decode); return the kernel name it builds."""
+    from dispatch.attention import AttentionRequest, dispatch_attention
+
+    assert len({s for s, _ in seqs}) == 1, "pinned cases use one query length"
+    result = dispatch_attention(
+        AttentionRequest(
+            batch=len(seqs),
+            nhead_q=hq,
+            nhead_k=hkv,
+            seqlen_q=seqs[0][0],
+            seqlen_k=max(k for _, k in seqs),
+            hdim_q=d,
+            hdim_v=d,
+            arch="gfx942",
+            mask_type=2,
             sliding_window=window,
-            num_cus=torch.cuda.get_device_properties(0).multi_processor_count,
-            num_kv_blocks=nblocks,
+            dtype=dt,
+            kv_block_size=bs,
+            algorithm="unified_tuning",
+            spec_id=_4WARP_SPEC,
         )
-        assert (
-            au._gfx942_4warp_route(problem, "gfx942") is not None
-        ), "case must exercise a 4-warp body"
-        spec = au._tiled_spec_from_problem(problem, "gfx942")
-        name = build_gfx942_4warp_gqa(spec, arch="gfx942").name
-        au.run_unified_attention_torch(
-            problem=problem,
-            q=q,
-            k=kc,
-            v=vc,
-            out=out,
-            cu_seqlens_q=cu,
-            seqused_k=kl,
-            softmax_scale=scale,
-            block_table=bt,
-            softcap=0.0,
-            backend="auto",
-        )
-    torch.cuda.synchronize()
+    )
+    tensors = {
+        "q": x.q,
+        "out": x.out,
+        "k": x.k,
+        "v": x.v,
+        "cu_seqlens_q": x.cu,
+        "seqused_k": x.kl,
+        "block_table": x.bt,
+    }
+    result.bind_torch(tensors).launch()
+    return result.build().name
+
+
+def _max_abs_vs_reference(x, seqs, hq, hkv, d, window):
+    """max |out - ref| over all sequences against an fp32 SDPA reference with the
+    bottom-right causal (and sliding-window) mask; asserts the output is finite."""
+    import torch
+    import torch.nn.functional as F
+
     rep = hq // hkv
     st = 0
     worst = 0.0
     for i, (sq, skv) in enumerate(seqs):
-        idx = bt[i, : pages[i]].long()
-        k = kc[idx].reshape(-1, hkv, d)[:skv].float().permute(1, 0, 2)
-        v = vc[idx].reshape(-1, hkv, d)[:skv].float().permute(1, 0, 2)
+        idx = x.bt[i, : x.pages[i]].long()
+        k = x.k[idx].reshape(-1, hkv, d)[:skv].float().permute(1, 0, 2)
+        v = x.v[idx].reshape(-1, hkv, d)[:skv].float().permute(1, 0, 2)
         k = k.repeat_interleave(rep, 0)
         v = v.repeat_interleave(rep, 0)
-        qs = q[st : st + sq].float().permute(1, 0, 2)
+        qs = x.q[st : st + sq].float().permute(1, 0, 2)
         ii = torch.arange(sq, device="cuda").view(sq, 1) + (skv - sq)
         jj = torch.arange(skv, device="cuda").view(1, skv)
         keep = jj <= ii
@@ -166,13 +190,24 @@ def _run(seqs, hq, hkv, d, bs, dt="bf16", window=0, pinned=False, seed=0):
             keep &= ii - jj < window
         mask = torch.where(keep, 0.0, float("-inf"))
         ref = F.scaled_dot_product_attention(
-            qs, k, v, attn_mask=mask, scale=scale
+            qs, k, v, attn_mask=mask, scale=1.0 / math.sqrt(d)
         ).permute(1, 0, 2)
-        o = out[st : st + sq].float()
+        o = x.out[st : st + sq].float()
         assert torch.isfinite(o).all(), f"seq {i}: non-finite output"
         worst = max(worst, (o - ref).abs().max().item())
         st += sq
-    return worst, name
+    return worst
+
+
+def _run(seqs, hq, hkv, d, bs, dt="bf16", window=0, pinned=False, seed=0):
+    """Launch one case; return (max_abs vs the fp32 reference, kernel name)."""
+    import torch
+
+    x = _paged_inputs(seqs, hq, hkv, d, bs, dt, seed)
+    launch = _launch_pinned if pinned else _launch_production
+    name = launch(x, seqs, hq, hkv, d, bs, dt, window)
+    torch.cuda.synchronize()
+    return _max_abs_vs_reference(x, seqs, hq, hkv, d, window), name
 
 
 @requires_gfx942_gpu
