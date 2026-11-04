@@ -201,26 +201,35 @@ Without a warm start the result depends on the seed.
 
 Evidence: an oracle replay of this coordinator (the real driver, adapter,
 coordinator and strategies; builds and GPU calls answered from an exhaustive
-sweep with calibrated timing noise) on MI350X (gfx950), fp16 `rcr`, 8
-problems with 5520 candidates each, 100 seeds per setting, the settings above.
-The figure is the geometric mean over the problems of the confirmed winner's
-speed relative to the best kernel's.
+sweep) on MI350X (gfx950), fp16 `rcr`, 8 problems with 5520 candidates each,
+the settings above. The figure is the geometric mean over the problems of the
+confirmed winner's speed relative to the best kernel's. Near-ties make it
+depend on the timing noise, so each range covers two noise models: one
+calibrated on the GPU's own search runs (a persistent offset per problem and
+kernel plus the GPU's run-to-run spread; 100 seeds) and heavy-tailed
+Student-t noise (60 seeds).
 
-| Setting | Mean | p10 | Min | Builds (8 problems) |
-|---|---|---|---|---|
-| `tpe`, `shared`, no warm start | 89% | 70% | 62% | 346 |
-| `tpe`, `shared`, warm start top 5 | 99.6% | 99.1% | 96% | 355 |
+| Setting | Mean | p10 | Min | Runs >= 99% | Builds (8 problems) |
+|---|---|---|---|---|---|
+| `tpe`, `shared`, no warm start | 88% | 68% | 59-62% | 14-17% | 341-358 |
+| `tpe`, `shared`, warm start top 5 | 98.9-99.2% | 97.5-98.2% | 95% | 62-72% | 356-357 |
+
+On MI350X (gfx950), re-measured against the best kernel known for each
+problem, the seeds that missed without the warm start (seed 0: 85%, seed 1:
+72%) reached 100% with it at seed 1, `shared` (every problem got its
+best-known kernel), and 98.9% at seed 0, `per_problem` (worst problem 92%).
 
 With the warm start, the best kernel among each problem's first 50, 75 and
-100 trials reached 94%, 98.6% and 99.7% on average (81%, 86% and 89% without
-it). The heuristic's own top 5 never held the best kernel (best of 5: 79%): the
-warm start moves the search into good regions rather than handing it the
-answer. `per_problem` seeds without a warm start did not help (88%, at 616
-builds). The runs used 355 of the 1200 builds allowed: keep
-`new_builds_per_run` from binding by scaling it with the number of problems
-(the warm-started runs built about 45 kernels per problem). With a cap of 150
-builds for the 8 problems, the warm-started `per_problem` search fell from 99.4%
-to 91%.
+100 trials reached about 94%, 98.5% and 99.5% on average in both noise models
+(81%, 86% and 89% without it); the confirmed winner is a little lower because
+noise can swap near-ties. The heuristic's own top 5 never held the best kernel
+(best of 5: 79%): the warm start moves the search into good regions rather
+than handing it the answer. In the replay's original, lighter noise model,
+`per_problem` seeds without a warm start did not help (88%, at 616 builds),
+and a cap of 150 builds for the 8 problems took the warm-started
+`per_problem` search from 99.4% to 91%. The runs used about 356 of the 1200
+builds allowed: keep `new_builds_per_run` from binding by scaling it with the
+number of problems (the warm-started runs built about 45 kernels per problem).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -379,18 +388,26 @@ and B, the reference and its maximum as `.npy` files: one entry per key (the
 problem, dtype, layout, fp8 format and input seed), written under a temp name
 and renamed into place, so concurrent workers on any device read a complete
 entry or none. Later calls only load them and compare: 0.37 s and 0.06 s for
-the two shapes above. A key has one writer: workers that miss it while another
-writes it (a problem's first round on several devices) compute their own copy
-and do not store it, and each writer reserves its entry's size under a lock
-before writing, so the caps and the 10%-free guard hold however many workers
-miss at once. A worker killed while it writes (its call timed out) keeps its
-reservation, and that problem computes on every call for the rest of the run.
-An entry holds what each worker would compute itself, so verification results
-are the same with or without it. The directory goes when the run ends (the
-run prints its entries and size), also on an error, Ctrl-C or SIGTERM; a run
-killed with SIGKILL leaves its `ck_search_host_cache-*` directory behind. A
-tmpfs such as `/dev/shm` is faster but holds the entries in RAM. Storing
-needs POSIX file locks (`fcntl`); without them every call computes.
+the two shapes above. Measured end to end on MI350X (gfx950), a search's
+measurement call (worker start, host side and kernel) took 0.34 s instead of
+0.62 s on the replay's 8 fp16 `rcr` shapes (1.8x) and 5.75 s instead of 17.2 s
+on 4 large bf16 `crr` shapes (3.0x), with the same verify outcomes and
+latencies. Each entry is the fp32 reference (4*M*N bytes) plus the encoded A
+and B: those 4 shapes took 10.8 GiB, the two 98304x9600 ones about 3.7 GiB
+each, close to the 4 GiB `max_entry_gib` default, so size `max_entry_gib`,
+`max_total_gib` and the free space of `dir` for a run's largest problems. A
+key has one writer: workers that miss it while another writes it (a problem's
+first round on several devices) compute their own copy and do not store it,
+and each writer reserves its entry's size under a lock before writing, so the
+caps and the 10%-free guard hold however many workers miss at once. A worker
+killed while it writes (its call timed out) keeps its reservation, and that
+problem computes on every call for the rest of the run. An entry holds what
+each worker would compute itself, so verification results are the same with or
+without it. The directory goes when the run ends (the run prints its entries
+and size), also on an error, Ctrl-C or SIGTERM; a run killed with SIGKILL
+leaves its `ck_search_host_cache-*` directory behind. A tmpfs such as
+`/dev/shm` is faster but holds the entries in RAM. Storing needs POSIX file
+locks (`fcntl`); without them every call computes.
 
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against
