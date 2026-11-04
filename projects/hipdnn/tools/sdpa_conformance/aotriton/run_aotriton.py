@@ -68,9 +68,10 @@ count | reason the engine cannot enumerate}``). Under ``<out>/cand/``:
   ``=k`` over the cases whose count exceeds ``k``;
 * ``<fwd|bwd>/<engine>/not-enumerable/``: no pytest run; a ``not-enumerable`` row carrying the
   message for each case where the engine could not enumerate;
-* with ``--all-engines`` also ``pair/<fwd>__<bwd>/<i>x<j>/`` (and ``.../not-enumerable/``) for backward
-  cases: every forward engine against every backward engine of the case, the winners included,
-  over every pair of candidate indices.
+* with ``--all-engines --pairs`` also ``pair/<fwd>__<bwd>/<i>x<j>/`` (and ``.../not-enumerable/``) for
+  backward cases: every forward engine against every backward engine of the case, the winners
+  included, over every pair of candidate indices. Without ``--pairs`` each candidate pass pins one
+  direction, so EXTREME costs the sum of the candidate counts, not their product.
 
 A case whose worker died in pass 1 has no counts and gets no candidate pass. The runner exports
 ``HIPDNN_SDPA_PREFIX`` (the ``--hipdnn-prefix``, where ``bin/hipdnn_bench`` lives) to every pass and
@@ -175,7 +176,7 @@ def parse_args(argv):
         "--exhaustive",
         action="store_true",
         help="after the normal run, run one pass per candidate (kernel) of every enumerable engine; "
-        "with --all-engines, per pair of candidates too (EXTREME)",
+        "with --all-engines (EXTREME) and --pairs, per pair of candidates too",
     )
     parser.add_argument(
         "--resume",
@@ -379,7 +380,7 @@ class CandidatePass(NamedTuple):
 
 def candidate_passes(rows, pairs):
     """Every pass ``--exhaustive`` runs under ``cand/`` from pass-1 rows, in run order; with
-    ``pairs`` (``--all-engines``) the EXTREME pair passes follow. A ``not-enumerable`` pass runs no
+    ``pairs`` (``--all-engines --pairs``) the EXTREME pair passes follow. A ``not-enumerable`` pass runs no
     pytest and carries ``{nodeid: message}`` as its cases.
     """
     for (direction, engine), (counts, messages) in sorted(candidate_work(rows).items()):
@@ -684,9 +685,9 @@ class Runner:
         print(f"{p.note}: {len(p.cases)} not enumerable", flush=True)
 
     def exhaustive(self):
-        """Candidate passes from pass 1's counts; with ``--all-engines`` the pair passes too."""
+        """Candidate passes from pass 1's counts; with ``--all-engines --pairs`` the pair passes too."""
         rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
-        for p in candidate_passes(rows, self.args.all_engines):
+        for p in candidate_passes(rows, self.args.all_engines and self.args.pairs):
             if p.kind == contract.NOT_ENUMERABLE:
                 self.not_enumerable(p)
             else:

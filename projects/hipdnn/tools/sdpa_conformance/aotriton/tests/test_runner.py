@@ -1045,24 +1045,27 @@ def test_without_candidate_counts_in_pass_one_no_candidate_pass_exists(
     assert cand_dirs(tmp_path) == []
 
 
-def test_extreme_runs_candidate_passes_over_every_enumerable_pair(
+EXTREME_PASS1 = {
+    n: dict(
+        fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A;F", bwd_engines="X;Y",
+        fwd_candidate='{"A": 2, "F": "no enumeration"}', bwd_candidate='{"X": 2, "Y": 1}',
+    )
+    for n in ("b1", "b2")
+}  # fmt: skip
+
+
+def test_extreme_with_pairs_runs_candidate_passes_over_every_enumerable_pair(
     monkeypatch, tmp_path
 ):
     ids = [f"{BWD}::b1", f"{BWD}::b2"]
-    pass1 = {
-        n: dict(
-            fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A;F", bwd_engines="X;Y",
-            fwd_candidate='{"A": 2, "F": "no enumeration"}', bwd_candidate='{"X": 2, "Y": 1}',
-        )
-        for n in ("b1", "b2")
-    }  # fmt: skip
     status, sim = run_with(
         monkeypatch,
         tmp_path,
         ids,
-        candidate_behave(pass1),
+        candidate_behave(EXTREME_PASS1),
         "--exhaustive",
         "--all-engines",
+        "--pairs",
     )
     assert status == 0
     assert cand_dirs(tmp_path) == [
@@ -1087,7 +1090,26 @@ def test_extreme_runs_candidate_passes_over_every_enumerable_pair(
         tmp_path / "cand" / "pair" / "F__X" / "not-enumerable" / "results.csv"
     )
     assert {r["reason"] for r in blocked} == {"fwd F: no enumeration"}
-    # the plain pair passes of --all-engines are opt-in (--pairs); EXTREME's candidate pairs are not
+
+
+def test_extreme_without_pairs_pins_one_direction_in_every_candidate_pass(
+    monkeypatch, tmp_path
+):
+    ids = [f"{BWD}::b1", f"{BWD}::b2"]
+    status, sim = run_with(
+        monkeypatch,
+        tmp_path,
+        ids,
+        candidate_behave(EXTREME_PASS1),
+        "--exhaustive",
+        "--all-engines",
+    )
+    assert status == 0
+    assert cand_dirs(tmp_path) == ["bwd/X/0", "bwd/X/1", "bwd/Y/0"]
+    pinned_fwd = [
+        d for d, pins, _ in sim.runs if pins["fwd"] and pins["fwd"] != "reference"
+    ]
+    assert pinned_fwd == []  # every backward pass leaves the forward to the heuristic
     assert not (tmp_path / "all-engines" / "pair").exists()
 
 
