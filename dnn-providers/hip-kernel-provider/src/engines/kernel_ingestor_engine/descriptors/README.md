@@ -4,10 +4,14 @@ This root holds the descriptors the provider **ships**. Its sibling `test_descri
 stages into the build tree for the unit and integration binaries and is installed only
 under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
 
-- `rocKE/gfx950_attention_dense/` (its KDP is stored in DVC, see
-  [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below), whose KDP declares
-  gfx950 only. It packs for a build whose GPU targets include gfx950 and that has rocKE
-  enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk).
+- Four rocKE bundles: `rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/`
+  and `rocKE/gfx950_attention_unified_3d/`, whose KDPs are stored in DVC (see
+  [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950
+  only, and `rocKE/gfx1151_wmma_attention/`, whose KDP is in git and declares the gfx11 and
+  gfx12 RDNA targets. They pack for a build that has rocKE enabled
+  (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk) and whose
+  GPU targets include an arch one of those KDPs declares; for gfx950 the DVC KDPs must also
+  have been pulled.
 - `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
   their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
   that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`

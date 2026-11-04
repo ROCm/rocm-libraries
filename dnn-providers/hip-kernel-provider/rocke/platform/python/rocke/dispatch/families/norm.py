@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
-from ...core.arch import ArchTarget, known_arches
+from ...core.arch import ArchTarget, arches_with_own_facts
 from ...instances.common import layernorm2d as _ln
 from ...instances.common import rmsnorm2d as _rms
 from ..core import (
@@ -85,8 +85,10 @@ NORM_DIM_VOCABULARY = ("rows", "cols")
 # both wave sizes. This is the documented exception to the wave-size consistency
 # invariant, which exists to catch MMA kernels that bake a wave size into their
 # geometry. The per-arch LDS / max-threads checks in the instance validators are
-# what actually narrow this list per request.
-_NORM_ARCHES = known_arches()
+# what actually narrow this list per request. Each generic target stands for the
+# processors whose rows point at it (``listed_arch_for``), so listing them again
+# would only build the generic's kernels once more per member.
+_NORM_ARCHES = arches_with_own_facts()
 
 
 def _norm_dtype(dtype: str) -> str:

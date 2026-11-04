@@ -19,6 +19,8 @@ from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayo
 from kernels.common.attention_unified import _3d_signature
 from rocke.core.verify import verify
 
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
+
 
 @pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
 def test_attention_strided_kv_golden(flavor):
@@ -201,7 +203,6 @@ def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monke
     from dataclasses import asdict
 
     engine = pytest.importorskip("rocke_engine")
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     module = import_module(f"kernels.{arch}.attention_tiled_3d")
@@ -219,20 +220,7 @@ def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monke
         kv_layout="strided",
         waves_per_eu=waves_per_eu,
     )
-    kernel = module.build_unified_attention_3d_tiled(spec, arch=arch)
-    expected = _lower_kernel_to_llvm_python(kernel, arch=arch)
-    if arch == "gfx950":
-        reduce = module.UnifiedAttentionReduceTiledSpec(
-            head_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-            waves_per_eu=waves_per_eu,
-        )
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
-        )
+    expected = lower_like_tiled_3d_binding(spec, arch)
     actual = getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(
         asdict(spec), arch
     )
