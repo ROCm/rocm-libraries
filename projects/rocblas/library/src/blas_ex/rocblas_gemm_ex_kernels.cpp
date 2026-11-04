@@ -517,7 +517,7 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
     // Tensile and hipBLASLt pass batch strides to their kernels as 32-bit values, so a strided-batched
     // problem with a batch stride of 2^32 elements or more reads and writes the wrong batches while
     // returning success (hipBLASLt refuses such problems since ROCM-32140). Issue those batches one at
-    // a time: with batch_count == 1 the stride is not used, and the 64-bit element offsets select the batch.
+    // a time as non-batched calls (batch_count 1, strides 0); the 64-bit element offsets select the batch.
     if(!BATCHED && batch_count > 1)
     {
         constexpr rocblas_stride stride_limit = rocblas_stride(1) << 32;
@@ -537,23 +537,23 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
                                                                           a_type,
                                                                           offsetAin + i * stride_a,
                                                                           lda,
-                                                                          stride_a,
+                                                                          0,
                                                                           b,
                                                                           b_type,
                                                                           offsetBin + i * stride_b,
                                                                           ldb,
-                                                                          stride_b,
+                                                                          0,
                                                                           beta,
                                                                           c,
                                                                           c_type,
                                                                           offsetCin + i * stride_c,
                                                                           ldc,
-                                                                          stride_c,
+                                                                          0,
                                                                           d,
                                                                           d_type,
                                                                           offsetDin + i * stride_d,
                                                                           ldd,
-                                                                          stride_d,
+                                                                          0,
                                                                           1,
                                                                           compute_type,
                                                                           algo,
