@@ -27,6 +27,7 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <dlfcn.h>
 #include <unistd.h>
 #endif
 
@@ -87,6 +88,16 @@ namespace
             out << gemmListStatus << ' ' << gemmAlgoCount << ' ' << gemmOk << ' ' << amaxStatus
                 << ' ' << amaxOk << ' ' << transformStatus << ' ' << transformOk;
             return out.str();
+        }
+
+        // Whether a line written by str() records a GEMM that ran correctly.
+        static bool ranGemm(const std::string& line)
+        {
+            std::istringstream in(line);
+            int                listStatus = 0;
+            size_t             algoCount  = 0;
+            bool               ok         = false;
+            return bool(in >> listStatus >> algoCount >> ok) && ok;
         }
     };
 
@@ -339,25 +350,28 @@ namespace
             reportDir.emplace(kReportDirEnv, dir.string().c_str());
         }
 
-        std::vector<int> forward, reverse;
+        std::vector<int>         forward, reverse;
+        std::vector<std::string> expected;
+        bool                     anyGemm = false;
         for(int device = 0; device < count; ++device)
         {
             forward.push_back(device);
             reverse.insert(reverse.begin(), device);
             const auto alone = "alone_" + std::to_string(device);
             EXPECT_EXIT(exitAfterDevices({device}, alone), ::testing::ExitedWithCode(0), "");
+            const auto lines = readLines(dir / alone);
+            ASSERT_EQ(lines.size(), size_t(count));
+            expected.push_back(lines[device]);
+            anyGemm = anyGemm || DeviceResult::ranGemm(lines[device]);
         }
+        // With no device running a GEMM on its own, every order would trivially
+        // give the same empty results.
+        if(!anyGemm)
+            GTEST_SKIP() << "no device runs a GEMM with the installed kernel libraries";
+
         EXPECT_EXIT(exitAfterDevices(forward, "forward"), ::testing::ExitedWithCode(0), "");
         EXPECT_EXIT(exitAfterDevices(reverse, "reverse"), ::testing::ExitedWithCode(0), "");
         EXPECT_EXIT(exitAfterDevicesConcurrently("concurrent"), ::testing::ExitedWithCode(0), "");
-
-        std::vector<std::string> expected;
-        for(int device = 0; device < count; ++device)
-        {
-            const auto lines = readLines(dir / ("alone_" + std::to_string(device)));
-            ASSERT_EQ(lines.size(), size_t(count));
-            expected.push_back(lines[device]);
-        }
         for(const char* run : {"forward", "reverse", "concurrent"})
             EXPECT_EQ(readLines(dir / run), expected) << run;
     }
@@ -523,11 +537,76 @@ namespace
         std::exit(failures == 0 ? 0 : 1);
     }
 
+    // With HIPBLASLT_TENSILE_LIBPATH set, the current device lists GEMM algorithms.
+    void exitAfterListingGemmAlgos()
+    {
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            std::exit(1);
+        std::vector<hipblasLtMatmulHeuristicResult_t> algos;
+        const auto                                    status = hipblaslt_ext::getAllAlgos(handle,
+                                                       hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                                       HIPBLAS_OP_N,
+                                                       HIPBLAS_OP_N,
+                                                       HIP_R_16F,
+                                                       HIP_R_16F,
+                                                       HIP_R_16F,
+                                                       HIP_R_16F,
+                                                       HIPBLAS_COMPUTE_32F,
+                                                       algos);
+        hipblasLtDestroy(handle);
+        std::exit(status == HIPBLAS_STATUS_SUCCESS && !algos.empty() ? 0 : 2);
+    }
+
+    // Whether dir holds a Tensile library, lazy-loading or not, for processor.
+    bool hasTensileLibrary(const std::filesystem::path& dir, const std::string& processor)
+    {
+        for(const char* prefix : {"TensileLibrary_lazy_", "TensileLibrary_"})
+            for(const char* extension : {".dat", ".dat.zlib", ".yaml"})
+                if(std::filesystem::exists(dir / (prefix + processor + extension)))
+                    return true;
+        return false;
+    }
+
     TEST(KernelLibrary, smoke_MissingTensileLibraryReturnsErrors)
     {
         GTEST_FLAG_SET(death_test_style, "threadsafe");
         ScopedEnv libPath("HIPBLASLT_TENSILE_LIBPATH", "/nonexistent/hipblaslt/library");
         EXPECT_EXIT(exitAfterGemmWithoutLibrary(), ::testing::ExitedWithCode(0), "");
+    }
+
+    // HIPBLASLT_TENSILE_LIBPATH may name an installed library directory, which
+    // holds one sub-directory per architecture, instead of one architecture's.
+    TEST(KernelLibrary, smoke_TensileLibPathAcceptsArchitectureSubdirectories)
+    {
+#ifdef _WIN32
+        GTEST_SKIP() << "finding the installed library directory is not implemented on Windows";
+#else
+        // dlsym, unlike &hipblasLtCreate, which is this binary's PLT stub, gives
+        // the definition in the library, so dladdr names the library file.
+        Dl_info     info{};
+        void* const entry = dlsym(RTLD_DEFAULT, "hipblasLtCreate");
+        if(entry == nullptr || dladdr(entry, &info) == 0 || info.dli_fname == nullptr)
+            GTEST_SKIP() << "cannot locate libhipblaslt";
+        const auto root = std::filesystem::weakly_canonical(info.dli_fname).parent_path()
+                          / "hipblaslt" / "library";
+
+        int             device = 0;
+        hipDeviceProp_t prop{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
+        const std::string arch      = prop.gcnArchName;
+        const std::string processor = arch.substr(0, arch.find(':'));
+        // An A0 gfx1250 part loads a revisioned sub-directory, which this test
+        // does not look for.
+        if(!hasTensileLibrary(root / processor, processor) || hasTensileLibrary(root, processor))
+            GTEST_SKIP() << root << " has no " << processor
+                         << " sub-directory with a Tensile library";
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        ScopedEnv libPath("HIPBLASLT_TENSILE_LIBPATH", root.string().c_str());
+        EXPECT_EXIT(exitAfterListingGemmAlgos(), ::testing::ExitedWithCode(0), "");
+#endif
     }
 
     TEST(KernelLibrary, smoke_MissingExtOpLibraryReturnsArchMismatch)

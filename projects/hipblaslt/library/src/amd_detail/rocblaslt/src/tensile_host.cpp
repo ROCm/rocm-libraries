@@ -3298,13 +3298,17 @@ namespace
             const char* env
                 = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
 
-            // Whether dir holds the lazy-loading Tensile mapping for this device. Both
-            // the per-architecture sub-directory and the mapping filenames carry
-            // `processor`, the name the runtime reports for this device -- which is
-            // the compiler target the kernels in it were built for, including a
-            // silicon-revision variant such as gfx1250-strict.
+            // Whether dir holds the Tensile library this build loads for this device:
+            // the lazy-loading mapping, or the full library without lazy loading. Both
+            // the per-architecture sub-directory and the filenames carry `processor`,
+            // the name the runtime reports for this device -- which is the compiler
+            // target the kernels in it were built for, including a silicon-revision
+            // variant such as gfx1250-strict.
             const auto hasMapping = [&](const std::filesystem::path& dir) {
-                const auto base = dir / ("TensileLibrary_lazy_" + processor);
+                const auto base
+                    = dir
+                      / (std::string(lazyLoad ? "TensileLibrary_lazy_" : "TensileLibrary_")
+                         + processor);
                 return std::filesystem::exists(base.string() + ".dat")
                        || std::filesystem::exists(base.string() + ".dat.zlib")
                        || std::filesystem::exists(base.string() + ".yaml");
