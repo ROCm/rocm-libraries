@@ -954,6 +954,11 @@ class LogicalScheduler:
         self._tail_freed_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                      'SA': set(), 'SB': set()}
         self._kernel = None
+        # Scale VGPRs are only known after population. The plan stays empty
+        # until emit, and stays empty for every schedule that is not the
+        # gfx950 dual-period uniform epoch.
+        self._scaleShadowPlan = None
+        self._mainloopC0Schedule = None
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -968,6 +973,112 @@ class LogicalScheduler:
         piM, piN = cfg.partition_coords(pi)
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
+
+    @staticmethod
+    def _flatEmittedInstructions(emitted_3d):
+        """Yield concrete instructions from a populated emitted schedule."""
+        for partition in emitted_3d:
+            for em_list in partition:
+                for emitted in em_list:
+                    for inst in emitted.instructions:
+                        if isinstance(inst, Module):
+                            yield from inst.flatitems()
+                        else:
+                            yield inst
+
+    def _prepareScaleShadowPlan(self):
+        """Derive the C0-entry scales that move to the preloop and C1 tail."""
+        if self._scaleShadowPlan is not None:
+            return self._scaleShadowPlan
+
+        cfg = self.config
+        first = self._partition_tile_range(0)
+        candidate = (
+            tuple(self._kernel.get("ISA", (9, 5, 0))) == (9, 5, 0)
+            and cfg.dualPeriodScale
+            and cfg.scaleReuse == 2
+            and cfg.pgr == 2
+            and cfg.prefetchNextPartition
+            and cfg.uniformPgrEpoch
+            and cfg.uniformEpochVmemCohortSize == 5
+            and cfg.numSubIterK == 1
+            and cfg.numPartitionsM > 1
+            and cfg.numPartitionsN > 1
+            and first['A'][0] == 0
+            and first['B'][0] == 0
+            and (first['A'][1] - first['A'][0]) % cfg.lrSA.mn == 0
+            and (first['B'][1] - first['B'][0]) % cfg.lrSB.mn == 0
+            and cfg.lrSA.mn == 2
+            and cfg.lrSB.mn == 2
+            and self.unroll_factor == 2
+        )
+        if not candidate:
+            self._scaleShadowPlan = []
+            return self._scaleShadowPlan
+
+        from .InstructionScheduler import selectScaleShadowPlan
+
+        firstPartitionMfmas = (
+            (first['A'][1] - first['A'][0])
+            * (first['B'][1] - first['B'][0])
+            * cfg.numSubIterK
+        )
+        plan = selectScaleShadowPlan(
+            list(self._flatEmittedInstructions(
+                self._emitted_per_unroll[0])),
+            list(self._flatEmittedInstructions(
+                self._emitted_per_unroll[1])),
+            firstPartitionMfmas,
+            (
+                (first['A'][1] - first['A'][0]) // cfg.lrSA.mn,
+                (first['B'][1] - first['B'][0]) // cfg.lrSB.mn,
+            ),
+        )
+        expectedReads = (
+            (first['A'][1] - first['A'][0]) // cfg.lrSA.mn
+            + (first['B'][1] - first['B'][0]) // cfg.lrSB.mn
+        )
+        assert plan and len(plan["entry"]) == expectedReads, \
+            "supported scale-shadow topology did not cover C0 P0 scales"
+        self._scaleShadowPlan = plan
+        return plan
+
+    @staticmethod
+    def _makeScaleShadowSeed(plan):
+        """Build the preloop reads that initialize C0-entry scale VGPRs."""
+        module = Module("Preloop C0-entry scale seed")
+        module.addComment0(
+            "Seed ScaleA/ScaleB reads needed by C0 partition zero")
+        for entry in plan:
+            read = copy.deepcopy(entry["readTemplate"])
+            read.comment = (
+                "preloop seed for C0 entry scale; "
+                f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}"
+            )
+            module.add(read)
+        return module
+
+    @classmethod
+    def _insertScaleShadowSeed(cls, preloop, plan):
+        """Insert entry scales before the NLL/NGLL preloop dispatch."""
+        items = list(preloop.flatitems())
+        nllBranch = next(
+            (
+                index for index, inst in enumerate(items)
+                if getattr(inst, "comment", "") == "skip to NLL"
+                or getattr(inst, "comment", "") == "skip to NLL (long)"
+            ),
+            None,
+        )
+        assert nllBranch is not None and nllBranch > 0, \
+            "scale shadowing could not find the preloop NLL dispatch"
+        compare = items[nllBranch - 1]
+        assert getattr(compare, "comment", "") == "LoopCounter LE 1?", \
+            "scale shadowing found an unexpected preloop NLL dispatch shape"
+        seed = list(cls._makeScaleShadowSeed(plan).flatitems())
+        items[nllBranch - 1:nllBranch - 1] = seed
+        preloop.setItems(items)
+        return preloop
 
     @pipeline_pass(Pass.LR)
     def place_LRs(self) -> LogicalSchedule:
@@ -4888,8 +4999,11 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from .InstructionScheduler import (
+            appendC1ScaleShadowReads,
+            dropEntryScaleReads,
             instructionSchedule,
             relaxWaitGrForOutstandingStores,
+            spillC0ScaleRefreshes,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -4922,6 +5036,20 @@ class LogicalScheduler:
         # holding it longer would keep the store's source registers live across more
         # of the loop for no extra cover.
         pendingDrain = None
+        write_floor = {}
+        body_mfma_base = 0
+        if schedule and label == "MAINLOOP_C0" and self._scaleShadowPlan:
+            # Entry scales are preloop-seeded. Drop those rereads before
+            # placement so data reads can take the early shadows, and hand
+            # the placer the C1-derived overwrite floor for what remains.
+            emitted_3d = copy.deepcopy(emitted_3d)
+            dropEntryScaleReads(
+                emitted_3d,
+                {
+                    entry["canonicalVgpr"]
+                    for entry in self._scaleShadowPlan["entry"]
+                })
+            write_floor = self._scaleShadowPlan.get("writeFloor", {})
         for pi, partition_emitted in enumerate(emitted_3d):
             # Partition 0 has no inbound drain, so it used to write straight into
             # the loop module and could not be woven into. Its own stage is the one
@@ -4938,12 +5066,19 @@ class LogicalScheduler:
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
+                    current_mfmas = sum(
+                        len(em.instructions)
+                        for em in em_list
+                        if em.opType == "mfma")
                     scheduled = instructionSchedule(
                         em_list,
                         multiDU=self._is_multi_du(),
                         minGapDsReadToWait=minGapDsReadToWait,
                         partitionPrefetch=self.config.prefetchNextPartition,
-                        uniformPgrEpoch=self.config.uniformPgrEpoch)
+                        uniformPgrEpoch=self.config.uniformPgrEpoch,
+                        earliestWriteShadow=write_floor,
+                        mfmaBase=body_mfma_base)
+                    body_mfma_base += current_mfmas
                     partModule.add(scheduled)
                 else:
                     for em in em_list:
@@ -5014,6 +5149,37 @@ class LogicalScheduler:
                             module.add(staged)
             if selfCover is not None:
                 module.add(selfCover)
+        if self._scaleShadowPlan and label == "MAINLOOP_C1":
+            final = self._partition_tile_range(
+                self.config.numPartitions - 1)
+            finalPartitionMfmas = (
+                (final['A'][1] - final['A'][0])
+                * (final['B'][1] - final['B'][0])
+                * self.config.numSubIterK
+            )
+            placed = appendC1ScaleShadowReads(
+                module,
+                self._scaleShadowPlan["entry"],
+                finalPartitionMfmas)
+            assert placed is not None, \
+                "scale shadowing could not place C1 tail refreshes"
+            leftovers, c1Mfmas = placed
+            if leftovers:
+                assert spillC0ScaleRefreshes(
+                    self._mainloopC0Schedule, leftovers, c1Mfmas), \
+                    "scale shadowing could not spill C1 tail refreshes"
+        if self._scaleShadowPlan and label == "NGLL_C0":
+            # C0 leaves the current scale epoch in the entry VGPRs. NGLL
+            # still consumes that epoch. NLL is the next epoch, and its
+            # opening wait retires these reads before its first scaled MFMA.
+            for entry in self._scaleShadowPlan["entry"]:
+                read = copy.deepcopy(entry["readTemplate"])
+                read.comment = (
+                    f"{getattr(read, 'comment', '')}; "
+                    "load next scale epoch for NLL after NGLL; "
+                    f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}"
+                )
+                module.add(read)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
@@ -5039,6 +5205,8 @@ class LogicalScheduler:
         # that sync); the wait is appended at the end to hide its cross-CU latency.
         from .ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
+        if label == "MAINLOOP_C0":
+            self._mainloopC0Schedule = module
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -6604,8 +6772,14 @@ class LogicalScheduler:
                 before=None,
                 source=None))
 
-        module.add(self._emitLoop(writer, kernel, "PRELOOP",
-                                  preloop_emitted, schedule=False))
+        preloop = self._emitLoop(writer, kernel, "PRELOOP",
+                                 preloop_emitted, schedule=False)
+        if self._scaleShadowPlan:
+            # Seed before the short-loop dispatch so mainloop, NLL, and NGLL
+            # entries all reach their first scaled MFMA with initialized data.
+            self._insertScaleShadowSeed(
+                preloop, self._scaleShadowPlan["entry"])
+        module.add(preloop)
         return module
 
     def _emitMainloopPhase(self, writer, kernel, plsin, isGfx1250, exitLabels):
@@ -6695,6 +6869,7 @@ class LogicalScheduler:
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
+        self._prepareScaleShadowPlan()
 
         # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
         # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
