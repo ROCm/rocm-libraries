@@ -74,6 +74,8 @@ struct BlockGemmARegBRegCRegV1
     static constexpr bool PackMNIter = Traits::PackMNIter;
 
     static constexpr index_t KPerSubTile = KIterPerWarp / KSubTileNum;
+    static_assert(KSubTileNum > 0 && KIterPerWarp % KSubTileNum == 0,
+                  "K sub-tile count must divide the K iterations per warp");
 
     static constexpr index_t MWarp            = Traits::MWarp;
     static constexpr index_t NWarp            = Traits::NWarp;

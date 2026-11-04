@@ -554,12 +554,17 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
 
         constexpr index_t vgpr_capacity = get_max_vgpr_count();
         // sub tile number; have 1, 2, 4 choices
-        constexpr index_t sub_tile_num = ((input_vgpr_num + acc_vgpr_num) <= vgpr_capacity) ? 1
-                                         : ((input_vgpr_num / 2 + acc_vgpr_num) <= vgpr_capacity)
-                                             ? 2
-                                             : 4;
+        constexpr index_t preferred = ((input_vgpr_num + acc_vgpr_num) <= vgpr_capacity) ? 1
+                                      : ((input_vgpr_num / 2 + acc_vgpr_num) <= vgpr_capacity) ? 2
+                                                                                               : 4;
+        constexpr index_t capped    = min(preferred, max_sub_tile_num);
+        // KPerSubTile is KIter / sub_tile_num. A 192 tile has 6 warp-K iterations,
+        // and 4 does not divide 6, so the last 64 K elements were never accumulated.
+        constexpr index_t sub_tile_num = (max_sub_tile_num % capped == 0)             ? capped
+                                         : (capped >= 2 && max_sub_tile_num % 2 == 0) ? 2
+                                                                                      : 1;
 
-        return number<min(sub_tile_num, max_sub_tile_num)>{};
+        return number<sub_tile_num>{};
     }
 
     template <typename Problem>
