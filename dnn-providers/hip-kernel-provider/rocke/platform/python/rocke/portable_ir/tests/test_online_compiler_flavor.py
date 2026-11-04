@@ -41,7 +41,12 @@ class TestOnlineCompilerFlavor(unittest.TestCase):
         self.addCleanup(environment.stop)
         os.environ.pop("ROCKE_LLVM_FLAVOR", None)
 
+    def require_engine(self):
+        if online.resolve_library_path(build=False) is None:
+            self.skipTest("no shared librocke; supply ROCKE_ONLINE_LIB")
+
     def test_auto_uses_owner_without_environment(self):
+        self.require_engine()
         for major, flavor in (
             (20, "llvm20"),
             (22, "llvm22"),
@@ -62,6 +67,7 @@ class TestOnlineCompilerFlavor(unittest.TestCase):
                         self.assertNotIn("ROCKE_LLVM_FLAVOR", os.environ)
 
     def test_explicit_profile_is_compiler_free(self):
+        self.require_engine()
         for route in ROUTES:
             with self.subTest(route=route):
                 with patch.object(
@@ -77,13 +83,17 @@ class TestOnlineCompilerFlavor(unittest.TestCase):
     def test_unavailable_owner_does_not_fall_back(self):
         for route in ROUTES:
             with self.subTest(route=route):
+                # The unavailable owner must refuse before any native call;
+                # an inert handle keeps this refusal test engine-independent.
+                lib = Mock()
                 with patch.object(
                     comgr, "_loaded_compiler_info", Mock(return_value=None)
-                ):
+                ), patch.object(online, "load", return_value=lib):
                     with self.assertRaisesRegex(
                         comgr.ComgrError, "Cannot determine LLVM flavor"
                     ):
                         convert(route)
+                    self.assertEqual(lib.method_calls, [])
 
     def test_old_engine_missing_owner_exports_is_actionable(self):
         class LegacyOnly:
@@ -96,6 +106,7 @@ class TestOnlineCompilerFlavor(unittest.TestCase):
             online._bind(LegacyOnly())
 
     def test_legacy_json_export_still_consumes_native_environment(self):
+        self.require_engine()
         os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
         lib = online.load()
         text = ir_export.export_kernel_ir_json(IRBuilder("legacy_profile").kernel)
@@ -124,6 +135,7 @@ class TestOnlineCompilerFlavor(unittest.TestCase):
         self.assertEqual(os.environ["ROCKE_LLVM_FLAVOR"], "llvm20")
 
     def test_legacy_exports_keep_signatures(self):
+        self.require_engine()
         lib = online.load()
         for name, size in (("recipe", 12), ("bundle", 13), ("ir_json", 7)):
             stem = (

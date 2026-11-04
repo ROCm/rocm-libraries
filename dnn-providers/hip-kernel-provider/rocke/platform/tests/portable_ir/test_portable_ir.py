@@ -155,6 +155,49 @@ def test_unit(mod):
     assert r.returncode == 0, r.stderr[-4000:] or r.stdout[-4000:]
 
 
+def test_online_flavor_units_do_not_build_without_an_engine(monkeypatch):
+    import unittest
+    from unittest.mock import Mock
+    from rocke.portable_ir.src import online
+    from rocke.portable_ir.tests.test_online_compiler_flavor import (
+        TestOnlineCompilerFlavor,
+    )
+
+    resolver = Mock(return_value=None)
+    load = Mock(side_effect=AssertionError("always-on lane acquired an engine"))
+    monkeypatch.setattr(online, "resolve_library_path", resolver)
+    monkeypatch.setattr(online, "load", load)
+    result = unittest.TestResult()
+    unittest.defaultTestLoader.loadTestsFromTestCase(TestOnlineCompilerFlavor).run(
+        result
+    )
+    assert result.wasSuccessful(), result.errors + result.failures
+    assert result.testsRun == 6
+    assert len(result.skipped) == 4
+    load.assert_not_called()
+    assert resolver.call_count == 4
+    assert all(call.kwargs == {"build": False} for call in resolver.call_args_list)
+
+
+def test_online_flavor_units_do_not_skip_an_invalid_explicit_engine(monkeypatch):
+    import unittest
+    from unittest.mock import Mock
+    from rocke.portable_ir.src import online
+    from rocke.portable_ir.tests.test_online_compiler_flavor import (
+        TestOnlineCompilerFlavor,
+    )
+
+    monkeypatch.setattr(
+        online,
+        "resolve_library_path",
+        Mock(side_effect=FileNotFoundError("explicit missing engine")),
+    )
+    result = unittest.TestResult()
+    TestOnlineCompilerFlavor("test_legacy_exports_keep_signatures").run(result)
+    assert not result.wasSuccessful() and not result.skipped
+    assert "explicit missing engine" in result.errors[0][1]
+
+
 def test_record_coverage():
     """Every buildable production kernel records faithfully.
 
