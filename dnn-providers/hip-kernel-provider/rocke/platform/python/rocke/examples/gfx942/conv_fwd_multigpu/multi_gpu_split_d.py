@@ -35,8 +35,45 @@ staged-copy path; rocke has no peer-access helper of its own, see
 ``platform/dsl_docs/runtime/limitations.md``), (2) each device's local conv
 launch, (3) a synchronize barrier. Host wall-clock, median over iters.
 
+Measured finding (2 MI300A GCDs, bf16, all three shapes): the halo
+hypothesis was right -- halo copy is 2-4% of wall time, nowhere near the
+bottleneck -- and with a correct launch, the split pays off: 1.64x-1.74x
+speedup over P=1 (82-87% of ideal 2x), correctness PASS.
+
+That "correct launch" fix is the load-bearing part, and it was not obvious:
+``KernelLauncher`` defaults to a *fenced* launch
+(``LaunchConfig.fence=True``, see ``rocke/runtime/launcher.py``) -- every
+call does a synchronous ``hipStreamSynchronize`` before returning, so a
+Python loop issuing ``launcher(...)`` once per device never lets the two
+devices' kernels overlap: each call blocks the host until its own device's
+kernel is done before the next device's launch can even be issued, making
+P devices strictly additive instead of concurrent. ``launch_all()`` below
+wraps the per-device loop in ``rocke.runtime.launcher.no_fence()`` (the
+same thing :func:`~rocke.runtime.time_launches` does internally) to get a
+true fire-and-forget async launch on each device.
+
+This was misdiagnosed once already in this file's history: an earlier
+version of this docstring blamed "node-level power/clock contention
+between GCDs" for a measured ~2x collapse in concurrent per-device
+throughput with fencing left on. That was wrong -- clock/hwmon sampling
+during the concurrent run showed both GPUs at full boost the whole time,
+and a two-separate-OS-process control (each pinned to one device, no
+shared Python runtime) hit full isolated TFLOPS on both simultaneously,
+which is what pointed at an in-process software serialization point
+rather than real hardware contention. If a `launch_all()`-shaped loop in
+another prototype shows a mysterious ~Px slowdown under concurrency,
+check the fence default before suspecting the node.
+
 Usage:
     python3 multi_gpu_split_d.py --arch gfx942 --shapes A,B,C --splits 2,4
+
+Per-shape tuned tile configs (found via a tile/warp sweep, see
+``benchmarks/common/benchmark_implicit_gemm_conv.py``; baseline column reused
+for ``--shard-*`` unless a dedicated shard-shape sweep found something
+better):
+    A (C=64,K=64,Di=258):   tile=128x64x32  warp=4x1 atom=16x16x16 mem/cshuffle
+    B (C=128,K=64,Di=258):  tile=128x64x32  warp=2x2 atom=16x16x16 mem/cshuffle
+    C (C=256,K=128,Di=130): tile=128x128x32 warp=4x2 atom=16x16x16 compv4/cshuffle
 """
 
 from __future__ import annotations
@@ -94,7 +131,43 @@ def _parse_args(argv=None):
     ap.add_argument("--warp-tile-mn", type=int, default=32)
     ap.add_argument("--pipeline", default="mem")
     ap.add_argument("--epilogue", default="cshuffle")
-    return ap.parse_args(argv)
+    # A shard's conv problem is a different (smaller) shape than the P=1
+    # baseline's, so the tile config that is fastest for one is not
+    # generally fastest for the other (confirmed empirically: a shard-sized
+    # problem tuned on its own merits reaches ~80% of the full problem's
+    # TFLOPS, vs ~37% when it's forced to reuse the baseline's config).
+    # These default to the baseline value and only need overriding when a
+    # separate sweep of the shard shape found a better config.
+    ap.add_argument("--shard-tile-m", type=int, default=None)
+    ap.add_argument("--shard-tile-n", type=int, default=None)
+    ap.add_argument("--shard-tile-k", type=int, default=None)
+    ap.add_argument("--shard-warp-m", type=int, default=None)
+    ap.add_argument("--shard-warp-n", type=int, default=None)
+    ap.add_argument("--shard-warp-tile-mn", type=int, default=None)
+    ap.add_argument("--shard-pipeline", default=None)
+    ap.add_argument("--shard-epilogue", default=None)
+    a = ap.parse_args(argv)
+    for name in (
+        "tile_m", "tile_n", "tile_k", "warp_m", "warp_n",
+        "warp_tile_mn", "pipeline", "epilogue",
+    ):
+        shard_name = f"shard_{name}"
+        if getattr(a, shard_name) is None:
+            setattr(a, shard_name, getattr(a, name))
+    return a
+
+
+def _shard_args(a):
+    """View of ``a`` with the ``--shard-*`` tile/pipeline knobs in the plain
+    ``tile_m``/``pipeline``/... slots, so :func:`_build_fwd_spec` and the atom
+    lookup can read it exactly like the baseline args."""
+    from copy import copy
+
+    sa = copy(a)
+    sa.tile_m, sa.tile_n, sa.tile_k = a.shard_tile_m, a.shard_tile_n, a.shard_tile_k
+    sa.warp_m, sa.warp_n, sa.warp_tile_mn = a.shard_warp_m, a.shard_warp_n, a.shard_warp_tile_mn
+    sa.pipeline, sa.epilogue = a.shard_pipeline, a.shard_epilogue
+    return sa
 
 
 def _build_fwd_spec(problem, a, tgt, atom):
@@ -159,7 +232,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     from rocke import compile_kernel
     from rocke.core.arch import ArchTarget
     from rocke.runtime import time_launches
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
     tgt = ArchTarget.from_gfx(a.arch)
     family = "wmma" if tgt.wave_size == 32 else "mma"
@@ -167,7 +240,12 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
         family=family, a_dtype=a.dtype, b_dtype=a.dtype, c_dtype="fp32",
         m=a.warp_tile_mn, n=a.warp_tile_mn, k_max=a.tile_k,
     )
-    if atom is None:
+    a_shard = _shard_args(a)
+    atom_shard = tgt.mma.select_largest_k(
+        family=family, a_dtype=a.dtype, b_dtype=a.dtype, c_dtype="fp32",
+        m=a_shard.warp_tile_mn, n=a_shard.warp_tile_mn, k_max=a_shard.tile_k,
+    )
+    if atom is None or atom_shard is None:
         print(f"[{shape_name} P={P}] no {family} atom available, skipping", file=sys.stderr)
         return
 
@@ -215,7 +293,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
 
     for d in range(P):
         with torch.cuda.device(d):
-            sp, kern = _build_fwd_spec(shard_problem, a, tgt, atom)
+            sp, kern = _build_fwd_spec(shard_problem, a_shard, tgt, atom_shard)
             art = compile_kernel(kern, arch=a.arch)
             specs[d], arts[d] = sp, art
             launchers[d] = KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig_fwd)
@@ -247,12 +325,22 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
             X_dev[d][:, chunk:].copy_(tail)
 
     def launch_all():
-        for d in range(P):
-            with torch.cuda.device(d):
-                values = _launch_values(ConvArgs, shard_problem, specs[d], X_dev[d], W_dev[d], Y_dev[d])
-                grid = _grid_for_spec(specs[d], shard_problem)
-                cfg = LaunchConfig(grid=grid, block=(specs[d].launch_block_size, 1, 1), stream=0)
-                launchers[d](values, config=cfg)
+        # KernelLauncher defaults to a *fenced* (synchronous,
+        # hipStreamSynchronize-after-every-call) launch -- see
+        # rocke.runtime.launcher.LaunchConfig.fence. Outside no_fence(), each
+        # call below would block the host until that device's kernel
+        # finished before the next device's launch could even be issued,
+        # serializing the P devices' compute instead of overlapping it (this
+        # was confirmed to fully explain an earlier, wrong "node-level power
+        # contention" diagnosis: per-device throughput looked like it halved
+        # under concurrency, but it was purely this fence, not the GPUs).
+        with no_fence():
+            for d in range(P):
+                with torch.cuda.device(d):
+                    values = _launch_values(ConvArgs, shard_problem, specs[d], X_dev[d], W_dev[d], Y_dev[d])
+                    grid = _grid_for_spec(specs[d], shard_problem)
+                    cfg = LaunchConfig(grid=grid, block=(specs[d].launch_block_size, 1, 1), stream=0)
+                    launchers[d](values, config=cfg)
 
     def sync_all():
         for d in range(P):
