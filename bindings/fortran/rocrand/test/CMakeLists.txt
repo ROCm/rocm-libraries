@@ -52,18 +52,10 @@ if(NOT TARGET hip::hip_fortran)
     "bindings were built with ${CMAKE_Fortran_COMPILER}.")
 endif()
 
-# hip-config.cmake reaches FindThreads, which needs C or CXX enabled.
-if(NOT TARGET roc::rocrand)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(rocrand QUIET)
-endif()
 if(NOT TARGET roc::rocrand)
   message(STATUS
     "rocRAND: no roc::rocrand target, skipping the Fortran binding tests "
-    "(they link librocrand). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link librocrand). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
@@ -131,15 +123,9 @@ if(NOT FORTRAN_ARRAY_INTERFACES STREQUAL "none")
   rocrand_fortran_add_test(rocrand_version_f2008 rocrand_version.f08)
   list(APPEND _rocrand_version_tests rocrand_version_f2008)
 endif()
-# In-tree the module and the library come from the same headers.
-get_target_property(_rocrand_aliased roc::rocrand ALIASED_TARGET)
+# The version query touches no device.
 foreach(_t IN LISTS _rocrand_version_tests)
-  # The version query touches no device.
   set_tests_properties(rocrand_fortran_${_t} PROPERTIES LABELS "")
-  if(_rocrand_aliased STREQUAL "rocrand")
-    set_tests_properties(rocrand_fortran_${_t} PROPERTIES
-                         ENVIRONMENT "ROCRAND_FORTRAN_EXACT_VERSION=1")
-  endif()
 endforeach()
 
 if(_have_hip_binding)
