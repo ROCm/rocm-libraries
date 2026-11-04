@@ -24,99 +24,25 @@
 
 # hipsolver.F90 is generated from the hipSOLVER headers; regenerate it, do not edit it.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.19)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(hipsolver-fortran LANGUAGES NONE)
-endif()
+project(hipsolver-fortran LANGUAGES NONE)
 
-# Off on the CUDA backend: hipsolver.F90 is not tested against cuSOLVER. The test
-# repeats the root's pre-project() one for a standalone configure; keep them identical.
-if(NOT DEFINED _hipsolver_cuda_backend)
-  set(_hipsolver_cuda_backend OFF)
-  if(DEFINED USE_CUDA)
-    if(USE_CUDA)
-      set(_hipsolver_cuda_backend ON)
-    endif()
-  elseif("$ENV{HIP_PLATFORM}" STREQUAL "nvidia" OR "${HIP_PLATFORM}" STREQUAL "nvidia")
-    set(_hipsolver_cuda_backend ON)
-  endif()
-endif()
-
-if(_hipsolver_cuda_backend)
-  set(_hipsolver_fortran_default OFF)
-else()
-  # ROCm ships no Fortran compiler on Windows.
-  set(_hipsolver_fortran_default "${UNIX}")
-endif()
-option(BUILD_FORTRAN_BINDINGS "Build the hipSOLVER Fortran bindings"
-       "${_hipsolver_fortran_default}")
-unset(_hipsolver_fortran_default)
-
-option(BUILD_FORTRAN_CLIENTS "Build the hipSOLVER Fortran clients and binding tests" ON)
-
-# Both cache entries are shared monorepo-wide; the per-library names override them here only.
-if(DEFINED HIPSOLVER_BUILD_FORTRAN_BINDINGS)
-  set(BUILD_FORTRAN_BINDINGS ${HIPSOLVER_BUILD_FORTRAN_BINDINGS})
-endif()
-if(DEFINED HIPSOLVER_BUILD_FORTRAN_CLIENTS)
-  set(BUILD_FORTRAN_CLIENTS ${HIPSOLVER_BUILD_FORTRAN_CLIENTS})
-endif()
+# Not ON: ROCm ships no Fortran compiler on Windows.
+option(BUILD_FORTRAN_BINDINGS "Build the hipSOLVER Fortran bindings" "${UNIX}")
+option(BUILD_FORTRAN_CLIENTS "Build the hipSOLVER Fortran binding tests" ON)
 
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
              none assumed-shape assumed-rank)
 
-# Read by clients/. Guarded: PARENT_SCOPE at the top level warns under -Wdev.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(HIPSOLVER_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
-endif()
-
 if(NOT BUILD_FORTRAN_BINDINGS)
   return()
 endif()
 
-if(_hipsolver_cuda_backend)
-  message(WARNING
-    "hipSOLVER: the Fortran bindings were requested on the CUDA backend. "
-    "hipsolver.F90 is generated from the ROCm code path and is not tested "
-    "against a cuSOLVER-backed libhipsolver, which is why it is off by default "
-    "there. Building it is supported; vouching for it is not.")
-endif()
-
-if(DEFINED ROCM_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_HAVE_FORTRAN})
-elseif(DEFINED ROCM_LIBS_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_LIBS_HAVE_FORTRAN})
-else()
-  include(CheckLanguage)
-  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCmFortranCompiler.cmake")
-
-  # check_language() writes the CMAKE_Fortran_COMPILER cache entry, which
-  # rocm-cmake's toolchain-variable watch reports (and fails on under CI).
-  set(_rocm_warn_toolchain_var "${ROCM_WARN_TOOLCHAIN_VAR}")
-  set(_rocm_error_toolchain_var "${ROCM_ERROR_TOOLCHAIN_VAR}")
-  set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-  set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
-
-  # Must run before check_language(), which keeps any compiler already set.
-  rocm_fortran_prefer_amdflang()
-
-  check_language(Fortran)
-  set(ROCM_WARN_TOOLCHAIN_VAR "${_rocm_warn_toolchain_var}")
-  set(ROCM_ERROR_TOOLCHAIN_VAR "${_rocm_error_toolchain_var}")
-  unset(_rocm_warn_toolchain_var)
-  unset(_rocm_error_toolchain_var)
-
-  if(CMAKE_Fortran_COMPILER)
-    set(_have_fortran TRUE)
-  else()
-    set(_have_fortran FALSE)
-  endif()
-endif()
-
-if(NOT _have_fortran)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCmFortranCompiler.cmake")
+if(NOT CMAKE_Fortran_COMPILER)
   message(STATUS "hipSOLVER: no Fortran compiler found, skipping the Fortran bindings")
   return()
 endif()
@@ -130,6 +56,17 @@ if(NOT FORTRAN_ARRAY_INTERFACES MATCHES "^(none|assumed-shape|assumed-rank)$")
 endif()
 
 include(GNUInstallDirs)
+
+# Before the target: an installed hipSOLVER that still exports its own
+# roc::hipsolver_fortran must not meet this one. C is enabled because
+# hip-config.cmake reaches FindThreads.
+enable_language(C)
+find_package(hipsolver QUIET)
+if(TARGET roc::hipsolver_fortran)
+  message(FATAL_ERROR
+    "hipSOLVER: the installed hipSOLVER already exports roc::hipsolver_fortran. "
+    "Build hipSOLVER with -DEXPORT_FORTRAN_BINDINGS=OFF to use these bindings.")
+endif()
 
 add_library(hipsolver_fortran STATIC hipsolver.F90)
 
@@ -170,7 +107,6 @@ set(HIPSOLVER_FORTRAN_COMPILER_DIR "${_fc_name}" CACHE STRING
 set(_moddir "${CMAKE_CURRENT_BINARY_DIR}/include")
 set_target_properties(hipsolver_fortran PROPERTIES
   Fortran_MODULE_DIRECTORY "${_moddir}"
-  # Ignored before CMake 3.18; the .F90 suffix is preprocessed anyway.
   Fortran_PREPROCESS ON
   Fortran_FORMAT FREE
   POSITION_INDEPENDENT_CODE ON)
@@ -185,15 +121,8 @@ target_include_directories(hipsolver_fortran PUBLIC
   "$<BUILD_INTERFACE:${_moddir}>"
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fortran/${HIPSOLVER_FORTRAN_COMPILER_DIR}>")
 
-# Link interface only. C is enabled because hip-config.cmake reaches FindThreads.
-if(NOT TARGET roc::hipsolver)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(hipsolver QUIET)
-endif()
-
-# Substituted into a bare if() in the config template, so it must be TRUE or FALSE.
+# Link interface only. Substituted into a bare if() in the config template, so
+# it must be TRUE or FALSE.
 if(TARGET roc::hipsolver)
   target_link_libraries(hipsolver_fortran INTERFACE roc::hipsolver)
   set(HIPSOLVER_FORTRAN_NEEDS_C_PACKAGE TRUE)
@@ -202,19 +131,6 @@ else()
   message(STATUS
     "hipSOLVER: the C library was not found, so the Fortran bindings carry no "
     "link interface; a consumer will have to link it (-lhipsolver) itself.")
-endif()
-
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(HIPSOLVER_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
-endif()
-
-# In-tree the tests follow hipSOLVER's client switches, which also enable testing at the root.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
-   AND BUILD_FORTRAN_CLIENTS
-   AND NOT (BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS))
-  message(STATUS
-    "hipSOLVER: clients are not being built, skipping the Fortran binding tests.")
-  set(BUILD_FORTRAN_CLIENTS OFF)
 endif()
 
 # The uninstrumented Fortran executables cannot link an ASan libhipsolver.
@@ -233,7 +149,6 @@ include(CMakePackageConfigHelpers)
 
 set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipsolver")
 
-# Plain install(), not rocm_install(): this directory also configures without rocm-cmake.
 install(TARGETS hipsolver_fortran
         EXPORT hipsolver-fortran-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/fortran/${HIPSOLVER_FORTRAN_COMPILER_DIR}"
