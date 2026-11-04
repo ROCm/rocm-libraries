@@ -1423,6 +1423,8 @@ def mainLoop(writer, kernel):
   schedulerPartitionOrder = "m-major"
   forcedPartition = None
   if schedulerPartitionPrefetch:
+      assert kernel["PrefetchLocalRead"] == 1, \
+          "dual-period MXFP8 subtile kernel requires PrefetchLocalRead=1"
       schedulerPartitionOrder = "n-major"
       schedulerDoubleBuffer = ('A', 'B')
       # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition

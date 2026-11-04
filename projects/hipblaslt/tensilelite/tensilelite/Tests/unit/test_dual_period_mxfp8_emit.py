@@ -8,8 +8,8 @@
 #
 # The dual-period path keeps the 128-K data loop while running a decoupled
 # 256-K pre-shuffled scale epoch that is reused by two data iterations.  This
-# test drives the shipped geometry (MT256x256, MIWT 8x4, MIWG 2x4, DU128,
-# PGR2/PLR0, 4x2 partitions, N-major, WGM4) through CPU-only codegen and
+# test drives the REAL winning geometry (MT256x256, MIWT 8x4, MIWG 2x4, DU128,
+# PGR2/PLR1, 4x2 partitions, N-major, WGM4) through CPU-only codegen and
 # asserts the steady-state mainloop honors the scale contract:
 #
 #   * exactly SIX scale ds_read_b32 per 256-K epoch (4 SA groups + 2 SB groups)
@@ -27,7 +27,7 @@ import shutil
 import pytest
 
 
-def _emit_dual_period_kernel(plr=0):
+def _emit_dual_period_kernel(plr=1):
     """Build the real dual-period MXFP8 solution and return its assembly text.
 
     Partition-directed PLR (next-partition prefetch, n-major traversal, 2x2
@@ -185,21 +185,6 @@ def test_vgpr_within_two_wave_slot_budget(dual_src):
     vgpr = int(m.group(1))
     assert vgpr <= 128, (
         "architectural VGPR %d exceeds the two-wave-slot budget (128)" % vgpr)
-
-
-def test_prefetch_local_read_is_name_only(dual_src):
-    """PrefetchLocalRead never reaches the dual-period schedule.
-
-    The partition-directed prefetch pins its own plr=0 base, the same way
-    ForceUnrollSubIter pins numItersPLR/numVgprBuffer for non-subtile kernels,
-    so the declared value survives only in the kernel name.  Comments are
-    stripped because they quote scheduler state that is allowed to mention the
-    declared value.
-    """
-    def instructions(src):
-        return [ln.split("//")[0].rstrip() for ln in _mainloop_lines(src)]
-
-    assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
 
 
 def test_no_scale_local_read_in_preloop(dual_src):
