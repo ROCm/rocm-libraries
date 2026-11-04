@@ -303,10 +303,13 @@ writes: nothing more is confirmed or logged to `trials.jsonl`, but
 can be written) holds the error. `130`: the run was interrupted (Ctrl-C, or
 SIGTERM such as a batch system's time limit); nothing is confirmed and
 `winners.json` is empty, but `summary.json` is written, with each problem's
-best discovery result. A build worker that gets the signal too (the batch
-system and Ctrl-C signal the whole process group) stops at once, so the
-summary does not wait for queued builds; a SIGTERM sent only to the driver's
-pid (`kill <pid>`) lets the round's builds finish first.
+best discovery result. A build worker that gets SIGTERM too (a batch system
+signals the whole process group) stops at once, so the summary does not wait
+for queued builds. Ctrl-C stops a forked build worker the same way (Linux's
+default up to Python 3.13); a worker started by forkserver (the default from
+Python 3.14) or spawn turns Ctrl-C into one build's error and goes on with the
+queued builds, so the summary waits for the round's builds. So does a SIGTERM
+sent only to the driver's pid (`kill <pid>`).
 
 Only a verified row of the requested kernel and problem with a finite positive
 latency counts as a result. A verification failure is `numeric_fail`; a blank

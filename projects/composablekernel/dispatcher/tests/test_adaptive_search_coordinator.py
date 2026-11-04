@@ -19,6 +19,7 @@ import hashlib
 import itertools
 import json
 import math
+import multiprocessing
 import os
 import signal
 import subprocess
@@ -913,38 +914,57 @@ def test_interrupt_handler_ends_a_forked_child(sig):
         handler(sig, None)
 
 
-_POOL_RUN = """
-import os, sys, time
-from concurrent.futures import ProcessPoolExecutor, as_completed
-sys.path.insert(0, sys.argv[1])
-from test_adaptive_search_coordinator import ABCD, AS, FakeAdapter, settings
+# The pool job lives in a module of its own: a worker started by forkserver or
+# spawn imports it (it cannot unpickle a function of a "python -c" __main__).
+_POOL_JOB = """
+import time
 
 def build(marker):  # one build: say it started, then compile for a while
     open(marker, "w").close()
     time.sleep(60)
+"""
+_POOL_RUN = """
+import multiprocessing, sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pool_job import build
 
-class Pool(FakeAdapter):  # builds like setup_multiple_gemm_dispatchers
-    def build_missing(self, cands):
-        with ProcessPoolExecutor(1) as ex:  # one worker: the second build waits
-            futs = [ex.submit(build, sys.argv[2] + "/started-" + c.canonical_key)
-                    for c in cands]
-            for fut in as_completed(futs):
-                fut.result()
-        return super().build_missing(cands)
+def main(tests, tmp, method):
+    sys.path.insert(0, tests)
+    from test_adaptive_search_coordinator import ABCD, AS, FakeAdapter, settings
 
-sys.exit(AS.run_search(Pool({"P1": ABCD}), settings(), sys.argv[2] + "/out", ["0"]))
+    class Pool(FakeAdapter):  # builds like setup_multiple_gemm_dispatchers
+        def build_missing(self, cands):
+            ctx = multiprocessing.get_context(method)
+            with ProcessPoolExecutor(1, mp_context=ctx) as ex:  # the 2nd build waits
+                futs = [ex.submit(build, tmp + "/started-" + c.canonical_key)
+                        for c in cands]
+                for fut in as_completed(futs):
+                    fut.result()
+            return super().build_missing(cands)
+
+    return AS.run_search(Pool({"P1": ABCD}), settings(), tmp + "/out", ["0"])
+
+if __name__ == "__main__":
+    sys.exit(main(*sys.argv[1:]))
 """
 
 
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="needs process groups")
-def test_sigterm_to_the_process_group_does_not_wait_for_queued_builds(tmp_path):
+@pytest.mark.parametrize("method", [m for m in ("fork", "forkserver", "spawn")
+                                    if m in multiprocessing.get_all_start_methods()])
+def test_sigterm_to_the_process_group_does_not_wait_for_queued_builds(tmp_path, method):
     # A batch system's time limit sends SIGTERM to every process of the job.
-    # The build worker dies, the pool breaks and the summary is written at
-    # once; a worker that turned it into one job's error would start the
-    # queued build (a second marker) and the summary would wait for it.
-    proc = subprocess.Popen([sys.executable, "-c", _POOL_RUN, str(Path(__file__).parent),
-                             str(tmp_path)], start_new_session=True,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    # The build worker dies whatever its start method (forked, it inherits the
+    # handler; started by forkserver or spawn, it has SIGTERM's default), the
+    # pool breaks and the summary is written at once; a worker that turned it
+    # into one job's error would start the queued build (a second marker) and
+    # the summary would wait for it.
+    (tmp_path / "pool_job.py").write_text(_POOL_JOB)
+    (tmp_path / "pool_run.py").write_text(_POOL_RUN)
+    proc = subprocess.Popen([sys.executable, str(tmp_path / "pool_run.py"),
+                             str(Path(__file__).parent), str(tmp_path), method],
+                            start_new_session=True, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE)
     try:
         for _ in range(600):
             if list(tmp_path.glob("started-*")) or proc.poll() is not None:

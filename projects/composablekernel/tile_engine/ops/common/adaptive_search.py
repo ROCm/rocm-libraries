@@ -1484,7 +1484,10 @@ def _interrupt_handler(pid: int):
     process forked from it (a build pool's worker) inherits the handler; there
     the signal ends the process as by default, so a pool whose workers get it
     breaks at once instead of turning it into one job's error and taking the
-    next queued build."""
+    next queued build. A worker started by forkserver (Linux's default from
+    Python 3.14) or spawn does not inherit it: SIGTERM still ends it (its
+    default), but SIGINT raises in its job, so after Ctrl-C to the process
+    group such a pool still runs its queued builds."""
     def handler(signum, frame):
         if os.getpid() != pid:
             signal.signal(signum, signal.SIG_DFL)
