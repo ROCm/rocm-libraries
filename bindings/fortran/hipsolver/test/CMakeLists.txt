@@ -49,12 +49,10 @@ if(NOT TARGET hip::hip_fortran)
     "bindings were built with ${CMAKE_Fortran_COMPILER}.")
 endif()
 
-# The parent directory already looked for hipSOLVER.
 if(NOT TARGET roc::hipsolver)
   message(STATUS
     "hipSOLVER: no roc::hipsolver target, skipping the Fortran binding tests "
-    "(they link libhipsolver). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link libhipsolver). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
