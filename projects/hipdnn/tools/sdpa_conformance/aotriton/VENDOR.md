@@ -7,15 +7,15 @@ collection counts are a manual `sync.py --check` (about 5 minutes), and runs com
 
 | | |
 |---|---|
-| Source | [ROCm/aotriton](https://github.com/ROCm/aotriton) `main`, `0.14b-10` |
-| Pin | `030b7b8db8f24aaa13dbf5501f7da33380c78007` |
+| Source | [ROCm/aotriton](https://github.com/ROCm/aotriton) `main`, `0.14b-16` |
+| Pin | `619f3636a23d94d6f258c89ff4ca7005afc019bb` |
 | Licence | MIT, Copyright (C) 2024-2025 Advanced Micro Devices, Inc. (`vendor/LICENSE`) |
 
 ## Contents
 
 | Vendored path | From AOTriton |
 |---|---|
-| `vendor/modules/flash/tests/**` (25 files, including `adiffs/`) | `modules/flash/tests/**`, except `aotriton_flash.py` |
+| `vendor/modules/flash/tests/**` (27 files, including `adiffs/`) | `modules/flash/tests/**`, except `aotriton_flash.py` |
 | `vendor/python/pytest-gpu-lease/pytest_gpu_lease/` (3 files) | same path; defines the `gpu_id` fixture |
 | `vendor/LICENSE` | `LICENSE` |
 
@@ -30,10 +30,10 @@ never edited; `adiffs/`, `performance_*`, `triton_*` and `pytest2entry.py` are p
 
 | `FOR_RELEASE` | default collection | `test_forward.py` |
 |---|---|---|
-| 0 | 3,915 | 497,088 |
-| 1 | 183,159 | 177,408 |
-| 2 | 413,559 | 177,408 |
-| 3 | 499,407 | 177,408 |
+| 0 | 3,917 | 497,088 |
+| 1 | 183,161 | 177,408 |
+| 2 | 413,561 | 177,408 |
+| 3 | 499,409 | 177,408 |
 
 ## Refresh
 

@@ -16,7 +16,13 @@ kernel in isolation — run it explicitly (`pytest .../test_forward.py`); its co
 is a subset of test_backward.py's.
 """
 
+import os
 from pathlib import Path
+
+# The UTs must not depend on Triton. Torch's native DSL ops (torch._native) replace
+# some aten ops with Triton kernels, e.g. the reference backward's bmm at seqlen 1;
+# keep aten. Set before torch is imported: torch reads it once.
+os.environ.setdefault('TORCH_DISABLE_NATIVE_JIT', '1')
 
 # Exclude the forward-only suite from `pytest modules/flash/tests` (see docstring).
 collect_ignore = ['test_forward.py']
