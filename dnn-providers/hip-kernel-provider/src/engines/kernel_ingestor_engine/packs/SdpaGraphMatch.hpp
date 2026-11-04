@@ -17,6 +17,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackGraph.hpp"
 
 /**
  * @file SdpaGraphMatch.hpp
@@ -40,12 +41,7 @@ inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_SIZE_AXIS = 3;
 inline constexpr uint32_t SDPA_RANK = 4;
 
-inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
+using pack_graph::findTensor;
 
 /// The node an SDPA pack's matchers read, or nullptr if the graph is not a single
 /// SDPA-forward node.
