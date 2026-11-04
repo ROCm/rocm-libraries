@@ -92,8 +92,8 @@ hipblasStatus_t refuse_unsupported_order(const char*      caller,
         if(orders[i] == HIPBLASLT_ORDER_ROW)
         {
             log_error(caller,
-                      "HIPBLASLT_ORDER_ROW is not supported by this API; hipblasLtMatmul and "
-                      "hipblasLtMatrixTransform accept it",
+                      "HIPBLASLT_ORDER_ROW is not supported by this API; hipblasLtMatmul "
+                      "accepts it for A and B, and hipblasLtMatrixTransform accepts it",
                       "matrix",
                       names[i]);
             return HIPBLAS_STATUS_NOT_SUPPORTED;
