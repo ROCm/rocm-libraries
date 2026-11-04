@@ -18,6 +18,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <thread>
 
 namespace
 {
@@ -65,10 +66,38 @@ namespace
         return value ? std::strtoll(value, nullptr, 10) : fallback;
     }
 
-    // The current device's scope, e.g. gfx942_CU304.
+    // The current device's scope, e.g. gfx942_CU304, gfx950_CU256_ID75a3 or
+    // gfx1250v0_CU<n>. TensileLite reads a PCI chip ID on gfx950 only, and
+    // gfx1250 A0 is a target of its own, as for the shipped library.
     std::string deviceScope()
     {
-        return deviceArch() + "_CU" + std::to_string(deviceCuCount());
+        int             device = 0, chip = 0;
+        hipDeviceProp_t prop{};
+        std::string     target = deviceArch();
+        if(target == "gfx1250" && hipGetDevice(&device) == hipSuccess
+           && hipGetDeviceProperties(&prop, device) == hipSuccess && prop.asicRevision == 0)
+            target += "v0";
+        std::string scope = target + "_CU" + std::to_string(deviceCuCount());
+        if(deviceArch() == "gfx950" && hipGetDevice(&device) == hipSuccess
+           && hipDeviceGetAttribute(&chip, hipDeviceAttributePciChipId, device) == hipSuccess)
+        {
+            char id[16];
+            std::snprintf(id, sizeof(id), "_ID%04x", unsigned(chip));
+            scope += id;
+        }
+        return scope;
+    }
+
+    // Waits up to a minute for another process to create `path`.
+    bool waitForFile(fs::path const& path)
+    {
+        for(int i = 0; i < 6000; ++i)
+        {
+            if(fs::exists(path))
+                return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
     }
 
     fs::path scopePath(fs::path const& library)
@@ -972,9 +1001,11 @@ TEST(LocalKernelPersist, RefreshRereadsReplacedJournal)
               0);
 }
 
-// Payloads that cannot be registered leave nothing in the library, though
-// some are rejected only after their objects were saved.
-TEST(LocalKernelPersist, RejectedPayloadsLeaveNothing)
+// Payloads that cannot be registered are not recorded. One rejected for its
+// shard saves nothing. One rejected for its code object keeps the objects it
+// saved, which another registration may already be using: here one shard,
+// shared by the three bad code objects.
+TEST(LocalKernelPersist, RejectedPayloadsAreNotRecorded)
 {
     TempDir tmp;
     ASSERT_FALSE(tmp.path.empty());
@@ -982,10 +1013,19 @@ TEST(LocalKernelPersist, RejectedPayloadsLeaveNothing)
 
     ASSERT_EQ(runWorker("LocalKernelRegister.DISABLED_BadPayloadsWorker", {libraryEnv(library)}),
               0);
-    std::vector<std::string> left;
+    size_t temporary = 0, shards = 0, codeObjects = 0;
     for(auto const& entry : fs::directory_iterator(library / "objects"))
-        left.push_back(entry.path().filename().string());
-    EXPECT_TRUE(left.empty()) << left.size() << " files left, first " << left[0];
+    {
+        if(entry.path().filename().string().rfind(".tmp.", 0) == 0)
+            ++temporary;
+        else if(entry.path().extension() == ".co")
+            ++codeObjects;
+        else
+            ++shards;
+    }
+    EXPECT_EQ(temporary, 0u);
+    EXPECT_EQ(shards, 1u) << "the shards that do not parse were not saved";
+    EXPECT_EQ(codeObjects, 3u);
     EXPECT_EQ(countRecords(journalLines(library), 'R'), 0u);
 }
 
@@ -1174,4 +1214,192 @@ TEST(LocalKernelPersist, LockedJournalTimesOut)
     EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_LockedJournalWorker", {libraryEnv(library)}),
               0);
     ::close(fd);
+}
+
+// Maps a kernel once the test has locked the journal, so the save waits for
+// the lock while the test replaces the journal.
+TEST(LocalKernelPersist, DISABLED_AppendDuringReplaceWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const fs::path                 signals    = fs::path(library).parent_path();
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    Registered r = registerUsable(handle, p, candidates);
+    ASSERT_GE(r.index, 0);
+
+    std::ofstream((signals / "ready").string());
+    ASSERT_TRUE(waitForFile(signals / "locked"));
+    EXPECT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+// A save granted the lock on a journal that was replaced while it waited
+// lands in the journal that replaced it.
+TEST(LocalKernelPersist, AppendWaitingOnAReplacedJournal)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+
+    const pid_t worker = spawnWorker("LocalKernelPersist.DISABLED_AppendDuringReplaceWorker",
+                                     {libraryEnv(library)});
+    ASSERT_GT(worker, 0);
+    ASSERT_TRUE(waitForFile(tmp.path / "ready"));
+
+    const fs::path journal = journalPath(library);
+    const int      held    = ::open(journal.c_str(), O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(held, 0);
+    ASSERT_EQ(::flock(held, LOCK_EX), 0);
+    std::ofstream((tmp.path / "locked").string());
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    const std::string content = readFile(journal);
+    ASSERT_TRUE(fs::remove(journal));
+    std::ofstream(journal.string(), std::ios::binary) << content;
+    ASSERT_EQ(::chmod(journal.c_str(), 0644), 0);
+    ::close(held);
+
+    ASSERT_EQ(waitWorker(worker), 0);
+    EXPECT_EQ(countRecords(journalLines(library), 'E'), 1u);
+    EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0);
+}
+
+// Registers payloads the library already holds but whose code objects this
+// process found damaged, which repairs them, and maps the shape the journal
+// already maps to the same kernel.
+TEST(LocalKernelPersist, DISABLED_RepairedPayloadWorker)
+{
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_LT(topIndex(handle, p), LOCAL_INDEX_BASE) << "the damaged payload was skipped";
+
+    Registered r = registerUsable(handle, p, candidates);
+    ASSERT_GE(r.index, 0);
+    ASSERT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(topIndex(handle, p), r.index) << "a mapping reported as made is applied";
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, MappingAlreadySavedIsApplied)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    const auto saved = journalLines(library);
+    for(auto const& entry : fs::directory_iterator(library / "objects"))
+    {
+        if(entry.path().extension() != ".co")
+            continue;
+        std::fstream file(entry.path(), std::ios::in | std::ios::out | std::ios::binary);
+        char         last = 0;
+        file.seekg(-1, std::ios::end);
+        file.get(last);
+        file.seekp(-1, std::ios::end);
+        file.put(static_cast<char>(~last));
+        ASSERT_TRUE(file.good()) << entry.path();
+    }
+
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_RepairedPayloadWorker", {libraryEnv(library)}),
+              0);
+    EXPECT_EQ(journalLines(library), saved) << "nothing new was saved";
+}
+
+// A payload skipped because its code object was missing is loaded by a later
+// Refresh once the file is back.
+TEST(LocalKernelPersist, DISABLED_RestoredObjectWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_LT(topIndex(handle, p), LOCAL_INDEX_BASE) << "the payload was skipped";
+
+    for(auto const& entry : fs::directory_iterator(fs::path(library) / "objects"))
+        if(entry.path().extension() == ".away")
+            fs::rename(entry.path(), fs::path(entry.path()).replace_extension());
+
+    size_t added = 0;
+    ASSERT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_GT(added, 0u);
+    EXPECT_GE(topIndex(handle, p), LOCAL_INDEX_BASE);
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, RefreshRetriesSkippedPayload)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    for(auto const& entry : fs::directory_iterator(library / "objects"))
+        if(entry.path().extension() == ".co")
+            fs::rename(entry.path(), entry.path().string() + ".away");
+
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_RestoredObjectWorker", {libraryEnv(library)}),
+              0);
+}
+
+// Device 0 cannot read the journal when it is initialized, because the test
+// holds its lock. Device 1, of the same scope, is initialized after the test
+// releases it, and reads it.
+TEST(LocalKernelPersist, DISABLED_LockedAtStartupWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const fs::path signals = fs::path(library).parent_path();
+
+    hipblasLtHandle_t first, second;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    ASSERT_EQ(hipblasLtCreate(&first), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(registeredCount(first), 0u) << "the journal was locked";
+
+    std::ofstream((signals / "ready").string());
+    ASSERT_TRUE(waitForFile(signals / "released"));
+    ASSERT_EQ(hipSetDevice(1), hipSuccess);
+    ASSERT_EQ(hipblasLtCreate(&second), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_GT(registeredCount(second), 0u);
+
+    EXPECT_EQ(hipblasLtDestroy(second), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    EXPECT_EQ(hipblasLtDestroy(first), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, FailedStartupReadIsRetried)
+{
+    if(!haveTwoMatchingDevices())
+        GTEST_SKIP() << "needs two devices of the same architecture";
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+
+    const int held = ::open(journalPath(library).c_str(), O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(held, 0);
+    ASSERT_EQ(::flock(held, LOCK_EX), 0);
+    const pid_t worker
+        = spawnWorker("LocalKernelPersist.DISABLED_LockedAtStartupWorker", {libraryEnv(library)});
+    ASSERT_GT(worker, 0);
+    EXPECT_TRUE(waitForFile(tmp.path / "ready"));
+    ::close(held);
+    std::ofstream((tmp.path / "released").string());
+    EXPECT_EQ(waitWorker(worker), 0);
 }

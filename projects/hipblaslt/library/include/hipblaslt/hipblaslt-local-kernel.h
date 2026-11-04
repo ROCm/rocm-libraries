@@ -14,13 +14,17 @@
  *  absolute directory, it is a local kernel library shared by every process
  *  that names it:
  *
- *  - Kernels and mappings are saved for the architecture and compute unit
- *    count of the device they were made on, and for the build of hipBLASLt
- *    that made them. Those saved for a device are loaded when this build of
- *    hipBLASLt first initializes it, before any heuristic query. A saved
- *    kernel is loaded only if its files still match what was saved and it
- *    can run on the device; otherwise it is skipped with a warning. Its code
- *    object is loaded when one of its kernels first runs.
+ *  - Kernels and mappings are saved for the kind of device they were made
+ *    on, and for the build of hipBLASLt that made them. A kind of device is
+ *    an architecture as the runtime reports it (with gfx1250 A0 apart from
+ *    later gfx1250 revisions, as for the shipped kernels), a compute unit
+ *    count and, on architectures that report one, a PCI chip ID. Those saved
+ *    for a device are loaded when this build of hipBLASLt first initializes
+ *    it, before any heuristic query. A saved kernel is loaded only if its
+ *    files still match what was saved and it can run on the device;
+ *    otherwise it is skipped with a warning. One skipped for its files is
+ *    tried again by \ref hipblasLtLocalKernelRefresh once they change. Its
+ *    code object is loaded when one of its kernels first runs.
  *  - \ref hipblasLtLocalKernelRegister and \ref hipblasLtLocalKernelSetExactMatch
  *    save to it before they return, and fail if they cannot.
  *  - \ref hipblasLtLocalKernelRefresh loads what other processes have saved
@@ -65,10 +69,9 @@ extern "C" {
  *  Indices are valid only in the current process. A payload is identified by
  *  the contents of both files: registering one already registered in this
  *  process, or loaded from the local kernel library, returns the indices it
- *  already has. That includes one registered through a device of another
- *  architecture or compute unit count, if every kernel can also run on the
- *  handle's device; otherwise the call fails as for any payload not built for
- *  the device.
+ *  already has. That includes one registered through another kind of device
+ *  (see above), if every kernel can also run on the handle's device;
+ *  otherwise the call fails as for any payload not built for the device.
  *
  *  With a local kernel library, both files are copied into it and the copies
  *  are what is loaded, so the originals may be removed afterwards. Files
@@ -131,7 +134,10 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *
  *  \details
  *  The mapping is for this shape and the kernel's own transposes and data
- *  types. Heuristic selection for such a problem returns the kernel first,
+ *  types, on devices of the same kind as the handle's (see above); other
+ *  devices in the process do not take it, even where the kernel can run on
+ *  them. On those devices, heuristic selection
+ *  for such a problem returns the kernel first,
  *  followed by the shipped library's choices, including for problems already
  *  queried. Other shapes and types are unaffected, so kernels for different
  *  data types or transposes can each be mapped to the same shape. Among
@@ -147,7 +153,7 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  before it, as \ref hipblasLtLocalKernelRefresh would. If another process
  *  mapped the same shape and types in between, its kernel is the one
  *  selected, here and in every later process. The mapping is saved for the
- *  handle's device's architecture and compute unit count.
+ *  same kind of device it applies to.
  *
  *  @param[in]
  *  handle       Pointer to the allocated hipBLASLt handle.

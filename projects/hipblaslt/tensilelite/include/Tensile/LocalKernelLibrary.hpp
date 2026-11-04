@@ -12,7 +12,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -47,10 +49,47 @@ namespace TensileLite
     };
 
     /**
-     * Exact match key: the shape, the transposes and the data types. Mapping a
-     * kernel takes the transposes and types from the kernel, so mappings for
-     * different data types or transposes at one shape never displace each
-     * other.
+     * The devices a mapping is for: one kernel target, compute unit count and,
+     * where the device reports one, PCI chip ID. A mapping is tuned on one
+     * kind of device, so another kind in the same process does not take it,
+     * even where the kernel could run there.
+     *
+     * The target tells apart devices that Processor folds together but that
+     * the shipped library serves from different files: gfx1250-strict, which
+     * the runtime names as such, and gfx1250 A0 (asicRevision 0), served from
+     * gfx1250v0.
+     */
+    struct LocalDeviceClass
+    {
+        AMDGPU::Processor  processor        = AMDGPU::Processor::gfx000;
+        int                computeUnitCount = 0;
+        std::optional<int> pciChipId;
+        // The architecture the runtime reports, without target features, and
+        // "v0" for gfx1250 A0; e.g. "gfx942", "gfx1250-strict" or "gfx1250v0".
+        std::string target;
+
+        static LocalDeviceClass of(AMDGPU const& gpu)
+        {
+            std::string target = gpu.archName();
+            target             = target.substr(0, target.find(':'));
+            if(target == "gfx1250" && gpu.asicRevision == 0)
+                target += "v0";
+            return LocalDeviceClass{
+                gpu.processor, gpu.computeUnitCount, gpu.pciChipId(), std::move(target)};
+        }
+
+        bool operator==(LocalDeviceClass const& rhs) const
+        {
+            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount
+                   && pciChipId == rhs.pciChipId && target == rhs.target;
+        }
+    };
+
+    /**
+     * Exact match key: the shape, the transposes, the data types and the
+     * device class. Mapping a kernel takes the transposes and types from the
+     * kernel, so mappings for different data types or transposes at one shape
+     * never displace each other.
      *
      * The key only narrows the candidates. Whether a kernel serves a problem
      * is decided by its own problem predicate, which TensileLite generates
@@ -67,6 +106,7 @@ namespace TensileLite
         rocisa::DataType cType       = rocisa::DataType::Float;
         rocisa::DataType dType       = rocisa::DataType::Float;
         rocisa::DataType computeType = rocisa::DataType::Float;
+        LocalDeviceClass device;
 
         auto tie() const
         {
@@ -80,7 +120,11 @@ namespace TensileLite
                                          bType,
                                          cType,
                                          dType,
-                                         computeType);
+                                         computeType,
+                                         device.processor,
+                                         device.computeUnitCount,
+                                         device.pciChipId,
+                                         device.target);
         }
         bool operator==(LocalExactKey const& rhs) const
         {
@@ -107,7 +151,11 @@ namespace TensileLite
                             size_t(key.bType),
                             size_t(key.cType),
                             size_t(key.dType),
-                            size_t(key.computeType)})
+                            size_t(key.computeType),
+                            size_t(key.device.processor),
+                            size_t(key.device.computeUnitCount),
+                            size_t(key.device.pciChipId.value_or(-1)),
+                            std::hash<std::string>{}(key.device.target)})
                 h ^= std::hash<size_t>{}(v) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
             return h;
         }
@@ -120,9 +168,9 @@ namespace TensileLite
             problem.freeSizeA(0), problem.freeSizeB(0), problem.batchSize(0), problem.boundSize(0)};
     }
 
-    /// The key a problem is looked up by.
+    /// The key a problem is looked up by on a device of class `device`.
     template <typename MyProblem>
-    inline LocalExactKey localExactKeyFor(MyProblem const& problem)
+    inline LocalExactKey localExactKeyFor(MyProblem const& problem, LocalDeviceClass const& device)
     {
         return LocalExactKey{localExactShapeFor(problem),
                              problem.transA(),
@@ -131,15 +179,26 @@ namespace TensileLite
                              problem.b().dataType(),
                              problem.c().dataType(),
                              problem.d().dataType(),
-                             problem.computeType()};
+                             problem.computeType(),
+                             device};
     }
 
-    /// The key a kernel of this problem type is mapped under at `shape`.
+    /// The key a kernel of this problem type is mapped under at `shape`, for
+    /// devices of class `device`.
     template <typename ProblemType>
-    inline LocalExactKey localExactKeyFor(LocalExactShape const& shape, ProblemType const& pt)
+    inline LocalExactKey localExactKeyFor(LocalExactShape const&  shape,
+                                          ProblemType const&      pt,
+                                          LocalDeviceClass const& device)
     {
-        return LocalExactKey{
-            shape, pt.transA, pt.transB, pt.aType, pt.bType, pt.cType, pt.dType, pt.computeType};
+        return LocalExactKey{shape,
+                             pt.transA,
+                             pt.transB,
+                             pt.aType,
+                             pt.bType,
+                             pt.cType,
+                             pt.dType,
+                             pt.computeType,
+                             device};
     }
 
     inline bool pinsProcessor(Predicates::Predicate<AMDGPU> const& predicate,
@@ -235,18 +294,21 @@ namespace TensileLite
         LocalKernelLibrary& operator=(LocalKernelLibrary const&) = delete;
 
         /**
-         * The newest kernel mapped under this problem's key that can serve
-         * it, or null. It is tagged Equal, like a shipped exact match, so the
-         * caller reports it as tuned.
+         * The newest kernel mapped under this problem's key, for this
+         * device's class, that can serve it, or null. It is tagged Equal,
+         * like a shipped exact match, so the caller reports it as tuned.
          */
         std::shared_ptr<MySolution> findExact(MyProblem const& problem,
                                               Hardware const&  hardware) const
         {
             if(!m_hasExact.load(std::memory_order_acquire))
                 return std::shared_ptr<MySolution>();
+            auto const* gpu = dynamic_cast<AMDGPU const*>(&hardware);
+            if(!gpu)
+                return std::shared_ptr<MySolution>();
 
             auto snap = current();
-            auto it   = snap->exactTable.find(localExactKeyFor(problem));
+            auto it = snap->exactTable.find(localExactKeyFor(problem, LocalDeviceClass::of(*gpu)));
             if(it == snap->exactTable.end())
                 return std::shared_ptr<MySolution>();
 
@@ -382,14 +444,14 @@ namespace TensileLite
 
         /**
          * Maps a registered kernel to one exact shape, under its own transposes
-         * and data types, making it selectable for the problems it can serve
-         * there. It takes priority over kernels mapped under the same key
-         * before; mapping it again moves it back to the front. Returns false if
-         * the index is not registered.
+         * and data types, on devices of class `device`, making it selectable
+         * there for the problems it can serve. It takes priority over kernels
+         * mapped under the same key before; mapping it again moves it back to
+         * the front. Returns false if the index is not registered.
          */
-        bool setExactMatch(LocalExactShape const& shape, int index)
+        bool setExactMatch(LocalExactShape const& shape, int index, LocalDeviceClass const& device)
         {
-            return setExactMatches({{shape, index}}) == 1;
+            return setExactMatches({{shape, index}}, device) == 1;
         }
 
         /**
@@ -397,7 +459,8 @@ namespace TensileLite
          * so applying many mappings copies the table once. Returns how many
          * were applied; one whose index is not registered is skipped.
          */
-        size_t setExactMatches(std::vector<std::pair<LocalExactShape, int>> const& mappings)
+        size_t setExactMatches(std::vector<std::pair<LocalExactShape, int>> const& mappings,
+                               LocalDeviceClass const&                             device)
         {
             std::unique_lock<std::shared_mutex> lock(m_snapshotMutex);
 
@@ -412,7 +475,7 @@ namespace TensileLite
                 if(!next)
                     next = std::make_shared<Snapshot>(*m_snapshot);
                 auto& candidates
-                    = next->exactTable[localExactKeyFor(shape, it->second->problemType)];
+                    = next->exactTable[localExactKeyFor(shape, it->second->problemType, device)];
                 candidates.erase(std::remove(candidates.begin(), candidates.end(), it->second),
                                  candidates.end());
                 candidates.insert(candidates.begin(), it->second);
@@ -429,8 +492,8 @@ namespace TensileLite
             return current()->solutions.size();
         }
 
-        /// Number of keys (shape, transposes and data types) with a kernel
-        /// mapped.
+        /// Number of keys (shape, transposes, data types and device class)
+        /// with a kernel mapped.
         size_t selectableCount() const
         {
             return current()->exactTable.size();

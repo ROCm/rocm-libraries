@@ -8617,6 +8617,10 @@ namespace
         std::unordered_map<int, LocalKernelOrigin> origins;
         // What has been applied of each scope's journal.
         std::map<std::string, uks::JournalCursor> journals;
+        // Saved payloads skipped because their objects did not verify, with
+        // the objects' state then, so they are checked again only once it
+        // changes.
+        std::map<Key, std::string> unverified;
 
         // The payload as registered for any scope, or null.
         LocalKernelPayload const* anyScope(uks::PayloadId const& id) const
@@ -8634,8 +8638,10 @@ namespace
         return registry;
     }
 
-    // Names the journal a device's kernels are saved in, e.g. "gfx942_CU304":
-    // its architecture and the compute unit count its hardware predicates see.
+    // Names the journal a device's kernels are saved in, e.g. "gfx942_CU304",
+    // "gfx950_CU256_ID75a3" or "gfx1250v0_CU<n>": the device class its mappings
+    // are for (TensileLite::LocalDeviceClass), which is its kernel target,
+    // compute unit count and PCI chip ID.
     //
     // HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE=<device>=<name> names one device's
     // scope instead, for tests on machines whose devices are all alike. A
@@ -8653,11 +8659,15 @@ namespace
         if(device == testScope.first && !testScope.second.empty())
             return testScope.second;
 
-        hipDeviceProp_t prop;
-        if(hipGetDeviceProperties(&prop, device) != hipSuccess)
-            return {};
-        std::string name(prop.gcnArchName);
-        return name.substr(0, name.find(':')) + "_CU" + std::to_string(gpu.computeUnitCount);
+        const auto  kind  = TensileLite::LocalDeviceClass::of(gpu);
+        std::string scope = kind.target + "_CU" + std::to_string(kind.computeUnitCount);
+        if(kind.pciChipId)
+        {
+            char id[16];
+            std::snprintf(id, sizeof(id), "_ID%04x", unsigned(*kind.pciChipId));
+            scope += id;
+        }
+        return kind.target.empty() ? std::string() : scope;
     }
 
     // Loads a payload shard with all of its solutions parsed, or returns null
@@ -8830,6 +8840,7 @@ namespace
         size_t next = 0;
         for(auto const& loaded : payloads)
         {
+            registry.unverified.erase({scope, loaded.record.id});
             auto& payload  = registry.payloads[{scope, loaded.record.id}];
             payload.record = loaded.record;
             for(auto const& entry : loaded.solutions)
@@ -8857,10 +8868,21 @@ namespace
     // its mappings.
     //
     // Mappings are applied in journal order, the order they were made in
-    // across all processes, this one included. A journal that was replaced is
-    // read again from the start, which applies nothing twice that matters.
-    // Returns false, applying nothing, if the journal cannot be read.
-    // Requires registry.mutex.
+    // across all processes, this one included, for devices of gpu's class.
+    // Reading again from an earlier record therefore leaves each key with the
+    // journal's last mapping for it.
+    //
+    // The cursor in the registry moves only once the records are applied. It
+    // stays at the first payload whose objects did not verify, which another
+    // process may still be writing or may repair, so the next replay tries it
+    // again once they change. A payload that verified but does not suit the
+    // device never will, and is passed. A journal that was replaced is read
+    // again from the start.
+    //
+    // Returns false, applying nothing and leaving the registry's cursor as it
+    // was, if the journal cannot be read: a scope with no cursor yet is then
+    // read again when the next device of it is initialized. Requires
+    // registry.mutex.
     bool replayLocalKernelJournal(LocalKernelRegistry&       registry,
                                   uks::Store const&          store,
                                   std::string const&         scope,
@@ -8869,25 +8891,30 @@ namespace
                                   size_t*                    added,
                                   std::string*               error)
     {
-        *added = 0;
+        *added                   = 0;
+        auto const         known = registry.journals.find(scope);
+        uks::JournalCursor cursor
+            = known == registry.journals.end() ? uks::JournalCursor{} : known->second;
         std::vector<uks::JournalEntry> entries;
-        if(!store.read(scope, &registry.journals[scope], &entries, error))
+        if(!store.read(scope, &cursor, &entries, error))
             return false;
 
         std::vector<LoadedPayload> loaded;
         std::set<uks::PayloadId>   seen;
+        uint64_t                   retryFrom = cursor.offset;
         for(auto const& entry : entries)
         {
             if(entry.kind != uks::JournalEntry::Kind::Payload)
                 continue;
-            auto const& id = entry.payload.id;
-            if(registry.payloads.count({scope, id}) || !seen.insert(id).second)
+            auto const&                    id = entry.payload.id;
+            const LocalKernelRegistry::Key key{scope, id};
+            if(registry.payloads.count(key) || !seen.insert(id).second)
                 continue;
 
             if(auto const* other = registry.anyScope(id))
             {
                 if(payloadSuits(localLibrary, *other, gpu))
-                    registry.payloads.emplace(LocalKernelRegistry::Key{scope, id}, *other);
+                    registry.payloads.emplace(key, *other);
                 else
                     std::cerr << "\nrocblaslt warning: skipping saved local kernel payload "
                               << id.datHash << " " << id.coHash << ": not for this device"
@@ -8895,17 +8922,29 @@ namespace
                 continue;
             }
 
-            std::string   why;
+            const std::string state  = store.objectState(entry.payload);
+            auto              before = registry.unverified.find(key);
+            std::string       why;
+            if((before != registry.unverified.end() && before->second == state)
+               || !store.verifyObjects(entry.payload, &why))
+            {
+                if(before == registry.unverified.end() || before->second != state)
+                    std::cerr << "\nrocblaslt warning: skipping saved local kernel payload "
+                              << id.datHash << " " << id.coHash << " for now: " << why << std::endl;
+                registry.unverified[key] = state;
+                retryFrom                = std::min(retryFrom, entry.offset);
+                continue;
+            }
+            registry.unverified.erase(key);
+
             LoadedPayload payload{entry.payload, {}};
-            if(!store.verifyObjects(entry.payload, &why)
-               || !parseLocalKernelPayload(store.shardPath(entry.payload),
-                                           store.codeObjectPath(id),
-                                           gpu,
-                                           &payload.solutions))
+            if(!parseLocalKernelPayload(store.shardPath(entry.payload),
+                                        store.codeObjectPath(id),
+                                        gpu,
+                                        &payload.solutions))
             {
                 std::cerr << "\nrocblaslt warning: skipping saved local kernel payload "
-                          << id.datHash << " " << id.coHash << (why.empty() ? "" : ": " + why)
-                          << std::endl;
+                          << id.datHash << " " << id.coHash << std::endl;
                 continue;
             }
             loaded.push_back(std::move(payload));
@@ -8936,7 +8975,11 @@ namespace
             mappings.emplace_back(TensileLite::LocalExactShape{e.m, e.n, e.batch, e.k},
                                   index->second);
         }
-        static_cast<void>(localLibrary.setExactMatches(mappings));
+        static_cast<void>(
+            localLibrary.setExactMatches(mappings, TensileLite::LocalDeviceClass::of(gpu)));
+
+        cursor.offset            = retryFrom;
+        registry.journals[scope] = cursor;
         return true;
     }
 
@@ -9125,8 +9168,9 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
     // With a library configured, the payload is staged in it and its shard
     // checked before the objects take their names, so a payload for another
     // device leaves nothing behind. Objects published for a code object that
-    // then fails to load are removed again. Staged copies are named by what was
-    // copied, which is what the payload is then identified by.
+    // then fails to load stay; see Store::publishObjects. Staged copies are
+    // named by what was copied, which is what the payload is then identified
+    // by.
     std::vector<LoadedPayload> loaded(1, LoadedPayload{record, {}});
     auto&                      payload = loaded[0];
     uks::StagedObjects         staged;
@@ -9149,11 +9193,7 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
         return rocblaslt_status_internal_error;
     }
     if(!checkLocalKernelCodeObject(*adapter, coFile, payload.solutions))
-    {
-        if(store)
-            store->unpublishObjects(&staged);
         return rocblaslt_status_invalid_value;
-    }
     if(store && !store->appendPayload(scope, payload.record, &error))
     {
         log_error(__func__, error);
@@ -9239,27 +9279,28 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
         registry.payloads.try_emplace({scope, record.id}, *other);
     }
 
-    // Recorded before it is published. It is then published by reading the
-    // journal back, with whatever other processes appended before it, so that
-    // when two map one key, this process selects what every later one will:
-    // the mapping appended last.
-    if(store)
+    // Recorded before it is published. It is then published, and the journal
+    // read back with whatever other processes appended before it, so that when
+    // two map one key, this process selects what every later one will: the
+    // mapping appended last. Publishing first covers a mapping the journal
+    // already ended with, which appendExact does not append again and the read
+    // back may be past.
+    const TensileLite::LocalExactShape shape{m, n, batch, k};
+    const auto                         deviceClass = TensileLite::LocalDeviceClass::of(*gpu);
+    if(store && !store->appendExact(scope, record, &error))
     {
-        if(!store->appendExact(scope, record, &error))
-        {
-            log_error(__func__, error);
-            return rocblaslt_status_internal_error;
-        }
-        std::lock_guard<std::mutex> lock(registry.mutex);
-        size_t                      added = 0;
-        if(replayLocalKernelJournal(registry, *store, scope, *gpu, *localLibrary, &added, &error))
-            return rocblaslt_status_success;
-        std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << error
-                  << std::endl;
+        log_error(__func__, error);
+        return rocblaslt_status_internal_error;
     }
 
-    if(!localLibrary->setExactMatch(TensileLite::LocalExactShape{m, n, batch, k}, kernelIndex))
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    if(!localLibrary->setExactMatch(shape, kernelIndex, deviceClass))
         return rocblaslt_status_invalid_value;
+    size_t added = 0;
+    if(store
+       && !replayLocalKernelJournal(registry, *store, scope, *gpu, *localLibrary, &added, &error))
+        std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << error
+                  << std::endl;
     return rocblaslt_status_success;
 }
 

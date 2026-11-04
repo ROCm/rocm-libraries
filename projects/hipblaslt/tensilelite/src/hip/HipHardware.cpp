@@ -74,6 +74,7 @@ namespace TensileLite
             , properties(prop)
             , deviceId(deviceId)
         {
+            asicRevision = prop.asicRevision;
             // Both entry points read gcnArchName out of the properties they are
             // handed, so the same renamed copy has to reach both: renaming only
             // the support check would trade the null for a throw out of

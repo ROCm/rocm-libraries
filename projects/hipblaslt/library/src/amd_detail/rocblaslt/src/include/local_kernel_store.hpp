@@ -98,6 +98,8 @@ namespace rocblaslt
             Kind          kind = Kind::Payload;
             PayloadRecord payload;
             ExactRecord   exact;
+            // Where the record's line starts in the journal.
+            uint64_t offset = 0;
         };
 
         /**
@@ -147,8 +149,6 @@ namespace rocblaslt
                 std::string temp, final;
                 // `final` existed but did not match its name.
                 bool replace = false;
-                // publishObjects created `final`.
-                bool created = false;
             };
 
             Object m_shard, m_co;
@@ -188,21 +188,25 @@ namespace rocblaslt
                               StagedObjects*     staged,
                               std::string*       error) const;
 
-            /** Moves staged copies to their names, which they then keep. */
-            bool publishObjects(StagedObjects* staged, std::string* error) const;
-
             /**
-             * Removes the objects publishObjects created, for a payload found
-             * unusable after they were published. Objects that were already
-             * there may belong to other payloads and are kept.
+             * Moves staged copies to their names, which they then keep, even
+             * if the payload turns out unusable: another payload's
+             * registration may already be using an object, and an object no
+             * record names costs only space.
              */
-            void unpublishObjects(StagedObjects* staged) const;
+            bool publishObjects(StagedObjects* staged, std::string* error) const;
 
             /**
              * Whether a payload's saved objects are private to this user, as
              * the directories must be, and still hash to their names.
              */
             bool verifyObjects(PayloadRecord const& record, std::string* error) const;
+
+            /**
+             * A cheap description of a payload's saved objects as they are
+             * now, which changes when either is written, replaced or removed.
+             */
+            std::string objectState(PayloadRecord const& record) const;
 
             /** Appends an R record unless the journal already has one for this payload. */
             bool appendPayload(std::string const&   scope,
