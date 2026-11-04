@@ -101,6 +101,10 @@ void resetGfx1151WmmaAttentionDecodeModuleCache();
 void registerGfx950ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvDgradAotModuleCache();
 
+/// @see packs/Gfx950ConvWgradNative.cpp (hipkernel:Gfx950ConvWgradAot)
+void registerGfx950ConvWgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvWgradAotModuleCache();
+
 /// Sets the per-image byte limit gfx950_conv_dgrad::batchChunks() slices a batch at, in
 /// the provider's own loaded copy of that test seam -- see
 /// Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting(). A test in another TU

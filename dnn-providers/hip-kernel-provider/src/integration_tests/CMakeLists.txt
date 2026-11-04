@@ -103,6 +103,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
+    # The wgrad AOT-instance engine, gated the same way. hkp_product_offers_engine reads
+    # this off the product root's KDP shards (offered_engines), so the gate stays FALSE --
+    # and this file is not compiled -- until the Phase 6 GPU session produces and
+    # DVC-registers gfx950_conv_wgrad_aot's kdp.json/artifacts (the ued/udd/uhd/kmd/umd
+    # descriptors alone are not enough to flip it).
+    hkp_product_offers_engine(_hkp_conv_wgrad_aot_bundle "hipkernel:Gfx950ConvWgradAot")
+    if(_hkp_conv_wgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvWgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX950_CONV_WGRAD_AOT=1
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

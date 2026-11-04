@@ -94,6 +94,7 @@ compilation::KpackModuleCache& flydslSdpaCdnaDecodeKpackModuleCache();
 
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache();
+compilation::KpackModuleCache& gfx950ConvWgradAotKpackModuleCache();
 
 /// What a kpack kernel needs to be loaded again for another device, or read again for a
 /// save: the archive it was resolved to, the entry inside it, and the declared digest the

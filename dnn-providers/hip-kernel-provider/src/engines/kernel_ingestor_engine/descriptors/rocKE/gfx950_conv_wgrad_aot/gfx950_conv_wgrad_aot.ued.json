@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "id": "d2826306-73aa-4c98-9fca-a415eb8bbf54",
+  "name": "hipkernel:Gfx950ConvWgradAot",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx950_conv_wgrad_aot.graph_match"
+  },
+  "metadata": "f9010275-dee5-4388-9343-4e256b3914e5",
+  "sort_kernel_catalog": {
+    "default": [
+      "7daed91f-2173-4cd6-a3a4-0281e509c8ab"
+    ]
+  },
+  "knobs": [
+    "kernel_family",
+    "direct_variant",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "epilogue",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "lds_k_outer",
+    "grouped",
+    "async_dma",
+    "unroll_k",
+    "lds_k_pad",
+    "lds_layout",
+    "group_merge",
+    "ws_replicas",
+    "prefetch_addr",
+    "ho_per_block",
+    "mfma_k",
+    "waves_c",
+    "waves_k",
+    "waves_q",
+    "prefetch",
+    "row_unroll",
+    "rows_per_seg",
+    "target_blocks",
+    "unfold_n",
+    "wave_c16",
+    "wave_k16",
+    "lanes_c",
+    "lanes_w",
+    "channels",
+    "strip",
+    "threads",
+    "q_tiles",
+    "rows_per_chunk",
+    "wave_q4",
+    "taps"
+  ]
+}

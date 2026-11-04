@@ -6,14 +6,29 @@
 WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
-``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
-(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
-this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
-ported those onto it, so those
-directions/arches are an explicit, declared gap rather than a silent
-regression -- a request for either is rejected with a reason, not routed to a
-default.
+``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- forward,
+backward-data (dgrad) and backward-weight (wgrad) convolutions on gfx950.
+gfx942 forward and gfx1250 forward have no list registered at all: this
+rewrite moved fwd/dgrad/wgrad onto the instance-list machinery but has not yet
+ported those onto it, so those arches are an explicit, declared gap rather
+than a silent regression -- a request for either is rejected with a reason,
+not routed to a default.
+
+wgrad binds dY to A and X to B (the opposite of fwd's X/W), and D is dW --
+see :mod:`kernels.common.conv_abi`. Its implicit-GEMM instances resolve their
+split-K *launch* degree from the request's shape at dispatch time, the same
+cost model
+:func:`kernels.common.conv_implicit_gemm_wgrad.build_implicit_gemm_conv_wgrad`
+calls on ``split_k=-1`` (see :func:`kernels.conv.kernel_label.strip_launch_suffix`'s
+``@split_k=N`` launch-time convention) -- but the catalog's own baked
+``split_k`` (1, or > 1 recorded as 2) is not a placeholder: it is whether the
+binary was built with an atomic-accumulate epilogue at all
+(``WgradConvSpec``'s ``_needs_atomic``), so an instance baked ``split_k == 1``
+is held to degree 1 regardless of the resolved shape (:func:`_wgrad_split_k`).
+Five of its seven direct families store one partial
+dW slot per block instead of an atomic add and need a second kernel,
+``direct_wgrad_fold``, to sum the partitions -- wired the same way the MFMA
+dgrad's weight-transform helpers are (:data:`kernels.conv.direct_variants.DIRECT_WGRAD_FOLDED`).
 
 One forward candidate is not an instance: ``conv_winograd_fwd``, the
 Winograd forward on gfx1250 (:mod:`dispatch.conv_winograd_plan`). It is
@@ -101,10 +116,13 @@ from kernels.conv.direct_aot_jobs import (
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
     DIRECT_MFMA_DGRAD,
+    DIRECT_WGRAD_FOLD,
+    DIRECT_WGRAD_FOLDED,
     direct_dgrad_kernarg_direction,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
+    direct_wgrad_fold_knobs,
     make_direct_spec,
 )
 from kernels.common.conv_implicit_gemm import ConvProblem
@@ -150,6 +168,8 @@ __all__ = [
     "CONV_FWD_EXECUTION_REGISTRY",
     "CONV_FWD_REGISTRY",
     "CONV_GROUPED_ABI_VERSION",
+    "CONV_WGRAD_EXECUTION_REGISTRY",
+    "CONV_WGRAD_REGISTRY",
     "CONV_WINOGRAD_ABI_VERSION",
     "DEFAULT_LLVM_FLAVOR",
     "ConvGroupedRequest",
@@ -176,7 +196,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 # Registry family of each direction that has registered instances.
-_FAMILIES = {"fwd": "conv_fwd", "dgrad": "conv_dgrad"}
+_FAMILIES = {"fwd": "conv_fwd", "dgrad": "conv_dgrad", "wgrad": "conv_wgrad"}
 
 # Kernarg layouts: implicit GEMM takes the conv_args_signature ABI, every
 # direct variant the conv_direct_args_signature one.
@@ -190,6 +210,7 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
+    ("gfx950", "wgrad"): "gfx950_wgrad.json",
 }
 
 # The LLVM flavor a request is admitted against unless it names its own: the
@@ -197,8 +218,11 @@ _INSTANCE_LISTS: dict[tuple[str, str], str] = {
 # test_default_llvm_flavor_is_the_registered_one).
 DEFAULT_LLVM_FLAVOR = "llvm22"
 
-# The buffers bound to an instance's A, B and D operands, by direction.
-_OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
+# The buffers bound to an instance's A, B and D operands, by direction. wgrad
+# binds dY to A and X to B (conv_abi.conv_direct_arg_names /
+# conv_arg_names: "direction='wgrad' binds dY (NHWK) to A and X (NHWC) to
+# B"), D is dW.
+_OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx"), "wgrad": ("dy", "x", "dw")}
 
 # ---------------------------------------------------------------------------
 # Request
@@ -502,6 +526,23 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
+        if identity.direction == "wgrad":
+            if identity.two_stage:
+                # Phase 0 (dispatch/grouped_convolution.py): the Stage 2
+                # fp32-workspace reduce kernel this binary's ABI needs is not
+                # wired into launch_plan_for yet -- a declared gap, not a
+                # silent wrong plan, until it is.
+                return False, (
+                    "two-stage wgrad (Stage 2 reduce) is not wired in the "
+                    "dispatcher yet"
+                )
+            # WgradConvSpec runs the unfolded problem (see _gemm_problem's
+            # docstring: "every other problem (and wgrad) launches as it
+            # is"), so admission is checked against it, not the fwd/dgrad
+            # width-folded view.
+            return identity_supports_problem(
+                identity, _conv_problem(req), req.llvm_flavor
+            )
         return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
@@ -517,12 +558,44 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
     return spec is not None, why
 
 
+def _direct_geometry(spec) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """``(grid, block)`` of a built direct spec, mirroring the AOT run path's
+    own dispatch (:func:`benchmarks.common.direct_kernel_sweep._conv_step`):
+    a few spec classes carry ``grid()`` + ``threads_per_block`` as two
+    separate members, most direct wgrad/fwd-WMMA specs carry one
+    ``launch_geometry()`` that returns both at once, and everything else is
+    matched by :func:`~kernels.common.conv_direct_grouped.direct_launch_geometry`'s
+    isinstance table. One place to ask, so the dispatcher's grid/block can
+    never disagree with what the AOT cache's run path would launch.
+    """
+    from kernels.common.conv_dgrad_patch_wmma import DgradPatchWmmaSpec
+    from kernels.common.conv_dgrad_smallc_wmma import DgradSmallcWmmaSpec
+    from kernels.common.conv_direct_dgrad_wmma import DirectDgradWmmaSpec
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+    from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+    if isinstance(
+        spec,
+        (
+            DirectNongroupedConvSpec,
+            DirectDgradWmmaSpec,
+            DgradPatchWmmaSpec,
+            DgradSmallcWmmaSpec,
+        ),
+    ):
+        return spec.grid(), (spec.threads_per_block, 1, 1)
+    if hasattr(spec, "launch_geometry"):
+        return spec.launch_geometry()
+    return direct_launch_geometry(spec)
+
+
 def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     """Workgroup size of an instance, from its tuning alone."""
     if not identity.is_direct:
         return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
-    # threads_per_block reads only the knobs, so any shape the spec accepts
-    # at construction answers it.
+    # The block a spec launches at reads only the knobs, so any shape the
+    # spec accepts at construction answers it -- the probe's grid (computed
+    # along the way by _direct_geometry) is discarded.
     probe = DirectConvProblem(
         N=1,
         H=16,
@@ -541,7 +614,7 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     spec = make_direct_spec(
         identity.algorithm, probe, _instance_knobs(identity), identity.wave_size
     )
-    return (spec.threads_per_block, 1, 1)
+    return _direct_geometry(spec)[1]
 
 
 def _split_c(identity: KernelIdentity) -> int:
@@ -568,6 +641,20 @@ def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
             identity.arch, identity.wave_size, split_c, identity.dtype_a
         )
         return (dataclasses.replace(reduce_id, llvm_flavor=identity.llvm_flavor),)
+    if identity.algorithm in DIRECT_WGRAD_FOLDED:
+        from kernels.conv.direct_aot_jobs import _caps_of, _helper_identity
+
+        caps = _caps_of(identity)
+        fold_knobs = direct_wgrad_fold_knobs(identity.algorithm, caps.KH, caps.KW, caps.cpg)
+        fold_id = _helper_identity(
+            identity.arch,
+            identity.wave_size,
+            DIRECT_WGRAD_FOLD,
+            caps,
+            fold_knobs,
+            identity.dtype_a,
+        )
+        return (dataclasses.replace(fold_id, llvm_flavor=identity.llvm_flavor),)
     if identity.algorithm not in DIRECT_MFMA_DGRAD:
         return ()
     return tuple(
@@ -607,16 +694,16 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
     # The MFMA dgrad's own kernel, and the FPROP_SINGLE dgrad variants
     # (direct_grouped_dgrad_4c / _fused, built by dc.build_direct_conv[_4c] --
     # the forward builder, reused for dgrad over the transposed problem), are
-    # both a forward pass; ``spec.helpers`` alone used to gate this (true only
-    # for the MFMA ones, which run weight-transform kernels first), silently
-    # mislabeling the FPROP_SINGLE pair's dgrad-shaped kernargs as the fwd
-    # names until the v3 dgrad catalog first registered one for a request this
-    # test suite exercises (test_launch_plan_matches_the_aot_run_path). See
-    # direct_dgrad_kernarg_direction for the FPROP_SINGLE half of this check,
-    # shared with launch_plan_for, the AOT adapter and the benchmark sweep.
+    # both a forward pass. Gated on the MFMA set explicitly (not on
+    # ``spec.helpers`` being non-empty): a split-C forward instance and a
+    # folded wgrad instance (direct_wgrad_dw, _gather, ...) both carry helpers
+    # too, but their own kernel keeps its own direction's ABI -- the helper
+    # runs after it, not instead of it. See direct_dgrad_kernarg_direction for
+    # the FPROP_SINGLE half of this check, shared with launch_plan_for, the
+    # AOT adapter and the benchmark sweep.
     direction = (
         "fwd"
-        if spec.helpers
+        if spec.identity.algorithm in DIRECT_MFMA_DGRAD
         or direct_dgrad_kernarg_direction(spec.identity.algorithm) == "fwd"
         else spec.direction
     )
@@ -628,19 +715,59 @@ def _sub_gemms(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple:
     return tuple(dgrad_sub_gemms(identity, _gemm_problem(req)))
 
 
+@functools.lru_cache(maxsize=4096)
+def _wgrad_split_k(identity: KernelIdentity, req: ConvGroupedRequest) -> int:
+    """The split-K degree an implicit-GEMM wgrad instance runs ``req`` at.
+
+    Resolved from the real problem shape by the same cost model
+    :func:`~kernels.common.conv_implicit_gemm_wgrad.build_implicit_gemm_conv_wgrad`
+    calls on ``split_k=-1``. ``identity.split_k`` is *not* an un-resolved
+    placeholder the dispatcher is free to override: per
+    :func:`~kernels.conv.aot_jobs`'s own comment ("split_k=1 (direct store,
+    no atomics) is a structurally different kernel") and
+    ``WgradConvSpec.__post_init__``'s ``_needs_atomic`` gate, a binary baked
+    ``split_k == 1`` has no atomic-accumulate epilogue compiled in at all --
+    only ``split_k > 1`` (recorded canonically as ``2``; the real degree is a
+    launch-time kernarg) built the atomic epilogue in. Handing such a binary
+    a dynamically resolved ``split_k > 1`` makes each grid-z block overwrite
+    ``dW`` instead of accumulating into it -- silently wrong, not a crash.
+    :func:`~kernels.conv.kernel_identity.identity_supports_problem` already
+    reads this same field this way (gating ``identity.split_k > 1`` against
+    :func:`~kernels.common.conv_implicit_gemm_wgrad.wgrad_atomic_epilogue_available`),
+    so this mirrors admission's own rule rather than inventing a new one.
+    """
+    if identity.split_k == 1:
+        return 1
+    from kernels.common.conv_split_k import resolve_conv_split_k
+
+    resolved = resolve_conv_split_k(
+        "wgrad",
+        _conv_problem(req),
+        arch=identity.arch,
+        dtype=identity.dtype_d,
+        tile_m=identity.tile_m,
+        tile_n=identity.tile_n,
+        tile_k=identity.tile_k,
+        block_size=identity.warp_m * identity.warp_n * identity.wave_size,
+        group_merge=identity.group_merge,
+        ws_replicas=identity.ws_replicas,
+        reduction="workspace" if identity.two_stage else "atomic",
+        epilogue=None if identity.two_stage else identity.epilogue,
+        allow_unsplit=not identity.two_stage,
+    )
+    return resolved.split_k
+
+
 def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     if spec.is_direct:
-        from kernels.common.conv_direct_grouped import direct_launch_geometry
-        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
-
         launch_spec, why = _direct_launch_spec(spec.identity, req)
         if launch_spec is None:
             raise ValueError(f"{spec.name} cannot run this request: {why}")
-        if isinstance(launch_spec, DirectNongroupedConvSpec):
-            return launch_spec.grid()
-        return direct_launch_geometry(launch_spec)[0]
+        return _direct_geometry(launch_spec)[0]
     ident = spec.identity
+    from kernels.common.conv_args import ConvArgs
+
     if spec.direction == "dgrad":
         # One workgroup per tile of every tilde sub-GEMM (the kernel finds its
         # sub-GEMM by binary search over the table); the group rides y.
@@ -649,8 +776,24 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
             for sg in _sub_gemms(ident, req)
         )
         return (tiles, max(1, req.G), max(1, ident.split_k))
-    from kernels.common.conv_args import ConvArgs
-
+    if spec.direction == "wgrad":
+        # WgradConvSpec runs its own (unfolded) problem -- no width-folding
+        # patch-embedding trick, unlike fwd/dgrad (see _gemm_problem). Mirrors
+        # benchmarks.common.benchmark_implicit_gemm_conv._grid_for("wgrad"):
+        # ConvArgs.grid()'s own z (groups * split_k) does not know about
+        # group_merge, so the z axis is recomputed here instead (a merged
+        # kernel runs one workgroup per Gm groups, sharing z with the
+        # split-K slice); gx/gy are unaffected by it.
+        gx, gy, _ = ConvArgs.from_problem(
+            _conv_problem(req),
+            direction="wgrad",
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+        ).grid()
+        split_k = _wgrad_split_k(ident, req)
+        grid_groups = max(1, req.G) // max(1, ident.group_merge)
+        return (gx, gy, grid_groups * split_k)
     return ConvArgs.from_problem(
         _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
     ).grid()
@@ -706,6 +849,11 @@ class ConvLaunchPlan:
     workspaces: Mapping[str, int] = field(default_factory=dict)
     sub_gemm_table: tuple[int, ...] = ()
     num_sub_gemms: int = 0
+    # Implicit-GEMM wgrad only: the split-K degree resolved for this request
+    # (see _wgrad_split_k). 1 everywhere else -- the default ``to_launch_values``
+    # already assumes, so it is only threaded through when it would change
+    # anything.
+    split_k: int = 1
 
     def values(
         self, step: ConvLaunchStep, ptrs: Mapping[str, int], sizes: Mapping[str, int]
@@ -739,6 +887,8 @@ class ConvLaunchPlan:
                 "sub_gemm_buf": ptrs["sub_gemms"],
                 "num_sub_gemms": self.num_sub_gemms,
             }
+        if self.split_k != 1:
+            extras["split_k"] = self.split_k
         return step.args.to_launch_values(
             ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d], **extras
         )
@@ -766,6 +916,17 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         _OPERANDS[spec.direction],
     )
     if not ident.is_direct:
+        if spec.direction == "wgrad":
+            # WgradConvSpec runs the raw (unfolded) problem -- see _grid.
+            split_k = _wgrad_split_k(ident, req)
+            args = ConvArgs.from_problem(
+                _conv_problem(req),
+                direction="wgrad",
+                tile_m=ident.tile_m,
+                tile_n=ident.tile_n,
+                tile_k=ident.tile_k,
+            )
+            return ConvLaunchPlan((step(args),), split_k=split_k)
         args = ConvArgs.from_problem(
             _gemm_problem(req),
             direction=spec.direction,
@@ -795,6 +956,35 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         else:
             args = ConvArgs.from_problem(problem, direction=spec.direction)
         return ConvLaunchPlan((step(args),))
+    if ident.algorithm in DIRECT_WGRAD_FOLDED:
+        # The pass stores one partial slot per partition into the scratch
+        # ``ws``; the fold sums them into dW (written whole, no zeroing), as
+        # benchmarks/common/direct_kernel_sweep.direct_plan's wgrad-fold leg.
+        from kernels.common.conv_direct_dw_wgrad import (
+            DW_WGRAD_FOLD_ARGS,
+            dw_wgrad_fold_signature,
+        )
+
+        (fold_id,) = spec.helpers
+        launch_spec, _ = _direct_launch_spec(ident, req)
+        args = ConvArgs.from_problem(problem, direction="wgrad")
+        conv = dataclasses.replace(step(args), buffers=("dy", "x", "ws"))
+        fold_spec = make_direct_spec(DIRECT_WGRAD_FOLD, problem, _instance_knobs(fold_id))
+        channels = (
+            launch_spec.fold_channels()
+            if hasattr(launch_spec, "fold_channels")
+            else problem.groups
+        )
+        grid, block = fold_spec.launch_geometry(channels)
+        fold = ConvLaunchStep(
+            fold_id,
+            grid,
+            block,
+            tuple(dw_wgrad_fold_signature(fold_spec)),
+            ("ws", None, "dw"),
+            scalars=tuple(zip(DW_WGRAD_FOLD_ARGS, (launch_spec.n_partitions(), channels))),
+        )
+        return ConvLaunchPlan((conv, fold), {"ws": launch_spec.workspace_bytes()})
     split_c = _split_c(ident)
     if split_c > 1:
         # Split-C: the conv pass writes fp32 partial sums into a workspace and
@@ -1203,11 +1393,15 @@ def format_instance_list(lst: InstanceList) -> str:
 
 #: Directions whose default (no-``ranker``) pick is the deterministic
 #: sorted-by-label order :func:`_instance_sort_key` defines, rather than the
-#: list file's on-disk order. Scoped to dgrad only: fwd's default pick is a
-#: hand-tuned family preference (e.g. #14628's windowed depthwise kernel
+#: list file's on-disk order. Scoped to dgrad and wgrad: fwd's default pick is
+#: a hand-tuned family preference (e.g. #14628's windowed depthwise kernel
 #: sorting first in its catalog) that label order does not reproduce, and
-#: re-deriving it needs fresh measurement this change does not make.
-_SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
+#: re-deriving it needs fresh measurement this change does not make. wgrad's
+#: catalog (``final_wgrad_instances_1pct.txt``) carries no such hand-tuned
+#: order of its own -- it is the output of a generation sweep, not a curated
+#: priority list -- so it defaults to the same unordered-set treatment as
+#: dgrad rather than inventing one.
+_SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad", "wgrad"})
 
 
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
@@ -1265,6 +1459,7 @@ _REGISTRIES = {
 }
 CONV_FWD_REGISTRY = _REGISTRIES["fwd"]
 CONV_DGRAD_REGISTRY = _REGISTRIES["dgrad"]
+CONV_WGRAD_REGISTRY = _REGISTRIES["wgrad"]
 
 # A second registry per direction, holding the same candidates as the route
 # registry above but meant for sweeping/benchmarking rather than production
@@ -1282,6 +1477,7 @@ _EXECUTION_REGISTRIES = {
 }
 CONV_FWD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["fwd"]
 CONV_DGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["dgrad"]
+CONV_WGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["wgrad"]
 
 # Registered instances by name; a candidate's spec does not depend on the request.
 # ``priority`` here is the index in _read_instance_list's deterministic

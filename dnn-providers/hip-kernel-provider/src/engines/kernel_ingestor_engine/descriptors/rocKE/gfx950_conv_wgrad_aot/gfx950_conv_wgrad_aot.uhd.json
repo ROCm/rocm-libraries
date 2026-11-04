@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "7daed91f-2173-4cd6-a3a4-0281e509c8ab",
+  "name": "Gfx950ConvWgradAot selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx950_conv_wgrad_aot.score"
+  }
+}
