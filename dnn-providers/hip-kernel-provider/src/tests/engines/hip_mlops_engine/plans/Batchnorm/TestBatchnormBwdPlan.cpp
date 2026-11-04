@@ -148,7 +148,7 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
             EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
             EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("BatchNormBwdSpatial"))
+            EXPECT_CALL(*program, getKernel("batchNormBwdSpatial"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
             return program;
         });
@@ -217,16 +217,16 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
 
 TEST(TestBatchnormBwdPlan, CompileVariantTwoRequestsExpectedKernelNames)
 {
-    const std::vector<std::string> savedStatsKernelNames{"BatchNormBwdSpatialDScaleDBias",
-                                                         "BatchNormBwdSpatialFinalDScaleDBias",
-                                                         "BatchNormBwdSpatialDX",
-                                                         "BatchNormBwdSpatialDX",
-                                                         "BatchNormBwdSpatialDX"};
-    const std::vector<std::string> unsavedStatsKernelNames{"BatchNormBwdSpatialMeanVariance",
-                                                           "BatchNormBwdSpatialFinalMeanVariance",
-                                                           "BatchNormBwdSpatialDScaleDBias",
-                                                           "BatchNormBwdSpatialFinalDScaleDBias",
-                                                           "BatchNormBwdSpatialDX"};
+    const std::vector<std::string> savedStatsKernelNames{"batchNormBwdSpatialDScaleDBias",
+                                                         "batchNormBwdSpatialFinalDScaleDBias",
+                                                         "batchNormBwdSpatialDX",
+                                                         "batchNormBwdSpatialDX",
+                                                         "batchNormBwdSpatialDX"};
+    const std::vector<std::string> unsavedStatsKernelNames{"batchNormBwdSpatialMeanVariance",
+                                                           "batchNormBwdSpatialFinalMeanVariance",
+                                                           "batchNormBwdSpatialDScaleDBias",
+                                                           "batchNormBwdSpatialFinalDScaleDBias",
+                                                           "batchNormBwdSpatialDX"};
 
     for(const bool usesSavedStats : {true, false})
     {

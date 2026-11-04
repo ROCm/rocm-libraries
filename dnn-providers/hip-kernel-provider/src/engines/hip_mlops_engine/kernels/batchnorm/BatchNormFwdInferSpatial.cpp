@@ -25,29 +25,35 @@ using ComputeVecType = hip_plugin_bn_config::compute_vec_type;
 } // namespace
 
 template <unsigned int vecSizeX, unsigned int vecSizeY>
-__device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
-                                                      unsigned int tidy,
-                                                      const InputType* in,
-                                                      OutputType* out,
-                                                      const MeanVarType* mean,
-                                                      const MeanVarType* invVariance,
-                                                      const ScaleBiasType* scale,
-                                                      const ScaleBiasType* bias,
-                                                      unsigned int channelStride,
-                                                      unsigned int spatialStride,
-                                                      unsigned int batchStride,
-                                                      float alpha,
-                                                      float beta)
+__device__ __forceinline__ void
+    bnFwdInferSpatialImpl(unsigned int tidx, // NOLINT(misc-use-internal-linkage)
+                          unsigned int tidy,
+                          const InputType* in,
+                          OutputType* out,
+                          const MeanVarType* mean,
+                          const MeanVarType* invVariance,
+                          const ScaleBiasType* scale,
+                          const ScaleBiasType* bias,
+                          unsigned int channelStride,
+                          unsigned int spatialStride,
+                          unsigned int batchStride,
+                          float alpha,
+                          float beta)
 {
-    ComputeType inhat[hip_plugin_bn_config::vec_size];
-    InputType value[hip_plugin_bn_config::vec_size];
-    OutputType outValue[hip_plugin_bn_config::vec_size]; // Unused if InputType equals OutputType
+    ComputeType inhat[hip_plugin_bn_config::VEC_SIZE]; // NOLINT(modernize-avoid-c-arrays)
+    InputType value[hip_plugin_bn_config::VEC_SIZE]; // NOLINT(modernize-avoid-c-arrays)
+    OutputType outValue // NOLINT(modernize-avoid-c-arrays)
+        [hip_plugin_bn_config::
+             VEC_SIZE]; // NOLINT(modernize-avoid-c-arrays) Unused if InputType equals OutputType
 
     // loop over the batches
     // NOTE: We use zlocalsize = 1 and zgridsize = min(batches, maxGridSizeToFillTheGPU). So the
     // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
     // each block will loop over the remaining batches with stride of gridDim.z if necessary.
-    for(unsigned int batch = blockIdx.z; batch < hip_plugin_bn_config::batches; batch += gridDim.z)
+    for(unsigned int batch = blockIdx.z; // NOLINT(readability-static-accessed-through-instance)
+        batch
+        < hip_plugin_bn_config::BATCHES; // NOLINT(readability-static-accessed-through-instance)
+        batch += gridDim.z) // NOLINT(readability-static-accessed-through-instance)
     {
         // load input value
         const unsigned int batchIndex = batch * batchStride + tidx * channelStride * vecSizeX
@@ -58,7 +64,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 
         // perform batchnorm and activation
 #pragma unroll
-        for(unsigned int i = 0; i < hip_plugin_bn_config::vec_size; ++i)
+        for(unsigned int i = 0; i < hip_plugin_bn_config::VEC_SIZE; ++i)
         {
             inhat[i] = (hip_kernel_provider::cast<ComputeType>(value[i])
                         - hip_kernel_provider::cast<ComputeType>(mean[i]))
@@ -68,7 +74,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                        + hip_kernel_provider::cast<ComputeType>(bias[i]);
 
             inhat[i]
-                = hip_kernel_provider::applyActivation<ComputeType, hip_plugin_config::neuron_op>(
+                = hip_kernel_provider::applyActivation<ComputeType, hip_plugin_config::NEURON_OP>(
                     inhat[i], alpha, beta);
             if constexpr(std::is_same_v<InputType, OutputType>)
             {
@@ -81,7 +87,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
         }
 
         // write output value
-        OutputVecType* outPtr = reinterpret_cast<OutputVecType*>(out + batchIndex);
+        auto* outPtr = reinterpret_cast<OutputVecType*>(out + batchIndex);
         if constexpr(std::is_same_v<InputType, OutputType>)
         {
             *outPtr = *reinterpret_cast<const OutputVecType*>(value);
@@ -93,8 +99,8 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
     }
 }
 
-extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bounds)
-    BatchNormFwdInferSpatialEst(const InputType* __restrict in,
+extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.BOUNDS)
+    batchNormFwdInferSpatialEst(const InputType* __restrict in,
                                 OutputType* __restrict out,
                                 const MeanVarType* __restrict estimatedMean,
                                 const MeanVarType* __restrict estimatedVariance,
@@ -107,34 +113,44 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bo
                                 float alpha,
                                 float beta)
 {
-    unsigned int tidx = blockIdx.x * hip_plugin_bn_config::launch_dim.grp0 + threadIdx.x;
-    unsigned int tidy = blockIdx.y * hip_plugin_bn_config::launch_dim.grp1 + threadIdx.y;
-    unsigned int tidz = blockIdx.z;
+    const unsigned int tidx
+        = blockIdx.x // NOLINT(readability-static-accessed-through-instance)
+              * hip_plugin_bn_config:: // NOLINT(readability-static-accessed-through-instance)
+                LAUNCH_DIM // NOLINT(readability-static-accessed-through-instance)
+                    .GRP0 // NOLINT(readability-static-accessed-through-instance)
+          + threadIdx.x; // NOLINT(readability-static-accessed-through-instance)
+    const unsigned int tidy
+        = blockIdx.y // NOLINT(readability-static-accessed-through-instance)
+              * hip_plugin_bn_config:: // NOLINT(readability-static-accessed-through-instance)
+                LAUNCH_DIM // NOLINT(readability-static-accessed-through-instance)
+                    .GRP1 // NOLINT(readability-static-accessed-through-instance)
+          + threadIdx.y; // NOLINT(readability-static-accessed-through-instance)
+    const unsigned int tidz = blockIdx.z; // NOLINT(readability-static-accessed-through-instance)
 
     // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX
-        = hip_plugin_config::layout_channel_last ? hip_plugin_bn_config::vec_size : 1;
-    constexpr unsigned int vecSizeY
-        = hip_plugin_config::layout_channel_last ? 1 : hip_plugin_bn_config::vec_size;
+    constexpr unsigned int VEC_SIZE_X
+        = hip_plugin_config::LAYOUT_CHANNEL_LAST ? hip_plugin_bn_config::VEC_SIZE : 1;
+    constexpr unsigned int VEC_SIZE_Y
+        = hip_plugin_config::LAYOUT_CHANNEL_LAST ? 1 : hip_plugin_bn_config::VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= hip_plugin_bn_config::channels
-       || tidy * vecSizeY >= hip_plugin_bn_config::spatial_size
-       || tidz >= hip_plugin_bn_config::batches)
+    if(tidx * VEC_SIZE_X >= hip_plugin_bn_config::CHANNELS
+       || tidy * VEC_SIZE_Y >= hip_plugin_bn_config::SPATIAL_SIZE
+       || tidz >= hip_plugin_bn_config::BATCHES)
     {
         return;
     }
 
     // indices for current thread
-    unsigned int adjIndex = tidx * vecSizeX;
+    const unsigned int adjIndex = tidx * VEC_SIZE_X;
 
     // batch parameters and values for current thread
-    MeanVarType mean[hip_plugin_bn_config::vec_size];
-    MeanVarType variance[hip_plugin_bn_config::vec_size];
-    ScaleBiasType pscale[hip_plugin_bn_config::vec_size];
-    ScaleBiasType pbias[hip_plugin_bn_config::vec_size];
-    ComputeType invVariance[hip_plugin_bn_config::vec_size];
-    if constexpr(hip_plugin_config::layout_channel_last)
+    MeanVarType mean[hip_plugin_bn_config::VEC_SIZE];
+    MeanVarType variance[hip_plugin_bn_config::VEC_SIZE];
+    ScaleBiasType pscale[hip_plugin_bn_config::VEC_SIZE];
+    ScaleBiasType pbias[hip_plugin_bn_config::VEC_SIZE];
+    ComputeType invVariance[hip_plugin_bn_config::VEC_SIZE];
+    if constexpr(hip_plugin_config::LAYOUT_CHANNEL_LAST)
     {
         *reinterpret_cast<MeanVarVecType*>(mean)
             = *reinterpret_cast<const MeanVarVecType*>(estimatedMean + adjIndex);
@@ -147,45 +163,47 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bo
     }
     else // NCL layout
     {
-        const auto mean_val = estimatedMean[adjIndex];
-        const auto variance_val = estimatedVariance[adjIndex];
-        const auto pscale_val = scale[adjIndex];
-        const auto pbias_val = bias[adjIndex];
+        const auto meanVal = estimatedMean[adjIndex];
+        const auto varianceVal = estimatedVariance[adjIndex];
+        const auto pscaleVal = scale[adjIndex];
+        const auto pbiasVal = bias[adjIndex];
 #pragma unroll
-        for(unsigned int i = 0; i < hip_plugin_bn_config::vec_size; ++i)
+        for(unsigned int i = 0; i < hip_plugin_bn_config::VEC_SIZE; ++i)
         {
-            mean[i] = mean_val;
-            variance[i] = variance_val;
-            pscale[i] = pscale_val;
-            pbias[i] = pbias_val;
+            mean[i] = meanVal;
+            variance[i] = varianceVal;
+            pscale[i] = pscaleVal;
+            pbias[i] = pbiasVal;
         }
     }
 #pragma unroll
-    for(unsigned int i = 0; i < hip_plugin_bn_config::vec_size; ++i)
+    for(unsigned int i = 0; i < hip_plugin_bn_config::VEC_SIZE; ++i)
     {
-        invVariance[i] = rsqrt(fabs(hip_kernel_provider::cast<ComputeType>(variance[i])
-                                    + static_cast<ComputeType>(epsilon)));
+        invVariance[i] = rsqrt( // NOLINT(bugprone-narrowing-conversions)
+            fabs(hip_kernel_provider::cast<ComputeType>( // NOLINT(bugprone-narrowing-conversions)
+                     variance[i]) // NOLINT(bugprone-narrowing-conversions)
+                 + static_cast<ComputeType>(epsilon)));
     }
 
-    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
-                                              tidy,
-                                              in,
-                                              out,
-                                              mean,
-                                              invVariance,
-                                              pscale,
-                                              pbias,
-                                              channelStride,
-                                              spatialStride,
-                                              batchStride,
-                                              alpha,
-                                              beta);
+    bnFwdInferSpatialImpl<VEC_SIZE_X, VEC_SIZE_Y>(tidx,
+                                                  tidy,
+                                                  in,
+                                                  out,
+                                                  mean,
+                                                  invVariance,
+                                                  pscale,
+                                                  pbias,
+                                                  channelStride,
+                                                  spatialStride,
+                                                  batchStride,
+                                                  alpha,
+                                                  beta);
 }
 
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
 // epsilon parameter and rsqrt() operations.
-extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bounds)
-    BatchNormFwdInferSpatialEstInvVar(const InputType* __restrict in,
+extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::LAUNCH_DIM.BOUNDS)
+    batchNormFwdInferSpatialEstInvVar(const InputType* __restrict in,
                                       OutputType* __restrict out,
                                       const MeanVarType* __restrict estimatedMean,
                                       const MeanVarType* __restrict estimatedInvVariance,
@@ -197,33 +215,43 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bo
                                       float alpha,
                                       float beta)
 {
-    unsigned int tidx = blockIdx.x * hip_plugin_bn_config::launch_dim.grp0 + threadIdx.x;
-    unsigned int tidy = blockIdx.y * hip_plugin_bn_config::launch_dim.grp1 + threadIdx.y;
-    unsigned int tidz = blockIdx.z;
+    const unsigned int tidx
+        = blockIdx.x // NOLINT(readability-static-accessed-through-instance)
+              * hip_plugin_bn_config:: // NOLINT(readability-static-accessed-through-instance)
+                LAUNCH_DIM // NOLINT(readability-static-accessed-through-instance)
+                    .GRP0 // NOLINT(readability-static-accessed-through-instance)
+          + threadIdx.x; // NOLINT(readability-static-accessed-through-instance)
+    const unsigned int tidy
+        = blockIdx.y // NOLINT(readability-static-accessed-through-instance)
+              * hip_plugin_bn_config:: // NOLINT(readability-static-accessed-through-instance)
+                LAUNCH_DIM // NOLINT(readability-static-accessed-through-instance)
+                    .GRP1 // NOLINT(readability-static-accessed-through-instance)
+          + threadIdx.y; // NOLINT(readability-static-accessed-through-instance)
+    const unsigned int tidz = blockIdx.z; // NOLINT(readability-static-accessed-through-instance)
 
     // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX
-        = hip_plugin_config::layout_channel_last ? hip_plugin_bn_config::vec_size : 1;
-    constexpr unsigned int vecSizeY
-        = hip_plugin_config::layout_channel_last ? 1 : hip_plugin_bn_config::vec_size;
+    constexpr unsigned int VEC_SIZE_X
+        = hip_plugin_config::LAYOUT_CHANNEL_LAST ? hip_plugin_bn_config::VEC_SIZE : 1;
+    constexpr unsigned int VEC_SIZE_Y
+        = hip_plugin_config::LAYOUT_CHANNEL_LAST ? 1 : hip_plugin_bn_config::VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= hip_plugin_bn_config::channels
-       || tidy * vecSizeY >= hip_plugin_bn_config::spatial_size
-       || tidz >= hip_plugin_bn_config::batches)
+    if(tidx * VEC_SIZE_X >= hip_plugin_bn_config::CHANNELS
+       || tidy * VEC_SIZE_Y >= hip_plugin_bn_config::SPATIAL_SIZE
+       || tidz >= hip_plugin_bn_config::BATCHES)
     {
         return;
     }
 
     // indices for current thread
-    unsigned int adjIndex = tidx * vecSizeX;
+    const unsigned int adjIndex = tidx * VEC_SIZE_X;
 
     // batch parameters and values for current thread
-    MeanVarType mean[hip_plugin_bn_config::vec_size];
-    ScaleBiasType pscale[hip_plugin_bn_config::vec_size];
-    ScaleBiasType pbias[hip_plugin_bn_config::vec_size];
-    MeanVarType invVariance[hip_plugin_bn_config::vec_size];
-    if constexpr(hip_plugin_config::layout_channel_last)
+    MeanVarType mean[hip_plugin_bn_config::VEC_SIZE];
+    ScaleBiasType pscale[hip_plugin_bn_config::VEC_SIZE];
+    ScaleBiasType pbias[hip_plugin_bn_config::VEC_SIZE];
+    MeanVarType invVariance[hip_plugin_bn_config::VEC_SIZE];
+    if constexpr(hip_plugin_config::LAYOUT_CHANNEL_LAST)
     {
         *reinterpret_cast<MeanVarVecType*>(mean)
             = *reinterpret_cast<const MeanVarVecType*>(estimatedMean + adjIndex);
@@ -236,31 +264,31 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bo
     }
     else // NCL layout
     {
-        const auto mean_val = estimatedMean[adjIndex];
-        const auto invVariance_val = estimatedInvVariance[adjIndex];
-        const auto pscale_val = scale[adjIndex];
-        const auto pbias_val = bias[adjIndex];
+        const auto meanVal = estimatedMean[adjIndex];
+        const auto invVarianceVal = estimatedInvVariance[adjIndex];
+        const auto pscaleVal = scale[adjIndex];
+        const auto pbiasVal = bias[adjIndex];
 #pragma unroll
-        for(unsigned int i = 0; i < hip_plugin_bn_config::vec_size; ++i)
+        for(unsigned int i = 0; i < hip_plugin_bn_config::VEC_SIZE; ++i)
         {
-            mean[i] = mean_val;
-            invVariance[i] = invVariance_val;
-            pscale[i] = pscale_val;
-            pbias[i] = pbias_val;
+            mean[i] = meanVal;
+            invVariance[i] = invVarianceVal;
+            pscale[i] = pscaleVal;
+            pbias[i] = pbiasVal;
         }
     }
 
-    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
-                                              tidy,
-                                              in,
-                                              out,
-                                              mean,
-                                              invVariance,
-                                              pscale,
-                                              pbias,
-                                              channelStride,
-                                              spatialStride,
-                                              batchStride,
-                                              alpha,
-                                              beta);
+    bnFwdInferSpatialImpl<VEC_SIZE_X, VEC_SIZE_Y>(tidx,
+                                                  tidy,
+                                                  in,
+                                                  out,
+                                                  mean,
+                                                  invVariance,
+                                                  pscale,
+                                                  pbias,
+                                                  channelStride,
+                                                  spatialStride,
+                                                  batchStride,
+                                                  alpha,
+                                                  beta);
 }

@@ -54,3 +54,11 @@ foreach(_bn_variant IN ITEMS 1 2)
                 HIP_PLUGIN_BN_USESAVED=${_bn_usesaved})
     endforeach()
 endforeach()
+
+# The batchnorm forward training kernel defines a different set of entry points for variant 2.
+add_kernel_tidy_target(
+    NAME hip_mlops_batchnorm_fwd_train_tidy_v2
+    PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/tidy/KernelTidyDefaults.hpp
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
+          ${_hip_mlops_kernel_headers}
+    COMPILE_DEFINITIONS HIP_PLUGIN_BN_VARIANT=2)

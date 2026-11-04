@@ -14,14 +14,14 @@ namespace detail
 {
 
 template <typename T1, typename T2>
-__forceinline__ __device__ __host__ void _accumulate2(T1& a, T2 const& b)
+__forceinline__ __device__ __host__ void accumulate2(T1& a, T2 const& b)
 {
     a += cast<T1>(b.x);
     a += cast<T1>(b.y);
 }
 
 template <typename T1, typename T2>
-__forceinline__ __device__ __host__ void _accumulate4(T1& a, T2 const& b)
+__forceinline__ __device__ __host__ void accumulate4(T1& a, T2 const& b)
 {
     a += cast<T1>(b.x);
     a += cast<T1>(b.y);
@@ -30,14 +30,14 @@ __forceinline__ __device__ __host__ void _accumulate4(T1& a, T2 const& b)
 }
 
 template <typename T1, typename T2, typename T3>
-__forceinline__ __device__ __host__ void _accumulate_mad2(T1& a, T2 const& b, T3 const& c)
+__forceinline__ __device__ __host__ void accumulateMad2(T1& a, T2 const& b, T3 const& c)
 {
     a = fma(cast<T1>(b.x), cast<T1>(c.x), a);
     a = fma(cast<T1>(b.y), cast<T1>(c.y), a);
 }
 
 template <typename T1, typename T2, typename T3>
-__forceinline__ __device__ __host__ void _accumulate_mad4(T1& a, T2 const& b, T3 const& c)
+__forceinline__ __device__ __host__ void accumulateMad4(T1& a, T2 const& b, T3 const& c)
 {
     a = fma(cast<T1>(b.x), cast<T1>(c.x), a);
     a = fma(cast<T1>(b.y), cast<T1>(c.y), a);
@@ -46,7 +46,7 @@ __forceinline__ __device__ __host__ void _accumulate_mad4(T1& a, T2 const& b, T3
 }
 
 template <typename T1, typename T2>
-__forceinline__ __device__ __host__ void _accumulate8(T1& a, T2 const& b)
+__forceinline__ __device__ __host__ void accumulate8(T1& a, T2 const& b)
 {
     a += cast<T1>(b.s0);
     a += cast<T1>(b.s1);
@@ -59,7 +59,7 @@ __forceinline__ __device__ __host__ void _accumulate8(T1& a, T2 const& b)
 }
 
 template <typename T1, typename T2, typename T3>
-__forceinline__ __device__ __host__ void _accumulate_mad8(T1& a, T2 const& b, T3 const& c)
+__forceinline__ __device__ __host__ void accumulateMad8(T1& a, T2 const& b, T3 const& c)
 {
     a = fma(cast<T1>(b.s0), cast<T1>(c.s0), a);
     a = fma(cast<T1>(b.s1), cast<T1>(c.s1), a);
@@ -73,58 +73,58 @@ __forceinline__ __device__ __host__ void _accumulate_mad8(T1& a, T2 const& b, T3
 } // namespace detail
 
 template <typename TAccum, typename T>
-__forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, T const& b, T const& c)
+__forceinline__ __device__ __host__ void accumulateMad(TAccum& a, T const& b, T const& c)
 {
-    constexpr auto TaccumSize = MappedVectorInfo<TAccum>::size;
-    constexpr auto TSize = MappedVectorInfo<T>::size;
+    constexpr auto TACCUM_SIZE = MappedVectorInfo<TAccum>::SIZE;
+    constexpr auto T_SIZE = MappedVectorInfo<T>::SIZE;
 
-    if constexpr(TSize == TaccumSize)
+    if constexpr(T_SIZE == TACCUM_SIZE)
     {
         a = fma(b, c, a);
     }
-    else if constexpr(TaccumSize == 1 && TSize == 2)
+    else if constexpr(TACCUM_SIZE == 1 && T_SIZE == 2)
     {
-        detail::_accumulate_mad2(a, b, c);
+        detail::accumulateMad2(a, b, c);
     }
-    else if constexpr(TaccumSize == 1 && TSize == 4)
+    else if constexpr(TACCUM_SIZE == 1 && T_SIZE == 4)
     {
-        detail::_accumulate_mad4(a, b, c);
+        detail::accumulateMad4(a, b, c);
     }
-    else if constexpr(TaccumSize == 1 && TSize == 8)
+    else if constexpr(TACCUM_SIZE == 1 && T_SIZE == 8)
     {
-        detail::_accumulate_mad8(a, b, c);
+        detail::accumulateMad8(a, b, c);
     }
     else
     {
-        static_assert(false, "Invalid input types for _accumulate_mad.");
+        static_assert(false, "Invalid input types for accumulateMad.");
     }
 }
 
 template <typename TAccum, typename T>
-__forceinline__ __device__ __host__ void _accumulate(TAccum& a, T const& b)
+__forceinline__ __device__ __host__ void accumulate(TAccum& a, T const& b)
 {
-    constexpr auto TaccumSize = MappedVectorInfo<TAccum>::size;
-    constexpr auto TSize = MappedVectorInfo<T>::size;
+    constexpr auto TACCUM_SIZE = MappedVectorInfo<TAccum>::SIZE;
+    constexpr auto T_SIZE = MappedVectorInfo<T>::SIZE;
 
-    if constexpr(TaccumSize == 1 && TSize == 8)
+    if constexpr(TACCUM_SIZE == 1 && T_SIZE == 8)
     {
-        detail::_accumulate8(a, b);
+        detail::accumulate8(a, b);
     }
-    else if constexpr(TaccumSize == 1 && TSize == 4)
+    else if constexpr(TACCUM_SIZE == 1 && T_SIZE == 4)
     {
-        detail::_accumulate4(a, b);
+        detail::accumulate4(a, b);
     }
-    else if constexpr(TaccumSize == 1 && TSize == 2)
+    else if constexpr(TACCUM_SIZE == 1 && T_SIZE == 2)
     {
-        detail::_accumulate2(a, b);
+        detail::accumulate2(a, b);
     }
-    else if constexpr(TaccumSize == TSize)
+    else if constexpr(TACCUM_SIZE == T_SIZE)
     {
         a += cast<TAccum>(b);
     }
     else
     {
-        static_assert(false, "Invalid input types for _accumulate.");
+        static_assert(false, "Invalid input types for accumulate.");
     }
 }
 
@@ -133,85 +133,85 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                                                       unsigned int zgroupoffset,
                                                       unsigned int ygroupoffset,
                                                       unsigned int ystride,
-                                                      unsigned int xgrp_size,
-                                                      unsigned int xgrp_id,
+                                                      unsigned int xgrpSize,
+                                                      unsigned int xgrpId,
                                                       unsigned int xlid,
                                                       unsigned int xstride,
                                                       unsigned int batchStride)
 {
     // For upcast, two _FLOAT values can only be stored in one _FLOAT_PREC value if _FLOAT is not the same type as _FLOAT_PREC (i.e. only during backwards)
-    if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::fpmix
-                 || (hip_kernel_provider::config::input_type_strategy == type_strategy::fpupcast
+    if constexpr(hip_kernel_provider::config::INPUT_TYPE_STRATEGY == TypeStrategy::FPMIX
+                 || (hip_kernel_provider::config::INPUT_TYPE_STRATEGY == TypeStrategy::FPUPCAST
                      && !std::is_same_v<FpPrecType_C, FpType_C>))
-    {
+    { // NOLINT(bugprone-branch-clone)
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
-        if constexpr(hip_kernel_provider::config::layout_channel_last)
+        if constexpr(hip_kernel_provider::config::LAYOUT_CHANNEL_LAST)
         {
-            if constexpr(config::channels % 2 == 0)
+            if constexpr(config::CHANNELS % 2 == 0)
             {
-                // xgrp_size values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
+                // xgrpSize values are split in two parts: even threads use 2 values at even rows,
+                // odd threads - at odd rows. The only restriction for C and xgrpSize is that they
                 // must be even.
-                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                        + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
-                       + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;
+                       + (xgrpSize * xgrpId + xlid / 2 * 2) * xstride;
             }
             else
             {
                 // Values are stored consecutively in y dim.
-                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                        + (vindex * 2) * batchStride + ygroupoffset * ystride
-                       + (xgrp_size * xgrp_id + xlid) * xstride;
+                       + (xgrpSize * xgrpId + xlid) * xstride;
             }
         }
         else
         {
             // Values are stored consecutively in y dim, indices are aligned up by 2 (_FLOAT_PREC).
-            return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+            return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                    + ((vindex * 2) * batchStride + ygroupoffset * ystride
-                      + (xgrp_size * xgrp_id + xlid) * xstride + 1)
+                      + (xgrpSize * xgrpId + xlid) * xstride + 1)
                          / 2 * 2;
         }
     }
-    else if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::bfpmix
-                      || (hip_kernel_provider::config::input_type_strategy
-                              == type_strategy::bfpupcast
+    else if constexpr(hip_kernel_provider::config::INPUT_TYPE_STRATEGY == TypeStrategy::BFPMIX
+                      || (hip_kernel_provider::config::INPUT_TYPE_STRATEGY
+                              == TypeStrategy::BFPUPCAST
                           && !std::is_same_v<FpPrecType_C, FpType_C>))
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
-        if constexpr(hip_kernel_provider::config::layout_channel_last)
+        if constexpr(hip_kernel_provider::config::LAYOUT_CHANNEL_LAST)
         {
-            if constexpr(config::channels % 2 == 0)
+            if constexpr(config::CHANNELS % 2 == 0)
             {
-                // xgrp_size values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
+                // xgrpSize values are split in two parts: even threads use 2 values at even rows,
+                // odd threads - at odd rows. The only restriction for C and xgrpSize is that they
                 // must be even.
-                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                        + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
-                       + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;
+                       + (xgrpSize * xgrpId + xlid / 2 * 2) * xstride;
             }
             else
             {
                 // Values are stored consecutively in y dim.
-                return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+                return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                        + (vindex * 2) * batchStride + ygroupoffset * ystride
-                       + (xgrp_size * xgrp_id + xlid) * xstride;
+                       + (xgrpSize * xgrpId + xlid) * xstride;
             }
         }
         else
         {
             // Values are stored consecutively in y dim, indices are aligned up by 2 (_FLOAT_PREC).
-            return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+            return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                    + ((vindex * 2) * batchStride + ygroupoffset * ystride
-                      + (xgrp_size * xgrp_id + xlid) * xstride + 1)
+                      + (xgrpSize * xgrpId + xlid) * xstride + 1)
                          / 2 * 2;
         }
     }
     else
     {
-        return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
+        return zgroupoffset * (config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE)
                + vindex * batchStride + ygroupoffset * ystride
-               + (xgrp_size * xgrp_id + xlid) * xstride;
+               + (xgrpSize * xgrpId + xlid) * xstride;
     }
 }
 
@@ -221,26 +221,19 @@ __forceinline__ __device__ FpPrecType_C loadFromStash(const FpType_C* stash,
                                                       unsigned int zgroupoffset,
                                                       unsigned int ygroupoffset,
                                                       unsigned int ystride,
-                                                      unsigned int xgrp_size,
-                                                      unsigned int xgrp_id,
+                                                      unsigned int xgrpSize,
+                                                      unsigned int xgrpId,
                                                       unsigned int xlid,
                                                       unsigned int xstride)
 {
-    unsigned int batchStride = config::stash_method == 0
-                                   ? ystride
-                                   : config::channels / config::vec_size_x * config::spatial_size;
+    const unsigned int batchStride
+        = config::STASH_METHOD == 0 ? ystride
+                                    : config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE;
 
-    unsigned int index = getStashIndex<FpPrecType_C, FpType_C>(vindex,
-                                                               zgroupoffset,
-                                                               ygroupoffset,
-                                                               ystride,
-                                                               xgrp_size,
-                                                               xgrp_id,
-                                                               xlid,
-                                                               xstride,
-                                                               batchStride);
+    const unsigned int index = getStashIndex<FpPrecType_C, FpType_C>(
+        vindex, zgroupoffset, ygroupoffset, ystride, xgrpSize, xgrpId, xlid, xstride, batchStride);
 
-    if constexpr(config::stash_method == 0 || config::stash_method == 1)
+    if constexpr(config::STASH_METHOD == 0 || config::STASH_METHOD == 1)
     {
         return *((const FpPrecType_C*)(stash + index));
     }
@@ -260,26 +253,19 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
                                              unsigned int zgroupoffset,
                                              unsigned int ygroupoffset,
                                              unsigned int ystride,
-                                             unsigned int xgrp_size,
-                                             unsigned int xgrp_id,
+                                             unsigned int xgrpSize,
+                                             unsigned int xgrpId,
                                              unsigned int xlid,
                                              unsigned int xstride)
 {
-    unsigned int batchStride = config::stash_method == 0
-                                   ? ystride
-                                   : config::channels / config::vec_size_x * config::spatial_size;
+    const unsigned int batchStride
+        = config::STASH_METHOD == 0 ? ystride
+                                    : config::CHANNELS / config::VEC_SIZE_X * config::SPATIAL_SIZE;
 
-    unsigned int index = getStashIndex<FpPrecType_C, FpType_C>(vindex,
-                                                               zgroupoffset,
-                                                               ygroupoffset,
-                                                               ystride,
-                                                               xgrp_size,
-                                                               xgrp_id,
-                                                               xlid,
-                                                               xstride,
-                                                               batchStride);
+    const unsigned int index = getStashIndex<FpPrecType_C, FpType_C>(
+        vindex, zgroupoffset, ygroupoffset, ystride, xgrpSize, xgrpId, xlid, xstride, batchStride);
 
-    if constexpr(config::stash_method == 0 || config::stash_method == 1)
+    if constexpr(config::STASH_METHOD == 0 || config::STASH_METHOD == 1)
     {
         *(reinterpret_cast<FpPrecType_C*>(stash + index)) = value;
     }
@@ -293,9 +279,9 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
 template <typename FpAccumType_C>
 struct StashUpdater
 {
-    FpAccumType_C const mean;
-    FpAccumType_C const variance;
-    FpAccumType_C const expAvgFactor;
+    const FpAccumType_C mean;
+    const FpAccumType_C variance;
+    const FpAccumType_C expAvgFactor;
 
     __device__ StashUpdater(FpAccumType_C m, FpAccumType_C v, FpAccumType_C e)
         : mean(m)
@@ -311,11 +297,11 @@ struct StashUpdater
         runningMean = fma(mean, expAvgFactor, newRunningMean);
 
         const FpAccumType_C adjust
-            = (config::channel_slice_size == 1)
+            = (config::CHANNEL_SLICE_SIZE == 1)
                   ? variance
                   : variance
-                        * (cast<FpAccumType_C>(config::channel_slice_size)
-                           / cast<FpAccumType_C>(config::channel_slice_size - 1));
+                        * (cast<FpAccumType_C>(config::CHANNEL_SLICE_SIZE)
+                           / cast<FpAccumType_C>(config::CHANNEL_SLICE_SIZE - 1));
 
         runningVariance
             = fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
@@ -325,9 +311,9 @@ struct StashUpdater
 template <typename FpAccumType_C>
 struct StashUpdaterPA
 {
-    FpAccumType_C const mean;
-    FpAccumType_C const variance;
-    FpAccumType_C const expAvgFactor;
+    const FpAccumType_C mean;
+    const FpAccumType_C variance;
+    const FpAccumType_C expAvgFactor;
 
     __device__ StashUpdaterPA(FpAccumType_C m, FpAccumType_C v, FpAccumType_C e)
         : mean(m)
@@ -342,11 +328,11 @@ struct StashUpdaterPA
         const FpAccumType_C newRunningMean = fma(-expAvgFactor, runningMean, runningMean);
         runningMean = fma(mean, expAvgFactor, newRunningMean);
 
-        const FpAccumType_C adjust = (config::batches == 1)
+        const FpAccumType_C adjust = (config::BATCHES == 1)
                                          ? variance
                                          : variance
-                                               * (cast<FpAccumType_C>(config::batches)
-                                                  / cast<FpAccumType_C>(config::batches - 1));
+                                               * (cast<FpAccumType_C>(config::BATCHES)
+                                                  / cast<FpAccumType_C>(config::BATCHES - 1));
 
         runningVariance
             = fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
@@ -354,130 +340,130 @@ struct StashUpdaterPA
 };
 
 template <typename FpAccumType_C, typename FpPrecType_C>
-__forceinline__ __device__ void saved_stash(FpPrecType_C* __restrict resultSaveMean,
-                                            FpPrecType_C* __restrict resultSaveInvVariance,
-                                            FpAccumType_C mean,
-                                            FpAccumType_C invVariance,
-                                            unsigned int channel)
+__forceinline__ __device__ void savedStash(FpPrecType_C* __restrict resultSaveMean,
+                                           FpPrecType_C* __restrict resultSaveInvVariance,
+                                           FpAccumType_C mean,
+                                           FpAccumType_C invVariance,
+                                           unsigned int channel)
 {
     resultSaveMean[channel] = cast<FpPrecType_C>(mean);
     resultSaveInvVariance[channel] = cast<FpPrecType_C>(invVariance);
 }
 
 template <typename FpAccumType_C, typename FpPrecType_C, typename Updater>
-__forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict prevRunningMean,
-                                              const FpPrecType_C* __restrict prevRunningVariance,
-                                              FpPrecType_C* __restrict nextRunningMean,
-                                              FpPrecType_C* __restrict nextRunningVariance,
-                                              Updater const& update,
-                                              unsigned int channel)
+__forceinline__ __device__ void runningStash(const FpPrecType_C* __restrict prevRunningMean,
+                                             const FpPrecType_C* __restrict prevRunningVariance,
+                                             FpPrecType_C* __restrict nextRunningMean,
+                                             FpPrecType_C* __restrict nextRunningVariance,
+                                             Updater const& update,
+                                             unsigned int channel)
 {
     // Variant 4 is not used any more. There used to be a special updater for that case deleted when
     // porting kernels to HIP.
-    static_assert(hip_kernel_provider::batchnorm::config::variant != 4,
-                  "running_stash is only compiled when HIP_PLUGIN_BN_VARIANT != 4.");
+    static_assert(hip_kernel_provider::batchnorm::config::VARIANT != 4,
+                  "runningStash is only compiled when HIP_PLUGIN_BN_VARIANT != 4.");
 
-    auto pvt_runMean = cast<FpAccumType_C>(prevRunningMean[channel]);
-    auto pvt_runVariance = cast<FpAccumType_C>(prevRunningVariance[channel]);
+    auto pvtRunMean = cast<FpAccumType_C>(prevRunningMean[channel]);
+    auto pvtRunVariance = cast<FpAccumType_C>(prevRunningVariance[channel]);
 
-    update(pvt_runMean, pvt_runVariance);
+    update(pvtRunMean, pvtRunVariance);
 
-    saved_stash(nextRunningMean, nextRunningVariance, pvt_runMean, pvt_runVariance, channel);
+    savedStash(nextRunningMean, nextRunningVariance, pvtRunMean, pvtRunVariance, channel);
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const&,
-                                                             FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activationOp(FpPrecType const& tmp,
+                                                            FpPrecType const& /* unused */,
+                                                            FpPrecType const& /* unused */)
 {
     return tmp;
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType bwdActivationOp(FpPrecType const& dy,
+                                                               FpPrecType const& /* unused */,
+                                                               FpPrecType const& /* unused */,
+                                                               FpPrecType const& /* unused */,
+                                                               FpPrecType const& /* unused */,
+                                                               FpPrecType const& /* unused */)
 {
     return dy;
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const&,
-                                                             FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activationOp(FpPrecType const& tmp,
+                                                            FpPrecType const& /* unused */,
+                                                            FpPrecType const& /* unused */)
 {
     return max(tmp, hip_kernel_provider::cast<FpPrecType>(0.));
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const& xnorm,
-                                                                 FpPrecType const& scale,
-                                                                 FpPrecType const& bias,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType bwdActivationOp(FpPrecType const& dy,
+                                                               FpPrecType const& xnorm,
+                                                               FpPrecType const& scale,
+                                                               FpPrecType const& bias,
+                                                               FpPrecType const& /* unused */,
+                                                               FpPrecType const& /* unused */)
 {
-    FpPrecType macro_tmp = scale * xnorm + bias;
-    return (macro_tmp > 0) ? dy : 0;
+    FpPrecType macroTmp = scale * xnorm + bias;
+    return (macroTmp > 0) ? dy : 0;
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const& _alpha,
-                                                             FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activationOp(FpPrecType const& tmp,
+                                                            FpPrecType const& alpha,
+                                                            FpPrecType const& /* unused */)
 {
-    return min(_alpha, max(tmp, hip_kernel_provider::cast<FpPrecType>(0.)));
+    return min(alpha, max(tmp, hip_kernel_provider::cast<FpPrecType>(0.)));
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const& xnorm,
-                                                                 FpPrecType const& scale,
-                                                                 FpPrecType const& bias,
-                                                                 FpPrecType const& alpha,
-                                                                 FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType bwdActivationOp(FpPrecType const& dy,
+                                                               FpPrecType const& xnorm,
+                                                               FpPrecType const& scale,
+                                                               FpPrecType const& bias,
+                                                               FpPrecType const& alpha,
+                                                               FpPrecType const& /* unused */)
 {
-    FpPrecType macro_tmp = scale * xnorm + bias;
-    return (macro_tmp > 0 && macro_tmp <= alpha) ? dy : 0;
+    FpPrecType macroTmp = scale * xnorm + bias;
+    return (macroTmp > 0 && macroTmp <= alpha) ? dy : 0;
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const& _alpha,
-                                                             FpPrecType const& _beta)
+__forceinline__ __host__ __device__ FpPrecType activationOp(FpPrecType const& tmp,
+                                                            FpPrecType const& alpha,
+                                                            FpPrecType const& beta)
 {
-    return hip_kernel_provider::max(_alpha, hip_kernel_provider::min(_beta, tmp));
+    return hip_kernel_provider::max(alpha, hip_kernel_provider::min(beta, tmp));
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::NEURON_OP,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const& xnorm,
-                                                                 FpPrecType const& scale,
-                                                                 FpPrecType const& bias,
-                                                                 FpPrecType const& alpha,
-                                                                 FpPrecType const& beta)
+__forceinline__ __host__ __device__ FpPrecType bwdActivationOp(FpPrecType const& dy,
+                                                               FpPrecType const& xnorm,
+                                                               FpPrecType const& scale,
+                                                               FpPrecType const& bias,
+                                                               FpPrecType const& alpha,
+                                                               FpPrecType const& beta)
 {
-    FpPrecType macro_tmp = scale * xnorm + bias;
-    return (macro_tmp > alpha && macro_tmp <= beta) ? dy : 0;
+    FpPrecType macroTmp = scale * xnorm + bias;
+    return (macroTmp > alpha && macroTmp <= beta) ? dy : 0;
 }
 
 } // namespace hip_kernel_provider::batchnorm
