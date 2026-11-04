@@ -111,13 +111,15 @@ namespace TensileLite
                         if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
                             HIP_CHECK_EXC(pe);
                     }
-                    const uint32_t node = sdmaNodeIdForDevice(deviceId);
+                    const uint32_t node        = sdmaNodeIdForDevice(deviceId);
+                    const uint32_t xgmiEngines = sdmaXgmiEngineCount(node);
                     for(int peer : sdmaPeers)
                     {
                         const uint32_t engine = sdmaSelectEngine(node, sdmaNodeIdForDevice(peer));
                         sdmaQueues.push_back(std::make_shared<SdmaQueue>(
                             node,
-                            peer == deviceId ? engine : sdmaRotateEngine(engine, sdmaRotate)));
+                            peer == deviceId ? engine
+                                             : sdmaRotateEngine(engine, sdmaRotate, xgmiEngines)));
                     }
 #else
                     throw std::runtime_error(
