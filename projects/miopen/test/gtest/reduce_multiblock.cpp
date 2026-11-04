@@ -570,14 +570,15 @@ std::vector<MultiBlockCase> RnnBiasGradientStandard()
 
 // The kernels of the reductions that propagate NaN are another instance than the ones of the
 // cases above (the RNN-shaped cases excepted). One case per first-pass variant (all dims, some
-// dims) and per second-pass kernel (threadwise, warpwise, blockwise).
+// dims) and per second-pass wrapper that a shape can reach (threadwise and warpwise over all dims
+// and some dims, blockwise over all dims).
 std::vector<MultiBlockCase> NanPropagationStandard()
 {
     constexpr auto hf = miopenHalf;
     constexpr auto fl = miopenFloat;
 
     std::vector<MultiBlockCase> cases;
-    for(const auto* s : {&thread2Partial, &warp2Partial, &warp2All, &block2All})
+    for(const auto* s : {&thread2Partial, &thread2All, &warp2Partial, &warp2All, &block2All})
     {
         cases.push_back(
             MakeCase("Avg300Nan", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const300));
