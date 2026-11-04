@@ -204,9 +204,8 @@ static void emit_float(rocke_strbuf_t* out, double f)
  * case below. A list attr is a Python List[Dict[str, Any]] (scf.for iter_args
  * metadata), and str(list) renders every contained element with repr(), which
  * differs from the top-level _attr_value (repr single-quotes strings, whereas
- * the top level double-quotes them). emit_repr_str is defined later in the file
- * and is the faithful port of Python repr(str). */
-static void emit_repr_str(rocke_strbuf_t* out, const char* s);
+ * the top level double-quotes them). rocke_print_repr_str (rocke/ir_print.h)
+ * is defined later in the file and is the port of Python repr(str). */
 static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v);
 static void emit_repr_map(rocke_strbuf_t* out, const struct rocke_attr_map* m);
 
@@ -218,7 +217,7 @@ static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
     switch(v->kind)
     {
     case ROCKE_ATTR_STR:
-        emit_repr_str(out, v->u.s);
+        rocke_print_repr_str(out, v->u.s);
         break;
     case ROCKE_ATTR_BOOL:
         rocke_strbuf_append(out, v->u.b ? "True" : "False");
@@ -280,7 +279,7 @@ static void emit_repr_map(rocke_strbuf_t* out, const struct rocke_attr_map* m)
             {
                 rocke_strbuf_append(out, ", ");
             }
-            emit_repr_str(out, m->entries[i].key);
+            rocke_print_repr_str(out, m->entries[i].key);
             rocke_strbuf_append(out, ": ");
             emit_repr_value(out, &m->entries[i].value);
         }
@@ -448,15 +447,12 @@ static void emit_pad(rocke_strbuf_t* out, int indent)
     }
 }
 
-/* Python repr(label) for a str: single-quoted. Handles the common identifier
- * labels ("body","then","entry"). CPython switches to double-quotes when the
- * string contains a single quote but no double quote, and escapes backslashes /
- * non-printables; those cases never occur for region labels in the engine. */
-static void emit_repr_str(rocke_strbuf_t* out, const char* s)
+/* The engine's one port of Python repr(str); contract in rocke/ir_print.h. */
+void rocke_print_repr_str(rocke_strbuf_t* out, const char* s)
 {
     if(!s)
     {
-        /* Python repr(None) -> "None"; labels are always strings, but be safe. */
+        /* Python repr(None) -> "None". */
         rocke_strbuf_append(out, "None");
         return;
     }
@@ -493,13 +489,9 @@ static void emit_repr_str(rocke_strbuf_t* out, const char* s)
         else
         {
             unsigned char uc = (unsigned char)c;
-            /* CPython repr(str) escapes C0 control characters (other than the
-             * \t \n \r handled above) and DEL (0x7f) as lowercase 2-digit
-             * "\xNN". Printable ASCII (0x20..0x7e) is emitted verbatim. Bytes
-             * >= 0x80 would require UTF-8 decoding to reproduce CPython's
-             * per-codepoint repr (\xNN / \uNNNN / printable) and are passed
-             * through verbatim; region labels and attr strings in the frozen IR
-             * contract are ASCII identifiers, so this case never arises. */
+            /* C0 controls (other than \t \n \r above) and DEL as lowercase
+             * "\xNN"; printable ASCII and bytes >= 0x80 verbatim (see the
+             * supported subset in rocke/ir_print.h). */
             if(uc < 0x20 || uc == 0x7f)
             {
                 static const char hexdig[] = "0123456789abcdef";
@@ -549,7 +541,7 @@ static void emit_op(rocke_strbuf_t* out, const rocke_op_t* op, int indent)
         const rocke_region_t* region = op->regions[r];
         emit_pad(out, indent);
         rocke_strbuf_append(out, "  region ");
-        emit_repr_str(out, region ? region->label : NULL);
+        rocke_print_repr_str(out, region ? region->label : NULL);
         rocke_strbuf_append(out, " {\n");
         if(region)
         {

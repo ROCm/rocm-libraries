@@ -259,7 +259,7 @@ class TestDgradWmmaSpec(unittest.TestCase):
     def test_engines_quote_the_scheduler_like_repr(self):
         """The C++ refusal of an unknown scheduler quotes the name as Python's
         ``{value!r}`` does: the quote character, the escapes, a printable
-        non-ASCII name (the subset rocke_py_str_repr documents)."""
+        non-ASCII name (the subset rocke_print_repr_str documents)."""
         eng = pytest.importorskip("rocke_engine")
         from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
 

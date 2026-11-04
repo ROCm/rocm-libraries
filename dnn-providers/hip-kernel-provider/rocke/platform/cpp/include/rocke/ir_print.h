@@ -30,6 +30,20 @@ void rocke_print_ir(const rocke_kernel_def_t* kernel, rocke_strbuf_t* out);
  * string the caller must free(). Returns NULL on allocation failure. */
 char* rocke_print_ir_alloc(const rocke_kernel_def_t* kernel);
 
+/* Append Python's repr() of the str `s` (UTF-8) to `out`, as repr(s) and an
+ * f-string's {s!r} write it: quoted with ' -- or with " when `s` contains '
+ * and no " -- with the backslash and the quote character escaped, \t \n \r
+ * named and every other ASCII control character (0x00-0x1f, 0x7f) as \xNN
+ * (lowercase hex). NULL appends "None", Python's repr(None). The printer
+ * quotes str attrs inside lists and region labels with it, and
+ * rocke_scheduler_strategy_reason (rocke/ir.h) the refused name.
+ *
+ * Supported subset: every ASCII string exactly. Bytes >= 0x80 are copied
+ * unchanged, which is Python's repr for printable non-ASCII characters
+ * (letters, CJK, ...) but not for the non-printable ones Python escapes as
+ * \xNN / \uNNNN / \UNNNNNNNN (e.g. U+00A0, U+0085) or for invalid UTF-8. */
+void rocke_print_repr_str(rocke_strbuf_t* out, const char* s);
+
 #ifdef __cplusplus
 }
 #endif
