@@ -32,6 +32,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/datatype.hpp>
+#include <miopen/target_properties.hpp>
 #include <ostream>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
@@ -270,7 +271,8 @@ std::string ConvDirectNaiveConvCompileOption(const ExecutionContext& ctx,
         if(out_cast_type)
             ss << " -DOUTPUT_CAST_TYPE=" << miopen::GetDataType(*out_cast_type);
         ss << " -DMIOPEN_FP8_CLIPPING=" << MIOPEN_FP8_CLIPPING;
-        ss << " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" << MIOPEN_FP8_IEEE_EXPONENT_BIAS;
+        ss << " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS="
+           << (UsesIeeeExponentBias(ctx.GetStream().GetDeviceName()) ? 1 : 0);
         //     Let the kernel choose its accumulator (double for naive kernels )
     }
     return ss.str();

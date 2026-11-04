@@ -37,12 +37,18 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed the install RPATH for `MIOpenDriver` and Composable Kernel (CK) backend libraries.
 * Fixed a dangling lambda capture that could cause a segfault at `MIOPEN_LOG_LEVEL=6`.
 * [Windows] Enabled long-path support for `addkernels`.
+* [FP8] Fixed wrong FP8 and BF8 results on gfx942 from a library built for several targets that
+  include gfx950 or gfx12 ([#14375](https://github.com/ROCm/rocm-libraries/issues/14375)). The
+  FP8 exponent bias was picked once at build time from `GPU_TARGETS`. MIOpen now picks it at run
+  time from the device: the IEEE bias on gfx950 and gfx12, the FNUZ bias everywhere else.
 
 ### Removed
 * Removed OpenCL solver `ConvOclDirectFwd1x1`.
 * Removed OpenCL convolution solver `conv_ocl_dir2Dfwdgen`.
 * Removed OpenCL solvers `ConvOclBwdWrW1x1` and `ConvOclBwdWrW2`.
 * Removed OpenCL solvers `OpTensorLeadingOnes` and `Op5dTensorGeneric` (replaced by HIP equivalents).
+* Removed the `MIOPEN_FP8_IEEE_EXPONENT_BIAS` CMake option and its `config.h` define. The FP8
+  exponent bias now follows the device at run time.
 
 ## MIOpen 3.5.1 for ROCm 7.13.0
 ### Added
