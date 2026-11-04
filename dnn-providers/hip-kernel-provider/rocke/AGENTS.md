@@ -138,6 +138,7 @@ the matching doc first.
 | Launch / benchmark harness | [kernel-launch-guide.md](platform/dsl_docs/optimization/utilities/skills/kernel-launch-guide.md) |
 | Bisect a perf regression | [bisect-perf-regression.md](platform/dsl_docs/optimization/utilities/skills/bisect-perf-regression.md) |
 | Real bug signatures + measured wins | [empirical-case-studies.md](platform/dsl_docs/optimization/utilities/skills/empirical-case-studies.md) |
+| Attention decode on gfx942/gfx950 (3D split-KV): defaults, per-lever outcomes, replay | [attention_3d_decode/CASE_STUDY.md](library/builders/common/attention_3d_decode/CASE_STUDY.md) |
 | Per-arch facts (MFMA atoms, LDS banks, occupancy caps, sched intrinsics) | [arch/gfx942.md](platform/dsl_docs/optimization/arch/gfx942.md), [arch/gfx950.md](platform/dsl_docs/optimization/arch/gfx950.md) |
 
 Hard rule from the runbook: **never report speed without correctness** — run the

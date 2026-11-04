@@ -88,7 +88,8 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
                                 tdmMemberIsLive, tdmHintDeciders
-from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
+from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText, \
+                                tdmKDimField, tdmKDimStepIsAddrInc
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -462,9 +463,12 @@ class KernelWriterAssembly(KernelWriter):
     fragmentation and occupancy limit included, so the counterfactual differs from
     it by exactly a known constant.
 
-    Only beta-with-no-edge is checked. beta reads C, so it needs the most
-    registers per element of the paths this problem can take, and the emitted size
-    predicates rule the edge variants out.
+    Only the beta, non-edge path is checked. beta reads C and so needs the most
+    registers per element of the non-edge paths. The edge path is reachable and
+    left unpriced deliberately: checking it would reject these kernels, and
+    pricing it in the model would cost every problem resident k-tiles to pay for
+    the ones that take it, so it is allowed its extra batch instead. See
+    rapMaxResidentKTiles.
     """
     if not (beta and not edge):
       return
@@ -490,6 +494,52 @@ class KernelWriterAssembly(KernelWriter):
          self.rapResidentKTiles(kernel) * kernel["DepthU"]))
     self.states.overflowedResources = 9
 
+  def tailFoldingMxsKSplitOffsetExceedsOneGroup(self, kernel, tc) -> bool:
+    """Can a K-split scale wave's offset outrun the last k-tile's K groups?"""
+    numComp, _ = tdmWaveComponents(kernel, tc)
+    numMxKGroups = kernel["DepthU"] // kernel["MatrixInstK"]
+    if numMxKGroups < numComp:
+      return False
+    return (numComp - 1) * (numMxKGroups // numComp) > 1
+
+  def tailFoldingShrinkTdmKDim(self, kernel, tPA, tPB) -> Module:
+    """Shrink a descriptor set's K dim by the k-tile its address just advanced.
+
+    TDM clamps the partial last k-tile at K only if the K dim, measured from the
+    moving base, shrinks in step: one subtract on the low-half dword (K < 2^16),
+    by the per-wave address increment when members step K differently. A scale
+    wave whose K offset can outrun the last k-tile clamps at zero.
+    """
+    tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
+    module = Module("Tail folding: shrink TDM K dim (%s/%s)" % (tcA, tcB))
+    fields = [tdmKDimField(kernel, tc) for tc in (tcA, tcB)]
+    assert None not in fields and fields[0][0] == fields[1][0], \
+      "%s/%s do not keep K in one field: %s" % (tcA, tcB, fields)
+    assert self.rapResidentKTiles(kernel) * kernel["DepthU"] < (1 << 16), \
+      "the TDM K dim's high half is not zero"
+    dword = fields[0][0]
+    group1 = "tdm%sGroup1+%u" % (self._tdmPairedParityOrder(kernel, tPA, tPB)[0]["tensorChar"], dword)
+    if fields[0][1] == fields[1][1]:
+      step = fields[0][1]
+      module.add(SSubU32(dst=sgpr(group1), src0=sgpr(group1), src1=hex(step << 16),
+                         comment="RAP: K dim -= %u, the k-tile the address just advanced" % step))
+    else:
+      assert tdmKDimStepIsAddrInc(kernel, tcA) and tdmKDimStepIsAddrInc(kernel, tcB), \
+        "%s/%s step K differently and not by bytes" % (tcA, tcB)
+      with self.allocTmpSgpr(1, tag="tailFoldingShrinkTdmKDimStep") as tmpSgprRes:
+        module.add(SLShiftLeftB32(dst=sgpr(tmpSgprRes.idx), shiftHex=hex(16), src=sgpr("tdm%s%sIncs" % (tcA, tcB)),
+                                  comment="RAP: this wave's K step is its address increment"))
+        module.add(SSubU32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
+                           comment="RAP: K dim -= the k-tile the address just advanced"))
+    if any(tc.startswith("MXS") and self.tailFoldingMxsKSplitOffsetExceedsOneGroup(kernel, tc)
+           for tc in (tcA, tcB)):
+      with self.allocTmpSgpr(1, tag="tailFoldingShrinkTdmKDim") as tmpSgprRes:
+        module.add(SCSelectB32(dst=sgpr(tmpSgprRes.idx), src0=hex(0x0000FFFF), src1=-1,
+                               comment="RAP: a borrow means this wave's K ran out"))
+        module.add(SAndB32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
+                           comment="RAP: clamp the K dim at zero"))
+    return module
+
   def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
     """Stop this wave's next tensor_load_to_lds if it is the one carrying A.
 
@@ -513,11 +563,18 @@ class KernelWriterAssembly(KernelWriter):
                              comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
       return module
     # This load feeds the next tile, not this one. Silencing A is only right while
-    # that tile goes on reusing the resident registers; when it changes batch the
-    # entry guard sends it to the fill copy, which computes from what this prefetch
-    # left behind. Fetch A for it. WorkGroup2 already names the next tile here --
-    # prefetchAcrossPersistentSetupNextTile has run and the current tile's identity
-    # is checkpointed -- so the batch is a compare away rather than another divide.
+    # that tile goes on reusing the resident registers; when it needs a different
+    # A the entry guard sends it to the fill copy, which computes from what this
+    # prefetch left behind. Fetch A for it. WorkGroup* already names the next tile
+    # here -- prefetchAcrossPersistentSetupNextTile has run and the current tile's
+    # identity is checkpointed -- so each half of the identity is a compare away
+    # rather than another divide.
+    #
+    # Both halves, not just the batch: the entry guard refills on either, and a
+    # prefetch that stayed silent for the other would hand the fill copy a tile
+    # whose A was never fetched. WorkGroup0 is past DefaultWGM here, and the M-tile
+    # the guard peeks goes through the same remap, so the two agree on when A is
+    # refilled; they disagreed once already, over the batch.
     with self.allocTmpSgpr(1, tag="rapPapKeepA") as keepRes:
       keep = keepRes.idx
       module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
@@ -526,8 +583,12 @@ class KernelWriterAssembly(KernelWriter):
                            comment="RAP: does the next tile stay in the resident batch?"))
       module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
                              comment="RAP: next tile changes batch -> it needs A prefetched"))
+      module.add(SCmpEQU32(src0=sgpr("WorkGroup0"), src1=sgpr("RAPResidentMTile"),
+                           comment="RAP: does the next tile stay on the resident M-tile?"))
+      module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
+                             comment="RAP: next tile changes M-tile -> it needs A prefetched"))
       module.add(SCmpEQU32(src0=sgpr(keep), src1=0,
-                           comment="RAP: neither reason to keep the descriptor"))
+                           comment="RAP: no reason to keep the descriptor"))
     module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=0, src1=sgpr(groupSgprName),
                            comment="RAP: NULL descriptor, this load moves nothing"))
     return module
@@ -3550,13 +3611,11 @@ class KernelWriterAssembly(KernelWriter):
       # remapped PersistentWorkGroupIndex % numQueues skews the per-queue home-workgroup count
       # and the counter drifts off 0. We snapshot the raw id (== physical XCD
       # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
-      # slot that is provably dead in the [prologue, queue-read) window on both
-      # the SK4 and SK5 dynamic paths (its first real write is after the queue
-      # read in graWorkGroup; for SK5 it aliases PersistentIteration, whose only
-      # in-window writes live on the mutually-exclusive SK3-static path). Reusing
-      # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
-      # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
-      # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
+      # slot that is dead until initialize() (for Hybrid it aliases
+      # PersistentIteration, written only by the static sub-mode). Reusing it
+      # costs ZERO additional persistent SGPRs (a dedicated SGPR overflows the
+      # SGPR file on tuned high-register SKXCC kernels). initialize() then moves
+      # it to PersistentWorkGroupIndex (emitRawRankRestore).
       # Once-per-workgroup setup only -- no steady-state instructions added.
       # The occupancy probe's ProbeGrid test reads the same snapshot.
       if Component.WorkAssignment.usesRawQueueRank(self, kernel) or self.states.probeKernArgOffset >= 0:
@@ -3761,21 +3820,48 @@ class KernelWriterAssembly(KernelWriter):
               #   d@16 c@24 a@32 b@40 |
               #   strideD@48 strideC@56 strideA@64 strideB@72 |
               #   alpha@80 (beta@96 is handled below).
+              # The MX record inserts the scale pointers and strides after
+              # their operands:
+              #   d@16 c@24 a@32 mxsa@40 b@48 mxsb@56 |
+              #   strideD@64 strideC@72 strideA@80 strideMXSA@88 strideB@96
+              #   strideMXSB@104 | alpha@112 (beta@128 is handled below).
               base = self.externalArgLoader.getOffset()
               numSgprAddress = self.states.rpga
+              mxA = bool(kernel["ProblemType"]["MXBlockA"])
+              mxB = bool(kernel["ProblemType"]["MXBlockB"])
+              mx  = mxA or mxB
               def _loadUserArg(name, structOffset, dword):
                 if dword > 0:
                   moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
                       name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
-              _loadUserArg("AddressD", 16, numSgprAddress)
-              _loadUserArg("AddressC", 24, numSgprAddress)
-              _loadUserArg("AddressA", 32, numSgprAddress)
-              _loadUserArg("AddressB", 40, numSgprAddress)
-              _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
-              _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
-              _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
-              _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
-              _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
+              if mx:
+                _loadUserArg("AddressD", 16, numSgprAddress)
+                _loadUserArg("AddressC", 24, numSgprAddress)
+                _loadUserArg("AddressA", 32, numSgprAddress)
+                if mxA:
+                  _loadUserArg("AddressMXSA", 40, numSgprAddress)
+                _loadUserArg("AddressB", 48, numSgprAddress)
+                if mxB:
+                  _loadUserArg("AddressMXSB", 56, numSgprAddress)
+                _loadUserArg("StridesD", 64, self.states.d.numSgprStrides)
+                _loadUserArg("StridesC", 72, self.states.c.numSgprStrides)
+                _loadUserArg("StridesA", 80, self.states.a.numSgprStrides)
+                if mxA:
+                  _loadUserArg("StridesMXSA", 88, self.states.mxsa.numSgprStrides)
+                _loadUserArg("StridesB", 96, self.states.b.numSgprStrides)
+                if mxB:
+                  _loadUserArg("StridesMXSB", 104, self.states.mxsb.numSgprStrides)
+                _loadUserArg("Alpha", 112, self.states.numSgprAlpha)
+              else:
+                _loadUserArg("AddressD", 16, numSgprAddress)
+                _loadUserArg("AddressC", 24, numSgprAddress)
+                _loadUserArg("AddressA", 32, numSgprAddress)
+                _loadUserArg("AddressB", 40, numSgprAddress)
+                _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
+                _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
+                _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
+                _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
+                _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
               # Restore the running offset to where a sequential load would have
               # left it, so the Beta / scale bookkeeping below stays unchanged.
               self.externalArgLoader.setOffset(base + load * 4)
@@ -5632,16 +5718,18 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
+    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # contiguous dimension and the unroll stride when it is not (TLU=1), where
+    # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
     for tP in tPs:
       tc = tP["tensorChar"]
       if tc not in ("A", "B", "MXSA", "MXSB"):
         return module
       strideF = self.strideRef(tc, tP['tileIdx'])
-      if self.isConstUnitStride(strideF):
-        return module
       isMx = tc in ("MXSA", "MXSB")
+      kRowStride = None
       if isMx:
         tcab = "A" if tc == "MXSA" else "B"
         mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
@@ -5653,6 +5741,10 @@ class KernelWriterAssembly(KernelWriter):
           return module
         mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
         isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+        # A swizzled scale is block-linear in K whatever the operand layout, as
+        # computeLoadSrd assumes; only an unswizzled TLU=1 scale lacks a K-linear limit.
+        if self.isConstUnitStride(strideF) and not isMxSwizzledScale:
+          return module
         swizzleSize0 = 32 if isMxSwizzledScale else 1
         if swizzleSize0 % mxBlock != 0:
           return module
@@ -5662,22 +5754,25 @@ class KernelWriterAssembly(KernelWriter):
       else:
         kPad = 1
         bpeForLimit = float(tP["bpeGR"])
-      tcKpadBpeList.append((tc, kPad, bpeForLimit))
+        if self.isConstUnitStride(strideF):
+          kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
+      tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
     # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
     # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp in tcKpadBpeList):
+    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
       return module
-    tcs = [t for t, _, _ in tcKpadBpeList]
+    tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
 
-    with self.allocTmpSgpr(1, tag="computeTailLoopSrdLimit_tmpSgprInfo") as tmpSgprInfo:
+    with self.allocTmpSgpr(2, tag="computeTailLoopSrdLimit_tmpSgprInfo") as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
+      sbytes = stmp + 1
       module.addComment1(
-        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s"
+        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s (* K-row stride when TLU=1)"
         % (",".join(tcs), kPad,
            "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
 
@@ -5696,12 +5791,18 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      # delta_bytes = delta_K * bpe_K_byteStride (handles bpe=0.5 via SShr 1)
-      module.add(scalarMultiplyBpe(stmp, stmp, bpeForLimit,
-                                   comment="delta_bytes"))
-      for tc in tcs:
+      for tc, _, _, kRowStride in tcKpadBpeList:
+        # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
+        if kRowStride is None:
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+                                       comment="delta_bytes"))
+        else:
+          module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
+                             comment="delta_K rows * %s K-row stride" % tc))
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+                                       comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
-                           src1=sgpr(stmp),
+                           src1=sgpr(sbytes),
                            comment="Srd%s+2 -= delta_bytes (tail-loop tight)" % tc))
 
     return module
@@ -7230,12 +7331,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SAndB32(dst=sgpr(staggerUStrideShift), src0=sgpr("StaggerU"), src1=hex(0x1F00)))
       module.add(SLShiftRightB32(dst=sgpr(staggerUStrideShift), shiftHex=hex(8), src=sgpr(staggerUStrideShift)))
       module.add(SAndB32(dst=sgpr(staggerUMapping), src0=sgpr("StaggerU"), src1=hex(0xE000)))
-      module.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr("StaggerU"), src1=hex(0xFF)))
+      # Keep the packed StaggerU intact: persistent kernels rerun this per tile.
+      module.add(SAndB32(dst=sgpr(currentStaggerU), src0=sgpr("StaggerU"), src1=hex(0xFF), comment="init staggerU"))
       if kernel["PrefetchGlobalRead"] >= 3:
         module.add(SCmpLeU32(src0=sgpr("OrigLoopCounter"), src1=(kernel["PrefetchGlobalRead"] - 1), \
             comment="loopCount <= PGR-1" ))
-        module.add(SCMovB32(dst=sgpr("StaggerU"), src=0, comment="set StaggerU=0 if loopCount <= PGR-1"))
-      module.add(SMovB32(dst=sgpr(currentStaggerU), src=sgpr("StaggerU"), comment="init staggerU"))
+        module.add(SCMovB32(dst=sgpr(currentStaggerU), src=0, comment="set staggerU=0 if loopCount <= PGR-1"))
       module.add(beginStaggerUIterLabel)
       module.add(SLShiftLeftB32(dst=sgpr(shiftedStaggerU), src=sgpr(currentStaggerU), \
               shiftHex=sgpr(staggerUStrideShift), comment="shift by StaggerUStride"))
@@ -9145,8 +9246,8 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["PrefetchGlobalRead"]==2:
           with self.allocTmpSgpr(2, tag="closeLoop_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
-            module.add(SCmpEQU32(src0=sgpr("StaggerU"), src1=0))
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(2), src1=hex(1)))
+            module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("StaggerU"), src1=hex(0xFF), comment="SCC = StaggerU amount != 0"))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(1), src1=hex(2)))
             decCode = SSubU32(dst=loopCounter, src0=loopCounter, \
                 src1=sgpr(tmpSgpr), \
                 comment="dec counter%s"%(loopChar) )
@@ -10014,7 +10115,9 @@ class KernelWriterAssembly(KernelWriter):
     numVgpr = int(ceil(instruction.blockWidth))
     lastAbs = self.mxSplatLastUsedInGroup(kernel, tP_MX, valuStart, groupBytes)
     destStart = self.mxSplatLoadDestStart(kernel, tP_MX, valuStart, groupBytes, numVgpr)
-    key = (tc, m, iui, valuStart)
+    # Keyed like _mxSplatNoteLoad, by the buffer the load wrote: under RAP that is
+    # the absolute resident index, not the wrapped m.
+    key = (tc, self.rapResidentBufferIdx(kernel, tc, u, m), iui, valuStart)
     gen = getattr(self, "_mxSplatGen", {}).get(key, 0)
     if not hasattr(self, "_mxSplatEmitted"):
       self._mxSplatEmitted = {}
@@ -10137,7 +10240,8 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP_MX["tensorChar"]
     if not self._mx2dSplatInPlace(kernel, tc):
       return
-    key = (tc, m, iui, mappedIdx)
+    # Keyed like _mx2dSplatNoteLoad; see _emitMxSplatBeforeWmma.
+    key = (tc, self.rapResidentBufferIdx(kernel, tc, u, m), iui, mappedIdx)
     gen = getattr(self, "_mx2dSplatGen", {}).get(key, 0)
     if not hasattr(self, "_mx2dSplatEmitted"):
       self._mx2dSplatEmitted = {}
@@ -23102,6 +23206,20 @@ class KernelWriterAssembly(KernelWriter):
             # tileM < numComp: do not M-split and do not zero extra comps.
             # A 0-wide TDM to the same LDS dest can clobber Comp0's scale byte.
             # All comps issue the same small tile (tile0 keeps the full footprint).
+          elif numComp > 1 and kernel.get("_TailFolding", False):
+            # K-splitting: this wave's K groups start compId * DepthU / numComp
+            # into each k-tile, so under tail folding the K dim has to start that
+            # much shorter for the partial last k-tile to clamp where the tail
+            # loop would.
+            if compShift == 1:
+              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            else:
+              self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
+            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), kernel["DepthU"] // numComp, "RAP: this wave's K offset"))
+            mod.add(SSubU32(sgpr(tmpSgprWaveOffset), sgpr(dim1), sgpr(tmpSgprWaveOffset), "RAP: K left from this wave's base"))
+            mod.add(SCMovB32(sgpr(tmpSgprWaveOffset), 0, "RAP: no K left for this wave"))
+            dim1 = tmpSgprWaveOffset
           if mxTile > 1:
             # remain M/N in scale-row units: ceil(remain / MXBlockFree)
             mod.add(SAddU32(sgpr(dim0), sgpr(dim0), mxTile - 1, f"ceil(remain / MXBlockFree({mxTile}))"))
@@ -23930,6 +24048,7 @@ class KernelWriterAssembly(KernelWriter):
     # Separate descriptors advance independently, each by its own GlobalReadIncs,
     # so the wrap is per tensor because the pointer it wraps is per tensor.
     if tdmSharedScaleSetActive(kernel):
+      assert not kernel.get("_TailFolding", False), "a shared scale set has no single K dim step"
       # Only the A/B call advances the shared scale set.
       if tcA != "A":
         return mod
@@ -23986,6 +24105,9 @@ class KernelWriterAssembly(KernelWriter):
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
+
+    if kernel.get("_TailFolding", False):
+      mod.add(self.tailFoldingShrinkTdmKDim(kernel, tPA, tPB))
 
     if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)):
       # Recompute the split increments transiently (see _tdmSplitMultiWaveInc). The

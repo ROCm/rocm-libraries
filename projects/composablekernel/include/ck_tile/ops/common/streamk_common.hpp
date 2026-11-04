@@ -83,10 +83,14 @@ struct StreamKReductionOps
         core::arch::is_target_family_gfx117<CompilerTarget_>()>
     SignalStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
     {
-        auto* sk_flags_ptr                = static_cast<index_t*>(kargs.workspace_ptr);
-        index_t offset                    = cta_idx * sizeof(index_t);
-        __amdgpu_buffer_rsrc_t buffer_rsc = make_builtin_buffer_resource(
-            sk_flags_ptr, sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas());
+        auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
+        index_t offset     = cta_idx * sizeof(index_t);
+        // The flag store uses raw builtins in both buffer-addressing modes.
+        __amdgpu_buffer_rsrc_t buffer_rsc = __builtin_amdgcn_make_buffer_rsrc(
+            sk_flags_ptr,
+            0,
+            sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas(),
+            CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
 
         if(threadIdx.x == 0)
         {
@@ -367,11 +371,13 @@ struct StreamKReductionOps
 
         store_tile(partial_tile_window, c_with_partials_dist);
         // Wait for all vector stores for this wavefront to complete
-        if constexpr(core::arch::is_target_id_any_of<CompilerTarget,
-                                                     core::arch::amdgcn_target_id::GFX1250>())
+        if constexpr(core::arch::is_target_family_any_of<
+                         CompilerTarget,
+                         core::arch::amdgcn_target_family_id::GFX12,
+                         core::arch::amdgcn_target_family_id::GFX1250>())
         {
-            // gfx1250 has separate load and store counters. s_waitcnt<0>() waits for loads
-            // here, so it cannot order these partial stores before the completion flag.
+            // gfx12 has separate load and store counters. Wait for the partial stores
+            // before publishing the completion flag in either buffer-addressing mode.
             buffer_store_fence();
         }
         else
