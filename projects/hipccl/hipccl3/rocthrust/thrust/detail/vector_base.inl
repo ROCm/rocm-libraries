@@ -26,25 +26,27 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/advance.h>
 #include <thrust/detail/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/detail/overlapped_copy.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/vector_base.h>
-#include <thrust/distance.h>
 #include <thrust/equal.h>
 #include <thrust/iterator/iterator_traits.h>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <thrust/detail/algorithm_wrapper.h>
-#endif
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__algorithm/max.h)
-#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-#endif
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__algorithm/max.h)
+#include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__iterator/next.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_trivially_constructible.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(initializer_list)
 
 #include <stdexcept>
 
@@ -681,7 +683,7 @@ void vector_base<T, Alloc>::insert(iterator position, InputIterator first, Input
 {
   // we could have received insert(position, n, x), so disambiguate on the
   // type of InputIterator
-  using integral = typename ::internal::is_integral<InputIterator>;
+  using integral = typename _THRUST_STD::is_integral<InputIterator>;
 
   insert_dispatch(position, first, last, integral());
 } // end vector_base::insert()

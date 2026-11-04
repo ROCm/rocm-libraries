@@ -31,9 +31,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
-#include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>
@@ -41,14 +38,20 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/tuple.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
-#  include _THRUST_STD_INCLUDE(__new/device_new.h)
-#endif
-
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory) // for ::new
+#include _THRUST_STD_INCLUDE(__new/device_new.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_const.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -315,12 +318,7 @@ struct compare_first
 } // end namespace detail
 THRUST_NAMESPACE_END
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_LIBCXX_NAMESPACE_BEGIN
-#else
-namespace internal
-{
-#endif
 template <typename Predicate, typename IntegralType>
 struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::detail::predicate_to_integral<Predicate, IntegralType>>
     : proclaims_copyable_arguments<Predicate>
@@ -335,8 +333,4 @@ template <class Predicate, class NewType, class OutputType>
 struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::detail::new_value_if_f<Predicate, NewType, OutputType>>
     : proclaims_copyable_arguments<Predicate>
 {};
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_LIBCXX_NAMESPACE_END
-#else
-} // namespace internal
-#endif

@@ -28,11 +28,9 @@
 #include <thrust/detail/alignment.h>
 #include <thrust/detail/execute_with_allocator_fwd.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 
 THRUST_NAMESPACE_BEGIN
 

@@ -23,8 +23,11 @@
 
 #include <thrust/random.h>
 
-#include <cuda/std/cstdint>
-#include <cuda/std/type_traits>
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
+#include _THRUST_STD_INCLUDE(bit)
+#include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -40,14 +43,8 @@ public:
   {
     // Calculate number of bits needed to represent num_elements - 1
     // Prevent zero
-    const uint64_t max_index = (m > 1 ? m : 1) - 1;
-    // Portable bit_width(max_index): std::bit_width is C++20 and unavailable without libhipcxx
-    uint64_t index_bits = 0;
-    for (uint64_t v = max_index; v != 0; v >>= 1)
-    {
-      ++index_bits;
-    }
-    const uint64_t total_bits = index_bits > 8 ? index_bits : 8;
+    const uint64_t max_index  = _THRUST_STD::max(static_cast<uint64_t>(1), m) - 1;
+    const uint64_t total_bits = static_cast<uint64_t>(_THRUST_STD::max(8, _THRUST_STD::bit_width(max_index)));
     // Half bits rounded down
     L_bits = total_bits / 2;
     L_mask = (1ull << L_bits) - 1;
@@ -110,8 +107,8 @@ template <class IndexType, class Bijection = feistel_bijection>
 class random_bijection
 {
 private:
-  static_assert(::cuda::std::is_integral_v<IndexType>, "IndexType must be an integral type");
-  static_assert(::cuda::std::is_convertible_v<IndexType, typename Bijection::index_type>,
+  static_assert(_THRUST_STD::is_integral_v<IndexType>, "IndexType must be an integral type");
+  static_assert(_THRUST_STD::is_convertible_v<IndexType, typename Bijection::index_type>,
                 "IndexType must be convertible to Bijection::index_type");
 
   Bijection bijection;
@@ -122,7 +119,7 @@ public:
 
   template <class URBG>
   THRUST_HOST_DEVICE random_bijection(IndexType n, URBG&& g)
-      : bijection(n, ::cuda::std::forward<URBG>(g))
+      : bijection(n, _THRUST_STD::forward<URBG>(g))
       , n(n)
   {}
 

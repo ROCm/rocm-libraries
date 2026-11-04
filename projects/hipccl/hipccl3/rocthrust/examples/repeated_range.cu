@@ -30,10 +30,6 @@
 
 #include "include/host_device.h"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
-
 // this example illustrates how to make repeated access to a range of values
 // examples:
 //   repeated_range([0, 1, 2, 3], 1) -> [0, 1, 2, 3]

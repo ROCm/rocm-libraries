@@ -51,7 +51,10 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__cmath/abs.h)
+#include _THRUST_STD_INCLUDE(__cmath/hypot.h)
+#include _THRUST_STD_INCLUDE(__cmath/inverse_trigonometric_functions.h)
+#include _THRUST_STD_INCLUDE(__cmath/logarithms.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail::complex

@@ -29,14 +29,8 @@
 
 #include <unittest/unittest.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(functional)
-#endif
+#include _THRUST_LIBCXX_INCLUDE(functional)
 #include _THRUST_STD_INCLUDE(array)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#endif
 
 #include <numeric>
 
@@ -613,7 +607,6 @@ struct iterator_traits<only_set_when_expected_it>
 };
 } // namespace std
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_STD_NAMESPACE_BEGIN
 template <>
 struct iterator_traits<only_set_when_expected_it>
@@ -624,7 +617,6 @@ struct iterator_traits<only_set_when_expected_it>
   using difference_type   = _THRUST_STD::ptrdiff_t;
 };
 _THRUST_STD_NAMESPACE_END
-#endif
 
 void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 {

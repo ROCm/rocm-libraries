@@ -29,11 +29,10 @@
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/normal_iterator.h>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <thrust/swap.h>
-#endif
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
+
 #include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN
@@ -117,11 +116,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE void swap(contiguous_storage& other)
   {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     using _THRUST_STD::swap;
-#else
-    using thrust::swap;
-#endif
     swap(m_begin, other.m_begin);
     swap(m_size, other.m_size);
 

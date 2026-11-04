@@ -33,10 +33,11 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/pair.h>
 #include <thrust/random/uniform_real_distribution.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__cmath/logarithms.h)
+#include _THRUST_STD_INCLUDE(__cmath/roots.h)
+#include _THRUST_STD_INCLUDE(__cmath/trigonometric_functions.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 #if THRUST_HAS_HIP_COMPILER()

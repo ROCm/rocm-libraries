@@ -58,34 +58,14 @@ struct constant_f
     return value;
   }
 };
-
-template <class Predicate, class NewType, class OutputType>
-struct new_value_if_f
-{
-  Predicate pred;
-  NewType new_value;
-
-  template <class T>
-  OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x)
-  {
-    return pred(x) ? new_value : x;
-  }
-
-  template <class T, class P>
-  OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x, P const& y)
-  {
-    return pred(y) ? new_value : x;
-  }
-};
-
 } // namespace __replace
 
 template <class Derived, class Iterator, class T>
 void THRUST_HOST_DEVICE
 replace(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& old_value, T const& new_value)
 {
-  using thrust::placeholders::_1;
-  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>{new_value}, _1 == old_value);
+  hip_rocprim::transform_if(
+    policy, first, last, first, __replace::constant_f<T>{new_value}, thrust::detail::equal_to_value<T>{old_value});
 }
 
 template <class Derived, class Iterator, class Predicate, class T>
@@ -117,7 +97,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   T const& new_value)
 {
   using output_type    = thrust::detail::it_value_t<OutputIt>;
-  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
+  using new_value_if_t = thrust::detail::new_value_if_f<Predicate, T, output_type>;
   return hip_rocprim::transform(policy, first, last, result, new_value_if_t{predicate, new_value});
 }
 
@@ -132,7 +112,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   T const& new_value)
 {
   using output_type    = thrust::detail::it_value_t<OutputIt>;
-  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
+  using new_value_if_t = thrust::detail::new_value_if_f<Predicate, T, output_type>;
   return hip_rocprim::transform(policy, first, last, stencil, result, new_value_if_t{predicate, new_value});
 }
 

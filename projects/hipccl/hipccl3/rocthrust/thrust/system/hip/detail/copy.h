@@ -41,6 +41,13 @@
 
 #include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
+#include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
+#include _THRUST_STD_INCLUDE(__functional/identity.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__iterator/next.h)
 
 THRUST_NAMESPACE_BEGIN
 

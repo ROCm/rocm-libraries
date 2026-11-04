@@ -37,7 +37,8 @@
 #include <thrust/functional.h>
 #include <thrust/tuple.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail::functional

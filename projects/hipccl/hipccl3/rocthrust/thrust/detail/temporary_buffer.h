@@ -30,7 +30,8 @@
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/pair.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 // Include all active backend system implementations (generic, sequential, host and device)
 #include <thrust/system/detail/generic/temporary_buffer.h>
@@ -52,15 +53,15 @@ namespace detail
 {
 template <typename T, typename DerivedPolicy, typename Pair>
 THRUST_HOST_DEVICE
-  thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
-  down_cast_pair(Pair p)
+_THRUST_STD::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
+down_cast_pair(Pair p)
 {
   // XXX should use a hypothetical thrust::static_pointer_cast here
   thrust::pointer<T, DerivedPolicy> ptr =
     thrust::pointer<T, DerivedPolicy>(static_cast<T*>(thrust::raw_pointer_cast(p.first)));
 
   using result_type =
-    thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>;
+    _THRUST_STD::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>;
   return result_type(ptr, p.second);
 } // end down_cast_pair()
 } // namespace detail
@@ -68,9 +69,9 @@ THRUST_HOST_DEVICE
 THRUST_EXEC_CHECK_DISABLE
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE
-  thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
-  get_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
-                       typename thrust::pointer<T, DerivedPolicy>::difference_type n)
+_THRUST_STD::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
+get_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+                     typename thrust::pointer<T, DerivedPolicy>::difference_type n)
 {
   using thrust::detail::get_temporary_buffer; // execute_with_allocator
   using thrust::system::detail::generic::get_temporary_buffer;

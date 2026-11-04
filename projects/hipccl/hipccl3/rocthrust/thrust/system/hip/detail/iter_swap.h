@@ -32,40 +32,46 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/raw_pointer_cast.h>
-#  include <thrust/swap.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/util.h>
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(utility)
-#  endif
+#  include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+namespace detail
+{
+template <typename Pointer1, typename Pointer2>
+ROCPRIM_KERNEL void iter_swap_kernel(Pointer1 a, Pointer2 b)
+{
+  using _THRUST_STD::swap;
+  swap(*raw_pointer_cast(a), *raw_pointer_cast(b));
+}
+} // namespace detail
 
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
-inline THRUST_HOST_DEVICE void iter_swap(thrust::hip::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
+inline THRUST_HOST_DEVICE void iter_swap(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 a, Pointer2 b)
 {
-  // XXX war nvbugs/881631
-  struct war_nvbugs_881631
+  // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
+  // __device__ function leads to the template instantiation of a __global__ function, then this instantiation needs to
+  // happen regardless of whether __CUDA_ARCH__ is defined. Therefore, we make the host path visible outside the
+  // _THRUST_IF_TARGET switch. See also NVBug 881631.
+  struct host_path
   {
-    THRUST_HOST inline static void host_path(Pointer1 a, Pointer2 b)
+    THRUST_HOST void operator()(execution_policy<DerivedPolicy>& exec, Pointer1 a, Pointer2 b) const
     {
-      thrust::swap_ranges(a, a + 1, b);
-    }
-
-    THRUST_DEVICE inline static void device_path(Pointer1 a, Pointer2 b)
-    {
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-      using _THRUST_STD::swap;
-#  else
-      using thrust::swap;
-#  endif
-      swap(*thrust::raw_pointer_cast(a), *thrust::raw_pointer_cast(b));
+      hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(detail::iter_swap_kernel<Pointer1, Pointer2>), dim3(1), dim3(1), 0, stream(exec), a, b);
+      throw_on_error(hipPeekAtLastError(), "iter_swap: calling iter_swap_kernel failed");
+      throw_on_error(synchronize_optional(exec), "iter_swap: sync failed");
     }
   };
 
-  _THRUST_IF_TARGET(_THRUST_IS_HOST, (war_nvbugs_881631::host_path(a, b);), (war_nvbugs_881631::device_path(a, b);));
+  _THRUST_IF_TARGET(_THRUST_IS_HOST,
+                    (host_path{}(exec, a, b);),
+                    (using _THRUST_STD::swap; //
+                     swap(*thrust::raw_pointer_cast(a), *thrust::raw_pointer_cast(b));));
 
 } // end iter_swap()
 

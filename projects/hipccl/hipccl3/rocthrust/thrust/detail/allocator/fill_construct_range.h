@@ -27,15 +27,12 @@
 #endif // no system header
 
 #include <thrust/detail/allocator/allocator_traits.h>
-#include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

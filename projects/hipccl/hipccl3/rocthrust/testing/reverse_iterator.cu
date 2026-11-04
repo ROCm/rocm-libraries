@@ -25,10 +25,6 @@
 #include _THRUST_STD_INCLUDE(iterator)
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
-
 // ensure that we properly support thrust::reverse_iterator from _THRUST_STD
 void TestReverseIteratorTraits()
 {
@@ -48,14 +44,12 @@ void TestReverseIteratorTraits()
 
   static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
   static_assert(_THRUST_STD::input_iterator<it>);
   static_assert(_THRUST_STD::forward_iterator<it>);
   static_assert(_THRUST_STD::bidirectional_iterator<it>);
   static_assert(_THRUST_STD::random_access_iterator<it>);
   static_assert(!_THRUST_STD::contiguous_iterator<it>);
-#endif
 }
 DECLARE_UNITTEST(TestReverseIteratorTraits);
 

@@ -30,10 +30,6 @@
 
 #include "include/host_device.h"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
-
 // this example illustrates how to tile a range multiple times
 // examples:
 //   tiled_range([0, 1, 2, 3], 1) -> [0, 1, 2, 3]
