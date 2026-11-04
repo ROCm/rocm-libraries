@@ -1721,7 +1721,7 @@ level_labels:
        changes: {paged_kv: present, dropout: caller_mask}}
     - {id: S8-bias-varlen, why: "bias with variable lengths (PyTorch#147460)",
        changes: {bias: present, sequence_lengths: variable}}
-    - {id: S9-bias-scale-tensor, why: "bias with a scale tensor (found by the SDPA backward test plan)",
+    - {id: S9-bias-scale-tensor, why: "bias with a scale tensor",
        changes: {bias: present, scale_source: by_value_constant_tensor}}
     - {id: S9b-bias-scale-zero, why: "bias with scale 0 gave NaN (AOTriton README)",
        changes: {bias: present, scale_value: zero}}
