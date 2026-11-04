@@ -106,13 +106,36 @@ faster natively however large `m * n * k` is.
 The Radeon rows set an FP64 threshold measured as the crossover between eager
 emulation and native FP64 on one card of the architecture, and `NEVER` for
 FP32. To support a new architecture without measuring every card, add a row
-with these two thresholds.
+with these two thresholds and the kernel-variant flag (see
+[Kernel variant](#kernel-variant)).
 
 Cards without a chip row use generic performance-model values,
-`{0, 1, 1, 1, 1, 1, 1, 1}`. They don't decide whether to emulate. They only
+`{0, 1, 1, 1, 1, 1, 1, 1}` (the kernel-variant flag comes from the
+architecture row). They don't decide whether to emulate. They only
 plan how an emulated GEMM is split when the workspace is too small, and fill
 the `pred_*` columns of the profiling CSV. With these values the split ignores
 launch overheads, so a card with a measured chip row can split better.
+
+### Kernel variant
+
+The scale and reconstruct kernels (`scale_kernels.hpp`,
+`reconstruct_kernels.hpp`) exist in two variants, selected by the `INT_RES`
+template parameter. Every chip row and architecture row carries a boolean
+`int_residue_kernels` that chooses one at runtime
+(`use_int_residue_kernels()` in `emulation.cpp`):
+
+- `false`: FP64 residues (`fma`/`rint`) and double-double (TwoSum)
+  accumulation. Faster on devices with a high FP64 rate (Instinct, e.g.
+  gfx950).
+- `true`: integer and FP32 residues, and an exact integer CRT sum when all
+  moduli are processed in one chunk. Intended for devices with a low FP64
+  rate (Radeon), where the FP64 variant makes these kernels FP64-bound.
+
+To choose the value for a new device, run the same GEMM with both settings
+and compare `t_scale_ms + t_accum_ms` in the profiling CSV
+(`HIPBLASLT_EMULATION_PROFILE`); keep the faster one. On gfx950 the FP64
+variant's scale and accumulate stages were about 3x and 2x faster than the
+integer variant at 4096^3.
 
 ### Chip rows
 
@@ -135,9 +158,11 @@ steps:
      - `L_sync`: `hipStreamSynchronize` round trip.
      - `L_host`: per-call host overhead of the emulation path.
 3. **Compute the table row** (field order `ai_fp64, ai_fp32, ai_int8,
-   ovh_kernel, ovh_matmul, ovh_memset, ovh_sync, ovh_host`):
+   ovh_kernel, ovh_matmul, ovh_memset, ovh_sync, ovh_host,
+   int_residue_kernels`):
    - `ai_fp64 = F64 / BW`, `ai_fp32 = F32 / BW`, `ai_int8 = I8 / BW`.
    - `ovh_X = L_X * BW` for each overhead.
+   - `int_residue_kernels`: see [Kernel variant](#kernel-variant).
 
    Two significant digits are enough. Only ratios between fields affect the
    emulate-vs-native and split decisions, so all values share one scale.

@@ -39,7 +39,7 @@ namespace FixedPointEmulation
      * Stores: one uint32_t NT store per modulus (packs INT8[j0..j0+3]) = 128 bytes/warp.
      * Moduli loop is OUTER so the per-modulus constants are loaded once, and only
      * TILE_M=8 NT write-combine buffers are needed simultaneously.               */
-    template <unsigned T_COUNT, typename T>
+    template <unsigned T_COUNT, typename T, bool INT_RES = true>
     __global__ static void scale_A_T_kernel(const T* __restrict__ A,
                                             int64_t m,
                                             int64_t lda,
@@ -112,7 +112,7 @@ namespace FixedPointEmulation
         Int88Limbs lv[4];
 #pragma unroll
         for(int p = 0; p < 4; ++p)
-            lv[p] = split_int88(ival[p]);
+            lv[p] = split_int88_v<INT_RES>(ival[p]);
         const size_t stride   = lda8i * cola8i;
         const size_t off_base = static_cast<size_t>(i) * lda8i;
         const size_t off0 = static_cast<size_t>(j0) + off_base; /* 4-aligned → uint32_t aligned */
@@ -126,7 +126,7 @@ namespace FixedPointEmulation
             int8_t b[4];
 #pragma unroll
             for(int p = 0; p < 4; ++p)
-                b[p] = int8_residue(lv[p], ival[p], tidx);
+                b[p] = int8_residue_v<INT_RES>(lv[p], ival[p], tidx);
             /* Pack and store: always write 4 bytes as uint32_t.
              * Out-of-bounds b[p] are zero (ival[p] was pre-zeroed for p >= valid count),
              * so the extra bytes land harmlessly in the [k, lda8i) padding region.
@@ -159,7 +159,7 @@ namespace FixedPointEmulation
      *   j_out = blockIdx.x*TILE_K + k_wb is always 4-aligned → uint32_t aligned.
      *   Out-of-bounds shmem entries are pre-zeroed in the load phase (stored 0.0 for j≥k),
      *   so the extra bytes in the padding region [k, lda8i) are harmlessly zero. */
-    template <unsigned T_COUNT, typename T>
+    template <unsigned T_COUNT, typename T, bool INT_RES = true>
     __global__ static void scale_A_N_kernel(const T* __restrict__ A,
                                             int64_t m,
                                             int64_t lda,
@@ -215,7 +215,7 @@ namespace FixedPointEmulation
             for(int p = 0; p < K_UNROLL; p++)
             {
                 ival[p] = trunc(ldexp(shmem[m_wr][k_wb + p], sft));
-                lv[p]   = split_int88(ival[p]);
+                lv[p]   = split_int88_v<INT_RES>(ival[p]);
             }
 
             const size_t stride = lda8i * cola8i;
@@ -228,7 +228,7 @@ namespace FixedPointEmulation
                 int8_t         b[K_UNROLL];
 #pragma unroll
                 for(int p = 0; p < K_UNROLL; p++)
-                    b[p] = int8_residue(lv[p], ival[p], tidx);
+                    b[p] = int8_residue_v<INT_RES>(lv[p], ival[p], tidx);
                 /* Pack and store: always write 4 bytes as uint32_t.
                  * Out-of-bounds b[p] are zero (ival[p]=0.0 from pre-zeroed shmem),
                  * so extra bytes land harmlessly in the [k, lda8i) padding region. */
@@ -245,7 +245,7 @@ namespace FixedPointEmulation
     /* ── B_N: TRANS_B=false, j-fast coalesced, blockDim=512, TILE_M=8, K_UNROLL=4 ──
      * Mirrors scale_A_T_kernel: two vector loads (j0..j0+1 and j0+2..j0+3) + uint32_t packed store.
      * FP64: double2 (128-bit).  FP32: float2 (64-bit), widened to double before arithmetic. */
-    template <unsigned T_COUNT, typename T>
+    template <unsigned T_COUNT, typename T, bool INT_RES = true>
     __global__ static void scale_B_N_kernel(const T* __restrict__ B,
                                             int64_t n,
                                             int64_t ldb,
@@ -309,7 +309,7 @@ namespace FixedPointEmulation
         Int88Limbs lv[4];
 #pragma unroll
         for(int p = 0; p < 4; ++p)
-            lv[p] = split_int88(ival[p]);
+            lv[p] = split_int88_v<INT_RES>(ival[p]);
         const size_t stride   = ldb8i * static_cast<size_t>(n);
         const size_t off_base = static_cast<size_t>(col) * ldb8i;
         const size_t off0 = static_cast<size_t>(j0) + off_base; /* 4-aligned → uint32_t aligned */
@@ -319,7 +319,7 @@ namespace FixedPointEmulation
             int8_t         b[4];
 #pragma unroll
             for(int p = 0; p < 4; ++p)
-                b[p] = int8_residue(lv[p], ival[p], tidx);
+                b[p] = int8_residue_v<INT_RES>(lv[p], ival[p], tidx);
             /* Pack and store: always write 4 bytes as uint32_t.
              * Out-of-bounds b[p] are zero (ival[p] was pre-zeroed for p >= valid count),
              * so the extra bytes land harmlessly in the [k, ldb8i) padding region.
@@ -348,7 +348,7 @@ namespace FixedPointEmulation
      *   j_out = blockIdx.x*TILE_K + k_wb is always 4-aligned → uint32_t aligned.
      *   Out-of-bounds shmem entries are pre-zeroed in the load phase (stored 0.0 for j≥k),
      *   so extra bytes in the padding region [k, ldb8i) are harmlessly zero.           */
-    template <unsigned T_COUNT, typename T>
+    template <unsigned T_COUNT, typename T, bool INT_RES = true>
     __global__ static void scale_B_T_kernel(const T* __restrict__ B,
                                             int64_t n,
                                             int64_t ldb,
@@ -403,7 +403,7 @@ namespace FixedPointEmulation
             for(int p = 0; p < K_UNROLL; p++)
             {
                 ival[p] = trunc(ldexp(shmem[l_wr][k_wb + p], sft));
-                lv[p]   = split_int88(ival[p]);
+                lv[p]   = split_int88_v<INT_RES>(ival[p]);
             }
 
             const size_t stride = ldb8i * static_cast<size_t>(n);
@@ -416,7 +416,7 @@ namespace FixedPointEmulation
                 int8_t         b[K_UNROLL];
 #pragma unroll
                 for(int p = 0; p < K_UNROLL; p++)
-                    b[p] = int8_residue(lv[p], ival[p], tidx);
+                    b[p] = int8_residue_v<INT_RES>(lv[p], ival[p], tidx);
                 /* Pack and store: always write 4 bytes as uint32_t.
                  * Out-of-bounds b[p] are zero (ival[p]=0.0 from pre-zeroed shmem),
                  * so extra bytes land harmlessly in the [k, ldb8i) padding region. */

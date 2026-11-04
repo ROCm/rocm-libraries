@@ -224,6 +224,43 @@ namespace FixedPointEmulation
             static_cast<int32_t>(fmaf(rintf(rf * imf), -static_cast<float>(m), rf)));
     }
 
+    /* ── Kernel-variant selection ──────────────────────────────────────────────
+     * INT_RES = true : integer / FP32 residue and exact integer CRT sum
+     *                  (for devices with a low FP64 rate).
+     * INT_RES = false: FP64 residue (fma/rint) and double-double TwoSum
+     *                  (for devices with a high FP64 rate, e.g. gfx950).
+     * The choice is made at runtime from the device's perf-model parameters
+     * (see emulation.cpp).                                                     */
+
+    /* FP64 INT8 residue of the integer-valued double y modulo m_t. */
+    static __device__ __forceinline__ int8_t int8_residue_fp64(double y, unsigned t)
+    {
+        const double nm  = neg_mod(t);
+        const double rp  = fma(nm, rint(y * inv_mod(t)), y);
+        const float  rfp = static_cast<float>(rp);
+        return static_cast<int8_t>(static_cast<int32_t>(
+            fmaf(rintf(rfp * inv_mod_f(t)), static_cast<float>(nm), rfp)));
+    }
+
+    template <bool INT_RES>
+    static __device__ __forceinline__ Int88Limbs split_int88_v(double y)
+    {
+        if constexpr(INT_RES)
+            return split_int88(y);
+        else
+            return Int88Limbs{{0u, 0u, 0u, 0u}, false, false}; /* unused */
+    }
+
+    template <bool INT_RES>
+    static __device__ __forceinline__ int8_t
+        int8_residue_v(const Int88Limbs& v, double y, unsigned t)
+    {
+        if constexpr(INT_RES)
+            return int8_residue(v, y, t);
+        else
+            return int8_residue_fp64(y, t);
+    }
+
     /* Balanced residue of the int32 c modulo m_t, identical to
      * fma(neg_mod(t), rint(double(c) * inv_mod(t)), double(c)), including the
      * round-half-to-even choice of +-m/2 for the even modulus 256.             */
@@ -256,6 +293,20 @@ namespace FixedPointEmulation
         if(twice > m || (twice == m && ((q1 + q2) & 1)))
             return r0 - m;
         return r0;
+    }
+
+    /* Balanced residue of an INT32 GEMM result c modulo m_t, as double.
+     * Defined after balanced_residue_i32, which it calls.                      */
+    template <bool INT_RES>
+    static __device__ __forceinline__ double balanced_residue_dc(int32_t c, unsigned t)
+    {
+        if constexpr(INT_RES)
+            return static_cast<double>(balanced_residue_i32(c, t));
+        else
+        {
+            const double dc_raw = static_cast<double>(c);
+            return fma(neg_mod(t), rint(dc_raw * inv_mod(t)), dc_raw);
+        }
     }
 
 } // namespace FixedPointEmulation

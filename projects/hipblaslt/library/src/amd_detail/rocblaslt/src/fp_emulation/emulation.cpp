@@ -135,11 +135,20 @@ namespace FixedPointEmulation
         double ovh_memset;
         double ovh_sync;
         double ovh_host;
+        /* Scale / reconstruct kernel variant (INT_RES template parameter of the
+         * kernels in scale_kernels.hpp / reconstruct_kernels.hpp).
+         * true : integer / FP32 residues and exact integer CRT sum; for devices
+         *        with a low FP64 rate (Radeon).
+         * false: FP64 residues and double-double accumulation; for devices with
+         *        a high FP64 rate (Instinct).
+         * Choose per device by comparing t_scale_ms + t_accum_ms in the profile
+         * CSV for both variants.                                              */
+        bool int_residue_kernels;
     };
 
     /* Device support tables.  Performance-model values are relative (only
      * ratios matter).  Field order: ai_fp64, ai_fp32, ai_int8, ovh_kernel,
-     * ovh_matmul, ovh_memset, ovh_sync, ovh_host.
+     * ovh_matmul, ovh_memset, ovh_sync, ovh_host, int_residue_kernels.
      * See fp_emulation/README.md, "Adding support for a new device".
      *
      * Chip rows, keyed by PCI device ID, hold performance-model values
@@ -150,12 +159,12 @@ namespace FixedPointEmulation
     static const std::unordered_map<uint32_t, PerfModelDeviceParams>& chip_rows()
     {
         static const std::unordered_map<uint32_t, PerfModelDeviceParams> rows = {
-            {0x75a0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
-            {0x75b0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
-            {0x75a3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
-            {0x75b3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
-            {0x745eu, {1.591, 15.62, 159.7, 1.3e6, 3.3e6, 1.4e6, 6.6e6, 2.7e7}}, // gfx1100-w7800
-            {0x7550u, {1.36, 39.86, 332.0, 1.4e6, 4.2e6, 1.8e6, 1.6e7, 5.6e7}}, // gfx1201-rx9070xt
+            {0x75a0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8, false}}, // gfx950-mi350x
+            {0x75b0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8, false}}, // gfx950-mi350x
+            {0x75a3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8, false}}, // gfx950-mi355x
+            {0x75b3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8, false}}, // gfx950-mi355x
+            {0x745eu, {1.591, 15.62, 159.7, 1.3e6, 3.3e6, 1.4e6, 6.6e6, 2.7e7, true}}, // gfx1100-w7800
+            {0x7550u, {1.36, 39.86, 332.0, 1.4e6, 4.2e6, 1.8e6, 1.6e7, 5.6e7, true}}, // gfx1201-rx9070xt
         };
         return rows;
     }
@@ -168,6 +177,8 @@ namespace FixedPointEmulation
          * FIXED_POINT_EMULATION_NEVER = never.                               */
         double fp64_min_ai;
         double fp32_min_ai;
+        /* PerfModelDeviceParams::int_residue_kernels for cards of this target. */
+        bool int_residue_kernels;
     };
 
     /* Generic performance-model values for cards without a chip row.  They
@@ -175,7 +186,7 @@ namespace FixedPointEmulation
      * how an emulated GEMM is split when the workspace is too small, and fill
      * the predictions in the profiling CSV.                                 */
     static constexpr PerfModelDeviceParams generic_arch_params
-        = {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+        = {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, false};
 
     static const ArchRow* find_arch_row(const char* gcn_arch_name)
     {
@@ -197,14 +208,14 @@ namespace FixedPointEmulation
          * NN layouts on both cards.                                          */
         constexpr double NEVER = FIXED_POINT_EMULATION_NEVER;
         static const ArchRow rows[] = {
-            {"gfx1100", 48.0, NEVER}, // RDNA 3
-            {"gfx1101", 48.0, NEVER}, // RDNA 3
-            {"gfx1102", 48.0, NEVER}, // RDNA 3
-            {"gfx1150", 48.0, NEVER}, // RDNA 3.5
-            {"gfx1151", 48.0, NEVER}, // RDNA 3.5
-            {"gfx1152", 48.0, NEVER}, // RDNA 3.5
-            {"gfx1200", 30.0, NEVER}, // RDNA 4
-            {"gfx1201", 30.0, NEVER}, // RDNA 4
+            {"gfx1100", 48.0, NEVER, true}, // RDNA 3
+            {"gfx1101", 48.0, NEVER, true}, // RDNA 3
+            {"gfx1102", 48.0, NEVER, true}, // RDNA 3
+            {"gfx1150", 48.0, NEVER, true}, // RDNA 3.5
+            {"gfx1151", 48.0, NEVER, true}, // RDNA 3.5
+            {"gfx1152", 48.0, NEVER, true}, // RDNA 3.5
+            {"gfx1200", 30.0, NEVER, true}, // RDNA 4
+            {"gfx1201", 30.0, NEVER, true}, // RDNA 4
         };
         if(gcn_arch_name == nullptr)
             return nullptr;
@@ -237,7 +248,8 @@ namespace FixedPointEmulation
         }
         else if(const ArchRow* arch = find_arch_row(gcn_arch_name))
         {
-            info.params               = generic_arch_params;
+            info.params                      = generic_arch_params;
+            info.params->int_residue_kernels = arch->int_residue_kernels;
             info.support.match        = FIXED_POINT_EMULATION_DEVICE_ARCH;
             info.support.fp64_min_ai  = arch->fp64_min_ai;
             info.support.fp32_min_ai  = arch->fp32_min_ai;
@@ -272,6 +284,16 @@ namespace FixedPointEmulation
     {
         const DeviceEmulationInfo* info = device_info(device);
         return info ? info->params : std::nullopt;
+    }
+
+    /* Selects the scale / reconstruct kernel variant for a device (INT_RES template
+     * parameter of the kernels in scale_kernels.hpp / reconstruct_kernels.hpp), from
+     * the int_residue_kernels flag of the device's table row.  Unsupported devices
+     * never run emulation, so the value returned for them is irrelevant.        */
+    static bool use_int_residue_kernels(int device)
+    {
+        const auto hw = get_perf_model_params(device);
+        return hw ? hw->int_residue_kernels : false;
     }
 
     /* Returns the minimum number of moduli s ∈ [2, S_MAX] such that
@@ -764,7 +786,7 @@ namespace FixedPointEmulation
     /* ── Scale kernel launch helpers ──────────────────────────────────────────── */
     /* T: input element type (double or float).  The scale kernels load T values
      * and widen to double immediately — all residue arithmetic stays in double.  */
-    template <unsigned TC, typename T>
+    template <unsigned TC, typename T, bool INT_RES>
     static void launch_scale_A(bool        tA,
                                const T*    A,
                                int64_t     m,
@@ -782,7 +804,7 @@ namespace FixedPointEmulation
         const unsigned k_x
             = static_cast<unsigned>((k + OZ2_SCALE_SHMEM_TILE_K - 1) / OZ2_SCALE_SHMEM_TILE_K);
         if(tA)
-            hipLaunchKernelGGL((scale_A_T_kernel<TC, T>),
+            hipLaunchKernelGGL((scale_A_T_kernel<TC, T, INT_RES>),
                                dim3(k_c,
                                     static_cast<unsigned>((m + OZ2_SCALE_COALESC_TILE_M - 1)
                                                           / OZ2_SCALE_COALESC_TILE_M)),
@@ -799,7 +821,7 @@ namespace FixedPointEmulation
                                k,
                                sc_start);
         else
-            hipLaunchKernelGGL((scale_A_N_kernel<TC, T>),
+            hipLaunchKernelGGL((scale_A_N_kernel<TC, T, INT_RES>),
                                dim3(k_x,
                                     static_cast<unsigned>((m + OZ2_SCALE_SHMEM_TILE_M - 1)
                                                           / OZ2_SCALE_SHMEM_TILE_M)),
@@ -817,7 +839,7 @@ namespace FixedPointEmulation
                                sc_start);
     }
 
-    template <unsigned TC, typename T>
+    template <unsigned TC, typename T, bool INT_RES>
     static void launch_scale_B(bool        tB,
                                const T*    B,
                                int64_t     n,
@@ -834,7 +856,7 @@ namespace FixedPointEmulation
         const unsigned k_x
             = static_cast<unsigned>((k + OZ2_SCALE_SHMEM_TILE_K - 1) / OZ2_SCALE_SHMEM_TILE_K);
         if(!tB)
-            hipLaunchKernelGGL((scale_B_N_kernel<TC, T>),
+            hipLaunchKernelGGL((scale_B_N_kernel<TC, T, INT_RES>),
                                dim3(k_c,
                                     static_cast<unsigned>((n + OZ2_SCALE_COALESC_TILE_M - 1)
                                                           / OZ2_SCALE_COALESC_TILE_M)),
@@ -850,7 +872,7 @@ namespace FixedPointEmulation
                                k,
                                sc_start);
         else
-            hipLaunchKernelGGL((scale_B_T_kernel<TC, T>),
+            hipLaunchKernelGGL((scale_B_T_kernel<TC, T, INT_RES>),
                                dim3(k_x,
                                     static_cast<unsigned>((n + OZ2_SCALE_SHMEM_TILE_M - 1)
                                                           / OZ2_SCALE_SHMEM_TILE_M)),
@@ -870,7 +892,7 @@ namespace FixedPointEmulation
     /* ── Accumulate/finalize dispatch helper ─────────────────────────────────── */
     /* Encapsulates the CRT accumulation and finalization kernel dispatch.  The   */
     /* grid is computed from m and n; CS is the compile-time chunk size (1..18). */
-    template <unsigned CS, typename T_out = double>
+    template <unsigned CS, typename T_out = double, bool INT_RES = true>
     static void dispatch_accum_chunk(bool           is_first,
                                      bool           is_last,
                                      bool           has_lo,
@@ -901,7 +923,7 @@ namespace FixedPointEmulation
             if(has_lo)
             {
                 if(is_first)
-                    hipLaunchKernelGGL((accum_finalize_kernel<true, CS, true, T_out>),
+                    hipLaunchKernelGGL((accum_finalize_kernel<true, CS, true, T_out, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -923,7 +945,7 @@ namespace FixedPointEmulation
                                        chunk_start,
                                        effective_s);
                 else
-                    hipLaunchKernelGGL((accum_finalize_kernel<true, CS, false, T_out>),
+                    hipLaunchKernelGGL((accum_finalize_kernel<true, CS, false, T_out, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -948,7 +970,7 @@ namespace FixedPointEmulation
             else
             {
                 if(is_first)
-                    hipLaunchKernelGGL((accum_finalize_kernel<false, CS, true, T_out>),
+                    hipLaunchKernelGGL((accum_finalize_kernel<false, CS, true, T_out, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -970,7 +992,7 @@ namespace FixedPointEmulation
                                        chunk_start,
                                        effective_s);
                 else
-                    hipLaunchKernelGGL((accum_finalize_kernel<false, CS, false, T_out>),
+                    hipLaunchKernelGGL((accum_finalize_kernel<false, CS, false, T_out, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -998,7 +1020,7 @@ namespace FixedPointEmulation
             if(has_lo)
             {
                 if(is_first)
-                    hipLaunchKernelGGL((chunk_accum_kernel<true, CS, true>),
+                    hipLaunchKernelGGL((chunk_accum_kernel<true, CS, true, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -1012,7 +1034,7 @@ namespace FixedPointEmulation
                                        chunk_start,
                                        effective_s);
                 else
-                    hipLaunchKernelGGL((chunk_accum_kernel<true, CS, false>),
+                    hipLaunchKernelGGL((chunk_accum_kernel<true, CS, false, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -1029,7 +1051,7 @@ namespace FixedPointEmulation
             else
             {
                 if(is_first)
-                    hipLaunchKernelGGL((chunk_accum_kernel<false, CS, true>),
+                    hipLaunchKernelGGL((chunk_accum_kernel<false, CS, true, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -1043,7 +1065,7 @@ namespace FixedPointEmulation
                                        chunk_start,
                                        effective_s);
                 else
-                    hipLaunchKernelGGL((chunk_accum_kernel<false, CS, false>),
+                    hipLaunchKernelGGL((chunk_accum_kernel<false, CS, false, INT_RES>),
                                        grid_acc,
                                        blk_acc,
                                        0,
@@ -1796,11 +1818,24 @@ namespace FixedPointEmulation
             const unsigned actual = std::min(chunk_size, effective_s - chunk_start);
 
             /* Scale: write actual moduli into A8i[0..actual-1] / B8i[0..actual-1] */
+            const bool int_res = use_int_residue_kernels(h->device);
             _pstart();
             dispatch_by_index<max_num_moduli<T>()>(actual, [&](auto Count) {
                 constexpr unsigned TC = Count.value;
-                launch_scale_A<TC>(tA, A, m, lda, A8i, lda8i, cola8i, sftA, k, chunk_start, stream);
-                launch_scale_B<TC>(tB, B, n, ldb, B8i, ldb8i, sftB, k, chunk_start, stream);
+                if(int_res)
+                {
+                    launch_scale_A<TC, T, true>(
+                        tA, A, m, lda, A8i, lda8i, cola8i, sftA, k, chunk_start, stream);
+                    launch_scale_B<TC, T, true>(
+                        tB, B, n, ldb, B8i, ldb8i, sftB, k, chunk_start, stream);
+                }
+                else
+                {
+                    launch_scale_A<TC, T, false>(
+                        tA, A, m, lda, A8i, lda8i, cola8i, sftA, k, chunk_start, stream);
+                    launch_scale_B<TC, T, false>(
+                        tB, B, n, ldb, B8i, ldb8i, sftB, k, chunk_start, stream);
+                }
             });
             _pstop(_t_scale);
 
@@ -1872,26 +1907,32 @@ namespace FixedPointEmulation
             const bool has_lo   = (effective_s > 7u);
             _pstart();
             dispatch_by_index<max_num_moduli<T>()>(actual, [&](auto Count) {
-                dispatch_accum_chunk<Count.value>(is_first,
-                                                  is_last,
-                                                  has_lo,
-                                                  C32i_batch,
-                                                  Zhi,
-                                                  Zlo,
-                                                  m,
-                                                  n,
-                                                  ldc32i,
-                                                  chunk_start,
-                                                  effective_s,
-                                                  C,
-                                                  D,
-                                                  ldc,
-                                                  ldd,
-                                                  *alpha,
-                                                  *beta,
-                                                  sftA,
-                                                  sftB,
-                                                  stream);
+                auto run = [&](auto IntRes) {
+                    dispatch_accum_chunk<Count.value, T, IntRes.value>(is_first,
+                                                                       is_last,
+                                                                       has_lo,
+                                                                       C32i_batch,
+                                                                       Zhi,
+                                                                       Zlo,
+                                                                       m,
+                                                                       n,
+                                                                       ldc32i,
+                                                                       chunk_start,
+                                                                       effective_s,
+                                                                       C,
+                                                                       D,
+                                                                       ldc,
+                                                                       ldd,
+                                                                       *alpha,
+                                                                       *beta,
+                                                                       sftA,
+                                                                       sftB,
+                                                                       stream);
+                };
+                if(int_res)
+                    run(std::true_type{});
+                else
+                    run(std::false_type{});
             });
 
             _pstop(_t_accum);

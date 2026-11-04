@@ -12,14 +12,21 @@
  *   accum_finalize_kernel  accumulate the final chunk and write D
  *
  * These kernels reconstruct the exact GEMM result from its CRT residues, then
- * range-reduce and scale it back to the output type.  When all moduli are
- * processed in one chunk, accum_finalize_kernel sums exactly in integer limbs;
- * with several chunks the partial sums are double-double (TwoSum) values.
+ * range-reduce and scale it back to the output type.
+ *
+ * Two variants are selected by the INT_RES template parameter (see
+ * kernel_common.hpp):
+ *   INT_RES = true : residues via integer/FP32 arithmetic; when all moduli are
+ *                    processed in one chunk, accum_finalize_kernel sums exactly
+ *                    in integer limbs.  Intended for devices with a low FP64
+ *                    rate.
+ *   INT_RES = false: residues via FP64 fma/rint and double-double (TwoSum)
+ *                    accumulation.  Intended for devices with a high FP64 rate.
  *
  * This header must be compiled as HIP.
  */
 
-#include "kernel_common.hpp" /* balanced_residue_i32 */
+#include "kernel_common.hpp" /* balanced_residue_dc, balanced_residue_i32 */
 #include "tables.hpp" /* qpi, inv_P, P_dd */
 
 #include <hip/hip_runtime.h>
@@ -28,7 +35,7 @@
 
 namespace FixedPointEmulation
 {
-    template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK>
+    template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK, bool INT_RES = true>
     __global__ static void chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
                                               double* __restrict__ Zhi_out,
                                               double* __restrict__ Zlo_out,
@@ -46,8 +53,8 @@ namespace FixedPointEmulation
         const size_t slice_stride = ldc32i * static_cast<size_t>(n);
         /* Two-pass: dc_s[CS] caches balanced residues from independent HBM loads.
          * Pass 1: all CS loads + residue reductions issued simultaneously (MLP, ~200cy
-         *   latency); the integer/FP32 reduction (balanced_residue_i32) overlaps HBM
-         *   latency. Uses CS×2 VGPRs (~52 for CS=16).
+         *   latency); the residue reduction overlaps HBM latency. Uses CS×2 VGPRs
+         *   (~52 for CS=16).
          * Pass 2: pure register TwoSum, loop-carried dep through Zhi only.
          * Note: storing dc as int32 (dc_int_s) was tested — same performance at all
          * sizes on gfx950 (kernel is HBM-bandwidth-limited there; higher occupancy does
@@ -57,8 +64,8 @@ namespace FixedPointEmulation
         for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local)
         {
             const unsigned t = chunk_start + t_local;
-            dc_s[t_local]    = static_cast<double>(
-                balanced_residue_i32(C32i_batch[t_local * slice_stride + idx], t));
+            dc_s[t_local]
+                = balanced_residue_dc<INT_RES>(C32i_batch[t_local * slice_stride + idx], t);
         }
         double Zhi = 0.0, Zlo = 0.0;
 #pragma unroll
@@ -102,7 +109,7 @@ namespace FixedPointEmulation
         }
     }
 
-    /* ── Exact integer CRT sum (single-chunk finalize) ─────────────────────────
+    /* ── Exact integer CRT sum (single-chunk finalize, INT_RES only) ───────────
      * Z = sum_t dc_t * qpi_t is held in 16-bit limbs (int32 per limb), folded
      * into X = Z - rint(Z / P) * P, and converted to double with one rounding,
      * so X is exact before the final rounding.  All operations are integer
@@ -178,7 +185,11 @@ namespace FixedPointEmulation
         return neg ? -d : d;
     }
 
-    template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK, typename T_out = double>
+    template <bool     HAS_LO,
+              unsigned CHUNK_SIZE,
+              bool     IS_FIRST_CHUNK,
+              typename T_out   = double,
+              bool     INT_RES = true>
     __global__ static void accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
                                                  const double* __restrict__ Zhi_in,
                                                  const double* __restrict__ Zlo_in,
@@ -204,7 +215,7 @@ namespace FixedPointEmulation
         const size_t slice_stride = ldc32i * static_cast<size_t>(n);
         const int    inv_sft = -(static_cast<int>(sftA[i]) + static_cast<int>(sftB[l]));
         double       x_scaled; /* ldexp(X, inv_sft), X = the reconstructed integer */
-        if constexpr(IS_FIRST_CHUNK)
+        if constexpr(INT_RES && IS_FIRST_CHUNK)
         {
             /* Single chunk: chunk_start == 0 and CHUNK_SIZE == effective_s.  Exact
              * integer CRT sum (see crt_sum_limbs); all CS loads are issued first
@@ -249,8 +260,8 @@ namespace FixedPointEmulation
             for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local)
             {
                 const unsigned t = chunk_start + t_local;
-                dc_s[t_local]    = static_cast<double>(
-                    balanced_residue_i32(C32i_batch[t_local * slice_stride + idx], t));
+                dc_s[t_local]
+                    = balanced_residue_dc<INT_RES>(C32i_batch[t_local * slice_stride + idx], t);
             }
             double Zhi = 0.0, Zlo = 0.0;
 #pragma unroll
@@ -270,7 +281,9 @@ namespace FixedPointEmulation
                 else
                     Zlo += err;
             }
-            /* Fold the prior chunks' Zhi_in/Zlo_in into Zhi/Zlo in-place. */
+            /* IS_FIRST_CHUNK: Zhi/Zlo already hold the final value (no prior chunk).
+             * Otherwise fold the prior chunks' Zhi_in/Zlo_in into Zhi/Zlo in-place. */
+            if constexpr(!IS_FIRST_CHUNK)
             {
                 const double old_hi = Zhi_in[idx];
                 const double s_hi   = old_hi + Zhi;
