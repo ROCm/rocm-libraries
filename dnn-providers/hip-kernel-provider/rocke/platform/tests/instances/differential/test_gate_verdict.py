@@ -442,7 +442,7 @@ class TestBatchAndBuildReuse(unittest.TestCase):
                 hashlib.sha256(b"1:2").hexdigest(),
             ],
         )
-        self.assertTrue(run_diff._is_end_emission(result.emissions[2]))
+        self.assertTrue(run_diff.is_end_emission(result.emissions[2]))
 
     def test_python_timeout_is_per_config_not_per_family(self):
         with TemporaryDirectory() as directory:

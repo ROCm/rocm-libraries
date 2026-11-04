@@ -16,9 +16,12 @@ kernel goes through both HIP lowerers, so a difference can only come from them.
 Each family's emitter runs in its own process through ``python_batch_worker.py``
 (the gate's worker) in the ``target-ir`` mode, which prints a ``target <gfx>``
 line and the serialized kernel for every kernel a config builds. A config the
-Python builder rejects prints nothing and has nothing to lower.
+Python builder rejects prints nothing and has nothing to lower; the test checks
+that the ``ir`` mode rejects it with the same error, so a failure of the
+target-ir path cannot pass as a rejection, and it fails any config that exits
+non-zero after printing output.
 
-Needs the ``rocke_engine`` extension; skipped without it.
+The family test needs the ``rocke_engine`` extension and is skipped without it.
 """
 
 from __future__ import annotations
@@ -31,17 +34,16 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("rocke_engine")
+from rocke.tests.engines import (
+    REFUSAL_ERROR_TYPES,
+    HipRefusal,
+    hip_outcomes_of_both_engines,
+)
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import run_diff  # noqa: E402 -- the differential harness is not a package
-
-from rocke.tests.engines import (  # noqa: E402
-    HipRefusal,
-    hip_outcomes_of_both_engines,
-)
 
 # Emitters that build no kernel, so they have no target-ir output.
 NO_KERNEL_FAMILIES = {
@@ -52,14 +54,19 @@ NO_KERNEL_FAMILIES = {
 # (the library attention emitters) take seconds; this bounds a hung emitter.
 EMITTER_TIMEOUT_S = 900
 
+# How a builder refusing a config ends: the exception line of one of these.
+_REFUSAL_TYPE_NAMES = frozenset(
+    error_type.__name__ for error_type in REFUSAL_ERROR_TYPES
+)
+
 FAMILIES = run_diff.find_families(python_only=True)
 
 
-def _target_ir_outputs(
-    name: str, src_dir: Path
+def _emitter_runs(
+    name: str, src_dir: Path, mode: str, indices: list[int]
 ) -> list[tuple[int, str, run_diff.Emission]]:
-    """Run one family's emitter in the target-ir mode over its configs; return
-    ``(config index, stdout, emission)`` for every config it ran."""
+    """Run one family's emitter in ``mode`` over the configs ``indices``, in one
+    process; return ``(config index, stdout, emission)`` for every config it ran."""
     emitter = src_dir / f"{name}_emit.py"
     with tempfile.TemporaryDirectory(prefix=f"hip_identity_{name}_") as out_dir:
         proc = subprocess.run(
@@ -69,8 +76,8 @@ def _target_ir_outputs(
                 "--output-dir",
                 out_dir,
                 str(emitter),
-                "target-ir",
-                *map(str, range(run_diff.config_limit(name))),
+                mode,
+                *map(str, indices),
             ],
             env=run_diff.python_emitter_env(src_dir),
             check=False,  # the assert below reports the worker's stderr
@@ -88,6 +95,55 @@ def _target_ir_outputs(
             text = out.read_text(encoding="utf-8") if out.exists() else ""
             runs.append((record["idx"], text, run_diff.emission_from_record(record)))
         return runs
+
+
+def _unexpected_failures(
+    name: str, src_dir: Path, runs: list[tuple[int, str, run_diff.Emission]]
+) -> list[str]:
+    """The configs of ``runs`` (target-ir mode) that failed for any reason but
+    the end of the config list or the builder refusing the config.
+
+    A config that exits non-zero after printing output, or exits zero with
+    none, is a failure: its kernels would silently drop out of the comparison.
+    A config that fails with no output is the builder's refusal only if it
+    raised one of the refusal types (``REFUSAL_ERROR_TYPES``), so a builder
+    crashing with, say, an AttributeError is a failure, and only if the ``ir``
+    mode, which builds the same kernel and only serializes it, refuses it with
+    the same error; otherwise the target-ir path itself failed."""
+    failures = []
+    refused: dict[int, str] = {}
+    for index, _, emission in runs:
+        if run_diff.is_end_emission(emission):
+            continue
+        if emission.returncode == 0 and emission.has_output:
+            continue
+        if emission.has_output:
+            failures.append(
+                f"config {index}: exited {emission.returncode} after printing "
+                f"output: {run_diff.last_error_line(emission)}"
+            )
+        elif emission.returncode == 0:
+            failures.append(f"config {index}: exited 0 without printing a kernel")
+        else:
+            error = run_diff.last_error_line(emission)
+            if error.split(":", 1)[0] in _REFUSAL_TYPE_NAMES:
+                refused[index] = error
+            else:
+                failures.append(f"config {index}: failed, not refused: {error}")
+    if refused:
+        for index, _, emission in _emitter_runs(name, src_dir, "ir", list(refused)):
+            ir_error = run_diff.last_error_line(emission)
+            if emission.returncode == 0 or emission.has_output:
+                failures.append(
+                    f"config {index}: failed in target-ir ({refused[index]}) but "
+                    "builds in ir"
+                )
+            elif ir_error != refused[index]:
+                failures.append(
+                    f"config {index}: failed in target-ir ({refused[index]}) and "
+                    f"in ir with another error ({ir_error})"
+                )
+    return failures
 
 
 def _kernels(text: str) -> list[tuple[str, str]]:
@@ -140,11 +196,63 @@ def _disagreement(
     return _first_difference(python_outcome, native_outcome)
 
 
+# An emitter with one config per way a config can end, for the check below.
+_OUTCOME_EMITTER = """
+import sys
+
+def main():
+    index, mode = int(sys.argv[1]), sys.argv[2]
+    if index == 0:
+        print("kernel")
+    elif index == 1:
+        raise ValueError("the builder refuses this config")
+    elif index == 2:
+        if mode == "target-ir":
+            raise ValueError("the target-ir path broke")
+        print("kernel")
+    elif index == 3:
+        print("half a kernel")
+        raise RuntimeError("failed after printing")
+    elif index == 4:
+        return 0
+    elif index == 5:
+        raise ValueError(f"refused as {mode}")
+    elif index == 6:
+        raise AttributeError("the builder broke")
+    else:
+        sys.stderr.write(f"unknown config {index}\\n")
+        return 1
+"""
+
+
+def test_only_builder_refusals_and_the_end_of_the_list_pass(tmp_path: Path) -> None:
+    (tmp_path / "outcomes_emit.py").write_text(_OUTCOME_EMITTER, encoding="utf-8")
+    runs = _emitter_runs("outcomes", tmp_path, "target-ir", list(range(9)))
+    assert [index for index, _, _ in runs] == [0, 1, 2, 3, 4, 5, 6, 7]
+    failures = _unexpected_failures("outcomes", tmp_path, runs)
+    assert failures == [
+        "config 3: exited 1 after printing output: RuntimeError: failed after printing",
+        "config 4: exited 0 without printing a kernel",
+        "config 6: failed, not refused: AttributeError: the builder broke",
+        (
+            "config 2: failed in target-ir (ValueError: the target-ir path "
+            "broke) but builds in ir"
+        ),
+        (
+            "config 5: failed in target-ir (ValueError: refused as target-ir) "
+            "and in ir with another error (ValueError: refused as ir)"
+        ),
+    ]
+
+
 @pytest.mark.parametrize(
     ("name", "src_dir"), FAMILIES, ids=[name for name, _ in FAMILIES]
 )
 def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None:
-    runs = _target_ir_outputs(name, src_dir)
+    pytest.importorskip("rocke_engine")
+    runs = _emitter_runs(
+        name, src_dir, "target-ir", list(range(run_diff.config_limit(name)))
+    )
     if name in NO_KERNEL_FAMILIES:
         assert runs and all(
             run_diff.mode_unsupported(emission) for _, _, emission in runs
@@ -156,6 +264,11 @@ def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None
     assert not any(
         run_diff.mode_unsupported(emission) for _, _, emission in runs
     ), f"{name}_emit.py does not accept the target-ir mode"
+    failures = _unexpected_failures(name, src_dir, runs)
+    assert not failures, (
+        f"{name}: {len(failures)} configs failed other than by the builder "
+        "refusing them:\n" + "\n".join(failures[:20])
+    )
 
     compared = 0
     disagreements = []
