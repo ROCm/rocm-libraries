@@ -34,27 +34,6 @@ const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_G
 namespace
 {
 
-/* Write the formatted reason (if a buffer was given) and return false. The
- * shared rocke_spec_set_reason marks a cut reason with "...". */
-bool reject(char* reason, size_t cap, const char* fmt, ...)
-{
-    if(reason != NULL && cap > 0)
-    {
-        va_list ap;
-        va_start(ap, fmt);
-        va_list again;
-        va_copy(again, ap);
-        const int len = vsnprintf(NULL, 0, fmt, ap);
-        va_end(ap);
-        std::string text(len > 0 ? (size_t)len : 0, '\0');
-        if(len > 0)
-            vsnprintf(&text[0], text.size() + 1, fmt, again);
-        va_end(again);
-        rocke_spec_set_reason(reason, cap, text.c_str());
-    }
-    return false;
-}
-
 bool streq(const char* a, const char* b)
 {
     return a != NULL && b != NULL && strcmp(a, b) == 0;
@@ -166,13 +145,44 @@ struct ExactProduct
     }
 };
 
-/* Python a // b: floors, where C's / truncates toward zero. b != 0. */
-int64_t py_floordiv(int64_t a, int64_t b)
+/* partial_tile_reason(spec): which sequence length leaves a partial tile on a
+ * ragged spec, or that both are already whole tiles. */
+std::string partial_tile_reason(const rocke_attention_dense_spec_t* s)
 {
-    int64_t q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
+    char buf[160];
+    std::string out;
+    if(s->seqlen_q % s->block_m != 0)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "seqlen_q %d is not a multiple of block_m %d",
+                 s->seqlen_q,
+                 s->block_m);
+        out = buf;
+    }
+    if(s->seqlen_kv % s->block_n != 0)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "seqlen_kv %d is not a multiple of block_n %d",
+                 s->seqlen_kv,
+                 s->block_n);
+        out += out.empty() ? "" : "; ";
+        out += buf;
+    }
+    if(out.empty())
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "ragged=True at seqlen_q %d and seqlen_kv %d, which are already multiples of "
+                 "block_m %d and block_n %d",
+                 s->seqlen_q,
+                 s->seqlen_kv,
+                 s->block_m,
+                 s->block_n);
+        out = buf;
+    }
+    return out;
 }
 
 bool contains(const char* const* items, size_t count, const char* s)
@@ -185,17 +195,17 @@ bool contains(const char* const* items, size_t count, const char* s)
 
 int64_t dense_nqb(const rocke_attention_dense_spec_t* s)
 {
-    return py_floordiv((int64_t)s->seqlen_q + s->block_m - 1, s->block_m);
+    return rocke_floor_div((int64_t)s->seqlen_q + s->block_m - 1, s->block_m);
 }
 
 int64_t dense_gqa(const rocke_attention_dense_spec_t* s)
 {
-    return py_floordiv(s->num_query_heads, s->num_kv_heads);
+    return rocke_floor_div(s->num_query_heads, s->num_kv_heads);
 }
 
 int64_t dense_num_waves(const rocke_attention_dense_spec_t* s)
 {
-    return py_floordiv(s->block_m, 32);
+    return rocke_floor_div(s->block_m, 32);
 }
 
 /* The fields the accessors divide by are usable: see SPEC PRECONDITION. */
@@ -237,11 +247,12 @@ struct DecodeInfo
 bool check_np_hq_minor_swz(const rocke_attention_dense_spec_t* s, bool, char* reason, size_t cap)
 {
     if(s->num_query_heads % s->chiplet_num_xcds != 0)
-        return reject(reason,
-                      cap,
-                      "hq_minor_swz needs num_query_heads (%d) divisible by chiplet_num_xcds (%d)",
-                      s->num_query_heads,
-                      s->chiplet_num_xcds);
+        ROCKE_SPEC_FAIL(
+            reason,
+            cap,
+            "hq_minor_swz needs num_query_heads (%d) divisible by chiplet_num_xcds (%d)",
+            s->num_query_heads,
+            s->chiplet_num_xcds);
     return true;
 }
 
@@ -249,15 +260,15 @@ bool check_hq_minor_swz(const rocke_attention_dense_spec_t* s, bool, char* reaso
 {
     if(s->num_query_heads % s->chiplet_num_xcds != 0
        || s->num_persistent % s->chiplet_num_xcds != 0)
-        return reject(reason,
-                      cap,
-                      "hq_minor_swz needs num_query_heads and num_persistent divisible by %d",
-                      s->chiplet_num_xcds);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "hq_minor_swz needs num_query_heads and num_persistent divisible by %d",
+                        s->chiplet_num_xcds);
     if(balance_causal(s) && dense_nqb(s) % 2 != 0)
-        return reject(reason,
-                      cap,
-                      "hq_minor_swz needs an even number of query blocks under causal "
-                      "masking without a sliding window");
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "hq_minor_swz needs an even number of query blocks under causal "
+                        "masking without a sliding window");
     return true;
 }
 
@@ -270,9 +281,9 @@ bool check_aligned_pair(const rocke_attention_dense_spec_t* s,
                         size_t cap)
 {
     if(!s->persistent || !s->causal || lookahead)
-        return reject(reason, cap, "%s requires persistent causal attention", name);
+        ROCKE_SPEC_FAIL(reason, cap, "%s requires persistent causal attention", name);
     if(s->ragged || s->varlen || s->paged)
-        return reject(reason, cap, "%s is validated only for aligned dense attention", name);
+        ROCKE_SPEC_FAIL(reason, cap, "%s is validated only for aligned dense attention", name);
     return true;
 }
 
@@ -282,17 +293,17 @@ bool check_gqa_pair(const rocke_attention_dense_spec_t* s, bool lookahead, char*
         return false;
     const int64_t nqb = dense_nqb(s);
     if(nqb % 2 != 0 || dense_gqa(s) % 2 != 0)
-        return reject(reason, cap, "gqa_pair requires even NQB and even GQA ratio");
+        ROCKE_SPEC_FAIL(reason, cap, "gqa_pair requires even NQB and even GQA ratio");
     const ExactProduct expected({nqb, s->num_kv_heads, s->batch});
     if(expected.compare(ExactProduct({s->num_persistent})) != 0)
     {
         char expected_text[64];
         expected.str(expected_text, sizeof(expected_text));
-        return reject(reason,
-                      cap,
-                      "gqa_pair requires num_persistent == NQB*Hkv*B (%s), got %d",
-                      expected_text,
-                      s->num_persistent);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "gqa_pair requires num_persistent == NQB*Hkv*B (%s), got %d",
+                        expected_text,
+                        s->num_persistent);
     }
     return true;
 }
@@ -307,17 +318,17 @@ bool check_gqa_pair_2phase(const rocke_attention_dense_spec_t* s,
     const int64_t nqb = dense_nqb(s);
     const int64_t gqa = dense_gqa(s);
     if(nqb % 2 != 0 || gqa < 2)
-        return reject(reason, cap, "gqa_pair_2phase requires even NQB and GQA ratio >= 2");
+        ROCKE_SPEC_FAIL(reason, cap, "gqa_pair_2phase requires even NQB and GQA ratio >= 2");
     const ExactProduct expected({nqb / 2, s->num_kv_heads, s->batch, gqa});
     if(expected.compare(ExactProduct({s->num_persistent})) != 0)
     {
         char expected_text[64];
         expected.str(expected_text, sizeof(expected_text));
-        return reject(reason,
-                      cap,
-                      "gqa_pair_2phase requires num_persistent == W/2 (%s), got %d",
-                      expected_text,
-                      s->num_persistent);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "gqa_pair_2phase requires num_persistent == W/2 (%s), got %d",
+                        expected_text,
+                        s->num_persistent);
     }
     return true;
 }
@@ -388,7 +399,7 @@ bool check_decode(const DecodeInfo (&table)[N],
         return true;
     const DecodeInfo* d = find_decode(table, value);
     if(d == NULL)
-        return reject(
+        ROCKE_SPEC_FAIL(
             reason, cap, "%s %s is not implemented by the C++ port", field, py_repr(value).c_str());
     return d->check == NULL || d->check(s, lookahead, reason, cap);
 }
@@ -443,95 +454,100 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                                          size_t cap)
 {
     if(s == NULL || t == NULL)
-        return reject(reason, cap, "attention dense spec is NULL");
+        ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
 
     if(!streq(s->dtype, "bf16") && !streq(s->dtype, "fp16"))
-        return reject(reason,
-                      cap,
-                      "dtype must be one of ['bf16', 'fp16'], got %s",
-                      s->dtype != NULL ? s->dtype : "None");
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "dtype must be one of ['bf16', 'fp16'], got %s",
+                        s->dtype != NULL ? s->dtype : "None");
     if(s->block_m <= 0)
-        return reject(reason, cap, "block_m must be positive, got %d", s->block_m);
+        ROCKE_SPEC_FAIL(reason, cap, "block_m must be positive, got %d", s->block_m);
     if(s->block_n <= 0 || s->block_n % 32 != 0)
-        return reject(reason, cap, "block_n must be a positive multiple of 32, got %d", s->block_n);
+        ROCKE_SPEC_FAIL(
+            reason, cap, "block_n must be a positive multiple of 32, got %d", s->block_n);
     if(s->head_size != 64 && s->head_size != 128)
-        return reject(reason, cap, "head_size must be 64 or 128, got %d", s->head_size);
+        ROCKE_SPEC_FAIL(reason, cap, "head_size must be 64 or 128, got %d", s->head_size);
     if(s->lds_k_group_pad < 0 || s->lds_k_group_pad % 8 != 0)
-        return reject(reason,
-                      cap,
-                      "lds_k_group_pad must be a non-negative multiple of 8 bf16 elements (16 "
-                      "bytes) so the K group pitch stays ds_read_b128-aligned, got %d",
-                      s->lds_k_group_pad);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "lds_k_group_pad must be a non-negative multiple of 8 bf16 elements (16 "
+                        "bytes) so the K group pitch stays ds_read_b128-aligned, got %d",
+                        s->lds_k_group_pad);
     if(s->causal_bottom_right)
     {
         if(!s->causal)
-            return reject(reason, cap, "causal_bottom_right requires causal=True");
+            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right requires causal=True");
         if(s->seqlen_q > s->seqlen_kv)
-            return reject(reason,
-                          cap,
-                          "causal_bottom_right requires seqlen_q <= seqlen_kv, got %d > %d",
-                          s->seqlen_q,
-                          s->seqlen_kv);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "causal_bottom_right requires seqlen_q <= seqlen_kv, got %d > %d",
+                            s->seqlen_q,
+                            s->seqlen_kv);
     }
 
     if(s->ragged)
     {
         if(s->seqlen_q <= 0 || s->seqlen_kv <= 0)
-            return reject(reason, cap, "ragged requires positive seqlen_q/seqlen_kv");
+            ROCKE_SPEC_FAIL(reason, cap, "ragged requires positive seqlen_q/seqlen_kv");
         if(s->seqlen_q != s->seqlen_kv && !s->causal && !t->supports_noncausal_cross_length_ragged)
-            return reject(reason,
-                          cap,
-                          "ragged is self-attention only (seqlen_q == seqlen_kv) unless causal "
-                          "(top-left or bottom-right) is set, got %d != %d",
-                          s->seqlen_q,
-                          s->seqlen_kv);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "ragged is self-attention only (seqlen_q == seqlen_kv) unless causal "
+                            "(top-left or bottom-right) is set, got %d != %d",
+                            s->seqlen_q,
+                            s->seqlen_kv);
         if(s->varlen)
-            return reject(reason, cap, "ragged is not supported with varlen");
+            ROCKE_SPEC_FAIL(reason, cap, "ragged is not supported with varlen");
         if(s->sliding_window > 0)
-            return reject(reason, cap, "ragged is not supported with sliding_window");
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "sliding_window needs whole tiles: %s (the partial-tile path has no "
+                            "window mask)",
+                            partial_tile_reason(s).c_str());
     }
     else
     {
         if(s->seqlen_q % s->block_m != 0)
-            return reject(reason,
-                          cap,
-                          "seqlen_q must be a multiple of block_m=%d, got %d",
-                          s->block_m,
-                          s->seqlen_q);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "seqlen_q must be a multiple of block_m=%d, got %d",
+                            s->block_m,
+                            s->seqlen_q);
         if(s->seqlen_kv % s->block_n != 0)
-            return reject(reason,
-                          cap,
-                          "seqlen_kv must be a multiple of block_n=%d, got %d",
-                          s->block_n,
-                          s->seqlen_kv);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "seqlen_kv must be a multiple of block_n=%d, got %d",
+                            s->block_n,
+                            s->seqlen_kv);
     }
 
     /* 64-bit remainder: INT_MIN % -1 is undefined in 32 bits. */
     if(s->num_kv_heads == 0 || (int64_t)s->num_query_heads % (int64_t)s->num_kv_heads != 0)
-        return reject(reason,
-                      cap,
-                      "num_query_heads (%d) must be a positive multiple of num_kv_heads (%d)",
-                      s->num_query_heads,
-                      s->num_kv_heads);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "num_query_heads (%d) must be a positive multiple of num_kv_heads (%d)",
+                        s->num_query_heads,
+                        s->num_kv_heads);
     if(!contains(t->persist_decodes, t->num_persist_decodes, s->persist_decode))
-        return reject(reason,
-                      cap,
-                      "persist_decode must be one of %s, got %s",
-                      py_str_list(t->persist_decodes, t->num_persist_decodes).c_str(),
-                      py_repr(s->persist_decode).c_str());
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "persist_decode must be one of %s, got %s",
+                        py_str_list(t->persist_decodes, t->num_persist_decodes).c_str(),
+                        py_repr(s->persist_decode).c_str());
     if(!contains(t->nonpersist_decodes, t->num_nonpersist_decodes, s->nonpersist_decode))
-        return reject(reason,
-                      cap,
-                      "nonpersist_decode must be one of %s, got %s",
-                      py_str_list(t->nonpersist_decodes, t->num_nonpersist_decodes).c_str(),
-                      py_repr(s->nonpersist_decode).c_str());
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "nonpersist_decode must be one of %s, got %s",
+                        py_str_list(t->nonpersist_decodes, t->num_nonpersist_decodes).c_str(),
+                        py_repr(s->nonpersist_decode).c_str());
     if(s->chiplet_num_xcds <= 0)
-        return reject(
+        ROCKE_SPEC_FAIL(
             reason, cap, "chiplet_num_xcds must be positive, got %d", s->chiplet_num_xcds);
     if(s->persistent)
     {
         if(s->num_persistent <= 0)
-            return reject(
+            ROCKE_SPEC_FAIL(
                 reason, cap, "num_persistent must be positive, got %d", s->num_persistent);
         if(!check_decode(
                k_persist_decodes, "persist_decode", s->persist_decode, s, lookahead, reason, cap))
@@ -546,94 +562,94 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                           cap))
         return false;
     if(s->sliding_window < 0)
-        return reject(reason, cap, "sliding_window must be >= 0, got %d", s->sliding_window);
+        ROCKE_SPEC_FAIL(reason, cap, "sliding_window must be >= 0, got %d", s->sliding_window);
     if(s->sliding_window > 0)
     {
         if(!s->causal && !t->supports_noncausal_window)
-            return reject(reason, cap, "sliding_window>0 requires causal=True");
+            ROCKE_SPEC_FAIL(reason, cap, "sliding_window>0 requires causal=True");
         if(s->sliding_window % s->block_n != 0)
-            return reject(reason,
-                          cap,
-                          "sliding_window (%d) must be a multiple of block_n=%d",
-                          s->sliding_window,
-                          s->block_n);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "sliding_window (%d) must be a multiple of block_n=%d",
+                            s->sliding_window,
+                            s->block_n);
     }
     if(s->varlen)
     {
         if(s->persistent)
-            return reject(reason, cap, "varlen is not supported with persistent=True");
+            ROCKE_SPEC_FAIL(reason, cap, "varlen is not supported with persistent=True");
         if(!s->causal)
-            return reject(reason, cap, "varlen requires causal=True");
+            ROCKE_SPEC_FAIL(reason, cap, "varlen requires causal=True");
     }
     if(s->waves_per_eu < 1 || s->waves_per_eu > 8)
-        return reject(reason, cap, "waves_per_eu must be in [1, 8], got %d", s->waves_per_eu);
+        ROCKE_SPEC_FAIL(reason, cap, "waves_per_eu must be in [1, 8], got %d", s->waves_per_eu);
 
     if(s->paged)
     {
         if(s->block_size <= 0)
-            return reject(reason, cap, "paged=True requires block_size > 0");
+            ROCKE_SPEC_FAIL(reason, cap, "paged=True requires block_size > 0");
         if((s->block_size & (s->block_size - 1)) != 0)
-            return reject(
+            ROCKE_SPEC_FAIL(
                 reason, cap, "paged block_size (%d) must be a power of two", s->block_size);
         if(s->block_n % s->block_size != 0)
-            return reject(reason,
-                          cap,
-                          "block_n (%d) must be a multiple of page block_size (%d)",
-                          s->block_n,
-                          s->block_size);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "block_n (%d) must be a multiple of page block_size (%d)",
+                            s->block_n,
+                            s->block_size);
         /* Python: rows_per_wave = block_n // num_waves. A block_m below 32 makes
          * num_waves 0, and a num_waves above block_n makes rows_per_wave 0 (then
          * block_size % 0); both raise ZeroDivisionError. Its text is the CPython
          * 3.14 one. */
         const int num_waves = (int)dense_num_waves(s);
         if(num_waves == 0)
-            return reject(reason, cap, "division by zero");
+            ROCKE_SPEC_FAIL(reason, cap, "division by zero");
         const int rows_per_wave = s->block_n / num_waves;
         if(s->block_size < rows_per_wave)
-            return reject(reason,
-                          cap,
-                          "paged block_size (%d) must be >= and a multiple of ROWS_PER_WAVE (%d)",
-                          s->block_size,
-                          rows_per_wave);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "paged block_size (%d) must be >= and a multiple of ROWS_PER_WAVE (%d)",
+                            s->block_size,
+                            rows_per_wave);
         if(rows_per_wave == 0)
-            return reject(reason, cap, "division by zero");
+            ROCKE_SPEC_FAIL(reason, cap, "division by zero");
         if(s->block_size % rows_per_wave != 0)
-            return reject(reason,
-                          cap,
-                          "paged block_size (%d) must be >= and a multiple of ROWS_PER_WAVE (%d)",
-                          s->block_size,
-                          rows_per_wave);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "paged block_size (%d) must be >= and a multiple of ROWS_PER_WAVE (%d)",
+                            s->block_size,
+                            rows_per_wave);
         if(s->num_kv_blocks <= 0)
-            return reject(reason, cap, "paged=True requires num_kv_blocks > 0");
+            ROCKE_SPEC_FAIL(reason, cap, "paged=True requires num_kv_blocks > 0");
         const ExactProduct cache_bytes(
             {s->num_kv_blocks, s->block_size, s->num_kv_heads, s->head_size, 2});
         if(cache_bytes.at_least(2147483648u))
         {
             char num[64];
             cache_bytes.str(num, sizeof(num));
-            return reject(reason, cap, "paged cache %s B exceeds i32 addressing (2 GiB)", num);
+            ROCKE_SPEC_FAIL(reason, cap, "paged cache %s B exceeds i32 addressing (2 GiB)", num);
         }
         if(s->batch != 1)
-            return reject(reason, cap, "paged multi-sequence (batch>1) not yet implemented");
+            ROCKE_SPEC_FAIL(reason, cap, "paged multi-sequence (batch>1) not yet implemented");
         if(s->varlen)
-            return reject(reason, cap, "paged varlen not yet implemented (single-seq only)");
+            ROCKE_SPEC_FAIL(reason, cap, "paged varlen not yet implemented (single-seq only)");
         if(s->persistent)
-            return reject(reason,
-                          cap,
-                          "paged + persistent not yet implemented (persistent builder is "
-                          "contiguous-only)");
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "paged + persistent not yet implemented (persistent builder is "
+                            "contiguous-only)");
         if(s->head_size != 128)
-            return reject(reason, cap, "paged not yet implemented for head_size != 128");
+            ROCKE_SPEC_FAIL(reason, cap, "paged not yet implemented for head_size != 128");
         if(!streq(s->dtype, "fp16") && !streq(s->dtype, "bf16"))
-            return reject(reason, cap, "paged not yet implemented for dtype=%s", s->dtype);
+            ROCKE_SPEC_FAIL(reason, cap, "paged not yet implemented for dtype=%s", s->dtype);
         if(s->sliding_window <= 0)
-            return reject(
+            ROCKE_SPEC_FAIL(
                 reason, cap, "paged not yet implemented for plain-causal (sliding_window>0 only)");
     }
     if(s->use_sinks && s->paged)
-        return reject(reason, cap, "use_sinks is not yet supported with paged KV");
+        ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
     if(s->use_sinks && s->varlen)
-        return reject(reason, cap, "use_sinks is not yet supported with varlen");
+        ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with varlen");
     return true;
 }
 
@@ -846,7 +862,7 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                                           size_t cap)
 {
     if(s == NULL || t == NULL || t->type_name == NULL)
-        return reject(reason, cap, "attention dense spec, traits or type_name is NULL");
+        ROCKE_SPEC_FAIL(reason, cap, "attention dense spec, traits or type_name is NULL");
 
     /* 1. Re-run the concrete type's validators: the base __post_init__ on this
      * same spec, then the arch's own fields. Both Python subclasses call
@@ -855,7 +871,7 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
     why[0] = '\0';
     if(!rocke_attention_dense_spec_validate(s, t, lookahead, why, sizeof(why))
        || (arch_validate != NULL && !arch_validate(ctx, why, sizeof(why))))
-        return reject(reason, cap, "invalid %s: %s", t->type_name, why);
+        ROCKE_SPEC_FAIL(reason, cap, "invalid %s: %s", t->type_name, why);
 
     /* 2. Positive extents. */
     const struct
@@ -872,18 +888,18 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
     };
     for(const auto& e : extents)
         if(e.value <= 0)
-            return reject(reason, cap, "%s must be positive, got %d", e.name, e.value);
+            ROCKE_SPEC_FAIL(reason, cap, "%s must be positive, got %d", e.name, e.value);
 
     /* 3. block_n divides the query tile. */
     if(s->block_m % s->block_n != 0)
-        return reject(reason,
-                      cap,
-                      "block_n must divide the %d-row query tile (got block_n=%d; the spec also "
-                      "requires block_n %% 32 == 0, so use 32, 64, 128 or 256). Load-bearing for "
-                      "causal=True, where n_per = %d // block_n floors and drops keys",
-                      s->block_m,
-                      s->block_n,
-                      s->block_m);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "block_n must divide the %d-row query tile (got block_n=%d; the spec also "
+                        "requires block_n %% 32 == 0, so use 32, 64, 128 or 256). Load-bearing for "
+                        "causal=True, where n_per = %d // block_n floors and drops keys",
+                        s->block_m,
+                        s->block_n,
+                        s->block_m);
 
     /* 4. 32-bit addressing. */
     const ExactProduct kv_bytes({s->batch, s->seqlen_kv, s->num_kv_heads, s->head_size, 2});
@@ -891,22 +907,22 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
     {
         char num[64];
         kv_bytes.str(num, sizeof(num));
-        return reject(reason,
-                      cap,
-                      "K/V extent is %s B, at or past the 32-bit buffer-resource limit (%lld B)",
-                      num,
-                      ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "K/V extent is %s B, at or past the 32-bit buffer-resource limit (%lld B)",
+                        num,
+                        ROCKE_ATTENTION_DENSE_INT32_LIMIT);
     }
     const ExactProduct qo_elems({s->batch, s->seqlen_q, s->num_query_heads, s->head_size});
     if(qo_elems.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
     {
         char num[64];
         qo_elems.str(num, sizeof(num));
-        return reject(reason,
-                      cap,
-                      "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
-                      num,
-                      ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
+                        num,
+                        ROCKE_ATTENTION_DENSE_INT32_LIMIT);
     }
     if(reason != NULL && cap > 0)
         reason[0] = '\0';

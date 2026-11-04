@@ -49,8 +49,9 @@
  * with no Python ValueError text:
  *   - the two paged geometries where Python raises ZeroDivisionError instead
  *     (block_m < 32, or more waves than block_n rows): the fixed text
- *     "division by zero" (CPython 3.14's; 3.12 says "integer division or
- *     modulo by zero"), so those are compared by verdict only;
+ *     "division by zero" (CPython 3.14's; older versions word it per operator,
+ *     "integer division or modulo by zero" or "integer modulo by zero"), so
+ *     those are compared by verdict only;
  *   - a decode the traits list but this port does not implement (Python raises
  *     KeyError): "<field> '<name>' is not implemented by the C++ port";
  *   - a NULL spec or traits: "attention dense spec is NULL" from validate,

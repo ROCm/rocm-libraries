@@ -122,6 +122,10 @@ _CASES: tuple[dict, ...] = (
     dict(ragged=True, seqlen_q=300, causal=False),
     dict(ragged=True, seqlen_q=500, varlen=True),
     dict(ragged=True, seqlen_q=500, sliding_window=64),
+    # partial_tile_reason's other branches: only seqlen_kv partial, both, neither.
+    dict(ragged=True, seqlen_kv=500, sliding_window=64),
+    dict(ragged=True, seqlen_q=500, seqlen_kv=500, sliding_window=64),
+    dict(ragged=True, sliding_window=64),
     dict(seqlen_q=500),
     dict(seqlen_kv=500),
     dict(seqlen_q=-256),

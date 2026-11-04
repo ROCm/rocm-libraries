@@ -858,6 +858,11 @@ void rocke_spec_set_reasonf(char* reason, size_t cap, const char* fmt, ...)
     }
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(reason, cap, fmt, ap);
+    const int len = vsnprintf(reason, cap, fmt, ap);
     va_end(ap);
+    /* Same rule as rocke_spec_set_reason: a cut reason ends in "...". */
+    if(len >= 0 && (size_t)len >= cap && cap >= 4)
+    {
+        memcpy(reason + cap - 4, "...", 4);
+    }
 }
