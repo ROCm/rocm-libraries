@@ -313,16 +313,18 @@ void geqrf_getError(const hipsolverHandle_t   handle,
                     Uh&                       hIpiv,
                     INTh&                     hInfo,
                     INTh&                     hInfoRes,
-                    double*                   max_err)
+                    double*                   max_errors)
 {
     using S = decltype(std::real(T{}));
 
-    const I min_mn = std::min(m, n);
+    const I min_mn  = std::min(m, n);
+    const T one     = 1;
+    const T neg_one = -1;
 
     // todo: query unmqr for workspace size; currently assume nb=64 is good enough.
     const I        nb = 64;
-    std::vector<T> hW(n * nb);
-    std::vector<S> hrwork(m);
+    std::vector<T> hW(std::max(n * nb, I(1)));
+    std::vector<T> hC(lda * n, T(0));
 
     // input data initialization
     geqrf_initData<true, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
@@ -355,14 +357,16 @@ void geqrf_getError(const hipsolverHandle_t   handle,
     // Pointer batched has single info, not array.
     EXPECT_EQ(hInfoRes[0][0], 0);
 
-    *max_err = 0;
+    //--------------------
+    // Check 0: Backward error: norm( Q*R - A ) / (m * norm( A )), using 1-norm.
+    max_errors[0] = 0;
     for(int b = 0; b < bc; ++b)
     {
-        // Copy R: upper trapezoid of A, zero elsewhere.
-        std::vector<T> hC(lda * n, T(0));
+        // Copy C = R: upper trapezoid of A, zero elsewhere.
+        std::fill(hC.begin(), hC.end(), T(0));
         cpu_lacpy(HIPSOLVER_FILL_MODE_UPPER, min_mn, n, hARes[b], lda, hC.data(), lda);
 
-        // Compute Q*R using unmqr.
+        // Compute C = Q*R using unmqr.
         int info = 0;
         cpu_ormqr_unmqr(HIPSOLVER_SIDE_LEFT,
                         HIPSOLVER_OP_N,
@@ -379,7 +383,7 @@ void geqrf_getError(const hipsolverHandle_t   handle,
                         &info);
         EXPECT_EQ(info, 0) << "where b = " << b;
 
-        // Compute Q*R - A.
+        // Compute C = Q*R - A.
         for(I j = 0; j < n; ++j)
             for(I i = 0; i < m; ++i)
                 hC[i + j * lda] -= hA[b][i + j * lda];
@@ -388,12 +392,55 @@ void geqrf_getError(const hipsolverHandle_t   handle,
         int    m_     = int(m);
         int    n_     = int(n);
         int    lda_   = int(lda);
-        double A_norm = xlange("1", &m_, &n_, hA[b], &lda_, hrwork.data());
-        double err    = xlange("1", &m_, &n_, hC.data(), &lda_, hrwork.data());
-        err /= m;
+        double A_norm = snorm('1', m_, n_, hA[b], lda_);
+        double err    = snorm('1', m_, n_, hC.data(), lda_);
+        if(m > 0)
+            err /= m;
         if(A_norm != 0)
             err /= A_norm;
-        max_err[0] = hipsolver_max_nan(err, max_err[0]);
+        max_errors[0] = hipsolver_max_nan(err, max_errors[0]);
+    }
+
+    //--------------------
+    // Check 1: Orthogonality: norm( I - Q^H * Q ) / m, using 1-norm.
+    max_errors[1] = 0;
+    for(int b = 0; b < bc; ++b)
+    {
+        // Generate explicit Q (m x min_mn) in A via ungqr.
+        int info = 0;
+        cpu_orgqr_ungqr(m, min_mn, min_mn, hARes[b], lda, hIpiv[b], hW.data(), hW.size(), &info);
+        EXPECT_EQ(info, 0) << "where b = " << b;
+
+        // Set C = I (min_mn x min_mn).
+        // todo: replace with laset
+        for(int j = 0; j < min_mn; ++j)
+        {
+            for(int i = 0; i < min_mn; ++i)
+            {
+                hC[i + j * lda] = (i == j ? 1 : 0);
+            }
+        }
+
+        // Compute C = I - Q^H * Q.
+        cpu_gemm(HIPSOLVER_OP_C,
+                 HIPSOLVER_OP_N,
+                 min_mn,
+                 min_mn,
+                 min_mn,
+                 neg_one,
+                 hARes[b], // -Q^H
+                 lda,
+                 hARes[b], // Q
+                 lda,
+                 one,
+                 hC.data(), // I
+                 lda);
+
+        // Compute norm( I - Q^H * Q ).
+        double err = snorm('1', min_mn, min_mn, hC.data(), lda);
+        if(m > 0)
+            err /= m;
+        max_errors[1] = hipsolver_max_nan(err, max_errors[1]);
     }
 }
 
@@ -523,9 +570,10 @@ void testing_geqrf(Arguments& argus)
     // N/A
 
     // determine sizes
-    size_t size_A    = size_t(lda) * n;
-    size_t size_P    = size_t(min(m, n));
-    double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
+    size_t size_A        = size_t(lda) * n;
+    size_t size_P        = size_t(min(m, n));
+    double max_errors[2] = {0};
+    double gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
 
@@ -639,7 +687,7 @@ void testing_geqrf(Arguments& argus)
                                             hIpiv,
                                             hInfo,
                                             hInfoRes,
-                                            &max_error);
+                                            max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -709,7 +757,7 @@ void testing_geqrf(Arguments& argus)
                                             hIpiv,
                                             hInfo,
                                             hInfoRes,
-                                            &max_error);
+                                            max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -741,7 +789,10 @@ void testing_geqrf(Arguments& argus)
     // using 15*machine_precision as tolerance (LAPACK uses 30 ulp/2).
     // max_error is already normalized, e.g., by m.
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 15);
+    {
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 15);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], 15);
+    }
 
     // output results for rocsolver-bench
     if(argus.timing)
@@ -771,8 +822,8 @@ void testing_geqrf(Arguments& argus)
             std::cerr << "============================================\n";
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time", "gpu_time", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time", "gpu_time", "error", "ortho");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1]);
             }
             else
             {
@@ -784,7 +835,7 @@ void testing_geqrf(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, max_errors[0], max_errors[1]);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
