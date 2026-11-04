@@ -438,11 +438,12 @@ def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
     assert str(native.value).endswith(": " + _reuse_message(reused)), str(native.value)
 
 
-def _nested_loops_renaming(renames):
+def _nested_loops_renaming(renames, iv_type_attr=None):
     """A rolled loop ``k`` over ``acc`` whose body holds a rolled loop ``j``
     over ``s``, built by the builder; then, past it, each value of the inner
     loop named in ``renames`` takes the name it maps to, in the loop's attrs
-    and in the value every read of it sees."""
+    and in the value every read of it sees, and the inner loop's ``iv_type``
+    attr becomes ``iv_type_attr`` when that is given."""
     b, _, z, lane = _kernel("verify_reuse")
     outer = _inner_loop(b, "k", "acc", lane, unroll=False)
     with outer as (_, (acc,)):
@@ -453,6 +454,8 @@ def _nested_loops_renaming(renames):
     b.global_store(z, lane, outer.results[0])
     b.ret()
     loop = inner.op
+    if iv_type_attr is not None:
+        loop.attrs["iv_type"] = iv_type_attr
     loop.attrs["iv"] = renames.get(loop.attrs["iv"], loop.attrs["iv"])
     for meta in loop.attrs["iter_args"]:
         meta["name"] = renames.get(meta["name"], meta["name"])
@@ -485,6 +488,16 @@ def test_the_verifier_reports_a_reused_loop_name(renames, reported):
     diagnostics = verify(_nested_loops_renaming(renames))
     assert [(d.severity, d.message) for d in diagnostics] == [
         ("error", _reuse_message(reported))
+    ]
+
+
+def test_the_verifier_counts_an_induction_variable_whose_type_is_not_named():
+    """The induction variable is a loop name whenever the loop names it, also
+    when its ``iv_type`` attr is not a type name, as in the C++ verifier
+    (``tests/core/test_scf_for_name_reuse.cpp``)."""
+    diagnostics = verify(_nested_loops_renaming({"%j": "%k"}, iv_type_attr=0))
+    assert [(d.severity, d.message) for d in diagnostics] == [
+        ("error", _reuse_message("%k"))
     ]
 
 

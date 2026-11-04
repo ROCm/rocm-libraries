@@ -2322,7 +2322,7 @@ static const char** flow_enclosing_loop_value_names(rocke_ir_builder_t* b, size_
         = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * (count ? count : 1));
     if(!names)
     {
-        rocke_i_set_err(b, ROCKE_ERR_OOM, "scf_for: OOM");
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "scf.for loop names: OOM");
     }
     size_t filled = 0;
     for(int d = 1; d < b->region_depth; ++d)

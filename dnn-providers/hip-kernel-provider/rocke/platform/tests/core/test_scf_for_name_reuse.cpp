@@ -246,8 +246,11 @@ std::string diagnostics(const rocke_kernel_def_t* kernel)
 /* The diagnostics for a rolled loop "k0" over "acc" whose body holds a rolled
  * loop "j" over "s", built by the builder; then, past it, the inner loop's
  * induction variable is renamed to `iv_name` and its carried value to
- * `carried_name`, in the loop's attrs and in the values every read sees. */
-std::string diagnostics_renaming(const char* iv_name, const char* carried_name)
+ * `carried_name`, in the loop's attrs and in the values every read sees. With
+ * `iv_type_not_a_name`, the inner loop's iv_type attr becomes an integer. */
+std::string diagnostics_renaming(const char* iv_name,
+                                 const char* carried_name,
+                                 bool iv_type_not_a_name = false)
 {
     Kernel k("verify_reuse");
     rocke_for_t outer = k.loop("k0", "acc");
@@ -260,6 +263,10 @@ std::string diagnostics_renaming(const char* iv_name, const char* carried_name)
     rocke_b_scf_yield(&k.b, inner.op->results, 1);
     rocke_b_region_leave(&k.b);
     rocke_b_ret(&k.b);
+    if(iv_type_not_a_name)
+    {
+        rocke_attr_set_int(&k.b, &inner.op->attrs, "iv_type", 0);
+    }
     rocke_attr_set_str(&k.b, &inner.op->attrs, "iv", iv_name);
     inner.iv->name = iv_name;
     rocke_attr_map_t* carried = rocke_attr_get(&inner.op->attrs, "iter_args")->u.list.items[0];
@@ -294,6 +301,15 @@ void verifier_reports_reused_loop_names()
     }
 }
 
+/* The induction variable is a loop name whenever the loop names it, also when
+ * its iv_type attr is not a type name, as in the Python verifier. */
+void verifier_counts_an_induction_variable_whose_type_is_not_named()
+{
+    const std::string reported = diagnostics_renaming("%k0", "%s", /*iv_type_not_a_name=*/true);
+    check(reported == "error: " + message("%k0") + "\n",
+          "verifying an inner loop over %k0 with an integer iv_type: '" + reported + "'");
+}
+
 void verifier_accepts_the_names_the_builder_gave()
 {
     const std::string reported = diagnostics_renaming("%j", "%s");
@@ -313,6 +329,7 @@ int main()
     parser_refuses_reused_loop_names();
     parser_accepts_the_names_the_builder_gave();
     verifier_reports_reused_loop_names();
+    verifier_counts_an_induction_variable_whose_type_is_not_named();
     verifier_accepts_the_names_the_builder_gave();
     if(g_failures)
     {
