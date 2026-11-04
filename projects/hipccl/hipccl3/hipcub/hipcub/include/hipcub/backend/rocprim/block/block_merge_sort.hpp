@@ -50,16 +50,14 @@ BEGIN_HIPCUB_NAMESPACE
 // Merging Made Simple", Multithreaded Architectures and Applications (MTAAP)
 // Workshop, IEEE 26th International Parallel & Distributed Processing
 // Symposium (IPDPS), 2012
-template <typename KeyT,
-        typename KeyIteratorT,
-        typename OffsetT,
-        typename BinaryPred>
-HIPCUB_DEVICE __forceinline__ OffsetT MergePath(KeyIteratorT keys1,
-                                            KeyIteratorT keys2,
-                                            OffsetT keys1_count,
-                                            OffsetT keys2_count,
-                                            OffsetT diag,
-                                            BinaryPred binary_pred)
+template<typename KeyT, typename KeyIteratorT, typename OffsetT, typename BinaryPred>
+_CCCL_DEVICE __forceinline__
+OffsetT MergePath(KeyIteratorT keys1,
+                  KeyIteratorT keys2,
+                  OffsetT      keys1_count,
+                  OffsetT      keys2_count,
+                  OffsetT      diag,
+                  BinaryPred   binary_pred)
 {
    OffsetT keys1_begin = diag < keys2_count ? 0 : diag - keys2_count;
    OffsetT keys1_end   = (::rocprim::min)(diag, keys1_count);
@@ -84,7 +82,7 @@ HIPCUB_DEVICE __forceinline__ OffsetT MergePath(KeyIteratorT keys1,
 }
 
 template<typename KeyIt, typename KeyT, typename CompareOp, int ItemsPerThread>
-HIPCUB_DEVICE __forceinline__
+_CCCL_DEVICE __forceinline__
 void SerialMerge(KeyIt keys_shared,
                  int   keys1_beg,
                  int   keys2_beg,
@@ -101,7 +99,7 @@ void SerialMerge(KeyIt keys_shared,
    KeyT key1 = keys1_count != 0 ? keys_shared[keys1_beg] : oob_default;
    KeyT key2 = keys2_count != 0 ? keys_shared[keys2_beg] : oob_default;
 
-   HIPCUB_SORT_MAYBE_UNROLL()
+   _CCCL_SORT_MAYBE_UNROLL()
    for(int item = 0; item < ItemsPerThread; ++item)
    {
        bool p = (keys2_beg < keys2_end) &&
@@ -123,7 +121,7 @@ void SerialMerge(KeyIt keys_shared,
 }
 
 template<typename KeyIt, typename KeyT, typename CompareOp, int ItemsPerThread>
-HIPCUB_DEVICE __forceinline__
+_CCCL_DEVICE __forceinline__
 void SerialMerge(KeyIt keys_shared,
                  int   keys1_beg,
                  int   keys2_beg,
@@ -222,7 +220,8 @@ private:
   _TempStorage &temp_storage;
 
   /// Internal storage allocator
-  HIPCUB_DEVICE __forceinline__ _TempStorage& PrivateStorage()
+  _CCCL_DEVICE __forceinline__
+  _TempStorage& PrivateStorage()
   {
     __shared__ _TempStorage private_storage;
     return private_storage;
@@ -234,19 +233,18 @@ public:
   struct TempStorage : Uninitialized<_TempStorage> {};
 
   BlockMergeSortStrategy() = delete;
-  explicit HIPCUB_DEVICE __forceinline__
+  explicit _CCCL_DEVICE __forceinline__
   BlockMergeSortStrategy(unsigned int linear_tid)
-      : temp_storage(PrivateStorage())
-      , linear_tid(linear_tid)
+      : temp_storage(PrivateStorage()), linear_tid(linear_tid)
   {}
 
-  HIPCUB_DEVICE __forceinline__ BlockMergeSortStrategy(TempStorage &temp_storage,
-                                                    unsigned int linear_tid)
-      : temp_storage(temp_storage.Alias())
-      , linear_tid(linear_tid)
+  _CCCL_DEVICE __forceinline__
+  BlockMergeSortStrategy(TempStorage& temp_storage, unsigned int linear_tid)
+      : temp_storage(temp_storage.Alias()), linear_tid(linear_tid)
   {}
 
-  HIPCUB_DEVICE __forceinline__ unsigned int get_linear_tid() const
+  _CCCL_DEVICE __forceinline__
+  unsigned int get_linear_tid() const
   {
     return linear_tid;
   }
@@ -274,7 +272,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void Sort(KeyT (&keys)[ItemsPerThread], CompareOp compare_op)
   {
       ValueT items[ItemsPerThread];
@@ -316,7 +314,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void Sort(KeyT (&keys)[ItemsPerThread], CompareOp compare_op, int valid_items, KeyT oob_default)
   {
       ValueT items[ItemsPerThread];
@@ -348,7 +346,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void Sort(KeyT (&keys)[ItemsPerThread], ValueT (&items)[ItemsPerThread], CompareOp compare_op)
   {
     Sort<CompareOp, false>(keys, items, compare_op, ITEMS_PER_TILE, keys[0]);
@@ -395,7 +393,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp, bool IS_LAST_TILE = true>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void Sort(KeyT (&keys)[ItemsPerThread],
             ValueT (&items)[ItemsPerThread],
             CompareOp compare_op,
@@ -409,7 +407,7 @@ public:
           //
           KeyT max_key = oob_default;
 
-          HIPCUB_SORT_MAYBE_UNROLL()
+          _CCCL_SORT_MAYBE_UNROLL()
           for(int item = 1; item < ItemsPerThread; ++item)
           {
               if(ItemsPerThread * static_cast<int>(linear_tid) + item < valid_items)
@@ -443,7 +441,7 @@ public:
 
           // store keys in shmem
           //
-          HIPCUB_PRAGMA_NOUNROLL()
+          _CCCL_PRAGMA_UNROLL_FULL()
           for(int item = 0; item < ItemsPerThread; ++item)
           {
               int idx                       = ItemsPerThread * linear_tid + item;
@@ -501,7 +499,7 @@ public:
 
               // store keys in shmem
               //
-              HIPCUB_PRAGMA_NOUNROLL()
+              _CCCL_PRAGMA_UNROLL_FULL()
               for(int item = 0; item < ItemsPerThread; ++item)
               {
                   int idx                        = ItemsPerThread * linear_tid + item;
@@ -512,7 +510,7 @@ public:
 
               // gather items from shmem
               //
-              HIPCUB_PRAGMA_NOUNROLL()
+              _CCCL_PRAGMA_UNROLL_FULL()
               for(int item = 0; item < ItemsPerThread; ++item)
               {
                   items[item] = temp_storage.items_shared[indices[item]];
@@ -545,7 +543,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void StableSort(KeyT (&keys)[ItemsPerThread], CompareOp compare_op)
   {
     Sort(keys, compare_op);
@@ -578,7 +576,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void StableSort(KeyT (&keys)[ItemsPerThread],
                   ValueT (&items)[ItemsPerThread],
                   CompareOp compare_op)
@@ -623,7 +621,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void StableSort(KeyT (&keys)[ItemsPerThread],
                   CompareOp compare_op,
                   int       valid_items,
@@ -674,7 +672,7 @@ public:
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
   template<typename CompareOp, bool IS_LAST_TILE = true>
-  HIPCUB_DEVICE __forceinline__
+  _CCCL_DEVICE __forceinline__
   void StableSort(KeyT (&keys)[ItemsPerThread],
                   ValueT (&items)[ItemsPerThread],
                   CompareOp compare_op,
@@ -689,10 +687,11 @@ public:
   }
 
 private:
-  HIPCUB_DEVICE __forceinline__ void Sync() const
-  {
-    static_cast<const SynchronizationPolicy*>(this)->SyncImplementation();
-  }
+    _CCCL_DEVICE __forceinline__
+    void Sync() const
+    {
+        static_cast<const SynchronizationPolicy*>(this)->SyncImplementation();
+    }
 };
 
 /**
@@ -797,21 +796,22 @@ private:
         = BlockMergeSortStrategy<KeyT, ValueT, BlockThreads, ItemsPerThread, BlockMergeSort>;
 
 public:
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     BlockMergeSort()
         : BlockMergeSortStrategyT(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {}
 
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     explicit BlockMergeSort(typename BlockMergeSortStrategyT::TempStorage& temp_storage)
         : BlockMergeSortStrategyT(temp_storage, RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {}
 
 private:
-  HIPCUB_DEVICE __forceinline__ void SyncImplementation() const
-  {
-      __syncthreads();
-  }
+    _CCCL_DEVICE __forceinline__
+    void SyncImplementation() const
+    {
+        __syncthreads();
+    }
 
   friend BlockMergeSortStrategyT;
 };

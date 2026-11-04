@@ -86,7 +86,7 @@ auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
                                BinaryFunction scan_op)
     -> typename std::enable_if<!Exclusive>::type
 {
-    if(UsePrefix)
+    if constexpr(UsePrefix)
     {
         auto prefix_op =
             [&prefix, scan_op](const T& reduction)
@@ -95,23 +95,18 @@ auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
                 prefix = scan_op(prefix, reduction);
                 return saved_prefix;
             };
-        BlockScanType()
-            .inclusive_scan(
-                input, output,
-                storage, prefix_op, scan_op
-            );
-        return;
+        BlockScanType().inclusive_scan(input, output, storage, prefix_op, scan_op);
     }
-    BlockScanType()
-        .inclusive_scan(
-            input, output, prefix,
-            storage, scan_op
-        );
+    else
+    {
+        BlockScanType().inclusive_scan(input, output, prefix, storage, scan_op);
+    }
 }
 
 template<
     class TargetConfig,
     bool Exclusive,
+    bool UsePrefix,
     class ResultType,
     class InputIterator,
     class OutputIterator,
@@ -186,9 +181,11 @@ void segmented_scan(InputIterator input,
         block_load_type().load(input + block_offset, values, valid_count, storage.load);
         ::rocprim::syncthreads();
         // Perform scan operation
-        segmented_scan_block_scan<Exclusive, false, block_scan_type>(
-            values, values, prefix, storage.scan, scan_op
-        );
+        segmented_scan_block_scan<Exclusive, UsePrefix, block_scan_type>(values,
+                                                                         values,
+                                                                         prefix,
+                                                                         storage.scan,
+                                                                         scan_op);
         ::rocprim::syncthreads();
         // Store the partial block
         block_store_type().store(output + block_offset, values, valid_count, storage.store);
@@ -201,9 +198,11 @@ void segmented_scan(InputIterator input,
         block_load_type().load(input + block_offset, values, storage.load);
         ::rocprim::syncthreads();
         // Perform scan operation
-        segmented_scan_block_scan<Exclusive, false, block_scan_type>(
-            values, values, prefix, storage.scan, scan_op
-        );
+        segmented_scan_block_scan<Exclusive, UsePrefix, block_scan_type>(values,
+                                                                         values,
+                                                                         prefix,
+                                                                         storage.scan,
+                                                                         scan_op);
         ::rocprim::syncthreads();
         // Store
         block_store_type().store(output + block_offset, values, storage.store);
@@ -216,9 +215,11 @@ void segmented_scan(InputIterator input,
             block_load_type().load(input + block_offset, values, storage.load);
             ::rocprim::syncthreads();
             // Perform scan operation
-            segmented_scan_block_scan<Exclusive, true, block_scan_type>(
-                values, values, prefix, storage.scan, scan_op
-            );
+            segmented_scan_block_scan<Exclusive, true /*UsePrefix*/, block_scan_type>(values,
+                                                                                      values,
+                                                                                      prefix,
+                                                                                      storage.scan,
+                                                                                      scan_op);
             ::rocprim::syncthreads();
             block_store_type().store(output + block_offset, values, storage.store);
             ::rocprim::syncthreads();
@@ -230,12 +231,157 @@ void segmented_scan(InputIterator input,
         block_load_type().load(input + block_offset, values, valid_count, storage.load);
         ::rocprim::syncthreads();
         // Perform scan operation
-        segmented_scan_block_scan<Exclusive, true, block_scan_type>(
-            values, values, prefix, storage.scan, scan_op
-        );
+        segmented_scan_block_scan<Exclusive, true /*UsePrefix*/, block_scan_type>(values,
+                                                                                  values,
+                                                                                  prefix,
+                                                                                  storage.scan,
+                                                                                  scan_op);
         ::rocprim::syncthreads();
         // Store the partial block
         block_store_type().store(output + block_offset, values, valid_count, storage.store);
+    }
+}
+
+template<
+    class TargetConfig,
+    bool Exclusive,
+    bool UsePrefix,
+    class ResultType,
+    class InputIterator,
+    class OutputIterator,
+    class OffsetIterator,
+    class InitValueType,
+    class BinaryFunction
+>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+void segmented_scan(InputIterator input,
+                    OutputIterator output,
+                    OffsetIterator begin_offsets,
+                    OffsetIterator end_offsets,
+                    OffsetIterator begin_out_offsets,
+                    InitValueType initial_value,
+                    BinaryFunction scan_op)
+{
+    static constexpr scan_config_params params = TargetConfig::params;
+
+    constexpr auto         block_size       = params.kernel_config.block_size;
+    constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
+    constexpr unsigned int items_per_block  = block_size * items_per_thread;
+
+    using result_type      = ResultType;
+    using block_load_type  = ::rocprim::block_load<result_type,
+                                                   block_size,
+                                                   items_per_thread,
+                                                   params.block_load_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
+    using block_store_type = ::rocprim::block_store<result_type,
+                                                    block_size,
+                                                    items_per_thread,
+                                                    params.block_store_method,
+                                                    1,
+                                                    1,
+                                                    TargetConfig::wavefront>;
+    using block_scan_type  = ::rocprim::block_scan<result_type,
+                                                   block_size,
+                                                   params.block_scan_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+        typename block_load_type::storage_type  load;
+        typename block_store_type::storage_type store;
+        typename block_scan_type::storage_type  scan;
+    } storage;
+
+    const unsigned int segment_id   = ::rocprim::detail::block_id<0>();
+    const unsigned int begin_offset = begin_offsets[segment_id];
+    const unsigned int end_offset   = end_offsets[segment_id];
+
+    // Empty segment
+    if(end_offset <= begin_offset)
+    {
+        return;
+    }
+
+    // Input values
+    result_type values[items_per_thread];
+    result_type prefix = initial_value;
+
+    unsigned int block_offset = begin_offset;
+    unsigned int out_offset   = begin_out_offsets[segment_id];
+    if(block_offset + items_per_block > end_offset)
+    {
+        // Segment is shorter than items_per_block
+
+        // Load the partial block
+        const unsigned int valid_count = end_offset - block_offset;
+        block_load_type().load(input + block_offset, values, valid_count, storage.load);
+        ::rocprim::syncthreads();
+        // Perform scan operation
+        segmented_scan_block_scan<Exclusive, UsePrefix, block_scan_type>(values,
+                                                                         values,
+                                                                         prefix,
+                                                                         storage.scan,
+                                                                         scan_op);
+        ::rocprim::syncthreads();
+        // Store the partial block
+        block_store_type().store(output + out_offset, values, valid_count, storage.store);
+    }
+    else
+    {
+        // Long segments
+
+        // Load the first block of input values
+        block_load_type().load(input + block_offset, values, storage.load);
+        ::rocprim::syncthreads();
+        // Perform scan operation
+        segmented_scan_block_scan<Exclusive, UsePrefix, block_scan_type>(values,
+                                                                         values,
+                                                                         prefix,
+                                                                         storage.scan,
+                                                                         scan_op);
+        ::rocprim::syncthreads();
+        // Store
+        block_store_type().store(output + out_offset, values, storage.store);
+        ::rocprim::syncthreads();
+        block_offset += items_per_block;
+        out_offset += items_per_block;
+
+        // Load next full blocks and continue scanning
+        while(block_offset + items_per_block < end_offset)
+        {
+            block_load_type().load(input + block_offset, values, storage.load);
+            ::rocprim::syncthreads();
+            // Perform scan operation
+            segmented_scan_block_scan<Exclusive, true /*UsePrefix*/, block_scan_type>(values,
+                                                                                      values,
+                                                                                      prefix,
+                                                                                      storage.scan,
+                                                                                      scan_op);
+            ::rocprim::syncthreads();
+            block_store_type().store(output + out_offset, values, storage.store);
+            ::rocprim::syncthreads();
+            block_offset += items_per_block;
+            out_offset += items_per_block;
+        }
+
+        // Load the last (probably partial) block and continue scanning
+        const unsigned int valid_count = end_offset - block_offset;
+        block_load_type().load(input + block_offset, values, valid_count, storage.load);
+        ::rocprim::syncthreads();
+        // Perform scan operation
+        segmented_scan_block_scan<Exclusive, true /*UsePrefix*/, block_scan_type>(values,
+                                                                                  values,
+                                                                                  prefix,
+                                                                                  storage.scan,
+                                                                                  scan_op);
+        ::rocprim::syncthreads();
+        // Store the partial block
+        block_store_type().store(output + out_offset, values, valid_count, storage.store);
     }
 }
 

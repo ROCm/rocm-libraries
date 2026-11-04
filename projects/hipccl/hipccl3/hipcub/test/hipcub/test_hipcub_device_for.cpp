@@ -76,9 +76,8 @@ TYPED_TEST_SUITE(HipcubDeviceForTests, HipcubDeviceForTestsParams);
 template<class T>
 struct plus
 {
-    HIPCUB_HOST_DEVICE
-    inline void
-        operator()(T& a) const
+    _CCCL_HOST_DEVICE
+    inline void operator()(T& a) const
     {
         a = a + T(5);
     }
@@ -164,7 +163,7 @@ struct count_device_t
     unsigned int* d_count;
 
     template<class T>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void operator()(T)
     {
         atomicAdd(d_count, 1);
@@ -1204,7 +1203,7 @@ struct offset_count_device_t
     int* d_count;
 
     template<class OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void operator()(OffsetT i)
     {
         static_assert(std::is_same_v<T, OffsetT>, "T and OffsetT must be the same type");

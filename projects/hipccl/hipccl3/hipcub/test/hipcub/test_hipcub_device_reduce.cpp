@@ -70,7 +70,7 @@ using HipcubDeviceReduceTestsParams = ::testing::Types<
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>>;
 
 // Device numeric_limits for custom_test_type<T>
-_HIPCUB_STD_NAMESPACE_BEGIN
+_CCCL_BEGIN_NAMESPACE_CUDA_STD
 
 template<class T>
 struct numeric_limits<test_utils::custom_test_type<T>>
@@ -93,7 +93,7 @@ struct numeric_limits<test_utils::custom_test_type<T>>
     }
 };
 
-_HIPCUB_STD_NAMESPACE_END
+_CCCL_END_NAMESPACE_CUDA_STD
 
 TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
@@ -793,14 +793,14 @@ struct ArgMinDispatch
                     NumItemsT       num_items,
                     hipStream_t     stream) const
     {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         return hipcub::DeviceReduce::ArgMin(d_temp_storage,
                                             temp_storage_bytes,
                                             d_in,
                                             d_out,
                                             num_items,
                                             stream);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
     }
 };
 
@@ -815,14 +815,14 @@ struct ArgMaxDispatch
                     NumItemsT       num_items,
                     hipStream_t     stream) const
     {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         return hipcub::DeviceReduce::ArgMax(d_temp_storage,
                                             temp_storage_bytes,
                                             d_in,
                                             d_out,
                                             num_items,
                                             stream);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
     }
 };
 
@@ -1391,7 +1391,7 @@ TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMaxExtream)
 struct TestTransformOp
 {
     template<class T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     T operator()(const T& x) const
     {
         return x + T(5);

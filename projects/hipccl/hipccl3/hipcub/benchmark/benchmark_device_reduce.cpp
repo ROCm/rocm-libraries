@@ -118,10 +118,10 @@ struct argmin_kernel
     using Iterator   = hipcub::ArgIndexInputIterator<T*, Difference>;
     using KeyValue   = typename Iterator::value_type;
 
-    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+    _CCCL_SUPPRESS_DEPRECATED_PUSH
     static constexpr hipError_t (*kernel)(void*, size_t&, T*, KeyValue*, int, hipStream_t)
         = &hipcub::DeviceReduce::ArgMin;
-    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+    _CCCL_SUPPRESS_DEPRECATED_POP
 };
 template<typename T>
 struct Benchmark<T, hipcub::ArgMin>

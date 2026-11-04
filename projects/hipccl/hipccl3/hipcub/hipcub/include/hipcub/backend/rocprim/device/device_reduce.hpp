@@ -61,7 +61,8 @@ namespace detail
 {
 
 template<typename T>
-HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
+_CCCL_HOST_DEVICE
+T set_half_bits(uint16_t value)
 {
     T              half_value{};
     unsigned char* char_representation = reinterpret_cast<unsigned char*>(&half_value);
@@ -71,40 +72,46 @@ HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE inline T get_lowest_value()
+_CCCL_HOST_DEVICE
+inline T get_lowest_value()
 {
     return _HIPCUB_STD::numeric_limits<T>::lowest();
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline __half get_lowest_value<__half>()
+_CCCL_HOST_DEVICE
+inline __half get_lowest_value<__half>()
 {
     // smallest normal value (not subnormal): 1 11110 1111111111
     return set_half_bits<__half>(0xfbff);
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline hip_bfloat16 get_lowest_value<hip_bfloat16>()
+_CCCL_HOST_DEVICE
+inline hip_bfloat16 get_lowest_value<hip_bfloat16>()
 {
     // smallest normal value (not subnormal): 1 11111110 1111111
     return set_half_bits<hip_bfloat16>(0xff7f);
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE inline T get_max_value()
+_CCCL_HOST_DEVICE
+inline T get_max_value()
 {
     return _HIPCUB_STD::numeric_limits<T>::max();
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline __half get_max_value<__half>()
+_CCCL_HOST_DEVICE
+inline __half get_max_value<__half>()
 {
     // largest normal value (not subnormal): 0 11110 1111111111
     return set_half_bits<__half>(0x7bff);
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline hip_bfloat16 get_max_value<hip_bfloat16>()
+_CCCL_HOST_DEVICE
+inline hip_bfloat16 get_max_value<hip_bfloat16>()
 {
     // largest normal value (not subnormal): 0 11111110 1111111
     return set_half_bits<hip_bfloat16>(0x7f7f);
@@ -204,8 +211,10 @@ template<typename Op, typename T = void>
 inline constexpr bool is_cuda_minimum_maximum_v
     = is_cuda_maximum_v<Op, T> || is_cuda_minimum_v<Op, T>;
 
+namespace reduce
+{
 template<typename EnvT>
-HIPCUB_RUNTIME_FUNCTION
+            HIPCUB_RUNTIME_FUNCTION
 static inline constexpr void check_supported_determinism()
 {
     static_assert(
@@ -227,6 +236,7 @@ static inline constexpr void check_supported_determinism()
                                           _HIPCUB_LIBCXX_EXEC::determinism::gpu_to_gpu_t>,
                   "gpu_to_gpu determinism is not supported");
 }
+} // namespace reduce
 } // namespace detail
 
 class DeviceReduce
@@ -397,7 +407,7 @@ public:
         using ReductionOpT      = _HIPCUB_STD::plus<>;
         const auto reduction_op = ReductionOpT{};
 
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,
@@ -469,7 +479,7 @@ public:
     static hipError_t
         Min(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(
@@ -527,9 +537,9 @@ public:
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
 
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         return ArgMin(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
     }
 
     template<typename InputIteratorT,
@@ -552,14 +562,14 @@ public:
             rocprim::make_zip_iterator(rocprim::make_tuple(d_index_out, d_min_out)),
             [](auto kvp) { return rocprim::make_tuple(kvp.key, kvp.value); });
 
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         return ArgMin(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_combined_iterator,
                       num_items,
                       stream);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
     }
 
     template<typename InputIteratorT,
@@ -574,7 +584,7 @@ public:
                              NumItemsT            num_items,
                              EnvT                 env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,
@@ -631,7 +641,7 @@ public:
     static hipError_t
         Max(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(
@@ -689,7 +699,7 @@ public:
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
 
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         return ArgMax(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
@@ -697,7 +707,7 @@ public:
                       num_items,
                       stream,
                       debug_synchronous);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
     }
 
     template<typename InputIteratorT,
@@ -720,14 +730,14 @@ public:
             rocprim::make_zip_iterator(rocprim::make_tuple(d_index_out, d_max_out)),
             [](auto kvp) { return rocprim::make_tuple(kvp.key, kvp.value); });
 
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         return ArgMax(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_combined_iterator,
                       num_items,
                       stream);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
     }
 
     template<typename InputIteratorT,
@@ -742,7 +752,7 @@ public:
                              NumItemsT            num_items,
                              EnvT                 env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,

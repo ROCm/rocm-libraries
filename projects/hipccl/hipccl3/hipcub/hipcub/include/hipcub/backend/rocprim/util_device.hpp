@@ -34,4 +34,72 @@
 
 #include "util_temporary_storage.hpp"
 
+BEGIN_HIPCUB_NAMESPACE
+
+/// \brief Computes the maximum potential dynamic shared memory size per block for kernel \p kernel_ptr taking into
+///        account the amount of kernel's static and CUDA Driver's reserved shared memory.
+///
+/// \param[out] max_dyn_smem_bytes
+///   Maximum dynamic shared memory that can be allocated. Set to -1 in case of error.
+///
+/// \param[in] kernel_ptr
+///   Kernel pointer for which to compute the maximum potential dynamic shared memory.
+template<class KernelPtr>
+HIPCUB_RUNTIME_FUNCTION
+inline hipError_t MaxPotentialDynamicSmemBytes(int&      max_dyn_smem_bytes,
+                                               KernelPtr kernel_ptr) noexcept
+{
+    max_dyn_smem_bytes = -1;
+
+    hipFuncAttributes kernel_attrs{};
+    if(const auto error = HipcubDebug(
+           hipFuncGetAttributes(&kernel_attrs, reinterpret_cast<const void*>(kernel_ptr))))
+    {
+        return error;
+    }
+
+    int curr_device{};
+    if(const auto error = HipcubDebug(hipGetDevice(&curr_device)))
+    {
+        return error;
+    }
+
+    int reserved_smem_per_block{};
+    if(const auto error
+       = HipcubDebug(hipDeviceGetAttribute(&reserved_smem_per_block,
+                                           hipDeviceAttributeReservedSharedMemPerBlock,
+                                           curr_device)))
+    {
+        return error;
+    }
+
+    int max_smem_per_block{};
+    if(const auto error
+       = HipcubDebug(hipDeviceGetAttribute(&max_smem_per_block,
+                                           hipDeviceAttributeMaxSharedMemoryPerBlock,
+                                           curr_device)))
+    {
+        return error;
+    }
+
+    max_dyn_smem_bytes = max_smem_per_block - reserved_smem_per_block
+                         - static_cast<int>(kernel_attrs.sharedSizeBytes);
+
+    return hipSuccess;
+}
+
+template<>
+HIPCUB_RUNTIME_FUNCTION
+inline hipError_t MaxPotentialDynamicSmemBytes(int&           max_dyn_smem_bytes,
+                                               std::nullptr_t kernel_ptr) noexcept
+{
+    max_dyn_smem_bytes = -1;
+
+    hipFuncAttributes kernel_attrs{};
+    const auto        error = HipcubDebug(hipFuncGetAttributes(&kernel_attrs, kernel_ptr));
+    return error;
+}
+
+END_HIPCUB_NAMESPACE
+
 #endif // HIPCUB_ROCPRIM_UTIL_DEVICE_HPP_

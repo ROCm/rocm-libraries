@@ -135,6 +135,7 @@ struct only_set_when_both_expected
   }
 };
 
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
 void TestEqualWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);

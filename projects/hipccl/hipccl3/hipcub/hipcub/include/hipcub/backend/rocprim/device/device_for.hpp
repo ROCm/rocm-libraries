@@ -61,7 +61,7 @@ template<class T, class OpT>
 struct OpWrapper
 {
     OpT op;
-    HIPCUB_HOST_DEVICE __forceinline__
+    _CCCL_HOST_DEVICE __forceinline__
     T   operator()(T const& a) const
     {
         // Make copies of operator and variable
@@ -90,16 +90,16 @@ struct OpWrapper
     struct OpDispatcher<std::index_sequence<Rank...>>
     {
         template<class IndexType>
-        HIPCUB_HOST_DEVICE
-        HIPCUB_FORCEINLINE void operator()(IndexType idx, OpT op) const
+        _CCCL_HOST_DEVICE
+        _CCCL_FORCEINLINE void operator()(IndexType idx, OpT op) const
         {
             op(idx, OpWrapper::coordinate_at<Rank, IndexType>(idx)...);
         }
     };
 
     template<size_t Rank, class IndexType>
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE static auto coordinate_at(IndexType index)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE static auto coordinate_at(IndexType index)
     {
         constexpr auto start = IsLayoutRight ? Rank + 1 : 0;
         constexpr auto end   = IsLayoutRight ? ExtentsType::rank() : Rank;
@@ -109,8 +109,8 @@ struct OpWrapper
     }
 
     template<class IndexType>
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE IndexType operator()(IndexType idx)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE IndexType operator()(IndexType idx)
     {
         using seq_type = std::make_index_sequence<ExtentsType::rank()>;
         OpDispatcher<seq_type>{}(idx, op);
@@ -363,8 +363,8 @@ HIPCUB_RUNTIME_FUNCTION
                                stream);
     }
 
-    HIPCUB_TEMPLATE(class LayoutMapping, typename OpType)
-    HIPCUB_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
+    _CCCL_TEMPLATE(class LayoutMapping, typename OpType)
+    _CCCL_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
     [[nodiscard]]
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
@@ -386,8 +386,8 @@ HIPCUB_RUNTIME_FUNCTION
         ;
     }
 
-    HIPCUB_TEMPLATE(class LayoutMapping, typename OpType)
-    HIPCUB_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
+    _CCCL_TEMPLATE(class LayoutMapping, typename OpType)
+    _CCCL_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
     [[nodiscard]]
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInLayout(void*                d_temp_storage,

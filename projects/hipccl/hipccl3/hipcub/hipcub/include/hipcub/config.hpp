@@ -110,8 +110,8 @@ END_HIPCUB_NAMESPACE
 
     #define HIPCUB_WARP_THREADS ::rocprim::warp_size()
     // HIPCUB (and CUB) don't have a method to express min and max warp size.
-    #define HIPCUB_DEVICE_WARP_THREADS ::rocprim::arch::wavefront::max_size()
-    #define HIPCUB_HOST_WARP_THREADS ::hipcub::detail::host_warp_size_wrapper()
+    #define _CCCL_DEVICE_WARP_THREADS ::rocprim::arch::wavefront::max_size()
+    #define _CCCL_HOST_WARP_THREADS ::hipcub::detail::host_warp_size_wrapper()
     #define HIPCUB_ARCH 1 // ignored with rocPRIM backend
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #define HIPCUB_CUB_API 1
@@ -121,8 +121,8 @@ END_HIPCUB_NAMESPACE
     #include <cuda/std/limits>
     #include <cuda/std/type_traits>
     #define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
-    #define HIPCUB_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
-    #define HIPCUB_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
+    #define _CCCL_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
+    #define _CCCL_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_ARCH CUB_PTX_ARCH
     BEGIN_HIPCUB_NAMESPACE
     using namespace cub;
@@ -134,10 +134,6 @@ END_HIPCUB_NAMESPACE
 #define HIPCUB_WARP_SIZE_64 64u
 #define HIPCUB_MAX_WARP_SIZE HIPCUB_WARP_SIZE_64
 
-#define HIPCUB_HOST __host__
-#define HIPCUB_DEVICE __device__
-#define HIPCUB_HOST_DEVICE __host__ __device__
-#define HIPCUB_FORCEINLINE __forceinline__
 #define HIPCUB_SHARED_MEMORY __shared__
 
 // Helper macros to disable warnings in clang
@@ -154,12 +150,6 @@ END_HIPCUB_NAMESPACE
 #define HIPCUB_CLANG_SUPPRESS_WARNING_POP
 #define HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH(w)
 #endif // __clang__
-
-#define HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH     \
-    HIPCUB_CLANG_SUPPRESS_WARNING_PUSH            \
-    HIPCUB_CLANG_SUPPRESS_WARNING("-Wdeprecated") \
-    HIPCUB_CLANG_SUPPRESS_WARNING("-Wdeprecated-declarations")
-#define HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP HIPCUB_CLANG_SUPPRESS_WARNING_POP
 
 /// hipCUB error reporting macro (prints error messages to stderr)
 #if (defined(DEBUG) || defined(_DEBUG)) && !defined(HIPCUB_STDERR)
@@ -232,42 +222,6 @@ END_HIPCUB_NAMESPACE
     #endif
 #endif // HIPCUB_ROCPRIM_API
 
-/// \brief Wrapper macro for C++20 'requires'.
-#define HIPCUB_REQUIRES(...) _CCCL_REQUIRES(__VA_ARGS__)
-
-/// \brief Wrapper macro for `template`.
-///
-/// Works together with `HIPCUB_REQUIRES`, such that if concepts are not
-/// supported the implementation of requires falls back to `enable_if`
-/// and templates.
-/// E.g. this code:
-/// \code{.cpp}
-/// HIPCUB_TEMPLATE(class T)
-/// HIPCUB_REQUIRES(_HIPCUB_STD::some_concept<T>)
-/// void some_function() {}
-/// \endcode
-/// would be preprocessed into
-/// \code{.cpp}
-/// template<class T> requires _HIPCUB_STD::some_concept<T>
-/// void some_function() {}
-/// \endcode
-/// if concepts are supported, or into something equivalent to
-/// \code{.cpp}
-/// template<class T, typename std::enable_if<(_HIPCUB_STD::some_concept<T>)>::type* = nullptr>
-/// void some_function() {}
-/// \endcode
-/// if they are not.
-#define HIPCUB_TEMPLATE(...) _CCCL_TEMPLATE(__VA_ARGS__)
-
-// This API needs to be deprecated once libhipcxx is available.
-#ifndef HIPCUB_PRAGMA_UNROLL_FULL
-    #define HIPCUB_PRAGMA_UNROLL_FULL() _Pragma("unroll")
-#endif // HIPCUB_PRAGMA_UNROLL_FULL
-
-#ifndef HIPCUB_PRAGMA_NOUNROLL
-    #define HIPCUB_PRAGMA_NOUNROLL() _Pragma("nounroll")
-#endif // HIPCUB_PRAGMA_NOUNROLL
-
 #ifndef HIPCUB_RETURN_ON_ERROR
     #define HIPCUB_RETURN_ON_ERROR(...)       \
         do                                    \
@@ -280,38 +234,5 @@ END_HIPCUB_NAMESPACE
         }                                     \
         while(0)
 #endif // HIPCUB_RETURN_ON_ERROR
-
-#ifndef HIPCUB_TRY_CUDA_API
-    #define HIPCUB_TRY_CUDA_API(_NAME, _MSG, ...)                               \
-        do                                                                      \
-        {                                                                       \
-            const ::hipError_t __status = _NAME(__VA_ARGS__);                   \
-            switch(__status)                                                    \
-            {                                                                   \
-                case ::hipSuccess: break;                                       \
-                default:                                                        \
-                    (void)::hipGetLastError();                                  \
-                    _HIPCUB_LIBCXX::__throw_cuda_error(__status, _MSG, #_NAME); \
-            }                                                                   \
-        }                                                                       \
-        while(0)
-#endif // HIPCUB_TRY_CUDA_API
-
-#ifndef HIPCUB_ASSERT
-    #define HIPCUB_ASSERT(expression, message, ...) _CCCL_ASSERT(expression, message)
-#endif // HIPCUB_ASSERT
-
-#ifndef HIPCUB_ASSERT_CUDA_API
-    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)      \
-        do                                                \
-        {                                                 \
-            [[maybe_unused]]                              \
-            const ::hipError_t __status                   \
-                = _NAME(__VA_ARGS__);                     \
-            (void)::hipGetLastError();                    \
-            HIPCUB_ASSERT(__status == cudaSuccess, _MSG); \
-        }                                                 \
-        while(0)
-#endif // HIPCUB_ASSERT_CUDA_API
 
 #endif // HIPCUB_CONFIG_HPP_

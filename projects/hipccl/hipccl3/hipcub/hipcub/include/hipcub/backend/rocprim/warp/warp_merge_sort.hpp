@@ -116,7 +116,7 @@ BEGIN_HIPCUB_NAMESPACE
  */
 template<typename KeyT,
          int ITEMS_PER_THREAD,
-         int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
+         int LOGICAL_WARP_THREADS = _CCCL_DEVICE_WARP_THREADS,
          typename ValueT          = NullType>
 class WarpMergeSort
     : public BlockMergeSortStrategy<
@@ -127,7 +127,7 @@ class WarpMergeSort
           WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT>>
 {
 private:
-  constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == HIPCUB_DEVICE_WARP_THREADS;
+  constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == _CCCL_DEVICE_WARP_THREADS;
   constexpr static bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
   constexpr static int TILE_SIZE = ITEMS_PER_THREAD * LOGICAL_WARP_THREADS;
 
@@ -140,8 +140,8 @@ private:
 public:
   WarpMergeSort() = delete;
 
-  HIPCUB_DEVICE __forceinline__ WarpMergeSort(
-      typename BlockMergeSortStrategyT::TempStorage& temp_storage)
+  _CCCL_DEVICE __forceinline__
+  WarpMergeSort(typename BlockMergeSortStrategyT::TempStorage& temp_storage)
       : BlockMergeSortStrategyT(temp_storage,
                                 IS_ARCH_WARP ? ::rocprim::lane_id()
                                              : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
@@ -150,16 +150,18 @@ public:
   {
   }
 
-  HIPCUB_DEVICE __forceinline__ uint64_t get_member_mask() const
+  _CCCL_DEVICE __forceinline__
+  uint64_t get_member_mask() const
   {
     return member_mask;
   }
 
 private:
-  HIPCUB_DEVICE __forceinline__ void SyncImplementation() const
-  {
-      ::rocprim::wave_barrier();
-  }
+    _CCCL_DEVICE __forceinline__
+    void SyncImplementation() const
+    {
+        ::rocprim::wave_barrier();
+    }
 
   friend BlockMergeSortStrategyT;
 };

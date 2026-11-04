@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCUB_TEST_HIPCUB_DEVICE_RADIX_SORT_HPP_
-#define HIPCUB_TEST_HIPCUB_DEVICE_RADIX_SORT_HPP_
+#ifndef HIPCUB_test_hipcub_device_RADIX_SORT_HPP_
+#define HIPCUB_test_hipcub_device_RADIX_SORT_HPP_
 
 #include "common_test_header.hpp"
 
@@ -1429,4 +1429,4 @@ inline void sort_keys_large_sizes()
     }
 }
 
-#endif // HIPCUB_TEST_HIPCUB_DEVICE_RADIX_SORT_HPP_
+#endif // HIPCUB_test_hipcub_device_RADIX_SORT_HPP_

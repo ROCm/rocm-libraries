@@ -106,7 +106,7 @@ public:
     /// This operation sets the fill-size and resets the drain counter, preparing the GridQueue for
     /// draining in the next kernel instance.  To be called by the host or by a kernel prior to the one
     /// which will be draining.
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     hipError_t FillAndResetDrain(OffsetT fill_size, [[maybe_unused]] hipStream_t stream = 0)
     {
         d_counters[FILL] = fill_size;
@@ -114,7 +114,7 @@ public:
         return hipSuccess;
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     hipError_t FillAndResetDrain(OffsetT fill_size, hipStream_t stream = 0)
     {
         OffsetT counters[2];
@@ -129,7 +129,7 @@ public:
 
     /// This operation resets the drain so that it may advance to meet the existing fill-size.
     /// To be called by the host or by a kernel prior to the one which will be draining.
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     hipError_t ResetDrain([[maybe_unused]] hipStream_t stream = 0)
     {
         d_counters[DRAIN] = 0;
@@ -137,7 +137,7 @@ public:
         return hipSuccess;
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     hipError_t ResetDrain(hipStream_t stream = 0)
     {
         return HipcubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
@@ -145,21 +145,21 @@ public:
 
     /// This operation resets the fill counter.
     /// To be called by the host or by a kernel prior to the one which will be filling.
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     hipError_t ResetFill([[maybe_unused]] hipStream_t stream = 0)
     {
         d_counters[FILL] = 0;
         return hipSuccess;
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     hipError_t ResetFill(hipStream_t stream = 0)
     {
         return HipcubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
     }
 
     /// Returns the fill-size established by the parent or by the previous kernel.
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     hipError_t FillSize(OffsetT& fill_size, [[maybe_unused]] hipStream_t stream = 0)
     {
         fill_size = d_counters[FILL];
@@ -167,7 +167,7 @@ public:
         return hipSuccess;
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     hipError_t FillSize(OffsetT& fill_size, hipStream_t stream = 0)
     {
         return HipcubDebug(hipMemcpyAsync(&fill_size,
@@ -177,16 +177,16 @@ public:
                                           stream));
     }
 
-
     /// Drain \p num_items from the queue.  Returns offset from which to read items.  To be called from hip kernel.
-    HIPCUB_DEVICE OffsetT Drain(OffsetT num_items)
+    _CCCL_DEVICE
+    OffsetT Drain(OffsetT num_items)
     {
         return atomicAdd(d_counters + DRAIN, num_items);
     }
 
-
     /// Fill \p num_items into the queue.  Returns offset from which to write items.    To be called from hip kernel.
-    HIPCUB_DEVICE OffsetT Fill(OffsetT num_items)
+    _CCCL_DEVICE
+    OffsetT Fill(OffsetT num_items)
     {
         return atomicAdd(d_counters + FILL, num_items);
     }

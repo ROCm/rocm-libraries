@@ -38,7 +38,7 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<typename T, int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS>
+template<typename T, int LOGICAL_WARP_THREADS = _CCCL_DEVICE_WARP_THREADS>
 class WarpScan : private ::rocprim::warp_scan<T, LOGICAL_WARP_THREADS>
 {
     static_assert(LOGICAL_WARP_THREADS > 0, "LOGICAL_WARP_THREADS must be greater than 0");
@@ -49,44 +49,45 @@ class WarpScan : private ::rocprim::warp_scan<T, LOGICAL_WARP_THREADS>
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    WarpScan(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline WarpScan(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T input, T& inclusive_output)
+    _CCCL_DEVICE
+    inline void InclusiveSum(T input, T& inclusive_output)
     {
         base_type::inclusive_scan(input, inclusive_output, temp_storage_);
     }
 
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T input, T& inclusive_output, T& warp_aggregate)
+    _CCCL_DEVICE
+    inline void InclusiveSum(T input, T& inclusive_output, T& warp_aggregate)
     {
         base_type::inclusive_scan(input, inclusive_output, warp_aggregate, temp_storage_);
     }
 
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T input, T& exclusive_output)
+    _CCCL_DEVICE
+    inline void ExclusiveSum(T input, T& exclusive_output)
     {
         base_type::exclusive_scan(input, exclusive_output, T(0), temp_storage_);
     }
 
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T input, T& exclusive_output, T& warp_aggregate)
+    _CCCL_DEVICE
+    inline void ExclusiveSum(T input, T& exclusive_output, T& warp_aggregate)
     {
         base_type::exclusive_scan(input, exclusive_output, T(0), warp_aggregate, temp_storage_);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T input, T& inclusive_output, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void InclusiveScan(T input, T& inclusive_output, ScanOp scan_op)
     {
         base_type::inclusive_scan(input, inclusive_output, temp_storage_, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScanPartial(T input, T& inclusive_output, ScanOp scan_op, int valid_items)
     {
         base_type::partial_inclusive_scan(input,
@@ -97,14 +98,14 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScan(T input, T& inclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::inclusive_scan(input, inclusive_output, temp_storage_, initial_value, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScanPartial(
         T input, T& inclusive_output, T initial_value, ScanOp scan_op, int valid_items)
     {
@@ -117,8 +118,8 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T input, T& inclusive_output, ScanOp scan_op, T& warp_aggregate)
+    _CCCL_DEVICE
+    inline void InclusiveScan(T input, T& inclusive_output, ScanOp scan_op, T& warp_aggregate)
     {
         base_type::inclusive_scan(
             input, inclusive_output, warp_aggregate,
@@ -127,7 +128,7 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScanPartial(
         T input, T& inclusive_output, ScanOp scan_op, int valid_items, T& warp_aggregate)
     {
@@ -140,7 +141,7 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScan(
         T input, T& inclusive_output, T initial_value, ScanOp scan_op, T& warp_aggregate)
     {
@@ -153,7 +154,7 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScanPartial(T      input,
                                      T&     inclusive_output,
                                      T      initial_value,
@@ -171,14 +172,14 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op)
     {
         base_type::exclusive_scan(input, exclusive_output, temp_storage_, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScanPartial(T input, T& exclusive_output, ScanOp scan_op, int valid_items)
     {
         base_type::partial_exclusive_scan(input,
@@ -189,8 +190,8 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& exclusive_output, T initial_value, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void ExclusiveScan(T input, T& exclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::exclusive_scan(
             input, exclusive_output, initial_value,
@@ -199,7 +200,7 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScanPartial(
         T input, T& exclusive_output, T initial_value, ScanOp scan_op, int valid_items)
     {
@@ -212,14 +213,14 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op, T& warp_aggregate)
+    _CCCL_DEVICE
+    inline void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op, T& warp_aggregate)
     {
         base_type::exclusive_scan(input, exclusive_output, temp_storage_, warp_aggregate, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScanPartial(
         T input, T& exclusive_output, ScanOp scan_op, int valid_items, T& warp_aggregate)
     {
@@ -232,8 +233,9 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& exclusive_output, T initial_value, ScanOp scan_op, T& warp_aggregate)
+    _CCCL_DEVICE
+    inline void ExclusiveScan(
+        T input, T& exclusive_output, T initial_value, ScanOp scan_op, T& warp_aggregate)
     {
         base_type::exclusive_scan(
             input, exclusive_output, initial_value, warp_aggregate,
@@ -242,7 +244,7 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScanPartial(T      input,
                                      T&     exclusive_output,
                                      T      initial_value,
@@ -260,14 +262,14 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void Scan(T input, T& inclusive_output, T& exclusive_output, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void Scan(T input, T& inclusive_output, T& exclusive_output, ScanOp scan_op)
     {
         base_type::scan(input, inclusive_output, exclusive_output, temp_storage_, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScanPartial(
         T input, T& inclusive_output, T& exclusive_output, ScanOp scan_op, int valid_items)
     {
@@ -280,8 +282,9 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void Scan(T input, T& inclusive_output, T& exclusive_output, T initial_value, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void
+        Scan(T input, T& inclusive_output, T& exclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::scan(
             input, inclusive_output, exclusive_output, initial_value,
@@ -293,7 +296,7 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScanPartial(T      input,
                             T&     inclusive_output,
                             T&     exclusive_output,
@@ -313,7 +316,7 @@ public:
         include_init(inclusive_output, inclusive_output, valid_items, scan_op, initial_value);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Broadcast(T input, unsigned int src_lane)
     {
         return base_type::broadcast(input, src_lane, temp_storage_);

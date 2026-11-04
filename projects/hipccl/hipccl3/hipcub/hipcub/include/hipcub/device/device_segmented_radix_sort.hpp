@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_HPP_
-#define HIPCUB_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_HPP_
+#ifndef _CCCL_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_HPP_
+#define _CCCL_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_HPP_
 
 #include <hip/hip_common.h>
 
@@ -38,4 +38,4 @@
     #include "../backend/cub/device/device_segmented_radix_sort.hpp" // IWYU pragma: export
 #endif
 
-#endif // HIPCUB_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_HPP_
+#endif // _CCCL_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_HPP_

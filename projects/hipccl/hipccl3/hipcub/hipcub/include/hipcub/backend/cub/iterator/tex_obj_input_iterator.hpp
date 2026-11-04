@@ -44,10 +44,13 @@ public:
         return hipCUDAErrorTohipError(::cub::TexObjInputIterator<T, OffsetT>::UnbindTexture());
     }
 
-    HIPCUB_HOST_DEVICE inline TexObjInputIterator() : ::cub::TexObjInputIterator<T, OffsetT>() {}
+    _CCCL_HOST_DEVICE
+    inline TexObjInputIterator()
+        : ::cub::TexObjInputIterator<T, OffsetT>()
+    {}
 
-    HIPCUB_HOST_DEVICE inline TexObjInputIterator(
-        const ::cub::TexObjInputIterator<T, OffsetT> other)
+    _CCCL_HOST_DEVICE
+    inline TexObjInputIterator(const ::cub::TexObjInputIterator<T, OffsetT> other)
         : ::cub::TexObjInputIterator<T, OffsetT>(other)
     {}
 };

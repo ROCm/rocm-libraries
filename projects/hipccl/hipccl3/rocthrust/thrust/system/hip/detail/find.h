@@ -41,17 +41,12 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/temporary_array.h>
-#  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-#  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/util.h>
-#  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_iterator.h)
 #  include _THRUST_STD_INCLUDE(__functional/not_fn.h)
 #  include _THRUST_STD_INCLUDE(__iterator/distance.h)
-#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
@@ -79,71 +74,40 @@ THRUST_NAMESPACE_END
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+
 namespace detail
 {
 template <typename Derived, typename InputIt, typename Size, typename Predicate>
-THRUST_HIP_RUNTIME_FUNCTION Size
+THRUST_HOST_DEVICE Size
 find_if_n_impl(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
-  using namespace thrust::system::hip_rocprim::temp_storage;
-
   hipStream_t stream = hip_rocprim::stream(policy);
-  bool debug_sync    = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  // Bind the predicate to the input iterator so that rocPRIM only loads the boolean results and
-  // never materializes the input values. rocPRIM's find_first_of exits early as soon as a block
-  // finds a match, so a single key that compares equal to `true` gives a single-pass find_if.
-  const auto input = _THRUST_LIBCXX::make_transform_iterator(thrust::try_unwrap_contiguous_iterator(first), predicate);
-  const auto keys  = rocprim::constant_iterator<bool>(true);
+  auto call_with_adjusted_size_type = [&](auto num_items_fixed) -> Size {
+    // we use the same offset type that rocPRIM uses internally for writing the result. avoids an extra kernel
+    using adjusted_size_type = std::size_t;
 
-  size_t tmp_size = 0;
-  hip_rocprim::throw_on_error(
-    rocprim::find_first_of(
-      nullptr,
-      tmp_size,
-      input,
-      keys,
-      static_cast<size_t*>(nullptr),
-      static_cast<size_t>(num_items),
-      1,
-      rocprim::equal_to<bool>(),
-      stream,
-      debug_sync),
-    "find_if: failed to get temp storage size");
+    std::size_t tmp_size = 0;
+    auto status          = ::rocprim::find_if(
+      nullptr, tmp_size, first, static_cast<adjusted_size_type*>(nullptr), num_items_fixed, predicate, stream);
+    hip_rocprim::throw_on_error(status, "find_if: failed to get temp storage size");
 
-  size_t storage_size = 0;
-  void* ptr           = nullptr;
-  void* tmp_ptr       = nullptr;
-  size_t* result_ptr;
+    // Allocate temporary storage for both the algorithm and the result.
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, sizeof(adjusted_size_type) + tmp_size);
 
-  auto l_part = make_linear_partition(make_partition(&tmp_ptr, tmp_size), ptr_aligned_array(&result_ptr, 1));
+    // Run find_if.
+    adjusted_size_type* result_ptr = thrust::detail::aligned_reinterpret_cast<adjusted_size_type*>(tmp.data().get());
+    void* tmp_ptr                  = static_cast<void*>((tmp.data() + sizeof(adjusted_size_type)).get());
 
-  // Calculate storage_size including alignment
-  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+    status = ::rocprim::find_if(tmp_ptr, tmp_size, first, result_ptr, num_items_fixed, predicate, stream);
+    hip_rocprim::throw_on_error(status, "find_if: failed to run algorithm");
 
-  // Allocate temporary storage for both the algorithm and the result.
-  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
-  ptr = static_cast<void*>(tmp.data().get());
+    return static_cast<Size>(hip_rocprim::get_value(policy, result_ptr));
+  };
 
-  // Create pointers with alignment
-  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
-
-  // Run find_if.
-  hip_rocprim::throw_on_error(
-    rocprim::find_first_of(
-      tmp_ptr,
-      tmp_size,
-      input,
-      keys,
-      result_ptr,
-      static_cast<size_t>(num_items),
-      1,
-      rocprim::equal_to<bool>(),
-      stream,
-      debug_sync),
-    "find_if: failed to run algorithm");
-
-  return static_cast<Size>(hip_rocprim::get_value(policy, result_ptr));
+  Size result;
+  THRUST_INDEX_TYPE_DISPATCH(result, call_with_adjusted_size_type, num_items, (num_items_fixed));
+  return result;
 }
 } // namespace detail
 
@@ -157,12 +121,14 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
     return first;
   }
 
+  Size result_idx = num_items;
+
   // struct workaround is required for HIP-clang
   struct workaround
   {
     THRUST_HOST static Size par(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
     {
-      return hip_rocprim::detail::find_if_n_impl(policy, first, num_items, predicate);
+      return thrust::hip_rocprim::detail::find_if_n_impl(policy, first, num_items, predicate);
     }
 #  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static Size seq(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
@@ -171,11 +137,10 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
     }
 #  endif
   };
-
 #  if !defined(__HIP_DEVICE_COMPILE__)
-  Size result_idx = workaround::par(policy, first, num_items, predicate);
+  result_idx = workaround::par(policy, first, num_items, predicate);
 #  else
-  Size result_idx = workaround::seq(policy, first, num_items, predicate);
+  result_idx = workaround::seq(policy, first, num_items, predicate);
 #  endif
 
   return first + result_idx;

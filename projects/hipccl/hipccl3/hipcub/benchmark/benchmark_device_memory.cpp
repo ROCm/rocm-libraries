@@ -60,9 +60,8 @@ struct operation<no_operation, T, ItemsPerThread, BlockSize>
 {
     using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE
-    inline void
-        operator()(storage_type& /*storage*/, T (&)[ItemsPerThread], T* = nullptr) const
+    _CCCL_DEVICE
+    inline void operator()(storage_type& /*storage*/, T (&)[ItemsPerThread], T* = nullptr) const
     {}
 };
 
@@ -72,17 +71,17 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
 {
     using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void operator()([[maybe_unused]] storage_type& storage,
                            T (&input)[ItemsPerThread],
                            [[maybe_unused]] T* global_mem_output = nullptr) const
     {
-        HIPCUB_PRAGMA_UNROLL_FULL()
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             input[i]                       = input[i] + 666;
             constexpr unsigned int repeats = 30;
-            HIPCUB_PRAGMA_UNROLL_FULL()
+            _CCCL_PRAGMA_UNROLL_FULL()
             for(unsigned int j = 0; j < repeats; j++)
             {
                 input[i] = input[i] * (input[j % ItemsPerThread]);
@@ -99,7 +98,7 @@ struct operation<block_scan, T, ItemsPerThread, BlockSize>
         typename hipcub::BlockScan<T, BlockSize, hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS>;
     using storage_type = typename block_scan_type::TempStorage;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void operator()(storage_type& storage,
                            T (&input)[ItemsPerThread],
                            [[maybe_unused]] T* global_mem_output = nullptr)
@@ -116,14 +115,14 @@ struct operation<atomics_no_collision, T, ItemsPerThread, BlockSize>
 {
     using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void operator()([[maybe_unused]] storage_type& storage,
                            [[maybe_unused]] T (&input)[ItemsPerThread],
                            T* global_mem_output = nullptr)
     {
         const unsigned int index
             = threadIdx.x * ItemsPerThread + blockIdx.x * blockDim.x * ItemsPerThread;
-        HIPCUB_PRAGMA_UNROLL_FULL()
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -137,14 +136,14 @@ struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
 {
     using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void operator()([[maybe_unused]] storage_type& storage,
                            [[maybe_unused]] T (&input)[ItemsPerThread],
                            T* global_mem_output = nullptr)
     {
         const unsigned int index
             = (threadIdx.x % warpSize) * ItemsPerThread + blockIdx.x * blockDim.x * ItemsPerThread;
-        HIPCUB_PRAGMA_UNROLL_FULL()
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -158,13 +157,13 @@ struct operation<atomics_inter_block_collision, T, ItemsPerThread, BlockSize>
 {
     using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void operator()([[maybe_unused]] storage_type& storage,
                            [[maybe_unused]] T (&input)[ItemsPerThread],
                            T* global_mem_output = nullptr)
     {
         const unsigned int index = threadIdx.x * ItemsPerThread;
-        HIPCUB_PRAGMA_UNROLL_FULL()
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));

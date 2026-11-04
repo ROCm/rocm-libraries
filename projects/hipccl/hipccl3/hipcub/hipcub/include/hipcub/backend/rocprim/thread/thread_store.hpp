@@ -35,8 +35,8 @@
 
 #include <rocprim/thread/thread_store.hpp> // IWYU pragma: export
 
-#include <stdint.h>
-#include <type_traits>
+#include _HIPCUB_STD_INCLUDE(__memory/pointer_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -51,40 +51,43 @@ enum CacheStoreModifier
 };
 
 template<typename T, typename Fundamental>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStoreVolatilePtr(T* ptr, T val, Fundamental /*is_fundamental*/)
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<STORE_VOLATILE>(ptr, val) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStoreVolatilePtr(T* ptr, T val, Fundamental /*is_fundamental*/)
 {
     rocprim::thread_store<rocprim::store_volatile, T>(ptr, val);
 }
 
 template<int MODIFIER, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStore(T* ptr,
-                                    T  val,
-                                    detail::int_constant_t<MODIFIER> /*modifier*/,
-                                    ::std::true_type /*is_pointer*/)
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<MODIFIER>(ptr, val) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStore(T* ptr,
+                                   T  val,
+                                   detail::int_constant_t<MODIFIER> /*modifier*/,
+                                   _HIPCUB_STD::true_type /*is_pointer*/)
 {
     rocprim::thread_store<rocprim::cache_store_modifier(MODIFIER), T>(ptr, val);
 }
 
 template<int MODIFIER, typename OutputIteratorT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr,
-                                    T               val,
-                                    detail::int_constant_t<MODIFIER> /*modifier*/,
-                                    ::std::false_type /*is_pointer*/)
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<MODIFIER>(ptr, val) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStore(OutputIteratorT itr,
+                                   T               val,
+                                   detail::int_constant_t<MODIFIER> /*modifier*/,
+                                   _HIPCUB_STD::false_type /*is_pointer*/)
 {
-    ThreadStore<MODIFIER>(&(*itr), val, detail::int_constant_t<MODIFIER>{}, ::std::true_type{});
+    ThreadStore<MODIFIER>(&(*itr),
+                          val,
+                          detail::int_constant_t<MODIFIER>{},
+                          _HIPCUB_STD::true_type{});
 }
 
-template<CacheStoreModifier MODIFIER = STORE_DEFAULT, typename OutputIteratorT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
+template<CacheStoreModifier MODIFIER, typename OutputIteratorT, typename T>
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
 {
-    ThreadStore(itr,
-                val,
-                detail::int_constant_t<MODIFIER>{},
-                ::std::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
+    rocprim::thread_store<rocprim::cache_store_modifier(MODIFIER), T>(itr, val);
 }
 
 namespace detail
@@ -95,16 +98,16 @@ template<int COUNT, int MAX>
 struct iterate_thread_store
 {
     template<CacheStoreModifier MODIFIER, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Store(T* ptr, T* vals)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Store(T* ptr, T* vals)
     {
         ThreadStore<MODIFIER>(ptr + COUNT, vals[COUNT]);
         iterate_thread_store<COUNT + 1, MAX>::template Store<MODIFIER>(ptr, vals);
     }
 
     template<typename OutputIteratorT, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Dereference(OutputIteratorT ptr, T* vals)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Dereference(OutputIteratorT ptr, T* vals)
     {
         ptr[COUNT] = vals[COUNT];
         iterate_thread_store<COUNT + 1, MAX>::Dereference(ptr, vals);
@@ -116,13 +119,13 @@ template<int MAX>
 struct iterate_thread_store<MAX, MAX>
 {
     template<CacheStoreModifier MODIFIER, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Store(T* /*ptr*/, T* /*vals*/)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Store(T* /*ptr*/, T* /*vals*/)
     {}
 
     template<typename OutputIteratorT, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Dereference(OutputIteratorT /*ptr*/, T* /*vals*/)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Dereference(OutputIteratorT /*ptr*/, T* /*vals*/)
     {}
 };
 

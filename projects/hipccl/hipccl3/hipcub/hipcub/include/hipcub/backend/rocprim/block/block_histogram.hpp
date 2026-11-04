@@ -95,32 +95,34 @@ class BlockHistogram
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockHistogram() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockHistogram()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockHistogram(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockHistogram(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
     template<class CounterT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InitHistogram(CounterT histogram[Bins])
     {
         base_type::init_histogram(histogram);
     }
 
     template<class CounterT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Composite(T (&items)[ItemsPerThread], CounterT histogram[Bins])
     {
         base_type::composite(items, histogram, temp_storage_);
     }
 
     template<class CounterT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Histogram(T (&items)[ItemsPerThread], CounterT histogram[Bins])
     {
         base_type::init_histogram(histogram);
@@ -129,8 +131,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

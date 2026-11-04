@@ -46,13 +46,13 @@ BEGIN_HIPCUB_NAMESPACE
  *
  */
 template<typename AIteratorT, typename BIteratorT, typename OffsetT, typename CoordinateT>
-HIPCUB_DEPRECATED HIPCUB_HOST_DEVICE
-HIPCUB_FORCEINLINE void MergePathSearch(OffsetT      diagonal,
-                                        AIteratorT   a,
-                                        BIteratorT   b,
-                                        OffsetT      a_len,
-                                        OffsetT      b_len,
-                                        CoordinateT& path_coordinate)
+HIPCUB_DEPRECATED _CCCL_HOST_DEVICE
+_CCCL_FORCEINLINE void MergePathSearch(OffsetT      diagonal,
+                                       AIteratorT   a,
+                                       BIteratorT   b,
+                                       OffsetT      a_len,
+                                       OffsetT      b_len,
+                                       CoordinateT& path_coordinate)
 {
     OffsetT split_min = _HIPCUB_STD::max(diagonal - b_len, 0);
     OffsetT split_max = _HIPCUB_STD::min(diagonal, a_len);
@@ -89,8 +89,8 @@ HIPCUB_FORCEINLINE void MergePathSearch(OffsetT      diagonal,
  *   Search key
  */
 template<typename InputIteratorT, typename OffsetT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE OffsetT LowerBound(InputIteratorT input, OffsetT num_items, T val)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE OffsetT LowerBound(InputIteratorT input, OffsetT num_items, T val)
 {
     OffsetT retval = 0;
     while (num_items > 0)
@@ -123,8 +123,8 @@ HIPCUB_FORCEINLINE OffsetT LowerBound(InputIteratorT input, OffsetT num_items, T
  *   Search key
  */
 template<typename InputIteratorT, typename OffsetT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, T val)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, T val)
 {
     OffsetT retval = 0;
     while (num_items > 0)
@@ -157,8 +157,8 @@ HIPCUB_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, T
  *   Search key
  */
 template<typename InputIteratorT, typename OffsetT>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, __half val)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, __half val)
 {
     OffsetT retval = 0;
     while(num_items > 0)

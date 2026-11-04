@@ -31,7 +31,7 @@ constexpr unsigned int Trials = 100;
 struct equal
 {
     template<class A, class B>
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const A& a, const B& b) const
     {
         return a == b;
@@ -59,7 +59,7 @@ struct flag_heads
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
@@ -96,7 +96,7 @@ struct flag_tails
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
@@ -133,7 +133,7 @@ struct flag_heads_and_tails
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;

@@ -59,7 +59,7 @@ auto warp_load_device_fn(T* d_input, T* d_output)
 
     WarpLoadT(temp_storage[warp_id]).Load(d_input + global_warp_id * tile_size, thread_data);
 
-    HIPCUB_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned striped_global_idx

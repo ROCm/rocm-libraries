@@ -341,7 +341,7 @@ void rank_kernel(const KeyType* keys_input,
     UnsignedBits(&unsigned_keys)[ItemsPerThread]
         = reinterpret_cast<UnsignedBits(&)[ItemsPerThread]>(keys);
 
-    HIPCUB_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
         unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
@@ -507,7 +507,7 @@ TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMatch)
 {
 #ifdef __HIP_PLATFORM_NVIDIA__
     constexpr unsigned int block_size = TestFixture::params::block_size;
-    if(block_size % HIPCUB_DEVICE_WARP_THREADS != 0)
+    if(block_size % _CCCL_DEVICE_WARP_THREADS != 0)
     {
         // The CUB implementation of BlockRadixRankMatch is currently broken when
         // the warp size does not divide the block size exactly, see
@@ -592,7 +592,7 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
     UnsignedBits(&unsigned_keys)[ItemsPerThread]
         = reinterpret_cast<UnsignedBits(&)[ItemsPerThread]>(keys);
 
-    HIPCUB_PRAGMA_NOUNROLL()
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
         unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);

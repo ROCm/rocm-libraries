@@ -388,7 +388,7 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
         return;
     }
 
-    const auto current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const auto current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     // Check if warp size is supported
     if(warp_size > current_device_warp_size ||
@@ -501,7 +501,7 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
         return;
     }
 
-    const auto current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const auto current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     // Check if warp size is supported
     if(warp_size > current_device_warp_size ||
@@ -649,7 +649,7 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeys)
         return;
     }
 
-    const auto current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const auto current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     // Check if warp size is supported
     if(warp_size > current_device_warp_size ||
@@ -748,7 +748,7 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValues)
         return;
     }
 
-    const auto current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const auto current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     // Check if warp size is supported
     if(warp_size > current_device_warp_size ||

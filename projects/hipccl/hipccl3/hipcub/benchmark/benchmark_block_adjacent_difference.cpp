@@ -42,7 +42,7 @@ void kernel(Args... args)
 template<class T>
 struct minus
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline constexpr T operator()(const T& a, const T& b) const
     {
         return a - b;
@@ -65,7 +65,7 @@ struct subtract_left
 
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -111,7 +111,7 @@ struct subtract_left_partial_tile
         // Try to evenly distribute the length of tile_sizes between all the trials
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -159,7 +159,7 @@ struct subtract_right
 
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -205,7 +205,7 @@ struct subtract_right_partial_tile
         // Try to evenly distribute the length of tile_sizes between all the trials
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
-        HIPCUB_PRAGMA_NOUNROLL()
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];

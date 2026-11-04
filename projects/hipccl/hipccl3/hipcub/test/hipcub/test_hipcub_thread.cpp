@@ -106,16 +106,8 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
     }
     else // index % 8 == 7
     {
-        // TODO: For compatibility, should also change this API in rocm backend
-#ifdef __HIP_PLATFORM_NVIDIA__
-        device_output[index] = hipcub::ThreadLoadVolatilePointer(
-            device_input + index,
-            ::cuda::std::integral_constant<bool, std::is_fundamental<Type>::value>{});
-#else
-        device_output[index] = hipcub::ThreadLoadVolatilePointer(
-            device_input + index,
-            std::bool_constant<std::is_fundamental<Type>::value>());
-#endif
+        // ThreadLoadVolatilePointer is deprecated
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_VOLATILE>(device_input + index);
     }
 }
 
@@ -304,17 +296,8 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
     }
     else // index % 7 == 6
     {
-        // TODO: For compatibility, should also change this API in rocm backend
-#ifdef __HIP_PLATFORM_NVIDIA__
-        hipcub::ThreadStoreVolatilePtr(
-            device_output + index,
-            device_input[index],
-            ::cuda::std::integral_constant<bool, std::is_fundamental<Type>::value>{});
-#else
-        hipcub::ThreadStoreVolatilePtr(device_output + index,
-                                       device_input[index],
-                                       std::bool_constant<std::is_fundamental<Type>::value>());
-#endif
+        // ThreadStoreVolatilePtr is deprecated
+        hipcub::ThreadStore<hipcub::STORE_VOLATILE>(device_output + index, device_input[index]);
     }
 }
 
@@ -470,9 +453,9 @@ TYPED_TEST(HipcubThreadOperationTests, IterateStore)
 
 struct sum_op
 {
-    template<typename T> HIPCUB_HOST_DEVICE
-    T
-    operator()(const T& input_1,const T& input_2) const
+    template<typename T>
+    _CCCL_HOST_DEVICE
+    T operator()(const T& input_1, const T& input_2) const
     {
         return input_1 + input_2;
     }

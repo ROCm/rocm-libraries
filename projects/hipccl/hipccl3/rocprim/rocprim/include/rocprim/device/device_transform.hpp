@@ -559,6 +559,84 @@ inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
         debug_synchronous);
 }
 
+/// \brief Parallel device-level transform primitive for an arbitrary amount of inputs and outputs.
+///
+/// transform function performs a device-wide transformation operation
+/// on n input ranges to m output ranges using binary \p transform_op operator.
+///
+/// \par Overview
+/// * All iterators in \p output_iters and \p input_iters must have at least \p size elements.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
+/// \tparam InputIterators all the random-access iterator types of the input range. These types must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterators all the random-access iterator types of the output range. These types must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction type of binary function used for transform.
+///
+/// \param [in] input_iters a tuple of iterators to the input sequences where num_items elements are read from each.
+/// \param [out] OutputIterators a tuple of iterators to the output sequences.
+/// \param [in] size number of element in the input range.
+/// \param [in] transform_op an n-ary function object used for the transform, where n is the number of input sequences.
+/// The function object must not modify the object passed to it.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on three arrays of
+/// integer values (element-wise sum is performed).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] (int a, int b) -> tuple<int, int, int>
+///     {
+///         return tuple<int, int, int>{a + b, a - b, -a};
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;   // e.g., 4
+/// int* input1;   // e.g., [1, 2, 3, 4]
+/// int* input2;   // e.g., [5, 6, 7, 8]
+/// int* output1;  // empty array of 8 elements
+/// int* output2;  // empty array of 8 elements
+/// int* output3;  // empty array of 8 elements
+///
+/// // perform transform
+/// rocprim::transform(
+///     rocprim::tuple(input1, input2), rocprim::tuple(output1, output2, output3), size, transform_op
+/// );
+/// // output1: [ 6,  8, 10, 12]
+/// // output2: [-4, -4, -4, -4]
+/// // output3: [-1, -2, -3, -4]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class... InputIterators,
+         class... OutputIterators,
+         class TransformOp>
+inline hipError_t transform(rocprim::tuple<InputIterators...>  input_iters,
+                            rocprim::tuple<OutputIterators...> output_iters,
+                            const size_t                       size,
+                            TransformOp                        transform_op,
+                            const hipStream_t                  stream            = 0,
+                            bool                               debug_synchronous = false)
+{
+    return transform<Config>(
+        ::rocprim::make_zip_iterator(input_iters),
+        ::rocprim::make_zip_iterator(output_iters),
+        size,
+        detail::unpack_nary_op<TransformOp,
+                               typename std::iterator_traits<InputIterators>::value_type...>(
+            transform_op),
+        stream,
+        debug_synchronous);
+}
+
 /// \brief Parallel generate primitive for device level.
 ///
 /// generate function performs a device-wide generation operation
