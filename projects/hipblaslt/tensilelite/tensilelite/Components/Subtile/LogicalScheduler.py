@@ -5077,7 +5077,10 @@ class LogicalScheduler:
                         partitionPrefetch=self.config.prefetchNextPartition,
                         uniformPgrEpoch=self.config.uniformPgrEpoch,
                         earliestWriteShadow=write_floor,
-                        mfmaBase=body_mfma_base)
+                        mfmaBase=body_mfma_base,
+                        retainAllLocalReads=(
+                            self.config.numPartitionsM == 1
+                            or self.config.numPartitionsN == 1))
                     body_mfma_base += current_mfmas
                     partModule.add(scheduled)
                 else:
