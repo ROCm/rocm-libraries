@@ -5,8 +5,8 @@
 > [test-plans index](README.md) this plan links to belong to that RFC's first phase and do not
 > exist yet. The bundles also depend on #14312, which derives O and Stats from the forward and
 > has not merged either. The generator is the source of truth for counts and
-> budgets: `generate_sdpa_bwd_bundles.py --dry-run --report` declares 580 cases, 500 written
-> (quick 57, PR 148, nightly 220, full 75) and 80 gated. The engine defects DEF-01 to DEF-08
+> budgets: `generate_sdpa_bwd_bundles.py --dry-run --report` declares 580 cases, 499 written
+> (quick 56, PR 148, nightly 220, full 75) and 81 gated. The engine defects DEF-01 to DEF-08
 > (§4.2) are tracked under ALMIOPEN-3035: DEF-01 is ALMIOPEN-3036, DEF-02 ALMIOPEN-3037,
 > DEF-03 ALMIOPEN-3046, DEF-04 ALMIOPEN-3039, DEF-05 and DEF-08 ALMIOPEN-3038, DEF-06
 > ALMIOPEN-3043 and DEF-07 ALMIOPEN-3044.
@@ -196,7 +196,8 @@ hipDNN's contract is cuDNN's semantics. In order of authority: `Attention.md:360
 
 Open points: dQ, dK and dV at padded positions are expected to be 0 until a SEM entry decides (the
 references write 0); rank-3 Stats is an extension probe (T6); `dropout_probability = 0` is a probe
-until a SEM entry defines it (A10): develop's references treat it as no dropout, #14358 declines it.
+until a SEM entry defines it (A10): the references treated it as no dropout until #14358, which
+declines it, so PRB-R01 is gated (p0) until ALMIOPEN-3149 or ALMIOPEN-3150 settles its meaning.
 
 ---
 
@@ -245,7 +246,7 @@ rejection probe.
 | A6, A7, AW7 | `causal_mask`, `causal_mask_bottom_right` | each alone; `causal_mask` with W, with R 5, with BR (composition per SEM-002); both together is U (IVP6) | ready | Q |
 | A8 | `alibi_mask` | TL causal only; any other band is U (IVP10) | #14358 + I6; develop ignores the flag | PR (rejection probes); gated → PR |
 | A9, AW6 | `padding_mask` | true with both seq_len tensors; false with both is padding (SEM-008 extension, cuDNN rejects); true without seq_len is illegal (R10) | #14358 + I6 + HG4 | gated → PR |
-| A10 | `dropout_probability` | unset; 0 (probe until a SEM entry defines it); 0 < p < 1 with seed and offset (Philox); p without RNG state, p ≥ 1, p < 0, NaN, or p with a mask is U (IVP7) | 0: ready; Philox: none | Q |
+| A10 | `dropout_probability` | unset; 0 (probe until a SEM entry defines it); 0 < p < 1 with seed and offset (Philox); p without RNG state, p ≥ 1, p < 0, NaN, or p with a mask is U (IVP7) | 0: gated (p0: ALMIOPEN-3149 or ALMIOPEN-3150); Philox: none | Q (gated) |
 | A11 | Node `compute_data_type` | FLOAT; HALF, BFLOAT16, DOUBLE (listed: each needs its own tolerance class); unset on node and graph is illegal | ready (FLOAT) | Q (FLOAT) |
 | A12, A13 | Node name; cuDNN-parity setters with no schema field | no semantic effect, not swept; rejected by R0 | — | unit tests |
 
@@ -569,7 +570,7 @@ Limits, placed in full; each shape states what its oracle needs.
 
 `sdpa_bwd_plan.py` holds one record per case (geometry, per-tensor dims, strides and dtypes, bounds,
 scale, attributes, value domains, level, topology, purpose, plan items, class, oracle, gate, cost):
-580 cases: 500 written on the baseline and 80 gated (§4.1). **Core axes:** dtype
+580 cases: 499 written on the baseline and 81 gated (§4.1). **Core axes:** dtype
 {BF16, FP16} × Sq:Skv {<, =, >} × mask {none, causal, window} × alignment {TL, BR} where it changes
 the mask: 13 cells per dtype. The mask and the Sq:Skv relation choose the kernel's code path (dead
 rows, unattended keys, the window anchor, the masked-tile skip); the dtype selects the kernel and the
@@ -689,19 +690,21 @@ Each level answers one question (RFC 0022 §8.2); a case sits in the lowest leve
 
 Quick holds the core cells; four core-base S variants; every hipDNN escaped-bug reproducer that has
 an oracle; the cheapest claim case of each claimed feature the core cells miss (H08, H11, H90,
-REG-18c, PRB-A01, CLM-S1, GL-01); and three probes chosen by cost and hazard: PRB-M01 (a rejection
-probe with a verdict before #14346), PRB-R01 (p = 0) and PRB-G01 (Sq = Skv = 1).
+REG-18c, PRB-A01, CLM-S1, GL-01); and two probes chosen by cost and hazard: PRB-M01 (a rejection
+probe with a verdict before #14346) and PRB-G01 (Sq = Skv = 1). A third, PRB-R01 (p = 0), targets
+quick but is gated (p0): since #14358 neither reference models p = 0, so an engine that accepts it
+cannot be checked and the case fails as Unverifiable.
 
 Cases generated (own level / cumulative):
 
 | Level | `Default` | Other topologies | Own | Cumulative | Claim | Probe | Regression | Distinct geometries |
 |---|---|---|---|---|---|---|---|---|
-| quick | 54 | 3 | **57** | 57 | 38 | 3 | 16 | 21 |
-| PR | 136 | 12 | **148** | 205 | 69 | 76 | 3 | 81 |
-| nightly | 173 | 47 | **220** | 425 | 109 | 111 | 0 | 102 |
-| full | 75 | 0 | **75** | 500 | 45 | 30 | 0 | 27 |
+| quick | 53 | 3 | **56** | 56 | 38 | 2 | 16 | 21 |
+| PR | 136 | 12 | **148** | 204 | 69 | 76 | 3 | 81 |
+| nightly | 173 | 47 | **220** | 424 | 109 | 111 | 0 | 102 |
+| full | 75 | 0 | **75** | 499 | 45 | 30 | 0 | 27 |
 
-Probes include the rejection probes (1, 17, 3, 2). By size class: quick S 31, H 26; PR S 37, M 6,
+Probes include the rejection probes (1, 17, 3, 2). By size class: quick S 31, H 25; PR S 37, M 6,
 H 105; nightly S 125, L 36, M 26, H 33; full S 54, M 10, H 5, X 6. 204 distinct geometries in all.
 `--report` prints these counts; the measured run (§4.5) fixes them.
 
@@ -709,6 +712,7 @@ H 105; nightly S 125, L 36, M 26, H 33; full S 54, M 10, H 5, X 6. 204 distinct 
 
 | Target | Cases | Gate | s, CPU / GPU era |
 |---|---|---|---|
+| quick | PRB-R01 | p0: a SEM entry for p = 0 and a reference that models it (ALMIOPEN-3149 or ALMIOPEN-3150) | 0.25 / 0.09 |
 | PR | GL-14, PRB-B11–B14, PRB-B16, REG-08 | #14358 | 2.84 / 0.71 |
 | PR | REG-14; PRB-M04 | #14358 + I4; #14358 + I6 | 0.68 / 0.20 |
 | PR | GL-15, GL-16a, M40.pr, PRB-P01–P04, PRB-R04 | #14358 + I6 + HG4 | 7.44 / 1.56 |
@@ -843,15 +847,16 @@ Each product left out is a decision. Rejection probes are never here and are nev
 
 Every case is costed as accepted, with the binding model of §3 (a repeated case costs repeat × its
 time; golden cases at the live CPU reference). The reserve holds every gated case whose gate can open
-before #14358, on the CPU reference: S46, S47, H87, H91, H93 (PR, 3.2 s) and H96 (nightly, 0.4 s).
+before #14358, on the CPU reference: PRB-R01 (quick, 0.2 s), S46, S47, H87, H91, H93 (PR, 3.2 s)
+and H96 (nightly, 0.4 s).
 The build fails when a level crosses 95 % of its budget with the reserve.
 
 | Level | s, own | s, cumulative | + reserved gates | Budget less 5 % | GPU-reference era, cumulative |
 |---|---|---|---|---|---|
-| quick | 18.4 | 18.4 | 18.4 | 19.0 | 5.6 |
-| PR | 90.6 | 109.0 | 112.2 | 114.0 | 23.9 |
-| nightly | 341.6 | 450.6 | 454.3 | 456.0 | 74.6 |
-| full | 1247.8 | 1698.4 | 1702.1 | 1710.0 | 194.1 |
+| quick | 18.2 | 18.2 | 18.4 | 19.0 | 5.5 |
+| PR | 90.6 | 108.7 | 112.2 | 114.0 | 23.8 |
+| nightly | 341.6 | 450.3 | 454.3 | 456.0 | 74.5 |
+| full | 1247.8 | 1698.1 | 1702.1 | 1710.0 | 194.0 |
 
 - Gates that open with #14358 also make the GPU reference the oracle; all gated cases then add 3.1,
   6.6 and 11.0 s to the GPU-era column of PR, nightly and full.
@@ -1053,7 +1058,7 @@ The generator emits these features' cases as gated or listed items; they run whe
 | the #14312 derivation declines ALiBi, padding, dropout and ragged (I6); its CPU forward is too slow for M and X | those cases stay gated after #14358 | extend it; derive with the GPU forward | ALMIOPEN-2855 (GPU forward); extension to file |
 | #14312 calls the forward overload that #14358 deletes | the second PR to land does not build | move to `SdpaFwdOptions` | PR review |
 | `left_bound` keeps L + 1 keys (SEM-001) | window cases pass while wrong against cuDNN | fixed by #14483 | ALMIOPEN-3024 |
-| rank-3 Stats throw; non-FLOAT Stats read as float; #14358 throws for a device-memory scale and declines p = 0 | false FAIL; silent mis-model; PRB-R01 loses its oracle | references decline; rule IVP2; a SEM entry for p = 0 | to file; PR review |
+| rank-3 Stats throw; non-FLOAT Stats read as float; #14358 throws for a device-memory scale and declines p = 0 | false FAIL; silent mis-model; PRB-R01 lost its oracle (Unverifiable in PR CI, 2026-11-02), so it is gated (p0) | references decline; rule IVP2; a SEM entry for p = 0 | to file; PR review; ALMIOPEN-3149 or ALMIOPEN-3150 (p = 0) |
 | CPU reference cost: single-threaded, dP for every key | 90 % of lane time | parallelise over (b, KV head); skip masked keys | to file |
 | E5: bundles load without `Graph::validate()` | frontend rules never apply to a bundle | the generator enforces legality; validate after load | to file |
 | HG1, HG2: no bundle generator; no `purpose` | plan and bundles drift; probes counted as claims | this plan's generator; harness and `feature_matrix.py` skip probes | ALMIOPEN-2948 (design); to file |

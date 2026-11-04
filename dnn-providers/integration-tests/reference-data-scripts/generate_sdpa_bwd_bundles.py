@@ -1031,7 +1031,7 @@ def probe_items():
              bias=dict(P.bias_spec("1h"), stride="rowpad8"), dbias=True, dbias_stride="rowpad8",
              inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias", oracle="14358",
              expected="dBias correct at its strides, or typed rejection"),
-        item("PRB-R01", "quick", "probe", "A10", nb, attrs={"dropout_probability": 0.0},
+        item("PRB-R01", "quick", "probe", "A10", nb, attrs={"dropout_probability": 0.0}, oracle="p0",
              expected="same as no dropout, or typed rejection"),
         item("PRB-R03", "notrun", "probe", "A10 T14 S54 DT6", (1, 1, 1, 1, 128, 128),
              attrs={"dropout_probability": 0.1}, topology="Philox", oracle="none",

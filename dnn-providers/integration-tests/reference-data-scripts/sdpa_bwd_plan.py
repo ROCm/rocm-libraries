@@ -879,6 +879,8 @@ GATES = {
     "HG18": ("HG18: finite-only validator", "to file"),
     "harness: zero strides rejected": ("HG17: zero input strides", "to file"),
     "none": ("no oracle (Philox: the backward schema has no rng_dump)", "to file"),
+    "p0": ("a SEM entry for dropout_probability = 0 without RNG state, and a reference that models it "
+           "(the references decline any dropout_probability since #14358)", "ALMIOPEN-3149 or ALMIOPEN-3150"),
     "none (decline-only probe mode)": ("a decline-only probe mode that does not allocate", "to file"),
     "unit": ("descriptor-only: a unit test, not a sweep case", "#14075"),
     UNASSIGNED_GATE: ("HG6: per-tensor magnitude-relative validator", "ALMIOPEN-2704 (partial); to file"),
