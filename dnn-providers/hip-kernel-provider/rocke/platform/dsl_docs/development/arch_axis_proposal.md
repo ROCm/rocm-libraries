@@ -249,13 +249,16 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 `tools/gen_arch_domain.py`, for each decl key × each wired arch, emits a minimal
 module, compiles **and links** it in a **subprocess**, and classifies the
 outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
-its structure and the `rocke_arch_domain_reproducibility` CTest asserts
-regeneration is a no-op when the host uses the exact compiler build recorded in
-the artifact. A different build is explicitly unvalidated because development
-builds within one LLVM major can disagree. The CTest is registered for both
-developer build trees and relocated provider test artifacts; the installed form
-checks the package data CI actually consumes without requiring a source
-checkout. This is exactly how golden is managed.
+its structure and the `rocke_arch_domain_reproducibility` CTest checks a
+monotonic support floor with compatible flavor, scope, and probe methodology.
+Previously working cells and accepted processor names must remain working.
+Compiler identity is provenance, not an applicability gate. Gains and improved
+classification pass and are reported; remaining no-data and degraded negative
+measurements are not qualified. Invalid or missing comparison records fail.
+The CTest is registered for both developer build trees and relocated provider
+test artifacts; the installed form checks the package data CI actually consumes
+without requiring a source checkout. Unlike an IR golden, this gate compares
+capability transitions rather than requiring identical generated text.
 
 Shipped schema — per-cell provenance is the point, per
 [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) §3.2, since one host

@@ -73,14 +73,15 @@ choose the name they pass the compiler
 
 # Provenance
 
-A result is only meaningful against the toolchain that produced it, and a host
-can only validate its own flavor. Every column records the clang identity and
-the flavor rocke resolved, and the generator refuses to run when they disagree:
-an artifact labelled with the wrong LLVM vintage looks authoritative.
+A host probes its own LLVM flavor. Every column records compiler identity as
+provenance, and the generator refuses to mix tools or label results with the
+wrong flavor. `--check` compares retained support across builds within that
+flavor: gains and improved classifications are reported, while support loss or
+invalid comparison inputs fail. Remaining no-data cells are not qualified.
 
 Usage:
   python rocke/platform/tools/gen_arch_domain.py            # write the artifact
-  python rocke/platform/tools/gen_arch_domain.py --check    # CI: regen is a no-op
+  python rocke/platform/tools/gen_arch_domain.py --check    # CI: support floor
   python rocke/platform/tools/gen_arch_domain.py --only mfma --verbose
   python rocke/platform/tools/gen_arch_domain.py --keep-ir DIR
 """
@@ -1136,11 +1137,9 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             continue
         if doc.get("schema") != SCHEMA:
             result.failures.append(f"{label} schema must be {SCHEMA!r}")
-        for field in ("toolchain", "keys", "canonical"):
+        for field in ("toolchain", "keys", "canonical", "processors"):
             if not isinstance(doc.get(field), dict):
                 result.failures.append(f"{label} {field} is not a mapping")
-        if not isinstance(doc.get("processors", {}), dict):
-            result.failures.append(f"{label} processors is not a mapping")
     if result.failures:
         return result
 
@@ -1169,7 +1168,13 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
 
     expected_arches = set(a_method["arches"])
     for label, doc in (("baseline", a), ("current", b)):
-        outside = set(doc.get("processors", {})) - expected_arches
+        processors = set(doc["processors"])
+        missing = expected_arches - processors
+        outside = processors - expected_arches
+        if missing:
+            result.failures.append(
+                f"{label} processors missing answers: {sorted(missing)}"
+            )
         if outside:
             result.failures.append(
                 f"{label} processors outside probe scope: {sorted(outside)}"
@@ -1215,42 +1220,33 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             ):
                 result.changes["unvalidated"].append(f"{key}/{arch}: {after}")
             for label, cell in (("baseline", before_cell), ("current", after_cell)):
-                if cell.get("verified_on", a_method["flavor"]) != a_method["flavor"]:
-                    result.failures.append(f"{key}/{arch}: {label} verified_on changed")
+                verified_on = cell.get("verified_on")
+                if (
+                    not isinstance(verified_on, str)
+                    or verified_on != a_method["flavor"]
+                ):
+                    result.failures.append(
+                        f"{key}/{arch}: {label} verified_on must be {a_method['flavor']!r}, got {verified_on!r}"
+                    )
             if before == after == STATUS_OK and (
                 before_cell.get("probe_imm") != after_cell.get("probe_imm")
             ):
                 result.failures.append(f"{key}/{arch}: probe witness changed")
 
-    before_processors, after_processors = a.get("processors", {}), b.get(
-        "processors", {}
-    )
-    for arch in sorted(set(before_processors) - set(after_processors)):
-        result.failures.append(f"missing current processor {arch}")
-    for arch in sorted(set(before_processors) | set(after_processors)):
-        before = before_processors.get(arch)
-        after = after_processors.get(arch)
-        if arch not in after_processors:
-            continue
+    for arch in sorted(expected_arches):
+        before, after = a["processors"][arch], b["processors"][arch]
         if (
-            not isinstance(after, dict)
+            not isinstance(before, dict)
+            or not isinstance(after, dict)
+            or not isinstance(before.get("accepted"), bool)
             or not isinstance(after.get("accepted"), bool)
-            or (
-                arch in before_processors
-                and (
-                    not isinstance(before, dict)
-                    or not isinstance(before.get("accepted"), bool)
-                )
-            )
         ):
             result.failures.append(f"processor {arch}: accepted must be boolean")
             continue
-        if before is not None and before["accepted"] and not after["accepted"]:
+        if before["accepted"] and not after["accepted"]:
             result.failures.append(f"processor {arch}: accepted -> unsupported")
-        elif after["accepted"] and (before is None or not before["accepted"]):
-            result.changes["gain"].append(
-                f"processor {arch}: unsupported/unmeasured -> accepted"
-            )
+        elif after["accepted"] and not before["accepted"]:
+            result.changes["gain"].append(f"processor {arch}: unsupported -> accepted")
     return result
 
 
@@ -1494,7 +1490,9 @@ def _unvalidated_exit(requested: int | None, legacy: int) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
-        "--check", action="store_true", help="regenerate and fail on any diff"
+        "--check",
+        action="store_true",
+        help="check baseline support; fail on support loss or invalid comparison, report gains and no-data",
     )
     ap.add_argument(
         "--out",
@@ -2063,9 +2061,13 @@ def main() -> int:
         if not comparison.failures:
             print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
             return 0
+        failure_count = len(comparison.failures)
+        summary = "; ".join(comparison.failures[:5])
+        if failure_count > 5:
+            summary += f" (+{failure_count - 5} more)"
         print(
             f"\nFAIL: {out} lost support or could not be compared safely.\n"
-            "      " + "; ".join(comparison.failures[:5]) + "\n"
+            f"      failures: {failure_count} -- {summary}\n"
             "      Investigate losses and validation errors; do not re-bless a regression."
         )
         return 1

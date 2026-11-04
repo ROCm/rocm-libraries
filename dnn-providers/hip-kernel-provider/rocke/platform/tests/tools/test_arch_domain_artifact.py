@@ -368,15 +368,18 @@ class SupportComparisonTest(unittest.TestCase):
                 "toolchain": tc,
                 "keys": {
                     "a.b": {
-                        "gfx942": {
+                        arch: {
                             "status": status,
+                            "verified_on": tc["flavor"],
                             "evidence": (
                                 "" if status == G.STATUS_OK else "probe diagnostic"
                             ),
                         }
+                        for arch in tc["arches"]
                     }
                 },
                 "canonical": {},
+                "processors": {arch: {"accepted": True} for arch in tc["arches"]},
             }
         )
 
@@ -536,6 +539,69 @@ class SupportComparisonTest(unittest.TestCase):
             "arches must be a list",
             "; ".join(G._compare_support(json.dumps(both), json.dumps(both)).failures),
         )
+
+    def test_missing_processor_records_fail_on_either_or_both_sides(self):
+        for accepted in (True, False):
+            for side in ("baseline", "current", "both"):
+                for damage in ("mapping", "entry"):
+                    with self.subTest(accepted=accepted, side=side, damage=damage):
+                        before, after = json.loads(self._doc()), json.loads(self._doc())
+                        for doc in (before, after):
+                            doc["processors"]["gfx942"] = {
+                                "accepted": accepted,
+                                "evidence": "processor diagnostic",
+                            }
+                        damaged = (
+                            (before, after)
+                            if side == "both"
+                            else ((before,) if side == "baseline" else (after,))
+                        )
+                        for doc in damaged:
+                            if damage == "mapping":
+                                del doc["processors"]
+                            else:
+                                del doc["processors"]["gfx942"]
+                        comparison = G._compare_support(
+                            json.dumps(before), json.dumps(after)
+                        )
+                        self.assertTrue(comparison.failures)
+                        self.assertIn("processors", "; ".join(comparison.failures))
+                        self.assertEqual(
+                            comparison.changes["gain"], [], "missing data became a gain"
+                        )
+
+    def test_missing_verified_on_fails_on_either_or_both_sides(self):
+        for status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT, G.STATUS_TOOLCHAIN_CRASH):
+            for side in ("baseline", "current", "both"):
+                with self.subTest(status=status, side=side):
+                    before, after = json.loads(self._doc(status)), json.loads(
+                        self._doc(status)
+                    )
+                    damaged = (
+                        (before, after)
+                        if side == "both"
+                        else ((before,) if side == "baseline" else (after,))
+                    )
+                    for doc in damaged:
+                        del doc["keys"]["a.b"]["gfx942"]["verified_on"]
+                    comparison = G._compare_support(
+                        json.dumps(before), json.dumps(after)
+                    )
+                    self.assertTrue(comparison.failures)
+                    self.assertIn("a.b/gfx942", "; ".join(comparison.failures))
+                    self.assertIn("verified_on", "; ".join(comparison.failures))
+
+    def test_wrong_or_invalid_verified_on_still_fails(self):
+        for value in (None, "llvm24", 22):
+            with self.subTest(value=value):
+                after = json.loads(self._doc())
+                after["keys"]["a.b"]["gfx942"]["verified_on"] = value
+                self.assertIn(
+                    "verified_on",
+                    "; ".join(
+                        G._compare_support(self._doc(), json.dumps(after)).failures
+                    ),
+                )
 
     def test_probe_witness_changes_still_fail(self):
         before, after = json.loads(self._doc()), json.loads(self._doc())
@@ -1646,6 +1712,72 @@ sys.exit(0)
         self.assertIn("MEASUREMENT DEGRADED: 1", text)
         self.assertIn("NO-DATA (not qualified): 1", text)
         self.assertIn("SUPPORT OK", text)
+
+    def test_cli_rejects_missing_baseline_metadata_without_rewriting(self):
+        for field in ("processors", "verified_on"):
+            with self.subTest(field=field):
+                out, tools = self._baseline_from_other_compiler()
+                doc = json.loads(out.read_text())
+                if field == "processors":
+                    del doc["processors"]
+                else:
+                    del doc["keys"]["fabs.f32"]["gfx942"]["verified_on"]
+                out.write_text(json.dumps(doc))
+                before = out.read_text()
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        "fabs.f32",
+                        "--check",
+                        "--unvalidated-exit-code",
+                        "77",
+                    )
+                self.assertEqual(
+                    rc, 1, "incomplete baseline must fail, not pass or skip"
+                )
+                self.assertIn(field, stdout.getvalue())
+                self.assertEqual(out.read_text(), before)
+
+    def test_failure_summary_reports_total_and_omitted_count(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        empty = {kind: [] for kind in G._compare_support(before, before).changes}
+        for count in (0, 5, 8):
+            with self.subTest(count=count):
+                failures = [f"summary-case-{i}" for i in range(count)]
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(
+                        G,
+                        "_compare_support",
+                        return_value=G._SupportComparison(failures, empty),
+                    ),
+                ):
+                    rc = self._run(tools, out, "--only", "fabs.f32", "--check")
+                text = stdout.getvalue()
+                self.assertEqual(rc, 1 if count else 0)
+                if count:
+                    self.assertIn(f"failures: {count}", text)
+                else:
+                    self.assertIn("SUPPORT OK", text)
+                    self.assertNotIn("FAIL:", text)
+                for index in range(min(count, 5)):
+                    self.assertIn(f"summary-case-{index}", text)
+                for index in range(5, count):
+                    self.assertNotIn(f"summary-case-{index}", text)
+                if count > 5:
+                    self.assertIn(f"(+{count - 5} more)", text)
+                else:
+                    self.assertNotIn(" more)", text)
+                self.assertEqual(out.read_text(), before)
 
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
