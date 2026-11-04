@@ -2,6 +2,7 @@
 #
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
+# SPDX-License-Identifier: MIT
 ################################################################################
 
 """The dual-period MXFP8 partition split must never produce an odd cycle.

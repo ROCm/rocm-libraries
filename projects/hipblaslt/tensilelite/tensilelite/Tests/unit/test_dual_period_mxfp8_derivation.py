@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Derivation gate for the dual-period MXFP8 subtile path (gfx950).
 
-The non-scale F8 subtile kernel wins at MT256x256 / MIWT 8x4 / DU128 / PGR2.
+The non-scale F8 subtile kernel runs at MT256x256 / MIWT 8x4 / DU128 / PGR2.
 MXFP8 historically forced DepthU to a multiple of 2*MI_K=256 (one scale local
 read covers two scale MMA tiles in K) and then split that into a dataDU=128
 multi-DU pipeline, which rejects PGR>1.  The dual-period derivation breaks that
@@ -158,7 +158,7 @@ def _derive(gfx950_iim, assembler, capsys, mi, depth_u, pgr, plr, **overrides):
     return sol, out
 
 
-# MT256x256, MIWT 8x4, MIWG 2x4 — the winning non-scale geometry.
+# MT256x256, MIWT 8x4, MIWG 2x4 — the non-scale F8 subtile geometry.
 _MI_8WAVE = [16, 16, 128, 1, 1, 8, 4, 2, 4]
 # MT256x256, MIWT 8x8, MIWG 2x2 — the shipped DU256/PGR1 MXFP8 geometry.
 _MI_PGR1 = [16, 16, 128, 1, 1, 8, 8, 2, 2]

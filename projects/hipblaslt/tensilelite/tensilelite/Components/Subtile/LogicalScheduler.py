@@ -279,8 +279,8 @@ class SchedulerConfig:
     # This is intentionally independent of PGR's global-read lookahead.
     prefetchNextPartition: bool = False
     # Physical traversal of the 2-D partition grid.  "m-major" preserves the
-    # legacy order (M varies fastest).  "n-major" matches FlyDSL's
-    # c00,c01,c10,c11 order (N varies fastest).
+    # legacy order (M varies fastest).  "n-major" visits the 2x2 grid as
+    # c00,c01,c10,c11 (N varies fastest).
     partitionOrder: str = "m-major"
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
@@ -929,8 +929,8 @@ class LogicalScheduler:
         """Return {'A': (start, end), 'B': (start, end)} for partition pi.
 
         Tile ranges are derived from prefix sums and the configured traversal
-        order.  The default is M-major; N-major is used by the FlyDSL-like
-        2x2 experiment.
+        order.  The default is M-major; N-major is used by the 2x2
+        partition-directed path.
         """
         cfg = self.config
         piM, piN = cfg.partition_coords(pi)
@@ -1607,9 +1607,8 @@ class LogicalScheduler:
         # color each tensor by its own partition-grid coordinate.  A follows
         # piM, B follows piN, so partitions sharing an operand range also share
         # its physical VGPR set.  This supports both one-dimensional splits and
-        # a FlyDSL-like 2x2 traversal without inferring the consumer from tile
-        # ranges.
-        # Scoped strictly to the env-gated experimental flip above: the natural
+        # a 2x2 traversal without inferring the consumer from tile ranges.
+        # Scoped strictly to the forced_local_pos flip above: the natural
         # use_global_pos=False case (e.g. MXFP4 numSubIterK>=2) must keep the
         # original set formula untouched.
         partition_sets = forced_local_pos and (numP > 1)

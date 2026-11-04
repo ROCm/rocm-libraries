@@ -482,7 +482,7 @@ class TestPartitionDirectedPLR:
             partitionOrder="n-major",
         )
 
-    def test_flydsl_2x2_ranges_and_lr_targets(self):
+    def test_nmajor_2x2_ranges_and_lr_targets(self):
         cfg = self._make_cfg()
         sched = LogicalScheduler(cfg)
         partitions = sched.place_LRs()
@@ -511,7 +511,7 @@ class TestPartitionDirectedPLR:
             (3, 'B', 1, 0, 0, 4),
         ]
 
-    def test_flydsl_2x2_vgpr_coloring(self):
+    def test_nmajor_2x2_vgpr_coloring(self):
         cfg = self._make_cfg()
         sched = LogicalScheduler(cfg)
         sched.place_LRs()

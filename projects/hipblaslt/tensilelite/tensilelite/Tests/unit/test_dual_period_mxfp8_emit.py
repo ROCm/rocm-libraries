@@ -1,9 +1,14 @@
 ################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+################################################################################
 # ISA-level regression for the dual-period MXFP8 subtile kernel.
 #
 # The dual-period path keeps the 128-K data loop while running a decoupled
 # 256-K pre-shuffled scale epoch that is reused by two data iterations.  This
-# test drives the REAL winning geometry (MT256x256, MIWT 8x4, MIWG 2x4, DU128,
+# test drives the shipped geometry (MT256x256, MIWT 8x4, MIWG 2x4, DU128,
 # PGR2/PLR0, 4x2 partitions, N-major, WGM4) through CPU-only codegen and
 # asserts the steady-state mainloop honors the scale contract:
 #
