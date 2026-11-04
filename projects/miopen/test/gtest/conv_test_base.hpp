@@ -27,13 +27,36 @@
 
 #include <miopen/bfloat16.hpp>
 #include <miopen/miopen.h>
+#include <miopen/target_properties.hpp>
 #include <iostream>
+#include <string>
+#include <type_traits>
 
 #include "tensor_holder.hpp"
 #include "conv_common.hpp"
 #include "conv_tensor_gen.hpp"
+#include "get_handle.hpp"
 
 using Direction = miopen::conv::Direction;
+
+// Host FP8 values must use the exponent bias of the device that runs the kernels.
+template <typename T>
+void SetHostFp8ExponentBias(const std::string& device_name)
+{
+    if constexpr(std::is_same_v<T, float8_fnuz> || std::is_same_v<T, bfloat8_fnuz>)
+    {
+        miopen_f8::set_hip_f8_ieee_exponent_bias(miopen::UsesIeeeExponentBias(device_name));
+    }
+}
+
+template <typename T>
+void SetHostFp8ExponentBias()
+{
+    if constexpr(std::is_same_v<T, float8_fnuz> || std::is_same_v<T, bfloat8_fnuz>)
+    {
+        SetHostFp8ExponentBias<T>(get_handle().GetDeviceName());
+    }
+}
 
 struct GroupConvTestConfigBase
 {
@@ -377,6 +400,7 @@ struct ConvFwdSolverTestBase
 protected:
     void SetUpImpl(TConfig conv_config, miopenTensorLayout_t tensor_layout)
     {
+        SetHostFp8ExponentBias<T>();
         input   = tensor<T>{tensor_layout, conv_config.GetInput()};
         weights = tensor<T>{tensor_layout, conv_config.GetWeights()};
         input.generate(GenData<T>{});

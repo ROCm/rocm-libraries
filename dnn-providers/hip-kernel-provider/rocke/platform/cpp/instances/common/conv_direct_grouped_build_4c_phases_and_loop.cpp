@@ -176,7 +176,7 @@ static void rocke_dconv4c_load_weights_dgrad_gather(rocke_dconv_4c_ctx_t* ctx)
     {
         int lengths[4];
         static const char* const coord_names[4] = {"k", "r", "s", "c"};
-        lengths[0] = p->groups * p->cpg;
+        lengths[0] = (int)rocke_direct_conv_problem_total_c(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->kpg;
@@ -352,7 +352,7 @@ void rocke_dconv4c_load_weights(rocke_dconv_4c_ctx_t* ctx)
     {
         int lengths[4];
         static const char* const coord_names[4] = {"k_out", "r", "s", "c"};
-        lengths[0] = rocke_direct_conv_problem_total_k(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_k(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->cpg;

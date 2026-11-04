@@ -54,10 +54,10 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
-from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason, \
-                                       tdmWavePartition, tdmWaveSeparated, \
-                                       tdmKDimTrackable
+from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
+                                       tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
+                                       tdmPairOnEveryWave, \
+                                       tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -83,7 +83,8 @@ from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
   b_rotate_reason as segBRotateReason, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
-  paired_buffer_layout_reason as segPairedLayoutReason
+  paired_buffer_layout_reason as segPairedLayoutReason, \
+  persistent_keeps_unpaired as segPersistentKeepsUnpaired
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -94,6 +95,19 @@ from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+
+
+def _oneSidedMX(state):
+  """True when exactly one of A and B carries MX scales."""
+  problemType = state["ProblemType"]
+  return bool(problemType.get("MXBlockA", 0)) != bool(problemType.get("MXBlockB", 0))
+
+
+def _oneSidedMXHead(state):
+  """The subject of every one-sided MX rejection, with both MXBlock values."""
+  problemType = state["ProblemType"]
+  return ("MX scales on one tensor only (MXBlockA=%d, MXBlockB=%d)"
+          % (problemType.get("MXBlockA", 0), problemType.get("MXBlockB", 0)))
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -2388,6 +2402,31 @@ class Solution(collections.abc.Mapping):
       # The amax workspace/counter indexes dense output tiles within one batch.
       # Publish the corresponding runtime predicate, including for explicit YAML.
       state["BatchSizeEqual"] = 1
+    # The limit that needs derived state (the decoupled pair) is checked where it exists.
+    if _oneSidedMX(state):
+      if tuple(state["ISA"])[:2] != (12, 5):
+        reject(state, printRejectionReason,
+               "%s are implemented only for gfx1250 (ISA 12.5.x) TDM kernels; got ISA %s, whose MX "
+               "scale path (UseSubtileImpl or buffer scale loads) has no one-sided support. Put MX "
+               "scales on both tensors or on neither, or target gfx1250"
+               % (_oneSidedMXHead(state), ".".join(str(v) for v in state["ISA"])))
+        return
+      if state.get("UseSubtileImpl"):
+        reject(state, printRejectionReason,
+               "%s are not implemented with UseSubtileImpl: the subtile scale loads always set up "
+               "both MXSA and MXSB. Use UseSubtileImpl=0 (the gfx1250 TDM path)"
+               % _oneSidedMXHead(state))
+        return
+      # A non-persistent kernel has PrefetchAcrossPersistent and ReuseAcrossPersistent cleared
+      # later, so only a persistent one keeps them.
+      for key in ("PrefetchAcrossPersistent", "ReuseAcrossPersistent"):
+        if state.get(key) and isPersistent(state):
+          reject(state, printRejectionReason,
+                 "%s are not implemented with %s=%s on a persistent kernel: the persistent "
+                 "descriptor refresh, the PAP tail reset and the RAP null handle MX scales only as "
+                 "a pair. Put MX scales on both tensors or on neither, or use %s=0"
+                 % (_oneSidedMXHead(state), key, state[key], key))
+          return
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
@@ -3686,7 +3725,9 @@ class Solution(collections.abc.Mapping):
     # TDMSplit is disabled: it has unresolved read-token/tensorcnt races under
     # the decoupled load-vs-compute wave layout. Reject any solution requesting it.
     if state["TDMSplit"]:
-      reject(state, printRejectionReason, "TDMSplit is currently disabled")
+      reject(state, printRejectionReason,
+             "TDMSplit is currently disabled: it has unresolved read-token and tensorcnt races "
+             "under the decoupled load-vs-compute wave layout. Use TDMSplit=0")
       return
 
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
@@ -3713,74 +3754,68 @@ class Solution(collections.abc.Mapping):
         state["TDMLoadWaveSync"] = False
     # TDMFuse pins which tensors share a TDM descriptor set; see ValidParameters.py.
     tdmFuse: int = state.get("TDMFuse", 0)
+    if tdmFuse not in TDM_FUSE_GROUPING:
+      fuseValues = sorted(TDM_FUSE_GROUPING)
+      reject(state, printRejectionReason,
+             "TDMFuse=%r names no descriptor grouping; supported values are %s and %d"
+             % (tdmFuse, ", ".join(str(v) for v in fuseValues[:-1]), fuseValues[-1]))
+      return
     if tdmFuse:
       if not tdmBothTensors(state):
         reject(state, printRejectionReason,
-               "TDMFuse=%d needs the TDM on both tensors (TDMInst=3); got TDMInst=%d"
-               % (tdmFuse, state["TDMInst"]))
+               "TDMFuse=%d is not implemented with TDMInst=%d: it chooses which TDM descriptor "
+               "sets A, B and their MX scales share, so it needs the TDM on both tensors "
+               "(TDMInst=3). Use TDMInst=3, or TDMFuse=0" % (tdmFuse, state["TDMInst"]))
         return
-      if tdmFuse in (2, 3):
+      if state["NumWaves"] <= 1:
+        reject(state, printRejectionReason,
+               "TDMFuse=%d needs more than one wave (NumWaves=%d): it splits the waves among the "
+               "TDM descriptor sets of A, B and their MX scales, while a one-wave kernel keeps one "
+               "descriptor per tensor. Use TDMFuse=0 on one wave" % (tdmFuse, state["NumWaves"]))
+        return
+      bothScales: bool = tdmLiveScales(state) == TDM_SCALE_TENSORS
+      if state.get("UseSubtileImpl"):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d is not implemented with UseSubtileImpl on more than one wave "
+               "(NumWaves=%d): the subtile path keeps one TDM descriptor per tensor, so no "
+               "descriptor set can be shared. Use UseSubtileImpl=0, or TDMFuse=0"
+               % (tdmFuse, state["NumWaves"]))
+        return
+      if tdmFuse in (2, 3) and bothScales and state["NumWaves"] not in (2, 4):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d with MX scales on both tensors supports 2 or 4 waves; got "
+               "NumWaves=%d: the %s grouping has a wave layout for its set {%s,MXSA,MXSB} only "
+               "on those counts. Use TDMFuse=0 or 1 on other wave counts"
+               % (tdmFuse, state["NumWaves"], TDM_FUSE_GROUPING[tdmFuse],
+                  "A" if tdmFuse == 2 else "B"))
+        return
+      if tdmFuse in (2, 3) and bothScales:
         owner = "A" if tdmFuse == 2 else "B"
         other = "B" if tdmFuse == 2 else "A"
-        if state["NumWaves"] != 4:
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires NumWaves=4 for its 2/1/1 split; got %d"
-                 % (tdmFuse, state["NumWaves"]))
-          return
-        if state.get("UseSubtileImpl"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires UseSubtileImpl=0" % tdmFuse)
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires MX scales on both tensors" % tdmFuse)
-          return
-        if state["enableTDMMetadata"]:
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d does not support sparse metadata" % tdmFuse)
-          return
         decoupled, blkA, blkB = decouplePGRBlocks(state)
         if decoupled and blkA != blkB:
           # Only the scale laid into the other side's LDS blocks conflicts.
           conflicting = next(mx for mx in ("MXSA", "MXSB") if dcpLdsSide(mx) != owner)
           reject(state, printRejectionReason,
-                 "TDMFuse=%d requires an equal decoupled pair (PGRA=%d, PGRB=%d -> %d and %d "
-                 "LDS blocks): %s rides %s's descriptor set but follows %s's LDS block count. "
-                 "Use TDMFuse=0 or 1, or an equal pair"
+                 "TDMFuse=%d with MX scales on both tensors is not implemented at a divergent "
+                 "decoupled pair (PGRA=%d, PGRB=%d -> %d and %d LDS blocks) on more than one "
+                 "wave: %s is in %s's descriptor group but follows %s's LDS block count. Use an "
+                 "equal pair, or TDMFuse=0 or 1"
                  % (tdmFuse, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
                     blkA, blkB, conflicting, owner, other))
           return
-      if tdmFuse == 1:
-        if state["NumWaves"] <= 1:
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires NumWaves > 1 for parity grouping; got %d"
-                 % state["NumWaves"])
-          return
-        if state.get("UseSubtileImpl"):
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires UseSubtileImpl=0")
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires MX scales on both tensors")
-          return
-        if state["enableTDMMetadata"]:
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 does not support sparse metadata")
-          return
-        decoupled, blkA, blkB = decouplePGRBlocks(state)
-        if state["HalfPLR"] and decoupled and blkA != blkB:
-          # The late-fill pass moves one set's advance out of HalfPLR's end-of-loop mask.
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair "
-                 "(HalfPLR=%d, PGRA=%d, PGRB=%d -> %d and %d LDS blocks)"
-                 % (state["HalfPLR"], state["PrefetchGlobalReadA"],
-                    state["PrefetchGlobalReadB"], blkA, blkB))
-          return
-      # Catch a row declined by a precondition no arm checks (TDMSplit).
-      if not tdmGroupingAccepted(state):
+    if _oneSidedMX(state) and state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1:
+      decoupled, blkA, blkB = decouplePGRBlocks(state)
+      if decoupled and blkA != blkB:
+        # A set with one live member rides every wave, and the divergent-pair late fill
+        # re-slots one set by wave parity.
         reject(state, printRejectionReason,
-               "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
+               "%s are not implemented at a divergent decoupled pair (PGRA=%d, PGRB=%d -> %d and "
+               "%d LDS blocks) on more than one wave (NumWaves=%d): a set with one live member "
+               "rides every wave, while the divergent-pair late fill re-slots a set by wave "
+               "parity. Use an equal pair"
+               % (_oneSidedMXHead(state), state["PrefetchGlobalReadA"],
+                  state["PrefetchGlobalReadB"], blkA, blkB, state["NumWaves"]))
         return
     if not _validateMX2DFreeTile(state, printRejectionReason):
       return
@@ -5990,7 +6025,10 @@ class Solution(collections.abc.Mapping):
       state["1LDSBuffer"] = 0
     # MX case
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
+      # One-sided MX is handled on more than one wave only; one wave compares both pairs.
+      oneWave = state["NumWaves"] <= 1
+      if ((oneWave or state["ProblemType"]["MXBlockA"]) and state["DirectToLdsA"] != state["DirectToLdsMXSA"]) \
+          or ((oneWave or state["ProblemType"]["MXBlockB"]) and state["DirectToLdsB"] != state["DirectToLdsMXSB"]):
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
       if state["DirectToLdsA"] != state["DirectToLdsB"]:
           reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")
@@ -6954,9 +6992,12 @@ class Solution(collections.abc.Mapping):
       if _bRotReason is not None:
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
-    # Persistent kernels retain their existing interleave offsets and buffer swaps.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned and not isPersistent(state):
-      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
+    # Tight layouts pair each component's ping/pong buffers when supported. Persistent
+    # kernels retain their existing unpaired interleave if pairing is unavailable;
+    # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
+        and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
+      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)
         _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)
@@ -6966,14 +7007,14 @@ class Solution(collections.abc.Mapping):
         state["LDSSegInterleaveOffsets"] = _pairedOffsets
         state["StoreSwapAddr"] = True
         ldsNumBytesAB = _pairedOffsets["pairedUsedBytes"]
-      elif state["LDSSegmentBRotate"] or _segRequested == 1:
-        # Explicit tight interleave and tight B rotation require a valid paired layout.
+      elif state["LDSSegmentBRotate"] or (_segRequested == 1 and not isPersistent(state)):
+        # Non-persistent explicit tight interleave and tight B rotation require pairing.
         _parameter = "LDSSegmentBRotate" if state["LDSSegmentBRotate"] else "LDSSegmentInterleave=1"
         reject(state, printRejectionReason, "%s requires paired LDS placement: %s" % (_parameter, _pairedReason))
         return
-      else:
-        # Pairing failed in auto mode. Keep the ordinary LDS offsets, buffer
-        # swap policy and byte count calculated above.
+      elif not isPersistent(state):
+        # Non-persistent auto mode disables interleave when pairing fails. Persistent
+        # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
     if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
       state["LDSSegInterleaveOffsets"] = {}
@@ -7832,6 +7873,33 @@ class Solution(collections.abc.Mapping):
       # descriptor set, which is what lets RAP silence A's transfers per parity.
       if not (state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1):
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires wave-separated TDM (TDMInst = 3 and NumWaves > 1)")
+        return
+      # The RAP null writes that parity assumption into the kernel: it zeroes the
+      # even waves of a descriptor set's enable word
+      # (KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves), once per set
+      # owner. RAP holds both A and its scale resident, so both have to be
+      # silenced. TDMFuse=0 gives each its own set on exactly the even waves and
+      # both are, and without MX scales TDMFuse 1-3 give A and B a set each on
+      # every wave, which the null's every-wave arm handles. With MX scales a
+      # scale shares its data tensor's set, so one owner carries both and the
+      # single null cannot cover them: TDMFuse=1 seats A on the even waves but
+      # leaves MXSA on the odd ones, TDMFuse=2 seats A on the low half of a block
+      # set so half of it survives, and TDMFuse=3 leaves A on every wave with
+      # MXSA on B's set, which this null never writes. A resident tensor that
+      # goes on loading moves data into an LDS buffer the reuse copy does not
+      # read, so the row is refused rather than left to waste the bandwidth.
+      if state.get("TDMFuse", 0) and not tdmPairOnEveryWave(state, "A", "B"):
+        reject(state, printRejectionReason,
+               "ReuseAcrossPersistent is not implemented with TDMFuse=%d and MX scales on %s: it "
+               "silences the even waves of one descriptor set per owner, which covers A and its "
+               "scale for TDMFuse=0, and A and B for TDMFuse 1-3 without MX scales, where each "
+               "rides every wave of a set of its own. Under the %s grouping a scale shares a data "
+               "tensor's set, so the null cannot silence every resident member and the ones it "
+               "misses keep loading into an LDS buffer the reuse copy never reads. Use TDMFuse=0, "
+               "put the MX scales on neither tensor, or use ReuseAcrossPersistent=0"
+               % (state["TDMFuse"],
+                  " and ".join(tdmLiveScales(state)),
+                  tdmGroupingName(state)))
         return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
