@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from kernels.common._fmha_common import check_head_counts
 from rocke.core.ir import KernelDef
 from .attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
@@ -94,6 +95,10 @@ def make_fastkv_register_p_spec(
     )
 
 
+# The body uses gfx950-only wide MFMA atoms and transposed LDS reads.
+_NOT_GFX950 = "fastKV register-P is a gfx950 kernel; {arch} is not supported"
+
+
 def supports_fastkv_register_p_2d(
     *,
     head_size: int,
@@ -109,8 +114,13 @@ def supports_fastkv_register_p_2d(
     tile_size: int | None = None,
     arch: str = "gfx950",
 ) -> tuple[bool, str]:
-    """Check support for the experimental fastKV + register-P kernel."""
+    """Check support for the experimental fastKV + register-P kernel.
 
+    ``supports_tiled_2d`` also admits gfx942 for its narrow-atom variant; this
+    kernel's body is gfx950-only, so every other target is refused first.
+    """
+    if arch != "gfx950":
+        return False, _NOT_GFX950.format(arch=arch)
     ok, reason = supports_tiled_2d(
         head_size=head_size,
         block_size=block_size,
@@ -141,10 +151,6 @@ def supports_fastkv_register_p_2d(
     return True, "supported"
 
 
-# The body uses gfx950-only wide MFMA atoms and transposed LDS reads.
-_NOT_GFX950 = "fastKV register-P is a gfx950 kernel; {arch} is not supported"
-
-
 def _fastkv_register_p_spec_error(spec: UnifiedAttention2DTiledSpec) -> str | None:
     """Why the fastKV register-P builder refuses ``spec``, or None if it builds."""
     if not spec.use_fast_paged_kv_desc:
@@ -167,6 +173,9 @@ def supports_fastkv_register_p_2d_spec(
     refusing what :func:`build_unified_attention_2d_fastkv_register_p` raises on,
     so the builder is validatable at pack time.
     """
+    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
+    if not ok:
+        return False, reason
     if arch != "gfx950":
         return False, _NOT_GFX950.format(arch=arch)
     error = _fastkv_register_p_spec_error(spec)

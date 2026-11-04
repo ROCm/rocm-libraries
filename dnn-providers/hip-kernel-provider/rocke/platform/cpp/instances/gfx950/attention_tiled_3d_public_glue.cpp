@@ -72,6 +72,7 @@
  * _default() definitions below -- the gfx942 TU owns them. The structs are
  * byte-identical so the single shared definition is correct for both. */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_attention_check_head_counts */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
@@ -1245,6 +1246,10 @@ rocke_status_t rocke_build_unified_attention_3d_tiled_gfx950_lower_to_llvm(
         return ROCKE_ERR_VALUE;
     }
 
+    /* The name carries the GQA ratio: refuse a head pair it cannot be formed
+     * for with the validator's reason, not the encoder's. */
+    if(!rocke_attention_check_head_counts(spec->num_query_heads, spec->num_kv_heads, err, err_cap))
+        return ROCKE_ERR_VALUE;
     if(rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)
     {
         rocke_attn3d950_set_err_buf(err, err_cap, "lower_to_llvm: kernel_name encode failed");

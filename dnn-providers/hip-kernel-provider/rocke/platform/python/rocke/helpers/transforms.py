@@ -1543,6 +1543,18 @@ class TensorDescriptor:
             remaining = next_remaining
         return coords
 
+    def _term(self, b: IRBuilder, i: int, value: Value) -> Value:
+        """Base coord ``i``'s i32 offset term: ``value`` times its stride, with no
+        multiply for a stride of 1. :class:`DynamicTensorDescriptor` overrides
+        the stride source; every offset/move loop goes through this hook."""
+        stride = self.base_strides[i]
+        return value if stride == 1 else b.mul(value, b.const_i32(stride))
+
+    def _term_i64(self, b: IRBuilder, i: int, wide: Value) -> Value:
+        """Base coord ``i``'s i64 term: the already-widened ``wide`` times its
+        stride (always multiplied, as the i64 paths do)."""
+        return b.mul(wide, b.const_i64(int(self.base_strides[i])))
+
     def offset(
         self,
         b: IRBuilder,
@@ -1558,17 +1570,14 @@ class TensorDescriptor:
         coords = self._run_chain(b, upper_values)
         offset: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in coords:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
                 )
             c = coords[name]
             valid = _and(b, valid, c.valid)
-            if stride == 1:
-                term = c.value
-            else:
-                term = b.mul(c.value, b.const_i32(stride))
+            term = self._term(b, i, c.value)
             offset = term if offset is None else b.add(offset, term)
         if offset is None:
             offset = b.const_i32(0)
@@ -1593,7 +1602,7 @@ class TensorDescriptor:
         base_i64: Optional[Value] = None
         within: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in coords:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
@@ -1605,9 +1614,9 @@ class TensorDescriptor:
                 # descriptor (uniform per wave), so pin the (wave-uniform)
                 # block id to an SGPR before widening.
                 base_val = b.to_sgpr_u32(c.value)
-                base_i64 = b.mul(b.zext(base_val, I64), b.const_i64(int(stride)))
+                base_i64 = self._term_i64(b, i, b.zext(base_val, I64))
             else:
-                term = c.value if stride == 1 else b.mul(c.value, b.const_i32(stride))
+                term = self._term(b, i, c.value)
                 within = term if within is None else b.add(within, term)
         if base_i64 is None:
             raise ValueError(
@@ -1635,7 +1644,7 @@ class TensorDescriptor:
         coords = self._run_chain(b, upper_values)
         off: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in coords:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
@@ -1643,10 +1652,9 @@ class TensorDescriptor:
             c = coords[name]
             valid = _and(b, valid, c.valid)
             if name == i64_coord:
-                term = b.mul(b.zext(c.value, I64), b.const_i64(int(stride)))
+                term = self._term_i64(b, i, b.zext(c.value, I64))
             else:
-                t32 = c.value if stride == 1 else b.mul(c.value, b.const_i32(stride))
-                term = b.zext(t32, I64)
+                term = b.zext(self._term(b, i, c.value), I64)
             off = term if off is None else b.add(off, term)
         if off is None:
             off = b.const_i64(0)
@@ -1737,14 +1745,13 @@ class TensorDescriptor:
         delta, new = self._run_chain_delta(b, old_values, delta_values)
         off_delta: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in delta:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(delta.keys())}"
                 )
             valid = _and(b, valid, new[name].valid)
-            dv = delta[name].value
-            term = dv if stride == 1 else b.mul(dv, b.const_i32(stride))
+            term = self._term(b, i, delta[name].value)
             off_delta = term if off_delta is None else b.add(off_delta, term)
         if off_delta is None:
             return prev_offset, valid
@@ -1771,121 +1778,13 @@ class DynamicTensorDescriptor(TensorDescriptor):
         stride_v = self.dynamic_strides[i]
         if stride_v is not None:
             return b.mul(value, stride_v)
-        stride = self.base_strides[i]
-        return value if stride == 1 else b.mul(value, b.const_i32(stride))
+        return super()._term(b, i, value)
 
-    def offset(
-        self,
-        b: IRBuilder,
-        **upper_values: Value,
-    ) -> Tuple[Value, Optional[Value]]:
-        coords = self._run_chain(b, upper_values)
-        off: Optional[Value] = None
-        valid: Optional[Value] = None
-        for i, name in enumerate(self.base_names):
-            if name not in coords:
-                raise ValueError(
-                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
-                )
-            c = coords[name]
-            valid = _and(b, valid, c.valid)
-            term = self._term(b, i, c.value)
-            off = term if off is None else b.add(off, term)
-        if off is None:
-            off = b.const_i32(0)
-        return off, valid
-
-    def offset_i64_split(
-        self,
-        b: IRBuilder,
-        base_coord: str,
-        **upper_values: Value,
-    ) -> Tuple[Value, Value, Optional[Value]]:
-        """:meth:`TensorDescriptor.offset_i64_split` with runtime strides; the
-        ``base_coord`` term widens a runtime stride to i64."""
-        coords = self._run_chain(b, upper_values)
-        base_i64: Optional[Value] = None
-        within: Optional[Value] = None
-        valid: Optional[Value] = None
-        for i, name in enumerate(self.base_names):
-            if name not in coords:
-                raise ValueError(
-                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
-                )
-            c = coords[name]
-            valid = _and(b, valid, c.valid)
-            if name == base_coord:
-                base_w = b.zext(b.to_sgpr_u32(c.value), I64)
-                stride_v = self.dynamic_strides[i]
-                if stride_v is not None:
-                    base_i64 = b.mul(base_w, b.zext(stride_v, I64))
-                else:
-                    base_i64 = b.mul(base_w, b.const_i64(int(self.base_strides[i])))
-            else:
-                term = self._term(b, i, c.value)
-                within = term if within is None else b.add(within, term)
-        if base_i64 is None:
-            raise ValueError(
-                f"offset_i64_split: base_coord {base_coord!r} not among "
-                f"base coords {list(self.base_names)}"
-            )
-        if within is None:
-            within = b.const_i32(0)
-        return base_i64, within, valid
-
-    def offset_i64(
-        self,
-        b: IRBuilder,
-        i64_coord: str,
-        **upper_values: Value,
-    ) -> Tuple[Value, Optional[Value]]:
-        """:meth:`TensorDescriptor.offset_i64` with runtime strides."""
-        coords = self._run_chain(b, upper_values)
-        off: Optional[Value] = None
-        valid: Optional[Value] = None
-        for i, name in enumerate(self.base_names):
-            if name not in coords:
-                raise ValueError(
-                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
-                )
-            c = coords[name]
-            valid = _and(b, valid, c.valid)
-            if name == i64_coord:
-                wide = b.zext(c.value, I64)
-                stride_v = self.dynamic_strides[i]
-                if stride_v is not None:
-                    term = b.mul(wide, b.zext(stride_v, I64))
-                else:
-                    term = b.mul(wide, b.const_i64(int(self.base_strides[i])))
-            else:
-                term = b.zext(self._term(b, i, c.value), I64)
-            off = term if off is None else b.add(off, term)
-        if off is None:
-            off = b.const_i64(0)
-        return off, valid
-
-    def move(
-        self,
-        b: IRBuilder,
-        prev_offset: Value,
-        old_values: Dict[str, Value],
-        delta_values: Dict[str, Value],
-    ) -> Tuple[Value, Optional[Value]]:
-        """:meth:`TensorDescriptor.move` with runtime strides."""
-        delta, new = self._run_chain_delta(b, old_values, delta_values)
-        off_delta: Optional[Value] = None
-        valid: Optional[Value] = None
-        for i, name in enumerate(self.base_names):
-            if name not in delta:
-                raise ValueError(
-                    f"after chain, base coord {name!r} not in {sorted(delta.keys())}"
-                )
-            valid = _and(b, valid, new[name].valid)
-            term = self._term(b, i, delta[name].value)
-            off_delta = term if off_delta is None else b.add(off_delta, term)
-        if off_delta is None:
-            return prev_offset, valid
-        return b.add(prev_offset, off_delta), valid
+    def _term_i64(self, b: IRBuilder, i: int, wide: Value) -> Value:
+        stride_v = self.dynamic_strides[i]
+        if stride_v is not None:
+            return b.mul(wide, b.zext(stride_v, I64))
+        return super()._term_i64(b, i, wide)
 
     @classmethod
     def create(
@@ -1906,15 +1805,23 @@ class DynamicTensorDescriptor(TensorDescriptor):
             raise ValueError("coord_names and strides length mismatch")
         coord_names = tuple(coord_names)
         dynamic = tuple(s if isinstance(s, Value) else None for s in strides)
-        # operator.index rejects a float or string stride instead of truncating it.
-        static = tuple(
-            1 if isinstance(s, Value) else operator.index(s) for s in strides
-        )
+        static = []
+        for i, s in enumerate(strides):
+            if isinstance(s, Value):
+                static.append(1)
+                continue
+            # operator.index rejects a float or string stride instead of truncating it.
+            try:
+                static.append(operator.index(s))
+            except TypeError:
+                raise TypeError(
+                    f"strides[{i}] must be a Value or an int, got {type(s).__name__}"
+                ) from None
         return cls(
             name=name,
             base_names=coord_names,
             base_lengths=tuple(0 for _ in coord_names),
-            base_strides=static,
+            base_strides=tuple(static),
             chain=(),
             upper_names=coord_names,
             dynamic_strides=dynamic,

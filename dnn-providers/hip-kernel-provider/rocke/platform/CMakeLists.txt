@@ -731,8 +731,8 @@ if(ROCKE_INSTALL_TESTS)
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
-    # bound against the compiled code object, and the backward-test memo bound
-    # in tests/conftest.py.
+    # bound against the compiled code object, the tiled C++ entries' head-count
+    # and arch refusals, and the backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -744,6 +744,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_tiled_launch_signature.py"
+        "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_module.py"
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
@@ -1031,8 +1032,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
-        "tests/library/tests/test_attention_gfx942_runtime_shape_numeric.py"
-        "tests/library/tests/test_attention_gfx950_runtime_shape_numeric.py"
+        "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"

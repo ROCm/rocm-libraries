@@ -395,9 +395,8 @@ void rocke_gfx942_attn2d_emit_preloop(rocke_gfx942_attn2d_build_ctx_t* ctx)
     int kv_strides[4] = {1, 1, ctx->HD * ctx->KV_BYTES, ctx->KV_BYTES};
     static const char* const kv_coords[4] = {"physical_block", "token", "kv_head", "dim"};
     rocke_value_t* dyn[4] = {ctx->kv_stride_blk_b_v, ctx->kv_stride_tok_b_v, NULL, NULL};
-    rocke_tensor_descriptor_t* kv_base = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                              b, "paged_kv_bytes", kv_coords, 4, dyn, kv_strides)
-                                              ->base;
+    rocke_tensor_descriptor_t* kv_base = rocke_tensor_descriptor_naive_dynamic_mixed(
+        b, "paged_kv_bytes", kv_coords, 4, dyn, kv_strides);
 
     /* Single-block tile (N_BLOCKS_PER_TILE == 1, T == BS):
      *   indirect(tile_idx -> physical_block) ; unmerge(linear_half -> token,dim).

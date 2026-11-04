@@ -115,6 +115,23 @@ int rocke_unified_attn_num_queries_per_kv(rocke_ir_builder_t* b,
     return p->num_query_heads / p->num_kv_heads;
 }
 
+bool rocke_attention_check_head_counts(int num_query_heads,
+                                       int num_kv_heads,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    const char* fmt = NULL;
+    if(num_query_heads <= 0 || num_kv_heads <= 0)
+        fmt = "num_query_heads / num_kv_heads must be > 0 (got %d, %d)";
+    else if(num_query_heads % num_kv_heads != 0)
+        fmt = "num_query_heads (%d) must be divisible by num_kv_heads (%d) for GQA / MQA";
+    if(fmt == NULL)
+        return true;
+    if(reason != NULL && reason_cap > 0)
+        (void)snprintf(reason, reason_cap, fmt, num_query_heads, num_kv_heads);
+    return false;
+}
+
 /* Internal convenience: same value without a builder (the selectors call the
  * property freely; the divisibility precondition is guaranteed for any problem
  * that reached the spec stage). */

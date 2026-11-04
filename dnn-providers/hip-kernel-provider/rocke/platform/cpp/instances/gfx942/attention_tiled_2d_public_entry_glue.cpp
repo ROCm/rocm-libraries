@@ -41,6 +41,7 @@
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 
+#include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
 #include <string.h>
@@ -652,12 +653,21 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar_new(
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char kname[1024];
+        char why[160];
         if(b == NULL || spec == NULL)
             return NULL;
+        /* Init before anything can fail: the lower convenience reads and frees
+         * `b` whatever this returns. */
+        if(rocke_ir_builder_init(b, "") != ROCKE_OK)
+            return NULL;
+        if(!rocke_attention_check_head_counts(
+               spec->num_query_heads, spec->num_kv_heads, why, sizeof(why)))
+            ckc::raise_status(ROCKE_ERR_VALUE, why);
         if(rocke__attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
-            return NULL;
-        if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
-            return NULL;
+            ckc::raise_status(ROCKE_ERR_VALUE, "tiled 2D kernel_name encode failed");
+        b->kernel->name = rocke_arena_strdup(&b->arena, kname);
+        if(b->kernel->name == NULL)
+            ckc::raise_status(ROCKE_ERR_OOM, "tiled 2D kernel name OOM");
         return rocke_build_unified_attention_2d_tiled_scalar(b, spec, arch);
     });
 }

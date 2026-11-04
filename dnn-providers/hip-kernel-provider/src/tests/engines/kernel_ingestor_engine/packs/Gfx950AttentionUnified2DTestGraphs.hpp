@@ -87,7 +87,8 @@ inline std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 
 /// The fields the engine's KMD declares, as a completed catalog record carries them. The
 /// defaults are the shipped baseline kernel for the default graph (bf16, D128, Hq 8 / Hkv 2,
-/// top-left causal, block 16, T64, 4 warps x 16 rows, capacity 511).
+/// top-left causal, block 16, T64, 4 warps x 16 rows, num_seqs 511). The engine does not read
+/// num_seqs -- the batch is a kernarg -- but the KMD still declares it.
 struct KernelSpec
 {
     std::string dtype = "BF16";

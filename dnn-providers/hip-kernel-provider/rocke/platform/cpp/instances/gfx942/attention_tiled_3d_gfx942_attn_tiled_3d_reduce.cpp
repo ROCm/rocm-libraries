@@ -219,9 +219,8 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
             = {rocke_b_mul(b, ctx->red_num_qh_p, rocke_b_const_i32(b, NUM_SEG)), NULL, NULL};
         const int static_strides[3] = {1, NUM_SEG, 1};
         const char* ml_coords[3] = {"token", "head", "seg"};
-        ctx->ml_desc_red = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                b, "segm_ml", ml_coords, 3, strides, static_strides)
-                                ->base;
+        ctx->ml_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_ml", ml_coords, 3, strides, static_strides);
     }
     {
         rocke_value_t* strides[4]
@@ -231,18 +230,16 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
                NULL};
         const int static_strides[4] = {1, NUM_SEG * HD, HD, 1};
         const char* sa_coords[4] = {"token", "head", "seg", "dim"};
-        ctx->seg_acc_desc_red = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                     b, "segm_output", sa_coords, 4, strides, static_strides)
-                                     ->base;
+        ctx->seg_acc_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_output", sa_coords, 4, strides, static_strides);
     }
     {
         rocke_value_t* strides[3]
             = {rocke_b_mul(b, ctx->red_num_qh_p, rocke_b_const_i32(b, HD)), NULL, NULL};
         const int static_strides[3] = {1, HD, 1};
         const char* out_coords[3] = {"token", "head", "dim"};
-        ctx->out_desc_red = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                 b, "out", out_coords, 3, strides, static_strides)
-                                 ->base;
+        ctx->out_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "out", out_coords, 3, strides, static_strides);
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----

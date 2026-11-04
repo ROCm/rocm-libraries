@@ -272,9 +272,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* kv_block_bytes_c_v; /* kv_stride_blk_b_v (one block)   */
     /* bf16/fp16 loaders (!KV_FP8, !FAST_PAGED_KV_DESC): the lane's in-page byte
      * offset, each copy's first-token offset in its page (indexed by that
-     * token; [0] stays NULL), and the i64 page stride (I64_KV_ADDR). */
+     * copy within the page, BS / copy tokens entries on the arena; [0] stays
+     * NULL), and the i64 page stride (I64_KV_ADDR). */
     rocke_value_t* lane_within_b_v;
-    rocke_value_t* copy_tok_b[64];
+    rocke_value_t** copy_tok_b;
     rocke_value_t* kv_stride_blk_i64_v;
     /* Page ids the KV loop carries when page copies prefetch them (one per page
      * of a tile), with the tile index value each set belongs to: the first tile

@@ -77,7 +77,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified
 // KMD fields (14-field schema). Fields a shipped variant holds at one value across the whole
 // catalog (waves_per_eu, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches) are absent:
 // a variant that moved one of them would have to add it here first, or the candidates collide
-// on the catalog key and the loader drops one.
+// on the catalog key and the loader drops one. `num_seqs` is declared but not read: the kernel
+// takes the batch as a kernarg and derives its cu_q search trip count from it, so no batch is
+// baked.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -85,7 +87,6 @@ constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view MASK_TYPE_FIELD = "mask_type";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
-constexpr std::string_view NUM_SEQS_FIELD = "num_seqs";
 constexpr std::string_view TILE_SIZE_FIELD = "tile_size";
 constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
@@ -241,7 +242,6 @@ struct AttentionUnified2DCandidate
     int64_t blockSize = 0;
     int64_t maskType = 0;
     int64_t slidingWindow = 0;
-    int64_t numSeqs = 0;
     int64_t tileSize = 0;
     int64_t numWarps = 0;
     int64_t blockMPerWarp = 0;
@@ -266,15 +266,13 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto blockSize = integerMetadata(kernel, BLOCK_SIZE_FIELD);
     const auto maskType = integerMetadata(kernel, MASK_TYPE_FIELD);
     const auto slidingWindow = integerMetadata(kernel, SLIDING_WINDOW_FIELD);
-    const auto numSeqs = integerMetadata(kernel, NUM_SEQS_FIELD);
     const auto tileSize = integerMetadata(kernel, TILE_SIZE_FIELD);
     const auto numWarps = integerMetadata(kernel, NUM_WARPS_FIELD);
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto useMfma32x32 = integerMetadata(kernel, USE_MFMA_32X32_FIELD);
     const auto useTransposedQk32x32 = integerMetadata(kernel, USE_TRANSPOSED_QK_32X32_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
-       || !numSeqs || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32
-       || !useTransposedQk32x32)
+       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32)
     {
         return std::nullopt;
     }
@@ -293,9 +291,7 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     {
         return std::nullopt;
     }
-    // A capacity of 0 or less would make the kernel run its unspecialized 32-iteration
-    // search; the catalog always states one, so a record without it is malformed.
-    if(*numSeqs <= 0 || *useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
+    if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
        || *useTransposedQk32x32 > 1)
     {
         return std::nullopt;
@@ -318,7 +314,6 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *blockSize,
                                        *maskType,
                                        *slidingWindow,
-                                       *numSeqs,
                                        *tileSize,
                                        *numWarps,
                                        *blockMPerWarp,
@@ -335,10 +330,10 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
  * what this checks against the graph:
  *
  *   - dtype, head_size, num_query_heads, num_kv_heads, the mask kind and sliding window;
- *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks);
- *   - the batch CAPACITY (`num_seqs`): the kernel's binary search resolves at most
- *     2^iters - 1 sequences, so a larger batch reads another sequence's lengths without a
- *     fault.
+ *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
+ *
+ * The batch is not bounded here: the kernel derives its cu_q search trip count from the
+ * `num_seqs` kernarg, so one binary serves every batch the identity table can index.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -396,13 +391,8 @@ bool kernelMatches(const MatchContext& context,
 
     // The identity cache must be whole blocks of THIS candidate's size, and small enough for
     // the table the kernel indexes in 32 bits.
-    if(!gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
-            .has_value())
-    {
-        return false;
-    }
-
-    return problem.batch <= gfx950Unified2DBatchCapacity(candidate->numSeqs);
+    return gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
+        .has_value();
 }
 
 /// Scores for the cold ranking. The baseline geometry scores `BASELINE_SCORE`; every
@@ -599,15 +589,6 @@ Gfx950Unified2DWorkspaceLayout requireLayout(const AttentionUnified2DCandidate& 
                                              const KernelDefinition& kernel)
 {
     const std::string name = toString(kernel.kernelId);
-    const auto capacity = gfx950Unified2DBatchCapacity(candidate.numSeqs);
-    if(problem.batch > capacity)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950 attention_unified_2d: kernel '" + name + "' serves at most "
-                + std::to_string(capacity) + " sequences and the graph has "
-                + std::to_string(problem.batch));
-    }
     const auto layout
         = gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate.blockSize);
     if(!layout.has_value())

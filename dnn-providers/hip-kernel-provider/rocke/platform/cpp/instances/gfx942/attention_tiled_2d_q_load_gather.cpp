@@ -92,9 +92,8 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* strides[3]
             = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, ctx->HD)), NULL, NULL};
         const int static_strides[3] = {1, ctx->HD, 1};
-        ctx->q_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                           b, "Q", coord_names, 3, strides, static_strides)
-                           ->base;
+        ctx->q_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "Q", coord_names, 3, strides, static_strides);
     }
 
     if(ctx->Q_DIRECT_GLOBAL)

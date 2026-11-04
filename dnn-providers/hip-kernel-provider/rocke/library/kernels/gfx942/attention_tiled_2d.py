@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 import os
 from typing import ClassVar, Optional, Tuple
 
+from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
@@ -946,7 +947,7 @@ class UnifiedAttention2DTiledSpec:
 
     @property
     def num_queries_per_kv(self) -> int:
-        return self.num_query_heads // self.num_kv_heads
+        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
 
     @property
     def block_m(self) -> int:
@@ -6781,6 +6782,9 @@ def supports_gfx942_4warp_gqa_spec(
 def _supports_tiled_2d_spec(
     spec: UnifiedAttention2DTiledSpec, *, arch: str, use_d256_fast: bool
 ) -> Tuple[bool, str]:
+    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
+    if not ok:
+        return False, reason
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_2d(
         head_size=spec.head_size,

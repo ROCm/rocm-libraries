@@ -47,6 +47,7 @@
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_attention_check_head_counts */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution */
@@ -1157,6 +1158,10 @@ rocke_status_t rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
         return ROCKE_ERR_VALUE;
     }
 
+    /* The name carries the GQA ratio: refuse a head pair it cannot be formed
+     * for with the validator's reason, not the encoder's. */
+    if(!rocke_attention_check_head_counts(spec->num_query_heads, spec->num_kv_heads, err, err_cap))
+        return ROCKE_ERR_VALUE;
     if(rocke_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)
     {
         rocke_attn3d_set_err_buf(err, err_cap, "lower_to_llvm: kernel_name encode failed");

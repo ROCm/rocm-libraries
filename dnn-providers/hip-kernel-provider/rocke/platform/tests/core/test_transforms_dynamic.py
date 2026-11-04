@@ -621,7 +621,7 @@ class TestDynamicTensorDescriptor:
     def test_create_rejects_a_non_integer_stride(self, bad):
         b = _builder()
         (s0,) = _params(b, "s0")
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match=r"strides\[1\]"):
             DynamicTensorDescriptor.create(
                 "t", coord_names=("a", "b"), strides=(s0, bad)
             )

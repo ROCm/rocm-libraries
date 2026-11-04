@@ -42,6 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Tuple
 
+from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
@@ -876,7 +877,7 @@ class UnifiedAttention2DTiledSpec:
 
     @property
     def num_queries_per_kv(self) -> int:
-        return self.num_query_heads // self.num_kv_heads
+        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
 
     @property
     def block_m(self) -> int:
@@ -5045,6 +5046,9 @@ def supports_tiled_2d_spec(
     ``use_conflict_free_v_store``, ``use_k_sliced_ring`` and ``use_d256_fast`` are
     not gfx950 spec fields.
     """
+    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
+    if not ok:
+        return False, reason
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_2d(
         head_size=spec.head_size,

@@ -415,18 +415,16 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
         rocke_value_t* ml_dyn[3]
             = {rocke_b_mul(B, ctx->num_qh_p, rocke_b_const_i32(B, NUM_SEG)), NULL, NULL};
         const int ml_static[3] = {1, NUM_SEG, 1};
-        ctx->ml_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                            B, "segm_ml", ml_coords, 3, ml_dyn, ml_static)
-                            ->base;
+        ctx->ml_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "segm_ml", ml_coords, 3, ml_dyn, ml_static);
     }
     {
         static const char* const sa_coords[4] = {"token", "head", "seg", "dim"};
         rocke_value_t* sa_dyn[4]
             = {rocke_b_mul(B, ctx->num_qh_p, rocke_b_const_i32(B, NUM_SEG * HD)), NULL, NULL, NULL};
         const int sa_static[4] = {1, NUM_SEG * HD, HD, 1};
-        ctx->seg_acc_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                 B, "segm_output", sa_coords, 4, sa_dyn, sa_static)
-                                 ->base;
+        ctx->seg_acc_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "segm_output", sa_coords, 4, sa_dyn, sa_static);
     }
     {
         static const char* const q_coords[3] = {"token", "head", "dim"};
@@ -434,8 +432,7 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
             = {rocke_b_mul(B, ctx->num_qh_p, rocke_b_const_i32(B, HD)), NULL, NULL};
         const int q_static[3] = {1, HD, 1};
         ctx->q_desc
-            = &rocke_tensor_descriptor_naive_dynamic_mixed(B, "Q", q_coords, 3, q_dyn, q_static)
-                   ->base;
+            = rocke_tensor_descriptor_naive_dynamic_mixed(B, "Q", q_coords, 3, q_dyn, q_static);
     }
 
     /* seg_start_tile_pos = seg_idx*tps*T (line 415) */
@@ -573,9 +570,8 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
         const int strides[4] = {1, 1, CFG.kv_stride_h_b, CFG.KV_BYTES};
         rocke_value_t* dyn[4] = {ctx->kv_stride_blk_b, ctx->kv_stride_tok_b, NULL, NULL};
         static const char* const coords[4] = {"physical_block", "token", "kv_head", "dim"};
-        rocke_tensor_descriptor_t* base = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                               B, "paged_kv_bytes", coords, 4, dyn, strides)
-                                               ->base;
+        rocke_tensor_descriptor_t* base = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "paged_kv_bytes", coords, 4, dyn, strides);
         const rocke_transform_t* chain[2];
         const char* into_td[2] = {"token", "dim"};
         const int dims_td[2] = {T, HD};

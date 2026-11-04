@@ -29,6 +29,19 @@
     ckc::raise_status(st, msg ? msg : "");
 }
 
+/* Python _NOT_GFX950: the body uses gfx950-only wide MFMA atoms and transposed
+ * LDS reads. True (with the reason written) for any target but gfx950; NULL arch
+ * is the Python default "gfx950". */
+static bool rocke__fastkv_regp_not_gfx950(const char* arch, char* reason, size_t reason_cap)
+{
+    if(arch == NULL || strcmp(arch, "gfx950") == 0)
+        return false;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(
+            reason, reason_cap, "fastKV register-P is a gfx950 kernel; %s is not supported", arch);
+    return true;
+}
+
 /* gfx950 UnifiedAttention2DTiledSpec.kernel_name() (rocke/instances/gfx950/
  * attention_tiled_2d.py kernel_name). The gfx950 part list is SHORTER than the
  * gfx942 one (no wpe, no mfma32x8/qdir/kvcp/gldlds/qgrid/cfv/... parts), so the
@@ -241,6 +254,11 @@ bool rocke_gfx950_supports_fastkv_register_p_2d(
     if(args == NULL)
         return false;
 
+    /* if arch != "gfx950": return False, _NOT_GFX950 -- supports_tiled_2d also
+     * admits gfx942, but this body is gfx950-only. NULL arch == Python "gfx950". */
+    if(rocke__fastkv_regp_not_gfx950(args->arch, reason, reason_cap))
+        return false;
+
     /* ok, reason = supports_tiled_2d(... num_warps=4, kv_storage_dtype=None,
      *   tile_size = tile_size if tile_size is not None else 2*block_size,
      *   arch=arch) */
@@ -295,6 +313,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
             return NULL;
         if(b->status != ROCKE_OK) /* dead builder: no-op */
             return NULL;
+
+        /* if arch != "gfx950": raise ValueError(_NOT_GFX950) */
+        {
+            char why[128];
+            if(rocke__fastkv_regp_not_gfx950(arch, why, sizeof(why)))
+            {
+                rocke__fastkv_regp_set_err(b, ROCKE_ERR_VALUE, why);
+                return NULL;
+            }
+        }
 
         /* if not spec.use_fast_paged_kv_desc: raise ValueError(...) */
         if(!spec->use_fast_paged_kv_desc)
