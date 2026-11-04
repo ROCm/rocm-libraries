@@ -10,8 +10,9 @@
 # rocke_build_attn_bwd_main_new (rocke/instance_attention_bwd.h) and the two
 # .ll must match.
 #
-# Both engines build _emit_main(spec, arch, main_kernel_refusals=False): the
-# recorded resource-gate refusals are Python-only.
+# Both engines build _emit_main(spec, arch, main_kernel_refusals=False), so
+# configs may be recorded resource-gate refusals (the IR is still compared;
+# attention_bwd_refusals_emit checks the refusals themselves).
 #
 # Configs:
 #   * "@<case id>": the main kernel of a case of the phase-1 lowerer gate

@@ -1013,7 +1013,7 @@ static int build(int idx, rocke_ir_builder_t* b)
         return 1;
     }
     static rocke_attn_bwd_spec_t s;
-    if(rocke_attn_bwd_validate_spec(&spec, arch, &s, &e) != ROCKE_OK)
+    if(rocke_attn_bwd_validate_spec(&spec, arch, false, &s, &e) != ROCKE_OK)
     {
         fail(b, e);
         return 1;

@@ -83,7 +83,7 @@ rocke_status_t rocke_attn_bwd_dense_dq_spec_kernel_name(const rocke_attn_bwd_den
                                                         rocke_attn_bwd_err_t* err);
 
 /* validate_attn_dense_bwd_dq_spec(spec, arch): the resolved, validated dQ
- * spec into *out (without DQ_RESOURCE_REFUSED, which stays Python). */
+ * spec into *out (DQ_RESOURCE_REFUSED included, as in Python). */
 rocke_status_t rocke_attn_bwd_dense_dq_validate(const rocke_attn_bwd_dense_dq_spec_t* spec,
                                                 const char* arch,
                                                 rocke_attn_bwd_dq_spec_t* out,

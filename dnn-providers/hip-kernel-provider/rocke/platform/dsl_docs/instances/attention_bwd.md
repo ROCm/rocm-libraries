@@ -92,15 +92,15 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/tests/test_attention_bwd_ir_golden.py`, `tests/golden/attention_bwd_ir_sha256.json` | LLVM-IR golden hashes of the main, split dQ, aux and unified kernels on the four targets at every LLVM flavor (11) |
 | `library/tests/parity/barrier_fence_emit.py`, `tests/test_barrier_fence_parity_emit.py` | the Python reference emitter of the barrier `fence` attribute and its checks (11) |
 | `platform/cpp/instances/common/attention_bwd*.cpp`, `attention_dense_bwd*.cpp`, `_attention_bwd_*.cpp`, `_attention_dense_bwd_shell.cpp`; `platform/cpp/helpers/attention_band.cpp` | the C++ twins of the kernel builders and their helpers (0.3); headers `rocke/instance_attention_bwd*.h`, `rocke/instance_attention_dense_bwd*.h`, `rocke/helper_rocke.instances.common._attention_bwd_*.h`, `rocke/helper_rocke.helpers.attention_band.h` |
-| `library/tests/parity/attention_bwd_*_emit.{py,c}`, `attention_dense_bwd_*_emit.{py,c}` | the 20 parity pairs of the twins: a Python emitter and a C driver that build the same configs (0.3) |
+| `library/tests/parity/attention_bwd_*_emit.{py,c}`, `attention_dense_bwd_*_emit.{py,c}` | the 21 parity pairs of the twins: a Python emitter and a C driver that build the same configs (0.3) |
 | `platform/tests/instances/differential/check_native_golden.py`, `platform/tests/cmake/NativeGoldenTests.cmake` | the ctest `rocke_native_golden_ll`: the installed C++ emitters against the differential golden (0.3, 11) |
 | `library/tests/test_attention_bwd_ir_cpp_parity.py` | both engines lower the dispatcher's kernels to the same `.ll` (0.3, 11) |
 
 ### 0.3 The C++ engine
 
 The kernel builders of the backward have C++ twins (below). The rest of the
-family is Python-only: its selectors, plans, knob registries, routing, tuned
-tables and recorded refusals. The Python family added one thing to the C++
+family is Python-only: its selectors, plans, knob registries, routing and tuned
+tables. The Python family added one thing to the C++
 engine, the mirror of a Python change that other families share, and relies
 on two that the platform now carries itself:
 
@@ -139,7 +139,7 @@ the unified main kernel, with the helpers they use (the 0.2 file map lists
 the files). Each twin emits the same
 LLVM IR as its Python builder, byte for byte, for every config of its parity
 pair (`library/tests/parity/attention_bwd_*_emit.{py,c}` and
-`attention_dense_bwd_*_emit.{py,c}`, 20 families). The dual-engine rule of
+`attention_dense_bwd_*_emit.{py,c}`, 21 families). The dual-engine rule of
 `platform/AGENTS.md` holds through three checks (11):
 
 * `check_byte_identity.py` builds the engine from source and compares the two
@@ -152,17 +152,25 @@ pair (`library/tests/parity/attention_bwd_*_emit.{py,c}` and
   `.ll` for every kernel the dispatcher can select (CPU, with `rocke_engine`
   built; it is in no ctest list, so it runs locally only).
 
-**Not ported.** The recorded resource-gate refusals stay Python-only:
+**The recorded refusals.** The resource-gate refusals are ported too:
 `RESOURCE_REFUSED` (`_attention_bwd_refusals.py`) and `DQ_RESOURCE_REFUSED`
-(`attention_bwd_dq.py`), both keyed by `spec_digest`. The C++ main and dQ
-builders build those specs (the main one as Python's
-`_emit_main(..., main_kernel_refusals=False)` does). Until the tables are
-ported, a C++ caller that launches those kernels must ask Python first:
-`resource_refusal` for the main kernel, `validate_attn_bwd_dq_spec` for the
-dQ kernel. No C++ caller exists yet: no provider plans a backward request, so
-the provider's rocKE path does not offer this backward to hipDNN, which
-serves the backward with its other engines meanwhile (8.4). Follow-up: a
-provider backward path (C++ plan and routing, or a Python-serving path).
+(`attention_bwd_dq.py`), both keyed by `spec_digest`. The C++ twin
+(`platform/cpp/instances/common/_attention_bwd_refusals.cpp`) ports
+`spec_digest` and looks the key up in
+`_attention_bwd_refusals_table.inc`, which
+`library/tests/parity/attention_bwd_refusals_emit.py --print-c-table`
+generates from the two dicts; `library/tests/test_attention_bwd_refusals_cpp_table.py`
+fails when the committed file and the dicts differ, and the parity pair
+`attention_bwd_refusals_emit.{py,c}` checks the digests and the verdicts. The
+C++ main validator and builder take `main_kernel_refusals` as Python's do, with
+no default: the public C entry points refuse those specs when it is true
+(Python's default), and only the dense and unified shells and the IR parity
+emitters pass false, as their Python twins do. The C++ dQ validator always
+applies `DQ_RESOURCE_REFUSED`, as Python does. No C++ caller exists yet: no
+provider plans a backward request, so the provider's rocKE path does not offer
+this backward to hipDNN, which serves the backward with its other engines
+meanwhile (8.4). Follow-up: a provider backward path (C++ plan and routing, or
+a Python-serving path).
 
 ### 0.4 Family glue and the helper layer
 

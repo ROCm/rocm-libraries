@@ -383,7 +383,7 @@ rocke_attn_bwd_spec_t dense_validate(const rocke_attn_bwd_dense_spec_t& spec,
         throw ckc::ValueError(class_name(spec) + " is a " + spec.arch_class + " spec, not " + arch);
     /* the general main kernel's recorded resource failures are of another
      * code object: the dense kernel's own gate rows cover it */
-    rocke_attn_bwd_spec_t body = validate_spec(dense_body_spec(spec), arch);
+    rocke_attn_bwd_spec_t body = validate_spec(dense_body_spec(spec), arch, false);
     if(!spec.ragged)
     {
         if(spec.seqlen_q % body.block_m || spec.seqlen_kv % body.block_n)

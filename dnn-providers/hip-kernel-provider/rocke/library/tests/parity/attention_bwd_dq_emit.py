@@ -11,8 +11,8 @@
 #
 # The C builder refuses the plain-tuple resource-gate tables
 # (DQ_SPILLING_COMBOS, DQ_SCHED_SPILLING) as Python does, and one config per
-# row checks it. DQ_RESOURCE_REFUSED (keyed by spec_digest) stays Python, so
-# no config here is one of its rows.
+# row checks it. DQ_RESOURCE_REFUSED (keyed by spec_digest) is checked by
+# attention_bwd_refusals_emit.
 #
 # The tail round of store_dq (a chunk guarded by chunk < total) cannot be
 # reached: a valid spec has block_m = 16 * waves * k, head_size in 32/64/128 and

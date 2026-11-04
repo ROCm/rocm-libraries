@@ -1307,7 +1307,7 @@ static Lines dump(const std::string& arch, rocke_attn_bwd_spec_t spec)
         lines.push_back(std::string("resolved kernel_name ") + stage + ": " + name);
     }
     rocke_attn_bwd_spec_t v;
-    if(rocke_attn_bwd_validate_spec(&spec, arch.c_str(), &v, &err) == ROCKE_OK)
+    if(rocke_attn_bwd_validate_spec(&spec, arch.c_str(), false, &v, &err) == ROCKE_OK)
         lines.push_back("validate: ok");
     else
         lines.push_back("validate: " + exc(err));
