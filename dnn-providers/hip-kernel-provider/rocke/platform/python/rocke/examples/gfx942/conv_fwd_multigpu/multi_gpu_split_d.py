@@ -419,6 +419,19 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
         launch_grids[d] = _grid_for_spec(specs[d], shard_problem)
         launch_cfgs[d] = LaunchConfig(grid=launch_grids[d], block=(specs[d].launch_block_size, 1, 1), stream=0)
 
+    # Precompute each halo pair's source/destination views once, same reason
+    # as launch_values above: X_dev[d][:, chunk:] and X_dev[d+1][:, :_Z-1]
+    # are views onto fixed buffers, so re-slicing them from scratch every
+    # iteration is pure host overhead. An event-bracketed probe (not
+    # committed, see commit message) split the measured ~0.30ms halo cost at
+    # P=4 into ~0.16ms genuine device-side transfer (bandwidth-bound: ~51
+    # GB/s per inter-socket link, matching this node's
+    # /sys/class/kfd/kfd/topology inter-GPU io_link bandwidth of 40-80 GB/s
+    # -- a hardware floor, not fixable here) and ~0.12-0.14ms host-side
+    # overhead from re-slicing + re-dispatching the same 3 copies every call.
+    halo_dst = {d: X_dev[d][:, chunk:] for d in range(P - 1)}
+    halo_src = {d: X_dev[d + 1][:, : _Z - 1] for d in range(P - 1)}
+
     def halo_exchange():
         for d in range(P - 1):
             # the (Z-1) rows shard d is missing are exactly the first (Z-1)
@@ -428,7 +441,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
             # the destination device and pays the transfer twice (once into
             # that temporary, once out of it into the real slice) for no
             # benefit here -- nothing else reads the temporary.
-            X_dev[d][:, chunk:].copy_(X_dev[d + 1][:, : _Z - 1])
+            halo_dst[d].copy_(halo_src[d])
 
     def launch_all():
         # KernelLauncher defaults to a *fenced* (synchronous,
