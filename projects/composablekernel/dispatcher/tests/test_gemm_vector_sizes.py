@@ -14,7 +14,9 @@ build the same tile with narrower fixed widths instead; these tests lock in:
     the per-tile legality checks;
   * that gemm_utils, the codegen KernelNaming and the generated kernel agree on
     the kernel name and actually pass the widths to the CK problem/epilogue;
-  * expand_sweep emitting fallback configs and counting rejects.
+  * expand_sweep emitting fallback configs and counting rejects;
+  * the Stream-K C store rule, which depends on the reduction strategy, in the
+    bridge, the codegen and the Stream-K driver.
 
 Run: python3 -m pytest tests/test_gemm_vector_sizes.py -v
 """
@@ -55,6 +57,7 @@ from unified_gemm_codegen import (  # noqa: E402
     KernelConfig,
     KernelNaming,
     TraitConfig,
+    UnifiedGemmCodegen,
 )
 from gemm_utils import GemmKernelConfig  # noqa: E402
 from gemm_vector_fallback import VectorFallback, _tile_fits  # noqa: E402
@@ -236,31 +239,33 @@ class TestResolution(unittest.TestCase):
         # bf16 C width 1 = 2 bytes: below the 4-byte buffer atomic.
         self.assertIn("atomic", _resolve("rrr", (8, 1, 1), variant="stream_k")[1])
         self.assertIsNone(_resolve("rrr", (8, 1, 2), variant="stream_k")[1])
-
-    def test_stream_k_linear_and_tree_allow_sub_dword_c(self):
-        # Linear and tree store C with a plain store, so a 2-byte C is legal; atomic
-        # (the default) still rejects it, and None defers the check to the caller.
-        for strategy in ("linear", "tree", None):
-            vec, reason = _resolve(
-                "rrr", (8, 1, 1), variant="stream_k", reduction_strategy=strategy
-            )
-            self.assertIsNone(reason, strategy)
-            self.assertEqual(vec, (8, 1, 1))
-        self.assertIn(
-            "atomic",
-            _resolve("rrr", (8, 1, 1), variant="stream_k", reduction_strategy="atomic")[1],
-        )
-        # The strategy only matters for Stream-K.
-        self.assertIsNone(_resolve("rrr", (8, 1, 1), reduction_strategy="atomic")[1])
-
-    def test_streamk_atomic_c_reject_reason(self):
-        self.assertIn("atomic", streamk_atomic_c_reject_reason("atomic", 1, "bf16"))
-        self.assertIsNone(streamk_atomic_c_reject_reason("atomic", 2, "bf16"))
-        self.assertIsNone(streamk_atomic_c_reject_reason("atomic", 1, "fp32"))
-        self.assertIsNone(streamk_atomic_c_reject_reason("atomic", 0, "bf16"))
-        for strategy in ("linear", "tree"):
-            self.assertIsNone(streamk_atomic_c_reject_reason(strategy, 1, "bf16"))
         self.assertIsNone(_resolve("rrr", (8, 1, 1))[1])
+
+    def test_stream_k_c_rule_follows_reduction_strategy(self):
+        # Only atomic adds partial tiles into C and needs >= 4 bytes; linear and tree
+        # store C with a plain store, and None defers the check to the caller.
+        for strategy, dtype_c, width in itertools.product(
+            ("atomic", "linear", "tree", None),
+            ("bf16", "fp16", "fp32", "int32"),
+            (0, 1, 2),
+        ):
+            narrow = width == 1 and dtype_c in ("bf16", "fp16")  # 2 bytes
+            rejected = strategy == "atomic" and narrow
+            with self.subTest(strategy=strategy, dtype_c=dtype_c, width=width):
+                reason = streamk_atomic_c_reject_reason(strategy, width, dtype_c)
+                self.assertEqual(reason is not None, rejected)
+                if not width:
+                    continue  # 0 = native, which resolution never checks
+                # resolve_gemm_vector_sizes applies the same rule, to Stream-K only.
+                dtype_ab = "int8" if dtype_c == "int32" else "bf16"
+                for variant in ("stream_k", "standard"):
+                    _, reason = _resolve(
+                        "rrr", (8, 1, width), dtype_a=dtype_ab, dtype_b=dtype_ab,
+                        dtype_c=dtype_c, variant=variant, reduction_strategy=strategy,
+                    )
+                    self.assertEqual(
+                        reason is not None, rejected and variant == "stream_k"
+                    )
 
     def test_rejects_warp_tile_k_not_multiple(self):
         _, reason = _resolve("rcr", (4, 8, 8), warp_tile=(32, 32, 2))
@@ -662,21 +667,29 @@ class TestHeaderLookup(unittest.TestCase):
 
 
 class TestStreamKMisalignedShapes(unittest.TestCase):
-    """AICK-2558 shapes Stream-K used to reject for vector alignment."""
+    """Problems whose contiguous extent is not a multiple of the 8-element bf16 load."""
 
     CONFIG = (
         DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "gemm_streamk" / "configs"
         / "gfx1250_config.json"
     )
+    ALL_STRATEGIES = ["atomic", "linear", "tree"]
 
     def _expand(self, layout, problem, strategies):
         from gemm_utils import expand_sweep
 
+        # The config lists every strategy, so the tests also pin that
+        # reduction_strategies replaces that list rather than adding to it.
+        config = json.loads(self.CONFIG.read_text())
+        config["streamk_config"] = {"reduction_strategy": self.ALL_STRATEGIES}
         vfb = VectorFallback([problem], layout, "bf16", "stream_k")
-        cfgs = expand_sweep(
-            str(self.CONFIG), "gfx1250", dtype="bf16", layout=layout, variant="stream_k",
-            reduction_strategies=strategies, **vfb.expand_kwargs,
-        )
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            path.write_text(json.dumps(config))
+            cfgs = expand_sweep(
+                str(path), "gfx1250", dtype="bf16", layout=layout, variant="stream_k",
+                reduction_strategies=strategies, **vfb.expand_kwargs,
+            )
         return [c for c in cfgs if any(c.vector_sizes)], vfb.rejects
 
     def test_misaligned_shapes_get_fixed_width_kernels(self):
@@ -697,7 +710,7 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
                     self.assertTrue(all(c.reduction_strategy == strategy for c in fixed))
 
     def test_two_byte_c_needs_linear_or_tree(self):
-        # N odd (I) or N = 1 (L): the C store is one bf16 element.
+        # N odd or N = 1: the C store is one bf16 element.
         for layout, problem in (
             ("rcr", dict(M=491520, N=121, K=105)),
             ("rrr", dict(M=3072, N=1, K=1024)),
@@ -710,6 +723,52 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
                 with self.subTest(problem=problem, strategy=strategy):
                     self.assertTrue(fixed)
                     self.assertTrue(all(c.effective_vector_sizes[2] == 1 for c in fixed))
+
+    def test_codegen_checks_c_per_strategy(self):
+        # The codegen resolves the widths with the strategy deferred, then checks C
+        # for each expanded strategy: only atomic drops a 2-byte C.
+        for vec, expected in (
+            ((8, 1, 1), ["linear", "tree"]),
+            ((8, 1, 2), self.ALL_STRATEGIES),
+        ):
+            config = _bridge_config(vec, variant="stream_k")[0].to_codegen_json()
+            config["streamk_config"] = {"reduction_strategy": self.ALL_STRATEGIES}
+            with tempfile.TemporaryDirectory() as d, self.assertLogs(
+                "unified_gemm_codegen", "INFO"
+            ) as logs:
+                path = Path(d) / "config.json"
+                path.write_text(json.dumps(config))
+                gen = UnifiedGemmCodegen(Path(d), "bf16", "rcr", "gfx950", path)
+                kernels = gen._get_configs_for_variant(GemmVariant.STREAM_K)
+            with self.subTest(vec=vec):
+                self.assertEqual([k.reduction_strategy for k in kernels], expected)
+                self.assertTrue(all(k.trait.vector_sizes == vec for k in kernels))
+                rejected = [r for r in logs.output if "atomic C store" in r]
+                self.assertEqual(len(rejected), 3 - len(expected), logs.output)
+
+    def test_driver_checks_widths_against_the_requested_strategy(self):
+        # --reduction-strategy reaches expand_sweep. Setting it on the expanded
+        # configs instead keeps only the widths legal for the config's atomic.
+        import streamk_gemm_full_benchmark as driver
+
+        argv = (
+            "streamk_gemm_full_benchmark.py --arch gfx1250 --layout rrr --dtype bf16"
+            " --reduction-strategy linear"
+        ).split()
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(
+            driver, "resolve_devices", return_value=["0"]
+        ), mock.patch.object(
+            driver, "load_problems", return_value=[dict(M=3072, N=1, K=1024)]
+        ), mock.patch.object(
+            driver,
+            "setup_multiple_gemm_dispatchers",
+            side_effect=lambda configs, **kwargs: [None] * len(configs),
+        ) as build, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(driver.main(), 1)
+        configs = build.call_args.args[0]
+        self.assertEqual({c.reduction_strategy for c in configs}, {"linear"})
+        fixed = {c.effective_vector_sizes for c in configs if any(c.vector_sizes)}
+        self.assertIn((8, 1, 1), fixed)
 
 
 class TestExpandSweep(unittest.TestCase):
