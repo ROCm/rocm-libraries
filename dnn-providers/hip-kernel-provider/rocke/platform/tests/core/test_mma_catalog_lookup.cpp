@@ -1620,6 +1620,32 @@ static int test_unscaled_wmma_values()
                                 : rocke_vector_type(
                                       &b, kind == 4 ? wrong_elem : spec.accum_elem, widths[kind]);
                 (variant < 5 ? c : result)->type = type;
+                if(spec.accum_elem == rocke_i32())
+                {
+                    const bool source = variant < 5;
+                    const char* label = source ? "MMA operand c" : "MMA result";
+                    const char* verb = source ? "takes" : "returns";
+                    if(kind == 4)
+                        snprintf(expected,
+                                 sizeof(expected),
+                                 "%s of '%s' holds f32 values; the instruction %s i32 -- %s",
+                                 label,
+                                 spec.id,
+                                 verb,
+                                 source ? "convert the values first"
+                                        : "declare the result in an element type it returns");
+                    else
+                        snprintf(expected,
+                                 sizeof(expected),
+                                 "%s of '%s' is %s (%d bits); the instruction %s vec<i32x8> "
+                                 "(256 bits) -- %s",
+                                 label,
+                                 spec.id,
+                                 type->name,
+                                 kind == 3 ? 32 : widths[kind] * 32,
+                                 verb,
+                                 source ? "pass a 256-bit value" : "declare a 256-bit result");
+                }
             }
             rocke_value_t* operands[] = {a, bb, c, c};
             rocke_value_t extra = {"%extra", result->type, op};
