@@ -44,12 +44,16 @@ GFX1250_CONFIG = (
 )
 
 
-def _write_reduction_config(tmp, reductions):
-    """Write the gfx1250 default config with a Stream-K reduction sweep into tmp."""
+def _write_reduction_config(tmp, reductions, name="config.json", **pinned):
+    """Write the gfx1250 default config with a Stream-K reduction sweep into
+    tmp/name; ``pinned`` replaces tile/trait value lists (e.g. tile_k=[32])."""
     with open(GFX1250_CONFIG) as f:
         cfg = json.load(f)
     cfg["streamk_config"] = {"reduction_strategy": {"values": reductions}}
-    config_path = Path(tmp) / "config.json"
+    for key, values in pinned.items():
+        section = "tile_config" if key in cfg["tile_config"] else "trait_config"
+        cfg[section][key] = {"values": values}
+    config_path = Path(tmp) / name
     config_path.write_text(json.dumps(cfg))
     return str(config_path)
 
@@ -183,6 +187,21 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertEqual(len({c.name for c in tree}), len(tree))
         self.assertTrue(all(c.name.endswith("_streamk_tree") for c in tree))
 
+    def test_repeated_sweep_values_expand_once(self):
+        # expand_sweep collapses configs that share a kernel name.
+        kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
+        with tempfile.TemporaryDirectory() as tmp:
+            once, twice = [
+                expand_sweep(
+                    _write_reduction_config(tmp, ["atomic"], name, tile_k=tile_k),
+                    "gfx1250",
+                    **kwargs,
+                )
+                for name, tile_k in (("once.json", [32]), ("twice.json", [32, 32]))
+            ]
+        self.assertTrue(once)
+        self.assertEqual([c.name for c in twice], [c.name for c in once])
+
     def test_unknown_reduction_strategy_is_rejected(self):
         kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
         with tempfile.TemporaryDirectory() as tmp:
@@ -288,18 +307,33 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                     {c.reduction_strategy for c in configs}, {reduction or "atomic"}
                 )
 
+    def _assert_tree_override_builds_distinct(self, *config_paths):
+        """--reduction-strategy tree --max-kernels 3 must build 3 distinct kernels."""
+        argv = ["--arch", "gfx1250", "--reduction-strategy", "tree"]
+        argv += ["--max-kernels", "3"]
+        configs, _ = self._main_build_configs(*config_paths, *argv)
+        base = [c.name for c in configs if not any(c.vector_sizes)]
+        self.assertEqual(len(set(base)), 3)
+        self.assertEqual(len({c.name for c in configs}), len(configs))
+
     def test_reduction_override_keeps_kernel_budget_distinct(self):
         # Overriding a multi-strategy sweep must not spend --max-kernels on copies
         # of one kernel.
         with tempfile.TemporaryDirectory() as tmp:
-            config_path = _write_reduction_config(tmp, ["atomic", "linear", "tree"])
-            argv = ["--arch", "gfx1250", "--reduction-strategy", "tree"]
-            configs, _ = self._main_build_configs(
-                config_path, *argv, "--max-kernels", "3"
+            self._assert_tree_override_builds_distinct(
+                _write_reduction_config(tmp, ["atomic", "linear", "tree"])
             )
-        base = [c.name for c in configs if not any(c.vector_sizes)]
-        self.assertEqual(len(set(base)), 3)
-        self.assertEqual(len({c.name for c in configs}), len(configs))
+
+    def test_reduction_override_keeps_kernel_budget_distinct_across_files(self):
+        # Nor on copies across positional configs: overridden to tree, file A's
+        # only (atomic) kernel is the first kernel of file B (linear).
+        with tempfile.TemporaryDirectory() as tmp:
+            self._assert_tree_override_builds_distinct(
+                _write_reduction_config(
+                    tmp, ["atomic"], "a.json", tile_k=[32], pipeline=["compv3"]
+                ),
+                _write_reduction_config(tmp, ["linear"], "b.json"),
+            )
 
     def test_arch_config_is_a_file_drop(self):
         with tempfile.TemporaryDirectory() as tmp:
