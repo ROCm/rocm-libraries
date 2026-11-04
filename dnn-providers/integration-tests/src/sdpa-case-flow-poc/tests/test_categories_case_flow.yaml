@@ -1,0 +1,12 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# CTest categories of the SDPA case-flow tests. The quick label puts each test in every
+# cumulative check target.
+test_categories:
+  quick:
+    description: "Device-free unit tests of the SDPA case builder"
+    test_patterns:
+      - "hipdnn_sdpa_case_flow_case_graph_tests"
+    labels:
+      - "quick"

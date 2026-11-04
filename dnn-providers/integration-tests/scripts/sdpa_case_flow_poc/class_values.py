@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .model import Model, ModelError, load_yaml
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FILE_NAME = "class-to-value.json"
 INVERSE_SQRT_HEAD_DIM = "1/sqrt(head_dim_qk)"
 INVERSE_SQRT_HEAD_DIM_TOKEN = "inverse_sqrt_head_dim_qk"
@@ -23,6 +23,9 @@ TENSOR_LETTERS = ("Q", "K", "V", "O")
 STATS_LETTER = "Stats"
 LAYOUT_AXES = ("strides_q", "strides_k", "strides_v", "strides_o", "strides_stats")
 NOTE = "note"
+STORED_LENGTH = "S"
+LENGTH_OPERATIONS = ("divide", "add", "multiply")
+OFFSET_LAYOUTS = ("prefix_sum_of_lengths", "full_slots", "prefix_sum_after_gap")
 
 
 def _without_notes(value):
@@ -79,6 +82,32 @@ def _format_list(value, model: Model, where: str) -> list:
             f"class_to_value: {where} is not a non-empty list of formats: {value!r}"
         )
     return [_format(v, model, f"{where}[{i}]") for i, v in enumerate(value)]
+
+
+def _length_term(value, where: str):
+    """One per-sequence length: S, an integer, or {of: S, <divide|add|multiply>: n}."""
+    if value == STORED_LENGTH:
+        return value
+    if isinstance(value, bool):
+        raise ModelError(f"class_to_value: {where} is not a length: {value!r}")
+    if isinstance(value, int):
+        if value < 0:
+            raise ModelError(f"class_to_value: {where} is a negative length: {value!r}")
+        return value
+    if (
+        isinstance(value, dict)
+        and len(value) == 2
+        and value.get("of") == STORED_LENGTH
+        and any(op in value for op in LENGTH_OPERATIONS)
+    ):
+        op = next(op for op in LENGTH_OPERATIONS if op in value)
+        n = _integer(value[op], f"{where}.{op}")
+        if op == "divide" and n <= 0:
+            raise ModelError(f"class_to_value: {where}.divide is not positive: {n!r}")
+        return {"of": STORED_LENGTH, op: n}
+    raise ModelError(
+        f"class_to_value: {where} is not S, an integer or {{of: S, divide|add|multiply: n}}: {value!r}"
+    )
 
 
 def _scale_representative(value, where: str):
@@ -321,6 +350,33 @@ def build(model: Model, model_dir: Path) -> dict:
     ro = _entry(table, "ragged_offsets", "class_to_value")
     _covers(ro, model, "ragged_offsets", "ragged_offsets")
     ragged_offsets = {k: _without_notes(ro[k]) for k in model.values["ragged_offsets"]}
+    for k, entry in ragged_offsets.items():
+        layout = _entry(entry, "offsets", f"ragged_offsets.{k}")
+        if layout not in OFFSET_LAYOUTS:
+            raise ModelError(
+                f"class_to_value: ragged_offsets.{k}.offsets is not one of {OFFSET_LAYOUTS}: {layout!r}"
+            )
+
+    psl = _entry(table, "per_seq_len", "class_to_value")
+    for axis in ("per_seq_len_q", "per_seq_len_kv"):
+        _covers(psl, model, axis, "per_seq_len")
+    per_seq_len = {}
+    for k in sorted(
+        set(model.values["per_seq_len_q"]) | set(model.values["per_seq_len_kv"])
+    ):
+        cycle = _entry(psl[k], "cycle", f"per_seq_len.{k}")
+        unknown = set(psl[k]) - {"cycle", NOTE}
+        if unknown:
+            raise ModelError(
+                f"class_to_value: per_seq_len.{k} has unknown keys {sorted(unknown)}"
+            )
+        if not isinstance(cycle, list) or not cycle:
+            raise ModelError(
+                f"class_to_value: per_seq_len.{k}.cycle is not a non-empty list"
+            )
+        per_seq_len[k] = [
+            _length_term(x, f"per_seq_len.{k}.cycle[{i}]") for i, x in enumerate(cycle)
+        ]
 
     paging = _entry(table, "paging", "class_to_value")
     sides_table = _entry(paging, "sides", "paging")
@@ -490,6 +546,7 @@ def build(model: Model, model_dir: Path) -> dict:
         "ragged_tensors": ragged_tensors,
         "ragged_stats": ragged_stats,
         "ragged_offsets": ragged_offsets,
+        "per_seq_len": per_seq_len,
         "paged_sides": paged_sides,
         "v_page_multiplier": v_page_multiplier,
         "page_tables": page_tables,

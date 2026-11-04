@@ -1,0 +1,493 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include "CaseGraph.hpp"
+
+using sdpa_case_flow::BuiltCase;
+using sdpa_case_flow::CaseContext;
+using sdpa_case_flow::CaseRealisationError;
+using sdpa_case_flow::ClassValues;
+using sdpa_case_flow::Contents;
+using sdpa_case_flow::DescaleForm;
+using sdpa_case_flow::Row;
+using sdpa_case_flow::SizeOverride;
+
+namespace
+{
+
+constexpr const char* CLASS_VALUES_JSON = R"json({
+  "schema_version": 2,
+  "batch_size": {"one": 1, "many": 2},
+  "q_heads": {"one": 1, "many": 8},
+  "seq_lengths": [{"seq_q": "many", "seq_kv": "many", "seq_q_vs_seq_kv": "equal",
+                   "S_q": 64, "S_kv": 64}],
+  "head_dim": {"d64": 64, "d128": 128},
+  "dtype_differs": {"by_dtype_q": {"bf16": "fp8_e4m3"},
+                    "by_arch": {"gfx942": {"fp8_e4m3": "fp8_e4m3_fnuz"}}},
+  "dim_order": {"bhsd": ["B", "H", "S", "D"], "bshd": ["B", "S", "H", "D"]},
+  "scale_value": {"inverse_sqrt_d": ["1/sqrt(head_dim_qk)"]},
+  "dropout_probability": {"zero": 0.0},
+  "dropout_seed_offset": {"seed": 1234, "offset": 0},
+  "dropout_mask_scale": {"mixed": 2.0},
+  "dropout_mask_cycle": {"mixed": [1.0, 0.0]},
+  "page_size": {"partial": 16, "whole_sequence": "S_kv"},
+  "quantisation_factors": {"descale_q": 0.5, "descale_k": 0.25, "descale_v": 2.0, "other": 1.0},
+  "descale_lists": {
+    "per_head": {"descale_q": [0.5, 1.0], "descale_k": [0.25, 0.5], "descale_v": [2.0, 4.0]},
+    "finer": {"descale_q": [0.5, 1.0], "descale_k": [0.25, 0.5], "descale_v": [2.0, 4.0]}},
+  "ragged_tensors": {"padded": [], "ragged": ["Q", "K", "V", "O"], "ragged_q_side": ["Q", "O"],
+                     "ragged_kv_side": ["K", "V"]},
+  "ragged_stats": {"dense": [], "packed_with_q": ["Stats"]},
+  "ragged_offsets": {"contiguous": {"offsets": "prefix_sum_of_lengths"},
+                     "gapped": {"offsets": "full_slots"},
+                     "leading_gap": {"offsets": "prefix_sum_after_gap"}},
+  "per_seq_len": {"all_full": ["S"], "all_equal_partial": [{"of": "S", "divide": 2}],
+                  "mixed": ["S", {"of": "S", "divide": 2}], "some_zero": ["S", 0],
+                  "all_zero": [0], "exceeds_storage": [{"of": "S", "add": 1}, "S"]},
+  "paged_sides": {"present": ["K", "V"], "k_only": ["K"], "v_only": ["V"]},
+  "v_page_multiplier": {"equal": 1, "differ": 2},
+  "page_tables": {"separate": 2, "shared": 1},
+  "packed_page_table": {"dense": false, "packed": true},
+  "alibi_head_count": {"H_q": {"8": 6}, "heads": {"6": {"mha": 6, "gqa": 2, "mqa": 1,
+                       "k_and_v_differ": {"H_k": 2, "H_v": 3}}}},
+  "mma_fp8": {"otherwise": "fp8_e4m3", "by_arch": {"gfx942": {"fp8_e4m3": "fp8_e4m3_fnuz"}}}
+})json";
+
+// Element strides over the sequence dimension at B 4, H 8, D 128 (Stats: D 1).
+constexpr int64_t BSHD_SEQUENCE_STRIDE = 8 * 128;
+constexpr int64_t BHSD_SEQUENCE_STRIDE = 128;
+constexpr int64_t BSHD_STATS_SEQUENCE_STRIDE = 8;
+
+const ClassValues& classValues()
+{
+    static const ClassValues VALUES = sdpa_case_flow::parseClassValues(CLASS_VALUES_JSON);
+    return VALUES;
+}
+
+SizeOverride sizes(int64_t b, int64_t sq, int64_t skv)
+{
+    SizeOverride z;
+    z.b = b;
+    z.hq = 8;
+    z.hk = 8;
+    z.hv = 8;
+    z.sq = sq;
+    z.skv = skv;
+    z.dqk = 128;
+    z.dv = 128;
+    return z;
+}
+
+Row baseRow()
+{
+    Row row;
+    for(const auto& axis : sdpa_case_flow::modelAxisIds())
+    {
+        row[axis] = sdpa_case_flow::sharedBaseValue(axis);
+    }
+    return row;
+}
+
+Row variableLengthRow(const std::string& qClass, const std::string& kvClass)
+{
+    auto row = baseRow();
+    row["sequence_lengths"] = "variable";
+    row["per_seq_len_q"] = qClass;
+    row["per_seq_len_kv"] = kvClass;
+    return row;
+}
+
+// Q, O and Stats token-major (bshd); K and V bhsd, so the two sides have different strides.
+Row raggedRow(const std::string& packing,
+              const std::string& offsets,
+              const std::string& qClass,
+              const std::string& kvClass)
+{
+    auto row = variableLengthRow(qClass, kvClass);
+    row["batch_packing"] = packing;
+    row["ragged_offsets"] = offsets;
+    row["dim_order_q"] = "bshd";
+    row["dim_order_o"] = "bshd";
+    return row;
+}
+
+Row withStats(Row row, const std::string& packing)
+{
+    row["stats_output"] = "requested";
+    row["dtype_stats"] = "fp32";
+    row["dim_order_stats"] = "bshd";
+    row["strides_stats"] = "packed";
+    row["alignment_stats"] = "wide_aligned";
+    row["stats_packing"] = packing;
+    return row;
+}
+
+Row pagedRow(const std::string& storage)
+{
+    auto row = baseRow();
+    row["paged_kv"] = "present";
+    row["page_table_sharing"] = "separate";
+    row["page_size_k_vs_v"] = "equal";
+    row["page_table_storage"] = storage;
+    row["page_size"] = "partial";
+    row["page_table_order"] = "in_order";
+    row["page_count"] = "exact";
+    row["max_seq_len_kv"] = "equal";
+    return row;
+}
+
+BuiltCase build(const Row& row, const SizeOverride& z)
+{
+    const CaseContext context{classValues(), DescaleForm::BY_VALUE, "gfx942", z};
+    return sdpa_case_flow::buildCaseGraph(row, {}, context);
+}
+
+const Contents& contentsOf(const BuiltCase& built, const std::string& name)
+{
+    const auto it = built.contents.find(name);
+    if(it == built.contents.end())
+    {
+        throw std::runtime_error("no contents for '" + name + "'");
+    }
+    return it->second;
+}
+
+std::vector<int64_t> integersOf(const BuiltCase& built, const std::string& name)
+{
+    return std::get<std::vector<int64_t>>(contentsOf(built, name).values);
+}
+
+std::vector<int64_t> scaled(std::vector<int64_t> tokens, int64_t stride)
+{
+    for(auto& token : tokens)
+    {
+        token *= stride;
+    }
+    return tokens;
+}
+
+struct LengthClass
+{
+    std::string id;
+    // Lengths at stored length 64.
+    std::vector<int64_t> cycle;
+};
+
+const std::vector<LengthClass>& lengthClasses()
+{
+    static const std::vector<LengthClass> CLASSES = {
+        {"all_full", {64}},
+        {"all_equal_partial", {32}},
+        {"mixed", {64, 32}},
+        {"some_zero", {64, 0}},
+        {"all_zero", {0}},
+        {"exceeds_storage", {65, 64}},
+    };
+    return CLASSES;
+}
+
+struct PackedClass
+{
+    std::string id;
+    // Token boundaries of four sequences of stored length 64, packed end to end.
+    std::vector<int64_t> prefixSums;
+};
+
+const std::vector<PackedClass>& packedClasses()
+{
+    static const std::vector<PackedClass> CLASSES = {
+        {"all_full", {0, 64, 128, 192, 256}},
+        {"all_equal_partial", {0, 32, 64, 96, 128}},
+        {"mixed", {0, 64, 96, 160, 192}},
+        {"some_zero", {0, 64, 64, 128, 128}},
+        {"all_zero", {0, 0, 0, 0, 0}},
+    };
+    return CLASSES;
+}
+
+} // namespace
+
+TEST(TestCaseGraph, SequenceLengthsHoldEachClassRecipe)
+{
+    for(const auto& lengthClass : lengthClasses())
+    {
+        SCOPED_TRACE(lengthClass.id);
+        const auto built
+            = build(variableLengthRow(lengthClass.id, lengthClass.id), sizes(4, 64, 64));
+        for(const char* name : {"seq_len_q", "seq_len_kv"})
+        {
+            EXPECT_EQ(integersOf(built, name), lengthClass.cycle) << name;
+            EXPECT_TRUE(contentsOf(built, name).repeat) << name;
+        }
+    }
+}
+
+TEST(TestCaseGraph, SizeOverrideSetsTheStoredLength)
+{
+    const auto built = build(variableLengthRow("mixed", "all_equal_partial"), sizes(4, 128, 96));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{128, 64}));
+    EXPECT_EQ(integersOf(built, "seq_len_kv"), (std::vector<int64_t>{48}));
+}
+
+TEST(TestCaseGraph, LengthCycleLongerThanTheBatchIsCut)
+{
+    const auto built = build(variableLengthRow("mixed", "some_zero"), sizes(1, 64, 64));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{64}));
+    EXPECT_EQ(integersOf(built, "seq_len_kv"), (std::vector<int64_t>{64}));
+}
+
+TEST(TestCaseGraph, QSideAndKeyValueSideLengthsDiffer)
+{
+    const auto built = build(variableLengthRow("mixed", "all_full"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{64, 32}));
+    EXPECT_EQ(integersOf(built, "seq_len_kv"), (std::vector<int64_t>{64}));
+
+    const auto longerKeys = build(variableLengthRow("mixed", "mixed"), sizes(4, 64, 128));
+    EXPECT_EQ(integersOf(longerKeys, "seq_len_q"), (std::vector<int64_t>{64, 32}));
+    EXPECT_EQ(integersOf(longerKeys, "seq_len_kv"), (std::vector<int64_t>{128, 64}));
+}
+
+TEST(TestCaseGraph, UniformRowHasNoLengthContents)
+{
+    const auto built = build(baseRow(), sizes(4, 64, 64));
+    EXPECT_EQ(built.contents.count("seq_len_q"), 0u);
+    EXPECT_EQ(built.contents.count("seq_len_kv"), 0u);
+}
+
+TEST(TestCaseGraph, PagedUniformRowGetsFullLengths)
+{
+    const auto built = build(pagedRow("dense"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{64}));
+    EXPECT_EQ(integersOf(built, "seq_len_kv"), (std::vector<int64_t>{64}));
+}
+
+TEST(TestCaseGraph, InOrderPageTablesAddressEveryPoolPage)
+{
+    // Four sequences of 64 keys in pages of 16: a pool of 16 pages, four per sequence.
+    const auto built = build(pagedRow("dense"), sizes(4, 64, 64));
+    std::vector<int64_t> expected(16);
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        expected[i] = static_cast<int64_t>(i);
+    }
+    for(const char* table : {"page_table_k", "page_table_v"})
+    {
+        EXPECT_EQ(integersOf(built, table), expected) << table;
+        EXPECT_FALSE(contentsOf(built, table).repeat) << table;
+    }
+    EXPECT_EQ(built.contents.count("page_table_k_offset"), 0u);
+}
+
+TEST(TestCaseGraph, PackedPageTableOffsetsCountTableEntries)
+{
+    const auto built = build(pagedRow("packed"), sizes(4, 64, 64));
+    for(const char* offset : {"page_table_k_offset", "page_table_v_offset"})
+    {
+        EXPECT_EQ(integersOf(built, offset), (std::vector<int64_t>{0, 4, 8, 12, 16})) << offset;
+        EXPECT_FALSE(contentsOf(built, offset).repeat) << offset;
+    }
+}
+
+TEST(TestCaseGraph, ContiguousOffsetsArePrefixSumsOfEachClass)
+{
+    for(const auto& packedClass : packedClasses())
+    {
+        SCOPED_TRACE(packedClass.id);
+        const auto built = build(raggedRow("ragged", "contiguous", packedClass.id, "all_full"),
+                                 sizes(4, 64, 64));
+        const auto expected = scaled(packedClass.prefixSums, BSHD_SEQUENCE_STRIDE);
+        EXPECT_EQ(integersOf(built, "ragged_offset_q"), expected);
+        EXPECT_EQ(integersOf(built, "ragged_offset_o"), expected);
+        EXPECT_FALSE(contentsOf(built, "ragged_offset_q").repeat);
+    }
+}
+
+TEST(TestCaseGraph, FullLengthOffsetsAreWholeSlots)
+{
+    // offset b = b x dims[2] x strides[2] on every ragged tensor.
+    const auto built
+        = build(raggedRow("ragged", "contiguous", "all_full", "all_full"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({0, 64, 128, 192, 256}, BSHD_SEQUENCE_STRIDE));
+    for(const char* offset : {"ragged_offset_k", "ragged_offset_v"})
+    {
+        EXPECT_EQ(integersOf(built, offset), scaled({0, 64, 128, 192, 256}, BHSD_SEQUENCE_STRIDE))
+            << offset;
+    }
+}
+
+TEST(TestCaseGraph, KeyValueOffsetsUseTheirOwnLengthsAndStrides)
+{
+    const auto built
+        = build(raggedRow("ragged", "contiguous", "mixed", "some_zero"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({0, 64, 96, 160, 192}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 64, 64, 128, 128}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_v"),
+              scaled({0, 64, 64, 128, 128}, BHSD_SEQUENCE_STRIDE));
+}
+
+TEST(TestCaseGraph, OneSideRaggedRowsOffsetOnlyTheirSide)
+{
+    const auto qSide
+        = build(raggedRow("ragged_q_side", "contiguous", "mixed", "all_full"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(qSide, "ragged_offset_q"),
+              scaled({0, 64, 96, 160, 192}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(qSide.contents.count("ragged_offset_k"), 0u);
+
+    const auto kvSide
+        = build(raggedRow("ragged_kv_side", "contiguous", "all_full", "mixed"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(kvSide, "ragged_offset_k"),
+              scaled({0, 64, 96, 160, 192}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(kvSide.contents.count("ragged_offset_q"), 0u);
+}
+
+TEST(TestCaseGraph, GappedOffsetsIgnoreTheLiveLengths)
+{
+    const auto built = build(raggedRow("ragged", "gapped", "mixed", "some_zero"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({0, 64, 128, 192, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 64, 128, 192, 256}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{64, 32}));
+}
+
+TEST(TestCaseGraph, LeadingGapPutsAllSpareRoomFirst)
+{
+    // Slack = 4 x 64 - (64 + 32 + 64 + 32) = 64 tokens; the K/V side has no slack.
+    const auto built
+        = build(raggedRow("ragged", "leading_gap", "mixed", "all_full"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({64, 128, 160, 224, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_o"),
+              scaled({64, 128, 160, 224, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 64, 128, 192, 256}, BHSD_SEQUENCE_STRIDE));
+}
+
+TEST(TestCaseGraph, RaggedLengthLongerThanTheSlotThrows)
+{
+    for(const char* offsets : {"contiguous", "gapped", "leading_gap"})
+    {
+        SCOPED_TRACE(offsets);
+        EXPECT_THROW(build(raggedRow("ragged_q_side", offsets, "exceeds_storage", "all_full"),
+                           sizes(4, 64, 64)),
+                     CaseRealisationError);
+    }
+}
+
+TEST(TestCaseGraph, OffsetsFollowEachTensorsOwnSequenceExtent)
+{
+    // V is paged: its pool holds pages of 16 tokens. K is dense beside it and spans the declared
+    // maximum of 128 keys. The length tensor keeps the key length of 64.
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
+    for(const auto& [axis, value] : pagedRow("dense"))
+    {
+        if(axis.rfind("page", 0) == 0 || axis == "max_seq_len_kv")
+        {
+            row[axis] = value;
+        }
+    }
+    row["paged_kv"] = "v_only";
+    row["max_seq_len_kv"] = "larger";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 128, 256, 384, 512}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_v"),
+              scaled({0, 16, 32, 48, 64}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "seq_len_kv"), (std::vector<int64_t>{64}));
+}
+
+TEST(TestCaseGraph, LengthsInOffsetsRowCarriesLengthsOnlyInOffsets)
+{
+    auto row = raggedRow("ragged", "contiguous", "mixed", "all_equal_partial");
+    row["sequence_lengths"] = "lengths_in_offsets";
+    row["dim_order_k"] = "bshd";
+    row["dim_order_v"] = "bshd";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({0, 64, 96, 160, 192}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 32, 64, 96, 128}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(built.contents.count("seq_len_q"), 0u);
+    EXPECT_EQ(built.contents.count("seq_len_kv"), 0u);
+}
+
+TEST(TestCaseGraph, LengthsInOffsetsNeedsARaggedTensor)
+{
+    auto row = variableLengthRow("mixed", "all_full");
+    row["sequence_lengths"] = "lengths_in_offsets";
+    EXPECT_THROW(build(row, sizes(4, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, PackedStatsUsesQBoundariesInStatsElements)
+{
+    const auto contiguous
+        = build(withStats(raggedRow("ragged", "contiguous", "mixed", "all_full"), "packed_with_q"),
+                sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(contiguous, "ragged_offset_stats"),
+              scaled({0, 64, 96, 160, 192}, BSHD_STATS_SEQUENCE_STRIDE));
+    EXPECT_FALSE(contentsOf(contiguous, "ragged_offset_stats").repeat);
+
+    const auto leadingGap = build(
+        withStats(raggedRow("ragged_q_side", "leading_gap", "mixed", "all_full"), "packed_with_q"),
+        sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(leadingGap, "ragged_offset_stats"),
+              scaled({64, 128, 160, 224, 256}, BSHD_STATS_SEQUENCE_STRIDE));
+}
+
+TEST(TestCaseGraph, DenseStatsHasNoOffset)
+{
+    const auto built
+        = build(withStats(raggedRow("ragged", "contiguous", "mixed", "all_full"), "dense"),
+                sizes(4, 64, 64));
+    EXPECT_EQ(built.contents.count("ragged_offset_stats"), 0u);
+}
+
+TEST(TestCaseGraph, PackedStatsNeedsARaggedQ)
+{
+    const auto row = withStats(raggedRow("ragged_kv_side", "contiguous", "all_full", "mixed"),
+                               "packed_with_q");
+    EXPECT_THROW(build(row, sizes(4, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, OffsetAboveInt32Throws)
+{
+    // The last Q offset is 4 x 2^20 tokens x 1024 elements = 2^32.
+    auto row = raggedRow("ragged_q_side", "contiguous", "all_full", "all_full");
+    EXPECT_THROW(build(row, sizes(4, int64_t{1} << 20, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, LengthAndOffsetAxesAreRealised)
+{
+    for(const char* axis : {"per_seq_len_q", "per_seq_len_kv", "ragged_offsets", "stats_packing"})
+    {
+        EXPECT_TRUE(sdpa_case_flow::isRealisedContentAxis(axis)) << axis;
+    }
+    EXPECT_FALSE(sdpa_case_flow::isRealisedContentAxis("tensor_overlap"));
+}
+
+TEST(TestCaseGraph, ClassValuesRejectAnUnknownOffsetLayout)
+{
+    std::string text = CLASS_VALUES_JSON;
+    const std::string layout = "\"full_slots\"";
+    text.replace(text.find(layout), layout.size(), "\"full_slot\"");
+    EXPECT_THROW(sdpa_case_flow::parseClassValues(text), sdpa_case_flow::ClassValuesError);
+}
+
+TEST(TestCaseGraph, ClassValuesRejectAnUnknownLengthTerm)
+{
+    std::string text = CLASS_VALUES_JSON;
+    const std::string term = "\"divide\": 2";
+    text.replace(text.find(term), term.size(), "\"halve\": 2");
+    EXPECT_THROW(sdpa_case_flow::parseClassValues(text), sdpa_case_flow::ClassValuesError);
+}

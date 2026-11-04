@@ -62,3 +62,5 @@ set_target_properties(${SDPA_CASE_FLOW_RUNNER_EXE}
     PROPERTIES
         BUILD_RPATH_USE_ORIGIN TRUE
 )
+
+add_subdirectory(${_it_src}/sdpa-case-flow-poc/tests ${CMAKE_CURRENT_BINARY_DIR}/case-graph-tests)

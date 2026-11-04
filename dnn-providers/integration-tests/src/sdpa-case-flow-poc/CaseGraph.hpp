@@ -11,6 +11,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_frontend/Graph.hpp>
@@ -59,6 +60,32 @@ struct AlibiHeads
     int64_t differV = 0;
 };
 
+// One per-sequence length: a constant, or the stored length S changed by one operation.
+struct LengthTerm
+{
+    enum class Op
+    {
+        CONSTANT,
+        STORED,
+        DIVIDE,
+        ADD,
+        MULTIPLY,
+    };
+    Op op = Op::CONSTANT;
+    int64_t operand = 0;
+};
+
+// How the B + 1 offsets of a ragged tensor follow from its per-sequence lengths.
+enum class OffsetLayout
+{
+    // offset b = (sum of the lengths of sequences 0 .. b-1) x stride.
+    PREFIX_SUM,
+    // offset b = b x S x stride.
+    FULL_SLOTS,
+    // offset b = (g + sum of the lengths of sequences 0 .. b-1) x stride, g = B x S - all lengths.
+    PREFIX_SUM_AFTER_GAP,
+};
+
 struct SequenceLengthEntry
 {
     std::string seqQ;
@@ -97,6 +124,12 @@ struct ClassValues
     std::map<std::string, std::map<std::string, std::vector<double>>> descaleLists;
     // batch_packing value -> ragged tensors, as letters Q, K, V, O.
     std::map<std::string, std::set<std::string>> raggedTensors;
+    // stats_packing value -> whether Stats is ragged with Q's token boundaries.
+    std::map<std::string, bool> raggedStats;
+    // per_seq_len class -> lengths of sequences 0 .. B-1, repeated in batch order.
+    std::map<std::string, std::vector<LengthTerm>> perSeqLen;
+    // ragged_offsets value -> how the offsets follow from the lengths.
+    std::map<std::string, OffsetLayout> raggedOffsets;
     // paged_kv value -> paged sides, as letters K, V.
     std::map<std::string, std::set<std::string>> pagedSides;
     // page_size_k_vs_v value -> V page size as a multiple of K's.
@@ -141,16 +174,21 @@ struct CaseContext
     std::optional<SizeOverride> sizes = std::nullopt;
 };
 
+// Exact contents of one input tensor. Element i in logical index order holds values[i % n]
+// when repeat is true. When repeat is false, the list holds one value per element.
+struct Contents
+{
+    std::variant<std::vector<int64_t>, std::vector<double>> values;
+    bool repeat = true;
+};
+
 struct BuiltCase
 {
     std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
     // Concrete numbers and formats the row turned into, for the result record.
     std::string realised;
-    // Values a tensor's contents must hold, keyed by tensor name. Element i of the named
-    // tensor is set to values[i % values.size()] in place of the random input fill.
-    std::map<std::string, std::vector<float>> floatContents;
-    // Whole contents of integer tensors, keyed by tensor name, in packed element order.
-    std::map<std::string, std::vector<int64_t>> indexContents;
+    // Contents that replace the random input fill, keyed by tensor name.
+    std::map<std::string, Contents> contents;
 };
 
 // The axis ids of the maintained forward SDPA model, in its column order.
@@ -159,7 +197,7 @@ const std::vector<std::string>& modelAxisIds();
 // True for an axis whose value is decided by tensor contents or pointers at execute time.
 bool isExecuteLevelAxis(const std::string& axis);
 
-// True for an execute-level axis that buildCaseGraph turns into BuiltCase::floatContents.
+// True for an axis whose value buildCaseGraph turns into BuiltCase::contents.
 bool isRealisedContentAxis(const std::string& axis);
 
 // The shared base case value of an axis, or "-" when the base omits the axis.

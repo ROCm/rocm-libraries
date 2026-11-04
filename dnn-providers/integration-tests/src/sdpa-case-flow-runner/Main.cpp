@@ -37,6 +37,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <unistd.h>
@@ -1080,103 +1081,26 @@ std::string writeFloatCycle(hipdnn_data_sdk::utilities::ITensor& tensor,
     return text;
 }
 
-// Replace the random fill of tensors whose contents are indices or lengths with valid
-// contents: full sequence lengths, contiguous ragged offsets (each in its own tensor's
-// elements), in-order page tables and an all-ones block mask. Returns one note per tensor it
-// writes.
-std::vector<std::string> writeStructuralContents(Bundle& bundle,
-                                                 const std::map<int64_t, TensorPtr>& attrs,
-                                                 const sdpa_case_flow::SizeOverride& z)
+// Write one tensor's class contents. Returns the content note suffix.
+std::string writeContents(hipdnn_data_sdk::utilities::ITensor& tensor,
+                          hipdnn_frontend::DataType type,
+                          const sdpa_case_flow::Contents& contents)
 {
-    std::vector<std::string> notes;
-    std::map<std::string, TensorPtr> byName;
-    for(const auto& [uid, attr] : attrs)
+    if(const auto* reals = std::get_if<std::vector<double>>(&contents.values))
     {
-        byName[attr->get_name()] = attr;
+        return writeFloatCycle(tensor, std::vector<float>(reals->begin(), reals->end()));
     }
-    const auto write = [&](const std::string& name, const std::vector<int64_t>& values) {
-        const auto found = byName.find(name);
-        if(found == byName.end())
-        {
-            return;
-        }
-        const auto& attr = found->second;
-        auto tensorIt = bundle.tensors.find(attr->get_uid());
-        if(tensorIt == bundle.tensors.end())
-        {
-            notes.push_back(name + ":not-in-bundle");
-            return;
-        }
-        if(writeIndexTensor(*tensorIt->second, attr->get_data_type(), values))
-        {
-            notes.push_back(name + ":structured");
-        }
-        else
-        {
-            notes.push_back(name + ":random(unsupported type)");
-        }
-    };
-    const auto elementCount = [](const TensorPtr& attr) {
-        int64_t count = 1;
-        for(const auto d : attr->get_dim())
-        {
-            count *= d;
-        }
-        return count;
-    };
-
-    write("seq_len_q", std::vector<int64_t>(static_cast<size_t>(z.b), z.sq));
-    write("seq_len_kv", std::vector<int64_t>(static_cast<size_t>(z.b), z.skv));
-
-    for(const auto& [uid, attr] : attrs)
+    const auto& integers = std::get<std::vector<int64_t>>(contents.values);
+    std::vector<int64_t> values = integers;
+    if(contents.repeat && !integers.empty())
     {
-        const auto offset = attr->get_ragged_offset();
-        const auto& dims = attr->get_dim();
-        const auto& strides = attr->get_stride();
-        if(offset == nullptr || dims.size() != 4 || strides.size() != 4)
-        {
-            continue;
-        }
-        std::vector<int64_t> offsets;
-        for(int64_t b = 0; b <= z.b; ++b)
-        {
-            offsets.push_back(b * dims[2] * strides[2]);
-        }
-        write(offset->get_name(), offsets);
-    }
-
-    for(const auto& [table, pools] : std::vector<std::pair<std::string, std::vector<std::string>>>{
-            {"page_table_k", {"k"}}, {"page_table_v", {"v"}}, {"page_table_kv", {"k", "v"}}})
-    {
-        const auto t = byName.find(table);
-        if(t == byName.end())
-        {
-            continue;
-        }
-        int64_t pages = std::numeric_limits<int64_t>::max();
-        for(const auto& pool : pools)
-        {
-            const auto p = byName.find(pool);
-            if(p != byName.end())
-            {
-                pages = std::min(pages, p->second->get_dim().at(0));
-            }
-        }
-        pages = std::max<int64_t>(1, pages == std::numeric_limits<int64_t>::max() ? 1 : pages);
-        std::vector<int64_t> values(static_cast<size_t>(elementCount(t->second)));
+        values.resize(tensor.elementSpace());
         for(size_t i = 0; i < values.size(); ++i)
         {
-            values[i] = static_cast<int64_t>(i) % pages;
+            values[i] = integers[i % integers.size()];
         }
-        write(table, values);
     }
-
-    if(const auto mask = byName.find("block_mask"); mask != byName.end())
-    {
-        write("block_mask",
-              std::vector<int64_t>(static_cast<size_t>(elementCount(mask->second)), 1));
-    }
-    return notes;
+    return writeIndexTensor(tensor, type, values) ? ":class-contents" : ":random(unsupported type)";
 }
 
 // ------------------------------------------------------------------ one case
@@ -1737,30 +1661,15 @@ std::string runCase(size_t index,
                 line.num("t_fill_us", microsSince(stageStart));
                 return finish(graphOutcome, "fill", fill.reason);
             }
-            contentNotes = writeStructuralContents(engineBundle, attrs, sizes);
-            for(const auto& [name, values] : built.floatContents)
+            for(const auto& [name, contents] : built.contents)
             {
                 std::string note = ":not-in-bundle";
                 for(const auto& [uid, attr] : attrs)
                 {
                     if(attr->get_name() == name && engineBundle.tensors.count(uid) != 0)
                     {
-                        note = writeFloatCycle(*engineBundle.tensors.at(uid), values);
-                    }
-                }
-                contentNotes.push_back(name + note);
-            }
-            for(const auto& [name, values] : built.indexContents)
-            {
-                std::string note = ":not-in-bundle";
-                for(const auto& [uid, attr] : attrs)
-                {
-                    if(attr->get_name() == name && engineBundle.tensors.count(uid) != 0)
-                    {
-                        note = writeIndexTensor(
-                                   *engineBundle.tensors.at(uid), attr->get_data_type(), values)
-                                   ? ":class-contents"
-                                   : ":random(unsupported type)";
+                        note = writeContents(
+                            *engineBundle.tensors.at(uid), attr->get_data_type(), contents);
                     }
                 }
                 contentNotes.push_back(name + note);
@@ -2101,18 +2010,18 @@ ExportResult exportCase(const CaseInput& input,
 
         result.stage = "contents";
         std::vector<std::string> notExpressible;
-        for(const auto& [name, contents] : built.floatContents)
+        for(const auto& [name, contents] : built.contents)
         {
-            if(name != EXPORT_FIXED_CONTENT || contents.size() != 1)
+            const auto* reals = std::get_if<std::vector<double>>(&contents.values);
+            if(name != EXPORT_FIXED_CONTENT || reals == nullptr || reals->size() != 1)
             {
-                notExpressible.push_back(name + "(" + std::to_string(contents.size())
-                                         + " float values)");
+                const size_t count = reals != nullptr
+                                         ? reals->size()
+                                         : std::get<std::vector<int64_t>>(contents.values).size();
+                notExpressible.push_back(
+                    name + "(" + std::to_string(count)
+                    + (reals != nullptr ? " float values)" : " index values)"));
             }
-        }
-        for(const auto& [name, contents] : built.indexContents)
-        {
-            notExpressible.push_back(name + "(" + std::to_string(contents.size())
-                                     + " index values)");
         }
         if(!notExpressible.empty())
         {
@@ -2148,8 +2057,8 @@ ExportResult exportCase(const CaseInput& input,
         meta["csv_case_id"] = extra("case_id");
         meta["generated_from_sha256"] = opts.sourceSha256;
 
-        const auto fixed = built.floatContents.find(EXPORT_FIXED_CONTENT);
-        if(fixed != built.floatContents.end())
+        const auto fixed = built.contents.find(EXPORT_FIXED_CONTENT);
+        if(fixed != built.contents.end())
         {
             result.stage = "contents";
             std::vector<int64_t> uids;
@@ -2170,7 +2079,8 @@ ExportResult exportCase(const CaseInput& input,
                             "the graph JSON has " + std::to_string(uids.size())
                                 + " tensors named attn_scale");
             }
-            const double value = static_cast<double>(fixed->second.front());
+            const double value = static_cast<double>(
+                static_cast<float>(std::get<std::vector<double>>(fixed->second.values).front()));
             meta["inputs"][std::to_string(uids.front())] = {{"kind", "fixed"}, {"value", value}};
             result.inputsNote
                 = "attn_scale uid " + std::to_string(uids.front()) + " fixed " + jsonNumber(value);
