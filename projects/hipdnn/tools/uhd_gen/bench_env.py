@@ -12,6 +12,10 @@ Standard library only: the hipdnn-uhd skill's scripts import it too.
   names an empty one, or the runtime's default applies.
 * `HIPDNN_FORCE_BENCHMARKING` overrides the bench's `global.benchmarking=0`: pinned to 0, so
   a run measures the engine's untuned pick rather than autotuning.
+* MIOpen's own selection is pinned too: `MIOPEN_FIND_MODE=FAST` (the find database, else the
+  immediate-mode choice, never benchmarking candidates) and `MIOPEN_FIND_ENFORCE=NONE` (no
+  tuning search). FAST keeps collection affordable; the default mode benchmarks every dynamic
+  solver on each find-database miss. The miopen-provider's selector revision records it.
 * `HIPDNN_LOG_FILE` sends every runtime line to a file instead of stderr, where the callers
   read refusals and record-served lines; it is cleared.
 """
@@ -41,13 +45,15 @@ def bench_environment(
 ) -> dict[str, str]:
     """`base` (default: this process's environment) for one bench run: reading only
     `descriptor_dir` (or the build's own tree when None), caching in `cache_dir`, never
-    benchmarking, logging to stderr."""
+    benchmarking, MIOpen in FAST find mode, logging to stderr."""
     env = {
         key: value
         for key, value in (os.environ if base is None else base).items()
         if key not in CLEARED_VARIABLES
     }
     env["HIPDNN_FORCE_BENCHMARKING"] = "0"
+    env["MIOPEN_FIND_MODE"] = "FAST"
+    env["MIOPEN_FIND_ENFORCE"] = "NONE"
     if descriptor_dir is not None:
         env["HIPDNN_DESCRIPTOR_DIR"] = str(descriptor_dir)
     if cache_dir is not None:
