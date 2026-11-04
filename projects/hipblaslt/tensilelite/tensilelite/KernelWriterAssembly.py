@@ -21324,9 +21324,10 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCBranchVCCNZ(label_wave_lower.getLabelName()))
     mod.add(SBranch(label_wave_empty.getLabelName()))
 
+    # Wave w stores to slot w and lower wave w reads slot w + Offset. A wave is an upper wave in exactly one
+    # iteration, so every slot is written once: no iteration can overwrite a slot an earlier one still reads (WAR).
     mod.add(label_wave_upper)
-    mod.add(VSubU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
-    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Tmp")))
+    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
 
     # TODO- select inst
     ds = DSModifiers(offset=amax_lds_start)
@@ -21336,7 +21337,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBranch(label_wave_inter.getLabelName()))
     mod.add(label_wave_lower)
     mod.add(SBarrier())
-    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
+    mod.add(VAddU32(vgpr("Tmp"), sgpr("Offset"), vgpr("Widx")))
+    mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Tmp")))
 
     # TODO- select inst
     mod.add(DSLoadB32(vgpr("AmaxOutB"), vgpr("Tmp"), ds))

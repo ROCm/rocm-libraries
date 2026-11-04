@@ -8,6 +8,7 @@ are not GPU execution or native-assembly validation.
 """
 from contextlib import contextmanager
 from types import SimpleNamespace
+import re
 import shutil
 
 import pytest
@@ -95,6 +96,33 @@ def test_amax_interwave_masks_match_wave_size(target):
     else:
         assert "s_and_b64 vcc" in assembly
         assert "s[sgprTmp+2:sgprTmp+2+1]" in assembly
+
+
+def _interwave_schedule(num_waves, store_slot, load_slot):
+    """Per iteration: (slots stored by upper waves, slots loaded by lower waves)."""
+    steps, offset = [], num_waves // 2
+    while offset:
+        steps.append(({store_slot(w, offset) for w in range(offset, 2 * offset)},
+                      {load_slot(w, offset) for w in range(offset)}))
+        offset //= 2
+    return steps
+
+
+def test_amax_interwave_each_slot_written_once(target):
+    # One barrier per iteration orders its stores before its loads, but not iteration i's loads before
+    # iteration i+1's stores: a slot reused across iterations can be overwritten before it is read (WAR).
+    writer, kernel = target
+    assembly = str(KernelWriterAssembly.amax_inter_wave_reduction(writer, kernel))
+    upper = assembly[assembly.index("label_wave_upper:") : assembly.index("label_wave_lower:")]
+    lower = assembly[assembly.index("label_wave_lower:") : assembly.index("label_wave_empty:")]
+    # upper wave w stores slot w; lower wave w loads slot w + Offset
+    assert "sgprOffset" not in upper
+    assert re.search(r"v_add\w*_u32 v\[vgprTmp\], s\[sgprOffset\], v\[vgprWidx\]", lower)
+    for num_waves in (2, 4, 8, 16):
+        steps = _interwave_schedule(num_waves, lambda w, o: w, lambda w, o: w + o)
+        stored = [s for st, _ in steps for s in st]
+        assert len(stored) == len(set(stored)) and 0 not in stored  # slot 0 is left to the broadcast
+        assert all(ld == st for st, ld in steps)
 
 
 def test_amax_publication_uses_target_atomic_fences_and_srd(target):
