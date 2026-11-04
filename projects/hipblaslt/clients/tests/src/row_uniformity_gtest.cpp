@@ -2945,4 +2945,243 @@ namespace
             << "parallel never reaches the flags; the bound must not shrink its grid";
     }
 
+    // fp8 e4m3 with the exponent field in 4..10: magnitudes in [2^-3, 2^4),
+    // mixed sign, never NaN.
+    uint8_t mxSampleE4M3(std::mt19937& rng)
+    {
+        std::uniform_int_distribution<int> exponentOf{4, 10};
+        std::uniform_int_distribution<int> mantissaOf{0, 7};
+        std::uniform_int_distribution<int> signOf{0, 1};
+        return static_cast<uint8_t>((signOf(rng) << 7) | (exponentOf(rng) << 3) | mantissaOf(rng));
+    }
+
+    double mxDecodeE4M3(uint8_t bits)
+    {
+        const int    exponent = (bits >> 3) & 15;
+        const int    mantissa = bits & 7;
+        const double value    = exponent == 0 ? std::ldexp(mantissa / 8.0, -6)
+                                              : std::ldexp(1.0 + mantissa / 8.0, exponent - 7);
+        return (bits >> 7) ? -value : value;
+    }
+
+    // E8M0 scale bytes 124..130: scales in [2^-3, 2^3].
+    uint8_t mxSampleScale(std::mt19937& rng)
+    {
+        return static_cast<uint8_t>(std::uniform_int_distribution<int>{124, 130}(rng));
+    }
+
+    double mxDecodeScale(uint8_t bits)
+    {
+        return std::ldexp(1.0, static_cast<int>(bits) - 127);
+    }
+
+    // A checked-in rocRoller kernel is admitted under uniform summation order
+    // only because its custom.config declares it, so the declaration is checked
+    // on the device. MX fp8 with per-32 E8M0 scales in the unswizzled layout has
+    // no Tensile kernel on gfx950: the pick is a checked-in rocRoller kernel.
+    // Every row of A and of its scales is the same vector, so every row of D
+    // must be bitwise identical, across all the tiles M is cut into.
+    TEST(RowUniformityRocRollerMX_pre_checkin, CheckedInKernelKeepsRowsUniform)
+    {
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        if(gpuArchName().rfind("gfx950", 0) != 0)
+            GTEST_SKIP() << "checked-in rocRoller MX kernels ship for gfx950 only";
+
+        constexpr int64_t m = 1024, n = 256, k = 2048, kb = k / 32;
+
+        std::mt19937         rng(20261103);
+        std::vector<uint8_t> rowA(k), rowScaleA(kb);
+        for(auto& value : rowA)
+            value = mxSampleE4M3(rng);
+        for(auto& scale : rowScaleA)
+            scale = mxSampleScale(rng);
+        std::vector<uint8_t> hostB(static_cast<size_t>(k * n)),
+            hostScaleB(static_cast<size_t>(kb * n));
+        for(auto& value : hostB)
+            value = mxSampleE4M3(rng);
+        for(auto& scale : hostScaleB)
+            scale = mxSampleScale(rng);
+
+        // op(A) = A^T with A stored k x m column-major: each row of op(A) is one
+        // contiguous column of k values, with its kb scales beside it.
+        std::vector<uint8_t> hostA(static_cast<size_t>(k * m)),
+            hostScaleA(static_cast<size_t>(kb * m));
+        for(int64_t row = 0; row < m; ++row)
+        {
+            std::copy(rowA.begin(), rowA.end(), hostA.begin() + row * k);
+            std::copy(rowScaleA.begin(), rowScaleA.end(), hostScaleA.begin() + row * kb);
+        }
+
+        auto product = [&](int64_t idx, int64_t col) {
+            return static_cast<float>(mxDecodeE4M3(rowA[idx]) * mxDecodeScale(rowScaleA[idx / 32])
+                                      * mxDecodeE4M3(hostB[col * k + idx])
+                                      * mxDecodeScale(hostScaleB[col * kb + idx / 32]));
+        };
+        float forward = 0.0f, reverse = 0.0f;
+        for(int64_t idx = 0; idx < k; ++idx)
+            forward += product(idx, 0);
+        for(int64_t idx = k - 1; idx >= 0; --idx)
+            reverse += product(idx, 0);
+        ASSERT_NE(forward, reverse) << "the fill must make fp32 summation order-sensitive, or "
+                                       "row uniformity says nothing about the order";
+
+        struct Resources
+        {
+            hipblasLtHandle_t           handle  = nullptr;
+            hipblasLtMatmulDesc_t       desc    = nullptr;
+            hipblasLtMatrixLayout_t     layoutA = nullptr, layoutB = nullptr, layoutD = nullptr;
+            hipblasLtMatmulPreference_t preference   = nullptr;
+            void*                       deviceA      = nullptr;
+            void*                       deviceB      = nullptr;
+            void*                       deviceScaleA = nullptr;
+            void*                       deviceScaleB = nullptr;
+            void*                       deviceD      = nullptr;
+            void*                       workspace    = nullptr;
+            ~Resources()
+            {
+                for(auto layout : {layoutA, layoutB, layoutD})
+                    if(layout)
+                        hipblasLtMatrixLayoutDestroy(layout);
+                if(preference)
+                    hipblasLtMatmulPreferenceDestroy(preference);
+                if(desc)
+                    hipblasLtMatmulDescDestroy(desc);
+                if(handle)
+                    hipblasLtDestroy(handle);
+                for(auto buffer :
+                    {deviceA, deviceB, deviceScaleA, deviceScaleB, deviceD, workspace})
+                    static_cast<void>(hipFree(buffer));
+            }
+        } res;
+
+        const size_t bytesD = static_cast<size_t>(m * n) * sizeof(float);
+        ASSERT_EQ(hipMalloc(&res.deviceA, hostA.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&res.deviceB, hostB.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&res.deviceScaleA, hostScaleA.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&res.deviceScaleB, hostScaleB.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&res.deviceD, bytesD), hipSuccess);
+        ASSERT_EQ(hipMalloc(&res.workspace, kWorkspaceBytes), hipSuccess);
+        ASSERT_EQ(hipMemcpy(res.deviceA, hostA.data(), hostA.size(), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(res.deviceB, hostB.data(), hostB.size(), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(
+                res.deviceScaleA, hostScaleA.data(), hostScaleA.size(), hipMemcpyHostToDevice),
+            hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(
+                res.deviceScaleB, hostScaleB.data(), hostScaleB.size(), hipMemcpyHostToDevice),
+            hipSuccess);
+        ASSERT_EQ(hipMemset(res.deviceD, 0xA5, bytesD), hipSuccess);
+
+        ASSERT_EQ(hipblasLtCreate(&res.handle), HIPBLAS_STATUS_SUCCESS);
+        int32_t handleMode = 0;
+        ASSERT_EQ(hipblasLtGetUniformSummationOrder(res.handle, &handleMode),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(handleMode, 1) << "uniform summation order must be on by default";
+
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&res.desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        const int32_t  opT = HIPBLAS_OP_T, opN = HIPBLAS_OP_N;
+        const uint32_t scaleMode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        const std::pair<hipblasLtMatmulDescAttributes_t, std::pair<const void*, size_t>>
+            attributes[]
+            = {{HIPBLASLT_MATMUL_DESC_TRANSA, {&opT, sizeof(opT)}},
+               {HIPBLASLT_MATMUL_DESC_TRANSB, {&opN, sizeof(opN)}},
+               {HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, {&res.deviceScaleA, sizeof(void*)}},
+               {HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, {&res.deviceScaleB, sizeof(void*)}},
+               {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, {&scaleMode, sizeof(scaleMode)}},
+               {HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, {&scaleMode, sizeof(scaleMode)}}};
+        for(const auto& [attribute, value] : attributes)
+            ASSERT_EQ(
+                hipblasLtMatmulDescSetAttribute(res.desc, attribute, value.first, value.second),
+                HIPBLAS_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&res.layoutA, HIP_R_8F_E4M3, k, m, k),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&res.layoutB, HIP_R_8F_E4M3, k, n, k),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&res.layoutD, HIP_R_32F, m, n, m),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        uint64_t workspaceBytes = kWorkspaceBytes;
+        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&res.preference), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtMatmulPreferenceSetAttribute(res.preference,
+                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                              &workspaceBytes,
+                                              sizeof(workspaceBytes));
+        hipblasLtMatmulHeuristicResult_t heuristic{};
+        int                              returned = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(res.handle,
+                                                  res.desc,
+                                                  res.layoutA,
+                                                  res.layoutB,
+                                                  res.layoutD,
+                                                  res.layoutD,
+                                                  res.preference,
+                                                  1,
+                                                  &heuristic,
+                                                  &returned),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(returned, 1) << "no kernel for MX fp8 " << m << "x" << n << "x" << k
+                               << " under uniform summation order";
+
+        std::string reason;
+        auto        solution = solutionForAlgo(heuristic, reason);
+        ASSERT_NE(solution, nullptr) << reason;
+        EXPECT_FALSE(solution->customKernel.name.empty() || solution->customKernel.generated)
+            << solution->kernelName << " is not a checked-in custom kernel";
+        EXPECT_TRUE(solution->customKernel.uniformSummationOrder)
+            << solution->kernelName << " was picked without declaring uniform summation order";
+
+        const float alpha = 1.0f, beta = 0.0f;
+        ASSERT_EQ(hipblasLtMatmul(res.handle,
+                                  res.desc,
+                                  &alpha,
+                                  res.deviceA,
+                                  res.layoutA,
+                                  res.deviceB,
+                                  res.layoutB,
+                                  &beta,
+                                  res.deviceD,
+                                  res.layoutD,
+                                  res.deviceD,
+                                  res.layoutD,
+                                  &heuristic.algo,
+                                  res.workspace,
+                                  heuristic.workspaceSize,
+                                  nullptr),
+                  HIPBLAS_STATUS_SUCCESS)
+            << solution->kernelName;
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        std::vector<float> hostD(static_cast<size_t>(m * n));
+        ASSERT_EQ(hipMemcpy(hostD.data(), res.deviceD, bytesD, hipMemcpyDeviceToHost), hipSuccess);
+
+        for(int64_t col = 0; col < n; ++col)
+        {
+            const float* column = hostD.data() + col * m;
+            for(int64_t row = 1; row < m; ++row)
+                ASSERT_EQ(std::memcmp(column, column + row, sizeof(float)), 0)
+                    << solution->kernelName << ": D(" << row << ", " << col << ") = " << column[row]
+                    << " differs from D(0, " << col << ") = " << column[0];
+        }
+
+        // Identical rows that are all wrong would pass the check above.
+        for(int64_t col = 0; col < n; ++col)
+        {
+            double reference = 0.0, magnitude = 0.0;
+            for(int64_t idx = 0; idx < k; ++idx)
+            {
+                const double term = product(idx, col);
+                reference += term;
+                magnitude += std::fabs(term);
+            }
+            EXPECT_LE(std::fabs(hostD[col * m] - reference), 1e-5 * magnitude)
+                << solution->kernelName << ": D(0, " << col << ")";
+        }
+    }
+
 } // namespace
