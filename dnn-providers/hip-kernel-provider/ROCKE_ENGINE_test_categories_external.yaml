@@ -44,6 +44,7 @@ test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
+      - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
@@ -102,6 +103,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
+      - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"

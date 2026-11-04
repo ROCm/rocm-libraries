@@ -51,6 +51,17 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_optimization_barrier)
 
+  add_executable(rocke_f64_mma core/test_f64_mma.cpp)
+  target_link_libraries(rocke_f64_mma PRIVATE rocke_core)
+  target_include_directories(rocke_f64_mma PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/gfx942")
+  add_test(NAME rocke_f64_mma COMMAND rocke_f64_mma)
+  set_tests_properties(rocke_f64_mma PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_mma)
+  set_target_properties(rocke_f64_mma PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_f64_mma RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_f64_mma)
+
   add_executable(rocke_tf32 core/test_tf32.cpp)
   target_link_libraries(rocke_tf32 PRIVATE rocke_core)
   target_include_directories(rocke_tf32 PRIVATE

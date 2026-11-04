@@ -1,13 +1,25 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Spec-driven native mirror of instances/gfx942/f64_mma_probe.py. */
+#include "f64_mma_probe_internal.h"
+
+#include <stdio.h>
+#include <string.h>
+
 #include "rocke/arch_target.h"
 #include "rocke/error_boundary.hpp"
 #include "rocke/instance_f64_mma_probe.h"
 #include "rocke/ir_internal.h"
-#include <stdio.h>
 
 rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int k)
+{
+    return ckc::build_f64_mma_probe(b, m, k, nullptr);
+}
+
+rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
+                                             int m,
+                                             int k,
+                                             const rocke_mma_catalog_t* catalog)
 {
     char name[64];
     snprintf(name, sizeof(name), "f64_mma_probe_m%d_k%d", m, k);
@@ -24,8 +36,41 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
         int slab_rows = m == 16 ? 4 : 16;
         int cols = m == 16 ? 16 : 4;
         const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx942");
-        const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
-            &target->mma, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
+        if(!catalog)
+            catalog = &target->mma;
+        const rocke_mma_op_t* atom
+            = rocke_mma_catalog_op_for_shape(catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
+        const int width = m == 16 ? 4 : 1;
+        char expected_id[64];
+        snprintf(expected_id, sizeof(expected_id), "mfma_f64_%dx%dx4_f64", m, m);
+        const auto* registered = rocke_mma_catalog_by_op_id(&target->mma, expected_id);
+        auto valid_map
+            = [&](const rocke_layout_map_t* map, const rocke_layout_map_t* expected, int count) {
+                  return map && expected && map->fn && map->fn == expected->fn
+                         && map->frag_len == count && map->wave_size == 64;
+              };
+        bool valid = atom && registered && atom->op_id && !strcmp(atom->op_id, expected_id)
+                     && atom->family && !strcmp(atom->family, "mma") && atom->m == m && atom->n == m
+                     && atom->k == 4 && atom->wave_size == 64;
+        // Reused output indices require the fixed instruction maps, not just equal widths.
+        if(valid)
+        {
+            for(int role = 0; role < 3; ++role)
+            {
+                const int count = role < 2 ? 1 : width;
+                const auto& src = atom->srcs[role];
+                valid = valid && src.dtype && !strcmp(src.dtype, "fp64") && src.frag_len == count
+                        && valid_map(src.layout, registered->srcs[role].layout, count);
+            }
+            valid = valid && atom->dst.dtype && !strcmp(atom->dst.dtype, "fp64")
+                    && atom->dst.frag_len == width
+                    && valid_map(atom->dst.layout, registered->dst.layout, width);
+        }
+        if(!valid)
+            return (rocke_kernel_def_t*)rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "F64 probe requires the fixed gfx942 instruction and layout contract");
         rocke_param_opts_t opts = {};
         opts.align = 8;
         opts.align_set = true;
@@ -64,7 +109,7 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
             rocke_value_t* bv = rocke_b_global_load(b, bb, b_index, rocke_f64(), 8);
             acc = rocke_b_mma(b, atom->op_id, av, bv, acc, NULL, 0);
         }
-        for(int slot = 0; slot < atom->dst.frag_len; ++slot)
+        for(int slot = 0; slot < atom->srcs[2].frag_len; ++slot)
         {
             rocke_value_t* value = rocke_b_vec_extract(b, acc, slot);
             rocke_b_global_store(b, d, indices[slot], value, 8);

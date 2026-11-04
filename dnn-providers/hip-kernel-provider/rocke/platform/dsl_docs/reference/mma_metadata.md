@@ -223,7 +223,11 @@ Pass `NULL` (`nullptr` in C++) for unconstrained scales, or a pointer to
 The scale-contract rules above apply. Indexed queries default a NULL `dst_dtype`
 to the third source dtype, matching Python's omitted `dst_dtype`. Required source
 dtype pointers must be non-NULL; an explicit empty destination stays an exact
-filter. Legacy A/B/C queries also require the destination dtype to equal C.
+filter. Legacy three-dtype catalog queries use the same default: a NULL
+`dst_dtype` selects the accumulator-source dtype (`c_dtype`, or `srcs[2]`).
+An explicit `dst_dtype` filters the result independently, so it may differ from
+`c_dtype`. Query `c_dtype` describes the accumulator input, unlike the legacy
+C metadata accessors that project the result.
 No match, or a null target, returns
 `NULL`; invalid filters and ambiguous matches raise `ckc::Error`. Handle those
 errors at a C++ boundary before returning to C. In particular, the scaled

@@ -16,8 +16,9 @@ maps, so the probe checks the A/B and C/D layouts as well as the instruction.
 
 from dataclasses import dataclass
 
-from rocke.core.arch import ArchTarget
-from rocke.core.ir import F64, IRBuilder, PtrType
+from ...core.arch import ArchTarget
+from ...core.arch.target import _frag_info
+from ...core.ir import F64, IRBuilder, KernelDef, PtrType
 
 # m -> (B slab rows, B/C/D columns) per K step of 4.
 _B_SLAB = {16: (4, 16), 4: (16, 4)}
@@ -39,7 +40,8 @@ class F64MmaProbeSpec:
         return f"f64_mma_probe_m{self.m}_k{self.k}"
 
 
-def build_f64_mma_probe(spec: F64MmaProbeSpec):
+def build_f64_mma_probe(spec: F64MmaProbeSpec) -> KernelDef:
+    """Build a probe for the fixed gfx942 F64 instruction and lane-map contract."""
     target = ArchTarget.from_gfx("gfx942")
     atom = target.mma.op_for_shape(
         family="mma",
@@ -50,6 +52,39 @@ def build_f64_mma_probe(spec: F64MmaProbeSpec):
         n=spec.m,
         k=4,
     )
+    # Reused output indices require the actual instruction maps, not just equal widths.
+    width = 4 if spec.m == 16 else 1
+    expected_id = "mfma_f64_16x16x4_f64" if spec.m == 16 else "mfma_f64_4x4x4_f64"
+    registered = _frag_info(expected_id)
+    if (
+        atom is None
+        or atom.op_id != expected_id
+        or atom.family != "mma"
+        or atom.shape != (spec.m, spec.m, 4)
+        or any(type(size) is not int for size in atom.shape)
+        or type(atom.wave_size) is not int
+        or atom.wave_size != 64
+        or any(
+            desc.dtype != "fp64"
+            or type(desc.frag_len) is not int
+            or desc.frag_len != count
+            or desc.layout is None
+            or type(desc.layout.frag_len) is not int
+            or desc.layout.frag_len != count
+            or type(desc.layout.wave_size) is not int
+            or desc.layout.wave_size != 64
+            or not callable(desc.layout.fn)
+            or desc.layout.fn is not expected.fn
+            for desc, count, expected in zip(
+                (*atom.srcs, atom.dst),
+                (1, 1, width, width),
+                (*registered.srcs, registered.dst),
+            )
+        )
+    ):
+        raise ValueError(
+            "F64 probe requires the fixed gfx942 instruction and layout contract"
+        )
     slab_rows, cols = _B_SLAB[spec.m]
     b = IRBuilder(spec.name)
     a = b.param("A", PtrType(F64, "global"), align=8)
