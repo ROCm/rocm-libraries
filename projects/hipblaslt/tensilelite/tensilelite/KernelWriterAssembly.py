@@ -16773,7 +16773,25 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SOrB32(sgprLo, sgprLo, sgpr(stmpRes.idx)))
         module.add(SLShiftRightB32(sgprHi, 7, sgprHi))
     return module
- 
+
+  def vecSrdNonNullMask(self, addressStr, laneSGPRCount) -> Module:
+    """Lane mask "Srd<addressStr> has records" into sgprAddress<addressStr>.
+
+    A null vector pointer gets num_records = 0, which the epilogue turns into a 1.0 scale.
+    On gfx125x shiftSrd keeps the low 7 bits of num_records in Srd+1[31:25], so Srd+2 alone
+    is 0 for any buffer under 128 bytes (e.g. a ScaleA vector with M <= 31) and a valid
+    vector would read as null. Fold Srd+1[31:25] back in before comparing. The address
+    SGPRs are overwritten with the mask anyway, so the first one serves as the temp.
+    """
+    module = Module("vecSrdNonNullMask")
+    numRecords = sgpr("Srd%s+2"%addressStr)
+    if self.states.version[:2] == (12, 5):
+      numRecords = sgpr("Address%s"%addressStr)
+      module.add(SLShiftRightB32(dst=numRecords, shiftHex=25, src=sgpr("Srd%s+1"%addressStr), comment="num_records low bits (gfx125x)"))
+      module.add(SOrB32(dst=numRecords, src0=numRecords, src1=sgpr("Srd%s+2"%addressStr), comment="num_records != 0 iff any bit set"))
+    module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, laneSGPRCount), src0=numRecords, src1=0, comment=" == 0 ?"))
+    return module
+
   def allocPostLoopSrd(self, ch: str, kernel, labelSuffix: str = ""):
     # labelSuffix disambiguates the labels when this SRD-init is emitted a second
     # time (PostLoopStoreInNll: the FUSED NLL store computes SrdD with suffix="Fused"
@@ -18752,6 +18770,7 @@ class KernelWriterAssembly(KernelWriter):
             # Suppress the per-element buffer load so the existing null-vector path stages 1.0.
             module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
             module.add(SCSelectB32(dst=sgpr("SrdScaleAlphaVec+2"), src0=0, src1=sgpr("SrdScaleAlphaVec+2"), comment="device scalar uses ScaleAlphaVec identity"))
+          module.add(self.shiftSrd("ScaleAlphaVec"))
         for dim in factorDims:
           vectorDataTypes.scaleAlpha(dim).dataType = kernel["ProblemType"]["ComputeDataType"]
 
@@ -20839,8 +20858,8 @@ class KernelWriterAssembly(KernelWriter):
 
     if setToOne:
       if kernel["BufferLoad"]:
-        # SRD+2 holds num records; compare to 0 to check if address is valid
-        module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+        # num_records == 0 means the address is null
+        module.add(self.vecSrdNonNullMask(addressStr, self.states.laneSGPRCount))
       else:
         # For flat addressing, check if the base pointer is non-null
         module.add(VCmpNeU64(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Address%s"%addressStr, 2), src1=0, comment="address != 0 ?"))
