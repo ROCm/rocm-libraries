@@ -809,6 +809,8 @@ _VEC_ELEMENT_BYTES = {
     "int8": 1,
     "int32": 4,
 }
+# Smallest C store, in bytes, that Stream-K's atomic reduction can add into C.
+_STREAMK_ATOMIC_MIN_C_BYTES = 4
 
 
 def streamk_atomic_c_reject_reason(
@@ -816,15 +818,19 @@ def streamk_atomic_c_reject_reason(
 ) -> Optional[str]:
     """Why a Stream-K C store width is illegal for ``reduction_strategy`` (None if legal).
 
-    Only the atomic strategy adds partial C tiles into C, with buffer atomics that
-    need at least 4 bytes. Linear and tree reduce the partials in an fp32 workspace
-    and store C with a plain store (StreamKTilePartitionerBase::MemoryOperation is
-    ``set``), so any width works for them. ``vector_size_c`` of 0 means native.
+    Only the atomic strategy adds partial C tiles into C, and its atomic adds need
+    at least 4 bytes per store (a narrower atomic C does not compile). Linear and
+    tree reduce the partials in the accumulator-type workspace and store C with a
+    plain store (StreamKTilePartitionerBase::MemoryOperation is ``set``), so any
+    width works for them. ``vector_size_c`` of 0 means native.
     """
     if reduction_strategy != "atomic" or not vector_size_c:
         return None
-    if vector_size_c * _VEC_ELEMENT_BYTES.get(dtype_c, 2) < 4:
-        return f"stream_k atomic C store needs >= 4 bytes, got vector_size_c={vector_size_c}"
+    if vector_size_c * _VEC_ELEMENT_BYTES[dtype_c] < _STREAMK_ATOMIC_MIN_C_BYTES:
+        return (
+            f"stream_k atomic C store needs >= {_STREAMK_ATOMIC_MIN_C_BYTES} bytes, "
+            f"got vector_size_c={vector_size_c}"
+        )
     return None
 
 

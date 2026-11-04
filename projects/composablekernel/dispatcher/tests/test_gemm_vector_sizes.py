@@ -743,7 +743,8 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
             with self.subTest(vec=vec):
                 self.assertEqual([k.reduction_strategy for k in kernels], expected)
                 self.assertTrue(all(k.trait.vector_sizes == vec for k in kernels))
-                rejected = [r for r in logs.output if "atomic C store" in r]
+                reject = "256x256x64 vec(8, 1, 1): stream_k atomic C store"
+                rejected = [r for r in logs.output if reject in r]
                 self.assertEqual(len(rejected), 3 - len(expected), logs.output)
 
     def test_driver_checks_widths_against_the_requested_strategy(self):
