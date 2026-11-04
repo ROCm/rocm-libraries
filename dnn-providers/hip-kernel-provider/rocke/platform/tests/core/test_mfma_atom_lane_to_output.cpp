@@ -10,8 +10,9 @@
  *     shape and accumulator type, including the f64 16x16 layout;
  *   - that the lanes and slots of one atom cover each of its cells exactly once
  *     (per batch for the batched 4x4 atom);
- *   - that the f64 16x16 branch emits its builder calls in the Python's order
- *     (the f32 branches are held to that by the byte-identity gate);
+ *   - that the f64 16x16 branch emits the Python's ops in its order, each
+ *     taking the Python's operands in its order (the f32 branches are held to
+ *     that by the byte-identity gate);
  *   - that an atom shape the Python rejects throws ckc::NotImplError with the
  *     Python's message, leaving the out-params untouched.
  */
@@ -20,62 +21,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "lane_index_evaluator.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/ir.h"
 
 static const int WAVE_SIZE = 64;
-
-/* Evaluates the index arithmetic rooted at `value` with the lane id fixed to
- * `lane_value`. Returns false on an op this test does not model. */
-static bool evaluate(const rocke_value_t* value,
-                     const rocke_value_t* lane,
-                     int64_t lane_value,
-                     int64_t* result)
-{
-    if(value == lane)
-    {
-        *result = lane_value;
-        return true;
-    }
-    const rocke_op_t* op = value->op;
-    if(op == NULL)
-    {
-        return false;
-    }
-    if(op->opcode == ROCKE_OP_ARITH_CONSTANT)
-    {
-        return rocke_attr_get_int(&op->attrs, "value", result);
-    }
-    if(op->num_operands != 2)
-    {
-        return false;
-    }
-    int64_t lhs = 0;
-    int64_t rhs = 0;
-    if(!evaluate(op->operands[0], lane, lane_value, &lhs)
-       || !evaluate(op->operands[1], lane, lane_value, &rhs))
-    {
-        return false;
-    }
-    switch(op->opcode)
-    {
-    case ROCKE_OP_ARITH_ADD:
-        *result = lhs + rhs;
-        return true;
-    case ROCKE_OP_ARITH_MUL:
-        *result = lhs * rhs;
-        return true;
-    case ROCKE_OP_ARITH_DIV:
-        *result = lhs / rhs;
-        return true;
-    case ROCKE_OP_ARITH_MOD:
-        *result = lhs % rhs;
-        return true;
-    default:
-        return false;
-    }
-}
 
 /* The (row, column) atoms.py documents for slot `slot` of lane `lane_value`. */
 static void documented_cell(
@@ -134,10 +85,16 @@ static int check_layout(const char* dtype, int m, int n, int k)
             int64_t column = 0;
             int64_t want_row = 0;
             int64_t want_column = 0;
-            if(!evaluate(row_value, lane, lane_value, &row)
-               || !evaluate(column_value, lane, lane_value, &column))
+            const char* failure_reason = NULL;
+            if(!rocke_test_evaluate_lane_index(row_value, lane, lane_value, &row, &failure_reason)
+               || !rocke_test_evaluate_lane_index(
+                   column_value, lane, lane_value, &column, &failure_reason))
             {
-                fprintf(stderr, "%s: unmodelled op in slot %d\n", atom->name, slot);
+                fprintf(stderr,
+                        "%s: slot %d cannot be evaluated: it reaches %s\n",
+                        atom->name,
+                        slot,
+                        failure_reason);
                 ++failures;
                 continue;
             }
@@ -181,13 +138,82 @@ static int check_layout(const char* dtype, int m, int n, int k)
     return failures;
 }
 
-/* The f64 16x16 branch has no kernel in the byte-identity corpus, so its op
- * order is pinned here: atoms.py emits const(n), mod, div, const(slot * 4), add. */
-static int check_f64_op_order(void)
+/* An expected operand that is the lane id, not an earlier op's result. */
+static const int OPERAND_LANE = -1;
+
+/* One op of an expected emission sequence: a constant and its value, or a
+ * two-operand op and the sources of its operands, each the lane id
+ * (OPERAND_LANE) or the result of an earlier op of the sequence (its index). */
+struct ExpectedOp
 {
+    rocke_opcode_t opcode;
+    int64_t constant_value; /* Read only when opcode is a constant. */
+    int lhs; /* Read only when opcode is not a constant. */
+    int rhs;
+};
+
+/* Checks one emitted operand against its expected source; returns 1 on mismatch. */
+static int check_operand(const rocke_op_t* emitted,
+                         int index,
+                         int operand,
+                         int expected_source,
+                         rocke_op_t* const* sequence,
+                         const rocke_value_t* lane)
+{
+    const rocke_value_t* want
+        = (expected_source == OPERAND_LANE) ? lane : sequence[expected_source]->results[0];
+    if(emitted->operands[operand] == want)
+    {
+        return 0;
+    }
+    if(expected_source == OPERAND_LANE)
+    {
+        fprintf(stderr,
+                "f64 atom op %d (%s): operand %d is not the lane id, as in atoms.py\n",
+                index,
+                emitted->name,
+                operand);
+    }
+    else
+    {
+        fprintf(stderr,
+                "f64 atom op %d (%s): operand %d is not op %d's result, as in atoms.py\n",
+                index,
+                emitted->name,
+                operand,
+                expected_source);
+    }
+    return 1;
+}
+
+/* The f64 16x16 branch has no kernel in the byte-identity corpus, so its
+ * emission is pinned here, op by op and operand by operand. With slot 3,
+ * atoms.py emits:
+ *   ops[0] = const(16)              the atom's n
+ *   ops[1] = mod(lane, ops[0])      the column
+ *   ops[2] = div(lane, ops[0])      the lane's row block
+ *   ops[3] = const(12)              slot * 4
+ *   ops[4] = add(ops[3], ops[2])    the row
+ * Operand order matters: swapped add operands give the same row but different
+ * IR from the Python engine's. */
+static int check_f64_emission(void)
+{
+    const int slot = 3;
+    const int atom_n = 16;
+    const ExpectedOp PYTHON_EMISSION[] = {
+        {ROCKE_OP_ARITH_CONSTANT, atom_n, 0, 0},
+        {ROCKE_OP_ARITH_MOD, 0, OPERAND_LANE, 0},
+        {ROCKE_OP_ARITH_DIV, 0, OPERAND_LANE, 0},
+        {ROCKE_OP_ARITH_CONSTANT, slot * 4, 0, 0},
+        {ROCKE_OP_ARITH_ADD, 0, 3, 2},
+    };
+    const int expected_ops = (int)(sizeof(PYTHON_EMISSION) / sizeof(PYTHON_EMISSION[0]));
+    const int row_op = 4;
+    const int column_op = 1;
+
     const rocke_mfma_atom_t* atom = rocke_mfma_atom("fp64", 16, 16, 4);
     rocke_ir_builder_t builder;
-    if(atom == NULL || rocke_ir_builder_init(&builder, "lane_to_output_f64_order") != ROCKE_OK)
+    if(atom == NULL || rocke_ir_builder_init(&builder, "lane_to_output_f64_emission") != ROCKE_OK)
     {
         return 1;
     }
@@ -197,34 +223,50 @@ static int check_f64_op_order(void)
     rocke_value_t* row_value = NULL;
     rocke_value_t* column_value = NULL;
     int failures = 0;
-    rocke_mfma_atom_lane_to_output(&builder, atom, lane, 3, &row_value, &column_value);
-    static const rocke_opcode_t PYTHON_ORDER[] = {ROCKE_OP_ARITH_CONSTANT,
-                                                  ROCKE_OP_ARITH_MOD,
-                                                  ROCKE_OP_ARITH_DIV,
-                                                  ROCKE_OP_ARITH_CONSTANT,
-                                                  ROCKE_OP_ARITH_ADD};
-    const int expected_ops = (int)(sizeof(PYTHON_ORDER) / sizeof(PYTHON_ORDER[0]));
+    rocke_mfma_atom_lane_to_output(&builder, atom, lane, slot, &row_value, &column_value);
     if(region->num_ops - first_op != expected_ops)
     {
         fprintf(stderr,
                 "f64 atom emitted %d ops, atoms.py emits %d\n",
                 region->num_ops - first_op,
                 expected_ops);
-        failures = 1;
+        rocke_ir_builder_free(&builder);
+        return 1;
     }
-    else
+    rocke_op_t* const* sequence = region->ops + first_op;
+    for(int index = 0; index < expected_ops; ++index)
     {
-        for(int index = 0; index < expected_ops; ++index)
+        const rocke_op_t* emitted = sequence[index];
+        const ExpectedOp* want = &PYTHON_EMISSION[index];
+        if(emitted->opcode != want->opcode)
         {
-            if(region->ops[first_op + index]->opcode != PYTHON_ORDER[index])
+            fprintf(
+                stderr, "f64 atom op %d is %s, not in atoms.py's order\n", index, emitted->name);
+            ++failures;
+            continue;
+        }
+        if(want->opcode == ROCKE_OP_ARITH_CONSTANT)
+        {
+            int64_t value = 0;
+            if(!rocke_attr_get_int(&emitted->attrs, "value", &value)
+               || value != want->constant_value)
             {
                 fprintf(stderr,
-                        "f64 atom op %d is %s, not in atoms.py's order\n",
+                        "f64 atom op %d is const(%lld), atoms.py emits const(%lld)\n",
                         index,
-                        region->ops[first_op + index]->name);
-                failures = 1;
+                        (long long)value,
+                        (long long)want->constant_value);
+                ++failures;
             }
+            continue;
         }
+        failures += check_operand(emitted, index, 0, want->lhs, sequence, lane);
+        failures += check_operand(emitted, index, 1, want->rhs, sequence, lane);
+    }
+    if(row_value != sequence[row_op]->results[0] || column_value != sequence[column_op]->results[0])
+    {
+        fprintf(stderr, "f64 atom: row or column is not the op atoms.py returns\n");
+        ++failures;
     }
     rocke_ir_builder_free(&builder);
     return failures;
@@ -277,7 +319,7 @@ int main(void)
     failures += check_layout("fp64", 16, 16, 4);
     failures += check_layout("f16", 32, 32, 8);
     failures += check_layout("f16", 4, 4, 4);
-    failures += check_f64_op_order();
+    failures += check_f64_emission();
     failures += check_refusal();
     if(failures != 0)
     {
