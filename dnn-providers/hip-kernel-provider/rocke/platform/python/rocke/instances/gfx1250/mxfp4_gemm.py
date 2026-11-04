@@ -1518,6 +1518,8 @@ class TileCompute:
                         b_scales[rn],
                         step == 0,
                     )
+            if last and issued == late_at:
+                hooks.late_refill()
         return out, None
 
 

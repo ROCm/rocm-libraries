@@ -546,6 +546,38 @@ class MxFp4GemmIrTest(unittest.TestCase):
                     self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), 4)
                 self.assertEqual(llvm.count("s_barrier_wait -3"), 2 + 4)
 
+    def test_direct_reads_refill_at_every_signal_point(self):
+        """local_prefetch 0 issues each tile's refill TDM and cluster wait
+        for every signal point up to the K-step's WMMA count, as read-ahead
+        does."""
+        tdm = r"call [^\n]*tensor\.load"
+        for tile_m, mma in ((256, "16x16"), (128, "32x16")):
+            fields = {
+                "tile_m": tile_m,
+                "tile_n": 16,
+                "wave_group": (4, 1),
+                "cluster_dim": (1, 4, 1),
+                "half_plr": "none",
+                "mma": mma,
+            }
+            spec = _spec(1024, 16, 4096, **fields)
+            llvm = _llvm(spec)
+            expected = (len(re.findall(tdm, llvm)), llvm.count("s_barrier_wait -3"))
+            for at in range(spec.signal_limit + 1):
+                direct = _spec(
+                    1024, 16, 4096, local_prefetch=0, cluster_signal_wmmas=at, **fields
+                )
+                with self.subTest(mma=mma, signal_wmmas=at):
+                    self.assertIsNone(validate(direct))
+                    llvm = _llvm(direct)
+                    self.assertEqual(
+                        (
+                            len(re.findall(tdm, llvm)),
+                            llvm.count("s_barrier_wait -3"),
+                        ),
+                        expected,
+                    )
+
     def test_schedule_variants_emit_their_waits_and_barriers(self):
         """Four tiles are emitted at the smoke shape (see the peel test), four
         K-steps each; every tile adds one wait before its refill TDM."""
