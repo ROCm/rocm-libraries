@@ -43,6 +43,8 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
 - The native symbols (`hipkernel.gfx950_attention_dense.*`) are registered in
   `packs/Gfx950AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
-- Saved plans store their launch values under `hipkernel.gfx950_attention_dense.dispatch.v1`,
-  or `.v2` for a plan that serves a bias kernel (v1 plus the bias uid and its batch,
-  query-head and query-row strides). Both stay registered so saved plans keep loading.
+- Saved plans store their launch values under `hipkernel.gfx950_attention_dense.dispatch.v2`
+  (the kernel reads the head counts at runtime), or `.v3` for a plan that serves a bias
+  kernel (v2 plus the bias uid and its batch, query-head and query-row strides). Plans
+  saved under `.v1` (head counts baked into the kernel) still load. All three stay
+  registered so saved plans keep loading.

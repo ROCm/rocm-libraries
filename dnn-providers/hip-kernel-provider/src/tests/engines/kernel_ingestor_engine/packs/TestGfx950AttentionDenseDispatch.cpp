@@ -349,7 +349,9 @@ std::vector<KernelArgument> recordedSignature(bool bias)
         KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
         KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
         KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"}};
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
     if(bias)
     {
         signature.push_back(KernelArgument{"global_buffer", POINTER_BYTES, 0, "additive_bias_ptr"});
@@ -721,7 +723,7 @@ TEST(TestGfx950AttentionDenseDispatch, BindsTheBiasUidAndItsKernelStrides)
 }
 
 /// A bias graph on a bias candidate reaches the loader: the binding is read in full and
-/// the twelve-argument signature is the one expected.
+/// the fourteen-argument signature is the one expected.
 TEST(TestGfx950AttentionDenseDispatch, ReachesTheLoaderForABiasGraphOnABiasCandidate)
 {
     const AttentionGraph graph(0.125F, Mask::TOP_LEFT_CAUSAL, false, /*withBias=*/true);

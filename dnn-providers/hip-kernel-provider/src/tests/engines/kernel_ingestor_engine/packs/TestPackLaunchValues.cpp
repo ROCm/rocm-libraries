@@ -118,8 +118,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseValuesMatchTheV1Contract)
     EXPECT_EQ(values, expected);
     EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
               "hipkernel.gfx950_attention_dense.dispatch.v1");
-    EXPECT_EQ(gfx950AttentionDenseDispatchSymbol(binding),
-              "hipkernel.gfx950_attention_dense.dispatch.v1");
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+              "hipkernel.gfx950_attention_dense.dispatch.v2");
 
     // The stored double converts back to the float the kernel takes, bit for bit.
     const auto stored = values.find("scale");
@@ -178,10 +178,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseBiasValuesMatchTheV2Contract)
                                   {"bias.stride_head", int64_t{62}},
                                   {"bias.stride_query", int64_t{63}}};
     EXPECT_EQ(values, expected);
-    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
-              "hipkernel.gfx950_attention_dense.dispatch.v2");
-    EXPECT_EQ(gfx950AttentionDenseDispatchSymbol(binding),
-              "hipkernel.gfx950_attention_dense.dispatch.v2");
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
+              "hipkernel.gfx950_attention_dense.dispatch.v3");
 }
 
 // ---------------------------------------------------------------------------
@@ -250,17 +248,19 @@ SavedLaunchInputs savedConvFwd()
             convFwdLaunchValues(launch.binding, launch.extents, launch.blockSize)};
 }
 
+// Saved under v2, the contract new plans carry.
 SavedLaunchInputs savedGfx950AttentionDense()
 {
     const auto launch = gfx950AttentionDenseInputs();
-    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
             gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
 }
 
+// Saved under v3, the contract of a plan with a bias.
 SavedLaunchInputs savedGfx950AttentionDenseBias()
 {
     const auto launch = gfx950AttentionDenseBiasInputs();
-    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
             gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
 }
 
@@ -379,6 +379,28 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseBiasInputsRoundTripThroughTheirVa
     EXPECT_EQ(read.binding.bias->strides, expected.binding.bias->strides);
 }
 
+// v1 and v2 differ only in the kernel arguments the launch passes, so one value set reads
+// the same under either name, and a version the pack never defined is refused.
+TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
+{
+    auto v1 = savedGfx950AttentionDense();
+    v1.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    const auto fromV1 = readGfx950AttentionDenseLaunchInputs(v1);
+    const auto fromV2 = readGfx950AttentionDenseLaunchInputs(savedGfx950AttentionDense());
+
+    EXPECT_EQ(fromV1.binding.q, fromV2.binding.q);
+    EXPECT_EQ(fromV1.binding.o, fromV2.binding.o);
+    EXPECT_EQ(fromV1.problem.batch, fromV2.problem.batch);
+    EXPECT_EQ(fromV1.problem.seqLenKv, fromV2.problem.seqLenKv);
+    EXPECT_EQ(fromV1.problem.numQueryHeads, fromV2.problem.numQueryHeads);
+    EXPECT_EQ(fromV1.problem.numKvHeads, fromV2.problem.numKvHeads);
+    EXPECT_EQ(fromV1.blockM, fromV2.blockM);
+
+    auto v4 = savedGfx950AttentionDense();
+    v4.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v4";
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, v4, "names no launch-value contract");
+}
+
 TEST(TestPackLaunchValues, PointwiseRefusesMalformedValues)
 {
     const auto valid = savedPointwise();
@@ -439,13 +461,18 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesMalformedBiasValues)
                              "hipkernel.gfx950_attention_dense.dispatch",
                              "bias.stride_head");
 
-    // v1 carries no bias, and v2 needs every bias value. The values are a std::map, so the
-    // first name v1 lacks, and the one refused, is 'bias.stride_batch'.
-    SavedLaunchInputs biasUnderV1 = valid;
-    biasUnderV1.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v1";
-    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs,
-                      biasUnderV1,
-                      "launch value 'bias.stride_batch' is not part of the contract");
+    // v1 and v2 carry no bias, and v3 needs every bias value. The values are a std::map,
+    // so the first name v1 and v2 lack, and the one refused, is 'bias.stride_batch'.
+    for(const char* plainContract : {"hipkernel.gfx950_attention_dense.dispatch.v1",
+                                     "hipkernel.gfx950_attention_dense.dispatch.v2"})
+    {
+        SCOPED_TRACE(plainContract);
+        SavedLaunchInputs biasUnderPlain = valid;
+        biasUnderPlain.dispatchSymbol = plainContract;
+        expectReadRefusal(&readGfx950AttentionDenseLaunchInputs,
+                          biasUnderPlain,
+                          "launch value 'bias.stride_batch' is not part of the contract");
+    }
 
     SavedLaunchInputs noBiasUid = valid;
     noBiasUid.values.erase("bias.uid");
@@ -467,11 +494,11 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesMalformedBiasValues)
     farReach.values["bias.stride_batch"] = int64_t{2147483647};
     expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, farReach, "reach element 2^31");
 
-    // A plain plan relabelled v2 holds none of the bias values v2 needs.
-    SavedLaunchInputs plainUnderV2 = savedGfx950AttentionDense();
-    plainUnderV2.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v2";
+    // A plain plan relabelled v3 holds none of the bias values v3 needs.
+    SavedLaunchInputs plainUnderV3 = savedGfx950AttentionDense();
+    plainUnderV3.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v3";
     expectReadRefusal(
-        &readGfx950AttentionDenseLaunchInputs, plainUnderV2, "needs launch value 'bias.uid'");
+        &readGfx950AttentionDenseLaunchInputs, plainUnderV3, "needs launch value 'bias.uid'");
 }
 
 // The kernel indexes the bias in 32-bit elements, so element 2^31 - 1 is the last one a

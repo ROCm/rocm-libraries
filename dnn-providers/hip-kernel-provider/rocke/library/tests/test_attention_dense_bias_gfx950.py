@@ -148,6 +148,41 @@ def test_bias_keeps_the_runtime_shape_cohort():
     )
 
 
+@pytest.mark.parametrize("sliding_window", [0, 128])
+@pytest.mark.parametrize("block_m", [256, 128])
+def test_bias_head_counts_share_one_kernel(block_m, sliding_window):
+    """The head counts are kernargs too, so one aligned bias binary serves every head
+    configuration at one block order: the bias head index and the GQA mapping are
+    computed at launch. A head count baked into the bias addressing would split the
+    IR under one cache key, and the cache would serve one head configuration's
+    kernel to all of them. The block order is pinned (the catalog's qb_minor)
+    because auto picks it partly from the head counts."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    specs = [
+        replace(
+            _bias({"sliding_window": sliding_window}),
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            block_m=block_m,
+            nonpersist_decode="qb_minor",
+        )
+        for hq, hkv in ((128, 8), (40, 8), (28, 4), (32, 32), (64, 64))
+    ]
+    assert all(s.runtime_shape for s in specs)
+    keys = {attention_dense_cache_key(s, arch="gfx950") for s in specs}
+    names = {s.kernel_name() for s in specs}
+    irs = {
+        _lower_kernel_to_llvm_python(
+            build_attention_dense(s, arch="gfx950"), arch="gfx950", llvm_flavor="llvm22"
+        )
+        for s in specs
+    }
+    assert len(keys) == 1
+    assert len(names) == 1 and not re.search(r"_(hq|kv)\d+", names.pop())
+    assert len(irs) == 1
+
+
 @pytest.mark.parametrize("value", [1, 0, "true", None])
 def test_use_additive_bias_must_be_a_bool(value):
     with pytest.raises(ValueError, match="must be a bool"):

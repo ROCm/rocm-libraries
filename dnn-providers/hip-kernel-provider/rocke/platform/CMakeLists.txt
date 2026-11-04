@@ -404,6 +404,36 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "reference_bundles" EXCLUDE
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
+
+      # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
+      # graph template and every SdpaFwd golden graph. Those live outside rocke,
+      # so install a copy beside the tests (tests/sdpa/hipdnn_assets.py reads it)
+      # when configuring from a monorepo checkout; rocke_library_sdpa_pytest then
+      # fails, instead of skipping, if the copy is missing.
+      set(_ROCKE_MONOREPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
+      set(_ROCKE_SDPA_TEMPLATE
+          "${_ROCKE_MONOREPO_ROOT}/projects/hipdnn/tools/IngestorGenerator/configs/templates/attention_sdpa_fwd.graph.json")
+      set(_ROCKE_SDPA_BUNDLES
+          "${_ROCKE_MONOREPO_ROOT}/dnn-providers/integration-tests/integration-test-bundles")
+      set(_ROCKE_SDPA_HIPDNN_DEST "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/sdpa/hipdnn")
+      set(_ROCKE_SDPA_HIPDNN_ASSETS OFF)
+      if(EXISTS "${_ROCKE_SDPA_TEMPLATE}" AND IS_DIRECTORY "${_ROCKE_SDPA_BUNDLES}")
+        file(GLOB_RECURSE _rocke_sdpa_graphs CONFIGURE_DEPENDS
+             RELATIVE "${_ROCKE_SDPA_BUNDLES}" "${_ROCKE_SDPA_BUNDLES}/*.json")
+        # hipdnn_assets.sdpa_fwd_golden_graphs()'s selection.
+        list(FILTER _rocke_sdpa_graphs INCLUDE REGEX "^[^/]+/SdpaFwd[^/]*/.+\\.json$")
+        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(meta|support|sweep)\\.json$")
+        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(^|/)Default/")
+        if(_rocke_sdpa_graphs)
+          install(FILES "${_ROCKE_SDPA_TEMPLATE}" DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}")
+          foreach(_rocke_sdpa_graph IN LISTS _rocke_sdpa_graphs)
+            get_filename_component(_rocke_sdpa_graph_dir "${_rocke_sdpa_graph}" DIRECTORY)
+            install(FILES "${_ROCKE_SDPA_BUNDLES}/${_rocke_sdpa_graph}"
+                    DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}/integration-test-bundles/${_rocke_sdpa_graph_dir}")
+          endforeach()
+          set(_ROCKE_SDPA_HIPDNN_ASSETS ON)
+        endif()
+      endif()
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -517,20 +547,23 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
-    # Compiler environment for Python entries that compile and disassemble
+    # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
     # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
-    # bitcode. Emitted once, before every entry that appends
-    # `${_rocke_compiler_env}` to its ENVIRONMENT. ctest resolves it at test
-    # time: empty off Linux or without ROCM_PATH, else ";PATH=...;..." so it
-    # appends straight after the entry's last variable. Where the tools are
-    # supplied, ROCKE_REQUIRE_COMPILER_TOOLS=1 makes the tests that honour it
-    # fail rather than skip: a gate that skips in every shard looks green and
-    # checks nothing.
+    # bitcode. CTest resolves these lists at test time; they stay empty off Linux
+    # or without ROCM_PATH. Tool discovery is separate from enforcement policy:
+    # only entries whose compiler checks must run append the requirement list.
+    # Contract: tests/test_engine_linkage.py::
+    # test_installed_ctest_entries_get_scoped_environment_contracts.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set(_rocke_compiler_env \"\")\n"
+           "set(_rocke_compiler_tool_environment)\n"
+           "set(_rocke_compiler_requirement_environment)\n"
            "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
-           "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode;ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
+           "  list(APPEND _rocke_compiler_tool_environment\n"
+           "       \"PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH}\"\n"
+           "       \"HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
+           "  list(APPEND _rocke_compiler_requirement_environment\n"
+           "       \"ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
            "endif()\n")
 
     # Reproduce the committed host-flavor column from the relocated artifact.
@@ -595,11 +628,13 @@ if(ROCKE_INSTALL_TESTS)
         endif()
       endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_platform_pytest_environment \"${_ROCKE_PYTEST_ENVIRONMENT}\")\n"
+             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"${_ROCKE_PYTEST_ENVIRONMENT}\${_rocke_compiler_env}\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -623,10 +658,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_direct_fwd_wmma.py"
         "tests/library/tests/test_conv_fwd_split_k.py"
         "tests/library/tests/test_conv_winograd_fwd_cpu.py"
+        "tests/library/tests/test_conv_winograd_fwd_rt_cpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
         "tests/library/tests/test_conv_winograd_gen_cpu.py"
         "tests/library/tests/test_conv_winograd_select.py"
         "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
+        "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_gradient_contract.py"
@@ -659,7 +696,9 @@ if(ROCKE_INSTALL_TESTS)
     # spec-wrapper parity gate, the 3D decode split rule and K/V cache policy,
     # the scalar fallback's cache key and block-table stride kernarg, the
     # unified attention running-max carry and keyless guards on the emitted IR,
-    # and the tiled 2D LSE store on the emitted IR.
+    # the tiled 2D LSE store on the emitted IR, the host-side SDPA sequence-length
+    # and padding-mask adapters/specs, and the fmha_mfma free-stride ABI and layout
+    # contracts.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -671,7 +710,11 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
-        "tests/library/tests/test_attention_unified_2d_lse_ir.py")
+        "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_sdpa_seqlen.py"
+        "tests/library/tests/test_sdpa_padding_mask.py"
+        "tests/library/tests/test_fmha_mfma_free_stride.py"
+        "tests/library/tests/test_sdpa_free_stride_layouts.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -727,11 +770,15 @@ if(ROCKE_INSTALL_TESTS)
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_mla_test}\"")
     endforeach()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set(_rocke_library_mla_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+           "list(APPEND _rocke_library_mla_pytest_environment\n"
+           "     \${_rocke_compiler_tool_environment}\n"
+           "     \${_rocke_compiler_requirement_environment})\n"
            "add_test(rocke_library_mla_pytest python -m pytest${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\${_rocke_compiler_env}\"\n"
+           "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
            "  TIMEOUT 900)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -767,6 +814,26 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 300)\n")
+
+    # Library SDPA CPU tests (no GPU): the hipDNN SDPA request contract and
+    # from_hipdnn, the request-driven and array oracles, and the forward/backward
+    # case tables. Pointed at the DIRECTORY so a new file there runs automatically;
+    # a GPU test added there must be --ignore'd here and enrolled in the GPU lane.
+    # Distinct from rocke_sdpa_reference_unit_pytest below, which runs only
+    # tests/test_sdpa_reference_contract.py.
+    set(_ROCKE_SDPA_PYTEST_ARGS "")
+    if(_ROCKE_SDPA_HIPDNN_ASSETS)
+      set(_ROCKE_SDPA_PYTEST_ARGS " --rocke-require-hipdnn-assets")
+    endif()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_sdpa_pytest python -m pytest"
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
+           "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
 
     # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
     # the golden IR hashes, the performance knobs, and dispatch selection. None
@@ -890,6 +957,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
         "tests/library/tests/test_conv_winograd_fwd_gpu.py"
+        "tests/library/tests/test_conv_winograd_fwd_rt_gpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
         "tests/library/tests/test_conv_winograd_gen_gpu.py"
         "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
@@ -897,6 +965,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_dense_bias_gfx950_gpu.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
+        "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"

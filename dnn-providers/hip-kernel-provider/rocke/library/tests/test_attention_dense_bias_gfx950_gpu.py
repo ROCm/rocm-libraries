@@ -37,9 +37,9 @@ from dispatch.attention import AttentionRequest, attention_tuning_spec
 from kernels.common._attention_additive_bias import additive_bias_launch_values
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx950.attention_dense import (
-    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
     attention_dense_signature,
     build_attention_dense,
 )
@@ -169,10 +169,7 @@ def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None, bias_view=None
         "o_ptr": out,
         "scale": float(scale),
     }
-    if _has_shape_params(spec):
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
+    vals.update(attention_dense_runtime_args(spec))
     if spec.varlen:
         vals["cu_seqlens_q"] = _device(np.asarray(cu_q, np.int32))
         vals["cu_seqlens_kv"] = _device(np.asarray(cu_kv, np.int32))

@@ -88,6 +88,10 @@ class _SimpleSgprPool:
         self.checked_out.append((base, size, tag))
         return base
 
+    def checkOutAligned(self, size, alignment, tag="", *args, **kwargs):
+        self._next += (-self._next) % alignment
+        return self.checkOut(size, tag)
+
     def checkIn(self, idx):
         self.checked_in.append(idx)
 
@@ -117,6 +121,14 @@ class _SKWriter:
         base = self._next_tmp
         self._next_tmp += size + alignment
         yield SimpleNamespace(idx=base, size=size)
+
+    @contextmanager
+    def allocTmpSgprList(self, nums, alignmentList=None, tag=""):
+        out = []
+        for size in nums:
+            out.append(SimpleNamespace(idx=self._next_tmp, size=size))
+            self._next_tmp += size
+        yield out
 
     # StreamK constant SGPRs are kept in-place (returns the symbolic name) in this
     # mock; isPersistentConstantsToVgprEnabled=False so no VGPR readfirstlane fires.
@@ -629,36 +641,51 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
 
 
 # ---------------------------------------------------------------------------
-# 10. peekTileBatch: the batch of the tile at NextTile, with none of the
-#     side effects that would make it unsafe where ReuseAcrossPersistent
-#     needs it.
+# 10. peekTileBatch with an M-tile: which A the tile at NextTile needs -- its
+#     batch and its M-tile -- with none of the side effects that would make it
+#     unsafe where ReuseAcrossPersistent needs it.
 # ---------------------------------------------------------------------------
-def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it(monkeypatch):
+def test_rap_tile_a_identity_reads_the_pending_tile_without_claiming_it(monkeypatch):
     """RAP asks for this before it knows whether it will run the tile here.
 
-    The reuse copy can only serve tiles in the batch its resident A was filled
-    from, so it opens by comparing the pending tile's batch against that one and
-    branching to the fill copy when they differ. The comparison therefore runs at
-    a point that may still jump away, and the two emitters that already compute
-    this batch cannot: ``skTileIndex`` resets the local-read offsets and
-    ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
+    The reuse copy can only serve tiles whose A is the one its resident
+    registers were filled from, so it opens by comparing the pending tile's A
+    identity against that one and branching to the fill copy when they differ.
+    The comparison therefore runs at a point that may still jump away, and the
+    two emitters that already compute this identity cannot: ``skTileIndex``
+    resets the local-read offsets and ``skIndexToWG`` claims WorkGroup0/1/2 for
+    the tile.
 
-    So peekTileBatch repeats their arithmetic and writes only its destination. A
-    later edit that reaches for skIndexToWG instead would leave WorkGroup* set
+    So peekTileBatch repeats their arithmetic and writes only its destinations.
+    A later edit that reaches for skIndexToWG instead would leave WorkGroup* set
     for a tile the fill copy then re-derives, which no build failure would catch.
     """
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only=True)
-    kernel["WavefrontSize"] = 32
+    kernel.update({
+        "WavefrontSize": 32,
+        "WorkGroupMappingXCC": 1,
+        "ClusterDim": [1, 1],
+    })
 
     monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _processing())
-    rendered = str(StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch"))
+    rendered = str(
+        StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch", "RAPResidentMTile")
+    )
 
     # NextTile names pending work; activation advances it only when claimed.
     assert "s[sgprNextTile]" in rendered
     # Tiles per batch, the divisor that turns a tile index into a batch.
     assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
     assert "s[sgprRAPResidentBatch]" in rendered
+    # A is indexed by M as well, so the M-tile has to come out of the same walk.
+    # Without it the guard would pass a tile that shares the batch but needs a
+    # different A -- which is every extra M-tile M > MacroTile0 introduces.
+    assert "s[sgprRAPResidentMTile]" in rendered
+    assert "s[sgprNumWorkGroups0]" in rendered
+    # A reads the M-tile DefaultWGM gives the tile, so the peek remaps it too
+    # (test_ReuseAcrossPersistent checks the values).
+    assert "s[sgprWGM]" in rendered
 
     for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
         assert claimed not in rendered, (

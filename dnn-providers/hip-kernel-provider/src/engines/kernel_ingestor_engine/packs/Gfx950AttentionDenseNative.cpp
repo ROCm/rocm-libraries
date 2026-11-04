@@ -521,7 +521,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     const auto& attributes = *attributesPtr;
 
     // --- 2. Operands. Q/K/V/O are the four pointers every candidate's ABI has; the
-    //     optional attn_mask (step 8) adds the bias pointer of the 12-arg form.
+    //     optional attn_mask (step 8) adds the bias pointer of the 14-arg form.
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* k = findTensor(context, attributes.k_tensor_uid());
     const auto* v = findTensor(context, attributes.v_tensor_uid());
@@ -983,9 +983,11 @@ std::optional<bool> candidateAdditiveBias(const KernelDefinition& kernel)
  * boundary tiles on-chip; this catalog ships none, and one arriving from elsewhere is
  * declined even at its authored shape rather than matched on metadata equality.
  *
- * A served candidate receives batch/seqlen_q/seqlen_kv as runtime kernel arguments, so
- * one binary serves any valid shape for the same head/dtype/mask/bias configuration; the
- * metadata's shape fields are canonical build inputs and are not compared.
+ * A served candidate receives batch/seqlen_q/seqlen_kv and num_query_heads/num_kv_heads
+ * as runtime kernel arguments, so one binary serves any valid shape for the same head
+ * size/dtype/mask/bias configuration; the metadata's shape fields are canonical build
+ * inputs and are not compared. The head counts are still compared below because the
+ * catalog lists each head configuration as its own entry.
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
@@ -1128,29 +1130,112 @@ double scoreKernel(const MatchContext& /*context*/,
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
 /// mismatch diagnostic prints the real layout beside the recorded one instead of a row
 /// of zeroes that read as data.
-std::vector<KernelArgument> attentionDenseKernelSignature(bool additiveBias)
+///
+/// This is the dispatch.v2 form, which every plain kernel in the catalog takes. A
+/// use_additive_bias kernel takes the dispatch.v3 form, attentionDenseKernelSignatureV3().
+std::vector<KernelArgument> attentionDenseKernelSignature()
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
     constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
 
-    std::vector<KernelArgument> signature{KernelArgument{"global_buffer", PTR, 0, "q_ptr"},
-                                          KernelArgument{"global_buffer", PTR, 8, "k_ptr"},
-                                          KernelArgument{"global_buffer", PTR, 16, "v_ptr"},
-                                          KernelArgument{"global_buffer", PTR, 24, "o_ptr"},
-                                          KernelArgument{"by_value", F32, 32, "scale"},
-                                          KernelArgument{"by_value", I32, 36, "batch"},
-                                          KernelArgument{"by_value", I32, 40, "seqlen_q"},
-                                          KernelArgument{"by_value", I32, 44, "seqlen_kv"}};
-    if(additiveBias)
-    {
-        // Spelled as kernels/common/_attention_additive_bias.py declares them.
-        signature.push_back(KernelArgument{"global_buffer", PTR, 48, "additive_bias_ptr"});
-        signature.push_back(KernelArgument{"by_value", I32, 56, "additive_bias_batch_stride"});
-        signature.push_back(KernelArgument{"by_value", I32, 60, "additive_bias_head_stride"});
-        signature.push_back(KernelArgument{"by_value", I32, 64, "additive_bias_sq_stride"});
-    }
+    return {KernelArgument{"global_buffer", PTR, 0, "q_ptr"},
+            KernelArgument{"global_buffer", PTR, 8, "k_ptr"},
+            KernelArgument{"global_buffer", PTR, 16, "v_ptr"},
+            KernelArgument{"global_buffer", PTR, 24, "o_ptr"},
+            KernelArgument{"by_value", F32, 32, "scale"},
+            KernelArgument{"by_value", I32, 36, "batch"},
+            KernelArgument{"by_value", I32, 40, "seqlen_q"},
+            KernelArgument{"by_value", I32, 44, "seqlen_kv"},
+            KernelArgument{"by_value", I32, 48, "num_query_heads"},
+            KernelArgument{"by_value", I32, 52, "num_kv_heads"}};
+}
+
+/// The dispatch.v1 form: the v2 list without the two trailing head counts. Kernels built
+/// before the head counts became runtime arguments take it, and only a plan saved under
+/// v1 still carries one.
+std::vector<KernelArgument> attentionDenseKernelSignatureV1()
+{
+    auto signature = attentionDenseKernelSignature();
+    signature.resize(signature.size() - 2);
     return signature;
+}
+
+/// The dispatch.v3 form, which every use_additive_bias kernel takes: the v2 list, then
+/// the bias pointer and its batch/head/sq element strides.
+std::vector<KernelArgument> attentionDenseKernelSignatureV3()
+{
+    constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
+
+    auto signature = attentionDenseKernelSignature();
+    // Spelled as kernels/common/_attention_additive_bias.py declares them.
+    signature.push_back(KernelArgument{"global_buffer", PTR, 56, "additive_bias_ptr"});
+    signature.push_back(KernelArgument{"by_value", I32, 64, "additive_bias_batch_stride"});
+    signature.push_back(KernelArgument{"by_value", I32, 68, "additive_bias_head_stride"});
+    signature.push_back(KernelArgument{"by_value", I32, 72, "additive_bias_sq_stride"});
+    return signature;
+}
+
+/// The launch contract a dispatch handler serves. v1 and v2 share their launch values and
+/// differ only in whether the launch passes the head counts; v3 is v2 plus the bias.
+enum class AttentionDenseContract
+{
+    V1,
+    V2,
+    V3
+};
+
+std::string_view contractSymbol(AttentionDenseContract contract)
+{
+    if(contract == AttentionDenseContract::V1)
+    {
+        return GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
+    }
+    return contract == AttentionDenseContract::V3 ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
+                                                  : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+}
+
+std::vector<KernelArgument> contractSignature(AttentionDenseContract contract)
+{
+    if(contract == AttentionDenseContract::V1)
+    {
+        return attentionDenseKernelSignatureV1();
+    }
+    return contract == AttentionDenseContract::V3 ? attentionDenseKernelSignatureV3()
+                                                  : attentionDenseKernelSignature();
+}
+
+/// The contract a plan built from a graph takes, for a handler registered under
+/// @p handler: the current handler gives a bias binding v3 and a plain one v2; the v1
+/// handler, kept for saved plans, has no bias form.
+AttentionDenseContract preparedContract(AttentionDenseContract handler, bool additiveBias)
+{
+    if(handler == AttentionDenseContract::V1)
+    {
+        if(additiveBias)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: the dispatch.v1 contract has no additive bias form");
+        }
+        return AttentionDenseContract::V1;
+    }
+    return additiveBias ? AttentionDenseContract::V3 : AttentionDenseContract::V2;
+}
+
+/// The contract a saved plan restores under, for a handler registered under @p handler:
+/// the current handler serves both current contracts and reads the one the plan names
+/// (anything but v3 is read, and refused, against v2); the v1 handler only v1.
+AttentionDenseContract restoredContract(AttentionDenseContract handler,
+                                        std::string_view dispatchSymbol)
+{
+    if(handler == AttentionDenseContract::V1)
+    {
+        return AttentionDenseContract::V1;
+    }
+    return dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3 ? AttentionDenseContract::V3
+                                                                       : AttentionDenseContract::V2;
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
@@ -1161,11 +1246,13 @@ public:
     PreparedGfx950AttentionDense(IngestorKernelCode code,
                                  AttentionDenseBinding binding,
                                  AttentionDenseProblem problem,
-                                 int64_t blockM)
+                                 int64_t blockM,
+                                 AttentionDenseContract contract)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
         , _blockM(blockM)
+        , _contract(contract)
     {
     }
 
@@ -1194,11 +1281,19 @@ public:
         return _blockM;
     }
 
+    /// The contract the code object was checked against, so launch() passes the kernel
+    /// arguments that code object takes.
+    AttentionDenseContract contract() const
+    {
+        return _contract;
+    }
+
 private:
     IngestorKernelCode _code;
     AttentionDenseBinding _binding;
     AttentionDenseProblem _problem;
     int64_t _blockM;
+    AttentionDenseContract _contract;
 };
 
 // Applies the launch geometry to `code` and builds the prepared dispatch. A plan built
@@ -1211,7 +1306,8 @@ private:
 std::unique_ptr<PreparedDispatch>
     makePreparedGfx950AttentionDense(IngestorKernelCode code,
                                      const Gfx950AttentionDenseLaunchInputs& launch,
-                                     const std::string& kernelName)
+                                     const std::string& kernelName,
+                                     AttentionDenseContract contract)
 {
     const auto& problem = launch.problem;
     const auto geometry = gfx950AttentionDenseGeometry(
@@ -1221,22 +1317,32 @@ std::unique_ptr<PreparedDispatch>
     code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
 
     return std::make_unique<PreparedGfx950AttentionDense>(
-        std::move(code), launch.binding, problem, launch.blockM);
+        std::move(code), launch.binding, problem, launch.blockM, contract);
 }
 
 /**
- * @brief The native dispatch behind this engine's UDD.
+ * @brief The native dispatch behind this engine's UDD, for one launch contract.
+ *
+ * The current handler serves the catalog and both current contracts: it prepares a plain
+ * graph under v2 and a bias graph under v3, saves each plan under the contract it was
+ * prepared with, and restores either. It is registered under the unversioned name, v2 and
+ * v3, because a plan may be saved only under a name registered to the handler that saves
+ * it. The v1 handler is registered only under the v1 name, so a plan saved before the head
+ * counts became runtime arguments restores with its own 8-argument code object and
+ * launches it with 8 arguments.
  */
 class Gfx950AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    explicit Gfx950AttentionDenseDispatchHandler(const compilation::KpackKernelLoader& kpackLoader)
+    Gfx950AttentionDenseDispatchHandler(const compilation::KpackKernelLoader& kpackLoader,
+                                        AttentionDenseContract contract)
         : _kpackLoader(kpackLoader)
+        , _contract(contract)
     {
     }
 
     /// Zero: the kernel's only scratch is LDS and registers; no global scratch,
-    /// and the 8-arg ABI has no workspace pointer.
+    /// and neither contract's ABI has a workspace pointer.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -1286,8 +1392,9 @@ public:
                     + "' and the graph disagree on the additive bias");
         }
 
-        auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, attentionDenseKernelSignature(binding.bias.has_value()));
+        const auto contract = preparedContract(_contract, binding.bias.has_value());
+        auto code
+            = buildIngestorKernelCode(_kpackLoader, context, kernel, contractSignature(contract));
 
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
@@ -1296,7 +1403,8 @@ public:
         return makePreparedGfx950AttentionDense(
             std::move(code),
             Gfx950AttentionDenseLaunchInputs{binding, problem, tile->blockM},
-            toString(kernel.kernelId));
+            toString(kernel.kernelId),
+            contract);
     }
 
     std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
@@ -1304,28 +1412,27 @@ public:
                                                     int deviceOrdinal) const override
     {
         const std::string kernelName = toString(code.kernelId);
-        // v2 is the contract of a bias plan and v1 of a plain one, so the contract names the
-        // argument form; restoreIngestorLaunch refuses a kernel that records the other form
-        // as incompatible, and the reader gives v2 inputs a bias and v1 inputs none.
+        const auto contract = restoredContract(_contract, inputs.dispatchSymbol);
+        // The saved code object must take this contract's arguments (checked first, inside
+        // restoreIngestorLaunch), and its values must be saved under this contract's name.
+        const auto readThisContract = [contract](const SavedLaunchInputs& saved) {
+            requireLaunchContract(saved, contractSymbol(contract));
+            return readGfx950AttentionDenseLaunchInputs(saved);
+        };
         auto restored = restoreIngestorLaunch<Gfx950AttentionDenseLaunchInputs>(
-            inputs,
-            std::move(code),
-            attentionDenseKernelSignature(inputs.dispatchSymbol
-                                          == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
-            &readGfx950AttentionDenseLaunchInputs,
-            deviceOrdinal);
+            inputs, std::move(code), contractSignature(contract), readThisContract, deviceOrdinal);
         return makePreparedGfx950AttentionDense(
-            std::move(restored.code), restored.launch, kernelName);
+            std::move(restored.code), restored.launch, kernelName, contract);
     }
 
     std::optional<SavedLaunchInputs>
         saveLaunchInputs(const PreparedDispatch& prepared) const override
     {
         const auto& preparedDense = dynamic_cast<const PreparedGfx950AttentionDense&>(prepared);
-        return SavedLaunchInputs{
-            std::string(gfx950AttentionDenseDispatchSymbol(preparedDense.binding())),
-            gfx950AttentionDenseLaunchValues(
-                preparedDense.binding(), preparedDense.problem(), preparedDense.blockM())};
+        return SavedLaunchInputs{std::string(contractSymbol(preparedDense.contract())),
+                                 gfx950AttentionDenseLaunchValues(preparedDense.binding(),
+                                                                  preparedDense.problem(),
+                                                                  preparedDense.blockM())};
     }
 
     bool supportsSaving() const override
@@ -1352,22 +1459,38 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
         const auto& p = preparedDense.problem();
-        // The eight arguments every variant takes, then the bias tail a bias variant
-        // declares (see attentionDenseKernelSignature).
+        auto& kernel = preparedDense.kernelForStream(handle.getStream());
+        // Exactly the arguments the code object was checked against: v1 code objects bake
+        // the head counts, v2 code objects read them as the two trailing arguments, and v3
+        // code objects take the bias pointer and its strides after them.
+        if(preparedDense.contract() == AttentionDenseContract::V1)
+        {
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          static_cast<int32_t>(p.batch),
+                          static_cast<int32_t>(p.seqLenQ),
+                          static_cast<int32_t>(p.seqLenKv));
+            return;
+        }
         const auto launchWith = [&](const auto&... tail) {
-            preparedDense.kernelForStream(handle.getStream())
-                .launch(handle.getStream(),
-                        q.ptr,
-                        k.ptr,
-                        v.ptr,
-                        o.ptr,
-                        binding.scale,
-                        static_cast<int32_t>(p.batch),
-                        static_cast<int32_t>(p.seqLenQ),
-                        static_cast<int32_t>(p.seqLenKv),
-                        tail...);
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          static_cast<int32_t>(p.batch),
+                          static_cast<int32_t>(p.seqLenQ),
+                          static_cast<int32_t>(p.seqLenKv),
+                          static_cast<int32_t>(p.numQueryHeads),
+                          static_cast<int32_t>(p.numKvHeads),
+                          tail...);
         };
-        if(binding.bias.has_value())
+        if(preparedDense.contract() == AttentionDenseContract::V3)
         {
             const auto bias = hipdnn_plugin_sdk::findDeviceBuffer(
                 binding.bias->uid, deviceBuffers, numDeviceBuffers);
@@ -1375,24 +1498,17 @@ public:
                        binding.bias->strides[0],
                        binding.bias->strides[1],
                        binding.bias->strides[2]);
+            return;
         }
-        else
-        {
-            launchWith();
-        }
+        launchWith();
     }
 
 private:
     const compilation::KpackKernelLoader& _kpackLoader;
+    AttentionDenseContract _contract;
 };
 
 } // namespace
-
-std::string_view gfx950AttentionDenseDispatchSymbol(const AttentionDenseBinding& binding)
-{
-    return binding.bias.has_value() ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
-                                    : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
-}
 
 MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
                                                 const AttentionDenseProblem& problem,
@@ -1449,18 +1565,15 @@ namespace
 Gfx950AttentionDenseLaunchInputs
     readGfx950AttentionDenseLaunchInputs(const SavedLaunchInputs& inputs)
 {
-    // v2 is v1 plus the bias values; any other name holds no contract this reader knows.
-    const bool withBias = inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
-    if(!withBias && inputs.dispatchSymbol != GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1)
-    {
-        serialization::refuseIngestorPlan(
-            serialization::IngestorPlanRefusal::INCOMPATIBLE,
-            "dispatch '" + inputs.dispatchSymbol
-                + "' names no launch-value contract this provider reads; the handler reads the "
-                  "contracts '"
-                + std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1) + "' and '"
-                + std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2) + "'");
-    }
+    // v1 and v2 share one value set and v3 adds the bias values; anything else, including
+    // the unversioned name, is refused against v2, the current plain contract.
+    const auto& symbol = inputs.dispatchSymbol;
+    const bool withBias = symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3;
+    requireLaunchContract(inputs,
+                          symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+                              ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+                          : withBias ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
+                                     : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
     std::vector<std::string_view> names{GFX950_ATTENTION_DENSE_Q_UID_VALUE,
                                         GFX950_ATTENTION_DENSE_K_UID_VALUE,
                                         GFX950_ATTENTION_DENSE_V_UID_VALUE,
@@ -1623,13 +1736,18 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler, process-lifetime.
-const Gfx950AttentionDenseDispatchHandler& gfx950AttentionDenseDispatchHandler()
+/// This engine's dispatch handlers, process-lifetime: the current one (v2 and v3) and the
+/// v1 one. Both share one module cache and loader.
+const Gfx950AttentionDenseDispatchHandler&
+    gfx950AttentionDenseDispatchHandler(AttentionDenseContract contract)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
         gfx950AttentionDenseKpackModuleCache());
-    static const Gfx950AttentionDenseDispatchHandler s_dispatchHandler(s_kpackLoader);
-    return s_dispatchHandler;
+    static const Gfx950AttentionDenseDispatchHandler s_v1(s_kpackLoader,
+                                                          AttentionDenseContract::V1);
+    static const Gfx950AttentionDenseDispatchHandler s_current(s_kpackLoader,
+                                                               AttentionDenseContract::V2);
+    return contract == AttentionDenseContract::V1 ? s_v1 : s_current;
 }
 
 } // namespace
@@ -1639,11 +1757,17 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler());
-    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
-              &gfx950AttentionDenseDispatchHandler());
+    // The UDD's unversioned name dispatches the catalog: plain kernels take v2 and bias
+    // kernels v3, both served (and saved under) by the current handler.
+    scope.add(std::string(DISPATCH_SYMBOL),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
-              &gfx950AttentionDenseDispatchHandler());
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V3));
+    // Kept so plans saved under v1 still load and launch their 8-argument code object.
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V1));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

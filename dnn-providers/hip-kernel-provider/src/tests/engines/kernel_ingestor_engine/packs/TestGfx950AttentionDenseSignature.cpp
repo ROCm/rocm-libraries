@@ -43,8 +43,8 @@
  * the matcher exist to stop, one layer lower down.
  *
  * Every variant in gfx950_attention_dense.kdp.json declares `persistent: false`,
- * `use_sinks: false`, `varlen: false` and `paged: false`, so the 8-argument form, and for a
- * `use_additive_bias` variant the same eight plus the bias pointer and its three strides,
+ * `use_sinks: false`, `varlen: false` and `paged: false`, so the 10-argument form, and for
+ * a `use_additive_bias` variant the same ten plus the bias pointer and its three strides,
  * are the only ones that ship; the sink / cu_seqlens / page-table tails of
  * attention_dense_signature are unreachable from this catalog. The 5-argument form is
  * covered here only as a shape the pack must refuse.
@@ -58,7 +58,7 @@
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
  * the signature refusal and the archive's absence are raised on the host. The restore
- * cases at the end run restoreLaunch() over v1 and v2 launch values on device ordinal -1,
+ * cases at the end run restoreLaunch() over v2 and v3 launch values on device ordinal -1,
  * so a restore that passes the signature comparison and the launch values stops at the
  * host-side ordinal refusal.
  */
@@ -95,7 +95,7 @@ constexpr uint32_t SCALAR_BYTES = 4;
 
 constexpr std::size_t SCALE_INDEX = 4;
 
-constexpr std::size_t LAST_INDEX = 7;
+constexpr std::size_t LAST_INDEX = 9;
 
 /// The argument list attention_dense_signature declares, under the names it gives them.
 std::vector<KernelArgument> pythonAbi()
@@ -107,11 +107,13 @@ std::vector<KernelArgument> pythonAbi()
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "scale"},
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "batch"},
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"}};
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_query_heads"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
 /// The form a persistent body would take: the same four pointers and scale, with the
-/// shape tail dropped because `num_persistent` bakes the work-item space.
+/// shape and head tail dropped because `num_persistent` bakes the work-item space.
 std::vector<KernelArgument> persistentAbi()
 {
     auto signature = pythonAbi();
@@ -119,7 +121,7 @@ std::vector<KernelArgument> persistentAbi()
     return signature;
 }
 
-/// The argument list of a use_additive_bias variant: the eight above, then the four
+/// The argument list of a use_additive_bias variant: the ten above, then the four
 /// kernels/common/_attention_additive_bias.py appends.
 std::vector<KernelArgument> biasAbi()
 {
@@ -353,11 +355,11 @@ TEST(TestGfx950AttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesADroppedTrailingArgument)
 {
-    // seqlen_kv gone. Seven arguments against eight: the kernel would read the kernarg
+    // num_kv_heads gone. Nine arguments against ten: the kernel would read the kernarg
     // segment one slot past what the host wrote.
     auto signature = pythonAbi();
     signature.pop_back();
-    expectRefused(signature, "a seven-argument list is not this ABI");
+    expectRefused(signature, "a nine-argument list is not this ABI");
 }
 
 TEST(TestGfx950AttentionDenseSignature, RefusesAnExtraTrailingArgument)
@@ -366,7 +368,7 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAnExtraTrailingArgument)
     // add. Every argument the host does write still lands correctly, so nothing faults.
     auto signature = pythonAbi();
     signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(signature, "a nine-argument list is not this ABI");
+    expectRefused(signature, "an eleven-argument list is not this ABI");
 }
 
 TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
@@ -394,13 +396,13 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAPointerInAScalarSlot)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesBuffersAndScalarsTransposed)
 {
-    // The by-value tail ahead of the pointers. Same eight entries, same four of each
-    // kind, and the comparison is positional, so only the order distinguishes this from
-    // the shipped ABI.
+    // The by-value tail ahead of the pointers. Same ten entries, the same four buffers
+    // and six scalars, and the comparison is positional, so only the order distinguishes
+    // this from the shipped ABI.
     const KernelArgument buffer{BUFFER_KIND, POINTER_BYTES, 0, ""};
     const KernelArgument scalar{BY_VALUE_KIND, SCALAR_BYTES, 0, ""};
     const std::vector<KernelArgument> transposed{
-        scalar, scalar, scalar, scalar, buffer, buffer, buffer, buffer};
+        scalar, scalar, scalar, scalar, scalar, scalar, buffer, buffer, buffer, buffer};
     expectRefused(transposed, "the four pointers come first");
 }
 
@@ -418,8 +420,8 @@ TEST(TestGfx950AttentionDenseSignature, RefusesANarrowedPointerSlot)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesAWidenedScalarSlot)
 {
-    // seqlen_kv as an i64. The shape parameters are i32 and the pack marshals int32_t, so
-    // a 64-bit slot would take the next four bytes of the segment as its high half.
+    // num_kv_heads as an i64. The shape parameters are i32 and the pack marshals int32_t,
+    // so a 64-bit slot would read four bytes past the segment as its high half.
     expectRefused(withArgument(LAST_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
                   "the shape parameters are 32-bit");
 }
@@ -468,7 +470,7 @@ TEST(TestGfx950AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
 // =============================================================================
 
 /// The positive control for a bias variant: a bias graph on a bias candidate recording
-/// the twelve arguments the builder declares gets past the comparison to the loader.
+/// the fourteen arguments the builder declares gets past the comparison to the loader.
 TEST(TestGfx950AttentionDenseSignature, AcceptsTheBiasAbiThePythonDeclares)
 {
     const std::string failure = prepareFailure(biasAbi(), /*bias=*/true);
@@ -478,7 +480,7 @@ TEST(TestGfx950AttentionDenseSignature, AcceptsTheBiasAbiThePythonDeclares)
         << "the pack refused the argument list the rocKE builder declares: " << failure;
 }
 
-TEST(TestGfx950AttentionDenseSignature, RefusesTheEightArgumentFormForABiasCandidate)
+TEST(TestGfx950AttentionDenseSignature, RefusesTheTenArgumentFormForABiasCandidate)
 {
     // A bias candidate whose object records no bias tail: the launch would write four
     // arguments past the end of its kernarg segment.
@@ -527,8 +529,8 @@ constexpr const char* RESTORE_MISMATCH_MARKER
 /// The fragment of the device-ordinal refusal that follows every restore check.
 constexpr const char* NO_DEVICE_MARKER = "which names no device";
 
-/// Valid launch values for the fixture graph: `hipkernel.gfx950_attention_dense.dispatch.v1`,
-/// or `.v2` with the fixture's full [B, Hq, Sq, Skv] bias when @p withBias. Every value reads
+/// Valid launch values for the fixture graph: `hipkernel.gfx950_attention_dense.dispatch.v2`,
+/// or `.v3` with the fixture's full [B, Hq, Sq, Skv] bias when @p withBias. Every value reads
 /// back, so only the recorded signature can stop a restore before the device load.
 hipdnn_plugin_sdk::ingestor::SavedLaunchInputs savedLaunchInputs(bool withBias)
 {
@@ -555,7 +557,8 @@ hipdnn_plugin_sdk::ingestor::SavedLaunchInputs savedLaunchInputs(bool withBias)
                                      static_cast<int32_t>(SEQ * SEQ),
                                      static_cast<int32_t>(SEQ)}};
     }
-    return {std::string(gfx950AttentionDenseDispatchSymbol(binding)),
+    return {std::string(withBias ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
+                                 : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
             gfx950AttentionDenseLaunchValues(binding, problem, SAVED_BLOCK_M)};
 }
 
@@ -567,14 +570,16 @@ struct RestoreFailure
     std::string message;
 };
 
-/// Runs the pack's restoreLaunch() over valid v1 (or, @p withBias, v2) launch values and a
-/// saved kernel whose recorded argument list is @p recorded, and returns what it throws.
+/// Runs the restoreLaunch() of the handler registered under the saved contract over valid
+/// v2 (or, @p withBias, v3) launch values and a saved kernel whose recorded argument list
+/// is @p recorded, and returns what it throws.
 RestoreFailure restoreFailure(const std::vector<KernelArgument>& recorded, bool withBias)
 {
     registerNativeIngestorSymbols();
 
-    const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(DISPATCH_SYMBOL));
+    const auto saved = savedLaunchInputs(withBias);
+    const auto* handler
+        = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(saved.dispatchSymbol);
     EXPECT_NE(handler, nullptr);
     if(handler == nullptr)
     {
@@ -591,8 +596,7 @@ RestoreFailure restoreFailure(const std::vector<KernelArgument>& recorded, bool 
 
     try
     {
-        static_cast<void>(
-            handler->restoreLaunch(savedLaunchInputs(withBias), std::move(code), NO_DEVICE));
+        static_cast<void>(handler->restoreLaunch(saved, std::move(code), NO_DEVICE));
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
     {
@@ -603,9 +607,9 @@ RestoreFailure restoreFailure(const std::vector<KernelArgument>& recorded, bool 
 
 } // namespace
 
-/// The positive control for the refusal below. The eight-argument form that v1 restores
+/// The positive control for the refusal below. The ten-argument form that v2 restores
 /// passes the signature comparison and the launch values and reaches the device load.
-TEST(TestGfx950AttentionDenseSignature, RestoresTheEightArgumentFormPastTheComparison)
+TEST(TestGfx950AttentionDenseSignature, RestoresTheTenArgumentFormPastTheComparison)
 {
     const auto failure = restoreFailure(pythonAbi(), /*withBias=*/false);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
@@ -613,10 +617,10 @@ TEST(TestGfx950AttentionDenseSignature, RestoresTheEightArgumentFormPastTheCompa
     EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
-/// v1 holds no bias, so a bias plan saves under v2. A v1 payload that names a bias kernel
-/// anyway (forged, or edited) records the twelve-argument list. The restore must refuse it
-/// as incompatible, and must not launch a bias kernel with eight arguments.
-TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV1PlanThatRecordsTheBiasForm)
+/// v2 holds no bias, so a bias plan saves under v3. A v2 payload that names a bias kernel
+/// anyway (forged, or edited) records the fourteen-argument list. The restore must refuse
+/// it as incompatible, and must not launch a bias kernel with ten arguments.
+TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV2PlanThatRecordsTheBiasForm)
 {
     const auto failure = restoreFailure(biasAbi(), /*withBias=*/false);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
@@ -624,9 +628,9 @@ TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV1PlanThatRecordsTheBia
     EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
-/// The positive control for the refusal below. The twelve-argument form that v2 restores
+/// The positive control for the refusal below. The fourteen-argument form that v3 restores
 /// passes the signature comparison and the bias values and reaches the device load.
-TEST(TestGfx950AttentionDenseSignature, RestoresTheTwelveArgumentFormPastTheComparison)
+TEST(TestGfx950AttentionDenseSignature, RestoresTheFourteenArgumentFormPastTheComparison)
 {
     const auto failure = restoreFailure(biasAbi(), /*withBias=*/true);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
@@ -634,10 +638,10 @@ TEST(TestGfx950AttentionDenseSignature, RestoresTheTwelveArgumentFormPastTheComp
     EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
-/// A v2 payload that names a plain kernel records the eight-argument list. The restore
-/// must refuse it as incompatible, and must not pass four bias arguments the kernel does
-/// not declare.
-TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV2PlanThatRecordsTheEightArgumentForm)
+/// A v3 payload that names a plain kernel records the ten-argument list. The restore must
+/// refuse it as incompatible, and must not pass four bias arguments the kernel does not
+/// declare.
+TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV3PlanThatRecordsTheTenArgumentForm)
 {
     const auto failure = restoreFailure(pythonAbi(), /*withBias=*/true);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
