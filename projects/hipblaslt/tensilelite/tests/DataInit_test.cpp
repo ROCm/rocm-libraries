@@ -611,8 +611,9 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
 //   mxDataGenerator only tiles scales along one axis, so a 2D MX scaling tile
 //   (MXBlockFree{A,B} > 1) is produced by generating the 1xmxBlock layout and
 //   collapsing every group of mxBlockFree free-dimension entries here. The
-//   representative is the group MAXIMUM for UE8M0 scales (byte order == numeric
-//   order, so a byte-wise max is exact) and the group's first entry otherwise.
+//   representative is the group MINIMUM for UE8M0 scales (byte order == numeric
+//   order, so a byte-wise min is exact; 0x00 / 0xFF are skipped) and the group's
+//   first entry otherwise. A min can only shrink a dequantized product.
 //
 //   Two buffer layouts have to work:
 //     kFast  (bound dim at index 0, TN A / NT B) -> [free][kBlock]
@@ -620,8 +621,8 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
 // =============================================================================
 
 // kFast: src is [free][kBlock] with 4 free rows x 2 K-blocks; a 2-row tile
-// collapses it to [2][2], taking the max down each column of the pair.
-TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMaxPerKBlock)
+// collapses it to [2][2], taking the min down each column of the pair.
+TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMinPerKBlock)
 {
     //            kb0   kb1
     // free 0:     10     1
@@ -635,14 +636,14 @@ TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMaxPerKBlock)
                                  /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
                                  /*kFast=*/true, /*unsignedExponentScale=*/true);
 
-    EXPECT_EQ(dst[0], 10); // tile 0, kb0: max(10, 3)
-    EXPECT_EQ(dst[1], 20); // tile 0, kb1: max(1, 20)
-    EXPECT_EQ(dst[2],  7); // tile 1, kb0: max(7, 7)
-    EXPECT_EQ(dst[3],  8); // tile 1, kb1: max(7, 8)
+    EXPECT_EQ(dst[0], 3); // tile 0, kb0: min(10, 3)
+    EXPECT_EQ(dst[1], 1); // tile 0, kb1: min(1, 20)
+    EXPECT_EQ(dst[2], 7); // tile 1, kb0: min(7, 7)
+    EXPECT_EQ(dst[3], 7); // tile 1, kb1: min(7, 8)
 }
 
 // !kFast: src is [kBlock][free], so the free axis is the fast one.
-TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMaxPerKBlock)
+TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMinPerKBlock)
 {
     // kb0: free 0..3 = 10, 3, 7, 7
     // kb1: free 0..3 =  1, 20, 7, 8
@@ -654,14 +655,14 @@ TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMaxPerKBlock)
                                  /*kFast=*/false, /*unsignedExponentScale=*/true);
 
     // dst is [kBlock][tiledFree] with tiledFree == 2.
-    EXPECT_EQ(dst[0], 10); // kb0, tile 0
-    EXPECT_EQ(dst[1],  7); // kb0, tile 1
-    EXPECT_EQ(dst[2], 20); // kb1, tile 0
-    EXPECT_EQ(dst[3],  8); // kb1, tile 1
+    EXPECT_EQ(dst[0], 3); // kb0, tile 0: min(10, 3)
+    EXPECT_EQ(dst[1], 7); // kb0, tile 1: min(7, 7)
+    EXPECT_EQ(dst[2], 1); // kb1, tile 0: min(1, 20)
+    EXPECT_EQ(dst[3], 7); // kb1, tile 1: min(7, 8)
 }
 
 // A free dimension that is not a multiple of the tile leaves a short last
-// group; the max must be taken over only the entries that exist.
+// group; the min must be taken over only the entries that exist.
 TEST(DownsampleMXScaleFreeDim, PartialLastTileStopsAtTheFreeDimension)
 {
     // 3 free rows x 1 K-block, tile of 2 -> tiles {0,1} and {2}.
@@ -672,11 +673,11 @@ TEST(DownsampleMXScaleFreeDim, PartialLastTileStopsAtTheFreeDimension)
                                  /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
                                  /*kFast=*/true, /*unsignedExponentScale=*/true);
 
-    EXPECT_EQ(dst[0], 9); // max(5, 9)
+    EXPECT_EQ(dst[0], 5); // min(5, 9)
     EXPECT_EQ(dst[1], 4); // the lone survivor, not a read past the buffer
 }
 
-// Without an unsigned-exponent encoding a byte-wise max is meaningless, so the
+// Without an unsigned-exponent encoding a byte-wise min is meaningless, so the
 // group's first entry is copied verbatim.
 TEST(DownsampleMXScaleFreeDim, NonExponentScaleKeepsFirstOfEachGroup)
 {
@@ -714,7 +715,7 @@ TEST(DownsampleMXScaleFreeDim, TileExtentOneIsANoOp)
 }
 
 // Multi-byte scale elements are copied whole. elemBytes != 1 also disables the
-// max, since the comparison only inspects the first byte.
+// min, since the comparison only inspects the first byte.
 TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
 {
     // 4 free rows x 1 K-block, 2 bytes per scale, tile of 2.
@@ -731,15 +732,32 @@ TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
     EXPECT_EQ(dst[3], 0x22);
 }
 
+// 0x00 (zero) and 0xFF (NaN) never win the min, so one special row cannot zero
+// or poison the whole tile; an all-special group keeps its first entry.
+TEST(DownsampleMXScaleFreeDim, MinSkipsZeroAndNaN)
+{
+    // 6 free rows x 1 K-block, tile of 3 -> {0x00, 0x90, 0x85} and {0xFF, 0x00, 0xFF}.
+    std::vector<uint8_t> src = {0x00, 0x90, 0x85, 0xFF, 0x00, 0xFF};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/6,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/3, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 0x85); // min(0x90, 0x85); 0x00 skipped
+    EXPECT_EQ(dst[1], 0xFF); // all special: first entry
+}
+
 // =============================================================================
 //   Section 6 - varyMXScaleFreeTiles
 //
 //   Random data quantizes every block against 0x7F, so the downsampled 2D
 //   scales are all equal and a wrong scale row would still validate. The helper
-//   offsets each tile by -2..2 so neighbouring free tiles always differ.
+//   lowers each tile by 0..2 so neighbouring tiles always differ and no product
+//   grows.
 // =============================================================================
 
-// kFast: [tiledFree][kBlock]. delta = (g + 2*kb) % 5 - 2.
+// kFast: [tiledFree][kBlock]. delta = (g + 2*kb) % 3 - 2.
 TEST(VaryMXScaleFreeTiles, KFastNeighbouringTilesDiffer)
 {
     std::vector<uint8_t> s(4 * 2, 0x7F); // 4 tiles x 2 K-blocks
@@ -747,14 +765,18 @@ TEST(VaryMXScaleFreeTiles, KFastNeighbouringTilesDiffer)
     dt::varyMXScaleFreeTiles(s.data(), /*tiledFreeDim=*/4, /*kBlocks=*/2, /*kFast=*/true);
 
     EXPECT_EQ(s[0], 0x7F - 2); // g0 kb0
-    EXPECT_EQ(s[1], 0x7F + 0); // g0 kb1
+    EXPECT_EQ(s[1], 0x7F - 0); // g0 kb1
     EXPECT_EQ(s[2], 0x7F - 1); // g1 kb0
-    EXPECT_EQ(s[3], 0x7F + 1); // g1 kb1
-    EXPECT_EQ(s[4], 0x7F + 0); // g2 kb0
-    EXPECT_EQ(s[6], 0x7F + 1); // g3 kb0
+    EXPECT_EQ(s[3], 0x7F - 2); // g1 kb1
+    EXPECT_EQ(s[4], 0x7F - 0); // g2 kb0
+    EXPECT_EQ(s[6], 0x7F - 2); // g3 kb0
+    for(auto b : s)
+        EXPECT_LE(b, 0x7F); // never grows
     for(size_t kb = 0; kb < 2; kb++)
         for(size_t g = 0; g + 1 < 4; g++)
             EXPECT_NE(s[g * 2 + kb], s[(g + 1) * 2 + kb]) << "g=" << g << " kb=" << kb;
+    for(size_t g = 0; g < 4; g++)
+        EXPECT_NE(s[g * 2 + 0], s[g * 2 + 1]) << "g=" << g;
 }
 
 // !kFast: [kBlock][tiledFree] gets the same per-(tile, K-block) offset.
@@ -774,15 +796,15 @@ TEST(VaryMXScaleFreeTiles, KSlowMatchesKFastPerTile)
 // Zero and NaN encodings are left alone; the result never reaches either.
 TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
 {
-    std::vector<uint8_t> s = {0x00, 0xFF, 0x01, 0xFE};
+    std::vector<uint8_t> s = {0x00, 0xFF, 0x01, 0x01};
 
-    // kFast, 4 tiles x 1 K-block: deltas -2, -1, 0, +1.
+    // kFast, 4 tiles x 1 K-block: deltas -2, -1, 0, -2.
     dt::varyMXScaleFreeTiles(s.data(), 4, 1, /*kFast=*/true);
 
     EXPECT_EQ(s[0], 0x00);
     EXPECT_EQ(s[1], 0xFF);
-    EXPECT_EQ(s[2], 0x01); // 0x01 + 0
-    EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
+    EXPECT_EQ(s[2], 0x01); // 0x01 - 0
+    EXPECT_EQ(s[3], 0x01); // 0x01 - 2 clamps to 0x01
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -801,4 +823,66 @@ TEST(CopyTensorVoid, CopiesSource)
     ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
     EXPECT_EQ(dst, src);
+}
+
+// =============================================================================
+//   Section 7 - ClientProblemFactory mx-{a,b}-free-block validation
+//
+//   Only 1 and 128 have solutions. The check runs before any HIP call, so these
+//   need no GPU.
+// =============================================================================
+namespace
+{
+    TensileLite::Client::po::variables_map
+        makeMXFreeBlockArgs(int mxBlockA, int mxBlockB, int freeA, int freeB)
+    {
+        TensileLite::Client::po::variables_map args;
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{128, 128, 1, 512}});
+        setOption(args, "strided-batched", true);
+        setOption(args, "batch-mode", 0);
+        setOption(args, "grouped-gemm", false);
+        setOption(args, "sparse", 0);
+        setOption(args, "high-precision-accumulate", false);
+        setOption(args, "kernel-language", KernelLanguage::Any);
+        setOption(args, "performance-metric", PerformanceMetric::DeviceEfficiency);
+        setOption(args, "deterministic-mode", false);
+        setOption(args, "c-equal-d", false);
+        setOption(args, "uniform-summation-order", 0);
+        setOption(args, "mx-a-block", mxBlockA);
+        setOption(args, "mx-b-block", mxBlockB);
+        setOption(args, "mx-a-free-block", freeA);
+        setOption(args, "mx-b-free-block", freeB);
+        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "metadata-layout", 0);
+        setOption(args, "a-ops", TensileLite::TensorOps{});
+        setOption(args, "b-ops", TensileLite::TensorOps{});
+        setOption(args, "c-ops", TensileLite::TensorOps{});
+        setOption(args, "d-ops", TensileLite::TensorOps{});
+        return args;
+    }
+
+    void expectFreeBlockRejected(TensileLite::Client::po::variables_map const& args,
+                                 std::string const&                            expected)
+    {
+        try
+        {
+            TensileLite::Client::ClientProblemFactory factory(args);
+            FAIL() << "expected std::invalid_argument: " << expected;
+        }
+        catch(std::invalid_argument const& e)
+        {
+            EXPECT_EQ(std::string(e.what()), expected);
+        }
+    }
+} // namespace
+
+TEST(ClientProblemFactoryMXFreeBlock, RejectsUnsupportedFreeBlockOnA)
+{
+    expectFreeBlockRejected(makeMXFreeBlockArgs(32, 0, 64, 1), "mx-a-free-block must be 1 or 128");
+}
+
+TEST(ClientProblemFactoryMXFreeBlock, RejectsUnsupportedFreeBlockOnB)
+{
+    // A is not MX, so its bogus free block is ignored and only B is reported.
+    expectFreeBlockRejected(makeMXFreeBlockArgs(0, 32, 64, 2), "mx-b-free-block must be 1 or 128");
 }
