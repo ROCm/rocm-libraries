@@ -3353,7 +3353,7 @@ namespace
         {
             return m_devicePropMap.at(deviceName);
         }
-        auto get_hardware(const std::string& deviceName) const
+        auto& get_hardware(const std::string& deviceName) const
         {
             return m_hardwareMap.at(deviceName);
         }
@@ -3362,7 +3362,7 @@ namespace
         {
             return m_deviceProp;
         }
-        auto get_hardware() const
+        auto& get_hardware() const
         {
             return m_hardware;
         }
@@ -3612,7 +3612,20 @@ namespace
         int                                                                                 device);
 #endif
 
-    // Return the library and adapter for the current HIP device
+    // A shared_ptr that points at p's object without owning it, so copying and
+    // destroying it never touches p's reference count.
+    template <typename T>
+    std::shared_ptr<T> nonOwning(std::shared_ptr<T> const& p)
+    {
+        return std::shared_ptr<T>(std::shared_ptr<T>(), p.get());
+    }
+
+    // Return the library and adapter for the current HIP device. The library,
+    // device properties and hardware are owned by the static TensileHost and
+    // never replaced, so the out-params do not own them: every thread copying
+    // them would otherwise update reference counts in shared cache lines.
+    // Use nonOwning only for TensileHost-owned objects; hand out anything that
+    // can be replaced while a call uses it as an owning copy.
     TensileLite::hip::SolutionAdapter* get_library_and_adapter(
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>*
             library
@@ -3662,17 +3675,23 @@ namespace
 
         // If an adapter is found, it is assumed that the library is initialized
         if(library)
-            *library = host.get_library();
+            *library = nonOwning(host.get_library());
 #if ROCBLASLT_TENSILE_LAZY_LOAD
-        if(deviceProp)
-            *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
-        if(hardware)
-            *hardware = host.get_hardware(rocblaslt_internal_get_arch_name());
+        if(deviceProp || hardware)
+        {
+            int current = 0;
+            HIP_CHECK_EXC(hipGetDevice(&current));
+            const std::string& arch = rocblaslt_internal_get_arch_name(current);
+            if(deviceProp)
+                *deviceProp = nonOwning(host.get_device_property(arch));
+            if(hardware)
+                *hardware = nonOwning(host.get_hardware(arch));
+        }
 #else
         if(deviceProp)
-            *deviceProp = host.get_device_property();
+            *deviceProp = nonOwning(host.get_device_property());
         if(hardware)
-            *hardware = host.get_hardware();
+            *hardware = nonOwning(host.get_hardware());
 #endif
 
         return adapter;
