@@ -250,6 +250,7 @@ writable, is refused up front with exit status `2`):
 | `run.json` | settings, build context, sources (commit, sha256 of the config and problem files), per-problem candidates, strategy and seed |
 | `trials.jsonl` | one event per trial, build, result, confirmation call, re-queue, cancel and error (with its traceback) |
 | `rounds/NNNN-measure.csv`, `rounds/NNNN-confirm.csv` | the usual results CSV of each measure call; the `.json` next to it maps `problem_idx` to the request and holds the call's failure records |
+| `rounds/NNNN-build.json` | the kernels of each build call and the full error of each that failed (`trials.jsonl` keeps its first line) |
 | `artifacts/<kernel>.so` | the run's copy of each built kernel; only these copies are loaded, and one that changed since its build is refused |
 
 Exit status: `0` when every problem has a confirmed winner, `1` when any has
@@ -278,6 +279,11 @@ identity (`check_identity`): a library whose own name
 with an error naming both. The worker also reports that name as
 `loaded_kernel` in its raw output, for information only: the driver copies it
 into neither its rows nor its CSV.
+
+Console: builds print as in a full run; the search prints a line per build
+and per round (`[search] round N: ...`: proposals, admissions, builds against
+the cap, measurements, active problems, elapsed time and deadline) and one
+title line per measure call, named like its `rounds/` file.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`. If nearly every

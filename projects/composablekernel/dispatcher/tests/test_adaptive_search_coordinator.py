@@ -576,6 +576,27 @@ def test_binding_build_cap_strands_no_strategy(tmp_path, name):
     assert sum(co.ledger.trials.values()) >= 90, co.ledger.trials
 
 
+def test_progress_lines_per_round_and_build(tmp_path):
+    lines = []
+    ad = FakeAdapter({"P1": ABCD, "P2": ABCD}, fail_build={"D"})
+    co = AS.SearchCoordinator(
+        ad, settings(deadline_s=600), tmp_path / "out", clock=FakeClock(),
+        strategy_factory=scripted({"P1": [["A", "B"]], "P2": [["B", "D"], ["C"]]})[0],
+        log=lines.append)
+    co.run()
+    assert lines == [
+        "  [search] round 1: building 3 kernel(s) (0/20 builds); 0/600 s",
+        "  [search] round 1: 4 proposed, 4 admitted, 0 cached, 0 known failed, 0 past"
+        " the build cap; 2 built, 1 failed (3/20 builds); 3 measured, 3 ok; 1/2"
+        " problems active; 0/600 s",
+        "  [search] round 2: building 1 kernel(s) (3/20 builds); 0/600 s",
+        "  [search] round 2: 1 proposed, 1 admitted, 0 cached, 0 known failed, 0 past"
+        " the build cap; 1 built, 0 failed (4/20 builds); 1 measured, 1 ok; 0/2"
+        " problems active; 0/600 s",
+        "  [search] confirming 4 finalist(s) of 2 problem(s), 3 fresh call(s) each",
+    ]
+
+
 def test_build_cap_rotates_the_first_problem(tmp_path):
     # Round 2 starts with P2, so the last two builds of the cap go to P2.
     ad = FakeAdapter({"P1": ABCD, "P2": list("EFGH")})

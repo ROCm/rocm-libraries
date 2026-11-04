@@ -629,7 +629,7 @@ def worker_setup():
 
 def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_path,
                          base_env, csv_path, extra=None, *, record_failures=None,
-                         measured=None, device_of=None):
+                         measured=None, device_of=None, title=None):
     """Phase 3: fan (problem, kernel-batch) units out over device-pinned workers.
 
     ``pairs[i]`` lists the indices into ``built_kernels`` to run on
@@ -640,13 +640,17 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
     dicts (under the output lock); ``measured``, if given, is a list every CSV
     row is also appended to. ``device_of``, if given, names the device that
     runs every unit of ``problems[i]`` (the devices still run in parallel).
+    ``title``, if given, is printed as one line instead of the Phase 3 banner.
     """
-    print(f"\n{'=' * 80}")
-    print("Phase 3: Benchmark (multi-GPU, subprocess isolation, batched)")
-    print(f"{'=' * 80}")
-    print(f"  Devices: {len(devices)} -> {', '.join(devices)}")
-    print(f"  Batch size: {args.batch_size} kernels per subprocess")
-    print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
+    if title is None:
+        print(f"\n{'=' * 80}")
+        print("Phase 3: Benchmark (multi-GPU, subprocess isolation, batched)")
+        print(f"{'=' * 80}")
+        print(f"  Devices: {len(devices)} -> {', '.join(devices)}")
+        print(f"  Batch size: {args.batch_size} kernels per subprocess")
+        print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
+    else:
+        print(f"  {title} (timeout {args.kernel_timeout}s per kernel)", flush=True)
 
     csv_file = open(csv_path, "w", newline="")
     writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)

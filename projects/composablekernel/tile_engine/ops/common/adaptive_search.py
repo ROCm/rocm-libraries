@@ -631,8 +631,9 @@ class SearchCoordinator:
     ``pair_loader(path) -> {problem: [names] | "*"}`` reads
     ``warm_start.pairs_file`` (the GEMM driver passes its ``load_pair_list``),
     ``prior_loader(path) -> {problem: {kernel name: predicted latency ms}}``
-    reads ``warm_start.ranked_csv``. Invalid options raise ``SettingsError``
-    here, before any work.
+    reads ``warm_start.ranked_csv``. ``log``, if given, gets one progress line
+    per round and per build (the driver passes print). Invalid options raise
+    ``SettingsError`` here, before any work.
 
     Rounds: each active problem in turn (the first one rotates) re-admits its
     re-queued trials, then asks its strategy for at most ``batch_per_problem``
@@ -665,12 +666,14 @@ class SearchCoordinator:
         strategy_factory: Optional[StrategyFactory] = None,
         pair_loader: Optional[Callable[[str], Mapping]] = None,
         prior_loader: Optional[Callable[[str], Mapping]] = None,
+        log: Optional[Callable[[str], None]] = None,
     ):
         if not isinstance(settings, SearchSettings):
             settings = SearchSettings.from_json(settings)
         self.adapter = adapter
         self.settings = settings
         self.clock = clock
+        self.log = log
         self.strategy_factory = strategy_factory or _default_factory
         self.writer = RunWriter(out_dir)
         self.writer.check_fresh()
@@ -918,7 +921,27 @@ class SearchCoordinator:
                 return "build_cap"
             self._round += 1
             self.counts["rounds"] += 1
+            before = {k: v for k, v in self.counts.items() if isinstance(v, int)}
             stall = 0 if self._one_round(active) else stall + 1
+            self._log_round(before)
+
+    def _progress(self, line: str) -> None:
+        if self.log is not None:
+            took = f"{self.ledger.elapsed():.0f}"
+            if self.ledger.deadline_s is not None:
+                took += f"/{self.ledger.deadline_s:.0f}"
+            self.log(f"  [search] round {self._round}: {line}; {took} s")
+
+    def _log_round(self, before: Mapping[str, int]) -> None:
+        """One line: what the round did (counts since ``before``)."""
+        d = {k: self.counts[k] - v for k, v in before.items()}
+        self._progress(
+            f"{d['proposed']} proposed, {d['admitted']} admitted, {d['cached']} cached, "
+            f"{d['known_failed']} known failed, {d['past_build_cap']} past the build "
+            f"cap; {d['built']} built, {d['build_failed']} failed ({self.ledger.builds}/"
+            f"{self.ledger.new_builds_per_run} builds); {d['measured']} measured, "
+            f"{d['ok']} ok; {sum(not p.finished for p in self.problems)}/"
+            f"{len(self.problems)} problems active")
 
     def _one_round(self, active: List[_Problem]) -> bool:
         """Ask, admit, build, measure, tell. True when a trial got a result."""
@@ -1054,6 +1077,8 @@ class SearchCoordinator:
         return progress
 
     def _build(self, missing: List[Candidate], admitted) -> None:
+        self._progress(f"building {len(missing)} kernel(s) "
+                       f"({self.ledger.builds}/{self.ledger.new_builds_per_run} builds)")
         results = self._call("build_missing", self.adapter.build_missing, missing)
         want = {c.canonical_key for c in missing}
         if not isinstance(results, Mapping) or set(results) != want or not all(
@@ -1192,6 +1217,10 @@ class SearchCoordinator:
             for p in self.problems
         }
         calls = {(p.key, ck): [] for p, best in fins.items() for ck, _ in best}
+        if self.log is not None and calls:
+            self.log(f"  [search] confirming {len(calls)} finalist(s) of "
+                     f"{sum(1 for b in fins.values() if b)} problem(s), "
+                     f"{cf.fresh_calls} fresh call(s) each")
         for j in range(cf.fresh_calls):
             reqs = [
                 PairRequest(p.key, ck, p.by_key[ck].kernel_name, uid, self._call_id("c"))
@@ -1423,7 +1452,9 @@ def run_search(adapter: OperationAdapter, settings: SearchSettings, out_dir,
         print("  ERROR: no GPU to measure on (--devices)")
         return EXIT_USAGE
     try:
-        coordinator = SearchCoordinator(adapter, settings, out_dir, **loaders)
+        coordinator = SearchCoordinator(adapter, settings, out_dir,
+                                        log=lambda line: print(line, flush=True),
+                                        **loaders)
     except SettingsError as e:
         print(f"  ERROR: {e}")
         return EXIT_USAGE

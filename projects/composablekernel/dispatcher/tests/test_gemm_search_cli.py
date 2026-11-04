@@ -233,6 +233,9 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     assert (run["sampling_policy"], run["exhaustive"]) == ("adaptive", False)
     assert (run["context"]["arch"], run["context"]["variant"]) == ("gfx950", "standard")
     assert "SEARCH COMPLETE: 3/3 problems" in cap.out
+    # Progress: a line per round and build, a title per measure call, no banner.
+    assert "[search] round 1: building" in cap.out and "Phase 3" not in cap.out
+    assert "-measure: " in cap.out and "-confirm: " in cap.out
     # Today's driver re-checks the winners from the file as a --pairs list.
     rc, _, rebuilt, recalls = _main(monkeypatch, capsys, tmp_path, "--pairs",
                                     str(out / "winners.json"), "--verify")
@@ -304,7 +307,7 @@ def test_pairs_restricts_the_search_domain(monkeypatch, capsys, tmp_path):
                                          "--pairs", str(path), problems=problems)
     assert rc == 0, cap.out
     assert "the search builds only the kernels it proposes" in cap.out
-    assert "building" not in cap.out
+    assert "; building" not in cap.out  # the plain --pairs plan line
     domain = {k: [n for n in v if n in eligible[k]] for k, v in picks.items()}
     assert unpaired not in domain[KEYS[0]]
     assert set(built) <= {n for v in domain.values() for n in v}

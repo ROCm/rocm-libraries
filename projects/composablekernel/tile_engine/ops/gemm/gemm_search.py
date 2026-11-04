@@ -10,9 +10,10 @@ driver's own build and measure functions, which the driver passes in as
 - candidates: per problem, the kernels a full run would measure with it, one
   per kernel name (with ``--pairs``: only its problems, and the listed kernels
   among those);
-- builds: ``setup_multiple_gemm_dispatchers`` on the round's missing kernels;
-  each built .so goes into the run's ``ArtifactStore`` as
-  ``<out>/artifacts/<name>.so``;
+- builds: ``setup_multiple_gemm_dispatchers`` on the round's missing kernels,
+  verbose like a full run's; each built .so goes into the run's
+  ``ArtifactStore`` as ``<out>/artifacts/<name>.so``, and each call's full
+  build errors go to ``<out>/rounds/NNNN-build.json``;
 - measurements: ``benchmark_on_devices`` with --verify on, one kernel per worker
   and one problem entry per request, so every row and failure record belongs to
   exactly one request; the worker also checks that the library reports the
@@ -92,6 +93,7 @@ RUN_STATUS = {
 # plus that time, budgeted at 50 GFLOP/s for the reference: a rate the host
 # keeps with several device workers sharing its cores.
 VERIFY_HOST_FLOPS = 5e10
+BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 
 
 def verify_allowance_s(problem) -> int:
@@ -275,12 +277,18 @@ class GemmSearchAdapter:
     def build_missing(self, cands: Sequence[Candidate]) -> Dict[str, BuildResult]:
         errors: Dict[str, str] = {}
         paths = self.hooks.build(
-            [c.original_config for c in cands], verbose=False,
+            [c.original_config for c in cands], verbose=True,
             max_workers=self.args.workers, errors=errors,
             build_timeout=self.args.build_timeout,
         )
         if len(paths) != len(cands):
             raise RuntimeError(f"build returned {len(paths)} paths for {len(cands)} kernels")
+        log = self.calls.new("build", ".json")
+        self.calls.write_json(log, {
+            "kernels": [c.kernel_name for c in cands],
+            "errors": {c.kernel_name: str(errors.get(c.kernel_name, ""))[:BUILD_ERROR_CHARS]
+                       for c, lib in zip(cands, paths) if lib is None},
+        })
         out = {}
         for c, lib in zip(cands, paths):
             if lib is None:
@@ -308,6 +316,9 @@ class GemmSearchAdapter:
                 cfg = self.cands[r.candidate_key].original_config
                 built.append((cfg, self.store.path(r.candidate_key)))
         csv_path = self.calls.new(kind, ".csv")
+        keys = list(dict.fromkeys(r.problem_key for r in reqs))
+        title = (f"[search] {csv_path.stem}: {len(reqs)} request(s) on "
+                 + ", ".join(keys[:6]) + (", ..." if len(keys) > 6 else ""))
         rows, fails, pin = [], [], {}
         if kind == "confirm":  # a problem's finalists are compared on one GPU
             order = {key: i for i, key in enumerate(self.problems)}
@@ -320,7 +331,7 @@ class GemmSearchAdapter:
             problems, [[index[r.candidate_key]] for r in reqs],
             built, self.devices, margs, self.worker_path, self.base_env,
             csv_path, extra={"check_identity": True},
-            record_failures=fails.extend, measured=rows, **pin,
+            record_failures=fails.extend, measured=rows, title=title, **pin,
         )
         self.calls.write_json(csv_path, {
             "requests": [

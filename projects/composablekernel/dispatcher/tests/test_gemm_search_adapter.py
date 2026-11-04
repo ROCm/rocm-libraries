@@ -312,9 +312,13 @@ def test_build_gets_the_driver_options_and_reports_one_line(
     tc = Toolchain(tmp_path, monkeypatch, fail={B})
     ad = _adapter(tmp_path, tc.build, build_timeout=build_timeout, workers=5)
     res = ad.build_missing([ad.cands[n] for n in (A, B)])
-    assert tc.builds == [{"names": [A, B], "verbose": False, "max_workers": 5,
+    assert tc.builds == [{"names": [A, B], "verbose": True, "max_workers": 5,
                           "build_timeout": build_timeout}]
     assert res[B] == AS.BuildResult(None, "Compile failed: k.cpp:1:2: error: boom")
+    # The one-line reason goes to the events; the full error is kept on disk.
+    log = json.loads((tmp_path / "out" / "rounds" / "0001-build.json").read_text())
+    assert log == {"kernels": [A, B],
+                   "errors": {B: "Compile failed: k.cpp:1:2: error: boom\nmore"}}
     art = tmp_path / "out" / "artifacts" / f"{A}.so"
     assert res[A] == AS.BuildResult(str(art), digest=hashlib.sha256(
         A.encode()).hexdigest())
@@ -354,10 +358,10 @@ def test_failed_build_compacts_indices_and_stale_files_are_never_loaded(
     assert all(B not in it["so_path"] for p in tc.payloads for it in p["items"])
     # The round's CSV holds both rows; its JSON maps problem_idx to the request.
     rounds = tmp_path / "out" / "rounds"
-    with open(rounds / "0001-measure.csv", newline="") as f:
+    with open(rounds / "0002-measure.csv", newline="") as f:
         assert [(r["kernel"], r["problem_idx"]) for r in csv.DictReader(f)] == [
             (A, "0"), (C, "1")]
-    side = json.loads((rounds / "0001-measure.json").read_text())
+    side = json.loads((rounds / "0002-measure.json").read_text())
     assert [(r["problem_idx"], r["call_id"]) for r in side["requests"]] == [
         (0, "d1"), (1, "d3")]
 
@@ -394,8 +398,8 @@ def test_rows_and_failures_belong_to_their_request(tmp_path, monkeypatch):
     (o,) = ad.confirm([AS.PairRequest(K2, A, A, f"{K2}:2", "c5")])
     assert o.status == "ok"
     names = sorted(p.name for p in (tmp_path / "out" / "rounds").iterdir())
-    assert names == ["0001-measure.csv", "0001-measure.json", "0002-confirm.csv",
-                     "0002-confirm.json"]
+    assert names == ["0001-build.json", "0002-measure.csv", "0002-measure.json",
+                     "0003-confirm.csv", "0003-confirm.json"]
 
 
 def test_attribution_holds_across_devices(tmp_path, monkeypatch):
