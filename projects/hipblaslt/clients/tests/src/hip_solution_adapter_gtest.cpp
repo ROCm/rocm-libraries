@@ -30,6 +30,7 @@
 namespace
 {
     constexpr char primary[] = "/library/primary.co";
+    constexpr char other[]   = "/library/other.co";
     constexpr char helper[]  = "/library/Kernels.so-000-gfx942.hsaco";
     constexpr char minus[]   = "/library/Kernels.so-000-gfx942-xnack-.hsaco";
     constexpr char plus[]    = "/library/Kernels.so-000-gfx942-xnack+.hsaco";
@@ -240,6 +241,28 @@ namespace
         EXPECT_EQ(adapter->numRotationModules(), 1);
         EXPECT_EQ(loads.unloads, 4u);
         EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    // Recovery marks every loaded file as not loaded, so the next lookup loads
+    // it again instead of trusting a module that recovery unloaded.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_FindCodeObjectReloadsAfterRecovery)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+
+        expectLoad(primary, GetParam());
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 2u);
+
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
     }
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS

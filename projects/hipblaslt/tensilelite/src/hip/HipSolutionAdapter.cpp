@@ -175,9 +175,13 @@ namespace TensileLite
                 std::lock_guard<std::mutex> guard(m_access);
                 m_modules.clear();
                 m_loadedModuleNames.clear();
-                m_loadedCOFiles.clear();
+                m_loadedCOFiles.forEachValue([](std::atomic<bool>& loaded) {
+                    loaded.store(false, std::memory_order_release);
+                });
                 m_helperKernelPath.clear();
-                m_kernels.clear();
+                m_kernels.forEachValue([](std::atomic<hipFunction_t>& kernel) {
+                    kernel.store(nullptr, std::memory_order_release);
+                });
                 m_extraModuleCopies.clear();
                 m_extraKernels.clear();
                 m_currentRotationCopy.store(0);
@@ -224,7 +228,8 @@ namespace TensileLite
                 std::string fileName(path.begin() + start, path.end());
                 if(fileName.rfind("Kernels.so-000-", 0) == 0)
                     m_helperKernelPath = path;
-                m_loadedCOFiles.insert(removeXnack(fileName));
+                m_loadedCOFiles.insert(removeXnack(fileName), true)
+                    .store(true, std::memory_order_release);
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -551,14 +556,15 @@ namespace TensileLite
             }
 #endif
             //If required code object file hasn't yet been loaded, load it now
-            m_access.lock();
-            bool loaded = m_loadedCOFiles.find(removeXnack(codeObjectFile))
-                          != m_loadedCOFiles.end();
-            std::string codeObjectDir = m_codeObjectDirectory;
-            m_access.unlock();
+            auto const* entry  = m_loadedCOFiles.find(removeXnack(codeObjectFile));
+            bool        loaded = entry && entry->load(std::memory_order_acquire);
 
             if(!loaded)
             {
+                m_access.lock();
+                std::string codeObjectDir = m_codeObjectDirectory;
+                m_access.unlock();
+
                 //Try other xnack versions
                 size_t     loc = codeObjectFile.rfind('.');
                 hipError_t err;
@@ -598,9 +604,24 @@ namespace TensileLite
             return hipSuccess;
         }
 
+        hipFunction_t SolutionAdapter::cachedKernel(std::string const& name) const
+        {
+            auto const* entry = m_kernels.find(name);
+            return entry ? entry->load(std::memory_order_acquire) : nullptr;
+        }
+
         hipError_t SolutionAdapter::getKernel(hipFunction_t& rv, std::string const& name)
         {
             int copyIdx = m_currentRotationCopy.load();
+
+            if(copyIdx == 0)
+            {
+                if(hipFunction_t cached = cachedKernel(name))
+                {
+                    rv = cached;
+                    return hipSuccess;
+                }
+            }
 
             std::unique_lock<std::mutex> guard(m_access);
             hipError_t                   err = hipErrorNotFound;
@@ -613,13 +634,21 @@ namespace TensileLite
             if(copyIdx <= 0 || copyIdx > (int)m_extraModuleCopies.size())
                 copyIdx = 0;
 
-            auto&       cache   = copyIdx ? m_extraKernels[copyIdx - 1] : m_kernels;
             auto const& modules = copyIdx ? m_extraModuleCopies[copyIdx - 1] : m_modules;
 
-            auto it = cache.find(name);
-            if(it != cache.end())
+            if(copyIdx)
             {
-                rv = it->second;
+                auto& cache = m_extraKernels[copyIdx - 1];
+                auto  it    = cache.find(name);
+                if(it != cache.end())
+                {
+                    rv = it->second;
+                    return hipSuccess;
+                }
+            }
+            else if(hipFunction_t cached = cachedKernel(name))
+            {
+                rv = cached;
                 return hipSuccess;
             }
 
@@ -629,7 +658,10 @@ namespace TensileLite
 
                 if(err == hipSuccess)
                 {
-                    cache[name] = rv;
+                    if(copyIdx)
+                        m_extraKernels[copyIdx - 1][name] = rv;
+                    else
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
                     return err;
                 }
                 else if(err != hipErrorNotFound)
@@ -646,10 +678,9 @@ namespace TensileLite
             // original m_modules so multi-kernel launches still resolve.
             if(copyIdx > 0)
             {
-                auto origIt = m_kernels.find(name);
-                if(origIt != m_kernels.end())
+                if(hipFunction_t cached = cachedKernel(name))
                 {
-                    rv = origIt->second;
+                    rv = cached;
                     return hipSuccess;
                 }
 
@@ -659,7 +690,7 @@ namespace TensileLite
 
                     if(err == hipSuccess)
                     {
-                        m_kernels[name] = rv;
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
                         return err;
                     }
                     else if(err != hipErrorNotFound)
@@ -809,8 +840,8 @@ namespace TensileLite
                 lazyDir                      = m_codeObjectDirectory;
                 std::string helperKernelName = std::string("Kernels.so-000-") + lazyArch;
                 // If required code object file hasn't yet been loaded, load it now.
-                loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
-                         != m_loadedCOFiles.end();
+                auto const* entry = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco");
+                loaded            = entry && entry->load(std::memory_order_acquire);
             }
 
             if(!loaded)
