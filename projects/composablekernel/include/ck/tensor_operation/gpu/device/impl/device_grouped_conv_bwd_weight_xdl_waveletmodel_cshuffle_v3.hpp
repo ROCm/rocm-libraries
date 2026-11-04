@@ -690,7 +690,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
 
             // Calculate stride using GetElementSpaceSize for accurate stride
             split_k_stride_a_ = a_grid_desc_k0_m_k1_.GetElementSpaceSize();
-            if(split_k_offset_hack_)
+            if(split_k_offset_hack_ && !UseTdm)
                 split_k_stride_a_ /= this->k_batch_;
 
             split_k_stride_b_ = b_grid_desc_k0_n_k1_.GetElementSpaceSize();
