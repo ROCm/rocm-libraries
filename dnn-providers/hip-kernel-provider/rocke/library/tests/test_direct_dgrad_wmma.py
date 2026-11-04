@@ -233,11 +233,13 @@ class TestDgradWmmaSpec(unittest.TestCase):
         n_rejected = 0
         for arch in ("gfx1250", "gfx950"):
             for i, spec in enumerate(specs):
-                ok, _, name, grid, lds = eng.conv_direct_dgrad_wmma_describe(
+                ok, why_c, name, grid, lds = eng.conv_direct_dgrad_wmma_describe(
                     conv_direct_dgrad_wmma_spec_to_dict(spec), arch
                 )
                 why = dgrad_wmma_reason(spec, arch)
                 self.assertEqual(ok, why is None, (arch, spec, why))
+                if why is not None:
+                    self.assertEqual(why_c, why, (arch, spec))
                 self.assertEqual(name, spec.kernel_name())
                 self.assertEqual(lds, spec.lds_bytes())
                 if why is None:
@@ -253,6 +255,26 @@ class TestDgradWmmaSpec(unittest.TestCase):
                         n_rejected += 1
         # Every extra spec is a reject on gfx1250.
         self.assertEqual(n_rejected, len(specs) - n_grid)
+
+    def test_engines_quote_the_scheduler_like_repr(self):
+        """The C++ refusal of an unknown scheduler quotes the name as Python's
+        ``{value!r}`` does: the quote character, the escapes, a printable
+        non-ASCII name (the subset rocke_py_str_repr documents)."""
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+
+        for name in ("bogus", "it's", "a\\b", "x'\"y", "tab\there", "caf\u00e9"):
+            with self.subTest(name=name):
+                spec = DirectDgradWmmaSpec(problem=_problem(), sched=name)
+                why = dgrad_wmma_reason(spec, "gfx1250")
+                self.assertTrue(
+                    why.startswith(f"unsupported scheduler_strategy {name!r};"), why
+                )
+                ok, why_c, *_ = eng.conv_direct_dgrad_wmma_describe(
+                    conv_direct_dgrad_wmma_spec_to_dict(spec), "gfx1250"
+                )
+                self.assertFalse(ok)
+                self.assertEqual(why_c, why)
 
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
