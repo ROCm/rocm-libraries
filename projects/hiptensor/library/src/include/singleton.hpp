@@ -33,8 +33,13 @@
 namespace hiptensor
 {
 
+    // Not exported: each module (the library, hiptensor_host_reference, a test) gets its own
+    // instantiation. With HIPTENSOR_EXPORT on the template, every specialization is dllimport
+    // outside the DLL on Windows, so singletons the DLL does not define (the CPU references,
+    // the test resources) fail to link. Singletons that must be shared across modules
+    // (HiptensorOptions, Logger) define a non-template instance() in the library instead.
     template <typename T>
-    class HIPTENSOR_EXPORT LazySingleton
+    class LazySingleton
     {
     public:
         static inline std::unique_ptr<T> const& instance()
