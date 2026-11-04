@@ -50,7 +50,6 @@ from codegen_common import (  # noqa: E402
     gemm_vector_size_sweep,
     resolve_gemm_vector_sizes,
     streamk_c_reject_reason,
-    STREAMK_REDUCTION_STRATEGIES,
 )
 from unified_gemm_codegen import (  # noqa: E402
     CKTileKernelGenerator,
@@ -60,7 +59,7 @@ from unified_gemm_codegen import (  # noqa: E402
     TraitConfig,
     UnifiedGemmCodegen,
 )
-from gemm_utils import GemmKernelConfig  # noqa: E402
+from gemm_utils import STREAMK_REDUCTION_STRATEGIES, GemmKernelConfig  # noqa: E402
 from gemm_vector_fallback import VectorFallback, _tile_fits  # noqa: E402
 
 TILE = dict(tile=(256, 256, 64), waves=(2, 2, 1), warp_tile=(32, 32, 16))

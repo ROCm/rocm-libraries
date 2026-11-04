@@ -811,7 +811,6 @@ _VEC_ELEMENT_BYTES = {
 }
 # Smallest C store, in bytes, that Stream-K's atomic reduction can add into C.
 _STREAMK_ATOMIC_MIN_C_BYTES = 4
-STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
 
 
 def streamk_c_reject_reason(
