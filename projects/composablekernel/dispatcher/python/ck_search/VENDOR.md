@@ -108,6 +108,11 @@ Checked by `tests/test_ck_search_core.py`:
 
 - Tell every trial before the next ask. Then an empty ask means the strategy
   is done (`strategy.done` is true and nothing is pending).
+- Attach a timing noise model, as upstream's `run_search` does
+  (`strategy.attach_noise(NoiseModel())`; a portfolio passes it to its
+  members). Without one, `gain_threshold` returns its floor, so hill moves
+  its center and the portfolio rewards a member on a 0.2 % or 0.1 % gain,
+  well inside call-to-call timing noise.
 - A portfolio may return the same config twice in one ask: its members do not
   see each other's pending asks, and upstream the evaluator answers the repeat
   from its cache. Measure a key once per batch and tell the repeat as an

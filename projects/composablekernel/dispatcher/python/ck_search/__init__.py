@@ -17,6 +17,7 @@ Importing this package needs only the standard library and NumPy.
 from .factory import STRATEGY_NAMES, make_strategy
 from .params import Param, SearchSpace
 from .portfolio import WarmStart
+from .stats import NoiseModel
 from .surrogate import TablePrior
 from .trial import Fidelity, Observation, Status, Trial
 
@@ -27,6 +28,7 @@ __all__ = [
     "ORIGIN_SHA",
     "STRATEGY_NAMES",
     "Fidelity",
+    "NoiseModel",
     "Observation",
     "Param",
     "SearchSpace",

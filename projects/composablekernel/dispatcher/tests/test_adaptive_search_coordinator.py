@@ -1007,6 +1007,20 @@ def test_warm_starts_reach_the_real_strategies(tmp_path, name):
     assert co.ledger.trials["64x512x512"] == len(ad.measured) <= 10
 
 
+def test_every_strategy_shares_the_runs_noise_model(tmp_path):
+    ad = GridAdapter(["64x512x512", "256x512x512"])
+    co = AS.SearchCoordinator(
+        ad, settings(strategy="portfolio", trials_per_problem=6, new_builds_per_run=24),
+        tmp_path / "out", clock=FakeClock())
+    co.run()
+    assert isinstance(co.noise, ck_search.NoiseModel)
+    for p in co.problems:
+        assert p.strategy.noise is co.noise
+        assert all(m.noise is co.noise for m in p.strategy.members)
+    meta = strict(tmp_path / "out" / "run.json")
+    assert meta["ck_search"]["noise_model"]["floor"] == co.noise.floor
+
+
 def test_prior_reaches_the_real_strategy(tmp_path, monkeypatch):
     made, real = [], ck_search.make_strategy
 

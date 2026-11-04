@@ -369,6 +369,18 @@ def test_factory_reproduces_upstream_defaults():
             cs.make_strategy(name, space, options=options)
 
 
+@pytest.mark.parametrize("name, floor", [("hill", 0.002), ("portfolio", 0.001)])
+def test_attached_noise_model_raises_the_gain_threshold(name, floor):
+    # Without a noise model a gain just above min_gain counts; the default
+    # model (as upstream's run_search attaches) asks for about 1 % on one sample.
+    st = cs.make_strategy(name, cs.SearchSpace.from_configs(RECORDS), 0)
+    assert st.gain_threshold(floor, 1) == floor
+    noise = cs.NoiseModel()
+    st.attach_noise(noise)
+    assert st.gain_threshold(floor, 1) > 0.009
+    assert all(m.noise is noise for m in getattr(st, "members", ()))
+
+
 def test_failed_observation_is_strict_json():
     space = cs.SearchSpace.from_configs(RECORDS[:6])
     t = cs.make_strategy("random", space).ask(1)[0]

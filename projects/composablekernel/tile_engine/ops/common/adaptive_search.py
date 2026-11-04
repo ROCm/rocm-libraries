@@ -657,6 +657,7 @@ class SearchCoordinator:
         self._round = 0
         self._ck = None
         self._run_json = None
+        self.noise = None  # the timing noise model shared by every strategy
 
     # ------------------------------------------------------------ public
 
@@ -668,6 +669,7 @@ class SearchCoordinator:
             self.settings.deadline_s, self.clock,
         )
         self._ck = _ck_search()
+        self.noise = self._ck.NoiseModel()
         stop, error, winners, broken = "error", "", {}, False
         try:
             try:
@@ -746,6 +748,10 @@ class SearchCoordinator:
                 warm = self._warm_records(p)
                 prior = self._prior(p)
             p.strategy = self.strategy_factory(p.strategy_name, p.space, p.seed, warm, prior)
+            # As upstream's run loop does: a gain counts only beyond timing noise.
+            attach = getattr(p.strategy, "attach_noise", None)
+            if attach is not None:
+                attach(self.noise)
         self._run_json = {
             "schema_version": SCHEMA_VERSION,
             "sampling_policy": "adaptive",
@@ -755,6 +761,7 @@ class SearchCoordinator:
             "ck_search": {
                 "origin_sha": getattr(self._ck, "ORIGIN_SHA", ""),
                 "strategies": list(getattr(self._ck, "STRATEGY_NAMES", ())),
+                "noise_model": self.noise.to_json(),
             },
             "problems": {
                 p.key: {
