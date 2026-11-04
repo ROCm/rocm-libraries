@@ -10,6 +10,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt_float8.h>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -234,7 +235,7 @@ namespace
     constexpr int64_t kM = 37, kN = 19, kK = 11;
 
     template <typename T>
-    void runCase(hipblasLtHandle_t handle, const Case& tc)
+    void runCase(hipblasLtHandle_t handle, const Case& tc, bool pointerArray = false)
     {
         SCOPED_TRACE(tc.name());
         const bool   tA = tc.opA == HIPBLAS_OP_T, tB = tc.opB == HIPBLAS_OP_T;
@@ -242,11 +243,17 @@ namespace
         const Stored sB = stored(tB ? kN : kK, tB ? kK : kN, tc.batch, tc.orderB);
         const Stored sC = stored(kM, kN, tc.batch, HIPBLASLT_ORDER_COL);
 
+        const std::array<int64_t, 4> offsets = pointerArray ? std::array<int64_t, 4>{16, 32, 48, 64}
+                                                            : std::array<int64_t, 4>{0, 0, 0, 0};
+        auto                         uploadWithOffset = [](std::vector<T> host, int64_t offset) {
+            host.insert(host.begin(), offset, T(0));
+            return upload(host);
+        };
         const float        alpha = 2.0f, beta = 3.0f;
-        const DeviceBuffer dA = upload(fill<T>(sA, valueA));
-        const DeviceBuffer dB = upload(fill<T>(sB, valueB));
-        const DeviceBuffer dC = upload(fill<T>(sC, valueC));
-        const DeviceBuffer dD = upload(std::vector<T>(sC.elements(), T(0)));
+        const DeviceBuffer dA = uploadWithOffset(fill<T>(sA, valueA), offsets[0]);
+        const DeviceBuffer dB = uploadWithOffset(fill<T>(sB, valueB), offsets[1]);
+        const DeviceBuffer dC = uploadWithOffset(fill<T>(sC, valueC), offsets[2]);
+        const DeviceBuffer dD = uploadWithOffset(std::vector<T>(sC.elements(), T(0)), offsets[3]);
         const DeviceBuffer work(kWorkspace);
 
         const DescPtr desc = makeDesc();
@@ -255,6 +262,34 @@ namespace
         const LayoutPtr lA = makeLayout(tc.type, sA), lB = makeLayout(tc.type, sB);
         const LayoutPtr lC = makeLayout(tc.type, sC), lD = makeLayout(tc.type, sC);
         const PrefPtr   pref = makePref(kWorkspace);
+
+        std::array<void*, 4>      data{dA.get(), dB.get(), dC.get(), dD.get()};
+        std::vector<DeviceBuffer> pointerBuffers;
+        if(pointerArray)
+        {
+            const std::array<hipblasLtMatrixLayout_t, 4> layouts{
+                lA.get(), lB.get(), lC.get(), lD.get()};
+            const std::array<Stored, 4> storage{sA, sB, sC, sC};
+            const auto                  mode = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            for(size_t i = 0; i < data.size(); ++i)
+            {
+                ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                              layouts[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode)),
+                          HIPBLAS_STATUS_SUCCESS);
+                ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(layouts[i],
+                                                            HIPBLASLT_MATRIX_LAYOUT_OFFSET,
+                                                            &offsets[i],
+                                                            sizeof(offsets[i])),
+                          HIPBLAS_STATUS_SUCCESS);
+                std::vector<void*> pointers;
+                // Reverse the batch order so treating the first pointer as a strided
+                // allocation cannot accidentally produce the expected result.
+                for(int64_t b = tc.batch; b-- > 0;)
+                    pointers.push_back(static_cast<T*>(data[i]) + b * storage[i].stride());
+                pointerBuffers.push_back(upload(pointers));
+                data[i] = pointerBuffers.back().get();
+            }
+        }
 
         hipblasLtMatmulHeuristicResult_t result{};
         int                              returned = 0;
@@ -273,14 +308,14 @@ namespace
         ASSERT_EQ(hipblasLtMatmul(handle,
                                   desc.get(),
                                   &alpha,
-                                  dA.get(),
+                                  data[0],
                                   lA.get(),
-                                  dB.get(),
+                                  data[1],
                                   lB.get(),
                                   &beta,
-                                  dC.get(),
+                                  data[2],
                                   lC.get(),
-                                  dD.get(),
+                                  data[3],
                                   lD.get(),
                                   &result.algo,
                                   work.get(),
@@ -290,7 +325,10 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         std::vector<T> hD(sC.elements());
-        ASSERT_EQ(hipMemcpy(hD.data(), dD.get(), hD.size() * sizeof(T), hipMemcpyDeviceToHost),
+        ASSERT_EQ(hipMemcpy(hD.data(),
+                            static_cast<T*>(dD.get()) + offsets[3],
+                            hD.size() * sizeof(T),
+                            hipMemcpyDeviceToHost),
                   hipSuccess);
         expectProduct(hD, sC, kK, tA, tB, alpha, beta);
     }
@@ -332,6 +370,15 @@ namespace
                                     runCase<float>(handle, tc);
                             }
             }
+    }
+
+    TEST_F(RowOrderMatmul, smoke_PointerArrayBatchesMatchReference)
+    {
+        for(auto opA : {HIPBLAS_OP_N, HIPBLAS_OP_T})
+            for(auto opB : {HIPBLAS_OP_N, HIPBLAS_OP_T})
+                for(auto oA : {HIPBLASLT_ORDER_COL, HIPBLASLT_ORDER_ROW})
+                    for(auto oB : {HIPBLASLT_ORDER_COL, HIPBLASLT_ORDER_ROW})
+                        runCase<float>(handle, {HIP_R_32F, opA, opB, oA, oB, 3}, true);
     }
 
     // Runs one scalar-scaled FP8 GEMM with the given orders and transposes, and checks D. Each
