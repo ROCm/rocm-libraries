@@ -497,6 +497,103 @@ namespace
         EXPECT_EQ(hD, (std::vector<float>{38, 83, 44, 98, 50, 113, 56, 128}));
     }
 
+    // A bias vector and an alpha vector have one value per row of D. The rewrite transposes only
+    // A and B, so with row-major A and B both must still apply to the rows of D.
+    TEST_F(RowOrderMatmul, smoke_RowVectorsFollowD)
+    {
+        const Stored sA = stored(kM, kK, 1, HIPBLASLT_ORDER_ROW);
+        const Stored sB = stored(kK, kN, 1, HIPBLASLT_ORDER_ROW);
+        const Stored sC = stored(kM, kN, 1, HIPBLASLT_ORDER_COL);
+
+        std::vector<float> rowValues(kM);
+        for(int64_t i = 0; i < kM; i++)
+            rowValues[i] = float(i % 5 - 2);
+        const float        alpha = 2.0f, beta = 3.0f;
+        const DeviceBuffer dA       = upload(fill<float>(sA, valueA));
+        const DeviceBuffer dB       = upload(fill<float>(sB, valueB));
+        const DeviceBuffer dC       = upload(fill<float>(sC, valueC));
+        const DeviceBuffer dRowData = upload(rowValues);
+        const DeviceBuffer work(kWorkspace);
+        const LayoutPtr    lA = makeLayout(HIP_R_32F, sA), lB = makeLayout(HIP_R_32F, sB);
+        const LayoutPtr    lC = makeLayout(HIP_R_32F, sC), lD = makeLayout(HIP_R_32F, sC);
+        const PrefPtr      pref = makePref(kWorkspace);
+
+        for(const bool alphaVector : {false, true})
+        {
+            SCOPED_TRACE(alphaVector ? "alpha vector" : "bias");
+            const DescPtr desc     = makeDesc();
+            const void*   alphaPtr = &alpha;
+            if(alphaVector)
+            {
+                setAttribute(desc.get(),
+                             HIPBLASLT_MATMUL_DESC_POINTER_MODE,
+                             HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST);
+                alphaPtr = dRowData.get();
+            }
+            else
+            {
+                setAttribute(desc.get(), HIPBLASLT_MATMUL_DESC_EPILOGUE, HIPBLASLT_EPILOGUE_BIAS);
+                setAttribute(desc.get(), HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, HIP_R_32F);
+                setAttribute(desc.get(), HIPBLASLT_MATMUL_DESC_BIAS_POINTER, dRowData.get());
+            }
+            const DeviceBuffer dD = upload(std::vector<float>(sC.elements(), 0.0f));
+
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = 0;
+            ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                      desc.get(),
+                                                      lA.get(),
+                                                      lB.get(),
+                                                      lC.get(),
+                                                      lD.get(),
+                                                      pref.get(),
+                                                      1,
+                                                      &result,
+                                                      &returned),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_GT(returned, 0);
+            ASSERT_EQ(hipblasLtMatmul(handle,
+                                      desc.get(),
+                                      alphaPtr,
+                                      dA.get(),
+                                      lA.get(),
+                                      dB.get(),
+                                      lB.get(),
+                                      &beta,
+                                      dC.get(),
+                                      lC.get(),
+                                      dD.get(),
+                                      lD.get(),
+                                      &result.algo,
+                                      work.get(),
+                                      kWorkspace,
+                                      nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<float> hD(sC.elements());
+            ASSERT_EQ(
+                hipMemcpy(hD.data(), dD.get(), hD.size() * sizeof(float), hipMemcpyDeviceToHost),
+                hipSuccess);
+
+            int mismatches = 0;
+            for(int64_t i = 0; i < kM; i++)
+                for(int64_t j = 0; j < kN; j++)
+                {
+                    float sum = 0;
+                    for(int64_t l = 0; l < kK; l++)
+                        sum += valueA(0, i, l) * valueB(0, l, j);
+                    const float expected
+                        = alphaVector ? rowValues[i] * sum + beta * valueC(0, i, j)
+                                      : alpha * sum + beta * valueC(0, i, j) + rowValues[i];
+                    const float actual = hD[sC.index(0, i, j)];
+                    if(actual != expected && mismatches++ < 3)
+                        ADD_FAILURE() << "D(" << i << ", " << j << ") is " << actual
+                                      << ", expected " << expected;
+                }
+            EXPECT_EQ(mismatches, 0);
+        }
+    }
+
     struct Guard
     {
         std::string                                name;
