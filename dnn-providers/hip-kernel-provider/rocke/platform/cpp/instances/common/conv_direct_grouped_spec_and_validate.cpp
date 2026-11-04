@@ -3065,11 +3065,7 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
         {
             return ROCKE_ERR_VALUE;
         }
-        if(reason != NULL && reason_cap > 0)
-        {
-            strncpy(reason, "ok", reason_cap);
-            reason[reason_cap - 1] = '\0';
-        }
+        rocke_spec_set_reason(reason, reason_cap, "ok");
         return ROCKE_OK;
     }
     if(p->kpg < spec->wave_tile_k)
@@ -3223,11 +3219,7 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         {
             ROCKE_DCONV_WGRAD_REJECT("missing wmma 16x16x32 %s on %s", ab, arch);
         }
-        if(reason != NULL && reason_cap > 0)
-        {
-            strncpy(reason, "ok", reason_cap);
-            reason[reason_cap - 1] = '\0';
-        }
+        rocke_spec_set_reason(reason, reason_cap, "ok");
         return true;
     }
     if(p->kpg < spec->wave_tile_k)
@@ -3323,11 +3315,7 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
             {
                 ROCKE_DCONV_WGRAD_REJECT("missing wmma 16x16x32 %s on %s", ab, arch);
             }
-            if(reason != NULL && reason_cap > 0)
-            {
-                strncpy(reason, "ok", reason_cap);
-                reason[reason_cap - 1] = '\0';
-            }
+            rocke_spec_set_reason(reason, reason_cap, "ok");
             return true;
         }
         if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
@@ -4570,11 +4558,7 @@ bool rocke_direct_depthwise_wgrad_is_valid_spec(const rocke_direct_depthwise_wgr
                               target->lds_capacity_bytes,
                               arch);
     }
-    if(reason != NULL && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 
 #undef ROCKE_DW_WGRAD_REJECT
