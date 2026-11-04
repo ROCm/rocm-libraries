@@ -376,6 +376,35 @@ echo '*.kdp.json diff=kdp' >> "$(git rev-parse --git-path info/attributes)"
 The splice tool appends rather than interleaves, so its output reads as pure insertion
 under every algorithm.
 
+### Shipping a trained model
+
+`uhd_gen promote` copies a trained model into the bundle's `heuristics/` subtree and adds
+its UHD id to the UED, per arch: `sort_kernel_catalog.<arch>` after `default`, or a new
+role (`predict_engine`, `predict_applicable_kernels`) at the end of the document. The
+generator writes the UED too, so record the same binding in the config, or the next
+regeneration drops it (and the regeneration gate's byte compare fails):
+
+1. Run `uhd_gen promote` on the bundle. It prints the arch and the model's UHD id.
+2. Add them to `engine.heuristics`, in the order promote added them:
+
+   ```yaml
+   engine:
+     heuristics:
+       sort_kernel_catalog:
+         gfx942: [4b750e22-2656-46ce-89e7-be9ba588d732]
+   ```
+
+3. Regenerate. The UED comes out byte-identical to the promoted one; nothing else
+   changes, and the reader still resolves the native UHD from `default` only, so the
+   model UHD under `heuristics/` mints and reuses no id.
+4. `dvc add heuristics` in the bundle directory, and commit the `.dvc` pointer.
+
+Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
+`gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
+is the generator's native UHD (so that role also needs `heuristic: native`). Values are
+non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
+per slot. Without `engine.heuristics` every output is unchanged.
+
 ## Output
 
 The descriptor directory mirrors the authored root, so the emitted tree copies across
@@ -883,6 +912,9 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
+    sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
+      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
