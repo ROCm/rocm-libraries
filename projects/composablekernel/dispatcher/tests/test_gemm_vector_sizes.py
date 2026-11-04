@@ -681,29 +681,14 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
     )
     ALL_STRATEGIES = list(STREAMK_REDUCTION_STRATEGIES)
 
-    @contextlib.contextmanager
-    def _config(self, strategies, codegen_json=None):
-        """Write a config listing ``strategies``: the gfx1250 sweep in the Tile
-        Engine format (``{"values": [...]}``), or ``codegen_json`` as is."""
-        config = codegen_json or json.loads(self.CONFIG.read_text())
-        listed = strategies if codegen_json else {"values": strategies}
-        config["streamk_config"] = {"reduction_strategy": listed}
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "config.json"
-            path.write_text(json.dumps(config))
-            yield path
-
     def _expand(self, layout, problem, strategies):
         from gemm_utils import expand_sweep
 
-        # The config lists every strategy, so the tests also pin that
-        # reduction_strategies replaces that list rather than adding to it.
         vfb = VectorFallback([problem], layout, "bf16", "stream_k")
-        with self._config(self.ALL_STRATEGIES) as path:
-            cfgs = expand_sweep(
-                str(path), "gfx1250", dtype="bf16", layout=layout, variant="stream_k",
-                reduction_strategies=strategies, **vfb.expand_kwargs,
-            )
+        cfgs = expand_sweep(
+            str(self.CONFIG), "gfx1250", dtype="bf16", layout=layout, variant="stream_k",
+            reduction_strategies=strategies, **vfb.expand_kwargs,
+        )
         return [c for c in cfgs if any(c.vector_sizes)], vfb.rejects
 
     def test_misaligned_shapes_get_fixed_width_kernels(self):
@@ -749,12 +734,15 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
             ("rcr", (8, 1, 2), self.ALL_STRATEGIES, None),
         ):
             config = _bridge_config(vec, variant="stream_k")[0].to_codegen_json()
+            config["streamk_config"] = {"reduction_strategy": self.ALL_STRATEGIES}
             # Record the reject log directly; assertLogs would also need an
             # unrelated INFO line in the clean case.
-            with self._config(self.ALL_STRATEGIES, config) as path, mock.patch(
+            with tempfile.TemporaryDirectory() as d, mock.patch(
                 "unified_gemm_codegen.log"
             ) as log:
-                gen = UnifiedGemmCodegen(path.parent, "bf16", layout, "gfx950", path)
+                path = Path(d) / "config.json"
+                path.write_text(json.dumps(config))
+                gen = UnifiedGemmCodegen(Path(d), "bf16", layout, "gfx950", path)
                 kernels = gen._get_configs_for_variant(GemmVariant.STREAM_K)
             with self.subTest(layout=layout, vec=vec):
                 self.assertEqual([k.reduction_strategy for k in kernels], expected)
@@ -803,26 +791,21 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
 
     def test_invalid_stream_k_sweeps_raise(self):
         # No strategy has a kernel for a column-major C (the CShuffle epilogue
-        # static_asserts a row-major C), and an unknown strategy, in the config file
-        # or the override, or the override with another variant is a caller error.
-        # All raise and say why instead of sweeping nothing.
+        # static_asserts a row-major C), and the override is Stream-K only: both
+        # raise and say why instead of sweeping nothing. Unknown strategy names
+        # are covered with the bridge, in test_streamk_gfx1250.py.
         from gemm_utils import expand_sweep
 
-        every = self.ALL_STRATEGIES
         row_major_c = r"row-major C .*'rrc'; valid: \['ccr', 'crr', 'rcr', 'rrr'\]"
-        cases = [
-            ("rcr", "stream_k", ["Atomic"], None, "Unknown Stream-K"),
-            ("rcr", "stream_k", every, ["linaer"], "Unknown Stream-K"),
-            ("rcr", "standard", every, ["linear"], "Stream-K only"),
-        ] + [("rrc", "stream_k", every, [s], row_major_c) for s in every]
-        for layout, variant, listed, override, error in cases:
-            with self.subTest(layout=layout, listed=listed, override=override):
-                with self._config(listed) as path, self.assertRaisesRegex(
-                    ValueError, error
-                ):
+        cases = [("rcr", "standard", "linear", "Stream-K only")] + [
+            ("rrc", "stream_k", s, row_major_c) for s in self.ALL_STRATEGIES
+        ]
+        for layout, variant, strategy, error in cases:
+            with self.subTest(layout=layout, variant=variant, strategy=strategy):
+                with self.assertRaisesRegex(ValueError, error):
                     expand_sweep(
-                        str(path), "gfx1250", dtype="bf16", layout=layout,
-                        variant=variant, reduction_strategies=override,
+                        str(self.CONFIG), "gfx1250", dtype="bf16", layout=layout,
+                        variant=variant, reduction_strategies=[strategy],
                     )
 
 
