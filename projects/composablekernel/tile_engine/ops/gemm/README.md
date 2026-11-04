@@ -241,7 +241,8 @@ search from 99.4% to 91%, and the deterministic TPE patch left the `shared`
 means unchanged (88.9% without and 99.6% with the warm start). The runs used
 about 356 of the 1200 builds allowed: keep `new_builds_per_run` from binding
 by scaling it with the number of problems (the warm-started runs built about
-45 kernels per problem).
+45 kernels per problem; the bf16 ccr GPU group, whose misaligned problems
+build their own fixed-width variants, about 80).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -295,12 +296,17 @@ Option rules:
   GEMM) comes from the run's host cache (see below) once a problem's first
   call has stored it; that call, the calls that run beside it on other
   devices, and every call of a problem the cache cannot hold pay it in full,
-  so a call's timeout is `--kernel-timeout` plus
-  `ceil(2*M*N*K / 5e10 + (M+N)*K * r)` s: the reference at 50 GFLOP/s, and
-  the inputs at a rate `r` per element that depends on the dtype, 75 ns for
-  fp16, bf16 and fp32 and 400 ns for fp8 and bf8, whose encoding costs about
-  4x more on the host (`HOST_S_PER_INPUT` in `gemm_search.py`; a dtype
+  so a call's timeout is `--kernel-timeout` plus the largest
+  `ceil(2*M*N*K / 5e10 + (M+N)*K * r)` s among the problems measured in the
+  same round (or the same confirmation pass): the reference at 50 GFLOP/s,
+  and the inputs at a rate `r` per element that depends on the dtype, 75 ns
+  for fp16, bf16 and fp32 and 400 ns for fp8 and bf8, whose encoding costs
+  about 4x more on the host (`HOST_S_PER_INPUT` in `gemm_search.py`; a dtype
   without a rate gets the slowest). `run.json` records the run's formula.
+  These host times assume the workers get the node's CPUs: inside a CPU
+  allocation smaller than the node, set `OPENBLAS_NUM_THREADS` (or
+  `OMP_NUM_THREADS`) to about the CPUs per device, or raise
+  `--kernel-timeout`.
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
   confirmation calls run on one device (problem `i` on device `i mod n`), so

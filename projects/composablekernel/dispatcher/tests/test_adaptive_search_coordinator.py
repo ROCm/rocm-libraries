@@ -1658,7 +1658,7 @@ def test_host_cache_concurrent_misses_hold_the_caps(tmp_path):
         assert race(cache, keys, free)[:2] == (2, 2)
 
 
-@pytest.mark.parametrize("kind", ["ext4", "nfs4"])
+@pytest.mark.parametrize("kind", ["ext4", "nfs", "nfs4"])
 def test_host_cache_warns_when_its_filesystem_is_too_full_or_nfs(tmp_path, monkeypatch,
                                                                  kind):
     # Every write leaves 10% of the filesystem free, so on one already under
@@ -1669,7 +1669,7 @@ def test_host_cache_warns_when_its_filesystem_is_too_full_or_nfs(tmp_path, monke
     floor = math.ceil(disk.total * HC.MIN_FREE_FRACTION)
     settings = AS.HostCacheSettings(str(tmp_path), 1.0, 1.0)
     monkeypatch.setattr(HC, "fs_type", lambda p: kind)
-    nfs = kind == "nfs4"
+    nfs = kind != "ext4"
     for free, full in ((floor - 1, True), (floor + 2**20, False)):
         monkeypatch.setattr(HC.shutil, "disk_usage", lambda p, f=free: disk._replace(free=f))
         lines = []
@@ -1680,20 +1680,22 @@ def test_host_cache_warns_when_its_filesystem_is_too_full_or_nfs(tmp_path, monke
         assert lines[0].startswith("  Host cache: WARNING: stores nothing: ") == full
         assert not full or f"under {tmp_path}, and a write must leave 10% free;" in lines[0]
         assert not full or lines[0].endswith("a tmpfs or another local filesystem")
-        assert [n.startswith(f"  Host cache: NOTE: {tmp_path} is on nfs4, ")
+        assert [n.startswith(f"  Host cache: NOTE: {tmp_path} is on {kind}, ")
                 for n in lines[:-1]] == [False] * full + [True] * nfs
 
 
 def test_fs_type_reads_the_mount_table(tmp_path):
     # The last mount on the longest mount point holding the path; a mount
-    # table escapes a space as \040.
+    # table escapes a space as \040; a symlink counts where it points.
     root = os.path.realpath(tmp_path)
     table = tmp_path / "mounts"
     table.write_text(f"/dev/md0 / ext4 rw 0 0\nauto {root}/h autofs rw 0 0\n"
                      f"srv:/h {root}/h nfs4 rw 0 0\ntmpfs {root}/h/a\\040b tmpfs rw 0 0\n")
-    paths = ("", "/h", "/h/u/x", "/h/a b/c", "/h/a bc", "/hx")
+    (tmp_path / "h").mkdir()
+    os.symlink(root + "/h", root + "/l")
+    paths = ("", "/h", "/h/u/x", "/h/a b/c", "/h/a bc", "/hx", "/l/u")
     assert [HC.fs_type(root + p, str(table)) for p in paths] == [
-        "ext4", "nfs4", "nfs4", "tmpfs", "nfs4", "ext4"]
+        "ext4", "nfs4", "nfs4", "tmpfs", "nfs4", "ext4", "nfs4"]
     assert HC.fs_type(root, str(tmp_path / "none")) == ""
 
 
