@@ -5140,3 +5140,39 @@ class TestPartitionZeroIssueOrder:
         mxfp8.lastDsReadPos = 4
         assert mxfp8.minGapDsReadBeforeWait(placer, 4, read)
         assert mxfp8.minGapDsReadToWait(placer, 3, wait)
+
+    def test_mxfp8_followers_use_five_slots(self):
+        from rocisa.container import sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer)
+
+        placer = _SlotPlacer(
+            intervals=2, numModules=1, pathOrders=[],
+            slotsPerInterval=_MXFP8_FOLLOWER_SLOTS, maxPerSlot=1,
+            dataDsReadCap=(2, 3))
+        rules = _SchedulingRules(totalSlots=placer.totalSlots)
+        read = self._read("r")
+        valu = VMovB32(dst=vgpr(1), src=vgpr(2))
+        assert placer.totalSlots == 10
+        assert not rules.noDsReadOrValuInFirstSlot(placer, 0, read)
+        assert not rules.noDsReadOrValuInFirstSlot(placer, 0, valu)
+        assert rules.noDsReadOrValuInFirstSlot(placer, 1, read)
+        assert rules.oneDsReadPerInterval(placer, 1, read)
+        placer._placed[1].append((0, read))
+        assert rules.oneDsReadPerInterval(placer, 2, read)
+        placer._placed[2].append((0, read))
+        assert not rules.oneDsReadPerInterval(placer, 3, read)
+        load = BufferLoadB128(
+            dst=vgpr(8, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="dtl")
+        assert rules.oneDtlLoadPerInterval(placer, 3, load)
+        placer._placed[3].append((0, load))
+        assert not rules.oneDtlLoadPerInterval(placer, 4, load)
+
+        legacy = _SlotPlacer(intervals=1, numModules=1, pathOrders=[])
+        legacy_rules = _SchedulingRules(totalSlots=legacy.totalSlots)
+        assert legacy.totalSlots == 2 and legacy.dataDsReadCap is None
+        assert legacy_rules.oneDsReadPerInterval(legacy, 0, read)
+        legacy._placed[0].append((0, read))
+        assert not legacy_rules.oneDsReadPerInterval(legacy, 1, read)

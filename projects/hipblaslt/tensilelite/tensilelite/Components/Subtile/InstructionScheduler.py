@@ -16,7 +16,8 @@ from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstru
 class _SlotPlacer:
     """Generic slot placement engine for interleaving instructions between MFMAs.
 
-    Each interval (pair of adjacent MFMAs) has 2 placement slots.
+    The legacy schedule has 2 placement slots between adjacent MFMAs.
+    MXFP8 partition prefetch uses five, one instruction each.
     Rules are injected via callbacks:
       - validators: (placer, pos, inst) -> bool — reject invalid slots
       - adjusters:  (placer, limit, inst) -> limit — shift search start
@@ -25,8 +26,14 @@ class _SlotPlacer:
 
     def __init__(self, intervals: int, numModules: int,
                  pathOrders: List[List[int]],
-                 validators=None, adjusters=None, onPlace=None):
-        self.totalSlots = intervals * 2
+                 validators=None, adjusters=None, onPlace=None,
+                 slotsPerInterval: int = 2,
+                 maxPerSlot: int = 2,
+                 dataDsReadCap: Optional[Tuple[int, int]] = None):
+        self.slotsPerInterval = slotsPerInterval
+        self.maxPerSlot = maxPerSlot
+        self.dataDsReadCap = dataDsReadCap
+        self.totalSlots = intervals * slotsPerInterval
         self._n = numModules
         self._prevInPath: List[int] = [-1] * numModules
         self._nextInPath: List[int] = [-1] * numModules
@@ -37,7 +44,6 @@ class _SlotPlacer:
         self._validators = validators or []
         self._adjusters = adjusters or []
         self._onPlace = onPlace
-        self.slotsPerInterval = 2
         self.denseToFit = False
 
         self._placed: List[List[Tuple[int, object]]] = [[] for _ in range(self.totalSlots)]
@@ -48,9 +54,18 @@ class _SlotPlacer:
     # ── Placement ──
 
     def _canPlace(self, pos: int, inst) -> bool:
-        if pos < 0 or pos >= self.totalSlots or len(self._placed[pos]) >= 2:
+        if pos < 0 or pos >= self.totalSlots or len(self._placed[pos]) >= self.maxPerSlot:
             return False
         return all(v(self, pos, inst) for v in self._validators)
+
+    def _intervalHasDtlLoad(self, pos: int) -> bool:
+        begin = (pos // self.slotsPerInterval) * self.slotsPerInterval
+        end = min(self.totalSlots, begin + self.slotsPerInterval)
+        return any(
+            _isDtlLoad(item[1])
+            for slot in range(begin, end)
+            for item in self._placed[slot]
+        )
 
     def adjustLimit(self, limit: int, inst) -> int:
         for adj in self._adjusters:
@@ -125,7 +140,8 @@ class _SlotPlacer:
             if not self._canPlace(setupPos, setupInst):
                 continue
             for loadPos in range(max(setupPos, loadLo), min(intervalEnd, loadHi) + 1):
-                if loadPos == setupPos and self._placed[setupPos]:
+                if loadPos == setupPos and (
+                        self.maxPerSlot <= 1 or self._placed[setupPos]):
                     continue
                 if not self._canPlace(loadPos, loadInst):
                     continue
@@ -141,6 +157,8 @@ class _SlotPlacer:
             intervalEnd = min(self.totalSlots - 1, intervalBegin + step - 1)
             setupPos = max(first, intervalBegin)
             loadPos = max(setupPos, loadLo)
+            if self.maxPerSlot <= 1 and loadPos <= setupPos:
+                loadPos = setupPos + 1
             if (setupPos <= min(setupHi, intervalEnd)
                     and loadPos <= min(loadHi, intervalEnd)):
                 self.place(setupPos, setupItem)
@@ -270,8 +288,9 @@ class _SlotPlacer:
         intervals = len(mfmas) - 1
         result = Module()
         result.add(mfmas[0])
+        width = self.slotsPerInterval
         for i in range(intervals):
-            for slot in (2 * i, 2 * i + 1):
+            for slot in range(width * i, width * i + width):
                 for item in self._placed[slot]:
                     result.add(item[1])
             result.add(mfmas[i + 1])
@@ -286,6 +305,13 @@ class _SlotPlacer:
 # gfx1250 needs a larger gap (8); other archs use 4.
 _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT = 4
 _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250 = 8
+# gfx950 MXFP8 MFMA is 32 cycles. The issue takes 8 and LD_PRELOAD
+# takes 4. The remaining 20 cycles are five follower slots. Every
+# ds_read counts toward two per interval, or three when denseToFit
+# says a two-read schedule cannot fit.
+_MXFP8_FOLLOWER_SLOTS = 5
+_MXFP8_DATA_DS_READS = 2
+_MXFP8_DATA_DS_READ_OVERFLOW = 3
 
 _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
@@ -297,6 +323,10 @@ _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') a
 _isWaitGr = lambda x: _isWaitCnt(x) and getattr(x, "isWaitGr", False)
 _isBarrier = lambda x: isinstance(x, SBarrier)
 _isDtlLoad = _isBufferLoad
+_isVALU = lambda x: isinstance(x, CommonInstruction) \
+    and not isinstance(x, (GlobalReadInstruction, LocalReadInstruction)) \
+    and hasattr(x, 'dst') and hasattr(x.dst, 'regType') \
+    and x.dst.regType == 'v'
 
 
 class _SchedulingRules:
@@ -332,12 +362,40 @@ class _SchedulingRules:
     # ── Validators: (placer, pos, inst) -> bool ──
 
     def oneDsReadPerInterval(self, placer, pos, inst):
-        """At most one ds_read per interval (pair of slots) to avoid same SIMD pair stalls as we have a single codepath"""
+        """Cap ds_reads in one MFMA interval.
+
+        The legacy pair keeps the other slot free of ds_reads. The MXFP8
+        budget is two, or three when denseToFit is set. SA and SB count.
+        """
         if not _isDsRead(inst):
             return True
-        peer = pos ^ 1
-        return not (0 <= peer < placer.totalSlots
-                    and any(_isDsRead(item[1]) for item in placer._placed[peer]))
+        explicit = placer.dataDsReadCap
+        if explicit is None:
+            peer = pos ^ 1
+            return not (0 <= peer < placer.totalSlots
+                        and any(_isDsRead(item[1]) for item in placer._placed[peer]))
+        ideal, overflow = explicit
+        first = (pos // placer.slotsPerInterval) * placer.slotsPerInterval
+        end = min(first + placer.slotsPerInterval, placer.totalSlots)
+        reads = sum(
+            _isDsRead(item[1])
+            for slot in range(first, end)
+            for item in placer._placed[slot])
+        limit = overflow if placer.denseToFit else ideal
+        return reads < limit
+
+    def oneDtlLoadPerInterval(self, placer, pos, inst):
+        """At most one direct-to-LDS load in an MFMA interval."""
+        return not _isDtlLoad(inst) or not placer._intervalHasDtlLoad(pos)
+
+    def noDsReadOrValuInFirstSlot(self, placer, pos, inst):
+        """Reserve each interval's first slot from ds_reads and VALU.
+
+        SALU, m0, waits, and the barrier may use it.
+        """
+        if pos % placer.slotsPerInterval != 0:
+            return True
+        return not (_isDsRead(inst) or _isVALU(inst))
 
     def minGapDsReadBeforeWait(self, placer, pos, inst):
         """Reject ds_read too close to an already-placed waitcnt ahead."""
@@ -347,7 +405,7 @@ class _SchedulingRules:
         # The default gap still applies to every other schedule.
         if self.allowReadsAcrossWait and pos >= self.earliestWaitCntPos:
             return True
-        gap = self.minGap * 2
+        gap = self.minGap * placer.slotsPerInterval
         return self.earliestWaitCntPos - pos >= gap
 
     def minGapDsReadToWait(self, placer, pos, inst):
@@ -356,20 +414,24 @@ class _SchedulingRules:
             return True
         if self.allowReadsAcrossWait and pos <= self.lastDsReadPos:
             return True
-        gap = self.minGap * 2
+        gap = self.minGap * placer.slotsPerInterval
         return pos - self.lastDsReadPos >= gap
 
     def noM0WithBufferLoad(self, placer, pos, inst):
         """Avoid placing M0 updates and buffer_loads in the same MFMA interval."""
         if not _isM0Update(inst) and not _isBufferLoad(inst):
             return True
-        peer = pos ^ 1
-        slots = [pos]
-        if 0 <= peer < placer.totalSlots:
-            slots.append(peer)
+        begin = (pos // placer.slotsPerInterval) * placer.slotsPerInterval
+        end = min(placer.totalSlots, begin + placer.slotsPerInterval)
         if _isM0Update(inst):
-            return not any(_isBufferLoad(item[1]) for s in slots for item in placer._placed[s])
-        return not any(_isM0Update(item[1]) for s in slots for item in placer._placed[s])
+            return not any(
+                _isBufferLoad(item[1])
+                for slot in range(begin, end)
+                for item in placer._placed[slot])
+        return not any(
+            _isM0Update(item[1])
+            for slot in range(begin, end)
+            for item in placer._placed[slot])
 
     def grAfterWaitGrDsReads(self, placer, pos, inst):
         """Keep GR (m0 / buffer_load) out of the window after wait_gr+barrier until ds_reads finish."""
@@ -720,13 +782,14 @@ def _isMx8Schedule(mfmas) -> bool:
 def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch):
-    """Issue partition-zero reads by consumer on the existing two-slot placer.
+    """Issue partition-zero reads by consumer in five follower slots.
 
     Local reads and global-read bundles are ordered by first-consumer rank.
     The earliest cohort issues before the rest. The partition barrier moves
     out of the pre-MFMA prefix when this epoch's wait owns the ordering.
-    Slot width, the one-ds-read rule, and local-read spreading stay as they
-    are.
+    Each slot holds one instruction. A ds_read or VALU stays out of the
+    first slot, and an interval holds at most one direct-to-LDS load and
+    two ds_reads. Local-read spreading stays off.
     """
     n = len(emittedModules)
     p0Split = _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules)
@@ -787,18 +850,24 @@ def _schedulePartitionZeroIssueOrder(
     if canUseThreePhase:
         placementPathOrders = []
 
+    slotsPerInterval = _MXFP8_FOLLOWER_SLOTS
     rules = _SchedulingRules(
-        totalSlots=(len(mfmas) - 1) * 2,
+        totalSlots=(len(mfmas) - 1) * slotsPerInterval,
         minGapDsReadToWait=minGapDsReadToWait,
         allowReadsAcrossWait=True)
     placer = _SlotPlacer(
         len(mfmas) - 1, n, placementPathOrders,
         validators=[
-            rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait,
+            rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
+            rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
             rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
         ],
         adjusters=[rules.spreadBufferLoads],
-        onPlace=rules.trackPlacement)
+        onPlace=rules.trackPlacement,
+        slotsPerInterval=slotsPerInterval,
+        maxPerSlot=1,
+        dataDsReadCap=(
+            _MXFP8_DATA_DS_READS, _MXFP8_DATA_DS_READ_OVERFLOW))
 
     def _placeRegularPaths():
         for order, hasWaitGR in paths:
@@ -814,7 +883,8 @@ def _schedulePartitionZeroIssueOrder(
                     rules.resetPath()
                     placer.placePath(pathInsts[:syncEnd], multiDU=True)
                     placer.placePath(
-                        pathInsts[syncEnd:], startLimit=2, overflowToTail=True)
+                        pathInsts[syncEnd:], startLimit=slotsPerInterval,
+                        overflowToTail=True)
                     continue
             reverse = hasWaitGR
             pathInsts = _flattenPath(order, emittedModules, reverse=reverse)
@@ -884,7 +954,8 @@ def _schedulePartitionZeroIssueOrder(
             else:
                 _placePhase(leading, mfmaBetweenWaitAndBarrier=True)
                 if overwriteReads and trailing and orderedGrItems:
-                    budget = max(0, rules.minGap - 1)
+                    budget = max(
+                        0, (rules.minGap - 1) * _MXFP8_DATA_DS_READS)
                     preWaitTail = []
                     postWaitTail = []
                     used = 0
