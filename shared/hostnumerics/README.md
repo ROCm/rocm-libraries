@@ -21,6 +21,8 @@ stages.
 - [Error handling](docs/error_handling.md).
 - [Scalar metadata and dispatch](include/roc/hostnumerics/scalar_type.hpp).
 - [Core tests and compiled usage example](tests/core_test.cpp).
+- [Permutations](include/roc/hostnumerics/permutation.hpp), which order
+  axes from slowest to fastest, and the Python `Permutation` docstrings.
 - [Logical tensor shapes](include/roc/hostnumerics/shape.hpp), including
   ordered coordinate traversal, and the Python `Shape` docstrings.
 - [Index ranges](include/roc/hostnumerics/index_range.hpp), which select

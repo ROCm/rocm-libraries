@@ -51,34 +51,42 @@ class ShapeVisitationTests(unittest.TestCase):
                 interval = hn.IndexRange(start, end, stride)
                 self.assertEqual(interval.indices(), full_range)
                 self.assertEqual(interval.count(), len(full_range))
-                self.assertEqual(shape.selected_coordinates(flat, order), expected)
+                self.assertEqual(
+                    shape.selected_coordinates(flat, hn.Permutation(order)), expected
+                )
                 if end <= shape.element_count:
                     self.assertEqual(
-                        shape.selected_coordinates(interval, order), expected
+                        shape.selected_coordinates(interval, hn.Permutation(order)),
+                        expected,
                     )
                 else:
                     with self.assertRaisesRegex(
                         RuntimeError, "exceeds the element count"
                     ):
-                        shape.selected_coordinates(interval, order)
+                        shape.selected_coordinates(interval, hn.Permutation(order))
 
     def test_explicit_indices_and_bounds(self):
         shape = hn.Shape([2, 4])
         self.assertEqual(
-            shape.selected_coordinates([7, 0, 3, 7], [0, 1]),
+            shape.selected_coordinates([7, 0, 3, 7], hn.Permutation([0, 1])),
             [[1, 3], [0, 0], [0, 3], [1, 3]],
         )
-        self.assertEqual(shape.selected_coordinates((7, 0), [1, 0]), [[1, 3], [0, 0]])
+        self.assertEqual(
+            shape.selected_coordinates((7, 0), hn.Permutation([1, 0])), [[1, 3], [0, 0]]
+        )
         with self.assertRaisesRegex(RuntimeError, r"index 8 is outside \[0, 8\)"):
-            shape.selected_coordinates([0, 8, 1], [0, 1])
+            shape.selected_coordinates([0, 8, 1], hn.Permutation([0, 1]))
         for bad in ([0, 0], [1], [0, 2]):
             with self.assertRaises(RuntimeError):
-                shape.selected_coordinates([], bad)
+                shape.selected_coordinates([], hn.Permutation(bad))
             with self.assertRaises(RuntimeError):
-                shape.selected_coordinates(hn.IndexRange(0, 0, 1), bad)
+                shape.selected_coordinates(hn.IndexRange(0, 0, 1), hn.Permutation(bad))
+        # Orders must be Permutations, so a list of indices is never read as one.
+        with self.assertRaises(TypeError):
+            shape.selected_coordinates([1, 0], [0, 1])
         for empty_shape in (hn.Shape(), hn.Shape([2, 0])):
             with self.assertRaisesRegex(RuntimeError, "rank"):
-                empty_shape.selected_coordinates([], [0])
+                empty_shape.selected_coordinates([], hn.Permutation([0]))
 
     def test_all_is_full_coverage(self):
         shape = hn.Shape([2, 4])
@@ -91,12 +99,9 @@ class ShapeVisitationTests(unittest.TestCase):
         for dimensions, expected in (([], [[]]), ([0], [])):
             shape = hn.Shape(dimensions)
             self.assertEqual(
-                shape.index_order_last_dimension_fastest(), list(range(len(dimensions)))
-            )
-            self.assertEqual(
                 shape.selected_coordinates(
                     hn.IndexRange.all(shape.element_count),
-                    shape.index_order_last_dimension_fastest(),
+                    hn.Permutation.identity(shape.rank),
                 ),
                 expected,
             )
@@ -117,7 +122,7 @@ class ShapeVisitationTests(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     hn.IndexRange(*args)
             with self.assertRaises(TypeError):
-                hn.Shape([1]).selected_coordinates([value], [0])
+                hn.Shape([1]).selected_coordinates([value], hn.Permutation([0]))
             with self.assertRaises(TypeError):
                 hn.IndexRange.all(value)
 

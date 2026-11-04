@@ -11,6 +11,7 @@
 #include <optional>
 #include <ranges>
 #include <roc/hostnumerics/index_range.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -94,13 +95,6 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
-    // Ascending axes: for a matrix, row-major order.
-    std::vector<size_t> indexOrderLastDimensionFastest() const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), size_t{0});
-        return order;
-    }
-
     // Convert coordinates to a logical linear index.
     //
     // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
@@ -126,12 +120,8 @@ class Shape {
         return computeLinearIndex(indices, order);
     }
 
-    size_t linearIndex(std::span<const size_t> indices, std::initializer_list<size_t> order) const {
-        return linearIndex(indices, std::span<const size_t>(order.begin(), order.size()));
-    }
-
     size_t linearIndexLastDimensionFastest(std::span<const size_t> indices) const {
-        return linearIndex(indices, indexOrderLastDimensionFastest());
+        return linearIndex(indices, Permutation::identity(rank()));
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
@@ -144,12 +134,8 @@ class Shape {
         return result;
     }
 
-    std::vector<size_t> coordinates(size_t index, std::initializer_list<size_t> order) const {
-        return coordinates(index, std::span<const size_t>(order.begin(), order.size()));
-    }
-
     std::vector<size_t> coordinatesLastDimensionFastest(size_t index) const {
-        return coordinates(index, indexOrderLastDimensionFastest());
+        return coordinates(index, Permutation::identity(rank()));
     }
 
     bool operator==(const Shape& other) const noexcept {
@@ -157,7 +143,7 @@ class Shape {
     }
 
     // Visit each selected flat index with its coordinates, which use the original
-    // axis numbering. Order must list every axis once, from slowest to fastest,
+    // axis numbering. Order lists every axis once, from slowest to fastest,
     // and defines how flat indices map to coordinates. Every overload validates
     // its inputs before the first callback, including empty work. The callback
     // takes (index, coordinates) or only (coordinates); the coordinate span is
@@ -167,7 +153,7 @@ class Shape {
     // A range's stop must not exceed elementCount(). Clip it first with
     // std::min to visit only the elements that exist.
     template <CoordinateVisitor Function>
-    void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
+    void forEachCoordinate(const IndexRange& range, const Permutation& order,
                            Function&& function) const {
         validateOrder(order);
         if (range.stop() > elementCount())
@@ -199,7 +185,7 @@ class Shape {
     template <typename Indices, CoordinateVisitor Function>
         requires std::ranges::forward_range<const Indices> &&
                  std::same_as<std::ranges::range_value_t<const Indices>, size_t>
-    void forEachCoordinate(const Indices& indices, std::span<const size_t> order,
+    void forEachCoordinate(const Indices& indices, const Permutation& order,
                            Function&& function) const {
         validateOrder(order);
         for (size_t index : indices)
@@ -216,30 +202,19 @@ class Shape {
 
     // Visit every element.
     template <CoordinateVisitor Function>
-    void forEachCoordinate(std::span<const size_t> order, Function&& function) const {
+    void forEachCoordinate(const Permutation& order, Function&& function) const {
         forEachCoordinate(IndexRange::all(elementCount()), order, function);
     }
 
     template <typename Indices, CoordinateVisitor Function>
-    void forEachCoordinate(const Indices& indices, std::initializer_list<size_t> order,
-                           Function&& function) const {
-        forEachCoordinate(indices, std::span<const size_t>(order.begin(), order.size()), function);
-    }
-
-    template <CoordinateVisitor Function>
-    void forEachCoordinate(std::initializer_list<size_t> order, Function&& function) const {
-        forEachCoordinate(std::span<const size_t>(order.begin(), order.size()), function);
-    }
-
-    template <typename Indices, CoordinateVisitor Function>
     void forEachCoordinateLastDimensionFastest(const Indices& indices, Function&& function) const {
-        forEachCoordinate(indices, indexOrderLastDimensionFastest(), function);
+        forEachCoordinate(indices, Permutation::identity(rank()), function);
     }
 
     // Visit every element with the last axis fastest.
     template <CoordinateVisitor Function>
     void forEachCoordinateLastDimensionFastest(Function&& function) const {
-        forEachCoordinate(indexOrderLastDimensionFastest(), function);
+        forEachCoordinate(Permutation::identity(rank()), function);
     }
 
    private:

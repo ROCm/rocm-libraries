@@ -5,6 +5,7 @@ from ._hostnumerics import (
     IndexRange,
     prime_index_range,
     Layout,
+    Permutation,
     ScalarCategory,
     ScalarType,
     ScalarTypeInfo,

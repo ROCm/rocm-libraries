@@ -22,7 +22,7 @@ nb::tuple shapeTuple(const Shape& shape) {
 
 template <typename Indices>
 std::vector<std::vector<size_t>> selectedCoordinates(const Shape& shape, const Indices& indices,
-                                                     const std::vector<size_t>& order) {
+                                                     const Permutation& order) {
     std::vector<std::vector<size_t>> result;
     shape.forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> coordinates) {
         result.emplace_back(coordinates.begin(), coordinates.end());
@@ -141,9 +141,9 @@ converted to size_t raise TypeError.
 Convert one coordinate per axis to a logical index, independent of storage strides.
 
 Coordinates always use the original axis order. For Shape([2, 3, 5]), axes 0,
-1, and 2 have extents 2, 3, and 5. Order lists axis numbers from slowest to fastest
-(outermost to innermost loop); its last entry changes fastest. It must be a
-permutation of all axes. Use linear_index_last_dimension_fastest for ascending axes.
+1, and 2 have extents 2, 3, and 5. Order is a Permutation of all axes, listed
+from slowest to fastest (outermost to innermost loop); its last entry changes
+fastest. Use linear_index_last_dimension_fastest for ascending axes.
 
 For order Permutation([1, 2, 0]), traversal is equivalent to these three nested
 loops:
@@ -164,7 +164,8 @@ Other orders for the same shape and coordinates:
     [2, 1, 0]:           strides [1, 2, 6], index 23
 
 Every coordinate must be less than its extent. A shape with a zero extent has
-no valid coordinates. Shape().linear_index([], []) returns 0 for its one scalar.
+no valid coordinates. Shape().linear_index([], Permutation([])) returns 0 for its one
+scalar.
 )doc")
         .def(
             "coordinates_last_dimension_fastest",
@@ -185,23 +186,21 @@ The logical index must lie in [0, element_count). The result always uses the
 original axis order: Shape([2, 3, 5]).coordinates(27, Permutation([1, 2, 0]))
 returns [1, 2, 3].
 See linear_index for the nested-loop interpretation of order. A shape with a
-zero extent has no valid index; Shape().coordinates(0, []) returns [] for its scalar.
+zero extent has no valid index; Shape().coordinates(0, Permutation([])) returns []
+for its scalar.
 )doc")
-        .def("index_order_last_dimension_fastest", &Shape::indexOrderLastDimensionFastest,
-             "Return ascending axes, the order in which the last axis changes fastest.")
         .def("selected_coordinates", &selectedCoordinates<IndexRange>, "range"_a, "order"_a,
              R"doc(
 Return owning coordinate lists for the range, whose stop must not exceed
 element_count.
-Order must be a complete slowest-to-fastest axis permutation, even for empty
+Order is a slowest-to-fastest Permutation of the axes, checked even for empty
 work. Each coordinate list uses the original axis order.
 )doc")
         .def("selected_coordinates", &selectedCoordinates<std::vector<size_t>>, "indices"_a,
              "order"_a, R"doc(
 Return owning coordinate lists for flat indices in the order given, including
-repeats. Every index must be less than element_count. Bounds and the complete
-slowest-to-fastest axis permutation are checked before traversal, including
-empty work. Each coordinate list uses the original axis order.
+repeats. Every index must be less than element_count. Bounds and the order's
+rank are checked before traversal, including empty work. Each coordinate list uses the original axis order.
 )doc")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
