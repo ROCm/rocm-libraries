@@ -27,106 +27,23 @@
 
 cmake_minimum_required(VERSION 3.19)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(rocblas-fortran LANGUAGES NONE)
-endif()
+project(rocblas-fortran LANGUAGES NONE)
 
 # Not ON: ROCm ships no Fortran compiler on Windows.
 option(BUILD_FORTRAN_BINDINGS "Build the rocBLAS Fortran bindings" "${UNIX}")
-
-# BUILD_FORTRAN_BINDINGS is shared by the whole monorepo; this one wins here.
-if(DEFINED ROCBLAS_BUILD_FORTRAN_BINDINGS)
-  set(BUILD_FORTRAN_BINDINGS ${ROCBLAS_BUILD_FORTRAN_BINDINGS})
-endif()
-
 option(BUILD_FORTRAN_CLIENTS "Build the rocBLAS Fortran binding tests" ON)
-if(DEFINED ROCBLAS_BUILD_FORTRAN_CLIENTS)
-  set(BUILD_FORTRAN_CLIENTS ${ROCBLAS_BUILD_FORTRAN_CLIENTS})
-endif()
 
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
              none assumed-shape assumed-rank)
 
-# Standalone, PARENT_SCOPE at top level fails under -Werror=dev.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(ROCBLAS_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
-endif()
-
 if(NOT BUILD_FORTRAN_BINDINGS)
   return()
 endif()
 
-# ROCM_LIBS_HAVE_FORTRAN is the root's current name; drop it once the root
-# publishes ROCM_HAVE_FORTRAN.
-if(DEFINED ROCM_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_HAVE_FORTRAN})
-elseif(DEFINED ROCM_LIBS_HAVE_FORTRAN)
-  set(_have_fortran ${ROCM_LIBS_HAVE_FORTRAN})
-else()
-  include(CheckLanguage)
-
-  # rocm-cmake's ROCMChecks would flag the CMAKE_Fortran_COMPILER cache write
-  # below (a hard error under ROCM_ERROR_TOOLCHAIN_VAR); silence it for this scope.
-  set(_rocm_warn_toolchain_var "${ROCM_WARN_TOOLCHAIN_VAR}")
-  set(_rocm_error_toolchain_var "${ROCM_ERROR_TOOLCHAIN_VAR}")
-  set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-  set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
-
-  # Prefer ROCm's amdflang over the first compiler on PATH (often gfortran); an
-  # explicit CMAKE_Fortran_COMPILER or FC wins. Must precede check_language().
-  if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-    set(_rocm_fc_hints)
-    foreach(_rocm_fc_cc "${CMAKE_CXX_COMPILER}" "${CMAKE_C_COMPILER}"
-                        "${CMAKE_HIP_COMPILER}")
-      if(_rocm_fc_cc)
-        get_filename_component(_rocm_fc_dir "${_rocm_fc_cc}" DIRECTORY)
-        list(APPEND _rocm_fc_hints "${_rocm_fc_dir}")
-      endif()
-    endforeach()
-    foreach(_rocm_fc_root "${ROCM_PATH}" "$ENV{ROCM_PATH}" "/opt/rocm")
-      if(_rocm_fc_root)
-        list(APPEND _rocm_fc_hints "${_rocm_fc_root}/bin"
-                                   "${_rocm_fc_root}/lib/llvm/bin")
-      endif()
-    endforeach()
-    # Uncached, so a changed ROCM_PATH is honoured on reconfigure.
-    unset(_rocm_amdflang CACHE)
-    find_program(_rocm_amdflang NAMES amdflang HINTS ${_rocm_fc_hints}
-                 NO_DEFAULT_PATH)
-    # A ROCm tree can carry a dangling amdflang symlink.
-    if(_rocm_amdflang)
-      execute_process(COMMAND "${_rocm_amdflang}" --version
-                      RESULT_VARIABLE _rocm_fc_rc
-                      OUTPUT_QUIET ERROR_QUIET)
-      if(_rocm_fc_rc EQUAL 0)
-        set(CMAKE_Fortran_COMPILER "${_rocm_amdflang}" CACHE FILEPATH
-            "Fortran compiler used for the ROCm Fortran bindings" FORCE)
-      endif()
-      unset(_rocm_fc_rc)
-    endif()
-    unset(_rocm_amdflang CACHE)
-    unset(_rocm_fc_hints)
-    unset(_rocm_fc_cc)
-    unset(_rocm_fc_dir)
-    unset(_rocm_fc_root)
-  endif()
-
-  check_language(Fortran)
-  set(ROCM_WARN_TOOLCHAIN_VAR "${_rocm_warn_toolchain_var}")
-  set(ROCM_ERROR_TOOLCHAIN_VAR "${_rocm_error_toolchain_var}")
-  unset(_rocm_warn_toolchain_var)
-  unset(_rocm_error_toolchain_var)
-
-  if(CMAKE_Fortran_COMPILER)
-    set(_have_fortran TRUE)
-  else()
-    set(_have_fortran FALSE)
-  endif()
-endif()
-
-if(NOT _have_fortran)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCmFortranCompiler.cmake")
+if(NOT CMAKE_Fortran_COMPILER)
   message(STATUS "rocBLAS: no Fortran compiler found, skipping the Fortran bindings")
   return()
 endif()
@@ -196,12 +113,8 @@ target_include_directories(rocblas_fortran PUBLIC
 
 # Link interface only. rocblas-config's find_dependency(hip) reaches FindThreads,
 # which needs C or CXX enabled; QUIET because the bindings build without rocBLAS.
-if(NOT TARGET roc::rocblas)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(rocblas QUIET)
-endif()
+enable_language(C)
+find_package(rocblas QUIET)
 
 # Never left empty: it is @-substituted into a bare if() in the installed config.
 if(TARGET roc::rocblas)
@@ -212,12 +125,6 @@ else()
     "rocBLAS: the C library was not found, so the Fortran bindings carry no "
     "link interface; a consumer will have to link it (-lrocblas) itself.")
   set(ROCBLAS_FORTRAN_NEEDS_C_PACKAGE FALSE)
-endif()
-
-# The parent cannot see the compiler ID; it keys its libgfortran dependency on it.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(ROCBLAS_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
-  set(ROCBLAS_FORTRAN_COMPILER_ID "${CMAKE_Fortran_COMPILER_ID}" PARENT_SCOPE)
 endif()
 
 # The uninstrumented Fortran executables cannot link an ASan librocblas.
