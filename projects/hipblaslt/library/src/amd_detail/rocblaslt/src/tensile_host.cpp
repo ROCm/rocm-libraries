@@ -6091,17 +6091,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     try
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
-        // getBestSolutions can fall back, so the algo decides the backend; only
-        // a call that picked no algo is still free to choose.
-        if(useRocRoller(handle, prob) && (algo == nullptr || isRocRollerAlgo(algo)))
-        {
-            const rocblaslt_status rrStatus = runRocRollerContractionProblem(handle, algo, prob);
-            // not_implemented is rocRoller's "no kernel fits"; anything else,
-            // including a launch failure, belongs to the caller. An algo the
-            // caller chose is never replaced.
-            if(algo != nullptr || rrStatus != rocblaslt_status_not_implemented)
-                return rrStatus;
-        }
+        // The algo decides the backend. A call with no algo selects below through
+        // getBestSolutions, the same checked-in selector the OFF build uses; only
+        // a negative (JIT) index the caller already holds runs through rocRoller.
+        if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
+            return runRocRollerContractionProblem(handle, algo, prob);
 #endif
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                                library;
@@ -8040,10 +8034,10 @@ static rocblaslt_status
     return rocblaslt_status_success;
 }
 
-// Vector-returning form of the rocRoller heuristic, for the object API. ON picks
-// JIT kernels (negative packed indices); OFF picks checked-in RR_GEMM_* Tensile
-// solutions (ordinary positive indices), which is why only ON needs the extra
-// launch plumbing in makeArgument/runKernelFromInvocation.
+// Vector-returning form of the rocRoller heuristic, for the object API. Both
+// builds return checked-in RR_GEMM_* solutions (ordinary positive indices). Only
+// a negative packed index the caller already holds is a JIT kernel, which is why
+// only ON keeps the extra launch plumbing in makeArgument/runKernelFromInvocation.
 static rocblaslt_status
     rocRollerBestSolutionsVector(rocblaslt_handle                                handle,
                                  const RocblasltContractionProblem&              prob,
@@ -8063,13 +8057,8 @@ static rocblaslt_status
     // here ranks Stream-K tiles first and they are then rejected for want of that
     // region, leaving no solution at all. Ranking them out yields a usable non-
     // Stream-K tile instead, which is why these two sizes can differ from the C API.
-#ifdef HIPBLASLT_USE_ROCROLLER
-    rocblaslt_status status = getRocRollerBestSolutions(
-        handle, prob, requestedAlgoCount, tmp.data(), maxWorkSpaceBytes, &returnAlgoCount);
-#else
     rocblaslt_status status = getRocRollerSelectedSolutions(
         handle, prob, requestedAlgoCount, tmp.data(), maxWorkSpaceBytes, &returnAlgoCount);
-#endif
     if(status != rocblaslt_status_success)
         return status;
 
@@ -8090,21 +8079,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     *returnAlgoCount = 0;
     if(useRocRoller(handle, prob))
     {
-#ifdef HIPBLASLT_USE_ROCROLLER
-        const rocblaslt_status rrStatus = getRocRollerBestSolutions(handle,
-                                                                    prob,
-                                                                    requestedAlgoCount,
-                                                                    heuristicResultsArray,
-                                                                    maxWorkSpaceBytes,
-                                                                    returnAlgoCount);
-#else
         const rocblaslt_status rrStatus = getRocRollerSelectedSolutions(handle,
                                                                         prob,
                                                                         requestedAlgoCount,
                                                                         heuristicResultsArray,
                                                                         maxWorkSpaceBytes,
                                                                         returnAlgoCount);
-#endif
         if(rrStatus == rocblaslt_status_success && *returnAlgoCount > 0)
             return rrStatus;
 
@@ -8311,11 +8291,6 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
 {
     if(useRocRoller(handle, prob))
     {
-#ifdef HIPBLASLT_USE_ROCROLLER
-        std::vector<rocblaslt_matmul_heuristic_result> ranked;
-        const rocblaslt_status                         rrStatus
-            = getAllSolutionsRocRoller(prob, handle, ranked, maxWorkSpaceBytes);
-#else
         // The array bounds the request: a fallback list is every accepting
         // kernel, not one per ranked tile.
         std::vector<rocblaslt_matmul_heuristic_result> ranked(160);
@@ -8328,7 +8303,6 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
                                             maxWorkSpaceBytes,
                                             &count);
         ranked.resize(static_cast<size_t>(std::max(count, 0)));
-#endif
         // Same fallback as getBestSolutions: an empty rocRoller list means no
         // rocRoller kernel fits, so answer from the generated library instead.
         if(rrStatus == rocblaslt_status_success && !ranked.empty())
