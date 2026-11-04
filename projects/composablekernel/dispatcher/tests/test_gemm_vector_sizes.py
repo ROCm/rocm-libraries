@@ -748,16 +748,19 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
             ("rcr", (8, 1, 2), self.ALL_STRATEGIES, None),
         ):
             config = _bridge_config(vec, variant="stream_k")[0].to_codegen_json()
-            with self._config(self.ALL_STRATEGIES, config) as path, self.assertLogs(
-                "unified_gemm_codegen", "INFO"
-            ) as logs:
+            # Record the reject log directly; assertLogs would also need an
+            # unrelated INFO line in the clean case.
+            with self._config(self.ALL_STRATEGIES, config) as path, mock.patch(
+                "unified_gemm_codegen.log"
+            ) as log:
                 gen = UnifiedGemmCodegen(path.parent, "bf16", layout, "gfx950", path)
                 kernels = gen._get_configs_for_variant(GemmVariant.STREAM_K)
             with self.subTest(layout=layout, vec=vec):
                 self.assertEqual([k.reduction_strategy for k in kernels], expected)
                 self.assertTrue(all(k.trait.vector_sizes == vec for k in kernels))
-                rejected = [r for r in logs.output if f"256x256x64 {reject}" in r]
-                self.assertEqual(len(rejected), bool(reject), logs.output)
+                lines = [c.args[0] for c in log.info.call_args_list]
+                rejected = [line for line in lines if f"256x256x64 {reject}" in line]
+                self.assertEqual(len(rejected), bool(reject), lines)
 
     def test_driver_checks_widths_against_the_requested_strategy(self):
         # --reduction-strategy reaches expand_sweep. Setting it on the expanded
