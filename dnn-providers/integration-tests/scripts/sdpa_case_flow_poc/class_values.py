@@ -20,6 +20,8 @@ INVERSE_SQRT_HEAD_DIM = "1/sqrt(head_dim_qk)"
 INVERSE_SQRT_HEAD_DIM_TOKEN = "inverse_sqrt_head_dim_qk"
 DIM_LETTERS = ("B", "H", "S", "D")
 TENSOR_LETTERS = ("Q", "K", "V", "O")
+STATS_LETTER = "Stats"
+LAYOUT_AXES = ("strides_q", "strides_k", "strides_v", "strides_o", "strides_stats")
 NOTE = "note"
 
 
@@ -193,7 +195,11 @@ def build(model: Model, model_dir: Path) -> dict:
     )
 
     do = _entry(table, "dim_order", "class_to_value")
-    _covers(do, model, "dim_order_q", "dim_order")
+    for axis in ("dim_order_q", "dim_order_k", "dim_order_v", "dim_order_o"):
+        _covers(do, model, axis, "dim_order")
+    strides_table = _entry(table, "strides", "class_to_value")
+    for axis in LAYOUT_AXES:
+        _covers(strides_table, model, axis, "strides")
     dim_order = {
         k: _dim_order(do[k], f"dim_order.{k}") for k in model.values["dim_order_q"]
     }
@@ -296,6 +302,25 @@ def build(model: Model, model_dir: Path) -> dict:
                 f"class_to_value: batch_packing.ragged_tensors.{k} is not a list of {TENSOR_LETTERS}"
             )
         ragged_tensors[k] = list(letters)
+
+    stats_table = _entry(
+        _entry(table, "batch_packing", "class_to_value"),
+        "ragged_stats",
+        "batch_packing",
+    )
+    _covers(stats_table, model, "stats_packing", "batch_packing.ragged_stats")
+    ragged_stats = {}
+    for k in model.values["stats_packing"]:
+        letters = stats_table[k]
+        if not isinstance(letters, list) or any(x != STATS_LETTER for x in letters):
+            raise ModelError(
+                f"class_to_value: batch_packing.ragged_stats.{k} is not a list of {STATS_LETTER}"
+            )
+        ragged_stats[k] = list(letters)
+
+    ro = _entry(table, "ragged_offsets", "class_to_value")
+    _covers(ro, model, "ragged_offsets", "ragged_offsets")
+    ragged_offsets = {k: _without_notes(ro[k]) for k in model.values["ragged_offsets"]}
 
     paging = _entry(table, "paging", "class_to_value")
     sides_table = _entry(paging, "sides", "paging")
@@ -463,6 +488,8 @@ def build(model: Model, model_dir: Path) -> dict:
         "quantisation_factors": factors,
         "descale_lists": descale_lists,
         "ragged_tensors": ragged_tensors,
+        "ragged_stats": ragged_stats,
+        "ragged_offsets": ragged_offsets,
         "paged_sides": paged_sides,
         "v_page_multiplier": v_page_multiplier,
         "page_tables": page_tables,

@@ -189,7 +189,7 @@ class LowChange:
                     dom, key=lambda x: (x != b, x is not None, dom.index(x))
                 )
         for bound in range(first, budget + 1):
-            sol = self._dfs(comp, {}, doms, 0, bound, frozenset())
+            sol, _ = self._dfs(comp, {}, doms, 0, bound, frozenset(), {})
             if sol is not None:
                 self._cache[key] = (bound, sol)
                 return sol, bound
@@ -204,9 +204,15 @@ class LowChange:
         cost: int,
         bound: int,
         changed_groups: frozenset,
+        why: dict,
     ):
+        """(row, None) for the first row within `bound` changes, or (None, conflict set).
+
+        A rule conflict names the assignments that caused it, so the search can jump back over the
+        others (see Solver._dfs). A failure of the change bound depends on every assignment, so its
+        conflict set is every assigned axis."""
         if len(asg) == len(comp.axes):
-            return dict(asg)
+            return dict(asg), None
         base = self.base
         lb = cost
         # A unit is an axis, or a group (its axes change together for one count).
@@ -226,11 +232,12 @@ class LowChange:
             if best is None or n < bestn:
                 best, bestn = a, n
         if lb > bound:
-            return None
+            return None, set(asg)
         lb = self._conflict_bound(comp, asg, doms, lb, bound, used)
         if lb > bound:
-            return None
+            return None, set(asg)
         g = self.group_of.get(best)
+        conflict = set(why.get(best, ()))
         for v in doms[best]:
             changed = counts_as_change(base, best, v)
             groups_now = changed_groups
@@ -239,15 +246,23 @@ class LowChange:
                 groups_now = changed_groups | {g}
             c = cost + changed
             if c > bound:
+                conflict |= set(asg)
                 continue
             asg[best] = v
-            nd = self.solver._propagate(comp, best, v, asg, doms)
-            if nd is not None:
-                sol = self._dfs(comp, asg, nd, c, bound, groups_now)
+            nd, nwhy, failed = self.solver._propagate(comp, best, v, asg, doms, why)
+            if nd is None:
+                conflict |= failed - {best}
+            else:
+                sol, sub = self._dfs(comp, asg, nd, c, bound, groups_now, nwhy)
                 if sol is not None:
-                    return sol
+                    del asg[best]
+                    return sol, None
+                if best not in sub:
+                    del asg[best]
+                    return None, sub
+                conflict |= sub - {best}
             del asg[best]
-        return None
+        return None, conflict
 
 
 def lowchange_pairwise(

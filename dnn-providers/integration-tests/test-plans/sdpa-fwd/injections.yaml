@@ -49,7 +49,7 @@ rejection_probes:
   - entry: MV-02
     what: "A sliding-window bound below -1"
     basis: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT
-    why: "The API's own contract says a bound below -1 is invalid (SA:129-133); the bound setters store any int64 (SA:671,677). A window size is a count of keys; a negative count other than the documented -1 has no meaning."
+    why: "The API's own contract says a bound below -1 is invalid (SA:129-133). The bound setters store any int64 (SA:671,677), and the node refuses both bounds at validate (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:483-484 left_bound 0 or below -1; :490 right_bound below -1). A window size is a count of keys; a negative count other than the documented -1 has no meaning."
     sha_sensitive: "Record the source commit with every result: PR #14358 shifts left_bound handling by one."
     probes:
       - {id: MV-02a, start_from: shared, changes: {sliding_window: present, window_alignment: top_left, window_left: partial, window_right: zero}, api_overrides: "left_bound = -2", level: graph, needs_execution: false, expect: refused at validate}
@@ -91,7 +91,7 @@ rejection_probes:
   - entry: MV-07
     what: "A declared maximum key/value length below the real length"
     basis: D-MAXLEN-NOT-BELOW-ACTUAL
-    why: "set_paged_attention_max_seq_len_kv is unvalidated (SA:683; FBS:84)."
+    why: "set_paged_attention_max_seq_len_kv stores any int32 (SA:683; FBS:84). The node refuses a value that is not positive (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:328-329), so MV-07b is refused at validate; a positive value below S_kv meets only the page-table width check (:359)."
     probes:
       - {id: MV-07a, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: smaller}, level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-07b, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: smaller}, api_overrides: "max_seq_len_kv = -1", level: graph, needs_execution: false, expect: refused at validate}
@@ -182,9 +182,9 @@ rejection_probes:
   - entry: MV-19
     what: "max_seq_len_kv without page tables (orphan setting)"
     basis: D-S-PAGING-PROPERTIES-NEED-PAGING
-    why: "SA:683 is independent of the page-table setters (SA:414,424)."
+    why: "SA:683 is independent of the page-table setters (SA:414,424). The node refuses max_seq_len_kv without page tables (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:319)."
     probes:
-      - {id: MV-19a, start_from: shared, changes: {}, api_overrides: "max_seq_len_kv = S_kv, no page tables", level: graph, needs_execution: false, expect: "refused at validate, or a documented 'ignored'"}
+      - {id: MV-19a, start_from: shared, changes: {}, api_overrides: "max_seq_len_kv = S_kv, no page tables", level: graph, needs_execution: false, expect: refused at validate}
 
   # There is no MV-20. Sequence-length tensors with padding_mask false are the model value
   # sequence_lengths = variable_no_flag. The references read it as padding
@@ -195,7 +195,7 @@ rejection_probes:
     basis: none
     debatable: true
     debatable_reason: "No definition rule covers auxiliary-tensor shapes; each probe is the analogue of D-BIAS-SHAPE (no element of the row, head or score the value belongs to)."
-    why: "No forward shape check on these tensors."
+    why: "The node checks the shapes of the sink (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:272), the seq_len tensors (:293) and the page tables (:340-341), so MV-21a, MV-21c, MV-21d and MV-21e are refused at validate. The block mask and the dropout mask have no shape check."
     not_probed_on_purpose: "Non-scalar descale/scale, dropout scale, seed, offset and amax tensors: per-head or per-block scaling is a real scheme, so a non-scalar shape is not clearly meaningless."
     probes:
       - {id: MV-21a, start_from: shared, changes: {attention_sinks: present}, api_overrides: "sink tensor with 3 values for 8 query heads (SA:444)", level: graph, needs_execution: false, expect: refused at validate}
@@ -206,8 +206,8 @@ rejection_probes:
       - {id: MV-21f, start_from: shared, changes: {dropout: caller_mask, dropout_mask_pattern: mixed, dropout_pattern_output: not_requested}, api_overrides: "dropout mask not the score shape (SA:394)", level: graph, needs_execution: false, expect: refused at validate}
 
   - entry: MV-22
-    what: "A negative stride (policy: should be refused)"
-    basis: P-NO-NEGATIVE-STRIDE
+    what: "A negative stride (frontend rule not enforced yet: should be refused)"
+    basis: F-NO-NEGATIVE-STRIDE
     ticket: ALMIOPEN-3114
     why: "set_stride takes any int64 values; only the count is checked (TA:438,627-630)."
     probes:
@@ -317,7 +317,7 @@ frontend_rejection_controls:
 
 conditional_probes:   # inactive; each becomes a rejection probe only if the case is ruled meaningless
   - {id: CP-01, open_question: "fully-masked rows", start_from: shared, changes: {causal_mask: present, causal_alignment: bottom_right, seq_q_vs_seq_kv: longer}, frontend_fact: "accepted", status: inactive}
-  - {id: CP-04, open_question: "non-finite scale", start_from: shared, changes: {scale_value: non_finite}, frontend_fact: "any float accepted (SA:665-669)", reference_fact: "declined by both references when the scale is written into the graph as a number (@ 1790cf623f4 PlanUtils.hpp:328-332; RaggedSdpaFwdSupport.hpp:233-238); a pass-by-value or tensor scale holding NaN or inf is not checked and gives NaN", expect_references: declined, note: "Layer 1 rule D-SCALE-FINITE answers it (no correct output exists); the case belongs to the rejection suite, so this probe stays inactive", status: inactive}
+  - {id: CP-04, open_question: "non-finite scale", start_from: shared, changes: {scale_value: non_finite}, frontend_fact: "any float accepted (SA:665-669)", reference_fact: "declined by both references when the scale is written into the graph as a number (@ 91a40bdfd4c PlanUtils.hpp:328-332; RaggedSdpaFwdSupport.hpp:233-238); a pass-by-value or tensor scale holding NaN or inf is not checked and gives NaN", expect_references: declined, note: "Meaningful: a NaN scale gives NaN scores, a defined result. scale_value non_finite is a model value whose reference gap the answer key carries (AK-SCALE-FINITE), so this probe stays inactive", status: inactive}
   - {id: CP-05, open_question: "dropout p = 1", start_from: shared, changes: {dropout: random, dropout_probability: one, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, frontend_fact: "no range check (SA:657)", status: inactive}
   - {id: CP-06, open_question: "K heads != V heads", start_from: shared, changes: {k_head_sharing: gqa, v_head_sharing: mqa, k_heads_vs_v_heads: differ}, frontend_fact: "allowed by design (NODE:98-121)", status: inactive}
   - {id: CP-07, open_question: "random dropout with no seed", start_from: shared, changes: {dropout: random, dropout_probability: between, dropout_rng_state: not_supplied, dropout_pattern_output: not_requested}, frontend_fact: "seed not required when p > 0 (SA:374,384)", status: inactive}

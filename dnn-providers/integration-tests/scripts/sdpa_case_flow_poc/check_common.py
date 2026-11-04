@@ -15,6 +15,8 @@ from pathlib import Path
 import yaml
 
 ABSENT = "-"
+MEMO_LIMIT = 500_000
+MEMO_SETS = 4
 
 
 class Spec:
@@ -58,6 +60,7 @@ class Spec:
                         (r["id"], {ax: set(vs) for ax, vs in c.items()})
                     )
         self.rule_ids = sorted({rid for rid, _ in self.nogoods})
+        self._memos = {}
 
     def base_row(self, name: str) -> dict:
         b = self.bases[name]
@@ -162,74 +165,185 @@ class Spec:
                         changed = True
         return doms
 
-    def _search(self, doms: dict, nogoods: list, bound=None) -> bool:
-        if bound is not None:
-            base, limit, groups = bound
-            grouped = {a for axes in groups.values() for a in axes}
+    def _memo_for(self, nogoods: list, base=None, unit_of=None) -> dict:
+        """Results of searches over one set of conjunctions, one base and one set of units."""
+        base_values = None if base is None else tuple(base.get(a) for a in self.axes)
+        key = (
+            tuple(map(id, nogoods)),
+            base_values,
+            tuple(sorted((unit_of or {}).items())),
+        )
+        if key not in self._memos:
+            if len(self._memos) >= MEMO_SETS:
+                del self._memos[next(iter(self._memos))]
+            self._memos[key] = (nogoods, {})
+        memo = self._memos[key][1]
+        if len(memo) > MEMO_LIMIT:
+            memo.clear()
+        return memo
 
-            def forced_axis(a):
-                return base[a] is not None and all(
-                    x is not None and x != base[a] for x in doms[a]
-                )
+    def _open_groups(self, doms: dict, nogoods: list, scope, unit_of=None) -> list:
+        """Open axes of `scope`, split into groups that no live conjunction, parent link or unit joins.
 
-            forced = sum(1 for a in self.axes if a not in grouped and forced_axis(a))
-            forced += sum(
-                1 for axes in groups.values() if any(forced_axis(a) for a in axes)
-            )
-            if forced > limit:
-                return False
-            if (
-                forced + self._conflicts(doms, nogoods, base, groups, forced_axis)
-                > limit
-            ):
-                return False
-        open_axes = [a for a in self.axes if len(doms[a]) > 1]
-        if not open_axes:
+        A conjunction is live when every axis it fixes holds a forbidden value; only its open axes
+        can still decide it. A unit ({axis: unit id}) is a set of axes that count as one change.
+        Returns (axes, indices of the live conjunctions on them) per group. Groups can be searched
+        one after another."""
+        open_axes = [a for a in self.axes if a in scope and len(doms[a]) > 1]
+        uf = {a: a for a in open_axes}
+
+        def find(x):
+            while uf[x] != x:
+                uf[x] = uf[uf[x]]
+                x = uf[x]
+            return x
+
+        def join(xs):
+            xs = [x for x in xs if x in uf]
+            for x in xs[1:]:
+                uf[find(x)] = find(xs[0])
+
+        for child, (pax, _) in self.parent.items():
+            join([child, pax])
+        by_unit = {}
+        for a in open_axes:
+            if unit_of and a in unit_of:
+                by_unit.setdefault(unit_of[a], []).append(a)
+        for axes in by_unit.values():
+            join(axes)
+        live = []
+        for i, c in enumerate(nogoods):
+            if all(next(iter(doms[ax])) in c[ax] for ax in c if len(doms[ax]) == 1):
+                axes = [ax for ax in c if ax in uf]
+                if axes:
+                    join(axes)
+                    live.append((i, axes[0]))
+        groups = {}
+        for a in open_axes:
+            groups.setdefault(find(a), []).append(a)
+        lives = {r: set() for r in groups}
+        for i, a in live:
+            lives[find(a)].add(i)
+        return [(axes, frozenset(lives[r])) for r, axes in groups.items()]
+
+    @staticmethod
+    def _state(doms: dict, axes: list) -> tuple:
+        return tuple((a, frozenset(doms[a])) for a in axes)
+
+    def _search_split(self, doms: dict, nogoods: list, scope, memo: dict) -> bool:
+        groups = self._open_groups(doms, nogoods, scope)
+        if not groups:
             return True
-        if bound is not None:
-            a = min(open_axes, key=lambda x: (bound[0][x] in doms[x], len(doms[x])))
-        else:
-            a = min(open_axes, key=lambda x: len(doms[x]))
-        first = bound[0][a] if bound is not None else None
-        for v in sorted(
-            doms[a],
-            key=lambda x: (bound is not None and x != first, x is None, x or ""),
-        ):
+        if len(groups) > 1:
+            return all(
+                self._search_split(doms, nogoods, set(g), memo) for g, _ in groups
+            )
+        ((group, live),) = groups
+        key = ("sat", self._state(doms, group), live)
+        if key in memo:
+            return memo[key]
+        a = min(group, key=lambda x: len(doms[x]))
+        found = False
+        for v in sorted(doms[a], key=lambda x: (x is None, x or "")):
             trial = dict(doms)
             trial[a] = {v}
             nd = self._fixpoint(trial, nogoods)
-            if nd is not None and self._search(nd, nogoods, bound):
-                return True
-        return False
+            if nd is not None and self._search_split(nd, nogoods, set(group), memo):
+                found = True
+                break
+        memo[key] = found
+        return found
 
-    def _conflicts(
-        self, doms: dict, nogoods: list, base: dict, groups: dict, forced_axis
-    ) -> int:
-        """Rule conjunctions that the row breaks if every undecided axis keeps its base value and that only a
-        counted change can leave, counted over disjoint units (an axis, or a group as one unit); forced
-        axes are excluded. Each needs a change no other counted one makes."""
-        group_of = {a: g for g, axes in groups.items() for a in axes}
-        used = {group_of.get(a, a) for a in self.axes if forced_axis(a)}
-        n = 0
-        for c in nogoods:
-            units = set()
-            for x, vs in c.items():
-                d = doms[x]
-                if len(d) == 1:
-                    if next(iter(d)) not in vs:
-                        break
+    def _search(self, doms: dict, nogoods: list, bound=None) -> bool:
+        if bound is None:
+            memo = self._memo_for(nogoods)
+            return self._search_split(doms, nogoods, set(self.axes), memo)
+        base, limit, groups = bound
+        unit_of = {a: g for g, axes in groups.items() for a in axes}
+        spent = self._changed_units(doms, base, unit_of)
+        if len(spent) > limit:
+            return False
+        memo = self._memo_for(nogoods, base, unit_of)
+        extra = self._min_extra(
+            doms, nogoods, base, unit_of, set(self.axes), limit - len(spent), memo
+        )
+        return extra is not None
+
+    def _changed_units(self, doms: dict, base: dict, unit_of: dict) -> set:
+        """Units with a decided axis whose value differs from `base` (both values set)."""
+        return {
+            unit_of.get(a, a)
+            for a in self.axes
+            if len(doms[a]) == 1 and _differs(base[a], next(iter(doms[a])))
+        }
+
+    def _min_extra(
+        self,
+        doms: dict,
+        nogoods: list,
+        base: dict,
+        unit_of: dict,
+        scope,
+        budget: int,
+        memo: dict,
+    ):
+        """Fewest units that a valid completion of the open axes of `scope` changes in addition to
+        the units changed already, or None when every completion needs more than `budget`.
+
+        The open axes are split into independent groups. Their counts add up, because a live
+        conjunction, a parent link and a unit never cross two groups."""
+        comps = self._open_groups(doms, nogoods, scope, unit_of)
+        if not comps:
+            return 0
+        if len(comps) > 1:
+            total = 0
+            for comp, _ in comps:
+                r = self._min_extra(
+                    doms, nogoods, base, unit_of, set(comp), budget - total, memo
+                )
+                if r is None:
+                    return None
+                total += r
+            return total
+        ((comp, live),) = comps
+        spent = self._changed_units(doms, base, unit_of)
+        units = {unit_of.get(a, a) for a in comp}
+        key = ("min", self._state(doms, comp), live, frozenset(units & spent))
+        hit = memo.get(key)
+        if hit is not None:
+            exact, value = hit
+            if exact:
+                return value if value <= budget else None
+            if budget <= value:
+                return None
+        forced = {
+            unit_of.get(a, a)
+            for a in comp
+            if base[a] is not None
+            and all(x is not None and x != base[a] for x in doms[a])
+        }
+        best = None
+        if len(forced - spent) <= budget:
+            a = min(comp, key=lambda x: (base[x] in doms[x], len(doms[x])))
+            for v in sorted(doms[a], key=lambda x: (x != base[a], x is None, x or "")):
+                cap = budget if best is None else best - 1
+                if cap < 0:
+                    break
+                trial = dict(doms)
+                trial[a] = {v}
+                nd = self._fixpoint(trial, nogoods)
+                if nd is None:
                     continue
-                b = base[x]
-                if b is None or b not in vs or b not in d:
-                    break
-                if any(y not in vs and (y is None or y == b) for y in d):
-                    break
-                units.add(group_of.get(x, x))
-            else:
-                if units and not (units & used):
-                    used |= units
-                    n += 1
-        return n
+                d = len(self._changed_units(nd, base, unit_of) - spent)
+                if d > cap:
+                    continue
+                r = self._min_extra(
+                    nd, nogoods, base, unit_of, set(comp), cap - d, memo
+                )
+                if r is not None:
+                    best = d + r
+        memo[key] = (True, best) if best is not None else (False, budget)
+        return best
 
     # ------------------------------------------------------------------ pairs
     def candidate_pairs(self, skip=()):
@@ -238,6 +352,10 @@ class Spec:
             for j in range(i + 1, len(feats)):
                 if feats[i][0] != feats[j][0]:
                     yield feats[i], feats[j]
+
+
+def _differs(base_value, value) -> bool:
+    return base_value is not None and value is not None and value != base_value
 
 
 def fmt_conj(c: dict) -> str:

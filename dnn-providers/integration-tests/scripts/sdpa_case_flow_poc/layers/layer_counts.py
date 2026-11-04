@@ -18,7 +18,10 @@
 #   The six size axes (HUBS) are enumerated. Every other top-level axis is a tree (the axis and its
 #   descendants). Trees that share a rule conjunction (ignoring hub axes) form one component. Given
 #   the hub values, components are independent, so the count is a sum over hub assignments of a
-#   product of per-component counts. Nothing is listed beyond one component's states.
+#   product of per-component counts. A component with at most ENUMERATE_LIMIT states is listed.
+#   A larger one is solved by branching: fix one tree's state, drop the conjunctions that state
+#   breaks, split the remaining trees into independent groups again, and repeat. Subproblems with
+#   the same trees and the same remaining conjunctions are solved once.
 
 import argparse
 import hashlib
@@ -26,12 +29,12 @@ import itertools
 import json
 import math
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import yaml
 
 HUBS = ["batch_size", "seq_q", "seq_kv", "q_heads", "head_dim_qk", "head_dim_v"]
-MAX_COMPONENT_STATES = 2_000_000
+ENUMERATE_LIMIT = 20_000
 
 
 def load(path):
@@ -64,6 +67,12 @@ class Space:
         for h in HUBS:
             assert h in self.roots and not self.children[h], h
         self._states = {}
+
+    def tree_axes(self, aid):
+        out = {aid}
+        for c in self.children[aid]:
+            out |= self.tree_axes(c)
+        return out
 
     def root(self, aid):
         while aid in self.parent:
@@ -123,6 +132,138 @@ def pairs_of_state(s):
     return {(a, b) for a, b in itertools.combinations(feats, 2)}
 
 
+def _ordered(a, b):
+    return (a, b) if a < b else (b, a)
+
+
+def restrict(conjs, state, fixed):
+    """Conjunctions left once `state` fixes the axes in `fixed`, or None when one of them is broken.
+
+    An axis in `fixed` that `state` does not name is inactive and matches nothing. A conjunction
+    that names a fixed axis with another value cannot match and is dropped. One whose fixed
+    axes all match keeps only its open axes; with none left, `state` breaks it."""
+    out = []
+    for c in conjs:
+        rest = {}
+        alive = True
+        for ax, vals in c.items():
+            if ax in fixed:
+                if state.get(ax) not in vals:
+                    alive = False
+                    break
+            else:
+                rest[ax] = vals
+        if not alive:
+            continue
+        if not rest:
+            return None
+        out.append(rest)
+    return out
+
+
+class Solver:
+    """Exact count, live features and valid pairs of a set of trees under rule conjunctions.
+
+    A conjunction names axes of the given trees only. An axis that a tree state leaves inactive
+    never matches, as in `matches`."""
+
+    def __init__(self, space):
+        self.space = space
+        self.memo = {}
+
+    def solve(self, trees, conjs):
+        trees = tuple(sorted(trees))
+        key = (trees, frozenset(frozenset(c.items()) for c in conjs))
+        if key not in self.memo:
+            self.memo[key] = self._solve(trees, conjs)
+        return self.memo[key]
+
+    def _groups(self, trees, conjs):
+        uf = {t: t for t in trees}
+
+        def find(x):
+            while uf[x] != x:
+                uf[x] = uf[uf[x]]
+                x = uf[x]
+            return x
+
+        conj_trees = []
+        for c in conjs:
+            ts = {self.space.root(ax) for ax in c}
+            conj_trees.append(ts)
+            t0 = next(iter(ts))
+            for t in ts:
+                uf[find(t)] = find(t0)
+        groups = defaultdict(list)
+        for t in trees:
+            groups[find(t)].append(t)
+        out = []
+        for members in groups.values():
+            mset = set(members)
+            out.append((members, [c for c, ts in zip(conjs, conj_trees) if ts <= mset]))
+        return out
+
+    def _solve(self, trees, conjs):
+        if not trees:
+            return 1, frozenset(), frozenset()
+        groups = self._groups(trees, conjs)
+        if len(groups) > 1:
+            count, parts = 1, []
+            for members, gconjs in groups:
+                n, feats, pairs = self.solve(members, gconjs)
+                if n == 0:
+                    return 0, frozenset(), frozenset()
+                count *= n
+                parts.append((feats, pairs))
+            feats, pairs = set(), set()
+            for f, p in parts:
+                feats |= f
+                pairs |= p
+            for (f1, _), (f2, _) in itertools.combinations(parts, 2):
+                for a in f1:
+                    for b in f2:
+                        pairs.add(_ordered(a, b))
+            return count, frozenset(feats), frozenset(pairs)
+        size = math.prod(len(self.space.states(t)) for t in trees)
+        if size <= ENUMERATE_LIMIT:
+            count, feats, pairs = 0, set(), set()
+            for combo in itertools.product(*(self.space.states(t) for t in trees)):
+                s = {}
+                for part in combo:
+                    s.update(part)
+                if any(matches(c, s) for c in conjs):
+                    continue
+                count += 1
+                feats |= set(s.items())
+                pairs |= pairs_of_state(s)
+            return count, frozenset(feats), frozenset(pairs)
+        # Branch on the tree that the most conjunctions name; ties go to the fewest states.
+        uses = Counter(self.space.root(ax) for c in conjs for ax in c)
+        t = min(trees, key=lambda x: (-uses[x], len(self.space.states(x)), x))
+        rest = [x for x in trees if x != t]
+        count, feats, pairs = 0, set(), set()
+        fixed = self.space.tree_axes(t)
+        for s in self.space.states(t):
+            sub = restrict(conjs, s, fixed)
+            if sub is None:
+                continue
+            n, f, p = self.solve(rest, sub)
+            if n == 0:
+                continue
+            count += n
+            own = set(s.items())
+            feats |= own | f
+            pairs |= p
+            pairs |= pairs_of_state(s)
+            for a in own:
+                for b in f:
+                    pairs.add(_ordered(a, b))
+        return count, frozenset(feats), frozenset(pairs)
+
+
+SOLVER = {}
+
+
 class Layer:
     """Exact combination count and valid-pair set for one rule set."""
 
@@ -160,13 +301,14 @@ class Layer:
         for trees in comps.values():
             tset = set(trees)
             size = math.prod(len(space.states(t)) for t in trees)
-            assert size <= MAX_COMPONENT_STATES, (trees, size)
-            cstates = []
-            for combo in itertools.product(*(space.states(t) for t in trees)):
-                s = {}
-                for part in combo:
-                    s.update(part)
-                cstates.append(s)
+            cstates = None
+            if size <= ENUMERATE_LIMIT:
+                cstates = []
+                for combo in itertools.product(*(space.states(t) for t in trees)):
+                    s = {}
+                    for part in combo:
+                        s.update(part)
+                    cstates.append(s)
             cconjs = [c for c, tr in zip(conjs, conj_trees) if tr and tr <= tset]
             self.components.append((sorted(trees), cstates, cconjs))
         self.free = [t for t in nonhub_roots if t not in touched]
@@ -195,6 +337,14 @@ class Layer:
             keys = []
             for i, (trees, cstates, cconjs) in enumerate(self.components):
                 key = tuple(h[x] for x in rel_hubs[i])
+                if key not in cache[i] and cstates is None:
+                    solver = SOLVER.setdefault(id(space), Solver(space))
+                    sub = restrict(cconjs, h, set(HUBS))
+                    if sub is None:
+                        cache[i][key] = (0, frozenset(), set())
+                    else:
+                        n, feats, pairs_here = solver.solve(trees, sub)
+                        cache[i][key] = (n, feats, set(pairs_here))
                 if key not in cache[i]:
                     ok = []
                     for s in cstates:

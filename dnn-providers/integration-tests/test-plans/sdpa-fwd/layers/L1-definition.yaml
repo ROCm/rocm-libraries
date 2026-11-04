@@ -63,22 +63,6 @@ rules:
     forbid: {dropout_probability: [negative, above_one]}
     source: "axis doc § 7 'Dropout probability'; flow doc § 4 (example 'dropout probability > 1')"
 
-  - id: D-SCALE-FINITE
-    kind: definition
-    basis: meaning
-    reason: "The scale multiplies every score; a NaN or infinite scale gives no defined attention weights, so there is no correct output to compare."
-    forbid: {scale_value: [non_finite]}
-    source: "axis doc § 7 'Scale value'; open-questions.md OQ-04"
-    attribution: "(user, 2026-10-29) \"Shouldn't cases like the scale set to NaN be rejection test cases and not numerical test cases?\" Added 2026-10-29; a negative scale stays valid."
-
-  - id: D-RNG-DUMP-NEEDS-RANDOM
-    kind: definition
-    basis: meaning
-    reason: "rng_dump hands back the keep mask that random dropout drew. A caller-supplied mask draws nothing, so there is no random mask to hand back."
-    forbid: {dropout: [caller_mask], dropout_pattern_output: [requested]}
-    source: "rocm-libraries @ 00d9c566bea projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp:657-664 (the references refuse rng_dump with any dropout other than Philox)"
-    attribution: "(user, 2026-10-29) \"yes\" to the optional rule forbidding a caller mask together with rng_dump."
-
   - id: D-SCALE-DEFAULT-DZERO
     kind: definition
     basis: meaning
@@ -133,6 +117,29 @@ rules:
     reason: "The output shares the ragged packing, so overlapping sequences would write two results to one place."
     forbid: {ragged_offsets: [overlapping]}
     source: "axis doc § 10 'Ragged offsets' ('every valid list of starting points')"
+
+  - id: D-RAGGED-WHOLE-TOKENS
+    kind: definition
+    basis: meaning
+    reason: "A sequence starts at a token; a start position inside a token names no token."
+    forbid: {ragged_offsets: [mid_token]}
+    source: "axis doc § 10 'Ragged offsets'"
+
+  - id: D-SEQLEN-NOT-NEGATIVE
+    kind: definition
+    basis: meaning
+    reason: "A sequence length counts tokens; a count below zero is not a length. A negative packed length that the start positions give is ragged_offsets out_of_order (Layer 2 F-RAGGED-OFFSETS-ARE-LENGTHS)."
+    forbid_any:
+      - {per_seq_len_q: [negative]}
+      - {per_seq_len_kv: [negative]}
+    source: "axis doc § 10 'Per-sequence lengths (varlen)' ('each from 0 to the maximum')"
+
+  - id: D-DROPOUT-MASK-BINARY
+    kind: definition
+    basis: meaning
+    reason: "Dropout keeps or drops each weight; a mask entry other than 0 or 1 is a weight, not a dropout pattern."
+    forbid: {dropout_mask_pattern: [non_binary]}
+    source: "axis doc § 7 'Dropout on/off', § 14 'Caller-supplied dropout mask'"
 
   - id: D-PAGES-SUFFICIENT
     kind: definition
@@ -255,9 +262,13 @@ rules:
   - id: D-REL-STRIDE-NEEDS-EXTENT
     kind: definition
     basis: consistency
-    reason: "A zero, negative or self-overlapping stride needs a dimension with more than one element."
+    reason: "A zero, negative or self-overlapping stride needs a dimension with more than one element; a head-dim stride needs a head size above one."
     forbid_any:
       - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], head_dim_qk: [zero, one], strides_q: [zero_broadcast, negative, self_overlapping]}
+      - {head_dim_qk: [zero, one], strides_q: [head_dim_strided]}
+      - {head_dim_qk: [zero, one], strides_k: [head_dim_strided]}
+      - {head_dim_v: [zero, one], strides_v: [head_dim_strided]}
+      - {head_dim_v: [zero, one], strides_o: [head_dim_strided]}
       - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [zero_broadcast, negative, self_overlapping]}
       - {batch_size: [zero, one], k_head_sharing: [mqa], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [zero_broadcast, negative, self_overlapping]}
       - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [zero_broadcast, negative, self_overlapping]}
@@ -277,13 +288,65 @@ rules:
     source: "axis doc § 6 'ALiBi'; L0 alibi_head_count (added 2026-10-29)"
     attribution: "Agent's proposal, 2026-10-29 (layers redo). Not confirmed by the user."
 
-  - id: D-REL-PAGED-NOT-RAGGED
+  - id: D-REL-GAPPED-NEEDS-SHORT-LENGTHS
     kind: definition
     basis: consistency
-    reason: "A paged K or V stores its tokens in pages found through a table; the same tensor cannot also be squashed end to end with start positions. Two storage forms for one tensor contradict each other."
-    forbid: {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only, v_only]}
-    source: "axis doc § 1, § 10. Ragged Q over a paged K/V (batch_packing ragged_q_side) stays meaningful."
-    attribution: "Agent's proposal, 2026-10-29 (layers redo). Confirmed by the user 2026-10-29 round b: ragged offsets on the paged K/V storage stay a Layer 1 rule; ragged Q only over paged K/V stays allowed. Seen in the data: every ragged + paged row of the 2026-10-29 escalate run (gfx942 job 68210928) was declined or errored by both references, e.g. lv-6441 'ragged SDPA densify: primary ragged_offset[1] = 2 is not a whole number of tokens'."
+    reason: "A gap needs a slot longer than its live sequence, so some live length on a ragged side must be shorter than its slot. With full slots only, gapped or leading_gap describes spare room that does not exist."
+    forbid_any:
+      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged], per_seq_len_q: [all_full], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [leading_gap], sequence_lengths: [uniform]}
+    source: "axis doc § 10 'Ragged offsets', 'Per-sequence lengths (varlen)'"
+    note: "gapped with sequence_lengths uniform is the Layer 2 rule F-RAGGED-OFFSETS-ARE-LENGTHS: the start positions are then the only lengths."
+
+  - id: D-REL-PACKED-STATS-NEEDS-RAGGED-Q
+    kind: definition
+    basis: consistency
+    reason: "Stats packed with Q's token boundaries needs a ragged Q; a Q in equal-length slots has no token boundaries to share."
+    forbid: {stats_packing: [packed_with_q], batch_packing: [padded, ragged_kv_side]}
+    source: "axis doc § 1, § 8"
+
+  - id: D-INPUTS-OVERLAP-VIEW-DTYPE
+    kind: definition
+    basis: consistency
+    reason: "A view reads its owner's bytes, so its storage format is the owner's; another format would read the same bytes as other numbers. The view is V inside K, or K inside Q when head_dim_v is larger than head_dim_qk."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [fp32], dtype_v: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [fp16], dtype_v: [fp32, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [bf16], dtype_v: [fp32, fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [fp8_e4m3], dtype_v: [fp32, fp16, bf16, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [fp8_e4m3_fnuz], dtype_v: [fp32, fp16, bf16, fp8_e4m3, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [fp8_e5m2], dtype_v: [fp32, fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dtype_k: [fp8_e5m2_fnuz], dtype_v: [fp32, fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp32], dtype_k: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp16], dtype_k: [fp32, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [bf16], dtype_k: [fp32, fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e4m3], dtype_k: [fp32, fp16, bf16, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e4m3_fnuz], dtype_k: [fp32, fp16, bf16, fp8_e4m3, fp8_e5m2, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e5m2], dtype_k: [fp32, fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2_fnuz]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e5m2_fnuz], dtype_k: [fp32, fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2]}
+    source: "axis doc § 4 'Overlap between tensors'; L0 tensor_overlap inputs_overlap"
+
+  - id: D-INPUTS-OVERLAP-VIEW-LAYOUT
+    kind: definition
+    basis: consistency
+    reason: "A view is a window into its owner's buffer and reads through its owner's strides and dimension order, so its layout is `inherited`; no other tensor, and no tensor of a row without inputs_overlap, is a view."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dim_order_v: [bhsd, bshd, other_permutation, d_not_innermost]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [smaller, equal], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dim_order_k: [bhsd, bshd, other_permutation, d_not_innermost]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dim_order_v: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_k: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_v: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_k: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_v: [inherited]}
+    source: "axis doc § 4 'Overlap between tensors'; L0 tensor_overlap inputs_overlap"
+    note: "The rule holds for a view smaller than its owner (head_dim_v below head_dim_qk, or K inside Q with fewer heads or keys): the view reads with its owner's strides at every size that fits."
 
 # Facts of the definition that Layer 0 already enforces by its SHAPE (one shared axis, or a child
 # axis). They exclude nothing from Layer 0, because Layer 0 cannot state the violation. They are
@@ -341,6 +404,9 @@ rejected_candidates:
   - {candidate: "Max and Sum_exp only together", verdict: library_convention, reason: "Each is a defined row statistic on its own.", source: "axis doc § 8"}
   - {candidate: "Descales only per tensor", verdict: library_limit, reason: "Scaling per head, per token or per block is a multiplication by a defined factor for each element.", source: "axis doc § 9"}
   - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axis doc § 6; CpuFpReferenceSdpa.hpp:941-960 at rocm-libraries 00d9c566bea"}
+  - {candidate: "A NaN or infinite scale (D-SCALE-FINITE)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-SCALE-FINITE).", source: "axis doc § 7 'Scale value'"}
+  - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axis doc § 8 'Dropout-pattern output'"}
+  - {candidate: "Ragged start positions not on a paged K or V (D-REL-PAGED-NOT-RAGGED)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RAGGED-NOT-ON-PAGED).", source: "axis doc § 1, § 10"}
   - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axis doc § 1, § 10"}
 
 # Combinations that are meaningful but give the same result as another combination. They are NOT
@@ -359,3 +425,5 @@ equivalences:
   - "bias_broadcast batch_only ≡ batch_or_heads when q_heads = one; heads_only ≡ batch_or_heads when batch_size = one (also dropout_mask_broadcast)."
   - "descale_* per_head ≡ present when batch_size = one and the K/V head count is one, if every factor is the same."
   - "page_table_sharing shared ≡ separate tables with the same contents."
+  - "sink_dtype as_q ≡ fp32 when dtype_q = fp32."
+  - "dim_order_* d_not_innermost ≡ the same order with the head-dim moved innermost when that tensor's head size is one."

@@ -190,18 +190,20 @@ rules:
 
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS
     kind: frontend
-    reason: "Ragged offsets are B + 1 boundaries that also give each sequence's length (offset[b + 1] − offset[b]), so unused memory between sequences, out-of-order starts or overlapping sequences cannot be stated."
-    forbid: {ragged_offsets: [gapped, out_of_order, overlapping]}
+    reason: "Ragged offsets are B + 1 boundaries that also give each sequence's slot (offset[b + 1] − offset[b]). Sequences stored out of their index order cannot be expressed with B + 1 offsets (it would need decreasing offsets, which are negative lengths), and two sequences cannot overlap. A gap needs live lengths apart from the offsets, so gapped is not stated when the offsets are the only lengths."
+    forbid_any:
+      - {ragged_offsets: [out_of_order, overlapping]}
+      - {ragged_offsets: [gapped], sequence_lengths: [uniform]}
     cites:
       - "frontend-surface.yaml axes.ragged_offsets — TA:508; DH:243-262 (checks the offset tensor's own properties only)"
-      - "rocm-libraries projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp:67-71 (offset[0] must be 0), 89-94 (offsets must not decrease)"
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp:89-94 (offsets must not decrease: `if(length < 0)`)"
     why_frontend: >-
-      Layer 0 keeps gapped and out_of_order as layouts (start positions with lengths given
-      elsewhere). hipDNN's ragged form has no separate lengths: a gap would change a length, and
-      a decreasing offset gives a negative length. Added 2026-10-28 (user ruling on model check
-      M7: "sure, add the layer 2 rule"). Value overlapping added 2026-10-28 (user ruling): with
-      non-decreasing boundaries sequence b holds exactly [offset[b], offset[b + 1]), so two
-      sequences cannot share memory. Layer 1's D-RAGGED-NO-OVERLAP is moot under this form.
+      Layer 0 keeps out_of_order as a layout (sequences stored in another order). hipDNN's ragged
+      form has B + 1 boundaries, so that layout needs decreasing offsets, which give negative
+      lengths. With non-decreasing boundaries sequence b holds exactly [offset[b], offset[b + 1]),
+      so two sequences cannot share memory; Layer 1's D-RAGGED-NO-OVERLAP is moot under this form.
+      A gapped slot is stated with the per-sequence length tensors (cuDNN's ragged + padding form);
+      without them the offsets are the lengths and a slot cannot be longer than its sequence.
     evidence: read in code
     debatable: true
     debatable_reason: "The limit is enforced by the ragged references (test SDK), not by the frontend: the frontend accepts any offset contents (DH:243-262). It is kind frontend because the API's ragged form defines the offsets as boundaries."
@@ -256,6 +258,62 @@ rules:
     debatable: true
     debatable_reason: "A validation choice, not an impossibility."
 
+  - id: F-SINK-FLOAT-ONLY
+    kind: frontend
+    reason: "The frontend takes only a FLOAT sink tensor, so a sink in Q's format cannot be stated unless Q is fp32 (then it is the value fp32)."
+    label: "refused by frontend, potential deficiency or defect"
+    forbid: {sink_dtype: [as_q]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:277 `HIPDNN_RETURN_IF_TRUE(effectiveDataType(sink) != DataType::FLOAT,`"
+    why_frontend: "Layer 0 keeps a sink in Q's format (lossy, not meaningless). The node refuses any sink whose type is not FLOAT; an unset type takes the graph's io type and is refused the same way."
+    evidence: read in code
+    debatable: true
+    debatable_reason: "A validation choice, not an impossibility: an engine that takes sinks in Q's format exists, and no frontend setting can reach it."
+
+  - id: F-NO-NEGATIVE-STRIDE
+    kind: frontend
+    reason: "A negative stride (a dimension walked backwards) on Q, K, V, O or Stats should be refused by the frontend."
+    enforced: "not yet: the frontend accepts any int64 stride (ALMIOPEN-3114)"
+    forbid_any:
+      - {strides_q: [negative]}
+      - {strides_k: [negative]}
+      - {strides_v: [negative]}
+      - {strides_o: [negative]}
+      - {strides_stats: [negative]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:627-628 (`HIPDNN_RETURN_IF_NE(_dim.size(),` / `_stride.size(),`: only the stride count is checked)"
+    why_frontend: "Layer 1 keeps negative strides (reading through any stride pattern is defined). The rule records a frontend validation gap: hipDNN intends to refuse them, and the rejection probe MV-22 fails until the frontend does."
+    evidence: read in code
+
+  - id: F-PAGED-NEEDS-SEQ-LENS
+    kind: frontend
+    reason: "Paged K or V needs both seq_len_q and seq_len_kv, so paging with every sequence at full length and no length tensors cannot be stated."
+    forbid: {paged_kv: [present, k_only, v_only], sequence_lengths: [uniform]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:325 `HIPDNN_RETURN_IF_TRUE(!attributes.get_seq_len_q() || !attributes.get_seq_len_kv(),`"
+    why_frontend: "Layer 1 keeps paged storage with full lengths. The node refuses paging without both length tensors; full lengths are stated as sequence_lengths variable with every length full."
+    still_expressible: "sequence_lengths = variable with per_seq_len_q / per_seq_len_kv = all_full."
+    evidence: read in code
+
+  - id: F-INDEX-TENSORS-INT32
+    kind: frontend
+    reason: "The per-sequence length tensors and the page tables must be INT32, so a 64-bit index tensor cannot be stated."
+    forbid: {index_tensor_dtype: [int64]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:298 `HIPDNN_RETURN_IF_TRUE(seqLen->get_data_type() != DataType::INT32,`"
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:346 `HIPDNN_RETURN_IF_TRUE(table->get_data_type() != DataType::INT32,`"
+    why_frontend: "Layer 0 keeps any integer format for an index. The node checks the type of each length tensor and each page table."
+    evidence: read in code
+
+  - id: F-LEFT-BOUND-NOT-ZERO
+    kind: frontend
+    reason: "A left bound of 0 is refused, so a window that excludes the diagonal key on the left cannot be stated."
+    forbid: {window_left: [zero_excluding_diagonal]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:483-484 `HIPDNN_RETURN_IF_TRUE(leftBound.has_value()` / `&& (leftBound.value() == 0 || leftBound.value() < -1),`"
+    why_frontend: "Layer 0 keeps the value (the left bound counts the diagonal key, so 0 excludes it). The node's band check refuses left_bound 0, as cuDNN does."
+    evidence: read in code
+
 # Layer 1 facts that the frontend DOES enforce. They remove nothing here (Layer 1 already removed
 # them, or Layer 0 cannot state them). Listed so a reader sees the agreements, not only the gaps.
 layer1_facts_enforced_by_frontend:
@@ -281,7 +339,16 @@ expressibility:
     - {axis: head_dim_v, lost: [zero], rule: F-EXTENT-NONZERO}
     - {axis: alibi_slopes, lost: [other_positive, zero, negative], rule: F-ALIBI-NO-SLOPES}
     - {axis: scale_source, lost: [default], rule: F-SCALE-NO-DEFAULT-SOURCE}
-    - {axis: ragged_offsets, lost: [gapped, out_of_order, overlapping], rule: F-RAGGED-OFFSETS-ARE-LENGTHS}
+    - {axis: ragged_offsets, lost: "out_of_order and overlapping; gapped only with sequence_lengths uniform", rule: F-RAGGED-OFFSETS-ARE-LENGTHS}
+    - {axis: sink_dtype, lost: [as_q], rule: F-SINK-FLOAT-ONLY}
+    - {axis: strides_q, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
+    - {axis: strides_k, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
+    - {axis: strides_v, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
+    - {axis: strides_o, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
+    - {axis: strides_stats, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
+    - {axis: sequence_lengths, lost: "uniform, only combined with paging", rule: F-PAGED-NEEDS-SEQ-LENS}
+    - {axis: index_tensor_dtype, lost: [int64], rule: F-INDEX-TENSORS-INT32}
+    - {axis: window_left, lost: [zero_excluding_diagonal], rule: F-LEFT-BOUND-NOT-ZERO}
     - {axis: causal_alignment, lost: "only combined with a window on the other diagonal", rule: F-ONE-DIAGONAL}
     - {axis: window_alignment, lost: "as causal_alignment", rule: F-ONE-DIAGONAL}
     - {axis: page_count, lost: "surplus with max_seq_len_kv equal; exact with larger", rule: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN}
@@ -334,6 +401,11 @@ expressibility:
     batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA:508 at 61c26758398; TensorAttributes.hpp:508 at 00d9c566bea). The frontend checks only the offset tensor itself (DH:243-262 at 61c26758398; DescriptorHelpers.hpp:229-262 at 00d9c566bea). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTokenBoundaries.hpp:54-58). Round b (2026-10-29): first run on the GPU in job 68212616 (gfx942)."
     matmul_input_precision_fp8: "set_mma_core_mode takes any DataType (SA9:150, 724-727)."
     dropout_mask_broadcast: "the dropout mask dims [1 or B, 1 or H_q, S_q, S_kv]; the node does not check the dropout mask shape (FN9:34-252). The references take [B or 1, H or 1, Sq, key extent], the key extent being max_seq_len_kv when K is paged (PU9:352-416, 400-415 @ 1790cf623f4); rng_dump is still compared with K's dim 2 (PU9:549-553)."
+    head_dim_stride: "head_dim_strided: a D stride of 2 or more through set_stride; d_not_innermost: strides that put D outside the innermost place. The tensor check compares only the stride count with the dim count (TensorAttributes.hpp:627-628 @ 91a40bdfd4c)."
+    view_layout: "inherited: the view's strides are its owner's strides (set_stride); the node never compares two tensors' strides. Memory sharing is made by the execute pointers (G:4746-4748)."
+    stats_packing: "packed_with_q: set_ragged_offset on the Stats tensor (TA:508). The node only fills Stats dims and strides when they are empty (SdpaFwdNode.hpp:403-415 @ 91a40bdfd4c); it has no ragged check, so no Layer 2 rule removes the value."
+    sink_dtype: "the sink tensor's data type (set_data_type); only FLOAT passes (F-SINK-FLOAT-ONLY)."
+    index_tensor_dtype: "the data type of the seq_len tensors and the page tables; only INT32 passes (F-INDEX-TENSORS-INT32)."
     left_bound_at_00d9c566bea: "left_bound counts the diagonal key (cuDNN); 0 and < -1 rejected, right_bound < -1 rejected (SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand). window_left zero / partial / whole_span = left_bound 1 / S_kv/4 + 1 / S_kv + 1"
 
 # API-path variants found while mapping. They are not exclusions; they go to model/injections.yaml
@@ -357,8 +429,8 @@ api_only_settings:
   - {id: runtime_shape_overrides, values: [off, on], cite: "G:6694,4936-4942,5044-5047"}
   - {id: workspace_memory, values: [none, enough], cite: "G:4678,4746-4748"}
 
-# Debatable count for this layer: 6 of the 10 rules
+# Debatable count for this layer: 7 of the 15 rules
 # (F-ALIBI-NO-SLOPES, F-SCALE-NO-DEFAULT-SOURCE, F-ONE-DIAGONAL, F-RAGGED-OFFSETS-ARE-LENGTHS,
-# F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN, F-SCALE-TENSOR-BY-VALUE; the last three added 2026-10-28), plus 2
+# F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN, F-SCALE-TENSOR-BY-VALUE, F-SINK-FLOAT-ONLY), plus 2
 # inferred mappings that are not rules (matmul_input_precision native = NOT_SET; window whole_span = −1).
-debatable_count: {rules: 6, mappings: 2}
+debatable_count: {rules: 7, mappings: 2}

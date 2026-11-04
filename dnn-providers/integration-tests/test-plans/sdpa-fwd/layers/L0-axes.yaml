@@ -45,6 +45,8 @@
 # Kept OUT on purpose (flow doc § 4, "Keep these OUT of Layers 0–1")
 #   - tile-edge and hazard values (127/128/129, primes, not-a-multiple-of-8);
 #   - concrete numbers (no class carries a test value; values are chosen later);
+#   - the model's size sweep and numeric domains: they choose concrete sizes inside the size
+#     classes and add no axis or value here;
 #   - see `set_aside` at the end for axes of the axis doc that are not attention-meaning axes.
 #
 # Tensor names: Q (query), K (key), V (value), O (output), S (the score/probability matrix
@@ -70,12 +72,47 @@ size_classes: &size_classes
   - {id: one, meaning: "exactly one"}
   - {id: many, meaning: "two or more"}
 
+# Q and O: four dims, the head-dim (D) among them.
 dim_orders: &dim_orders
+  - {id: bhsd, meaning: "batch, heads, sequence, head-dim from outermost to innermost"}
+  - {id: bshd, meaning: "batch, sequence, heads, head-dim"}
+  - {id: other_permutation, meaning: "any of the other 4 orderings with the head-dim innermost"}
+  - {id: d_not_innermost, meaning: "any of the 18 orderings with the head-dim not innermost"}
+
+# K and V: as Q and O, and either can be a view into another input's buffer (tensor_overlap).
+dim_orders_view: &dim_orders_view
+  - {id: bhsd, meaning: "batch, heads, sequence, head-dim from outermost to innermost"}
+  - {id: bshd, meaning: "batch, sequence, heads, head-dim"}
+  - {id: other_permutation, meaning: "any of the other 4 orderings with the head-dim innermost"}
+  - {id: d_not_innermost, meaning: "any of the 18 orderings with the head-dim not innermost"}
+  - {id: inherited, meaning: "the tensor is a view into another input's buffer; it reads through its owner's dimension order"}
+
+# Stats: one value per row, so its head-dim extent is 1 and where that dim sits does not change memory.
+stats_dim_orders: &stats_dim_orders
   - {id: bhsd, meaning: "batch, heads, sequence, head-dim from outermost to innermost"}
   - {id: bshd, meaning: "batch, sequence, heads, head-dim"}
   - {id: other_permutation, meaning: "any of the other 22 orderings of the four dimensions"}
 
 stride_classes: &stride_classes
+  - {id: packed, meaning: "no gaps between elements"}
+  - {id: padded, meaning: "gaps after some dimension (row or plane padding)"}
+  - {id: non_contiguous_view, meaning: "a slice of a larger tensor"}
+  - {id: zero_broadcast, meaning: "stride 0 on a dimension of extent > 1: the same element is read for every index"}
+  - {id: negative, meaning: "a dimension is walked backwards in memory"}
+  - {id: self_overlapping, meaning: "non-zero strides under which two different indices reach the same element"}
+  - {id: head_dim_strided, meaning: "the head-dim elements are not adjacent: a head-dim stride of 2 or more"}
+
+stride_classes_view: &stride_classes_view
+  - {id: packed, meaning: "no gaps between elements"}
+  - {id: padded, meaning: "gaps after some dimension (row or plane padding)"}
+  - {id: non_contiguous_view, meaning: "a slice of a larger tensor"}
+  - {id: zero_broadcast, meaning: "stride 0 on a dimension of extent > 1: the same element is read for every index"}
+  - {id: negative, meaning: "a dimension is walked backwards in memory"}
+  - {id: self_overlapping, meaning: "non-zero strides under which two different indices reach the same element"}
+  - {id: head_dim_strided, meaning: "the head-dim elements are not adjacent: a head-dim stride of 2 or more"}
+  - {id: inherited, meaning: "the tensor is a view into another input's buffer; it reads through its owner's strides, one per dimension, applied to its own dimensions"}
+
+stats_stride_classes: &stats_stride_classes
   - {id: packed, meaning: "no gaps between elements"}
   - {id: padded, meaning: "gaps after some dimension (row or plane padding)"}
   - {id: non_contiguous_view, meaning: "a slice of a larger tensor"}
@@ -101,11 +138,11 @@ axes:
   # ---------------------------------------------------------------- § 1 batch packing, § 10 lengths
   - id: batch_packing
     kind: categorical
-    meaning: "How several sequences share one tensor. The query side (Q, O, Stats) and the key/value side (K, V) can be packed differently."
+    meaning: "How several sequences share one tensor. The query side (Q, O) and the key/value side (K, V) can be packed differently. Whether Stats is packed with Q is stats_packing."
     values:
       - {id: padded, meaning: "every tensor in equal-length slots; a shorter sequence leaves blank positions"}
-      - {id: ragged, meaning: "every tensor squashed end to end; a list of start positions says where each sequence begins"}
-      - {id: ragged_q_side, meaning: "Q and O (and Stats) squashed end to end; K and V in equal-length slots or pages (the vLLM serving shape). Added 2026-10-29"}
+      - {id: ragged, meaning: "Q, K, V and O squashed end to end; a list of start positions says where each sequence begins"}
+      - {id: ragged_q_side, meaning: "Q and O squashed end to end; K and V in equal-length slots or pages (the vLLM serving shape). Added 2026-10-29"}
       - {id: ragged_kv_side, meaning: "K and V squashed end to end; Q and O in equal-length slots. Added 2026-10-29"}
     notes: >-
       O always has Q's packing and V always has K's: an output row belongs to its query, and each value to its
@@ -122,10 +159,15 @@ axes:
     meaning: "The list of start positions for ragged packing. It exists only for ragged packing (rule A)."
     values:
       - {id: contiguous, meaning: "each sequence starts where the previous one ends"}
-      - {id: gapped, meaning: "unused memory between sequences"}
-      - {id: out_of_order, meaning: "start positions are not increasing with the sequence index"}
+      - {id: gapped, meaning: "a packed slot is longer than its live sequence: the start positions give the slots, and the per-sequence lengths give the live lengths"}
+      - {id: leading_gap, meaning: "the first sequence starts after the start of the tensor: a gapped layout whose spare room is before sequence 0"}
+      - {id: out_of_order, meaning: "sequences stored in a different order from their index; with B + 1 start positions this can be written only as decreasing start positions"}
       - {id: overlapping, meaning: "two sequences share memory (meaningless value — see Layer 1)"}
-    notes: "The tensors of one side share one list, so O uses the same start positions as Q."
+      - {id: mid_token, meaning: "a start position falls inside a token (meaningless value — see Layer 1)"}
+    notes: >-
+      The tensors of one side share one list, so O uses the same start positions as Q, and so does
+      Stats when stats_packing is packed_with_q. A gap exists only where some live length is shorter
+      than its slot (Layer 1 D-REL-GAPPED-NEEDS-SHORT-LENGTHS).
     source: "axis doc § 10 'Ragged offsets'"
 
   - id: sequence_lengths
@@ -144,6 +186,9 @@ axes:
       references treat the lengths as padding whatever the flag says (rocm-libraries @ 00d9c566bea
       PlanUtils.hpp:112-118; SdpaSemanticsRegister.md SEM-008; cuDNN instead refuses lengths without the
       flag). The two spellings are model values with class variable (model.yaml sequence_lengths).
+      Under ragged packing, `variable` and the per_seq_len classes describe the packed lengths: the
+      start positions give each slot, and length tensors, when given, give the live lengths. The query
+      side and the key/value side vary per sequence independently (per_seq_len_q, per_seq_len_kv).
     source: "axis doc § 5 'Mask type' (padding mask), § 10 'Per-sequence lengths'"
 
   - id: per_seq_len_q
@@ -158,6 +203,7 @@ axes:
       - {id: some_zero, meaning: "at least one sequence, but not all, has length 0"}
       - {id: all_zero, meaning: "every sequence has length 0"}
       - {id: exceeds_storage, meaning: "a length is larger than the storage holds (meaningless value — see Layer 1)"}
+      - {id: negative, meaning: "an entry of a length tensor below zero (meaningless value — see Layer 1)"}
     source: "axis doc § 10 'Per-sequence lengths (varlen)'"
 
   - id: per_seq_len_kv
@@ -291,19 +337,19 @@ axes:
 
   # ---------------------------------------------------------------- § 4 memory layout (per tensor)
   - {id: dim_order_q, kind: categorical, meaning: "Physical dimension order of Q.", values: *dim_orders,
-     notes: "The 24 orders are equally meaningful; the 22 uncommon ones share one value.", source: "axis doc § 4 'Dimension order', 'Per-tensor layout independence'"}
-  - {id: dim_order_k, kind: categorical, meaning: "Physical dimension order of K.", values: *dim_orders, source: "axis doc § 4"}
-  - {id: dim_order_v, kind: categorical, meaning: "Physical dimension order of V.", values: *dim_orders, source: "axis doc § 4"}
+     notes: "The 24 orders are equally meaningful; the 22 uncommon ones share two values: other_permutation (head dim innermost) and d_not_innermost.", source: "axis doc § 4 'Dimension order', 'Per-tensor layout independence'"}
+  - {id: dim_order_k, kind: categorical, meaning: "Physical dimension order of K.", values: *dim_orders_view, source: "axis doc § 4"}
+  - {id: dim_order_v, kind: categorical, meaning: "Physical dimension order of V.", values: *dim_orders_view, source: "axis doc § 4"}
   - {id: dim_order_o, kind: categorical, meaning: "Physical dimension order of O.", values: *dim_orders, source: "axis doc § 4"}
   - {id: dim_order_stats, kind: child, value_kind: categorical, parent: {stats_output: [requested]},
-     meaning: "Physical dimension order of Stats. Exists only when Stats is requested (rule A).", values: *dim_orders, source: "axis doc § 4"}
+     meaning: "Physical dimension order of Stats. Exists only when Stats is requested (rule A).", values: *stats_dim_orders, source: "axis doc § 4"}
 
   - {id: strides_q, kind: class, meaning: "Stride pattern of Q.", values: *stride_classes, source: "axis doc § 4 'Strides'; footnote 5"}
-  - {id: strides_k, kind: class, meaning: "Stride pattern of K.", values: *stride_classes, source: "axis doc § 4 'Strides'"}
-  - {id: strides_v, kind: class, meaning: "Stride pattern of V.", values: *stride_classes, source: "axis doc § 4 'Strides'"}
+  - {id: strides_k, kind: class, meaning: "Stride pattern of K.", values: *stride_classes_view, source: "axis doc § 4 'Strides'"}
+  - {id: strides_v, kind: class, meaning: "Stride pattern of V.", values: *stride_classes_view, source: "axis doc § 4 'Strides'"}
   - {id: strides_o, kind: class, meaning: "Stride pattern of O.", values: *stride_classes, source: "axis doc § 4 'Strides'"}
   - {id: strides_stats, kind: child, value_kind: class, parent: {stats_output: [requested]},
-     meaning: "Stride pattern of Stats.", values: *stride_classes, source: "axis doc § 4 'Strides'"}
+     meaning: "Stride pattern of Stats. Its head-dim extent is 1, so it has no head-dim stride class.", values: *stats_stride_classes, source: "axis doc § 4 'Strides'"}
 
   - {id: alignment_q, kind: class, meaning: "Start-address alignment of Q.", values: *alignment_classes, source: "axis doc § 4 'Starting address alignment' (†)"}
   - {id: alignment_k, kind: class, meaning: "Start-address alignment of K.", values: *alignment_classes, source: "axis doc § 4"}
@@ -317,7 +363,7 @@ axes:
     meaning: "Whether tensors share memory."
     values:
       - {id: separate, meaning: "no two tensors share memory"}
-      - {id: inputs_overlap, meaning: "two inputs share memory (e.g. Q and K are the same buffer)"}
+      - {id: inputs_overlap, meaning: "two inputs share memory: one input is a view into another input's buffer. V is a view of K's leading head_dim_v columns at offset 0; when head_dim_v is larger than head_dim_qk, K is a view of Q instead. The view reads through its owner's layout (the value inherited of its dim_order and strides axes)"}
       - {id: output_overlaps_input, meaning: "an output is written into an input's memory (in place) — see open-questions.md OQ-08"}
       - {id: outputs_overlap, meaning: "two outputs share memory (meaningless value — see Layer 1)"}
     source: "axis doc § 4 'Overlap between tensors' (†)"
@@ -358,10 +404,12 @@ axes:
     parent: {sliding_window: [present]}
     relates: [window_left_size, seq_kv]
     meaning: "How far left of the diagonal a query may look, relative to the key/value length."
-    values: &window_sizes
+    values:
       - {id: zero, meaning: "no keys on this side of the diagonal"}
       - {id: partial, meaning: "some, but not all, keys on this side"}
       - {id: whole_span, meaning: "every key on this side"}
+      - {id: zero_excluding_diagonal, meaning: "no keys on this side, and not the diagonal key either"}
+    notes: "The left bound counts the diagonal key, so zero_excluding_diagonal is a left bound of 0."
     source: "axis doc § 5 'Sliding-window size'"
   - id: window_right
     kind: child
@@ -369,7 +417,10 @@ axes:
     parent: {sliding_window: [present]}
     relates: [window_right_size, seq_kv]
     meaning: "How far right of the diagonal a query may look, relative to the key/value length."
-    values: *window_sizes
+    values:
+      - {id: zero, meaning: "no keys on this side of the diagonal"}
+      - {id: partial, meaning: "some, but not all, keys on this side"}
+      - {id: whole_span, meaning: "every key on this side"}
     source: "axis doc § 5 'Sliding-window size'"
 
   - id: block_mask
@@ -451,6 +502,16 @@ axes:
     values: *presence
     notes: "Sink values are tensor contents; their classes belong with data values, not here."
     source: "axis doc § 6 'Attention sinks'"
+  - id: sink_dtype
+    kind: child
+    value_kind: categorical
+    parent: {attention_sinks: [present]}
+    meaning: "Storage format of the sink logits."
+    values:
+      - {id: fp32, meaning: "32-bit IEEE float"}
+      - {id: as_q, meaning: "Q's storage format; with an fp32 Q this is the same as fp32"}
+    notes: "Storing a sink logit in any format is meaningful; a low-precision format is lossy, not meaningless."
+    source: "axis doc § 6 'Attention sinks'"
 
   - id: logit_softcap
     kind: categorical
@@ -530,6 +591,7 @@ axes:
       - {id: keep_all, meaning: "nothing dropped"}
       - {id: mixed, meaning: "some weights dropped"}
       - {id: drop_all, meaning: "every weight dropped: the output is zero"}
+      - {id: non_binary, meaning: "an entry other than 0 or 1: a weight, not a kept-or-dropped mark (meaningless value — see Layer 1)"}
     source: "axis doc § 14 'Caller-supplied dropout mask'"
   - id: dropout_mask_broadcast
     kind: child
@@ -565,6 +627,15 @@ axes:
     values: *formats
     notes: "The axis doc lists fp32, fp16 and bf16. Storing a number in any format is meaningful, so all seven are listed; fp8 is lossy, not meaningless."
     source: "axis doc § 2 'Stats / LSE number type'"
+  - id: stats_packing
+    kind: child
+    value_kind: categorical
+    parent: {stats_output: [requested]}
+    meaning: "How Stats stores its rows when several sequences share one tensor."
+    values:
+      - {id: dense, meaning: "Stats in plain [B, H, S_q, 1] slots"}
+      - {id: packed_with_q, meaning: "Stats packed token by token with Q's token boundaries, with its own list of start positions in Stats's element units"}
+    source: "axis doc § 1, § 8 'Stats / LSE output'"
   - id: max_sumexp_output
     kind: categorical
     meaning: "Hand back the row maximum and/or the row sum of exponentials (the two parts of LSE)."
@@ -695,6 +766,15 @@ axes:
     notes: "The axis doc's 'split' value is set aside (see set_aside: split_kv)."
     source: "axis doc § 10 'KV cache update style'"
 
+  - id: index_tensor_dtype
+    kind: categorical
+    meaning: "Integer format of the index tensors: the per-sequence length tensors and the page tables, where a case has them."
+    values:
+      - {id: int32, meaning: "32-bit signed integers"}
+      - {id: int64, meaning: "64-bit signed integers"}
+    notes: "Any integer format can hold an index. The ragged start positions are not part of this axis."
+    source: "axis doc § 10 'Per-sequence lengths', 'Paged KV cache'"
+
 # Conditions that are a RESULT of other axes, not a setting. Listed so they are not lost.
 derived_conditions:
   - id: fully_masked_rows
@@ -726,6 +806,7 @@ set_aside:
   - {id: explicit_setting_state, source: "axis doc § 13 'Which optional settings are explicitly set'", reason: "Unset vs set-to-default is a property of an API, not of attention.", enters_at: "Layer 2 injection 'API-path variants' (flow doc § 2)"}
   - {id: engine_choice, source: "axis doc § 13 'Engine choice'", reason: "Which implementation runs, not what it computes.", enters_at: "per-engine view / discovery (flow doc § 13)"}
   - {id: execution_strategy, source: "axis doc § 14 'Execution strategy'", reason: "A hint about how to run; the result's meaning is the same.", enters_at: "Layer 2 (frontend record)"}
+  - {id: unfuse_fma_hint, source: "hipDNN SdpaAttributes set_unfuse_fma", reason: "An advisory hint about how to compute; Graph::sdpa warns and then ignores it (rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:6382).", enters_at: "Layer 2 (frontend record)"}
   - {id: scalar_by_value_vs_device_memory, source: "axis doc § 14", reason: "How a number reaches the operation, not what it is. The setup-time vs run-time distinction is kept as scale_source.", enters_at: "Layer 2 API-path variants"}
   - {id: runtime_shape_overrides, source: "axis doc § 14", reason: "Reuse of one prepared operation at several shapes; each shape is already a Layer 0 point.", enters_at: "Layer 2 API-path variants"}
   - {id: ragged_offset_multiplier, source: "axis doc § 14", reason: "A unit for storing offsets, not their meaning.", enters_at: "Layer 2"}

@@ -46,6 +46,9 @@ Per level, in recipe order:
      order, until its cumulative time plus the per-run overhead reaches headroom x budget. A
      filled case obeys the level's `larger_tiers` and `tiers_per_row` too.
 
+A level's `size_sweep` labels are checked against SIZE_SWEEP_LABELS. This generator emits no
+size-sweep rows, and it does not read the `numeric_domains` and `size_sweep` sections.
+
 Run: python3 -m sdpa_case_flow_poc.levels --model-dir DIR --out-dir DIR [--seed N]
          [--timings ARCH=CSV ...]
 A timings CSV has columns case_key,seconds,source (source: measured, measured-stops-early or
@@ -77,6 +80,13 @@ BASE = "shared"
 TIER_ORDER = ("S", "H", "M", "L", "X")
 ORIGIN_ORDER = ("low-change", "pairwise", "one-at-a-time", "targeted", "real_world")
 HEAD_DIM = {"d1": 1, "d64": 64, "d128": 128, "d192": 192, "d256": 256}
+SIZE_SWEEP_LABELS = (
+    "typical",
+    "corner_plain",
+    "corner_crossed",
+    "corner_crossed_at_L",
+    "stress",
+)
 OUT_CSV = "levels.csv"
 OUT_SUMMARY = "levels-summary.md"
 
@@ -251,6 +261,13 @@ def load_recipe(model: Model, model_dir: Path) -> Recipe:
         if any(t not in spec["shapes"] for t in spec.get("tiers_per_value") or []):
             raise ModelError(
                 f"level {spec['name']}: tiers_per_value names a tier outside its shapes"
+            )
+        sweep = spec.get("size_sweep", [])
+        if not isinstance(sweep, list) or any(
+            x not in SIZE_SWEEP_LABELS for x in sweep
+        ):
+            raise ModelError(
+                f"level {spec['name']}: size_sweep must list labels from {SIZE_SWEEP_LABELS}"
             )
     over_budget = ll.get("over_budget", "move")
     if over_budget not in ("move", "report"):

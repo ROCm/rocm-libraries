@@ -101,22 +101,23 @@ thought about what makes sense or what hipDNN can express. This list is
   `causal_mask` is `present`.
 - A **combination** is one value for every active axis.
 
-Layer 0 has 85 axes and 297 values. That gives about 1.5 × 10³⁹ combinations.
+Layer 0 has 88 axes and 321 values. That gives about 3.3 × 10⁴¹ combinations.
 Nobody can run that many cases. So we count **pairs**: two values of two
 different axes, for example `dtype_q = fp16` together with
 `causal_mask = present`. A pair is **valid** when at least one allowed
-combination holds it. Layer 0 has 43,301 valid pairs.
+combination holds it. Layer 0 has 50,599 valid pairs.
 
 **Pairwise testing** puts every valid pair in at least one case. Most defects
 need only one or two settings in a bad state, so pairwise testing finds most of
 them with a small number of cases. For this reason, the plan measures its size
 in pairs, not in combinations.
 
-The layer numbers in sections 2 and 3 come from research files that are not
-in the repository. A script counted them by arithmetic over those files: it
-enumerates the size axes, splits the other axes into independent groups, and
-multiplies the counts of the groups. It does not list the combinations one by
-one.
+The layer numbers in sections 2 and 3 come from the layer files in
+`test-plans/sdpa-fwd/layers/`. The script
+`scripts/sdpa_case_flow_poc/layers/layer_counts.py` counts them by arithmetic:
+it enumerates the size axes, splits the other axes into independent groups, and
+multiplies the counts of the groups. It splits a large group again by fixing
+one axis at a time. It does not list the combinations one by one.
 
 ## 3. Narrowing: meaning, then the frontend
 
@@ -131,8 +132,8 @@ or about numbers. Examples:
 - `D-OUTPUT-SELF-ALIAS`: output strides that send two output elements to one
   address cannot hold both results.
 
-Layer 1 has 27 definition rules. They leave about 2.0 × 10³⁴ combinations and
-38,386 valid pairs.
+Layer 1 has 31 definition rules. They leave about 2.1 × 10³⁶ combinations and
+44,393 valid pairs.
 
 **Layer 2 removes combinations that hipDNN's frontend cannot express.** These
 are **frontend** rules (ids `F-*`). The frontend is the hipDNN C++ API that
@@ -145,8 +146,29 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-Layer 2 has 10 frontend rules. They leave about 7.4 × 10³⁰ combinations and
-33,314 valid pairs.
+Layer 2 has 15 frontend rules. They leave about 1.1 × 10³² combinations and
+36,997 valid pairs.
+
+Some values and combinations have meaning, but the frontend cannot state them,
+refuses them, or is to refuse them. Layer 2 removes them. The model does not hold the values of
+the first two rules. The model holds the values of `F-LEFT-BOUND-NOT-ZERO` and
+`F-NO-NEGATIVE-STRIDE`, and the rule removes them from every row.
+`F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value:
+
+- `F-SINK-FLOAT-ONLY`: the frontend takes only an fp32 sink, so a sink in Q's
+  format cannot be stated. This is a possible frontend defect.
+- `F-INDEX-TENSORS-INT32`: the length tensors and the page tables must be
+  32-bit integers.
+- `F-LEFT-BOUND-NOT-ZERO`: a left window bound of 0 is refused.
+- `F-PAGED-NEEDS-SEQ-LENS`: a paged K or V needs both length tensors.
+- `F-NO-NEGATIVE-STRIDE`: a negative stride. The frontend accepts it today, but
+  hipDNN intends to refuse it (ticket ALMIOPEN-3114). The rule is marked "not
+  enforced yet".
+
+Some combinations are valid but no reference executor can check them. They are
+not Layer 1 or Layer 2 rules. The answer key (section 4) holds them. Examples: a
+scale that is NaN or infinite, the dropout pattern output with a caller-supplied
+mask, and ragged offsets on a paged K or V.
 
 A removed combination is not lost. When the frontend accepts a meaningless
 request, that request comes back as a **rejection probe** in
@@ -156,7 +178,7 @@ are not part of this plan's bundles.
 ## 4. The model
 
 The model (`model.yaml`) is the Layer 2 space in a form that a script can
-use. It has 79 axes (28 of them child axes) and 271 values.
+use. It has 80 axes (29 of them child axes) and 289 values.
 
 **Classes, not numbers.** Most size axes hold a **class**, chosen by meaning.
 Example: `batch_size` is `one` or `many`. A **relationship** axis says how two
@@ -206,7 +228,20 @@ value alone has one. `level_labels.answer_key_needs` lists them, with ids
 reference executors support. A tier that must be fully checkable applies these
 rules.
 
-**Bridges.** `level_labels.bridges` (B1 to B13) name pairs of axes in different
+**Inputs that share memory.** With `tensor_overlap = inputs_overlap`, one input
+is a view into another input's buffer: V inside K, or K inside Q when V's head
+size is larger. The view reads through its owner's strides, so its layout
+values (`strides_*`, `dim_order_*`) are `inherited`. Two rules keep this true:
+`D-INPUTS-OVERLAP-VIEW-DTYPE` (the view has its owner's format) and
+`D-INPUTS-OVERLAP-VIEW-LAYOUT` (only the view is `inherited`).
+
+**Numeric domains.** `numeric_domains` gives, for each size axis, the smallest
+and largest size the frontend takes, the range of each class, and boundary
+values (powers of two, multiples of 16 to 128, and the values next to them).
+Each entry cites its source: the frontend line where the frontend sets a limit,
+otherwise the rule or entry it follows.
+
+**Bridges.** `level_labels.bridges` (B1 to B14) name pairs of axes in different
 groups that still interact. Example: B3, "element size changes byte strides and
 alignment".
 
@@ -243,9 +278,9 @@ Each rule also has a `form`:
 | `setting` | Records a choice about how the model is built. It removes nothing. |
 | `covered` | A policy rule whose requests another rule already removes. |
 
-The model applies 27 exclusion rules: 21 definition, 4 frontend and 2 policy.
-Together they make 5,434 of the 35,993 structurally possible pairs invalid.
-30,559 valid pairs remain.
+The model applies 32 exclusion rules: 23 definition, 8 frontend and 1 policy.
+Together they make 5,844 of the 40,951 structurally possible pairs invalid.
+35,107 valid pairs remain.
 
 Example of a `forbid`:
 
@@ -259,10 +294,11 @@ Example of a `forbid`:
 With one key, a window cannot cover "some but not all" keys, so these rows
 are removed.
 
-The two policy rules remove negative strides (`P-NO-NEGATIVE-STRIDE`) and a
-zero stride on the head dimension of Q, K or V (`P-NO-HEAD-DIM-BROADCAST`). They
-name ticket ALMIOPEN-3114, which asks hipDNN to refuse these requests. The
-requests come back as rejection probes MV-22 and MV-23.
+The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides, and the
+policy rule `P-NO-HEAD-DIM-BROADCAST` removes a zero stride on the head
+dimension of Q, K or V. Both name ticket ALMIOPEN-3114, which asks hipDNN to
+refuse these requests. The requests come back as rejection probes MV-22 and
+MV-23.
 
 ## 6. Generating the cases
 
@@ -318,6 +354,14 @@ the recipe are open to review.
 | comprehensive | as standard | yes | within groups and bridges, packed | one-at-a-time at S and L | S, H, M, L (one per row) | 8,000 MFLOP | 60 min |
 | full | everything, including `fringe` and answer key "no" | no | all, packed | one-at-a-time at S and L; the base case at X | S, H, M, L, X | none | none |
 
+**Size sweep.** Each level names the size-sweep rows it takes (`size_sweep`
+in `levels:`). quick takes the typical sizes, which are most likely to pass.
+standard takes the corner sizes, which are most likely to find a defect: on the
+plain case, and crossed with the settings whose `size_sensitive` label is
+"yes". comprehensive takes standard's crossings again at shape tier L. full
+takes the stress sizes of shape tier X. The model holds the rule
+(`size_sweep`); the generator does not make sweep rows yet.
+
 The base value of each axis is always allowed. A required child axis whose
 values all have `changes_numbers` "no" (for example `max_seq_len_kv` under
 paging) does not hold its parent back.
@@ -363,10 +407,10 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,330 | 1,330 | 46.1 | 45.3 | 15.4 % |
-| standard | 6,782 | 8,112 | 432.6 | 321.8 | 24.0 % |
-| comprehensive | 3,080 | 11,192 | 1,624.5 | 1,353.1 | 45.1 % |
-| full | 5,537 | 16,729 | 4,823.2 | 3,800.4 | — |
+| quick | 1,599 | 1,599 | 65.6 | 53.0 | 21.9 % |
+| standard | 9,004 | 10,603 | 557.4 | 419.2 | 31.0 % |
+| comprehensive | 4,208 | 14,811 | 2,156.7 | 1,557.9 | 59.9 % |
+| full | 7,181 | 21,992 | 5,327.8 | 3,825.8 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
@@ -397,9 +441,9 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 16,729 rows. It has no quoted fields. A `-`
-means that a child axis is not active in that row. Each row has 92 columns: 13
-case columns, then 79 axis columns.
+`levels.csv` has one row per case: 21,992 rows. It has no quoted fields. A `-`
+means that a child axis is not active in that row. Each row has 93 columns: 13
+case columns, then 80 axis columns.
 
 **Case columns (13).**
 
@@ -419,7 +463,7 @@ case columns, then 79 axis columns.
 | `case_key` | 16 hex digits: a hash of the tier, the sizes and every axis value. It is unique per row and stays the same when `case_id` values shift. Use it as the key. |
 | `est_seconds_gfx950` | The time of the case on gfx950. |
 
-**Axis columns (79).** One column per model axis, from `batch_packing` to
+**Axis columns (80).** One column per model axis, from `batch_packing` to
 `runtime_shape_override`, in the order of `model.yaml`.
 
 ## 9. From rows to bundles
@@ -680,15 +724,16 @@ caller-supplied dropout mask. Rows with such a setting are excluded
   They are rows of the generated CSV, but no bundle holds them.
 - The rejection probes and the API-path variants in `injections.yaml` are not
   bundles. They belong to a rejection suite.
-- A sweep of awkward sizes (sizes that do not fit tile edges) is not part of
-  this plan.
+- The model holds the numeric domains and the size-sweep rule, but the
+  generator does not make size-sweep rows (sizes that do not fit tile edges)
+  yet.
 - The suite is expected to read the CSV directly in a later step. The bundles
   under `SdpaFwdPlan` will then be removed.
 
 ## 12. How to regenerate
 
 **The CSV.** Run the generator from `dnn-providers/integration-tests/scripts`.
-It needs Python 3 and PyYAML. It takes about 3 minutes.
+It needs Python 3 and PyYAML. It takes about 10 minutes.
 
 ```bash
 python3 -m sdpa_case_flow_poc.levels \

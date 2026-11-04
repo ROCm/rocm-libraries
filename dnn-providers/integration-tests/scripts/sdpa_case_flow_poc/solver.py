@@ -10,6 +10,11 @@ The axes split into components: axes linked by a rule conjunction or by a parent
 share a component. Components are independent, so each one is solved alone. The search picks
 the axis with the fewest remaining values first and removes values that would complete a
 forbidden conjunction (forward checking).
+
+When a branch fails, the search records which earlier assignments caused the failure (the
+conflict set) and returns straight to the latest of them (conflict-directed backjumping). The
+branches it skips hold no valid row, so the search still returns the first valid row in value
+order.
 """
 
 from __future__ import annotations
@@ -158,11 +163,16 @@ class Solver:
                 doms[a] = [fixed[a]]
             else:
                 doms[a] = self._value_order(a, order)
-        return self._dfs(comp, {}, doms)
+        sol, _ = self._dfs(comp, {}, doms, {})
+        return sol
 
-    def _dfs(self, comp: Component, asg: dict, doms: dict):
+    def _dfs(self, comp: Component, asg: dict, doms: dict, why: dict):
+        """(row, None) for the first valid row below this node, or (None, conflict set).
+
+        `why` maps an unassigned axis to the assigned axes whose values removed some of its values.
+        A conflict set names assigned axes only."""
         if len(asg) == len(comp.axes):
-            return dict(asg)
+            return dict(asg), None
         best, bestn = None, None
         for a in comp.axes:
             if a in asg:
@@ -172,47 +182,63 @@ class Solver:
                 best, bestn = a, n
                 if n <= 1:
                     break
+        conflict = set(why.get(best, ()))
         for v in doms[best]:
             asg[best] = v
-            nd = self._propagate(comp, best, v, asg, doms)
-            if nd is not None:
-                sol = self._dfs(comp, asg, nd)
+            nd, nwhy, failed = self._propagate(comp, best, v, asg, doms, why)
+            if nd is None:
+                conflict |= failed - {best}
+            else:
+                sol, sub = self._dfs(comp, asg, nd, nwhy)
                 if sol is not None:
-                    return sol
+                    del asg[best]
+                    return sol, None
+                if best not in sub:
+                    del asg[best]
+                    return None, sub
+                conflict |= sub - {best}
             del asg[best]
-        return None
+        return None, conflict
 
-    def _propagate(self, comp: Component, a: str, v, asg: dict, doms: dict):
+    def _propagate(self, comp: Component, a: str, v, asg: dict, doms: dict, why: dict):
+        """(domains, reasons, None) after assigning `a`, or (None, None, conflict set)."""
         parent = self.model.parent
         nd = dict(doms)
+        nwhy = dict(why)
         nd[a] = [v]
+
+        def prune(axis, keep, reasons):
+            nd[axis] = keep
+            nwhy[axis] = nwhy.get(axis, frozenset()) | reasons
 
         if a in parent:
             pax, pvals = parent[a]
             if pax in asg:
                 active = asg[pax] in pvals
                 if (v is None) == active:
-                    return None
+                    return None, None, {a, pax}
             else:
                 keep = [p for p in nd[pax] if (p in pvals) == (v is not None)]
                 if not keep:
-                    return None
-                nd[pax] = keep
+                    return None, None, set(nwhy.get(pax, ())) | {a}
+                if len(keep) != len(nd[pax]):
+                    prune(pax, keep, frozenset({a}))
 
         for c in self.model.children[a]:
             cp = parent[c][1]
             active = v in cp
             if c in asg:
                 if (asg[c] is None) == active:
-                    return None
+                    return None, None, {a, c}
             else:
                 keep = [x for x in nd[c] if (x is None) != active]
                 if not keep:
-                    return None
-                nd[c] = keep
+                    return None, None, set(nwhy.get(c, ())) | {a}
+                if len(keep) != len(nd[c]):
+                    prune(c, keep, frozenset({a}))
 
         if v is None:
-            return nd
+            return nd, nwhy, None
         for conj in comp.conjs_by_axis[a]:
             if v not in conj[a]:
                 continue
@@ -231,12 +257,14 @@ class Solver:
                     unassigned = x
             if not matched:
                 continue
+            fixed = frozenset(x for x in conj if x != unassigned)
             if open_count == 0:
-                return None
+                return None, None, set(fixed)
             if open_count == 1:
                 vs = conj[unassigned]
                 keep = [x for x in nd[unassigned] if x is None or x not in vs]
                 if not keep:
-                    return None
-                nd[unassigned] = keep
-        return nd
+                    return None, None, set(nwhy.get(unassigned, ())) | fixed
+                if len(keep) != len(nd[unassigned]):
+                    prune(unassigned, keep, fixed)
+        return nd, nwhy, None

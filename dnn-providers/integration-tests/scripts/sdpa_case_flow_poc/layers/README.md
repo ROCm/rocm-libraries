@@ -25,7 +25,7 @@ Run the commands from the folder `dnn-providers/integration-tests/scripts`.
 You need Python 3 and the PyYAML package.
 
 Count the combinations and pairs of each layer. The script writes a JSON
-summary to standard output. It takes about 30 seconds.
+summary to standard output. It takes about one minute.
 
 ```bash
 python3 sdpa_case_flow_poc/layers/layer_counts.py ../test-plans/sdpa-fwd/layers
