@@ -1024,10 +1024,9 @@ def _decl_table(flavor: str) -> dict[str, str]:
 def _drift(committed: str, fresh: str) -> str | None:
     """Describe how a committed column differs from a fresh run, or None.
 
-    Exact reproduction is meaningful only with the compiler build recorded in
-    ``toolchain.clang``. The caller checks that provenance before probing, so a
-    different compiler build is unvalidated rather than drift. Once applicable,
-    every toolchain field remains part of the artifact: ``generator``,
+    ``toolchain.clang`` records provenance, not an expected measurement: another
+    compiler build must still be compared against the baseline. Every other
+    field remains part of the comparison. In particular, ``generator``,
     ``probe_cflags`` and ``probe_timeout_s`` say how the question was asked, and
     changing any of them means the committed answers were obtained by a method
     we no longer use. ``probe_cflags`` is the concrete example -- the same clang
@@ -1038,6 +1037,9 @@ def _drift(committed: str, fresh: str) -> str | None:
         a, b = json.loads(committed), json.loads(fresh)
     except json.JSONDecodeError as exc:
         return f"committed column is not valid JSON: {exc}"
+
+    for doc in (a, b):
+        doc.get("toolchain", {}).pop("clang", None)
 
     if a.get("keys") != b.get("keys"):
         changed = [
@@ -1470,12 +1472,9 @@ def main() -> int:
         )
         return 1
 
-    # A measured column is an artifact of one exact compiler build, not every
-    # compiler that reports the same LLVM major. Development snapshots within a
-    # flavor can change intrinsic availability and even ABI. Re-probing with a
-    # different build would compare two different questions and make ordinary
-    # CI depend on whichever compiler-runtime artifact it happened to receive.
-    # Report that honestly as unvalidated before starting the expensive sweep.
+    # Keep compiler provenance visible, but do not let a different build skip
+    # the comparison: changes in its intrinsic availability are what this gate
+    # must detect. The flavor and toolchain-consistency checks above still apply.
     if args.check and out.is_file():
         try:
             committed_doc = json.loads(out.read_text())
@@ -1485,12 +1484,11 @@ def main() -> int:
         blessed_identity = committed_doc.get("toolchain", {}).get("clang")
         if blessed_identity and blessed_identity != identity:
             print(
-                f"\nUNVALIDATED: {out.name} was measured with a different "
-                "compiler build; exact artifact reproduction is not applicable.\n"
+                f"\nNOTE: {out.name} was measured with a different "
+                "compiler build; comparing its measurements against the baseline.\n"
                 f"      blessed by: {blessed_identity}\n"
                 f"      this host : {identity}"
             )
-            return _unvalidated_exit(args.unvalidated_exit_code, 0)
 
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)

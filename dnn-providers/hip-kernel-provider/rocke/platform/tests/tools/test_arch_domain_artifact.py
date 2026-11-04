@@ -17,12 +17,12 @@ Two gates fail for different reasons and run under different schedulers:
   removed while the artifact still looks authoritative.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
-  When the host has the exact compiler build recorded in the column, it
-  re-probes the toolchain and asserts the committed measurements reproduce
-  cell-for-cell. A different compiler build is explicitly unvalidated: an LLVM
-  major is not a stable intrinsic-availability contract. It is the only check
-  that can catch a wrong measurement rather than a missing one. Its external compiler processes,
-  timeout, resource policy, and skip result do not belong in the unit-test pool.
+  With a matching LLVM flavor, it re-probes the toolchain and compares the
+  committed measurements cell-for-cell, even when the compiler build differs.
+  Compiler identity is diagnostic provenance, not a reason to skip or fail the
+  comparison. It is the only check that can catch a wrong measurement rather
+  than a missing one. Its external compiler processes, timeout, resource policy,
+  and skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
 toolchain is skipped, never failed — "we did not get an answer" must not be
@@ -349,11 +349,7 @@ class AvailableCpusTest(unittest.TestCase):
 
 
 class DriftTest(unittest.TestCase):
-    """What an applicable ``--check`` treats as drift.
-
-    The caller rejects a compiler-provenance mismatch before probing. Once the
-    exact recorded compiler is present, every artifact field is load-bearing.
-    """
+    """Every artifact field except compiler identity remains load-bearing."""
 
     def _doc(self, **toolchain) -> str:
         tc = {
@@ -374,14 +370,12 @@ class DriftTest(unittest.TestCase):
             }
         )
 
-    def test_a_different_compiler_build_is_drift_when_compared(self):
+    def test_a_different_compiler_build_is_not_drift(self):
         other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
-        why = G._drift(self._doc(), self._doc(clang=other))
-        self.assertIsNotNone(why)
-        self.assertIn("toolchain", why)
+        self.assertIsNone(G._drift(self._doc(), self._doc(clang=other)))
 
     def test_a_changed_measurement_is_drift_and_says_which(self):
-        fresh = json.loads(self._doc())
+        fresh = json.loads(self._doc(clang="AMD clang version 22.0.0git (other)"))
         fresh["keys"]["a.b"]["gfx942"]["status"] = G.STATUS_ARCH_ABSENT
         why = G._drift(self._doc(), json.dumps(fresh))
         self.assertIsNotNone(why)
@@ -395,9 +389,13 @@ class DriftTest(unittest.TestCase):
             ("probe_cflags", ["-nogpulib"]),
             ("probe_timeout_s", 5),
             ("generator", G.GENERATOR + 1),
+            ("flavor", "llvm23"),
+            ("arches", ["gfx950"]),
         ):
             with self.subTest(field=field):
-                why = G._drift(self._doc(), self._doc(**{field: value}))
+                why = G._drift(
+                    self._doc(), self._doc(clang="other build", **{field: value})
+                )
                 self.assertIsNotNone(why, field)
                 self.assertIn("toolchain", why)
 
@@ -415,9 +413,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
             "declare i32 @llvm.amdgcn.example(i32) #1\n"
         )
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", return_value=completed
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", return_value=completed) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
             )
@@ -430,9 +429,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
     def test_alias_keys_share_one_declaration_query(self):
         output = "declare float @llvm.fabs.f32(float) #0\n"
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", return_value=completed
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", return_value=completed) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("fabs-alias", self._A)], Path(td)
             )
@@ -445,9 +445,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
         failed = mock.Mock(returncode=1, stdout="", stderr="bad combined module")
         a = mock.Mock(returncode=0, stdout=self._A + " #0\n", stderr="")
         b = mock.Mock(returncode=0, stdout=self._B + " #0\n", stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", side_effect=(failed, a, b)
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", side_effect=(failed, a, b)) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
             )
@@ -625,9 +626,12 @@ class PositiveBatchTest(unittest.TestCase):
             "unsupported": G.STATUS_TARGET_UNSUPPORTED,
             "supported": G.STATUS_OK,
         }
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "_target_preflight", return_value=(G.STATUS_OK, "")
-        ) as probe:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(
+                G, "_target_preflight", return_value=(G.STATUS_OK, "")
+            ) as probe,
+        ):
             retried = G._retry_target_preflights(
                 "clang", path, Path(td), preflight, expected
             )
@@ -1287,8 +1291,9 @@ for line in open(src):
         # Pin the flavor so the earlier clang-vs-rocke check passes on any host
         # and the run reaches the pairing check.
         for extra in ((), ("--check", "--unvalidated-exit-code", "77")):
-            with self.subTest(adapter=bool(extra)), mock.patch.dict(
-                os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}
+            with (
+                self.subTest(adapter=bool(extra)),
+                mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
             ):
                 rc = self._run(tools, out, *extra)
                 self.assertEqual(rc, 2, "two vintages measured one column")
@@ -1321,34 +1326,88 @@ for line in open(src):
         self.assertEqual(rc, 77)
         self.assertFalse(out.exists())
 
-    def test_ctest_skips_a_column_from_a_different_compiler_build(self):
-        """One LLVM major does not make development builds interchangeable."""
+    def _baseline_from_other_compiler(self) -> tuple[Path, dict[str, str]]:
+        """Measure with stub tools, then change only the recorded provenance."""
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
-        blessed = "AMD clang version 22.0.0git (blessed-build)"
-        host = "AMD clang version 22.0.0git"
-        out.write_text(json.dumps({"toolchain": {"clang": blessed}}))
         tools = {
             "clang": self._clang_with_accepting_assembler(self._CLANG_ACCEPTS),
             "opt": self._stub("opt", self._OPT_RESOLVES_AND_IDENTIFIES),
         }
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+            self.assertEqual(self._run(tools, out, "--only", "fabs.f32"), 0)
+        doc = json.loads(out.read_text())
+        self.assertEqual(doc["keys"]["fabs.f32"]["gfx942"]["status"], G.STATUS_OK)
+        doc["toolchain"]["clang"] = "AMD clang version 22.0.0git (blessed-build)"
+        out.write_text(json.dumps(doc))
+        return out, tools
+
+    def test_ctest_compares_a_different_compiler_build_and_passes(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
         stdout = io.StringIO()
         with (
             mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
             mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_probe", wraps=G._probe) as probe,
         ):
             rc = self._run(
                 tools,
                 out,
+                "--only",
+                "fabs.f32",
                 "--check",
                 "--unvalidated-exit-code",
                 "77",
             )
 
-        self.assertEqual(rc, 77)
-        self.assertIn("UNVALIDATED", stdout.getvalue())
-        self.assertIn(blessed, stdout.getvalue())
-        self.assertIn(host, stdout.getvalue())
+        self.assertEqual(rc, 0)
+        self.assertGreater(probe.call_count, 0, "skipped the measurement")
+        self.assertIn("semantically unchanged", stdout.getvalue())
+        self.assertIn("(blessed-build)", stdout.getvalue())
+        self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
+        self.assertNotIn("UNVALIDATED", stdout.getvalue())
+        self.assertEqual(out.read_text(), before, "--check re-blessed provenance")
+
+    def test_ctest_different_compiler_build_still_fails_on_measurement_drift(self):
+        """A new compiler rejecting a previously accepted intrinsic is a failure."""
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        tools["clang"] = self._clang_with_accepting_assembler(
+            """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+    sys.exit(0)
+if "@llvm.fabs.f32(" in open(sys.argv[-1]).read():
+    sys.stderr.write("error: Cannot select: intrinsic %llvm.fabs.f32\\n")
+    sys.exit(1)
+sys.exit(0)
+"""
+        )
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_probe", wraps=G._probe) as probe,
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--only",
+                "fabs.f32",
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+
+        self.assertEqual(rc, 1, "measurement drift must fail, not pass or skip")
+        self.assertGreater(probe.call_count, 0, "skipped the measurement")
+        self.assertIn("fabs.f32/gfx942: ok -> arch_absent", stdout.getvalue())
+        self.assertIn("(blessed-build)", stdout.getvalue())
+        self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
+        self.assertNotIn("UNVALIDATED", stdout.getvalue())
+        self.assertEqual(out.read_text(), before, "--check changed the baseline")
 
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
@@ -1725,9 +1784,11 @@ class CTestExitTest(unittest.TestCase):
             ("--check", "--unvalidated-exit-code", "0"),
             ("--unvalidated-exit-code", "77"),
         ):
-            with self.subTest(args=args), mock.patch.object(
-                sys, "argv", [str(_TOOL), *args]
-            ), self.assertRaises(SystemExit):
+            with (
+                self.subTest(args=args),
+                mock.patch.object(sys, "argv", [str(_TOOL), *args]),
+                self.assertRaises(SystemExit),
+            ):
                 G.main()
 
 
