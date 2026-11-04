@@ -109,19 +109,11 @@ protected:
                           gap);
     }
 
-    // The first GPU entry in the table, or empty once every gap has been closed.
-    // Taken from the live table rather than hardcoded so these cases follow the list
-    // instead of pinning one bundle name that is expected to be deleted.
-    static std::optional<KnownReferenceGap> aKnownGpuGap()
+    // A GPU gap entry. The harness asserts whatever entry it is handed and looks nothing
+    // up, so a fixture entry exercises the path even when the live table is empty.
+    static KnownReferenceGap aKnownGpuGap()
     {
-        for(const auto& gap : knownReferenceGaps())
-        {
-            if(gap.reference == ReferenceExecutorType::GPU)
-            {
-                return gap;
-            }
-        }
-        return std::nullopt;
+        return {ReferenceExecutorType::GPU, "fixture_gap.Small", "fixture GPU gap"};
     }
 };
 
@@ -274,10 +266,6 @@ TEST_F(TestBundleReferenceValidationHarness, InapplicableReferenceFailsRatherTha
 TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
 {
     const auto gap = aKnownGpuGap();
-    if(!gap.has_value())
-    {
-        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
-    }
 
     ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
         .WillByDefault(::testing::Return(false));
@@ -285,7 +273,7 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
-    setGoldenBundleExpecting(harness, *gap);
+    setGoldenBundleExpecting(harness, gap);
 
     ::testing::TestPartResultArray results;
     drive(harness, &results);
@@ -300,10 +288,6 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
 TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPasses)
 {
     const auto gap = aKnownGpuGap();
-    if(!gap.has_value())
-    {
-        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
-    }
 
     ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
         .WillByDefault([](void*, size_t) -> bool {
@@ -313,7 +297,7 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPas
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
-    setGoldenBundleExpecting(harness, *gap);
+    setGoldenBundleExpecting(harness, gap);
 
     ::testing::TestPartResultArray results;
     drive(harness, &results);
@@ -329,17 +313,13 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPas
 TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails)
 {
     const auto gap = aKnownGpuGap();
-    if(!gap.has_value())
-    {
-        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
-    }
 
     ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
         .WillByDefault(::testing::Return(true));
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
-    setGoldenBundleExpecting(harness, *gap);
+    setGoldenBundleExpecting(harness, gap);
 
     ::testing::TestPartResultArray results;
     drive(harness, &results);
@@ -348,7 +328,7 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails
     EXPECT_FALSE(testing_support::anySkipped(results));
     const auto messages = testing_support::allMessages(results);
     EXPECT_NE(messages.find("now reports this graph applicable"), std::string::npos) << messages;
-    EXPECT_NE(messages.find(std::string(gap->bundleId)), std::string::npos) << messages;
+    EXPECT_NE(messages.find(std::string(gap.bundleId)), std::string::npos) << messages;
 }
 
 // Same contract by the other route: the reference accepts the graph up front and

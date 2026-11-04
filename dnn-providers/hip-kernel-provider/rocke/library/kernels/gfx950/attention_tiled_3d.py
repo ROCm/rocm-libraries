@@ -39,7 +39,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import lse_store
+from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -195,9 +195,10 @@ class UnifiedAttention3DTiledSpec:
     use_decode_grid: bool = False
     # Cache policy of the async K/V copies, one of ``CACHE_POLICY_NAMES`` (as
     # attention 2D's ``kv_cache_policy``). The dispatcher sets "stream" (NT)
-    # for all-decode batches, whose K/V bytes are each read once
-    # (``_kv_cache_policy_3d``). The fp8 K/V loader is synchronous and keeps
-    # "all".
+    # for all-decode batches whose K/V is larger than the last-level cache,
+    # since each K/V byte is read once per call; smaller K/V keeps "all" so the
+    # next call can hit in the cache (``_kv_cache_policy_3d``). The fp8 K/V
+    # loader is synchronous and keeps "all".
     kv_cache_policy: str = "all"
     # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
@@ -260,6 +261,14 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("kv_cache_policy applies to fp16/bf16 KV storage only")
         if self.use_kv_lds_swizzle and self.kv_storage_dtype is not None:
             raise ValueError("use_kv_lds_swizzle needs fp16/bf16 KV")
+        # The swizzle XORs a row's 16-byte chunk index with row % chunks, which
+        # stays inside the row only for a power-of-two chunk count.
+        chunks = self.head_size // 8
+        if self.use_kv_lds_swizzle and chunks & (chunks - 1):
+            raise ValueError(
+                f"use_kv_lds_swizzle needs head_size / 8 a power of two "
+                f"(got head_size={self.head_size})"
+            )
         if self.use_wave_page_id_load and (
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
@@ -283,6 +292,20 @@ class UnifiedAttention3DTiledSpec:
                     f"tile_size_override={t} x head_size={self.head_size} needs "
                     "more async calls per tile than s_waitcnt can count"
                 )
+        # An async K/V copy moves KV_HALVES_PER_CALL halves. When that is not a
+        # whole number of rows (head_size 192), each lane derives its own row,
+        # which holds only while a tile is one page and its LDS rows are not
+        # permuted.
+        if (
+            self.kv_layout == "paged"
+            and self.kv_storage_dtype is None
+            and KV_HALVES_PER_CALL % self.head_size != 0
+            and (self.tile_size != self.block_size or self.use_kv_lds_swizzle)
+        ):
+            raise ValueError(
+                f"head_size={self.head_size} K/V copies span partial rows: needs "
+                "page-sized tiles and no use_kv_lds_swizzle"
+            )
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -369,10 +392,10 @@ def supports_tiled_3d(
         return False, arch_reason
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 3D kernel currently supports fp16/bf16 (got {dtype!r})"
-    if head_size not in (64, 128, 256):
+    if head_size not in (64, 128, 192, 256):
         return (
             False,
-            f"tiled 3D kernel only supports head_size in {{64,128,256}} (got {head_size})",
+            f"tiled 3D kernel only supports head_size in {{64,128,192,256}} (got {head_size})",
         )
     if head_size % 32 != 0:
         return (
@@ -404,8 +427,9 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    if 16 % num_queries_per_kv != 0:
-        return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
+    # A num_queries_per_kv that does not divide BLOCK_M=16 leaves the last
+    # 16 % num_queries_per_kv rows of a q-block as padding; the kernel masks
+    # their stores (VALID_ROWS), as they alias the next q-block's rows.
     # ALiBi and QQ-bias are now supported by the tiled 3D kernel; FP8 K/V
     # cache is gated above via kv_storage_dtype.
     return True, "supported"
@@ -438,6 +462,9 @@ def build_unified_attention_3d_tiled(
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
+    # Rows past BLOCK_Q * NQK are q-block padding when NQK does not divide
+    # BLOCK_M; they must not store, as they alias the next q-block's rows.
+    VALID_ROWS = spec.block_q * NQK
     NUM_SEG = spec.num_segments
     SLIDING_WINDOW = spec.sliding_window
     USE_SOFTCAP = spec.has_softcap
@@ -621,6 +648,8 @@ def build_unified_attention_3d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
             row_ok = b.land(b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, num_qh_p))
+            if VALID_ROWS < spec.block_m:
+                row_ok = b.land(row_ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
             qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
             qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
             qtoken = b.add(cu_q_start, qp_r_safe)
@@ -642,6 +671,8 @@ def build_unified_attention_3d_tiled(
                 row_ok = b.land(
                     b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, num_qh_p)
                 )
+                if VALID_ROWS < spec.block_m:
+                    row_ok = b.land(row_ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
                 qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
                 qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
                 qtoken = b.add(cu_q_start, qp_r_safe)
@@ -866,9 +897,10 @@ def build_unified_attention_3d_tiled(
             )
         # The token stride is a kernarg, so each call's token offset within the
         # page is a multiply. They are wave-uniform and loop-invariant: build
-        # them once here rather than in every tile's copies.
+        # them once here rather than in every tile's copies. Calls that cover a
+        # partial row (head_size 192) compute their own offsets instead.
         call_tok_b = {}
-        for call in range(kv_calls_per_tile):
+        for call in range(kv_calls_per_tile if KV_HALVES_PER_CALL % HD == 0 else 0):
             tok0 = (call % calls_per_block) * tokens_per_call
             if tok0 and tok0 not in call_tok_b:
                 call_tok_b[tok0] = b.mul(kv_stride_tok_b, b.const_i32(tok0))
@@ -924,9 +956,18 @@ def build_unified_attention_3d_tiled(
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
             ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW if KV_SWZ else 0
-            voff = lane_within_b[ph]
-            if tok0:
-                voff = b.add(voff, call_tok_b[tok0])
+            if KV_HALVES_PER_CALL % HD:
+                # The call covers a partial row (head_size 192), so each lane
+                # takes its own (row, dim); the tile is one page (spec check).
+                lin = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
+                tok_b = b.mul(b.div(lin, b.const_i32(HD)), kv_stride_tok_b)
+                head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+                dim_b = b.mul(b.mod(lin, b.const_i32(HD)), b.const_i32(KV_BYTES))
+                voff = b.add(b.add(tok_b, head_b), dim_b)
+            else:
+                voff = lane_within_b[ph]
+                if tok0:
+                    voff = b.add(voff, call_tok_b[tok0])
             if I64_KV_ADDR:
                 base_i64 = b.mul(b.zext(page_ids[blk], I64), kv_stride_blk_i64)
                 call_rsrc = b.buffer_rsrc(
@@ -1137,6 +1178,8 @@ def build_unified_attention_3d_tiled(
         b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(lane_col, b.const_i32(NQK))
     )
     row_ok = b.land(b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, num_qh_p))
+    if VALID_ROWS < spec.block_m:
+        row_ok = b.land(row_ok, b.cmp_lt(lane_col, b.const_i32(VALID_ROWS)))
     causal_lim = b.add(context_len, qp_r)
 
     if USE_ALIBI:
@@ -1632,7 +1675,9 @@ def build_unified_attention_reduce_tiled(
         # Every lane holds the same butterfly-reduced overall_max/expsum, so one
         # lane writes. overall_max is in log2 units (segm_max carries
         # scale*log2e); lse_store converts to natural log and writes -inf for a
-        # row with no mass (every segment empty), whose O is already 0.
+        # row with no mass (every segment empty, sum 0), whose O is already 0.
+        # A NaN sum (NaN query row) keeps NaN, as O does: the same !(l == 0)
+        # test the tiled 2D epilogues use, never l > 0.
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
             lse_index = b.add(b.mul(q_token, num_qh_p), q_head)
             lse_store(
@@ -1641,7 +1686,7 @@ def build_unified_attention_reduce_tiled(
                 lse_index,
                 overall_max,
                 overall_expsum,
-                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+                row_has_mass=lse_row_has_mass(b, overall_expsum),
             )
 
     return b.kernel

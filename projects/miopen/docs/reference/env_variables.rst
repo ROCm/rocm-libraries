@@ -114,6 +114,21 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | solvers are still used as a fallback when no non-naive solver
         | succeeds.
         |
+        | At most ``GPU_MAX_HW_QUEUES`` minus 2 skipped streams (at least
+        | 1; 2 at the HIP default of 4 queues) may be outstanding. Beyond
+        | that, the next naive evaluation waits for one to finish rather
+        | than timing a kernel that shares a hardware queue with it.
+        |
+        | A skipped kernel's scratch buffer is released as soon as the
+        | kernel finishes, by a background thread MIOpen starts for the
+        | handle on the first skip; no further MIOpen call is needed, so
+        | a workload that only replays a captured HIP graph releases it
+        | too. A deallocator installed with ``miopenSetAllocator`` is
+        | therefore called from that thread, possibly while another
+        | thread is capturing. It must not make calls HIP refuses during
+        | any capture, such as a synchronous ``hipMemcpy`` or
+        | ``hipMemset``: those invalidate every capture in the process.
+        |
         | Limitation: a skipped kernel keeps reading the caller's input
         | tensors until it finishes. Its results are discarded, so stale
         | or reused data is harmless, but unmapping those pages while it

@@ -41,6 +41,7 @@ MULTI_LAUNCH_FIXTURES = (
     FIXTURES / "multi_launch_decode_merge",
     FIXTURES / "multi_launch_same_kernel_twice",
 )
+SLOTTED_MULTI_LAUNCH_FIXTURE = FIXTURES / "slotted_multi_launch"
 MAIN_FIXTURE = FIXTURES / "main"
 EMPTY_ARCH_FIXTURE = FIXTURES / "empty_arch"
 HSACO_FIXTURES = FIXTURES / "hsaco"
@@ -74,6 +75,27 @@ def comgr_lib():
     """The comgr library the pack is steered to, or None when the environment
     does not pin one (rocke then resolves its own)."""
     return os.environ.get("ROCKE_COMGR_LIB") or None
+
+
+def tool_module(name):
+    """The probe tool `tools/<name>.py`, imported as a module, so a test can drive
+    its check functions directly."""
+    sys.path.insert(0, str(PROBE_ASSERT.parent))
+    try:
+        return __import__(name)
+    finally:
+        sys.path.pop(0)
+
+
+class StandInArchive:
+    """A kpack archive for hkp_probe_assert's checks: `get_kernel` returns the blob
+    held under the toc_key, for any arch."""
+
+    def __init__(self, blobs):
+        self._blobs = blobs
+
+    def get_kernel(self, toc_key, arch):
+        return self._blobs.get(toc_key)
 
 
 def pack_root(

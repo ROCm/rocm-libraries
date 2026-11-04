@@ -80,6 +80,7 @@ namespace TensileLite
             , m_performanceMetric(args["performance-metric"].as<PerformanceMetric>())
             , m_deterministicMode(args["deterministic-mode"].as<bool>())
             , m_cEqualsD(args["c-equal-d"].as<bool>())
+            , m_uniformSummationOrder(args["uniform-summation-order"].as<int>())
             , m_biasTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_gateTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_factorDimArgs(std::vector<int>(1, 0))
@@ -94,6 +95,8 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
+            , m_mxBlockFreeA(args["mx-a-free-block"].as<int>())
+            , m_mxBlockFreeB(args["mx-b-free-block"].as<int>())
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
@@ -443,6 +446,7 @@ namespace TensileLite
                                     static_cast<ContractionProblemGemm::BATCHMODE>(m_batchMode));
                                 rv.back().setHighPrecisionAccumulate(m_highPrecisionAccumulate);
                                 rv.back().setUseGradient(m_useGradient);
+                                rv.back().setParams().setUniformSummationOrder(m_uniformSummationOrder);
                                 rv.back().setUseBias(m_useBias);
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);
@@ -555,11 +559,11 @@ namespace TensileLite
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeA);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeB);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD

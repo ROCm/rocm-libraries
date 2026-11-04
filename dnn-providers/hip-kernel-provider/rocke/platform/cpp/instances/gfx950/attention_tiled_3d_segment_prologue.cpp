@@ -630,10 +630,12 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
         }
         /* The token stride is a kernarg, so each call's token offset within the
          * page is a multiply. They are wave-uniform and loop-invariant: build
-         * them once here rather than in every tile's copies. */
+         * them once here rather than in every tile's copies. Calls that cover a
+         * partial row (head_size 192) compute their own offsets instead. */
         {
             int call;
-            for(call = 0; call < CFG.kv_calls_per_tile; ++call)
+            const int n_calls = CFG.KV_HALVES_PER_CALL % CFG.HD == 0 ? CFG.kv_calls_per_tile : 0;
+            for(call = 0; call < n_calls; ++call)
             {
                 const int tok_i = call % CFG.calls_per_block;
                 if(tok_i == 0 || ctx->call_tok_b[tok_i] != NULL)
@@ -805,9 +807,27 @@ static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t*
         const int blk = call / CFG.calls_per_block;
         const int tok_i = call % CFG.calls_per_block;
         const int ph_i = CFG.KV_SWZ ? (call % (CFG.KV_CHUNKS_PER_ROW / CFG.tokens_per_call)) : 0;
-        rocke_value_t* voff = ctx->lane_within_b[ph_i];
-        if(tok_i != 0)
-            voff = rocke_b_add(B, voff, ctx->call_tok_b[tok_i]);
+        rocke_value_t* voff;
+        if(CFG.KV_HALVES_PER_CALL % CFG.HD != 0)
+        {
+            /* The call covers a partial row (head_size 192), so each lane takes
+             * its own (row, dim); the tile is one page (spec check). */
+            rocke_value_t* lin = rocke_b_add(
+                B, rocke_b_const_i32(B, call * CFG.KV_HALVES_PER_CALL), ctx->lane_half_base);
+            rocke_value_t* row = rocke_b_div(B, lin, rocke_b_const_i32(B, CFG.HD));
+            rocke_value_t* tok_b = rocke_b_mul(B, row, ctx->kv_stride_tok_b);
+            rocke_value_t* head_b
+                = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, CFG.kv_stride_h_b));
+            rocke_value_t* dim = rocke_b_mod(B, lin, rocke_b_const_i32(B, CFG.HD));
+            rocke_value_t* dim_b = rocke_b_mul(B, dim, rocke_b_const_i32(B, CFG.KV_BYTES));
+            voff = rocke_b_add(B, rocke_b_add(B, tok_b, head_b), dim_b);
+        }
+        else
+        {
+            voff = ctx->lane_within_b[ph_i];
+            if(tok_i != 0)
+                voff = rocke_b_add(B, voff, ctx->call_tok_b[tok_i]);
+        }
         rocke_value_t* call_rsrc;
         rocke_value_t* soff;
         if(CFG.I64_KV_ADDR)
@@ -861,6 +881,13 @@ void rocke_gfx950_attention_tiled_3d_emit_early_zero_fill(
             rocke_value_t* row_ok_a = rocke_b_cmp_lt(B, qp_r, ctx->cur_batch_q_len);
             rocke_value_t* row_ok_b = rocke_b_cmp_lt(B, qh_r, ctx->num_qh_p);
             rocke_value_t* row_ok = rocke_b_land(B, row_ok_a, row_ok_b);
+            /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+            if(CFG.BLOCK_Q * NQK < CFG.BLOCK_M)
+            {
+                rocke_value_t* vr = rocke_b_const_i32(B, CFG.BLOCK_Q * NQK);
+                rocke_value_t* row_vr = rocke_b_cmp_lt(B, row, vr);
+                row_ok = rocke_b_land(B, row_ok, row_vr);
+            }
             rocke_value_t* qp_r_safe = rocke_b_select(B, row_ok, qp_r, rocke_b_const_i32(B, 0));
             rocke_value_t* qh_r_safe = rocke_b_select(B, row_ok, qh_r, rocke_b_const_i32(B, 0));
             rocke_value_t* qtoken = rocke_b_add(B, ctx->cu_q_start, qp_r_safe);
@@ -894,6 +921,13 @@ void rocke_gfx950_attention_tiled_3d_emit_early_zero_fill(
                     rocke_value_t* row_ok_a = rocke_b_cmp_lt(B, qp_r, ctx->cur_batch_q_len);
                     rocke_value_t* row_ok_b = rocke_b_cmp_lt(B, qh_r, ctx->num_qh_p);
                     rocke_value_t* row_ok = rocke_b_land(B, row_ok_a, row_ok_b);
+                    /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+                    if(CFG.BLOCK_Q * NQK < CFG.BLOCK_M)
+                    {
+                        rocke_value_t* vr = rocke_b_const_i32(B, CFG.BLOCK_Q * NQK);
+                        rocke_value_t* row_vr = rocke_b_cmp_lt(B, row, vr);
+                        row_ok = rocke_b_land(B, row_ok, row_vr);
+                    }
                     rocke_value_t* qp_r_safe
                         = rocke_b_select(B, row_ok, qp_r, rocke_b_const_i32(B, 0));
                     rocke_value_t* qh_r_safe

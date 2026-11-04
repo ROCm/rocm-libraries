@@ -43,8 +43,8 @@ from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
 from .Common.Architectures import ARCH_BUILD_ALIASES, architectureMap, archNameForIsa, \
-                                         baseArchName, detectGlobalCurrentArch, \
-                                         gfxToIsa, steppingArchOf
+                                         baseArchName, capOverrideKeyOf, detectGlobalCurrentArch, \
+                                         gfxToIsa, steppingArchOf, verifyTargetIdQualifiers
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
@@ -510,6 +510,90 @@ def restore_prob_sol_map(logfile):
     return prob_sol_map
 
 
+def archNamesFromConfig(configArchitecture, isaList, archNames):
+    """``archNames`` after reading the config's ``Architecture:``.
+
+    ``Architecture:`` is read for the two things ``ISA:`` cannot express --
+    which stepping, and which target-ID qualifier -- and not for ISA selection.
+    It cannot replace a detected name: that would tune one stepping on the
+    other's hardware. Every entry is validated either way, so a typo is reported
+    rather than ignored.
+
+    Args:
+        configArchitecture: the config's ``Architecture:``, ``;``-separated.
+        isaList: the ISAs this run covers.
+        archNames: the names already settled on -- one, from device detection,
+            or none when only ``ISA:`` was given.
+
+    Raises:
+        ValueError: on an unrecognized name, or on a stepping of an ISA this run
+            does not cover.
+    """
+    nameCameFromDetection = bool(archNames)
+    # The config entry that has qualified the detected architecture, if one has.
+    claimed = None
+    for arch in str(configArchitecture).split(";"):
+        arch = arch.strip()
+        if not arch:
+            continue
+        isa = gfxToIsa(arch)
+        if isa is None or baseArchName(arch) not in architectureMap \
+                or baseArchName(arch) in ARCH_BUILD_ALIASES:
+            raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
+        # Checked here because this is the one place a qualifier is authored by
+        # hand; everywhere else it arrives from a list the build already
+        # validated. The base-name check above lets a typo straight through --
+        # 'gfx1250:xnack--' is gfx1250 with something unrecognizable attached,
+        # which ARCH_CAP_OVERRIDES then fails to match, leaving replay enabled
+        # in a run that asked for it off and saying nothing.
+        verifyTargetIdQualifiers(arch)
+        if nameCameFromDetection:
+            # A qualifier is not a stepping: gfx1250 and gfx1250:xnack- are one
+            # chip under two driver configurations, and the enumerator reads the
+            # hardware, so it reports the bare name either way -- the config is
+            # the only place that mode can be said. Let it qualify the
+            # architecture that was detected, and only that one, so naming a
+            # different architecture or stepping is still passed over rather
+            # than tuning one on the other's hardware.
+            if baseArchName(arch) == baseArchName(archNames[0]):
+                # Two entries naming the detected architecture under different
+                # xnack modes are refused rather than resolved by order. Letting
+                # the later one win made the build a function of the order they
+                # were written in: `gfx1250:xnack-;gfx1250` tuned with replay on
+                # and the same two reversed tuned with it off, both silently.
+                #
+                # Compared by the mode each names, not by the capabilities each
+                # ends up with. Those are not the same test: gfx942:xnack+ and
+                # gfx942:xnack- select no capability override at all, yet the
+                # compiler takes them as distinct target IDs and the helper
+                # kernels come out different, because the mode also reaches
+                # --offload-arch. A capability comparison would call that pair
+                # equivalent and go on picking one of two real builds by
+                # position.
+                #
+                # Compared against the entry that claimed the slot, not against
+                # what is in it -- the detected name starts there, and the
+                # config is allowed to qualify that.
+                if claimed is not None and capOverrideKeyOf(arch) != capOverrideKeyOf(claimed):
+                    raise ValueError(
+                        f"Architecture entries {claimed!r} and {arch!r} both name the "
+                        "detected architecture under different xnack modes; a run "
+                        "builds one mode, so name it once."
+                    )
+                claimed = arch
+                archNames[0] = arch
+            continue
+        if isa in isaList:
+            archNames.append(arch)
+        elif steppingArchOf(arch):
+            raise ValueError(
+                f"Architecture '{arch}' in config requests a stepping of ISA "
+                f"{tuple(isa)}, which this build does not cover ({isaList}); "
+                "align the config's ISA with it or drop the stepping."
+            )
+    return archNames
+
+
 ################################################################################
 # TensileLite
 # - below entry points call here
@@ -731,30 +815,19 @@ def Tensile(userArgs):
         isaList = [gfxToIsa(detected)]
         archNames = [detected]
 
-    # `Architecture:` is read for the one thing `ISA:` cannot express -- which
-    # stepping -- and not for ISA selection. It cannot override a detected name:
-    # that would tune one stepping on the other's hardware. It is still validated
-    # there, so a typo is reported rather than ignored.
+    # Every name that reaches the capability overrides passes the qualifier
+    # check, whichever way it arrived. archNamesFromConfig applies it to the
+    # config's entries, but --gpu-targets skips that call entirely, so a
+    # qualifier typed there used to go unchecked and lose its suffix on the way
+    # to the compiler -- generating replay-enabled kernels for a run that asked
+    # for the opposite, with nothing reported.
+    for arch in archNames:
+        verifyTargetIdQualifiers(arch)
+
     if not args.gpuTargets:
-        nameCameFromDetection = bool(archNames)
-        for arch in str(config["GlobalParameters"].get("Architecture", "")).split(";"):
-            arch = arch.strip()
-            if not arch:
-                continue
-            isa = gfxToIsa(arch)
-            if isa is None or baseArchName(arch) not in architectureMap \
-                    or baseArchName(arch) in ARCH_BUILD_ALIASES:
-                raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
-            if nameCameFromDetection:
-                continue
-            if isa in isaList:
-                archNames.append(arch)
-            elif steppingArchOf(arch):
-                raise ValueError(
-                    f"Architecture '{arch}' in config requests a stepping of ISA "
-                    f"{tuple(isa)}, which this build does not cover ({isaList}); "
-                    "align the config's ISA with it or drop the stepping."
-                )
+        archNames = archNamesFromConfig(
+            config["GlobalParameters"].get("Architecture", ""), isaList, archNames
+        )
 
     if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList:
         printWarning("HardwareMonitor currently disabled for gfx950 and gfx1250")

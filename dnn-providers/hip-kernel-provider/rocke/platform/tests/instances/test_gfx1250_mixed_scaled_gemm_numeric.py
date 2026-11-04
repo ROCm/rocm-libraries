@@ -3,10 +3,11 @@
 """Mixed A/B matrix-format numerical cases with E8M0 scales."""
 
 import subprocess
-import sys
 from itertools import product
 
 import pytest
+
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 _MODULE = "rocke.examples.gfx1250.gemm.mixed_scaled_gemm"
 
@@ -27,8 +28,7 @@ _MIXED_OUTPUTS = [(a, b, "bf16") for a, b in _MIXED] + [
 )
 def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, output_dtype, route):
     result = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             _MODULE,
             "--dtype-a",
@@ -49,7 +49,7 @@ def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, output_dtype, rou
             "256",
             "--case",
             "all",
-        ],
+        ),
         env=gpu_env,
         capture_output=True,
         text=True,

@@ -261,6 +261,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->hoist_in_warp_row[reg] = row;
         ctx->hoist_q_pos[reg] = qp_r;
         ctx->hoist_q_head[reg] = qh_r;
+        ctx->hoist_qh_r[reg] = qh_r;
         ctx->hoist_row_mask[reg] = row_ok;
         ctx->hoist_state_row[reg] = causal_lim;
     }
@@ -357,13 +358,13 @@ void rocke_gfx950_attn2d_permute_p_c_to_a16(rocke_gfx950_attn2d_build_ctx_t* ctx
     for(int bit = 0; bit < 2; ++bit)
     {
         rocke_value_t* lane_bit = rocke_gfx950_attn2d_bit2(ctx, lane_col_mod4, bit);
-        int reg_bit = 1 << bit;
+        int reg_bit = 1 << bit; /* 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle */
         rocke_value_t* old[4];
         for(i = 0; i < 4; ++i)
             old[i] = vals[i];
         for(int reg = 0; reg < 4; ++reg)
         {
-            rocke_value_t* partner = rocke_b_warp_shuffle_xor(b, old[reg ^ reg_bit], reg_bit);
+            rocke_value_t* partner = rocke_b_warp_shuffle_xor_dpp(b, old[reg ^ reg_bit], reg_bit);
             rocke_value_t* same_bit
                 = rocke_b_cmp_eq(b, lane_bit, rocke_b_const_i32(b, (reg >> bit) & 1));
             vals[reg] = rocke_b_select(b, same_bit, old[reg], partner);
@@ -467,8 +468,9 @@ void rocke_gfx950_attn2d_reset_softmax_scratch(void)
  *  Front half of the QK + mask + softmax body.
  *
  *  Narrow 16x16x16 and transposed-32x32 QK/softmax paths; both supported by the
- *  gfx950 ctx. On return the softmax-derived state (alpha / new_l / m_new and,
- *  on the transposed path, the PT32 register-P groups) is handed to the peer
+ *  gfx950 ctx. On return the softmax-derived state (alpha / new_l / m_carry,
+ *  the raw running max, and, on the transposed path, the PT32 register-P
+ *  groups) is handed to the peer
  *  rocke_gfx950_attn2d_emit_pv_bucket, which runs acc *= alpha; acc += P @ V and
  *  emits the scf_yield carry.
  * ===================================================================== */
@@ -563,15 +565,19 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     if(rocke_gfx950_attn2d_page_prefetch(ctx))
         ctx->page_next_tile = safe_next_tile;
 
-    /* softmax-derived state forwarded to the PV bucket. */
+    /* softmax-derived state forwarded to the PV bucket (alpha, new_l, and
+     * m_carry = the raw running max). m_new_out is the MFMA-32 branch's
+     * clamped exponent reference for P and alpha; it is not forwarded. */
     rocke_value_t* alpha_regs[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* m_new_out[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* m_carry_out[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     for(int _i = 0; _i < ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE; ++_i)
     {
         alpha_regs[_i] = NULL;
         new_l_vals[_i] = NULL;
         m_new_out[_i] = NULL;
+        m_carry_out[_i] = NULL;
     }
 
     /* PT32 register groups for the transposed register-P PV. */
@@ -875,6 +881,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             m_new[r] = st_m_new;
+            m_carry_out[r] = st_m_raw;
             l_local[r] = st_l_sum;
         }
 
@@ -913,7 +920,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else if(ctx->USE_MFMA_32X32)
@@ -1055,6 +1061,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
                 ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
                 m_new_out[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+                m_carry_out[reg] = full_max_raw;
             }
 
             /* P = exp2(S - m_new); publish to P_lds; per-row L (Python 3056-3065). */
@@ -1243,6 +1250,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+            m_carry_out[reg] = full_max_raw;
         }
 
         /* P = exp2(S - m_new) + per-row L. */
@@ -1288,7 +1296,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
 
@@ -1304,7 +1311,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         pv_in.alpha_regs = alpha_regs;
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
-        pv_in.m_new = m_new_out;
+        pv_in.m_carry = m_carry_out;
         if(ctx->REGISTER_PV)
         {
             pv_in.p_regs_f32 = p_regs_f32_buf;
