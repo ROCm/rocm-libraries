@@ -107,8 +107,6 @@ namespace rocalution
 
             _set_omp_backend_threads(this->local_backend_, nrow);
 
-            int idx = 0;
-
 // interior
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -116,7 +114,7 @@ namespace rocalution
             for(int i = 1; i < this->size_ - 1; ++i)
                 for(int j = 1; j < this->size_ - 1; ++j)
                 {
-                    idx = i * this->size_ + j;
+                    int idx = i * this->size_ + j;
 
                     cast_out->vec_[idx]
                         = static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_] // i-1
@@ -133,7 +131,7 @@ namespace rocalution
 #endif
             for(int j = 1; j < this->size_ - 1; ++j)
             {
-                idx = 0 * this->size_ + j;
+                int idx = 0 * this->size_ + j;
 
                 cast_out->vec_[idx]
                     = static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
@@ -154,7 +152,7 @@ namespace rocalution
 #endif
             for(int i = 1; i < this->size_ - 1; ++i)
             {
-                idx = i * this->size_ + 0;
+                int idx = i * this->size_ + 0;
 
                 cast_out->vec_[idx]
                     = static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
@@ -173,7 +171,7 @@ namespace rocalution
 
             // boundary points
 
-            idx                 = 0 * (this->size_) + 0;
+            int idx             = 0 * (this->size_) + 0;
             cast_out->vec_[idx] = static_cast<ValueType>(4) * cast_in->vec_[idx]
                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];
@@ -219,8 +217,6 @@ namespace rocalution
 
             _set_omp_backend_threads(this->local_backend_, nrow);
 
-            int idx = 0;
-
 // interior
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -228,7 +224,7 @@ namespace rocalution
             for(int i = 1; i < this->size_ - 1; ++i)
                 for(int j = 1; j < this->size_ - 1; ++j)
                 {
-                    idx = i * this->size_ + j;
+                    int idx = i * this->size_ + j;
 
                     cast_out->vec_[idx]
                         += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_] // i-1
@@ -245,7 +241,7 @@ namespace rocalution
 #endif
             for(int j = 1; j < this->size_ - 1; ++j)
             {
-                idx = 0 * this->size_ + j;
+                int idx = 0 * this->size_ + j;
 
                 cast_out->vec_[idx]
                     += static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
@@ -266,7 +262,7 @@ namespace rocalution
 #endif
             for(int i = 1; i < this->size_ - 1; ++i)
             {
-                idx = i * this->size_ + 0;
+                int idx = i * this->size_ + 0;
 
                 cast_out->vec_[idx]
                     += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
@@ -285,7 +281,7 @@ namespace rocalution
 
             // boundary points
 
-            idx = 0 * (this->size_) + 0;
+            int idx = 0 * (this->size_) + 0;
             cast_out->vec_[idx] += static_cast<ValueType>(4) * cast_in->vec_[idx]
                                    + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
                                    + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];

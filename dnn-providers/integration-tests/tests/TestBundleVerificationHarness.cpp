@@ -21,9 +21,11 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PackedElementTraits.hpp>
 #include <hipdnn_data_sdk/utilities/PackedSubByteTensor.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -360,9 +362,9 @@ TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
     const auto& attributes = wrapper.getTensorMap();
 
     auto hostOutputs = detail::allocateSentinelOutputs(
-        attributes, bundle->outputTensorUids, TensorMap{}, /*onDevice=*/false);
+        attributes, bundle->outputTensorUids, TensorMap{}, {}, /*onDevice=*/false);
     auto deviceOutputs = detail::allocateSentinelOutputs(
-        attributes, bundle->outputTensorUids, TensorMap{}, /*onDevice=*/true);
+        attributes, bundle->outputTensorUids, TensorMap{}, {}, /*onDevice=*/true);
 
     for(const int64_t uid : bundle->outputTensorUids)
     {
@@ -600,10 +602,12 @@ TEST_F(TestGoldenHarnessFixture, RaggedDeviceSentinelFillMatchesTheHostFill)
     const auto wrapper = bundle->graphWrapper();
     const auto& attributes = wrapper.getTensorMap();
 
+    const auto lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph());
+
     auto hostOutputs = detail::allocateSentinelOutputs(
-        attributes, bundle->outputTensorUids, loadedTensors, /*onDevice=*/false);
+        attributes, bundle->outputTensorUids, loadedTensors, lengthUids, /*onDevice=*/false);
     auto deviceOutputs = detail::allocateSentinelOutputs(
-        attributes, bundle->outputTensorUids, loadedTensors, /*onDevice=*/true);
+        attributes, bundle->outputTensorUids, loadedTensors, lengthUids, /*onDevice=*/true);
 
     for(const int64_t uid : bundle->outputTensorUids)
     {
@@ -799,6 +803,54 @@ TEST_F(TestGoldenHarnessFixture, ValuesFillOfASubByteGraphMatchesInBothInputSets
                           packed.rawHostData(),
                           unpacked.elementSpace() * unpacked.elementSize()),
               0);
+}
+
+// An SDPA bundle whose Stats sits [H,T] with a gap between its batches (L7d) gives its
+// outputs the elementSpace of the dense view only when the sentinel outputs are built with the
+// node's seq_len lengths; the engine is then handed buffers that size and the golden
+// comparison reads them.
+TEST_F(TestGoldenHarnessFixture, RaggedSdpaSentinelOutputsTakeTheirLengthsFromSeqLen)
+{
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    const auto bundle = fixtures::loadWrittenBundle(dir, layout.name);
+    const auto loadedTensors = bundle->loadTensors();
+    const auto wrapper = bundle->graphWrapper();
+
+    const auto outputs = detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(),
+        bundle->outputTensorUids,
+        loadedTensors,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        /*onDevice=*/false);
+
+    for(const int64_t uid : {fixtures::K_SDPA_O_UID, fixtures::K_SDPA_STATS_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(uid));
+        const auto& output = outputs.at(uid);
+        ASSERT_TRUE(output->raggedIterationInfo().has_value());
+        EXPECT_EQ(output->raggedIterationInfo()->lengths, layout.lengths);
+        EXPECT_EQ(output->elementSpace(),
+                  uid == fixtures::K_SDPA_STATS_UID ? layout.statsSpace : layout.qkvoSpace);
+    }
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedSdpaMatchingOutputYieldsPass)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeRaggedSdpaGappedOutputs, 0.0f);
+
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, fixtures::loadWrittenBundle(dir, layout.name), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 // NOLINTEND(readability-identifier-naming)

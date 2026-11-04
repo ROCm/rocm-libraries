@@ -14,6 +14,7 @@ if _CODEGEN_DIR not in sys.path:
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import shared_assembler, shared_isa_info_map_or_skip
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +60,25 @@ def _single_threaded_parallel_map():
         yield
 
 
+@pytest.fixture(scope="session")
+def assembler():
+    return shared_assembler()
+
+@pytest.fixture(scope="session")
+def gfx90a_iim():
+    return shared_isa_info_map_or_skip("gfx90a")
+
+@pytest.fixture(scope="session")
+def gfx942_iim():
+    return shared_isa_info_map_or_skip("gfx942")
+
+@pytest.fixture(scope="session")
+def gfx950_iim():
+    return shared_isa_info_map_or_skip("gfx950")
+
+@pytest.fixture(scope="session")
+def gfx1250_iim():
+    return shared_isa_info_map_or_skip("gfx1250")
 @pytest.fixture(autouse=True)
 def skip_parametrized_if_cli(request):
     """Skip all tests except test_storeD_cli when CLI options (--mn) are provided."""

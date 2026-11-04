@@ -36,6 +36,7 @@ import re
 import shutil
 
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import cxx_compiler, shared_assembler
 
 # --- assembly canonicalization ---------------------------------------------
 
@@ -82,17 +83,16 @@ def canonicalize_asm(text):
 
 @functools.lru_cache(maxsize=1)
 def _toolchain():
-    """Build (assembler, isaInfoMap) once. Uses amdclang++; no GPU required."""
+    """Build (assembler, isaInfoMap) once, the map covering every supported ISA.
+
+    Uses amdclang++; no GPU required. Probing all ISAs is what makes this slow
+    (about 40 s); callers that target one ISA use ``toolchain_for``.
+    """
     from tensilelite.Common.Architectures import SUPPORTED_ISA
     from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    assembler = makeAssemblyToolchain(cxx, bundler, "default").assembler
-    return assembler, iim
+    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler())
+    return shared_assembler(), iim
 
 
 def get_assembler():

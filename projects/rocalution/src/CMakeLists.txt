@@ -110,6 +110,9 @@ set(static_depends)
 
 # Target link libraries
 if(SUPPORT_OMP)
+  # Consumers (the OpenMP state tests in particular) cannot see a PRIVATE
+  # OpenMP link. This definition is the installed library's record of it.
+  target_compile_definitions(rocalution INTERFACE ROCALUTION_WITH_OPENMP)
   if(CMAKE_VERSION VERSION_LESS "3.29.0"
       AND (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
       AND (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")

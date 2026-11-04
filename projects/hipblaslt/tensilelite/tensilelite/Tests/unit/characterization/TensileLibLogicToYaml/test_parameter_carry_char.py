@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for how Tensile.TensileLibLogicToYaml carries a
+# Characterization tests for how tensilelite.TensileLibLogicToYaml carries a
 # solution's parameters into the config it emits.
 #
 # The emitter keeps no per-parameter list: what a config can set comes from

@@ -30,6 +30,7 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
     Tag = "Single"
@@ -90,7 +91,7 @@ class MatchingLibrary:
     StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
-    def FromOriginalState(cls, d, solutions):
+    def FromOriginalState(cls, d, solutions, problemType=None):
         indices = d["indexOrder"]
         distance = d["distance"]
         origTable = d["table"]
@@ -115,16 +116,30 @@ class MatchingLibrary:
                 7: Properties.Property("BoundSize", index=0)
             }
 
+        fusedA2A = isFusedA2A(problemType)
+        if fusedA2A and distance != "Equality":
+            raise RuntimeError("fused GEMM+A2A logic supports only the Equality distance; got %s" % distance)
+
         properties = list([propertyKeys[i] for i in indices if i in propertyKeys])
         keyOrder = [i for i, j in enumerate(indices) if j in propertyKeys]
+        if fusedA2A:
+            properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
         table = []
+        # Rows typically outnumber solutions by orders of magnitude; the wrapper
+        # is immutable, so share one per solution (keeps the pickled result that
+        # workers send back to the parent small).
+        wrappers = {}
 
         for row in origTable:
             try:
                 index = row[1][0]
-                value = IndexSolutionLibrary(solutions[index])
+                value = wrappers.get(index)
+                if value is None:
+                    value = wrappers[index] = IndexSolutionLibrary(solutions[index])
                 key = list([row[0][i] for i in keyOrder])
+                if fusedA2A:
+                    key += splitFusedA2ARow(row[0], problemType)[2]
                 if distance == "GridBased":
                     entry = {"key": key, "index": value}
                 else:
@@ -472,7 +487,7 @@ class MasterSolutionLibrary:
                 else:
                     predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
-                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions)
+                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions, d["ProblemType"])
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": matchingLib})
             elif d["LibraryType"] == "FreeSize":

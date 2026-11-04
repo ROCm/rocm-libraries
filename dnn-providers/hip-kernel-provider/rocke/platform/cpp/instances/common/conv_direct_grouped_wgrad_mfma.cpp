@@ -33,16 +33,6 @@ constexpr int kCH = kBC / 8; /* 16-byte chunks per staged pixel */
 
 const char* bf16_flag[1] = {"bf16"};
 
-int total_c(const rocke_direct_conv_problem_t* p)
-{
-    return p->groups * p->cpg;
-}
-
-int total_k(const rocke_direct_conv_problem_t* p)
-{
-    return p->groups * p->kpg;
-}
-
 int block_q(const rocke_grouped_wgrad_mfma_spec_t* s)
 {
     return 4 * s->wave_q4 * s->waves_q;
@@ -71,7 +61,8 @@ int iy(const rocke_grouped_wgrad_mfma_spec_t* s)
 
 int n_channel_tiles(const rocke_grouped_wgrad_mfma_spec_t* s)
 {
-    return cdiv(total_c(&s->problem), kBC);
+    /* The validator bounds total_c to i32. */
+    return cdiv((int)rocke_direct_conv_problem_total_c(&s->problem), kBC);
 }
 
 int n_q(const rocke_grouped_wgrad_mfma_spec_t* s)
@@ -142,7 +133,7 @@ extern "C" int rocke_grouped_wgrad_mfma_fold_taps(const rocke_grouped_wgrad_mfma
 extern "C" long rocke_grouped_wgrad_mfma_workspace_bytes(const rocke_grouped_wgrad_mfma_spec_t* s)
 {
     return (long)rocke_grouped_wgrad_mfma_n_partitions(s) * rocke_grouped_wgrad_mfma_fold_taps(s)
-           * total_k(&s->problem) * 4;
+           * rocke_direct_conv_problem_total_k(&s->problem) * 4;
 }
 
 extern "C" void rocke_grouped_wgrad_mfma_launch_geometry(const rocke_grouped_wgrad_mfma_spec_t* s,
@@ -185,17 +176,19 @@ extern "C" bool rocke_grouped_wgrad_mfma_is_valid_spec(const rocke_grouped_wgrad
     char msg[ROCKE_ERR_MSG_CAP];
     if(s == NULL)
     {
-        set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&s->problem, reason, reason_cap))
+        return false;
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
-        set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     const char* why = NULL;
@@ -215,7 +208,7 @@ extern "C" bool rocke_grouped_wgrad_mfma_is_valid_spec(const rocke_grouped_wgrad
     {
         why = "PAD <= K - 1";
     }
-    else if(total_c(p) % 8)
+    else if(rocke_direct_conv_problem_total_c(p) % 8)
     {
         why = "C must be a multiple of 8";
     }
@@ -255,10 +248,10 @@ extern "C" bool rocke_grouped_wgrad_mfma_is_valid_spec(const rocke_grouped_wgrad
     }
     if(why != NULL)
     {
-        set_reason(reason, reason_cap, why);
+        rocke_spec_set_reason(reason, reason_cap, why);
         return false;
     }
-    set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 

@@ -688,6 +688,174 @@
         "seed": 42,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness_b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask"
       }
+    },
+    {
+      "id": "2_16_1_128_bfp16_nhwc_decode_hkv2_skv384_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              1,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              1,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "reference_source": "single-token decode (seqlen_q 1) variant of case 1_2_384_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0: b2 hq16 hkv2 skv384 d128 bf16 causal_br, BSHD"
+      }
+    },
+    {
+      "id": "4_8_1_64_bfp16_nhwc_decode_hkv1_skv256_nomask",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1,
+              256,
+              64
+            ],
+            "strides": [
+              16384,
+              64,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              1,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              1,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1,
+              256,
+              64
+            ],
+            "strides": [
+              16384,
+              64,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "reference_source": "single-token decode (seqlen_q 1) variant of case 1_8_288_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound: b4 hq8 hkv1 skv256 d64 bf16 nomask, BSHD"
+      }
     }
   ]
 }

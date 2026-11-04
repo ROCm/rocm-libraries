@@ -22,8 +22,7 @@ import pytest
 import tensilelite.LibraryIO as L
 from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Toolchain.Validators import validateToolchain
 
 pytestmark = pytest.mark.unit
 
@@ -40,12 +39,6 @@ def cxx_compiler():
 @pytest.fixture(scope="module")
 def isa_info_map(cxx_compiler):
     return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
-
-
-@pytest.fixture(scope="module")
-def assembler(cxx_compiler):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx_compiler, bundler, "default").assembler
 
 
 def _raw_dict():

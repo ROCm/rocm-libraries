@@ -23,6 +23,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/SweepManifestCache.hpp"
@@ -106,8 +107,10 @@ struct IntegrationTestBundle
             attrByUid[attributes->uid()] = attributes;
         }
 
-        // Ragged tensors are constructed from their offset tensor, so they load last.
-        // Offset tensors are always inputs, so an output's offset is already loaded.
+        // Ragged tensors are constructed from their offset tensor and, when the node
+        // declares one, their seq_len tensor, so they load last. Both are always
+        // inputs, so an output's offset and seq_len are already loaded.
+        const auto lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(graph);
         const auto loadUids = [&](const std::vector<int64_t>& uids) {
             std::vector<int64_t> raggedUids;
             for(const int64_t uid : uids)
@@ -136,8 +139,10 @@ struct IntegrationTestBundle
                                              + " references missing offset tensor "
                                              + std::to_string(offsetUid));
                 }
+                const auto lengths
+                    = hipdnn_test_sdk::utilities::findRaggedLengths(lengthUids, tensors, uid);
                 tensors[uid] = hipdnn_test_sdk::utilities::raggedTensorFromFileAndAttributes(
-                    blobs->pathForUid(uid), *attributes, offsetIt->second);
+                    blobs->pathForUid(uid), *attributes, offsetIt->second, lengths);
             }
         };
 

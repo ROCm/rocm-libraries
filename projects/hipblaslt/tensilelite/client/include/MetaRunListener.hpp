@@ -45,6 +45,8 @@ namespace TensileLite
             void addListener(std::shared_ptr<RunListener> listener);
 
             virtual void setReporter(std::shared_ptr<ResultReporter> reporter) override;
+            virtual void
+                setDevices(std::vector<std::shared_ptr<DeviceContext>> const* devices) override;
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;

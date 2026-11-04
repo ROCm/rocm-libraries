@@ -51,7 +51,7 @@ struct RaggedSdpaFwdGraphOptions
     std::optional<int64_t> raggedOffsetVUid;
     std::optional<int64_t> raggedOffsetOUid;
     // Token-unit offsets, AITER's form: each ragged tensor's ragged_offset_multiplier is its seq
-    // stride (strides[2] = H*D, or H for a packed LSE), so the Q table also serves O and the K
+    // stride (strides[2] = H*D, or H for a ragged LSE), so the Q table also serves O and the K
     // table also serves V even when their widths differ. Default: element offsets (multiplier 1).
     bool tokenOffsets = false;
 };

@@ -16,8 +16,7 @@ import pytest
 
 from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Toolchain.Validators import validateToolchain
 import tensilelite.LibraryIO as LibraryIO
 
 _DATA = os.path.join(os.path.dirname(__file__), "..", "_codegen", "data")
@@ -36,12 +35,6 @@ def _cxx():
 @pytest.fixture(scope="session")
 def isa_info_map(_cxx):
     return makeIsaInfoMap(SUPPORTED_ISA, _cxx)
-
-
-@pytest.fixture(scope="session")
-def assembler(_cxx):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(_cxx, bundler, "default").assembler
 
 
 @pytest.fixture(scope="session")

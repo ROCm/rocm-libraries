@@ -64,8 +64,7 @@ long long fdiv(long long a, long long b)
 
 void set_reason(char* reason, size_t cap, const std::string& msg)
 {
-    if(reason && cap > 0)
-        snprintf(reason, cap, "%s", msg.c_str());
+    rocke_spec_set_reason(reason, cap, msg.c_str());
 }
 
 /* ------------------------------------------------------------ geometry */

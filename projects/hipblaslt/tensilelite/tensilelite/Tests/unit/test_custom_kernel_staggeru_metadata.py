@@ -973,6 +973,10 @@ class _Writer:
     def isTdmWaveIdxLive(self, kernel):
         return self._waveIdxLive
 
+    def rapLabel(self, name):
+        # Outside ReuseAcrossPersistent's reuse copy a literal label keeps its name.
+        return name
+
     def _emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc):
         return KernelWriterAssembly._emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc)
 

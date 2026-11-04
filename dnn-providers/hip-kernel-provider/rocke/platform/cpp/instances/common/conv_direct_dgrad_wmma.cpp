@@ -27,34 +27,21 @@
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* ROCKE_FWD_WMMA_K / _CH_PAD, rocke_wmma_fwd_op_id */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
-/* conv_direct_dgrad_wmma.WMMA_K / CH_PAD / DGRAD_WMMA_VGPR_BUDGET. */
-#define DGW_WMMA_K 32
-#define DGW_CH_PAD 8
+/* conv_direct_dgrad_wmma.DGRAD_WMMA_VGPR_BUDGET (WMMA_K / CH_PAD are the
+ * forward gate's ROCKE_FWD_WMMA_K / ROCKE_FWD_WMMA_CH_PAD). */
 #define DGW_VGPR_BUDGET 448
 
 namespace
 {
 
-int dgw_ceil_div(int a, int b)
-{
-    return (a + b - 1) / b;
-}
-
 /* pack_groups serves cpg / kpg in (2, 4, 8, 16). */
 bool dgw_packable(int c)
 {
     return c == 2 || c == 4 || c == 8 || c == 16;
-}
-
-void dgw_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
 }
 
 const char* dgw_dtype(const rocke_direct_dgrad_wmma_spec_t* spec)
@@ -65,13 +52,6 @@ const char* dgw_dtype(const rocke_direct_dgrad_wmma_spec_t* spec)
 bool dgw_is_bf16(const rocke_direct_dgrad_wmma_spec_t* spec)
 {
     return strcmp(dgw_dtype(spec), "bf16") == 0;
-}
-
-/* Python floor division / modulo (the C operators truncate toward zero). */
-long long dgw_floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
 }
 
 /* _axis_plan(K, PAD, dil, S): output row S * i + a (phase a) collects filter
@@ -99,7 +79,7 @@ dgw_plan dgw_axis_plan(int K, int PAD, int dil, int S)
             if(x % S == 0)
             {
                 pl.phase.push_back(a);
-                d.push_back(dgw_floordiv(x, S));
+                d.push_back(rocke_floor_div(x, S));
                 break;
             }
         }
@@ -157,11 +137,11 @@ int dgw_halo_w(const rocke_direct_dgrad_wmma_spec_t* s)
 }
 int dgw_x_pitch(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return s->ck + DGW_CH_PAD;
+    return s->ck + ROCKE_FWD_WMMA_CH_PAD;
 }
 int dgw_w_pitch(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return rocke_direct_dgrad_wmma_block_c(s) + DGW_CH_PAD;
+    return rocke_direct_dgrad_wmma_block_c(s) + ROCKE_FWD_WMMA_CH_PAD;
 }
 int dgw_image_elems(const rocke_direct_dgrad_wmma_spec_t* s)
 {
@@ -239,7 +219,7 @@ long rocke_direct_dgrad_wmma_lds_bytes(const rocke_direct_dgrad_wmma_spec_t* spe
     if(spec->wave_epilogue)
     {
         long n_waves = (long)spec->waves_c * spec->waves_p;
-        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_c * 16 + DGW_CH_PAD);
+        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_c * 16 + ROCKE_FWD_WMMA_CH_PAD);
     }
     return 2 * (ring > epi ? ring : epi);
 }
@@ -248,10 +228,11 @@ void rocke_direct_dgrad_wmma_grid(const rocke_direct_dgrad_wmma_spec_t* spec, in
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     int S = p->stride;
-    int n_ct = dgw_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
-    int n_ht = dgw_ceil_div(dgw_ceil_div(p->H, S), rocke_direct_dgrad_wmma_tile_h(spec));
-    int n_wt = dgw_ceil_div(dgw_ceil_div(p->W, S), spec->tile_w);
-    grid[0] = dgw_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec) * n_ht * n_wt * n_ct;
+    long long n_ct = rocke_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
+    long long n_ht = rocke_ceil_div(rocke_ceil_div(p->H, S), rocke_direct_dgrad_wmma_tile_h(spec));
+    long long n_wt = rocke_ceil_div(rocke_ceil_div(p->W, S), spec->tile_w);
+    /* The validator bounds the block count to i32. */
+    grid[0] = (int)(rocke_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec) * n_ht * n_wt * n_ct);
     grid[1] = 1;
     grid[2] = 1;
 }
@@ -338,7 +319,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
 
     if(spec == NULL)
     {
-        dgw_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -352,56 +333,56 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     p = &spec->problem;
     if(target->wave_size != 32 || spec->wave_size != 32)
     {
-        dgw_set_reason(reason, reason_cap, "direct_dgrad_wmma is a wave32 kernel");
+        rocke_spec_set_reason(reason, reason_cap, "direct_dgrad_wmma is a wave32 kernel");
         return false;
     }
     if(!target->memory.has_tdm)
     {
         snprintf(msg, sizeof msg, "no TDM on %s", arch);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     ab = dgw_is_bf16(spec) ? "bf16" : "f16";
     if(strcmp(dgw_dtype(spec), "fp16") != 0 && strcmp(dgw_dtype(spec), "bf16") != 0)
     {
         snprintf(msg, sizeof msg, "unsupported dtype '%s'", dgw_dtype(spec));
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, DGW_WMMA_K))
+           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, ROCKE_FWD_WMMA_K))
     {
         snprintf(msg, sizeof msg, "missing wmma_f32_16x16x32_%s on %s", ab, arch);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->stride != 1 && p->stride != 2)
     {
         snprintf(msg, sizeof msg, "stride %d not in (1, 2)", p->stride);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->stride > 1 && (p->dil_h != 1 || p->dil_w != 1))
     {
-        dgw_set_reason(reason, reason_cap, "a strided dilated dgrad is not supported");
+        rocke_spec_set_reason(reason, reason_cap, "a strided dilated dgrad is not supported");
         return false;
     }
     if(p->dil_h < 1 || p->dil_w < 1)
     {
         snprintf(msg, sizeof msg, "dilation %dx%d < 1", p->dil_h, p->dil_w);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->KH < 1 || p->KW < 1)
     {
         snprintf(msg, sizeof msg, "filter %dx%d is not positive", p->KH, p->KW);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->PAD < 0 || dgw_plan_h(spec).shift < 0 || dgw_plan_w(spec).shift < 0)
     {
         snprintf(msg, sizeof msg, "PAD %d outside 0..(K-1)*dilation", p->PAD);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
@@ -410,7 +391,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     if(G < 1)
     {
         snprintf(msg, sizeof msg, "pack_groups %d < 1", G);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(G > 1)
@@ -418,14 +399,14 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         if(p->groups % G != 0)
         {
             snprintf(msg, sizeof msg, "groups %d not a multiple of pack_groups %d", p->groups, G);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(!dgw_packable(p->cpg) || !dgw_packable(p->kpg))
         {
             snprintf(
                 msg, sizeof msg, "packed cpg %d / kpg %d not in (2, 4, 8, 16)", p->cpg, p->kpg);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(dgw_kpg_eff(spec) > spec->ck)
@@ -435,7 +416,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                      "packed kpg %d > ck %d (one dY chunk)",
                      dgw_kpg_eff(spec),
                      spec->ck);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(dgw_cpg_eff(spec) > rocke_direct_dgrad_wmma_block_c(spec))
@@ -445,7 +426,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                      "packed cpg %d > block_c %d",
                      dgw_cpg_eff(spec),
                      rocke_direct_dgrad_wmma_block_c(spec));
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
     }
@@ -456,23 +437,24 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                  "cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
                  dgw_cpg_eff(spec),
                  dgw_kpg_eff(spec));
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->ck % DGW_WMMA_K != 0 || spec->ck <= 0)
+    if(spec->ck % ROCKE_FWD_WMMA_K != 0 || spec->ck <= 0)
     {
-        snprintf(msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, DGW_WMMA_K);
-        dgw_set_reason(reason, reason_cap, msg);
+        snprintf(
+            msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_c < 1 || spec->waves_p < 1 || spec->tiles_c < 1 || spec->tiles_p < 1)
     {
-        dgw_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
         return false;
     }
     if(spec->stages < 2)
     {
-        dgw_set_reason(reason, reason_cap, "stages must be >= 2");
+        rocke_spec_set_reason(reason, reason_cap, "stages must be >= 2");
         return false;
     }
     tw = spec->tile_w;
@@ -480,31 +462,31 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     if(tw < 1 || spec->tile_n < 1)
     {
         snprintf(msg, sizeof msg, "tile_w %d and tile_n %d must be >= 1", tw, spec->tile_n);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(block_p % (tw * spec->tile_n) != 0)
     {
         snprintf(
             msg, sizeof msg, "tile_w %d x tile_n %d must divide %d", tw, spec->tile_n, block_p);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->tile_n > 1 && (rocke_direct_dgrad_wmma_tile_h(spec) * tw) % 16 != 0)
     {
-        dgw_set_reason(reason, reason_cap, "an image tile must hold whole 16-pixel tiles");
+        rocke_spec_set_reason(reason, reason_cap, "an image tile must hold whole 16-pixel tiles");
         return false;
     }
     if(spec->tile_n > spec->waves_c * spec->waves_p - 1)
     {
-        dgw_set_reason(reason,
-                       reason_cap,
-                       "tile_n needs one more wave than images (one dY transfer per image)");
+        rocke_spec_set_reason(reason,
+                              reason_cap,
+                              "tile_n needs one more wave than images (one dY transfer per image)");
         return false;
     }
     if((spec->split_barrier || spec->wave_epilogue) && (p->stride > 1 || G > 1))
     {
-        dgw_set_reason(
+        rocke_spec_set_reason(
             reason, reason_cap, "split_barrier / wave_epilogue serve stride-1 unpacked tiles only");
         return false;
     }
@@ -513,7 +495,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         int wpx = spec->tiles_p * 16;
         if(wpx % tw != 0 || (rocke_direct_dgrad_wmma_tile_h(spec) * tw) % wpx != 0)
         {
-            dgw_set_reason(
+            rocke_spec_set_reason(
                 reason, reason_cap, "wave_epilogue needs whole rows of one image per wave");
             return false;
         }
@@ -525,18 +507,19 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                  sizeof msg,
                  "%d threads per block",
                  rocke_direct_dgrad_wmma_threads_per_block(spec));
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_c * spec->waves_p < 2)
     {
-        dgw_set_reason(reason, reason_cap, "needs at least two waves (one TDM issuer per operand)");
+        rocke_spec_set_reason(
+            reason, reason_cap, "needs at least two waves (one TDM issuer per operand)");
         return false;
     }
     if(dgw_x_pitch(spec) > 0xFFFF || dgw_w_pitch(spec) > 0xFFFF || dgw_halo_w(spec) > 0xFFFF
        || dgw_halo_h(spec) > 0xFFFF)
     {
-        dgw_set_reason(reason, reason_cap, "tile too wide for a TDM descriptor");
+        rocke_spec_set_reason(reason, reason_cap, "tile too wide for a TDM descriptor");
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_direct_dgrad_wmma_lds_bytes(spec)))
@@ -546,7 +529,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                  "LDS %ld B > %d",
                  rocke_direct_dgrad_wmma_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     vgprs = 8 * dgw_phases(spec) * spec->tiles_c * spec->tiles_p
@@ -554,37 +537,34 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     if(vgprs > DGW_VGPR_BUDGET)
     {
         snprintf(msg, sizeof msg, "~%d VGPRs of accumulators and fragments", vgprs);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-    {
-        snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        dgw_set_reason(reason, reason_cap, msg);
+    if(rocke_scheduler_strategy_reason(spec->sched, reason, reason_cap))
         return false;
-    }
     /* Global offsets are i32 bytes and the tile index is a flat block id. */
     {
         /* DirectConvProblem.Ho / .Wo: strided, dilated output extents. */
         long long Ho
-            = dgw_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
-                           p->stride)
+            = rocke_floor_div((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
+                              p->stride)
               + 1;
         long long Wo
-            = dgw_floordiv((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
-                           p->stride)
+            = rocke_floor_div((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
+                              p->stride)
               + 1;
-        long long total_k = (long long)p->groups * p->kpg;
-        long long total_c = (long long)p->groups * p->cpg;
+        long long total_k = rocke_direct_conv_problem_total_k(p);
+        long long total_c = rocke_direct_conv_problem_total_c(p);
         long long bytes[3] = {2 * p->N * Ho * Wo * total_k,
                               2 * total_k * p->KH * p->KW * p->cpg,
                               2 * p->N * (long long)p->H * p->W * total_c};
         long long mx = bytes[0];
         long long tiles
-            = (long long)dgw_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec)
-              * dgw_ceil_div(dgw_ceil_div(p->H, p->stride), rocke_direct_dgrad_wmma_tile_h(spec))
-              * dgw_ceil_div(dgw_ceil_div(p->W, p->stride), spec->tile_w)
-              * dgw_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
+            = rocke_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec)
+              * rocke_ceil_div(rocke_ceil_div(p->H, p->stride),
+                               rocke_direct_dgrad_wmma_tile_h(spec))
+              * rocke_ceil_div(rocke_ceil_div(p->W, p->stride), spec->tile_w)
+              * rocke_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
         if(bytes[1] > mx)
             mx = bytes[1];
         if(bytes[2] > mx)
@@ -592,17 +572,17 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         if(mx > INT32_MAX)
         {
             snprintf(msg, sizeof msg, "tensors of %lld B exceed the i32 byte offsets", mx);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(tiles > INT32_MAX)
         {
             snprintf(msg, sizeof msg, "%lld workgroups exceed the i32 block id", tiles);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
     }
-    dgw_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -866,7 +846,7 @@ struct dgw_step
 std::vector<dgw_step> make_steps(const dgw_ctx& c)
 {
     std::vector<dgw_step> steps;
-    for(int ks = 0; ks < c.CK / DGW_WMMA_K; ++ks)
+    for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
     {
         /* Python dict: shifts in first-seen order. */
         size_t first = steps.size();
@@ -901,7 +881,7 @@ void frags(dgw_ctx& c,
            std::vector<std::vector<rocke_value_t*>>& af,
            std::vector<rocke_value_t*>& bf)
 {
-    int tap_off = (st.dh * c.HALO_W + st.dw) * c.XP + st.ks * DGW_WMMA_K;
+    int tap_off = (st.dh * c.HALO_W + st.dw) * c.XP + st.ks * ROCKE_FWD_WMMA_K;
     bf.assign(c.TN, NULL);
     af.assign(st.taps.size(), std::vector<rocke_value_t*>());
     for(int tn = 0; tn < c.TN; ++tn)
@@ -910,7 +890,8 @@ void frags(dgw_ctx& c,
     {
         af[t].assign(c.TM, NULL);
         for(int m = 0; m < c.TM; ++m)
-            af[t][m] = read_a(c, wei_base, m, (st.taps[t] * c.CK + st.ks * DGW_WMMA_K) * c.WPITCH);
+            af[t][m]
+                = read_a(c, wei_base, m, (st.taps[t] * c.CK + st.ks * ROCKE_FWD_WMMA_K) * c.WPITCH);
     }
 }
 
@@ -1199,7 +1180,7 @@ void epilogue_wave(dgw_ctx& c, rocke_value_t* const* accs)
     if(!c.SB)
         rocke_b_sync_lds_only(b); /* every wave is done with the ring */
     const int WPX = c.TN * 16;
-    const int EP = c.TM * 16 + DGW_CH_PAD;
+    const int EP = c.TM * 16 + ROCKE_FWD_WMMA_CH_PAD;
     const int ROWS = WPX / c.TW;
     rocke_value_t* base;
     {
@@ -1438,18 +1419,9 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
     c.io_type = rocke_b_io_ir_type(b, dgw_dtype(spec));
     if(c.io_type == NULL)
         return NULL;
-    {
-        const char* ab = dgw_is_bf16(spec) ? "bf16" : "f16";
-        const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-        const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
-            target, "wmma", ab, ab, "fp32", 16, 16, DGW_WMMA_K, NULL);
-        if(op == NULL || op->op_id == NULL)
-        {
-            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_dgrad_wmma: no WMMA atom");
-            return NULL;
-        }
-        c.wmma_op_id = op->op_id;
-    }
+    c.wmma_op_id = rocke_wmma_fwd_op_id(b, dgw_dtype(spec), arch, "build_direct_dgrad_wmma");
+    if(c.wmma_op_id == NULL)
+        return NULL;
     c.WAVE = spec->wave_size;
     c.WC = spec->waves_c;
     c.WP = spec->waves_p;
@@ -1674,7 +1646,7 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
             rocke_value_t* zero_v = rocke_b_zero_vec(b, c.io_type, 8);
             rocke_value_t* c8z = ci(c, 8);
             rocke_value_t* z_vecs = rocke_b_div(b, c.z_elems, c8z);
-            for(int j = 0; j < dgw_ceil_div(max_z, 8); j += c.THREADS)
+            for(int j = 0; j < (int)rocke_ceil_div(max_z, 8); j += c.THREADS)
             {
                 rocke_value_t* cj = ci(c, j);
                 rocke_value_t* v = rocke_b_add(b, c.tid, cj);
@@ -1875,7 +1847,7 @@ rocke_status_t rocke_direct_dgrad_wmma_lower_to_llvm(const rocke_direct_dgrad_wm
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        dgw_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -1885,7 +1857,7 @@ rocke_status_t rocke_direct_dgrad_wmma_lower_to_llvm(const rocke_direct_dgrad_wm
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        dgw_set_reason(
+        rocke_spec_set_reason(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_dgrad_wmma failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;

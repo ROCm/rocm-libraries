@@ -552,7 +552,8 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | `cpg` ∈ {4, 8, 16, 32} and small K loop (`KH×KW×cpg ≲ 128`) | Try direct-conv first; lower setup cost |
 | `cpg` ∈ {4, 8, 16, 32} and large K loop | Both; compare with `benchmark_conv_compare.py` |
 | `cpg` not in {1, 4, 8, 16, 32} | Implicit-GEMM only |
-| `stride > 1` or `dilation > 1` | Implicit-GEMM only |
+| `stride > 1` | Implicit-GEMM only |
+| `dilation > 1` | Implicit-GEMM; this family refuses it (`direct_nongrouped`, `direct_fwd_wmma`, `direct_fwd_tapouter_wmma` and `direct_dgrad_wmma` are the direct variants that compute one) |
 | Grouped with arbitrary `groups` | Implicit-GEMM |
 | gfx1250 target | Implicit-GEMM (`pipeline="wavelet"`) |
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |

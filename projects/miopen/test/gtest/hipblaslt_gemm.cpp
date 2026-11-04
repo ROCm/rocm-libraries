@@ -42,11 +42,13 @@
 #include <miopen/gemm_v2.hpp>
 
 #include <half/half.hpp>
-#include <hip_float8.hpp>
+// MIOpen test helpers already define half as half_float::half.
+#ifndef HIP_NO_HALF
+#define HIP_NO_HALF
+#endif
+#include <hip/hip_fp8.h>
 
-using float16      = half_float::half;
-using float8_fnuz  = miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>;
-using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
+using float16 = half_float::half;
 
 using namespace miopen;
 
@@ -54,6 +56,10 @@ using namespace miopen;
 #define WORKAROUND_SWDEV_473387 1
 
 namespace hipblaslt_gemm {
+
+// The descriptors below request FNUZ regardless of MIOPEN_FP8_IEEE_EXPONENT_BIAS.
+using Float8Fnuz  = __hip_fp8_e4m3_fnuz;
+using BFloat8Fnuz = __hip_fp8_e5m2_fnuz;
 
 struct TestCase
 {
@@ -189,7 +195,8 @@ static void RunGemmDescriptors(const TestCase& testCase, miopenDataType_t dataTy
 
         for(auto& index : workspaceB_host)
         {
-            index = prng::gen_A_to_B(static_cast<T>(-0.5), static_cast<T>(0.5f));
+            // Quantize before shifting, preserving the input distribution for low precision types.
+            index = static_cast<T>(static_cast<float>(prng::gen_canonical<T>()) - 0.5f);
         }
 
         workspaceA_device.Write(workspaceA_host);
@@ -228,7 +235,11 @@ static void RunGemmDescriptors(const TestCase& testCase, miopenDataType_t dataTy
         miopen::gemm_cpu_util::CallGemm<T>(
             desc, workspaceA_host.data(), 0, workspaceB_host.data(), 0, workspaceC_host.data(), 0);
 
-        auto error = miopen::rms_range(workspaceC_host, workspaceC_device.Read<std::vector<T>>());
+        const auto result = workspaceC_device.Read<std::vector<T>>();
+        const auto referenceFloat =
+            std::vector<float>(workspaceC_host.begin(), workspaceC_host.end());
+        const auto resultFloat = std::vector<float>(result.begin(), result.end());
+        auto error             = miopen::rms_range(referenceFloat, resultFloat);
         EXPECT_TRUE(std::isfinite(error));
 
         const double tolerance = ((sizeof(T) == 4) ? 1e-6 : 7e-2);
@@ -288,6 +299,28 @@ static void CheckExceptionsWithSkip([[maybe_unused]] miopenDataType_t dataType)
 } // namespace hipblaslt_gemm
 using namespace hipblaslt_gemm;
 
+TEST(CPU_HipBLASLtGEMMTest_FP8, FNUZEncoding)
+{
+    EXPECT_EQ(Float8Fnuz(1.0f).__x, 0x40);
+    EXPECT_EQ(Float8Fnuz(-0.0f).__x, 0x00);
+    Float8Fnuz value;
+    value.__x = 0x40;
+    EXPECT_EQ(static_cast<float>(value), 1.0f);
+    value.__x = 0x80;
+    EXPECT_TRUE(std::isnan(static_cast<float>(value)));
+}
+
+TEST(CPU_HipBLASLtGEMMTest_BFP8, FNUZEncoding)
+{
+    EXPECT_EQ(BFloat8Fnuz(1.0f).__x, 0x40);
+    EXPECT_EQ(BFloat8Fnuz(-0.0f).__x, 0x00);
+    BFloat8Fnuz value;
+    value.__x = 0x40;
+    EXPECT_EQ(static_cast<float>(value), 1.0f);
+    value.__x = 0x80;
+    EXPECT_TRUE(std::isnan(static_cast<float>(value)));
+}
+
 TEST_F(GPU_HipBLASLtGEMMTest_FP32, CheckHipBLASLtGEMMException)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
@@ -340,7 +373,7 @@ TEST_F(GPU_HipBLASLtGEMMTest_FP8, CheckHipBLASLtGEMMException)
                             Gpu::gfx90A,
                             Gpu::gfx110X,
                             Gpu::gfx115X>;
-    CheckExceptionsWithSkip<float8_fnuz, d_mask, e_mask>(miopenDataType_t::miopenFloat8_fnuz);
+    CheckExceptionsWithSkip<Float8Fnuz, d_mask, e_mask>(miopenDataType_t::miopenFloat8_fnuz);
 };
 TEST_P(GPU_HipBLASLtGEMMTest_FP8, RunHipBLASLtGEMM)
 {
@@ -352,8 +385,7 @@ TEST_P(GPU_HipBLASLtGEMMTest_FP8, RunHipBLASLtGEMM)
                             Gpu::gfx90A,
                             Gpu::gfx110X,
                             Gpu::gfx115X>;
-    RunGemmDescriptors<float8_fnuz, d_mask, e_mask>(GetParam(),
-                                                    miopenDataType_t::miopenFloat8_fnuz);
+    RunGemmDescriptors<Float8Fnuz, d_mask, e_mask>(GetParam(), miopenDataType_t::miopenFloat8_fnuz);
 };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_FP8, testing::ValuesIn(GetTestCases()));
 
@@ -368,9 +400,9 @@ TEST_F(GPU_HipBLASLtGEMMTest_BFP8, CheckHipBLASLtGEMMException)
                             Gpu::gfx90A,
                             Gpu::gfx110X,
                             Gpu::gfx115X>;
-    CheckExceptionsWithSkip<bfloat8_fnuz, d_mask, e_mask>(miopenDataType_t::miopenBFloat8_fnuz);
+    CheckExceptionsWithSkip<BFloat8Fnuz, d_mask, e_mask>(miopenDataType_t::miopenBFloat8_fnuz);
 #else
-    CheckExceptions<bfloat8_fnuz>(miopenDataType_t::miopenInt64);
+    CheckExceptions<BFloat8Fnuz>(miopenDataType_t::miopenInt64);
 #endif
 };
 TEST_P(GPU_HipBLASLtGEMMTest_BFP8, RunHipBLASLtGEMM)
@@ -384,8 +416,8 @@ TEST_P(GPU_HipBLASLtGEMMTest_BFP8, RunHipBLASLtGEMM)
                             Gpu::gfx90A,
                             Gpu::gfx110X,
                             Gpu::gfx115X>;
-    RunGemmDescriptors<bfloat8_fnuz, d_mask, e_mask>(GetParam(),
-                                                     miopenDataType_t::miopenBFloat8_fnuz);
+    RunGemmDescriptors<BFloat8Fnuz, d_mask, e_mask>(GetParam(),
+                                                    miopenDataType_t::miopenBFloat8_fnuz);
 #else
     GTEST_SKIP();
 #endif

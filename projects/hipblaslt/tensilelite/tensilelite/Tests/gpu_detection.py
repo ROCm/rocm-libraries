@@ -29,14 +29,14 @@ GPU architecture detection for TensileLite unit and common tests.
 import contextlib
 import os
 
-from Tensile.GpuArch import cmake_gpu_target, detect_gpu_archs
+from tensilelite.GpuArch import cmake_gpu_target, detect_gpu_archs
 
 
 @contextlib.contextmanager
 def _rocmPathFromTestOverride():
     """``TENSILE_ROCM_PATH`` standing in for ``ROCM_PATH`` inside the block.
 
-    ``Tensile.GpuArch`` reads ``ROCM_PATH``, the variable the build uses. The
+    ``tensilelite.GpuArch`` reads ``ROCM_PATH``, the variable the build uses. The
     tests keep their own override so a run can probe a different install without
     moving the one the build points at, so it is applied here and taken back
     out again rather than leaking into anything the tests go on to launch.
@@ -60,7 +60,7 @@ def _rocmPathFromTestOverride():
 def get_available_archs() -> list[str]:
     """Get list of available GPU architectures, one entry per distinct name.
 
-    Reads through ``Tensile.GpuArch``, the same detection the build uses, so a
+    Reads through ``tensilelite.GpuArch``, the same detection the build uses, so a
     stepping suffix survives. It has to: ``config_helpers.configMarks`` keys its
     ``skip-<arch>`` marks off this list, and the two spellings of a config carry
     mirrored marks -- a strict config says ``skip-gfx1250``, a base config says

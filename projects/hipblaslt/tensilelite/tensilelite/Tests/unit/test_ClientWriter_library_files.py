@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Unit tests for Tensile.ClientWriter.clientLibraryFiles.
+Unit tests for tensilelite.ClientWriter.clientLibraryFiles.
 
 The LibraryClient step used to collect only `*.yaml` libraries, so with
 LibraryFormat=msgpack it found nothing and ClientWriter.main crashed on

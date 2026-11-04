@@ -62,6 +62,14 @@ if(NOT TARGET rocalution OR BUILD_CLIENTS_ONLY)
     endif()
   endforeach()
 
+  # OpenMP is a private link, so it is not in INTERFACE_LINK_LIBRARIES.
+  # Follow the installed library, not whether this machine has an OpenMP toolchain.
+  set(SUPPORT_OMP OFF)
+  get_target_property(_rocalution_defs roc::rocalution INTERFACE_COMPILE_DEFINITIONS)
+  if(_rocalution_defs AND "ROCALUTION_WITH_OPENMP" IN_LIST _rocalution_defs)
+    set(SUPPORT_OMP ON)
+  endif()
+
   option(BUILD_CLIENTS_SAMPLES "Build examples." ON)
   option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks." OFF)
   option(BUILD_CLIENTS_TESTS "Build tests." OFF)

@@ -122,10 +122,9 @@ namespace TensileLite
     {
         static_assert(BenchmarkTimer::clock::is_steady, "Clock must be steady.");
 
-        BenchmarkTimer::BenchmarkTimer(po::variables_map const&                    args,
-                                       Hardware const&                             hardware,
-                                       float                                       flushTimeUs,
-                                       std::vector<std::shared_ptr<DeviceContext>> devices)
+        BenchmarkTimer::BenchmarkTimer(po::variables_map const& args,
+                                       Hardware const&          hardware,
+                                       float                    flushTimeUs)
             : m_numWarmups(args["num-warmups"].as<int>())
             , m_syncAfterWarmups(args["sync-after-warmups"].as<bool>())
             , m_numBenchmarks(args["num-benchmarks"].as<int>())
@@ -146,7 +145,6 @@ namespace TensileLite
             , m_skiprun_from_map(0)
             , m_numSolutionSkip(0)
             , m_prob_sol_map(args["prob-sol-map"].as<prob_sol_map>())
-            , m_devices(std::move(devices))
         {
         }
 
@@ -446,20 +444,20 @@ namespace TensileLite
         {
             if(!m_useGPUTimer)
             {
-                forEachDevice(m_devices,
+                forEachDevice(*m_devices,
                               [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_startTime = clock::now();
             }
             else
             {
-                m_start.assign(m_devices.size(), nullptr);
-                m_stop.assign(m_devices.size(), nullptr);
-                for(size_t d = 0; d < m_devices.size(); d++)
+                m_start.assign(m_devices->size(), nullptr);
+                m_stop.assign(m_devices->size(), nullptr);
+                for(size_t d = 0; d < m_devices->size(); d++)
                 {
-                    ScopedDevice device(m_devices[d]->deviceId);
+                    ScopedDevice device((*m_devices)[d]->deviceId);
                     HIP_CHECK_EXC(hipEventCreate(&m_start[d]));
                     HIP_CHECK_EXC(hipEventCreate(&m_stop[d]));
-                    HIP_CHECK_EXC(hipEventRecord(m_start[d], m_devices[d]->stream));
+                    HIP_CHECK_EXC(hipEventRecord(m_start[d], (*m_devices)[d]->stream));
                 }
             }
         }
@@ -469,17 +467,17 @@ namespace TensileLite
         {
             if(!m_useGPUTimer)
             {
-                forEachDevice(m_devices,
+                forEachDevice(*m_devices,
                               [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_endTime = clock::now();
             }
             else
             {
                 // Surfaces kernel faults, which would otherwise yield bogus timings.
-                for(size_t d = 0; d < m_devices.size(); d++)
+                for(size_t d = 0; d < m_devices->size(); d++)
                 {
-                    ScopedDevice device(m_devices[d]->deviceId);
-                    HIP_CHECK_EXC(hipEventRecord(m_stop[d], m_devices[d]->stream));
+                    ScopedDevice device((*m_devices)[d]->deviceId);
+                    HIP_CHECK_EXC(hipEventRecord(m_stop[d], (*m_devices)[d]->stream));
                 }
                 for(auto stop : m_stop)
                     HIP_CHECK_EXC(hipEventSynchronize(stop));
@@ -492,7 +490,7 @@ namespace TensileLite
                 return double_millis(m_endTime - m_startTime).count();
 
             float maxMs = 0.0f;
-            for(size_t d = 0; d < m_devices.size(); d++)
+            for(size_t d = 0; d < m_devices->size(); d++)
             {
                 float eventMs = 0.0f;
                 HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, m_start[d], m_stop[d]));

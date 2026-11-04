@@ -415,6 +415,16 @@ GENERATE_TEST_CASES_DEVICE(local_matrix_test,
                            testing_local_move_to_host_async,
                            local_move_to_host_async)
 
+// Test case for LocalMatrix::MoveToHostAsync followed by LocalMatrix::Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_move_to_host_async_sync,
+                           local_move_to_host_async_sync)
+
+// Test case for LocalMatrix::MoveToAcceleratorAsync followed by LocalMatrix::Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_move_to_accelerator_async_sync,
+                           local_move_to_accelerator_async_sync)
+
 // Test case for LocalMatrix::Apply
 GENERATE_P_TEST_CASES(parameterized_local_matrix_test, testing_local_apply, local_apply)
 

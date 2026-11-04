@@ -208,6 +208,7 @@ def load_config(path: Path) -> IngestorConfig:
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
+        slug_override=engine_raw.get("slug"),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -367,6 +368,10 @@ def load_config(path: Path) -> IngestorConfig:
                     ),
                     default=_default_marker(
                         kernel_raw.get("default", False),
+                        f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
+                    ),
+                    provenance=_kernel_provenance(
+                        kernel_raw.get("provenance", {}),
                         f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
                     ),
                 )
@@ -1331,6 +1336,7 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
         "census_name_symbol",
         "shared_workspace",
+        "slug",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
@@ -1363,8 +1369,30 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "shape_axes",
     }
 )
+#: Per-kernel ``provenance`` keys a config may author. Informational only; the
+#: compiler-owned ``effective_spec`` and the specialization contract are not among them.
+_KERNEL_PROVENANCE_KEYS = frozenset({"rocke_spec_id", "rocke_tuning_id"})
+
+
+def _kernel_provenance(raw, where: str) -> dict:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} provenance must be a mapping, got {raw!r}.")
+    unknown = sorted(set(raw) - _KERNEL_PROVENANCE_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{where} provenance has unknown key(s) {unknown}; known: "
+            f"{sorted(_KERNEL_PROVENANCE_KEYS)}."
+        )
+    for key, value in raw.items():
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                f"{where} provenance.{key} must be a non-empty string, got {value!r}."
+            )
+    return dict(raw)
+
+
 _KNOWN_KERNEL = frozenset(
-    {"name", "kernel_source", "metadata", "priority", "arch", "default"}
+    {"name", "kernel_source", "metadata", "priority", "arch", "default", "provenance"}
 )
 #: Each authored kind's MANDATORY ``kernel_source`` fields, mirroring
 #: ``hkp_pack._validate_ukd_fields``. Shared with `_KNOWN_KERNEL_SOURCE_BY_KIND`
@@ -2590,6 +2618,16 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
         raise ConfigError(
             f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
             "declared by IngestorPacks.hpp."
+        )
+
+    slug = config.engine.slug_override
+    if slug is not None and (
+        not isinstance(slug, str) or not PATH_STEM_PATTERN.fullmatch(slug)
+    ):
+        raise ConfigError(
+            f"engine.slug {slug!r} must be a single path stem, matching "
+            f"^[A-Za-z0-9_][A-Za-z0-9_-]*$: it names the descriptor directory and "
+            f"the stem of every descriptor file under it."
         )
 
     for derived, emitted_as in (

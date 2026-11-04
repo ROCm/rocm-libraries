@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: False
   BoundsCheck: 0
-  PrintSolutionRejectionReason: True
+  PrintSolutionRejectionReason: False  # with the HalfPLR fork, printed reasons push this test's output toward pytest-xdist's 2 GiB report limit
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   PruneSparseMode: 0
@@ -49,7 +49,7 @@ BenchmarkProblems:
       DataTypeMXSA: E8
       DataTypeMXSB: E8
 
-    - # BenchmarkProblemSizeGroup - decoupled PGR, TDMFuse, NumWaves=4
+    - # BenchmarkProblemSizeGroup - decoupled PGR, TDMFuse, HalfPLR, NumWaves=4
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -66,6 +66,7 @@ BenchmarkProblems:
         - PrefetchGlobalReadA: [-1, 1, 2]
         - PrefetchGlobalReadB: [-1, 1, 2]
         - TDMFuse: [0, 1, 2, 3]
+        - HalfPLR: [0, 1, 2, 3]
         - ScheduleIterAlg: [0, 3, 4]
         - StaggerU: [0, 16, 32]
         - InitCIterWmma: [0, 1]
@@ -109,5 +110,71 @@ BenchmarkProblems:
           - Exact: [512, 1024, 1, 1152]
           - Exact: [512, 1024, 1, 2048]
           - Exact: [512, 1024, 1, 2176]
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TN - BF16 without MX scales: TDMFuse 1-3 reduce to {A} + {B}, each on every wave
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - TDMFuse 0-3 without MX, NumWaves=2 and 4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 1]   # 64x32, waves [2,1]
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]   # 64x64, waves [2,2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - TDMSplit: [False]
+        - PrefetchGlobalRead: [2]
+        - TDMFuse: [0, 1, 2, 3]
+        - HalfPLR: [0, 1, 2, 3]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [128, 128, 1, 1000]
         - ActivationArgs:
           - [Enum: none]

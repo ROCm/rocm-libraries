@@ -7,12 +7,15 @@
  * LDS budget and validity. A native launcher sizes its launches and workspace
  * with these, and none of it is visible to the byte-identity gate, so the C
  * port is pinned to Python reference vectors here (mirrors
- * library/tests/test_wmma_fmha_decode_spec.py).
+ * library/tests/test_wmma_fmha_decode_spec.py). It also pins the unknown
+ * scheduler refusal of the decode and of the prefill (wmma_fmha_fwd_v2) to
+ * normalize_scheduler_strategy's ValueError text.
  */
 #include <stdio.h>
 #include <string.h>
 
 #include "rocke/instance_gfx1151_wmma_fmha_decode.h"
+#include "rocke/instance_gfx1151_wmma_fmha_fwd_v2.h"
 
 static int g_failures = 0;
 
@@ -374,8 +377,37 @@ static void test_names_lds_validity(void)
               0);
 }
 
+/* An unknown scheduler strategy is refused with Python's ValueError text
+ * (normalize_scheduler_strategy), not only its first clause. */
+static void test_scheduler_reason(void)
+{
+    const char* want = "unsupported scheduler_strategy 'bogus'; expected one of: iterative-ilp, "
+                       "iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause, or None";
+    char reason[512];
+    rocke_wmma_fmha_decode_spec_t d = rocke_wmma_fmha_decode_spec_default();
+    d.head_size = 128;
+    d.scheduler_strategy = "bogus";
+    reason[0] = '\0';
+    check_int("decode is_valid sched bogus",
+              rocke_wmma_fmha_decode_is_valid_spec(&d, "gfx1151", reason, sizeof reason),
+              0);
+    check_str("decode sched bogus reason", reason, want);
+    rocke_wmma_fmha_fwd_v2_spec_t v = rocke_wmma_fmha_fwd_v2_spec_default();
+    reason[0] = '\0';
+    check_int("fwd_v2 default is_valid",
+              rocke_wmma_fmha_fwd_v2_is_valid_spec(&v, "gfx1151", reason, sizeof reason),
+              1);
+    v.scheduler_strategy = "bogus";
+    reason[0] = '\0';
+    check_int("fwd_v2 is_valid sched bogus",
+              rocke_wmma_fmha_fwd_v2_is_valid_spec(&v, "gfx1151", reason, sizeof reason),
+              0);
+    check_str("fwd_v2 sched bogus reason", reason, want);
+}
+
 int main(void)
 {
+    test_scheduler_reason();
     test_bucket();
     test_kv_range();
     test_heads();
