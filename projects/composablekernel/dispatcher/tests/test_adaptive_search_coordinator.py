@@ -752,8 +752,9 @@ class _FullDisk:
 
 def test_output_dir_failing_mid_run_ends_with_a_summary_not_a_traceback(
         tmp_path, capsys):
-    # The first failed write ends the search as an error; recording that error,
-    # the confirmation and the final files are skipped instead of failing again.
+    # The first failed write ends the search as an error; recording that error
+    # and the confirmation are skipped instead of failing again, the final
+    # files are still tried (here only trials.jsonl fails).
     ad = FakeAdapter({"P1": ABCD})
     co = AS.SearchCoordinator(ad, settings(), tmp_path / "out", clock=FakeClock(),
                               strategy_factory=scripted({"P1": [["A"], ["B"]]})[0])
@@ -768,8 +769,43 @@ def test_output_dir_failing_mid_run_ends_with_a_summary_not_a_traceback(
     assert (s.stop_reason, s.status, s.exit_code) == ("error", "no_winner", 1)
     assert "No space left on device" in s.error and "cannot write" in s.error
     assert ad.confirmed == [] and len(ad.measured) == 1
-    assert not (tmp_path / "out" / "summary.json").exists()
+    summary = strict(tmp_path / "out" / "summary.json")
+    assert (summary["status"], summary["exit_code"], summary["error"]) == (
+        "no_winner", 1, s.error)
     assert "cannot write" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("fail_on", ["winners.json", "stop", "summary.json"])
+def test_failed_final_write_exits_1_with_what_can_be_written(
+        tmp_path, capsys, monkeypatch, fail_on):
+    # The first failed write is one of the last three: the run is not
+    # complete, and each final file after it is still written and says why.
+    # The stop event (trials.jsonl) is skipped after a failed write, like every
+    # event, and cannot know of a later one.
+    def failing(real):
+        def write(self, name, data):
+            if name == fail_on:
+                raise OSError(28, "No space left on device")
+            return real(self, name, data)
+        return write
+
+    for attr in ("_event", "_write_json"):
+        monkeypatch.setattr(AS.RunWriter, attr, failing(getattr(AS.RunWriter, attr)))
+    out = tmp_path / "out"
+    rc = AS.run_search(FakeAdapter({"P1": ABCD}), settings(), out, ["0"])
+    cap = capsys.readouterr()
+    assert rc == 1 and "SEARCH PARTIAL: 1/1" in cap.out and "COMPLETE" not in cap.out
+    assert "No space left on device" in cap.err
+    written = {p.name for p in out.iterdir()}
+    assert ("winners.json" in written) == (fail_on != "winners.json")
+    assert ("summary.json" in written) == (fail_on != "summary.json")
+    if fail_on != "summary.json":
+        summary = strict(out / "summary.json")
+        assert (summary["status"], summary["exit_code"]) == ("partial", 1)
+        assert "No space left on device" in summary["error"]
+    stops = [e["status"] for e in events(out, "stop")]
+    assert stops == {"winners.json": [], "stop": [],
+                     "summary.json": ["complete"]}[fail_on]
 
 
 class Interrupting(FakeAdapter):

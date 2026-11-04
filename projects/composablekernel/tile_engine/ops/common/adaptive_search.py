@@ -464,7 +464,9 @@ class RunWriter:
     """The run's output directory: trials.jsonl is appended and flushed event by
     event; the JSON files are written atomically (temp file + rename). The
     first write that fails raises its OSError and is kept in ``failed``; every
-    later write is skipped, so the error path cannot fail the same way again."""
+    later write is skipped, so the error path cannot fail the same way again,
+    except a ``final`` JSON file (the run's last word, e.g. summary.json): it
+    is still tried, and its failure is kept, never raised."""
 
     def __init__(self, out_dir):
         self.out_dir = Path(out_dir)
@@ -492,14 +494,16 @@ class RunWriter:
                 "use a new directory"
             )
 
-    def _guard(self, fn, *args):
-        if self.failed:
+    def _guard(self, fn, *args, final=False):
+        if self.failed and not final:
             return None
         try:
             return fn(*args)
         except OSError as e:
-            self.failed = f"cannot write {self.out_dir}: {e}"
-            raise
+            self.failed = self.failed or f"cannot write {self.out_dir}: {e}"
+            if not final:
+                raise
+            return None
 
     def event(self, kind: str, **fields) -> None:
         self._guard(self._event, kind, fields)
@@ -512,8 +516,8 @@ class RunWriter:
         self._fh.write(_dumps({"seq": self._seq, "event": kind, **fields}) + "\n")
         self._fh.flush()
 
-    def write_json(self, name: str, data) -> Optional[Path]:
-        return self._guard(self._write_json, name, data)
+    def write_json(self, name: str, data, final: bool = False) -> Optional[Path]:
+        return self._guard(self._write_json, name, data, final=final)
 
     def _write_json(self, name, data) -> Path:
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -1170,15 +1174,21 @@ class SearchCoordinator:
                      else EXIT_OK if status == "complete" else EXIT_FAIL)
         return status, exit_code, error
 
-    def _write_outputs(self, winners, stop, error, status, exit_code, wall) -> None:
-        self._note("stop", stop_reason=stop, status=status)
+    def _write_outputs(self, winners, stop, error, wall) -> None:
+        """The final files, each tried even after a failed write (see
+        ``RunWriter``). The status each one records counts the failed writes
+        before it, so outputs that are incomplete never say ``complete``."""
+        out = self.writer
         if self._run_json is None:  # setup failed: still say what was asked
-            self.writer.write_json("run.json", {
+            out.write_json("run.json", {
                 "schema_version": SCHEMA_VERSION, "sampling_policy": "adaptive",
                 "exhaustive": False, "settings": self.settings.to_json(),
-                "error": error,
-            })
-        self.writer.write_json("winners.json", {k: [w["kernel"]] for k, w in winners.items()})
+                "error": self._status(winners, stop, error)[2],
+            }, final=True)
+        out.write_json("winners.json", {k: [v["kernel"]] for k, v in winners.items()},
+                       final=True)
+        self._note("stop", stop_reason=stop, status=self._status(winners, stop, error)[0])
+        status, exit_code, error = self._status(winners, stop, error)
         problems = {}
         for p in self.problems:
             best = min(p.best.items(), key=lambda kv: (kv[1][0], kv[0]), default=None)
@@ -1190,7 +1200,7 @@ class SearchCoordinator:
                 "discovery_best": None if best is None else {
                     "kernel": p.by_key[best[0]].kernel_name, "latency_ms": best[1][0]},
             }
-        self.writer.write_json("summary.json", {
+        out.write_json("summary.json", {
             "status": status,
             "exit_code": exit_code,
             "stop_reason": stop,
@@ -1202,7 +1212,7 @@ class SearchCoordinator:
             "artifacts": self.registry.to_json(),
             "problems": problems,
             "wall_s": wall,
-        })
+        }, final=True)
 
     def _confirm(self, stop: str) -> Dict[str, dict]:
         """Re-measure each problem's finalists with ``fresh_calls`` fresh verified
@@ -1274,11 +1284,9 @@ class SearchCoordinator:
             if p.key not in winners and p.key not in self.unresolved:
                 self.unresolved[p.key] = f"search ended: {stop}"
         wall = self.ledger.elapsed()
+        self._write_outputs(winners, stop, error, wall)
+        # A failed write, the last one included, is an error: never complete.
         status, exit_code, error = self._status(winners, stop, error)
-        try:
-            self._write_outputs(winners, stop, error, status, exit_code, wall)
-        except OSError:  # kept in writer.failed: the outputs are incomplete
-            status, exit_code, error = self._status(winners, stop, error)
         if self.writer.failed:
             print(f"adaptive search: {self.writer.failed}", file=sys.stderr)
         return RunSummary(

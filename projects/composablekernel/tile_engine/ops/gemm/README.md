@@ -260,10 +260,13 @@ but the finalists measured before it are still confirmed and exported; the
 status is then at best `partial` and `summary.json` holds the error. When the
 adapter breaks its contract (a lost or repeated outcome), nothing is confirmed.
 When a write to the output directory fails (a full disk, say), the search
-ends with that error and nothing is confirmed or written after it. `130`: the
-run was interrupted (Ctrl-C, or SIGTERM such as a batch system's time limit);
-nothing is confirmed and `winners.json` is empty, but `summary.json` is
-written, with each problem's best discovery result.
+ends with that error and exit status `1`, also when it is one of the last
+writes: nothing more is confirmed or logged to `trials.jsonl`, but
+`winners.json` and `summary.json` are still tried, and `summary.json` (when it
+can be written) holds the error. `130`: the run was interrupted (Ctrl-C, or
+SIGTERM such as a batch system's time limit); nothing is confirmed and
+`winners.json` is empty, but `summary.json` is written, with each problem's
+best discovery result.
 
 Only a verified row of the requested kernel and problem with a finite positive
 latency counts as a result. A verification failure is `numeric_fail`; a blank
