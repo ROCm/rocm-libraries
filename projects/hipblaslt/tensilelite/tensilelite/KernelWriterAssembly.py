@@ -9276,6 +9276,9 @@ class KernelWriterAssembly(KernelWriter):
     batch (unless it is batch 0) draws no ticket. An enqueuer overwrites iBSgpr
     and A2ABlockCount.
 
+    A feature-tile-0 work-group of each batch must be dispatched before the
+    work-groups of the batches it places fill every free slot.
+
     Everything between the election and A2ASkipEnqueue runs on an enqueuer only.
     """
     module    = Module("a2aElect")

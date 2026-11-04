@@ -192,7 +192,7 @@ def test_fused_a2a_rejects_non_bf16_d(_gp_gfx942, gfx942_iim, assembler, capsys)
         gfx942_iim, assembler, capsys, ProblemType={"DestDataType": "s"}
     )
     assert sol.get("Valid") is False
-    assert "FusedA2A=GemmA2A only supports a bf16 D" in out
+    assert "FusedA2A=GemmA2A requires a bf16 D" in out
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ def test_fused_a2a_rejects_unsupported_macrotile(
 ):
     sol, out = _derive(gfx942_iim, assembler, capsys, mi=list(_MI_MT64))
     assert sol.get("Valid") is False
-    assert "FusedA2A=GemmA2A supports MacroTile0/1 in {128, 256}" in out
+    assert "FusedA2A=GemmA2A requires MacroTile0/1 in {128, 256}" in out
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +269,8 @@ def test_a2a_gemm_rejects(_gp_gfx942, request, assembler, capsys, overrides, msg
 
 
 def test_a2a_sub_rounds_accepted_with_a2a_gemm(_gp_gfx942, request, assembler, capsys):
-    sol, out = _derive_a2a_gemm(request, assembler, capsys, A2ASubRounds=2)
+    sol, out = _derive_a2a_gemm(request, assembler, capsys, arch="gfx950",
+                                A2ASubRounds=2, DepthU=64)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
 
 

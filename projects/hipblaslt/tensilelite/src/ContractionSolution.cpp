@@ -2553,6 +2553,12 @@ namespace TensileLite
         const uint32_t mask14              = 0x3FFF;
         const uint32_t mask8               = 0xFF;
 
+        if(problemType.fusedA2A == FusedA2A::A2AGemm && (wgm < 0 || wgmxcc > 1))
+            throw std::runtime_error("[fused-a2a] A2AGemm requires WorkGroupMapping >= 0 and "
+                                     "WorkGroupMappingXCC = 1; got "
+                                     + std::to_string(wgm) + " and " + std::to_string(wgmxcc)
+                                     + ".");
+
         internalArg0 = 0;
         internalArg1 = 0;
 
@@ -3042,7 +3048,6 @@ namespace TensileLite
         if(problemType.fusedA2A != FusedA2A::Disabled)
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-            assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             appendFusedSegment(rv.args,
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
@@ -3050,7 +3055,7 @@ namespace TensileLite
                                problem.world(),
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()),
-                               static_cast<uint32_t>(pAMDGPU->computeUnitCount));
+                               static_cast<uint32_t>(pAMDGPU ? pAMDGPU->computeUnitCount : 0));
         }
 
         // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
@@ -4006,15 +4011,15 @@ namespace TensileLite
                 case CustomArgSemantic::FusedA2ASegment:
                 {
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-                    assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                    appendFusedSegment(rv.args,
-                                       inputs.fusedA2APeers,
-                                       inputs.fusedA2ACounter,
-                                       inputs.fusedA2AMyRank,
-                                       problem.world(),
-                                       inputs.fusedA2ADrain,
-                                       static_cast<uint32_t>(problem.fusedA2AExtent()),
-                                       static_cast<uint32_t>(pAMDGPU->computeUnitCount));
+                    appendFusedSegment(
+                        rv.args,
+                        inputs.fusedA2APeers,
+                        inputs.fusedA2ACounter,
+                        inputs.fusedA2AMyRank,
+                        problem.world(),
+                        inputs.fusedA2ADrain,
+                        static_cast<uint32_t>(problem.fusedA2AExtent()),
+                        static_cast<uint32_t>(pAMDGPU ? pAMDGPU->computeUnitCount : 0));
                     break;
                 }
                 // ---- Random seed args ----

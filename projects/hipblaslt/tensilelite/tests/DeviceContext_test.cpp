@@ -96,8 +96,8 @@ TEST(TimingEvents, CreatesEachCardsEventsOnItsDevice)
 TEST(DeviceContext, SdmaRotateWalksTheEvenXgmiEngines)
 {
     using TensileLite::Client::sdmaRotateEngine;
-    EXPECT_EQ(sdmaRotateEngine(3, 0), 3u);
-    EXPECT_EQ(sdmaRotateEngine(2, -1), 14u);
-    EXPECT_EQ(sdmaRotateEngine(14, 1), 2u);
-    EXPECT_THROW(sdmaRotateEngine(3, -1), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(4, 0, 14), 4u);
+    EXPECT_EQ(sdmaRotateEngine(2, -1, 14), 14u);
+    EXPECT_EQ(sdmaRotateEngine(14, 1, 14), 2u);
+    EXPECT_THROW(sdmaRotateEngine(3, -1, 14), std::runtime_error);
 }

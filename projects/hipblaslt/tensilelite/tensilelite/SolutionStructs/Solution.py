@@ -2686,15 +2686,16 @@ class Solution(collections.abc.Mapping):
                "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
                "the election may fire early)" % fusedA2A)
         return
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires MacroTile0/1 in {128, 256}" % fusedA2A)
+        return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
 
     if fusedA2A == "GemmA2A":
       if not state["ProblemType"]["DestDataType"].isBFloat16():
-        reject(state, printRejectionReason, "FusedA2A=GemmA2A only supports a bf16 D")
-        return
-      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
-      if mt0 not in (128, 256) or mt1 not in (128, 256):
-        reject(state, printRejectionReason, "FusedA2A=GemmA2A supports MacroTile0/1 in {128, 256}")
+        reject(state, printRejectionReason, "FusedA2A=GemmA2A requires a bf16 D")
         return
 
     if state["A2ASubRounds"] != 1 and fusedA2A != "A2AGemm":
@@ -2703,6 +2704,9 @@ class Solution(collections.abc.Mapping):
 
     if fusedA2A == "A2AGemm":
       _disableRuntimeStaggerU(state)
+      if not state["ProblemType"]["DataTypeB"].isBFloat16():
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires a bf16 B")
+        return
       if state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "FusedA2A=A2AGemm requires UseSubtileImpl=0")
         return
@@ -2712,6 +2716,15 @@ class Solution(collections.abc.Mapping):
         return
       if not state["BufferLoad"]:
         reject(state, printRejectionReason, "FusedA2A=A2AGemm requires BufferLoad=1")
+        return
+      if state["WorkGroupMapping"] < 0:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires WorkGroupMapping >= 0")
+        return
+      if state["WorkGroupMappingXCC"] != 1:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires WorkGroupMappingXCC=1")
+        return
+      if state["SpaceFillingAlgo"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires SpaceFillingAlgo=[]")
         return
       state["OptNoLoadLoop"] = 0
 
@@ -3929,6 +3942,12 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+
+    if state["A2ASubRounds"] > 1 \
+        and state["DepthU"] * state["ProblemType"]["DataTypeB"].numBytes() % 128 != 0:
+      reject(state, printRejectionReason,
+             "A2ASubRounds > 1 requires DepthU*bpeB %% 128 == 0; got DepthU=%d" % state["DepthU"])
+      return
 
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
