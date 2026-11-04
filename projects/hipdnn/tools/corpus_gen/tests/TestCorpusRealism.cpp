@@ -156,6 +156,71 @@ TEST(TestCorpusRealism, TheCorpusStillContainsShapesNobodyDeclared)
     EXPECT_GT(composition.fromExploration, 0);
 }
 
+TEST(TestCorpusRealism, GrowingTowardACountKeepsTheDeclaredMixture)
+{
+    // --count grows every served combination past its first-pass target. Growth that only
+    // searched would make a corpus of 25,000 per operation almost entirely exploration,
+    // however the first pass was mixed.
+    ExplorationRequest request;
+    request.pointsPerCombination = 20;
+    request.corpusTarget = 4000;
+    request.seed = 16;
+
+    const auto composition
+        = compose(exploreProblemSpace(shippedConvolution(), request, ACCEPT_EVERYTHING));
+
+    ASSERT_GE(composition.total, 4000U);
+    const auto anchored
+        = static_cast<double>(composition.fromArchetypes + composition.fromNeighbourhood)
+          / static_cast<double>(composition.total);
+    GTEST_LOG_(INFO) << composition.total << " shapes, " << (composition.realistic * 100.0)
+                     << "% realistic, " << (anchored * 100.0) << "% anchored";
+    // The declaration asks for 80% anchored; draws a combination cannot admit fall to the search.
+    EXPECT_GT(anchored, 0.6) << "growth ignored the declared mixture";
+    EXPECT_GT(composition.realistic, 0.5);
+    EXPECT_GT(composition.fromExploration, 0) << "growth dropped the exploration floor";
+}
+
+TEST(TestCorpusRealism, NoConvolutionArchetypeIsDrawnAtTheOtherSpatialRank)
+{
+    // A recorded 2-D layer offered as a 3-D convolution of depth 1 is a shape no network runs.
+    for(const auto& file :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
+    {
+        const auto name = file.path().filename().string();
+        if(name.rfind("conv", 0) != 0 || name.find(".opmeta.json") == std::string::npos)
+        {
+            continue;
+        }
+        std::ifstream stream(file.path());
+        const auto parsed = parseOperationMetadata(nlohmann::json::parse(stream));
+        ASSERT_TRUE(parsed.ok()) << name;
+
+        ExplorationRequest request;
+        request.pointsPerCombination = 60;
+        request.seed = 22;
+        const auto corpus = exploreProblemSpace(*parsed.metadata, request, ACCEPT_EVERYTHING);
+        int64_t anchored3d = 0;
+        for(const auto& combination : corpus.combinations)
+        {
+            const auto count
+                = static_cast<size_t>(combination.fromArchetypes + combination.fromNeighbourhood);
+            for(size_t i = 0; i < count && i < combination.problems.size(); ++i)
+            {
+                const auto& point = combination.problems[i];
+                if(std::get<std::string>(point.at("spatial")) != "3d")
+                {
+                    continue;
+                }
+                ++anchored3d;
+                EXPECT_FALSE(at(point, "D") == 1 && at(point, "T") == 1)
+                    << name << ": " << detail::describe(point);
+            }
+        }
+        EXPECT_GT(anchored3d, 0) << name << " drew no 3-D workload";
+    }
+}
+
 TEST(TestCorpusRealism, EverySourceContributes)
 {
     // Any source silently dropping to zero would leave the row count unchanged.
