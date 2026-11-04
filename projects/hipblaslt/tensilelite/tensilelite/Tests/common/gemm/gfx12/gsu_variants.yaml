@@ -15,7 +15,6 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   Architecture: gfx1250
-  UniformSummationOrder: 0
 
 BenchmarkProblems:
   # FP16 with GlobalSplitUCoalesced

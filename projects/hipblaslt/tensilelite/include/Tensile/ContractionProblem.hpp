@@ -176,16 +176,12 @@ namespace TensileLite
         }
 
         // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
-        void setUniformSummationOrder(int uniformSummationOrder)
+        void setUniformSummationOrder(bool uniformSummationOrder)
         {
-            if(uniformSummationOrder < -1 || uniformSummationOrder > 1)
-            {
-                throw std::invalid_argument("uniform summation order must be -1, 0, or 1");
-            }
             m_uniformSummationOrder = uniformSummationOrder;
         }
 
-        int uniformSummationOrder() const
+        bool uniformSummationOrder() const
         {
             return m_uniformSummationOrder;
         }
@@ -238,7 +234,7 @@ namespace TensileLite
         bool             m_fallbackStatus = false; // default value
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
-        int              m_uniformSummationOrder = -1; // default value
+        bool             m_uniformSummationOrder = false; // default value
         void*            m_occupancyProbeAddr    = nullptr;
         uint32_t         m_occupancyProbeEpoch   = 0;
         uint32_t         m_occupancyProbeMinGrid = 0;

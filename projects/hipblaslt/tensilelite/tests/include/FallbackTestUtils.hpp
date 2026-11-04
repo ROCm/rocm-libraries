@@ -184,8 +184,6 @@ namespace testing
         // always set by ClientProblemFactory; mirror the factory's Float here.
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
-        // These fixtures test library routing with placeholder solutions, not launch validity.
-        problem.setParams().setUniformSummationOrder(0);
         return problem;
     }
 
