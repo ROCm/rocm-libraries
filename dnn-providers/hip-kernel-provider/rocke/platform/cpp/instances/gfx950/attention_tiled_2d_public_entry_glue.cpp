@@ -16,7 +16,7 @@
  *       rocke_gfx950_attention_tiled_2d_supports_args_default
  *       rocke_gfx950_attention_tiled_2d_supports
  *   - the body-context prologue
- *       rocke_g950_build_ctx_init_local  (Python build body lines 711-1151):
+ *       rocke_gfx950_attn2d_build_ctx_init  (Python build body lines 711-1151):
  *       require_tiled_attention_arch(arch) gate -> dtype fp16/bf16 gate ->
  *       WIDE-atom geometry select (Py813-814) -> the whole ALL-CAPS config
  *       derivation -> kernel attrs + param decls -> grid ids + wave
@@ -25,7 +25,7 @@
  *       TransposeLdsReader bind (Py1128) -> the SSA constants block.
  *   - the build driver
  *       rocke_gfx950_build_unified_attention_2d_tiled
- *     which zero-inits the shared ctx, calls rocke_g950_build_ctx_init_local,
+ *     which zero-inits the shared ctx, calls rocke_gfx950_attn2d_build_ctx_init,
  *     then drives the phase functions in the exact Python execution order:
  *         emit_q_load -> emit_loop_bounds_and_inits -> emit_preloop ->
  *         emit_q_gather -> emit_preloop_prefetch -> emit_licm_hoist ->
@@ -367,16 +367,16 @@ bool rocke_gfx950_attention_tiled_2d_supports(
 }
 
 /* ===================================================================== *
- *  rocke_g950_build_ctx_init_local -- the prologue (Python 711-1151)
+ *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
  *
  *  File-local: only this driver calls it. It uses the file-local rocke_g950_*
  *  helpers and the gfx950-specific "leave ctx->target / ctx->qk_atom NULL"
  *  derivation that the phase functions this driver calls expect.
  * ===================================================================== */
-static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                            rocke_ir_builder_t* b,
-                                            const rocke_attention_tiled_2d_spec_t* spec,
-                                            const char* arch)
+static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                               rocke_ir_builder_t* b,
+                                               const rocke_attention_tiled_2d_spec_t* spec,
+                                               const char* arch)
 {
     if(ctx == NULL || b == NULL || spec == NULL)
         return false;
@@ -949,7 +949,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
 /* ===================================================================== *
  *  build_unified_attention_2d_tiled(spec, arch="gfx950")  (lines 711-3818)
  *
- *  The driver: populate the shared build ctx via rocke_g950_build_ctx_init_local
+ *  The driver: populate the shared build ctx via rocke_gfx950_attn2d_build_ctx_init
  *  (the prologue), then run the phase functions in Python execution order and
  *  return b->kernel from the epilogue.
  * ===================================================================== */
@@ -981,7 +981,7 @@ rocke_kernel_def_t* rocke_gfx950_build_unified_attention_2d_tiled(
          * smem_alloc, PV TransposeLdsReader bind, SSA constants. On any reject it
          * sets b's sticky error and returns false. */
         memset(&ctx, 0, sizeof(ctx));
-        if(!rocke_g950_build_ctx_init_local(&ctx, b, spec, arch))
+        if(!rocke_gfx950_attn2d_build_ctx_init(&ctx, b, spec, arch))
             return NULL;
 
         /* The emission order below mirrors the single linear Python emitter exactly

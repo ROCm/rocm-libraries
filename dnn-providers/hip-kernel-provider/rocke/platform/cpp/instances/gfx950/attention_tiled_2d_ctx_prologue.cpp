@@ -9,7 +9,7 @@
  *       (lines 1386 / 2505 / 3605).
  *
  * The build prologue itself lives in the driver TU
- * (attention_tiled_2d_public_entry_glue.cpp, rocke_g950_build_ctx_init_local).
+ * (attention_tiled_2d_public_entry_glue.cpp, rocke_gfx950_attn2d_build_ctx_init).
  *
  * The Python closures capture the enclosing-function locals; here they read the
  * shared rocke_gfx950_attn2d_build_ctx_t. The per-warp lane-decomposition scalars
