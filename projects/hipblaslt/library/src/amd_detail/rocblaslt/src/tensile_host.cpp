@@ -3172,12 +3172,16 @@ namespace
             // library/gfx1250v0/.
             const int  asicRevision = processor == "gfx1250" ? prop.asicRevision : -1;
             const auto libArch      = rocblaslt_revisioned_arch_name(processor, asicRevision);
-            // Whether dir holds the lazy-loading Tensile mapping for this device. The
-            // mapping filenames carry `processor`, the name the runtime reports for
-            // this device -- which is the compiler target the kernels in it were
-            // built for, including gfx1250-strict.
+            // Whether dir holds the Tensile library this build loads for this device:
+            // the lazy-loading mapping, or the full library without lazy loading. The
+            // filenames carry `processor`, the name the runtime reports for this
+            // device -- which is the compiler target the kernels in it were built
+            // for, including gfx1250-strict.
             const auto hasMapping = [&](const std::filesystem::path& dir) {
-                const auto base = dir / ("TensileLibrary_lazy_" + processor);
+                const auto base
+                    = dir
+                      / (std::string(lazyLoad ? "TensileLibrary_lazy_" : "TensileLibrary_")
+                         + processor);
                 return std::filesystem::exists(base.string() + ".dat")
                        || std::filesystem::exists(base.string() + ".dat.zlib")
                        || std::filesystem::exists(base.string() + ".yaml");
