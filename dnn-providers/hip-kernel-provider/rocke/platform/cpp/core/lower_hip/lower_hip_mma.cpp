@@ -168,16 +168,6 @@ static const h_mma_builtin_t* h_find_mma_builtin(const h_mma_builtin_t (&table)[
     return NULL;
 }
 
-/* Python unpacks `a, b, c = op.operands` and reads op.result. */
-static rocke_status_t h_require_abc(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
-{
-    if(op->num_operands != 3 || op->num_results != 1)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 3 operands and 1 result", op_id);
-    }
-    return ROCKE_OK;
-}
-
 /* The target's catalog row for WMMA atom `op_id` (Python _require_wmma_arch
  * then target.mma.by_op_id), or NULL after failing `lw` when the target does
  * not list it. */
@@ -197,9 +187,21 @@ static const rocke_type_t* h_packed_i32(rocke_h_lowerer_t* lw, int words)
     return rocke_vector_type(lw->b, rocke_i32(), words);
 }
 
+/* Python: _Lowerer._require_abc_atom. An atom lowered from A, B and C indexes
+ * them and its one result, and IR read through the serialized-IR entry point is
+ * not verified, so each such path checks the counts before reading any. */
+static rocke_status_t h_require_abc(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
+{
+    if(op->num_operands != 3 || op->num_results != 1)
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "tile.mma %s expects 3 operands and 1 result", op_id);
+    return ROCKE_OK;
+}
+
 /* Each h_emit_* below lowers one kind of MMA atom. It returns false, emitting
  * nothing, when `op_id` is not of its kind; otherwise it lowers the op (or
- * fails `lw`) and returns true. */
+ * fails `lw`) and returns true. Each checks the op's arity (h_require_abc)
+ * before anything else, as Python does before calling the atom's handler. */
 
 static bool
     h_emit_mfma_operands_as_is(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
@@ -209,17 +211,18 @@ static bool
     {
         return false;
     }
-    if(h_require_abc(lw, op, op_id) == ROCKE_OK)
+    if(h_require_abc(lw, op, op_id) != ROCKE_OK)
     {
-        rocke_h_emitf(lw,
-                      "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
-                      rocke_arch_mma_c_frag_len(op_id),
-                      rocke_h_name(lw, op->results[0]),
-                      atom->builtin,
-                      rocke_h_name(lw, op->operands[0]),
-                      rocke_h_name(lw, op->operands[1]),
-                      rocke_h_name(lw, op->operands[2]));
+        return true;
     }
+    rocke_h_emitf(lw,
+                  "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                  rocke_arch_mma_c_frag_len(op_id),
+                  rocke_h_name(lw, op->results[0]),
+                  atom->builtin,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]));
     return true;
 }
 
@@ -269,8 +272,12 @@ static bool
     {
         return false;
     }
+    if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+    {
+        return true;
+    }
     const rocke_mma_op_t* catalog_atom = h_require_wmma_atom(lw, op_id);
-    if(!catalog_atom || h_require_abc(lw, op, op_id) != ROCKE_OK)
+    if(!catalog_atom)
     {
         return true;
     }
@@ -312,6 +319,10 @@ static bool h_emit_wmma_gfx1250_fp8(rocke_h_lowerer_t* lw, const rocke_op_t* op,
     {
         return false;
     }
+    if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+    {
+        return true;
+    }
     const rocke_mma_op_t* catalog_atom = h_require_wmma_atom(lw, op_id);
     if(!catalog_atom)
     {
@@ -338,6 +349,10 @@ static bool h_emit_wmma_integer(rocke_h_lowerer_t* lw, const rocke_op_t* op, con
     if(!atom)
     {
         return false;
+    }
+    if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+    {
+        return true;
     }
     const rocke_mma_op_t* catalog_atom = h_require_wmma_atom(lw, op_id);
     if(!catalog_atom)
@@ -469,6 +484,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)
     {
+        if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         char tf32_error[ROCKE_ERR_MSG_CAP];
         if(rocke_tf32_mma_target_error(op_id, lw->arch.gfx, tf32_error, sizeof tf32_error))
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
@@ -506,6 +523,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
      * B are passed as f32 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {
+        if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
         const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f32());
         const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f32());
@@ -528,6 +547,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
     {
+        if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
         const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
         rocke_h_emitf(lw,
@@ -540,6 +561,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     }
     if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
     {
+        if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
         const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
         rocke_h_emitf(lw,
@@ -563,6 +586,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
          * when no _op_tile_<op_id> handler exists. */
         return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "no HIP lowering for op '%s'", dotted);
     }
+    if(h_require_abc(lw, op, op_id) != ROCKE_OK)
+        return lw->status;
     /* Build the synthetic "tile.<op_id>" op: same operands/results/regions, the
      * original attrs map (op_id is simply ignored by the concrete handlers). */
     legacy = *op;

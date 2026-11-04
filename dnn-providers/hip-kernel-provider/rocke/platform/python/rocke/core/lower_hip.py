@@ -845,6 +845,7 @@ class _Lowerer:
             )
             return
         if op_id in TF32_MMA:
+            self._require_abc_atom(op, op_id)
             error = tf32_mma_target_error(op_id, self.arch)
             if error:
                 raise ValueError(error)
@@ -866,8 +867,11 @@ class _Lowerer:
                 f"through the LLVM path"
             )
         if op_id in _GFX11_INTEGER_WMMA:
+            self._require_abc_atom(op, op_id)
             self._emit_gfx11_integer_wmma(op, op_id)
             return
+        if hasattr(self, f"_op_tile_{op_id}"):
+            self._require_abc_atom(op, op_id)
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -876,6 +880,15 @@ class _Lowerer:
             loc=op.loc,
         )
         self.lower_op(legacy)
+
+    @staticmethod
+    def _require_abc_atom(op: Op, op_id: str) -> None:
+        """Refuse an MMA op lowered from A, B and C unless it has those three
+        operands and one result: the handlers index them, and IR read from its
+        serialized form is not verified. An op_id with no handler is refused
+        as unknown instead, by the dispatch that finds none."""
+        if len(op.operands) != 3 or len(op.results) != 1:
+            raise ValueError(f"tile.mma {op_id} expects 3 operands and 1 result")
 
     def _mma_operand(
         self, op: Op, op_id: str, role: MmaOperandRole, register_type: Type
@@ -1056,6 +1069,8 @@ class _Lowerer:
         op_id = spec.op_id
         fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
+        if len(op.operands) != 5 or len(op.results) != 1:
+            raise ValueError(f"{op_id} expects 5 operands and 1 result")
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
