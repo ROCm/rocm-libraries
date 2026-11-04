@@ -53,18 +53,10 @@ if(NOT TARGET hip::hip_fortran)
     "Fortran bindings were built with ${CMAKE_Fortran_COMPILER}.")
 endif()
 
-# Standalone librocsparse has to be found; its find_dependency(hip) needs C.
-if(NOT TARGET roc::rocsparse)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(rocsparse QUIET)
-endif()
 if(NOT TARGET roc::rocsparse)
   message(STATUS
     "rocSPARSE: no roc::rocsparse target, skipping the Fortran binding tests "
-    "(they link librocsparse). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link librocsparse). Point CMAKE_PREFIX_PATH at an installed ROCm.")
   return()
 endif()
 
