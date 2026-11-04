@@ -99,12 +99,9 @@ RUN_STATUS = {
 # a batched --verify run pays once per batch. With the host cache only the
 # comparison is left once the problem has an entry, but a problem's first
 # calls, or one over the cache's caps, pay it all. Each call's timeout is
-# --kernel-timeout plus that time: 50 GFLOP/s for the reference, a rate the
-# host keeps with several device workers sharing its cores, and 75 ns per
-# input element, twice the single-threaded 37 ns measured for generating and
-# encoding them (they dominate skinny large-K shapes: 34 s at 256x768x874159).
-VERIFY_HOST_FLOPS = 5e10
-VERIFY_HOST_S_PER_INPUT = 75e-9
+# --kernel-timeout plus that time (verify_allowance_s, at the per-dtype rates
+# of adaptive_search.host_allowance_s). The inputs dominate skinny large-K
+# shapes: 34 s of bf16 inputs at 256x768x874159, and about 5x that in fp8.
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # A search round measures once all its builds end, so a kernel that never
 # builds holds the round for its whole limit (a full run keeps the build
@@ -120,11 +117,11 @@ BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 SEARCH_BUILD_TIMEOUT_S = 180
 
 
-def verify_allowance_s(problem) -> int:
-    """Seconds added to ``--kernel-timeout`` for a verified call on ``problem``."""
+def verify_allowance_s(problem, dtype) -> int:
+    """Seconds added to ``--kernel-timeout`` for a verified call on ``problem``
+    with ``dtype`` inputs: its fp32 reference and its A and B."""
     m, n, k = problem["M"], problem["N"], problem["K"]
-    return math.ceil(2 * m * n * k / VERIFY_HOST_FLOPS
-                     + (m + n) * k * VERIFY_HOST_S_PER_INPUT)
+    return adaptive_search.host_allowance_s(2 * m * n * k, (m + n) * k, dtype)
 
 
 @dataclass(frozen=True)
@@ -289,6 +286,8 @@ class GemmSearchAdapter:
             notes.append(f"--max-kernels {a.max_kernels} limits the expansion")
         if self.repeated:
             notes.append(f"repeated problems searched once: {sorted(set(self.repeated))}")
+        flops = adaptive_search.HOST_REFERENCE_FLOPS
+        rate = adaptive_search.host_input_rate(a.dtype)
         return {
             **self._context,
             "dtype": a.dtype,
@@ -300,9 +299,8 @@ class GemmSearchAdapter:
             "devices": self.devices,
             "measurement": {"verify": True, "verify_tol": a.verify_tol,
                             "batch_size": 1, "kernel_timeout": a.kernel_timeout,
-                            "timeout_s": "kernel_timeout + ceil(2*M*N*K / "
-                                         f"{VERIFY_HOST_FLOPS:g} + (M+N)*K * "
-                                         f"{VERIFY_HOST_S_PER_INPUT:g}) per call",
+                            "timeout_s": f"kernel_timeout + ceil(2*M*N*K / {flops:g} "
+                                         f"+ (M+N)*K * {rate:g}) per call",
                             "check_identity": True, "host_cache": self.host_cache},
             "build": {"workers": a.workers,
                       "build_timeout": self.build_timeout or SEARCH_BUILD_TIMEOUT_S,
@@ -377,7 +375,8 @@ class GemmSearchAdapter:
                                 for r in reqs]
         problems = [self.problems[r.problem_key] for r in reqs]
         margs = argparse.Namespace(**{**vars(self.margs), "kernel_timeout": (
-            self.margs.kernel_timeout + max(map(verify_allowance_s, problems)))})
+            self.margs.kernel_timeout
+            + max(verify_allowance_s(p, self.args.dtype) for p in problems))})
         self.hooks.measure(
             problems, [[index[r.candidate_key]] for r in reqs],
             built, self.devices, margs, self.worker_path, self.base_env,

@@ -296,8 +296,11 @@ Option rules:
   call has stored it; that call, the calls that run beside it on other
   devices, and every call of a problem the cache cannot hold pay it in full,
   so a call's timeout is `--kernel-timeout` plus
-  `ceil(2*M*N*K / 5e10 + (M+N)*K * 75e-9)` s (the reference at 50 GFLOP/s,
-  the inputs at 75 ns per element).
+  `ceil(2*M*N*K / 5e10 + (M+N)*K * r)` s: the reference at 50 GFLOP/s, and
+  the inputs at a rate `r` per element that depends on the dtype, 75 ns for
+  fp16, bf16 and fp32 and 400 ns for fp8 and bf8, whose encoding costs about
+  5x more on the host (`HOST_S_PER_INPUT` in `adaptive_search.py`; a dtype
+  without a rate gets the slowest). `run.json` records the run's formula.
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
   confirmation calls run on one device (problem `i` on device `i mod n`), so

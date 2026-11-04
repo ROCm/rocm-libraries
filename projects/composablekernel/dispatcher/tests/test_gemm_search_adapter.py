@@ -504,8 +504,7 @@ def test_workers_share_the_host_cache_with_unchanged_outcomes(tmp_path, monkeypa
 def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):
     # --kernel-timeout covers the kernel; a verified one-kernel call also builds
     # the inputs and the fp32 reference on the host: 8192^3 gets 33 s more
-    # (22 s of reference, 10 s of inputs), and a skinny large-K shape, whose
-    # 34 s of inputs dwarf its 7 s of reference, 75 s.
+    # (22 s of reference, 10 s of inputs).
     big = {"M": 8192, "N": 8192, "K": 8192}
     seen = []
 
@@ -518,8 +517,32 @@ def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):
     ad.measure_pairs([_req(K1, A, 1)])
     ad.measure_pairs([_req(K1, A, 2), _req("8192x8192x8192", A, 3)])
     assert seen == [31, 63] and ad.args.kernel_timeout == 30
-    skinny = {"M": 256, "N": 768, "K": 874159}
-    assert [GS.verify_allowance_s(p) for p in (P1, big, skinny)] == [1, 33, 75]
+
+
+SKINNY = {"M": 256, "N": 768, "K": 874159}
+
+
+@pytest.mark.parametrize("dtype,want", [
+    ("fp16", [1, 33, 75]), ("bf16", [1, 33, 75]), ("fp32", [1, 33, 75]),
+    ("fp8", [1, 76, 365]), ("bf8", [1, 76, 365]), ("fp4", [1, 76, 365]),
+])
+def test_host_allowance_is_per_input_dtype(tmp_path, monkeypatch, dtype, want):
+    # A skinny large-K shape is mostly inputs: 75 s, of which 7 s reference.
+    # fp8 and bf8 inputs cost about 5x a 16-bit one on the host (their
+    # encoding): 400 ns per element against 75 ns, so the same fp8 shape gets
+    # 365 s. A dtype without a rate of its own gets the slowest.
+    big = {"M": 8192, "N": 8192, "K": 8192}
+    assert [GS.verify_allowance_s(p, dtype) for p in (P1, big, SKINNY)] == want
+    seen = []
+    tc = Toolchain(tmp_path, monkeypatch)
+    ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.append(a[4].kernel_timeout),
+                  problems=(P1, SKINNY), kernel_timeout=30, dtype=dtype)
+    ad.build_missing([ad.cands[A]])
+    ad.measure_pairs([_req(K1, A, 1), _req("256x768x874159", A, 2)])
+    assert seen == [30 + want[2]]
+    rate = "4e-07" if want[2] == 365 else "7.5e-08"
+    assert ad.context()["measurement"]["timeout_s"] == (
+        f"kernel_timeout + ceil(2*M*N*K / 5e+10 + (M+N)*K * {rate}) per call")
 
 
 def test_confirmation_runs_each_problem_on_one_device(tmp_path, monkeypatch):
