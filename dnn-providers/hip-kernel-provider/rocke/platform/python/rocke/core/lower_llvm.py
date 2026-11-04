@@ -3539,24 +3539,27 @@ class _Lowerer:
         spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
         spin.terminated = True
 
-    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
-        """Lower the packed-bf16 atomic add via a generic ``atomicrmw fadd``
-        on a ``<2 x bfloat>``.
+    def _lower_pk_atomic_add(self, op: Op, elem_llvm_type: str) -> None:
+        """Lower a packed (bf16 or fp16) atomic add via a generic
+        ``atomicrmw fadd`` on a ``<2 x elem_llvm_type>``.
 
-        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in
-        the shipping ROCm LLVM (only the image variant exists), so the prior
-        intrinsic-call lowering failed to compile. The AMDGPU backend selects
-        the native ``global_atomic_pk_add_bf16`` HW instruction from a generic
-        ``atomicrmw fadd <2 x bfloat>`` when the fine/remote-memory model
-        metadata is attached (same contract as the f32 path -- device-local
-        HBM). GEP into the bf16 buffer first (idx may be i64 after the wide
-        C-scatter address fix, so match its width).
+        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in the
+        shipping ROCm LLVM (only the image variant exists), and the legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic is auto-upgraded to
+        an agent-scope ``seq_cst`` atomicrmw that brackets every atomic with
+        an L2 writeback (``buffer_wbl2``) and invalidate (``buffer_inv``). The
+        AMDGPU backend instead selects the native ``global_atomic_pk_add_*``
+        HW instruction from a generic ``atomicrmw fadd`` under the
+        fine/remote-memory model metadata (same contract as the f32 path --
+        device-local HBM), honouring the op's ``ordering`` attribute. GEP
+        uses the idx operand's own width (idx may be i64 after the wide
+        C-scatter address fix).
         """
         ptr, idx, val = op.operands
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         self._current().emit(
-            f"  {gep} = getelementptr inbounds bfloat, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds {elem_llvm_type}, ptr addrspace(1) "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         ordering = op.attrs.get("ordering", "monotonic")
@@ -3568,39 +3571,14 @@ class _Lowerer:
         )
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
-            f"<2 x bfloat> {self._operand(val)} {ordering}{md}"
+            f"<2 x {elem_llvm_type}> {self._operand(val)} {ordering}{md}"
         )
+
+    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
+        self._lower_pk_atomic_add(op, "bfloat")
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
-        """Lower the packed-fp16 atomic add via a generic ``atomicrmw fadd``
-        on a ``<2 x half>``.
-
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16``: the backend selects
-        the native ``global_atomic_pk_add_f16`` (gfx940+) under the same
-        device-local memory-model metadata. The legacy
-        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic is auto-upgraded to
-        a system-scope ``seq_cst`` atomicrmw, which brackets every atomic with
-        an L2 writeback (``buffer_wbl2``) and invalidate (``buffer_inv``) that
-        the bf16 atomic the same epilogues emit does not pay.
-        GEPs into the fp16 buffer at ``idx`` (i32).
-        """
-        ptr, idx, val = op.operands
-        gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
-        ordering = op.attrs.get("ordering", "monotonic")
-        self._needs_fp_atomic_md = True
-        md = (
-            ", !amdgpu.no.fine.grained.memory !1"
-            ", !amdgpu.no.remote.memory !1"
-            ", !amdgpu.ignore.denormal.mode !1"
-        )
-        self._current().emit(
-            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
-            f"<2 x half> {self._operand(val)} {ordering}{md}"
-        )
+        self._lower_pk_atomic_add(op, "half")
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         """Vectorised <vec x 16-bit> load: a single naturally-aligned

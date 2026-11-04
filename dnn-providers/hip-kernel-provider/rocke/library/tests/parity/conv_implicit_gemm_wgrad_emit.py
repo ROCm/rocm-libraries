@@ -55,9 +55,11 @@
 #   52-54 -- WMMA split-K both engines must reject: gfx1201 bf16 dW (arch not
 #         enabled), gfx1250 bf16 dW with the cshuffle epilogue (outside the
 #         WMMA wgrad subset), gfx1151 fp32 dW (arch not enabled, any dtype)
-#   55-56 -- prefetch_addr + compv3 (next tile prefetched into registers across
-#         the MFMAs): split-K packed fp16 atomic on the K-outer cshuffle base,
-#         and two-stage
+#   55-56 -- prefetch_addr + compv3 + register_prefetch=True (next tile
+#         prefetched into registers across the MFMAs; config 43 above is
+#         compv3 + prefetch_addr with register_prefetch left at its default
+#         False, so it is NOT this loop): split-K packed fp16 atomic on the
+#         K-outer cshuffle base, and two-stage
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -105,8 +107,15 @@ _PFA_BASES = {
     # 128x128x64 with C = K = 3, so both operands load scalar: 4 accumulators
     # + 64 carried offsets, past the C++ engine's accumulator cap.
     48: (4, {"problem": ConvProblem(N=8, Hi=56, Wi=56, C=3, K=3, Y=3, X=3)}),
-    55: (11, {"split_k": 2, "pipeline": "compv3"}),  # compv3, packed fp16 atomic
-    56: (15, {"pipeline": "compv3"}),  # compv3, two-stage
+    # 55-56 opt into the register-prefetch compv3 K loop explicitly: config 43
+    # above is pipeline="compv3" + prefetch_addr with register_prefetch left
+    # at its default False, so it stays on the plain prefetch_addr loop every
+    # other pipeline shares.
+    55: (
+        11,
+        {"split_k": 2, "pipeline": "compv3", "register_prefetch": True},
+    ),  # compv3, packed fp16 atomic
+    56: (15, {"pipeline": "compv3", "register_prefetch": True}),  # compv3, two-stage
 }
 
 

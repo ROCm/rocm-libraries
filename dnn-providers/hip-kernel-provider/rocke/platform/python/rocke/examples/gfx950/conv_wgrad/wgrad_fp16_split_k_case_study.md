@@ -55,8 +55,8 @@ difference had to be in the kernels. Their ISA differed: every
 `s_waitcnt vmcnt(0)` and `buffer_inv sc1`, the bf16 atomic was bare.
 
 `memref.global_atomic_add_pk_f16` lowered to the legacy
-`llvm.amdgcn.global.atomic.fadd.v2f16` intrinsic, which LLVM auto-upgrades to a
-system-scope `seq_cst` `atomicrmw`. Its bf16 sibling already lowered to a
+`llvm.amdgcn.global.atomic.fadd.v2f16` intrinsic, which LLVM auto-upgrades to an
+agent-scope `seq_cst` `atomicrmw`. Its bf16 sibling already lowered to a
 `monotonic` `atomicrmw fadd <2 x bfloat>` with the AMDGPU memory-model
 metadata. Both engines now lower fp16 the same way
 ([`lower_llvm.py`](../../../core/lower_llvm.py),
@@ -98,18 +98,25 @@ iteration, and the three pipelines differed only in scheduling hints.
 `unroll_k` alternates two LDS buffers but still waits for the next tile's loads
 after one MFMA.
 
-`pipeline="compv3"` with `prefetch_addr` now does what CK's compv3 does with one
-LDS buffer: a prologue stages tile `k_lo`; each iteration issues tile `k+1`'s
-loads into registers, runs tile `k`'s MFMAs out of LDS while they are in
-flight, then barriers and overwrites LDS
+`pipeline="compv3"` with `prefetch_addr` and the new `register_prefetch` flag
+now does what CK's compv3 does with one LDS buffer: a prologue stages tile
+`k_lo`; each iteration issues tile `k+1`'s loads into registers, runs tile
+`k`'s MFMAs out of LDS while they are in flight, then barriers and overwrites
+LDS
 ([`conv_implicit_gemm_wgrad.py`](../../../../../../library/kernels/common/conv_implicit_gemm_wgrad.py),
 C++ twin `wgrad_emit_kloop_prefetch_addr` in
 [`conv_implicit_gemm_wgrad.cpp`](../../../../../cpp/instances/common/conv_implicit_gemm_wgrad.cpp)).
 The last iteration loads one tile past the slice into LDS that no MFMA reads;
 the reduction-axis predicate sends it to the zero-fill sentinel past the
-tensor. `mem` and `compv4` keep the old loop, so both shapes of loop stay in the
-AOT grid without a new identity field. Alone the new loop helps some shapes
-and hurts others; with both loops in the cache the per-shape best improves.
+tensor. Unlike plain `prefetch_addr` (address math only, data dependency
+unchanged) this restructures the loop body, so it is its own flag rather than
+folded into the `pipeline="compv3"` + `prefetch_addr` identity: default
+`register_prefetch=False` keeps `pipeline="compv3"` + `prefetch_addr` on the
+same loop as `mem`/`compv4`, byte-identical to before this change and under
+its existing kernel name and cached binaries. `mem` and `compv4` ignore
+`register_prefetch`, so both shapes of loop stay in the AOT grid. Alone the
+new loop helps some shapes and hurts others; with both loops in the cache the
+per-shape best improves.
 
 ## Not taken: unroll_k and async_dma in the AOT grid
 

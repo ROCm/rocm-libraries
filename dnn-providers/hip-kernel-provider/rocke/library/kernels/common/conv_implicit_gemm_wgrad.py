@@ -541,12 +541,27 @@ class WgradConvSpec:
     # outweigh the hidden latency on large, MFMA-bound tiles -- see
     # ``default_prefetch_addr`` for the selection policy. Applies to the single-buffer synchronous K loop shared by the
     # mem/compv3/compv4/basic pipelines; async_dma and unroll_k have their own
-    # loops and reject it. Under pipeline="compv3" the loop also prefetches
-    # the next tile's data into registers across the MFMAs (see the K loop).
+    # loops and reject it.
     #
     # Default False: strictly additive, so every existing config emits
     # byte-identical IR and keeps its kernel name.
     prefetch_addr: bool = False
+
+    # Under pipeline="compv3" with prefetch_addr, go one step further (CK's
+    # compv3: one LDS buffer, the next tile prefetched into registers): a
+    # prologue stages the first tile, and each iteration issues the next
+    # tile's loads into registers while the current tile's MFMAs run out of
+    # LDS, then barriers and overwrites LDS. Unlike plain ``prefetch_addr``
+    # this DOES change the data dependency -- LDS is published a full
+    # iteration later than the plain loop -- so it gets its own flag rather
+    # than reusing pipeline="compv3" + prefetch_addr's existing identity.
+    # Ignored (and untagged) off pipeline="compv3"; "mem"/compv4/basic keep
+    # the plain prefetch_addr loop regardless of this flag.
+    #
+    # Default False: strictly additive, so every existing config -- including
+    # pipeline="compv3" + prefetch_addr=True -- emits byte-identical IR and
+    # keeps its kernel name.
+    register_prefetch: bool = False
 
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
@@ -765,6 +780,13 @@ class WgradConvSpec:
                 "unroll": self.unroll_k,
                 # A different K-loop body; only tagged when set.
                 "pfa": self.prefetch_addr,
+                # Only changes the compv3 body, and only together with
+                # prefetch_addr; gated on both so a register_prefetch=True
+                # that pipeline ignores never tags a byte-identical kernel
+                # under a new name.
+                "rpf": self.register_prefetch
+                and self.prefetch_addr
+                and self.pipeline == "compv3",
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -2020,8 +2042,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
-    # LDS the kernel never allocates. (compv3 with prefetch_addr stages the next
-    # tile in registers, not in a second LDS tile.)
+    # LDS the kernel never allocates. (compv3 with register_prefetch stages the
+    # next tile in registers, not in a second LDS tile.)
     _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -3290,12 +3312,14 @@ def build_implicit_gemm_conv_wgrad(
         # The last iteration computes offsets for a tile past _k_upper that no
         # load ever consumes.
         #
-        # pipeline="compv3" goes one step further (CK's compv3: one LDS
-        # buffer, the next tile prefetched into registers): the loads of tile
-        # k+1 are issued before tile k's MFMAs and only written to LDS after
-        # them, so the global latency overlaps the math instead of preceding
-        # it. Its last iteration loads a tile past _k_upper into LDS that no
-        # MFMA reads -- a buffer load, so past the tensor it reads zero.
+        # pipeline="compv3" with register_prefetch goes one step further (CK's
+        # compv3: one LDS buffer, the next tile prefetched into registers):
+        # the loads of tile k+1 are issued before tile k's MFMAs and only
+        # written to LDS after them, so the global latency overlaps the math
+        # instead of preceding it. Its last iteration loads a tile past
+        # _k_upper into LDS that no MFMA reads -- a buffer load, so past the
+        # tensor it reads zero. Off register_prefetch, pipeline="compv3" takes
+        # the same loop as every other pipeline here.
         _a_fn, _b_fn = _split_desc_fns()
         _a_slots = a_sync_loader.plan_slots(b, tid=tid)
         _b_slots = b_sync_loader.plan_slots(b, tid=tid)
@@ -3309,7 +3333,7 @@ def build_implicit_gemm_conv_wgrad(
         _offs0 = _tile_offsets(k_lo)
         _n_acc = len(accs)
         _n_a = len(_a_slots)
-        if spec.pipeline == "compv3":
+        if spec.pipeline == "compv3" and spec.register_prefetch:
             # Prologue: stage tile k_lo into LDS and publish it.
             _st_a = a_sync_loader.issue_slots(
                 b, rsrc=dy_rsrc, slots=_a_slots, offsets=_offs0[:_n_a]

@@ -76,6 +76,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.split_k = 1;
     s.ws_replicas = ROCKE_WGRAD_DEFAULT_WS_REPLICAS;
     s.prefetch_addr = false;
+    s.register_prefetch = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -375,8 +376,8 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
      * sk, skpers, skr{reduction} */
     char pad_flag[32] = {0};
-    const char* flag_names[11];
-    int flag_on[11];
+    const char* flag_names[12];
+    int flag_on[12];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -452,6 +453,17 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* prefetch_addr is a different K-loop body; only tagged when set. */
     flag_names[n_flags] = "pfa";
     flag_on[n_flags] = s->prefetch_addr ? 1 : 0;
+    n_flags++;
+
+    /* register_prefetch only changes the compv3 body, and only together with
+     * prefetch_addr; gated on both so a register_prefetch=true that the
+     * pipeline ignores never tags a byte-identical kernel under a new name.
+     * Mirrors Python. */
+    flag_names[n_flags] = "rpf";
+    flag_on[n_flags] = (s->register_prefetch && s->prefetch_addr && s->pipeline
+                        && strcmp(s->pipeline, "compv3") == 0)
+                           ? 1
+                           : 0;
     n_flags++;
     /* Stream-K tags, in the Python flag order: sk, skpers, skr<reduction>
      * (the last only when not the default "linear"). The CTA pool is a launch
@@ -3449,17 +3461,18 @@ static rocke_value_t* wgrad_declare_ptr(rocke_ir_builder_t* b,
  * flight, then writes LDS. The (row, col) slot decode is loop-invariant and is
  * emitted once ahead of the loop.
  *
- * pipeline="compv3" also prefetches the data (CK's compv3: one LDS buffer,
- * the next tile in registers): a prologue stages tile k_lo into LDS, and each
- * iteration issues tile k+1's loads before tile k's MFMAs and writes them to
- * LDS only after those MFMAs. */
+ * pipeline="compv3" with register_prefetch also prefetches the data (CK's
+ * compv3: one LDS buffer, the next tile in registers): a prologue stages tile
+ * k_lo into LDS, and each iteration issues tile k+1's loads before tile k's
+ * MFMAs and writes them to LDS only after those MFMAs. Off register_prefetch,
+ * pipeline="compv3" takes the same loop as every other pipeline here. */
 
 /* Iteration arguments of that loop: the accumulators plus one byte offset per
  * staged A and B vector. Python has no fixed cap, so this one must cover every
  * plan the loaders can produce. */
 #define WGRAD_PFA_MAX_ITER_ARGS (ROCKE_CONV_MAX_ACCS + 2 * ROCKE_CTL_MAX_VECS_PER_THREAD)
 
-static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
+static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx, bool register_prefetch)
 {
     rocke_ir_builder_t* b = ctx->b;
     const int num_accs = ctx->num_accs;
@@ -3500,7 +3513,8 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
     if(!rocke_ir_builder_ok(b))
         return;
 
-    const bool compv3 = ctx->spec->pipeline != NULL && strcmp(ctx->spec->pipeline, "compv3") == 0;
+    const bool compv3 = register_prefetch && ctx->spec->pipeline != NULL
+                        && strcmp(ctx->spec->pipeline, "compv3") == 0;
     if(compv3)
     {
         /* Prologue: stage tile k_lo into LDS and publish it; the loop starts
@@ -4016,7 +4030,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
     else if(spec->prefetch_addr)
-        wgrad_emit_kloop_prefetch_addr(&ctx);
+        wgrad_emit_kloop_prefetch_addr(&ctx, spec->register_prefetch);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else

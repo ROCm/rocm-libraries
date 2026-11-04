@@ -206,6 +206,17 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * Appended last so existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */
     bool prefetch_addr; /* default false */
+    /* register_prefetch: under pipeline="compv3" with prefetch_addr, go one
+     * step further (CK's compv3: one LDS buffer, the next tile prefetched
+     * into registers) instead of the plain prefetch_addr loop every other
+     * pipeline here uses. Changes the data dependency (LDS publishes a full
+     * iteration later), so it is its own flag rather than reusing the
+     * pipeline="compv3" + prefetch_addr identity. Ignored off pipeline ==
+     * "compv3". Mirrors WgradConvSpec.register_prefetch. Appended last so
+     * existing aggregate initialisers keep their layout.
+     * Default false: every existing config, including pipeline="compv3" +
+     * prefetch_addr=true, emits byte-identical IR. */
+    bool register_prefetch; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

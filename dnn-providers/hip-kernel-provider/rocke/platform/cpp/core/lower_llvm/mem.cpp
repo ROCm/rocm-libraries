@@ -360,13 +360,18 @@ static void op_memref_global_atomic_add_f32(rocke_lower_t* L, const rocke_op_t* 
                    rocke_ll_operand(L, val));
 }
 
-static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
+/* Mirror of Python _lower_pk_atomic_add: lower a packed (bf16 or fp16)
+ * atomic add via a generic atomicrmw fadd <2 x elem_llvm_type>. Neither
+ * llvm.amdgcn.global.atomic.fadd.v2bf16 (doesn't exist in shipping ROCm
+ * LLVM) nor the legacy v2f16 intrinsic (auto-upgraded to an agent-scope
+ * seq_cst atomicrmw that fences every atomic with an L2 writeback and
+ * invalidate) is used; the AMDGPU backend instead selects the native
+ * global_atomic_pk_add_* HW instruction from a generic atomicrmw under the
+ * fine/remote-memory model metadata, honouring the op's ordering attribute.
+ * GEP uses the idx operand's own width (idx may be i64 after the wide
+ * C-scatter address fix). */
+static void lower_pk_atomic_add(rocke_lower_t* L, const rocke_op_t* op, const char* elem_llvm_type)
 {
-    /* Mirror of Python _op_memref_global_atomic_add_pk_bf16: there is NO
-     * llvm.amdgcn.global.atomic.fadd.v2bf16 intrinsic in the shipping ROCm
-     * LLVM, so lower to a generic atomicrmw fadd <2 x bfloat> with the AMDGPU
-     * memory-model metadata (backend selects global_atomic_pk_add_bf16). GEP
-     * uses the idx operand's own width (i64 after the wide C-scatter fix). */
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
@@ -374,51 +379,33 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
+                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
                    gep,
+                   elem_llvm_type,
                    rocke_ll_operand(L, ptr),
                    idx_ty,
                    rocke_ll_operand(L, idx));
     L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
-                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s %s"
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x %s> %s %s"
                    ", !amdgpu.no.fine.grained.memory !1"
                    ", !amdgpu.no.remote.memory !1"
                    ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
+                   elem_llvm_type,
                    rocke_ll_operand(L, val),
                    ordering);
 }
 
+static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    lower_pk_atomic_add(L, op, "bfloat");
+}
+
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
 {
-    /* Mirror of Python _op_memref_global_atomic_add_pk_f16: a generic
-     * atomicrmw fadd <2 x half> with the AMDGPU memory-model metadata, as for
-     * bf16 (backend selects global_atomic_pk_add_f16). The legacy
-     * llvm.amdgcn.global.atomic.fadd.v2f16 intrinsic is auto-upgraded to a
-     * system-scope seq_cst atomicrmw that fences every atomic with an L2
-     * writeback and invalidate. GEP index stays i32. */
-    const rocke_value_t* ptr = op->operands[0];
-    const rocke_value_t* idx = op->operands[1];
-    const rocke_value_t* val = op->operands[2];
-    const char* gep = rocke_ll_fresh(L, "gep");
-    const char* ordering = ll_attr_str(op, "ordering", "monotonic");
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
-    L->needs_fp_atomic_md = true;
-    rocke_ll_emitf(L,
-                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x half> %s %s"
-                   ", !amdgpu.no.fine.grained.memory !1"
-                   ", !amdgpu.no.remote.memory !1"
-                   ", !amdgpu.ignore.denormal.mode !1",
-                   ll_res(op),
-                   gep,
-                   rocke_ll_operand(L, val),
-                   ordering);
+    lower_pk_atomic_add(L, op, "half");
 }
 
 /* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
