@@ -412,10 +412,14 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                         success=True, output=expected, time_ms=1, tflops=1
                     )
                     output = io.StringIO()
+                    # The worker draws A/B through _sweep_inputs; no cached
+                    # operands or reference may enter or leave the subtest.
                     with patch.object(
                         self.worker, "GpuGemmRunner", return_value=runner
                     ), patch.object(
-                        np.random, "randn", side_effect=[a / 0.1, b / 0.1]
+                        self.worker, "_sweep_inputs", return_value=(a, b)
+                    ) as inputs, patch.dict(
+                        gemm_utils._SWEEP_CACHE, clear=True
                     ), contextlib.redirect_stdout(
                         output
                     ):
@@ -427,6 +431,7 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                             True,
                             1e-8,
                         )
+                    inputs.assert_called_once_with((2, 2), (2, 2))
                     self.assertEqual(
                         json.loads(output.getvalue())["verified"], not corrupt
                     )
