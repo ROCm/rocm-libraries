@@ -579,7 +579,8 @@ TEST(LocalKernelRegister, RejectsIncompleteIndexedPayloads)
 
 // A kernel runs from the code object it was registered with, even when a
 // shipped kernel and an earlier registered kernel have the same name. The
-// replacement here is an empty kernel, so it leaves D untouched.
+// replacement here is an empty kernel, so D does not get the product, even
+// where a shipped helper kernel reduces the (zeroed) workspace into D.
 TEST(LocalKernelRegister, DISABLED_OwnCodeObjectWorker)
 {
     const std::vector<std::string> candidates = candidatePayloads();
