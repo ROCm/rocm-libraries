@@ -237,10 +237,27 @@ def test_warm_records_are_asked_first(name):
     space = strat.space
     warm_keys = [space.key(space.encode(r)) for r in WARM]
     keys = [row[3] for row in trace]
-    assert keys[0] == warm_keys[0]
-    assert warm_keys[1] in keys[: 2 * BATCH]
+    assert keys[:2] == warm_keys  # batched: no proposal of its own in between
     if name == "portfolio":
         assert [row[1] for row in trace[:2]] == ["warm:record:0", "warm:record:1"]
+
+
+@pytest.mark.parametrize("batch", [1, BATCH])
+@pytest.mark.parametrize("name", ["de", "hill", "tpe", "gp", "portfolio"])
+def test_every_warm_start_is_asked_before_the_strategys_own_picks(name, batch):
+    # One field of 100 values: more warm starts than DE's default population (6).
+    records = [{"tile_m": 16 * (i + 1)} for i in range(100)]
+    space = cs.SearchSpace.from_configs(records)
+    warm = records[::10]
+    strat = cs.make_strategy(name, space, seed=3, warm_records=warm)
+    keys = []
+    while len(keys) < len(warm):
+        asked = strat.ask(batch)
+        assert asked
+        keys += [space.key(t.genome) for t in asked]
+        strat.tell([cs.Observation(t, space.key(t.genome), cs.Status.OK,
+                                   float(t.genome[0] + 1)) for t in asked])
+    assert keys[: len(warm)] == [space.key(space.encode(r)) for r in warm]
 
 
 @pytest.mark.parametrize("name", ["random", "exhaustive"])
@@ -364,8 +381,11 @@ def _rocke_skip_reason():
 ROCKE_SKIP = _rocke_skip_reason()
 needs_rocke = pytest.mark.skipif(bool(ROCKE_SKIP), reason=ROCKE_SKIP)
 
+# Patch 3 changes what a batched hill ask returns while warm starts wait, so
+# hill with warm starts is compared one trial per ask, where it changes nothing.
 PARITY_CASES = [
-    (name, seed, warm, prior)
+    dict(name=name, seed=seed, warm=warm, prior=prior,
+         batch=1 if name == "hill" and warm else BATCH)
     for name in cs.STRATEGY_NAMES
     for seed, warm, prior in (
         (0, (), False),
@@ -456,12 +476,12 @@ def test_trials_match_upstream_for_identical_seeds():
     upstream = json.loads(run.stdout.strip().splitlines()[-1])
     assert len(upstream) == len(PARITY_CASES)
     for case, theirs in zip(PARITY_CASES, upstream):
-        mine = json.loads(json.dumps(_drive(VENDORED_NS, *case)[0]))
-        assert mine == theirs, f"{case[0]} seed={case[1]}"
+        mine = json.loads(json.dumps(_drive(VENDORED_NS, **case)[0]))
+        assert mine == theirs, f"{case['name']} seed={case['seed']}"
 
 
 if __name__ == "__main__":
     # The upstream side of test_trials_match_upstream_for_identical_seeds, in
     # its own interpreter so ROCKE modules never enter the test process.
     ns = _upstream_namespace(sys.argv[1])
-    print(json.dumps([_drive(ns, *case)[0] for case in PARITY_CASES]))
+    print(json.dumps([_drive(ns, **case)[0] for case in PARITY_CASES]))

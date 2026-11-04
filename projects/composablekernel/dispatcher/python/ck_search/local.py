@@ -256,7 +256,11 @@ class HillClimb(Strategy):
             self._set_center(self.space.key(start), list(start), push=False)
         taken = self.pending_keys()
         # Warm starts beyond ``start`` follow the start's own measurement.
-        while self.seed_queue and len(out) < int(n) and self.center in self.history:
+        # The start (first in its stage 0 queue), then they share its batch.  # ck_search patch 3
+        if self.seed_queue and len(out) < int(n) and self.stage is None and self.center not in self.history and self._next_stage():  # ck_search patch 3
+            out.append(self.trial(self.queue.pop(0)))  # ck_search patch 3
+            taken.add(self.center)  # ck_search patch 3
+        while self.seed_queue and len(out) < int(n) and (self.center in self.history or self.center in taken):  # ck_search patch 3
             g = self.space.repair(self.seed_queue.pop(0), self.rng)
             k = None if g is None else self.space.key(g)
             if k is None or k in self.history or k in taken:

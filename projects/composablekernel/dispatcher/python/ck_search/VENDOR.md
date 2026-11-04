@@ -68,7 +68,10 @@ above), `db.py`, `driver.py`, `measure.py`, `halving.py`, `knobspace.py`,
   prior. Interface differences: warm starts are records (or `WarmStart`
   objects) instead of `WarmStart` only, the portfolio member list is
   `options["members"]`, and there is no fidelity ladder (only the
-  multi-fidelity strategies, not vendored, use it). On a config list
+  multi-fidelity strategies, not vendored, use it). Behaviour difference:
+  with more distinct warm starts than DE's `pop_size`, upstream drops the
+  extra ones; here the first population grows to hold them all, so every
+  requested warm start is measured before DE evolves. On a config list
   (`SearchSpace.from_configs`), `exhaustive` asks the same trials in the same
   order as upstream but steps through the sorted listed genomes instead of
   the whole product of field levels: GEMM kernel records vary in up to 19
@@ -89,6 +92,11 @@ is listed here.
    runtime on Python 3.8, which CK supports). Every other PEP 585 / 604 type
    in these files is an annotation, not evaluated under
    `from __future__ import annotations`.
+3. `local.py`: with warm starts beyond `start`, a batched first `ask`
+   returns the start and then the warm starts, before any neighbour of the
+   start (upstream fills the batch with the start's neighbours and measures
+   the warm starts only in the next ask, so a budget of two trials never
+   reached the second warm start). One-trial asks are unchanged.
 
 ## Notes for drivers
 

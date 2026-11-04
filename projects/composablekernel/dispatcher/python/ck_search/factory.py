@@ -11,9 +11,10 @@ and database layers.
 Warm starts are kernel records (the dicts the space was built from) or ready
 ``WarmStart`` objects, best first. A portfolio evaluates them before any
 member asks; ``de``, ``hill``, ``tpe`` and ``gp`` take them (encoded and
-repaired to the nearest listed config) as their initial genomes; ``random``
-and ``exhaustive`` ignore them. Only ``tpe`` and ``gp`` use ``prior``; a
-portfolio hands it to its members.
+repaired to the nearest listed config) as their initial genomes and measure
+every one before their own picks (``de`` grows its first population to hold
+them all); ``random`` and ``exhaustive`` ignore them. Only ``tpe`` and ``gp``
+use ``prior``; a portfolio hands it to its members.
 """
 
 import random
@@ -137,7 +138,14 @@ def make_strategy(
     if name == "de":
         de_opts = {"variant": "current_to_pbest1bin", "adapt": "shade"}
         de_opts.update(opts)
-        return DifferentialEvolution(space, seed, init=init, **de_opts)
+        de = DifferentialEvolution(space, seed, init=init, **de_opts)
+        # DE seeds its first population with the warm starts and drops those
+        # past pop_size: grow the population so every distinct one is measured.
+        n_warm = len({space.key(g) for g in init})
+        if n_warm > de.pop_size:
+            de_opts["pop_size"] = n_warm
+            de = DifferentialEvolution(space, seed, init=init, **de_opts)
+        return de
     if name == "tpe":
         return TPE(space, seed, prior=prior, init=init, **opts)
     if name == "gp":
