@@ -135,11 +135,15 @@ namespace FixedPointEmulation
     }
 
     /* =========================================================================
-     * Integer residue helpers
+     * Residue helpers
      *
-     * The residues are computed with integer and FP32 arithmetic instead of
-     * FP64.  On GPUs with a low FP64 rate (Radeon) the FP64 versions made the
-     * scale and accumulation kernels FP64-bound.  All steps are exact:
+     * Two versions compute the same balanced residues.  The FP64 versions use
+     * a few FP64 operations per residue and suit GPUs with a fast FP64 rate,
+     * where the scale and accumulation kernels are bandwidth-bound.  The
+     * integer versions use integer and FP32 arithmetic instead; on GPUs with a
+     * low FP64 rate (Radeon) the FP64 versions make those kernels FP64-bound.
+     * The kernels take the choice as the template parameter INT_RES, set per
+     * device (see int_residues in emulation.cpp).  All steps are exact:
      * balanced_residue_i32 matches the FP64 formula it replaces for every
      * int32 input, and int8_residue matches it for scaled values below 2^75.
      * Above 2^75 the FP64 formula can return an unbalanced or wrong residue;
@@ -191,19 +195,25 @@ namespace FixedPointEmulation
         return r;
     }
 
+    /* INT8 balanced residue of the integer-valued double y modulo m_t, FP64
+     * version.                                                                  */
+    static __device__ __forceinline__ int8_t fp64_int8_residue(double y, unsigned t)
+    {
+        const double nm  = neg_mod(t);
+        const double rp  = fma(nm, rint(y * inv_mod(t)), y);
+        const float  rfp = static_cast<float>(rp);
+        return static_cast<int8_t>(
+            static_cast<int32_t>(fmaf(rintf(rfp * inv_mod_f(t)), static_cast<float>(nm), rfp)));
+    }
+
     /* INT8 balanced residue of the integer-valued double y modulo m_t, given
      * v = split_int88(y).  Out of range (v.fits false), it falls back to the
-     * original FP64 formula.                                                    */
+     * FP64 version.                                                             */
     static __device__ __forceinline__ int8_t int8_residue(const Int88Limbs& v, double y, unsigned t)
     {
         const float imf = inv_mod_f(t);
         if(!v.fits)
-        {
-            const double rp  = fma(neg_mod(t), rint(y * inv_mod(t)), y);
-            const float  rfp = static_cast<float>(rp);
-            return static_cast<int8_t>(static_cast<int32_t>(
-                fmaf(rintf(rfp * imf), static_cast<float>(neg_mod(t)), rfp)));
-        }
+            return fp64_int8_residue(y, t);
         const uint32_t m = static_cast<uint32_t>(moduli[t]);
         /* S < 2^22 + 3 * 255 * 2^22 < 2^32.  __umul24 needs operands < 2^24.  */
         const uint32_t S = v.x[0] + __umul24(v.x[1], limb_weight(t, 1))
@@ -222,9 +232,28 @@ namespace FixedPointEmulation
             static_cast<int32_t>(fmaf(rintf(rf * imf), -static_cast<float>(m), rf)));
     }
 
+    /* Residue of a scaled value for the scale kernels: integer version from the
+     * limbs v (filled only when INT_RES), FP64 version from y otherwise.        */
+    template <bool INT_RES>
+    static __device__ __forceinline__ int8_t
+        scaled_residue(const Int88Limbs& v, double y, unsigned t)
+    {
+        if constexpr(INT_RES)
+            return int8_residue(v, y, t);
+        else
+            return fp64_int8_residue(y, t);
+    }
+
+    /* Balanced residue of the int32 c modulo m_t, as a double, FP64 version.  */
+    static __device__ __forceinline__ double fp64_balanced_residue(int32_t c, unsigned t)
+    {
+        const double dc = static_cast<double>(c);
+        return fma(neg_mod(t), rint(dc * inv_mod(t)), dc);
+    }
+
     /* Balanced residue of the int32 c modulo m_t, identical to
-     * fma(neg_mod(t), rint(double(c) * inv_mod(t)), double(c)), including the
-     * round-half-to-even choice of +-m/2 for the even modulus 256.             */
+     * fp64_balanced_residue(c, t), including the round-half-to-even choice of
+     * +-m/2 for the even modulus 256.                                           */
     static __device__ __forceinline__ int32_t balanced_residue_i32(int32_t c, unsigned t)
     {
         const int32_t m   = moduli[t];
@@ -254,6 +283,16 @@ namespace FixedPointEmulation
         if(twice > m || (twice == m && ((q1 + q2) & 1)))
             return r0 - m;
         return r0;
+    }
+
+    /* Balanced residue of an INT32 GEMM result for the accumulation kernels. */
+    template <bool INT_RES>
+    static __device__ __forceinline__ double crt_residue(int32_t c, unsigned t)
+    {
+        if constexpr(INT_RES)
+            return static_cast<double>(balanced_residue_i32(c, t));
+        else
+            return fp64_balanced_residue(c, t);
     }
 
 } // namespace FixedPointEmulation

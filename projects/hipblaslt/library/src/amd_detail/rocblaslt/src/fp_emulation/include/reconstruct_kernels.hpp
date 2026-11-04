@@ -18,7 +18,7 @@
  * This header must be compiled as HIP.
  */
 
-#include "kernel_common.hpp" /* balanced_residue_i32 */
+#include "kernel_common.hpp" /* crt_residue */
 #include "tables.hpp" /* qpi, inv_P, P_dd */
 
 #include <hip/hip_runtime.h>
@@ -27,7 +27,7 @@
 
 namespace FixedPointEmulation
 {
-    template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK>
+    template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK, bool INT_RES>
     __global__ static void chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
                                               double* __restrict__ Zhi_out,
                                               double* __restrict__ Zlo_out,
@@ -56,8 +56,7 @@ namespace FixedPointEmulation
         for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local)
         {
             const unsigned t = chunk_start + t_local;
-            dc_s[t_local]    = static_cast<double>(
-                balanced_residue_i32(C32i_batch[t_local * slice_stride + idx], t));
+            dc_s[t_local]    = crt_residue<INT_RES>(C32i_batch[t_local * slice_stride + idx], t);
         }
         double Zhi = 0.0, Zlo = 0.0;
 #pragma unroll
@@ -101,7 +100,11 @@ namespace FixedPointEmulation
         }
     }
 
-    template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK, typename T_out = double>
+    template <bool HAS_LO,
+              unsigned CHUNK_SIZE,
+              bool     IS_FIRST_CHUNK,
+              bool     INT_RES,
+              typename T_out = double>
     __global__ static void accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
                                                  const double* __restrict__ Zhi_in,
                                                  const double* __restrict__ Zlo_in,
@@ -130,8 +133,7 @@ namespace FixedPointEmulation
         for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local)
         {
             const unsigned t = chunk_start + t_local;
-            dc_s[t_local]    = static_cast<double>(
-                balanced_residue_i32(C32i_batch[t_local * slice_stride + idx], t));
+            dc_s[t_local]    = crt_residue<INT_RES>(C32i_batch[t_local * slice_stride + idx], t);
         }
         double Zhi = 0.0, Zlo = 0.0;
 #pragma unroll

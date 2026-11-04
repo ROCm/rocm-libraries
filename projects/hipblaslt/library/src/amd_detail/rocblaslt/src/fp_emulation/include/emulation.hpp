@@ -135,6 +135,11 @@ struct FixedPointEmulationDeviceSupport
      * FIXED_POINT_EMULATION_NEVER = never.                                  */
     double fp64_min_ai;
     double fp32_min_ai;
+    /* Residue arithmetic of the scale and accumulation kernels: true for the
+     * integer/FP32 versions, false for the FP64 versions.  Integer for devices
+     * whose FP64 rate is low relative to their INT8 rate (see emulation.cpp),
+     * unless HIPBLASLT_EMULATION_INT_RESIDUES overrides it.                    */
+    bool int_residues;
 };
 
 /* Pure lookup, for tests: gcn_arch_name may carry target features
