@@ -138,12 +138,12 @@ inline bool mayEnableMultiGroupReplay(const Function& func) {
     return false;
 }
 
-/// True iff, in single-group mode, an SMEM replay group can still be open with XCNT != 0 when an
-/// instruction placed before \p insertBefore issues. The closest preceding instruction that is not
-/// replay-group transparent decides: SMEM keeps the group open; anything else ends it, because the
-/// hardware drains XCNT before leaving a group. Opaque text may hold SMEM, so it answers true. The
-/// walk follows physical layout and so crosses fall-through block boundaries; a block entered by a
-/// branch has the branch as its predecessor.
+/// Returns true when a software prefetch inserted at \p insertBefore needs
+/// `s_wait_xcnt 0` because it would follow an open SMEM group.
+///
+/// Scan backward to the first instruction that determines the replay-group
+/// state: SMEM returns true; anything else returns false. Continue across
+/// fall-through block boundaries. Treat opaque assembly as SMEM conservatively.
 inline bool smemReplayGroupOpenBefore(BasicBlock& bb, IRList::iterator insertBefore) {
     BasicBlock* block = &bb;
     IRBase* node = nullptr;
