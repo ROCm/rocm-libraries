@@ -6109,9 +6109,7 @@ def run_unified_attention_torch(
     visible key get ``-inf`` (and O = 0).
     """
     if kv_layout == "strided" and problem.emit_lse:
-        raise NotImplementedError(
-            "LSE output is not implemented for strided-KV decode"
-        )
+        raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
     validate_unified_lse(
