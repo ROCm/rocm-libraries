@@ -30,6 +30,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tempfile
+from os import environ
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
@@ -52,10 +53,27 @@ __all__ = [
 
 def _validity_tool() -> ModuleType | None:
     """The IR-validity tool module, or None when the platform tools are not
-    shipped alongside this package (e.g. an installed wheel)."""
-    tools = platform_root() / "tools"
-    if not (tools / "check_ir_validity.py").is_file():
-        return None
+    shipped alongside this package (e.g. an installed wheel).
+
+    The tools are ``tools/`` in a source checkout. ``ROCKE_PLATFORM_TOOLS_DIR``
+    overrides that: the installed test payload stages a copy of the tool and the
+    modules it imports under ``tests/arch_domain``, and the test tree's
+    ``conftest.py`` points the variable there. An override that holds no tool
+    raises ``FileNotFoundError``, so a wrong path fails instead of skipping every
+    test that compiles.
+    """
+    override = environ.get("ROCKE_PLATFORM_TOOLS_DIR")
+    if override:
+        tools = Path(override).resolve()
+        if not (tools / "check_ir_validity.py").is_file():
+            raise FileNotFoundError(
+                f"ROCKE_PLATFORM_TOOLS_DIR={override!r} holds no check_ir_validity.py "
+                f"(resolved to {tools}); point it at a directory that does, or unset it"
+            )
+    else:
+        tools = platform_root() / "tools"
+        if not (tools / "check_ir_validity.py").is_file():
+            return None
     if str(tools) not in sys.path:
         sys.path.insert(0, str(tools))
     import check_ir_validity

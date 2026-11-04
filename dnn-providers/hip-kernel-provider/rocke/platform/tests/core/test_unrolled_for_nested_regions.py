@@ -276,14 +276,48 @@ CASES = {
 }
 
 
+_LOCAL_NAME = re.compile(r"%[-\w.$]+")
+
+
+def _local_names(text):
+    """The local names of the one function in the LLVM IR ``text``, as
+    ``(values, bound, read)``: ``values`` lists every value definition in order
+    (a name defined twice appears twice), ``bound`` is the set of parameter and
+    block-label names, and ``read`` is the set of names the body reads."""
+    lines = text.splitlines()
+    start = next(
+        index for index, line in enumerate(lines) if line.startswith("define ")
+    )
+    end = lines.index("}", start)
+    values = []
+    bound = set(_LOCAL_NAME.findall(lines[start]))
+    read = set()
+    for line in lines[start + 1 : end]:
+        if line.endswith(":"):
+            bound.add("%" + line[:-1])
+            continue
+        target, assigns, operands = line.partition(" = ")
+        if assigns and target.strip().startswith("%"):
+            values.append(target.strip())
+        else:
+            operands = line
+        read.update(_LOCAL_NAME.findall(operands))
+    return values, bound, read
+
+
 def _names_defined_more_than_once(text):
     """The SSA names the LLVM IR ``text`` defines more than once, sorted."""
-    defined = [
-        line.split("=", 1)[0].strip()
-        for line in text.splitlines()
-        if line.startswith("  %") and "=" in line
-    ]
-    return sorted(name for name in set(defined) if defined.count(name) > 1)
+    values, _, _ = _local_names(text)
+    return sorted(name for name in set(values) if values.count(name) > 1)
+
+
+def _names_read_but_never_defined(text):
+    """The local names the one function in the LLVM IR ``text`` reads but
+    defines nowhere in it -- not as a parameter, a block label or a value --
+    sorted. (Whether each definition dominates its reads is LLVM's check, which
+    the compile-and-link test makes.)"""
+    values, bound, read = _local_names(text)
+    return sorted(read - set(values) - bound)
 
 
 def _reuse_message(name):
@@ -448,9 +482,13 @@ def test_both_engines_emit_the_same_text(case, flavor):
 
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_each_trip_defines_its_own_values(case):
-    """Every SSA name is defined once."""
-    text = lower_with_both_engines(CASES[case][0](), "gfx942")
+    """Every SSA name is defined once, and every name read is defined. Checks
+    the text ``lower_kernel_to_llvm`` emits, so it also runs where the C++
+    engine binding is not built (the installed test payload), on the Python
+    engine's text there."""
+    text = lower_kernel_to_llvm(CASES[case][0](), arch="gfx942")
     assert _names_defined_more_than_once(text) == []
+    assert _names_read_but_never_defined(text) == []
 
 
 @pytest.mark.parametrize("case", sorted(CASES))
