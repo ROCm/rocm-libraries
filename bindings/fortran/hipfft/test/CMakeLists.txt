@@ -23,7 +23,7 @@
 # ############################################################################
 
 # hipFFT and hipFFTW Fortran binding tests: one GPU executable per test. Each
-# half guards itself on its own binding target and C library.
+# half guards itself on its C library.
 
 # ifx/ifort skip .f03/.f08 files unless -Tf precedes the source.
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
@@ -39,14 +39,6 @@ if(NOT APPLE AND NOT WIN32)
   add_link_options(-Wl,--gc-sections)
 endif()
 
-# hip-config-amd.cmake reaches FindThreads, which needs C or CXX enabled.
-if(NOT TARGET hip::hipfft AND NOT TARGET hip::hipfftw)
-  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  find_package(hipfft QUIET)
-endif()
-
 # The tests `use hip`, so hip.mod (rocm-systems, same compiler) is required.
 if(NOT TARGET hip::hip_fortran)
   find_package(hip-fortran QUIET)
@@ -58,16 +50,10 @@ if(NOT TARGET hip::hip_fortran)
     "this compiler to build them.")
 endif()
 
-if(NOT _hipfft_tests)
-  # Deliberately silent: the parent was told not to build this half.
-elseif(NOT TARGET hipfft_fortran)
-  message(STATUS
-    "hipFFT: the Fortran binding target was not built, skipping its tests.")
-elseif(NOT TARGET hip::hipfft)
+if(NOT TARGET hip::hipfft)
   message(STATUS
     "hipFFT: no hip::hipfft target, skipping the hipFFT Fortran binding tests "
-    "(they link libhipfft). Point CMAKE_PREFIX_PATH at an installed ROCm to "
-    "build them standalone.")
+    "(they link libhipfft). Point CMAKE_PREFIX_PATH at an installed ROCm.")
 else()
   # hipfft_fortran_add_test(<name> [F2008]): F2008 builds <name>.f08, which
   # exercises the array overloads, as test hipfft_fortran_<name>_f2008.
@@ -133,16 +119,11 @@ else()
   endif()
 endif()
 
-if(NOT _hipfftw_tests)
-  # Deliberately silent: the parent was told not to build this half.
-elseif(NOT TARGET hipfftw_fortran)
-  message(STATUS
-    "hipFFTW: the Fortran binding target was not built, skipping its tests.")
-elseif(NOT TARGET hip::hipfftw)
+if(NOT TARGET hip::hipfftw)
   message(STATUS
     "hipFFTW: no hip::hipfftw target, skipping the hipFFTW Fortran binding "
     "tests (they link libhipfftw). Point CMAKE_PREFIX_PATH at an installed "
-    "ROCm to build them standalone.")
+    "ROCm.")
 else()
   # hipfftw_fortran_add_test(<name>): builds <name>.f03 as test
   # hipfftw_fortran_<name>.
