@@ -1,5 +1,8 @@
 # TensileLite
 
+For race-detection workloads, [choose one GEMM from a solution index](../docs/how-to/choose-gemm-for-solution.md)
+constructs one full-tile problem for a selected solution.
+
 ## Building and Running Tests
 
 While full test suites can be run with a single `tox` command, developers may wish to

@@ -1,0 +1,8 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# All 26 former s_atomic_dec exclusions rechecked: 104 cases passed.
+# Instruction support: https://github.com/ROCm/rocm-systems/pull/12963
+version: 3
+rocjitsu_revision: c2bffdf7c6530c79329edd0add31fa9d0485b96f
+case_policy: tile-depth-v1
+failures: []

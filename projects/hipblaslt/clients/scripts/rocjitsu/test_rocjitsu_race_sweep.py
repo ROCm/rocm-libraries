@@ -1,0 +1,2848 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+import copy
+import csv
+import io
+import json
+import os
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import zlib
+from collections import Counter
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import msgpack
+import rocjitsu_race_sweep as sweep
+import rocjitsu_sweep_plan as plan
+import yaml
+from rocjitsu_known_failures import apply_known_failures, known_failures
+
+
+def run_single_queue(jobs, workers, execute, progress, **kwargs):
+    return sweep.run_queue(
+        [[j] for j in jobs],
+        workers,
+        lambda batch, slot: [execute(batch[0], slot)],
+        progress,
+        **kwargs,
+    )
+
+
+def solution(index, tile=(64, 96, 1), depth=32):
+    return {
+        "index": index,
+        "name": f"solution-{index}",
+        "kernelName": f"kernel-{index}",
+        "problemType": {
+            "operationIdentifier": "Contraction_l_Ailk_Bjlk_Cijk_Dijk",
+            "aType": "Float",
+            "bType": "Float",
+            "cType": "Float",
+            "dType": "Float",
+            "computeType": "Float",
+            "transA": False,
+            "transB": True,
+            "biasDataTypeWhiteList": [],
+            "biasSrcWhiteList": [3],
+        },
+        "hardwarePredicate": {"type": "Processor", "value": "gfx942"},
+        "problemPredicate": {"type": "And", "value": []},
+        "sizeMapping": {
+            "macroTile": list(tile),
+            "depthU": depth,
+            "globalSplitU": 1,
+            "streamK": 0,
+        },
+    }
+
+
+def job():
+    s = solution(7)
+    return {
+        "id": 0,
+        "solutions": [{"index": 7, "name": "solution-7", "kernel": "kernel-7"}],
+        "cases": plan.derive_cases(s),
+        "problem_type": s["problemType"],
+        "library": "library.dat",
+        "profile": "default",
+    }
+
+
+def success_log(j=None):
+    j = job() if j is None else j
+    s = j["solutions"][0]
+    stream = io.StringIO()
+    for n, case in enumerate(j["cases"]):
+        stream.write(sweep.target_dispatch_line(j) + "\n")
+        csv.writer(stream, lineterminator="\n").writerow(
+            [
+                0,
+                f"{n}/3",
+                f"{s['index']}/{s['index']}",
+                "Contraction",
+                "(" + ",".join(map(str, case["shape"])) + ")",
+                "None",
+                "",
+                "None",
+                s["name"],
+                "PASSED",
+            ]
+        )
+    return stream.getvalue()
+
+
+def bench_log(j=None):
+    j = job() if j is None else j
+    s = j["solutions"][0]
+    lines = []
+    for case in j["cases"]:
+        m, n, batch, k = case["shape"]
+        lines += [sweep.target_dispatch_line(j)] * j.get("target_dispatches_per_case", 2)
+        lines += [
+            "[0]:m,n,batch_count,k,norm_error,atol,rtol",
+            f"    {m},{n},{batch},{k},0,0.00001,0.00001",
+            f"    --Solution index: {s['index']}",
+            f"    --Solution name:  {s['name']}",
+            f"    --kernel name:    {s['kernel']}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def bench_case_log(jobs, statuses=None, done=True):
+    cases = [(j, c) for j in jobs for c in j["cases"]]
+    statuses = ["PASSED"] * len(cases) if statuses is None else statuses
+    lines = []
+    for ordinal, ((j, case), status) in enumerate(zip(cases, statuses, strict=True)):
+        index = j["solutions"][0]["index"]
+        lines.append(
+            f"[hipblaslt-case-v1] BEGIN {ordinal} {index} "
+            + " ".join(map(str, case["shape"]))
+            + "\n"
+        )
+        lines.append(f"[hipblaslt-case-v1] RESULT {index} {status}\n")
+        record = bench_log({**j, "cases": [case]})
+        if status == "FAILED":
+            record = record.replace(",0,0.00001,0.00001", ",1,failed,failed")
+        lines.extend([record, f"[hipblaslt-case-v1] END {ordinal} {index} {status}\n"])
+    if done:
+        lines.append(f"[hipblaslt-case-v1] DONE {len(cases)} {statuses.count('FAILED')}\n")
+    return "".join(lines)
+
+
+def failure_list():
+    return {
+        "version": 3,
+        "rocjitsu_revision": "a" * 40,
+        "case_policy": plan.POLICY,
+        "failures": [
+            {
+                "id": "test-hang",
+                "reason": "Unsupported instruction leaves the client waiting",
+                "tracking": ["https://github.com/ROCm/rocm-systems/pull/12963"],
+                # Review dates are reminders; an old date must still apply skips.
+                "review_by": "2000-01-01",
+                "target": "gfx942",
+                "backends": ["tensile", "bench"],
+                "cases": [c["id"] for c in job()["cases"]],
+                "kernel_names": ["kernel-7"],
+            }
+        ],
+    }
+
+
+class SweepTests(unittest.TestCase):
+
+    def grouped_job_and_log(self, status="PASSED"):
+        j = job()
+        j.update(
+            target_dispatches_per_case=1,
+            cases=[
+                {
+                    "id": "regular",
+                    "shape": [64, 96, 1, 96],
+                    "grouped_shapes": [[64, 96, 1, 96], [128, 192, 1, 192]],
+                }
+            ],
+        )
+        text = bench_case_log([j], [status])
+        text = text.replace("[0]:m,n,batch_count,k,", "[0]:grouped_gemm,m,n,batch_count,k,")
+        text = text.replace("64,96,1,96,", "2,(64,128),(96,192),1,(96,192),")
+        return j, text
+
+    def test_grouped_bench_validates_every_member_and_one_dispatch(self):
+        j, text = self.grouped_job_and_log()
+        (result,) = sweep.classify_bench_batch([j], text, 0)
+        self.assertEqual(result["outcome"], "PASS")
+        self.assertEqual(result["cases"][0]["grouped_shapes"], j["cases"][0]["grouped_shapes"])
+        self.assertEqual(result["target_dispatches"], 1)
+        changes = [
+            ("(64,128)", "(64,64)"),
+            ("(96,192)", "(96,96)"),
+            ("2,(64,128)", "3,(64,128)"),
+            ("2,(64,128)", "2,64"),
+            ("(96,192),1,", "(96,192),2,"),
+            ("--Solution index: 7", "--Solution index: 8"),
+            (sweep.target_dispatch_line(j), ""),
+            ("[hipblaslt-case-v1] RESULT 7 PASSED\n", ""),
+        ]
+        for before, after in changes:
+            with self.subTest(change=after):
+                (result,) = sweep.classify_bench_batch([j], text.replace(before, after), 0)
+                self.assertTrue(result["failed"])
+        ordinary = copy.deepcopy(j)
+        del ordinary["cases"][0]["grouped_shapes"]
+        self.assertTrue(sweep.classify_bench(ordinary, text, 0)["failed"])
+        self.assertTrue(sweep.classify_bench(j, bench_case_log([j]), 0)["failed"])
+
+    def test_grouped_bench_requires_native_verdict_and_preserves_failure(self):
+        j, text = self.grouped_job_and_log("FAILED")
+        (result,) = sweep.classify_bench_batch([j], text, 1)
+        self.assertEqual(result["outcome"], "NUMERICAL_FAILED")
+        self.assertEqual(result["cases"][0]["status"], "FAILED")
+        self.assertEqual(result["cases"][0]["grouped_shapes"], j["cases"][0]["grouped_shapes"])
+        j, text = self.grouped_job_and_log()
+        legacy = "\n".join(
+            line for line in text.splitlines() if not line.startswith("[hipblaslt-case-v1]")
+        )
+        self.assertTrue(sweep.classify_bench(j, legacy, 0)["failed"])
+
+    def test_grouped_plan_records_members_and_counts_all_buffer_memory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [
+                solution(7),
+                solution(8, tile=(1536, 1536, 1)),
+                solution(9, tile=(1536, 1536, 1)),
+            ]
+            for record in records[:2]:
+                record["problemType"]["groupedGemm"] = True
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 7, 10, policy=plan.REGULAR_POLICY)
+            grouped, oversized, ordinary = manifest["jobs"]
+            self.assertEqual(grouped["cases"][0]["grouped_shapes"], [[64, 96, 1, 256]] * 2)
+            self.assertEqual(yaml.safe_load(grouped["bench_yaml"])[0]["grouped_gemm"], 2)
+            self.assertEqual(oversized["planning_outcome"], "INVALID_INPUT")
+            self.assertIn("data-buffer budget", oversized["planning_error"])
+            self.assertNotIn("planning_error", ordinary)
+
+    def protocol_jobs(self, count=3):
+        jobs = []
+        for i in range(count):
+            j = job()
+            j.update(id=i, batch_id=0, cases=j["cases"][:1], target_dispatches_per_case=1)
+            j["solutions"][0] = {
+                "index": i,
+                "name": f"solution-{i}",
+                "kernel": f"kernel-{i}",
+            }
+            jobs.append(j)
+        return jobs
+
+    def test_native_numerical_failure_does_not_taint_completed_neighbors(self):
+        jobs = self.protocol_jobs()
+        results = sweep.classify_bench_batch(
+            jobs, bench_case_log(jobs, ["FAILED", "PASSED", "PASSED"]), 1
+        )
+        self.assertEqual([r["outcome"] for r in results], ["NUMERICAL_FAILED", "PASS", "PASS"])
+        self.assertEqual([r["failed"] for r in results], [True, False, False])
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1, 1])
+        self.assertEqual(results[0]["cases"][0]["numerical"]["norm_error"], 1)
+        self.assertEqual(results[0]["cases"][0]["numerical"]["atol"], "failed")
+        self.assertEqual(
+            results[0]["errors"],
+            [f"Native numerical validation FAILED: {tuple(jobs[0]['cases'][0]['shape'])}"],
+        )
+        self.assertEqual(sweep.numerical_index_counts(results), {"FAILED": 1, "PASSED": 2})
+
+    def test_explicit_norm_failure_overrides_finite_allclose_measurements(self):
+        jobs = self.protocol_jobs(1)
+        text = bench_case_log(jobs, ["FAILED"]).replace(",1,failed,failed", ",0.25,0.00001,0.00001")
+        result = sweep.classify_bench_batch(jobs, text, 1)[0]
+        self.assertEqual(result["outcome"], "NUMERICAL_FAILED")
+        self.assertEqual(result["cases"][0]["numerical"]["atol"], 0.00001)
+
+    def test_case_records_distinguish_cleanup_interruption_from_unstarted_work(self):
+        jobs = self.protocol_jobs()
+        text = bench_case_log(jobs)
+        text = text[: text.index("[hipblaslt-case-v1] END 1")]
+        results = sweep.classify_bench_batch(jobs, text, -6)
+        self.assertEqual(
+            [r["outcome"] for r in results],
+            [
+                "VALIDATED_IN_FAILED_PROCESS",
+                "INCOMPLETE",
+                "UNEXECUTED",
+            ],
+        )
+        self.assertFalse(results[1]["cases"][0]["native_completed"])
+        self.assertEqual(results[1]["cases"][0]["reported_numerical_status"], "PASSED")
+        self.assertEqual(sweep.numerical_index_counts(results), {"PASSED": 1, "INCOMPLETE": 2})
+
+    def test_native_records_require_verdict_completion_and_consistent_counts(self):
+        jobs = self.protocol_jobs(1)
+        text = bench_case_log(jobs)
+        for broken, rc in [
+            (text.replace("RESULT 0 PASSED", "RESULT 0 NOT_CHECKED"), 0),
+            (text.replace("[hipblaslt-case-v1] RESULT 0 PASSED\n", ""), 0),
+            (text.replace("DONE 1 0", "DONE 1 1"), 0),
+            (text.replace("[hipblaslt-case-v1] DONE 1 0\n", ""), 0),
+            (text, 1),
+            (bench_case_log(jobs, ["FAILED"]), 0),
+        ]:
+            with self.subTest(text=broken, rc=rc):
+                self.assertTrue(sweep.classify_bench_batch(jobs, broken, rc)[0]["failed"])
+
+    def test_contradictory_native_status_never_counts_as_numerical_pass(self):
+        jobs = self.protocol_jobs(1)
+        text = bench_case_log(jobs)
+        for broken in (
+            text.replace("END 0 0 PASSED", "END 0 0 FAILED"),
+            text.replace("RESULT 0 PASSED", "RESULT 0 FAILED"),
+            text.replace(
+                "RESULT 0 PASSED\n",
+                "RESULT 0 PASSED\n[hipblaslt-case-v1] RESULT 0 PASSED\n",
+            ),
+        ):
+            with self.subTest(text=broken):
+                result = sweep.classify_bench_batch(jobs, broken, 1)[0]
+                self.assertTrue(result["failed"])
+                self.assertEqual(sweep.numerical_index_counts([result]), {"INCOMPLETE": 1})
+
+    def test_selected_dispatches_must_belong_to_the_active_case(self):
+        jobs = self.protocol_jobs(2)
+        text = bench_case_log(jobs)
+        misplaced = (
+            sweep.target_dispatch_line(jobs[0]) + "\n" + text,
+            text + sweep.target_dispatch_line(jobs[0]) + "\n",
+            text.replace(
+                sweep.target_dispatch_line(jobs[0]),
+                sweep.target_dispatch_line(jobs[1]),
+                1,
+            ),
+        )
+        for broken in misplaced:
+            with self.subTest(text=broken):
+                results = sweep.classify_bench_batch(jobs, broken, 0)
+                self.assertTrue(all(r["failed"] for r in results))
+                self.assertTrue(
+                    any("Selected target dispatch" in error for error in results[0]["batch_errors"])
+                )
+
+    def test_case_rows_cannot_satisfy_a_different_started_shape(self):
+        j = job()
+        j["cases"] = j["cases"][:2]
+        text = bench_case_log([j])
+        shapes = [f"{','.join(map(str, c['shape']))},0,0.00001,0.00001" for c in j["cases"]]
+        text = text.replace(shapes[0], "SWAPPED_ROW", 1).replace(shapes[1], shapes[0], 1)
+        text = text.replace("SWAPPED_ROW", shapes[1], 1)
+        result = sweep.classify_bench_batch([j], text, 0)[0]
+        self.assertTrue(result["failed"])
+        self.assertFalse(any(c["status"] == "PASSED" for c in result["cases"]))
+        self.assertEqual(sweep.numerical_index_counts([result]), {"INCOMPLETE": 1})
+
+    def test_native_case_identity_resolves_repeated_kernel_names(self):
+        jobs = self.protocol_jobs(2)
+        jobs[1]["solutions"][0]["kernel"] = jobs[0]["solutions"][0]["kernel"]
+        results = sweep.classify_bench_batch(jobs, bench_case_log(jobs), 0)
+        self.assertEqual([r["outcome"] for r in results], ["PASS", "PASS"])
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1])
+        text = bench_case_log(jobs).replace("END 0 0 PASSED", "END 0 1 PASSED")
+        results = sweep.classify_bench_batch(jobs, text, -6)
+        self.assertTrue(all(r["failed"] for r in results))
+        self.assertNotIn("UNEXECUTED", [r["outcome"] for r in results])
+
+    def test_queue_coordinator_owns_progress_and_worker_inputs_are_private(self):
+        owner = threading.get_ident()
+        jobs = [{"id": i, "nested": [i]} for i in range(12)]
+        observed = []
+
+        def execute(batch, slot):
+            batch[0]["nested"].append(slot)
+            return [{"id": batch[0]["id"], "failed": False, "cases": []}]
+
+        def progress(value):
+            self.assertEqual(threading.get_ident(), owner)
+            observed.extend(r["id"] for r in value["completed"])
+
+        result = sweep.run_queue([[j] for j in jobs], 4, execute, progress)
+        self.assertEqual(sorted(observed), list(range(12)))
+        self.assertEqual(len(observed), len(set(observed)))
+        self.assertEqual([j["nested"] for j in jobs], [[i] for i in range(12)])
+        self.assertEqual(result["assigned_job_ids"], list(range(12)))
+
+    def test_worker_exit_reports_infrastructure_error_to_coordinator(self):
+        def execute(batch, slot):
+            raise SystemExit("worker stopped")
+
+        result = sweep.run_queue([[{"id": 0, "cases": []}]], 1, execute, lambda value: None)
+        self.assertEqual(result["results"][0]["outcome"], "INFRASTRUCTURE_ERROR")
+        self.assertEqual(result["results"][0]["errors"], ["SystemExit('worker stopped')"])
+
+    def test_memory_budget_limits_concurrent_estimates(self):
+        costs = [4, 4, 4, 9, 12, 1, 1, 3]
+        batches = [[{"id": i, "cost": cost, "cases": []}] for i, cost in enumerate(costs)]
+        lock = threading.Lock()
+        running, peaks, alone = {}, [], []
+
+        def execute(batch, slot):
+            job = batch[0]
+            with lock:
+                running[job["id"]] = job["cost"]
+                peaks.append(sum(running.values()))
+                if job["cost"] > 10:
+                    alone.append(len(running) == 1)
+            time.sleep(0.02)
+            with lock:
+                del running[job["id"]]
+            return [{"id": job["id"], "failed": False, "cases": []}]
+
+        result = sweep.run_queue(
+            batches,
+            4,
+            execute,
+            lambda value: None,
+            memory=(lambda batch: batch[0]["cost"], 10),
+        )
+        self.assertEqual(sorted(r["id"] for r in result["results"]), list(range(len(costs))))
+        self.assertEqual(alone, [True])
+        self.assertTrue(all(peak <= 10 or peak == 12 for peak in peaks))
+        self.assertEqual(result["max_reserved_memory_gib"], 12)
+        # Smaller later batches start while the next one in order cannot fit.
+        self.assertLess(result["assigned_job_ids"].index(5), result["assigned_job_ids"].index(3))
+
+    def test_code_object_size_reads_compressed_bundle_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            compressed = Path(tmp) / "compressed.co"
+            compressed.write_bytes(
+                b"CCOB"
+                + (3).to_bytes(2, "little")
+                + (1).to_bytes(2, "little")
+                + (40).to_bytes(8, "little")
+                + (5 << 30).to_bytes(8, "little")
+                + bytes(16)
+            )
+            plain = Path(tmp) / "plain.co"
+            plain.write_bytes(b"\x7fELF" + bytes(1020))
+            self.assertEqual(sweep.code_object_bytes(str(compressed)), 5 << 30)
+            self.assertEqual(sweep.code_object_bytes(str(plain)), 1024)
+            job = {"code_objects": [str(compressed), str(plain), "Kernels.hsaco"]}
+            self.assertAlmostEqual(
+                sweep.batch_memory_gib([job, job]),
+                sweep.MEMORY_BASE_GIB + sweep.MEMORY_PER_CODE_OBJECT_GIB * (5 + 1024 / (1 << 30)),
+            )
+
+    def test_infrastructure_error_preserves_prior_pass_and_numerical_history(self):
+        good = {
+            "id": 0,
+            "index": 7,
+            "outcome": "PASS",
+            "failed": False,
+            "errors": [],
+            "cases": [{"status": "PASSED"}],
+        }
+        error = {
+            "id": 0,
+            "index": 7,
+            "outcome": "INFRASTRUCTURE_ERROR",
+            "failed": True,
+            "errors": ["disk full"],
+            "cases": [{"status": "INFRASTRUCTURE_ERROR"}],
+        }
+        merged = sweep.merge_attempts(good, error)
+        self.assertEqual(merged["outcome"], "PASS_RETAINED")
+        self.assertTrue(merged["failed"])
+        self.assertEqual(sweep.numerical_index_counts([merged]), {"PASSED": 1})
+        self.assertEqual(merged["latest_attempt_errors"], ["disk full"])
+        bad = {
+            **good,
+            "outcome": "NUMERICAL_FAILED",
+            "failed": True,
+            "cases": [{"status": "FAILED"}],
+        }
+        replay = sweep.merge_attempts(sweep.merge_attempts(bad, good), good)
+        self.assertEqual(sweep.numerical_index_counts([replay]), {"PASSED": 1})
+        self.assertEqual(sweep.numerical_failure_indices([replay]), [7])
+
+    def test_ranges_use_original_ids_before_profile_and_shard_grouping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename, indices in (("first", [103, 100, 101]), ("second", [105, 102, 104])):
+                records = [solution(i) for i in indices]
+                for record in records:
+                    record["hardwarePredicate"] = {
+                        "type": "CUCount",
+                        "value": 128 if record["index"] % 2 else 256,
+                    }
+                path = root / f"{filename}_gfx942.dat"
+                path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+                path.with_suffix(".co").write_bytes(b"object")
+            profiles = {
+                "full": {"simd_count": 1024, "simd_per_cu": 4},
+                "half": {"simd_count": 512, "simd_per_cu": 4},
+            }
+            full = plan.make_plan(root, "gfx942", {}, 100, 106, profiles=profiles)
+            left = plan.make_plan(root, "gfx942", {}, 100, 103, profiles=profiles)
+            right = plan.make_plan(root, "gfx942", {}, 103, 106, profiles=profiles)
+            indices = lambda manifest: [j["solutions"][0]["index"] for j in manifest["jobs"]]
+            self.assertEqual(indices(left), [100, 101, 102])
+            self.assertEqual(indices(right), [103, 104, 105])
+            self.assertEqual(indices(left) + indices(right), indices(full))
+            batches = plan.make_batches(full["jobs"], 2, group_by_shard=True)
+            self.assertEqual(
+                [[j["solutions"][0]["index"] for j in batch] for batch in batches],
+                [[100, 102], [104], [101, 103], [105]],
+            )
+            self.assertTrue(all(len({j["profile"] for j in batch}) == 1 for batch in batches))
+            self.assertEqual(full["solution_index_range"], {"begin": 100, "end": 106})
+            self.assertEqual(
+                plan.make_plan(root, "gfx942", {}, 100, 106, profiles=profiles, workers=3), full
+            )
+
+    def test_checkpoint_interval_grows_with_its_write_time(self):
+        self.assertEqual(sweep.checkpoint_after(100, 100.1), 100.1 + sweep.CHECKPOINT_SECONDS)
+        self.assertEqual(sweep.checkpoint_after(100, 102), 102 + 2 * sweep.CHECKPOINT_COST_RATIO)
+
+    def test_index_list_selects_within_the_range_and_must_exist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in (3, 5, 8, 9)]
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 4, None, indices=[9, 5, 3, 5])
+            self.assertEqual([j["solutions"][0]["index"] for j in manifest["jobs"]], [5, 9])
+            self.assertEqual(manifest["selection"], "solution-index-list")
+            same = plan.make_plan(root, "gfx942", {}, 0, None, indices=[3, 5, 9])
+            self.assertEqual(
+                same["solution_index_list_sha256"], manifest["solution_index_list_sha256"]
+            )
+            self.assertEqual(
+                plan.make_plan(root, "gfx942", {}, 0, None)["inventory"]["solutions"], 4
+            )
+            self.assertEqual(plan.catalogue_end(root, "gfx942"), 10)
+            with self.assertRaisesRegex(ValueError, r"not in the catalogue: \[4\]"):
+                plan.make_plan(root, "gfx942", {}, 0, None, indices=[3, 4])
+
+    def test_one_index_per_kernel_keeps_the_smallest_eligible_index_per_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shards = {"first": [solution(i) for i in (4, 6, 9)], "second": [solution(2)]}
+            shards["second"].append(solution(7))
+            for record in shards["first"] + shards["second"]:
+                record["kernelName"] = "shared"
+            # Index 2 is unsupported, so the smallest eligible index for "shared" is 4.
+            shards["second"][0]["problemType"]["sparse"] = True
+            # Index 9 runs under another profile, so it is its own representative.
+            shards["first"][2]["hardwarePredicate"] = {"type": "CUCount", "value": 128}
+            shards["second"][1]["kernelName"] = "other"
+            for name, records in shards.items():
+                path = root / f"{name}_gfx942.dat"
+                path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+                path.with_suffix(".co").write_bytes(b"object")
+            profiles = {
+                "full": {"simd_count": 1024, "simd_per_cu": 4},
+                "half": {"simd_count": 512, "simd_per_cu": 4},
+            }
+            for policy in (plan.POLICY, plan.REGULAR_POLICY):
+                with self.subTest(policy=policy):
+                    manifest = plan.make_plan(
+                        root, "gfx942", {}, 0, None, policy, profiles, one_index_per_kernel=True
+                    )
+                    kept = [j["solutions"][0]["index"] for j in manifest["jobs"]]
+                    self.assertEqual(kept, [2, 4, 7, 9])
+                    self.assertEqual(manifest["omitted_kernel_duplicates"], 1)
+                    later = plan.make_plan(
+                        root, "gfx942", {}, 5, None, policy, profiles, one_index_per_kernel=True
+                    )
+                    self.assertEqual([j["solutions"][0]["index"] for j in later["jobs"]], [7, 9])
+                    with self.assertRaises(plan.EmptySelection):
+                        plan.make_plan(
+                            root, "gfx942", {}, 5, 7, policy, profiles, one_index_per_kernel=True
+                        )
+                    every = plan.make_plan(root, "gfx942", {}, 0, None, policy, profiles)
+                    self.assertEqual(len(every["jobs"]), 5)
+                    self.assertFalse(every["one_index_per_kernel"])
+
+    def test_stopping_the_runner_kills_native_process_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "native.pid"
+            script = f"""
+import signal, sys, threading, time
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).parent)!r})
+import rocjitsu_race_sweep as sweep
+signal.signal(signal.SIGTERM, sweep.stop_native_processes)
+command = ["sh", "-c", "echo $$ > {marker}; exec sleep 60"]
+threading.Thread(
+    target=sweep.execute_command, args=(command, Path({tmp!r}) / "log", 120, None), daemon=True
+).start()
+time.sleep(120)
+"""
+            runner = subprocess.Popen([sys.executable, "-c", script], env=os.environ)
+            for _ in range(200):
+                if marker.is_file() and marker.read_text().strip():
+                    break
+                time.sleep(0.05)
+            native = int(marker.read_text())
+            runner.send_signal(signal.SIGTERM)
+            self.assertEqual(runner.wait(timeout=30), 128 + signal.SIGTERM)
+            for _ in range(200):
+                try:
+                    os.kill(native, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("Native process outlived the stopped runner")
+
+    def test_campaign_runs_chunks_reuses_finished_ones_and_resumes_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls = []
+            stop_at = {}
+
+            def fake_run(args):
+                begin, end = args.solution_index_range_begin, args.solution_index_range_end
+                calls.append((begin, end, args.resume_from and args.resume_from.name))
+                args.reports.mkdir()
+                (args.reports / "manifest.json").write_text("{}")
+                if begin in stop_at:
+                    if stop_at.pop(begin) == "crash":
+                        raise KeyboardInterrupt
+                    stop = {"reason": "suite-timeout"}
+                else:
+                    stop = None
+                indices = [i for i in range(begin, end) if i in (args.solution_indices or [i])]
+                outcomes = [
+                    {"index": i, "outcome": "LAUNCHED_NO_RESULT" if i == 13 else "PASS"}
+                    for i in indices
+                ]
+                summary = {
+                    "stop": stop,
+                    "passed": stop is None and 13 not in indices,
+                    "outcome_counts": dict(Counter(r["outcome"] for r in outcomes)),
+                    "index_outcomes": outcomes,
+                }
+                (args.reports / "summary.json").write_text(json.dumps(summary))
+                return 0 if summary["passed"] else 1
+
+            args = SimpleNamespace(
+                reports=root / "campaign",
+                target="gfx942",
+                library_dir=root,
+                workers=1,
+                solution_index_range_begin=0,
+                solution_index_range_end=25,
+                solution_indices=None,
+                suite_timeout=None,
+                resume_from=None,
+                chunk_size=10,
+            )
+            with patch.object(sweep, "run", side_effect=fake_run):
+                stop_at[10] = "crash"
+                with self.assertRaises(KeyboardInterrupt):
+                    sweep.run_campaign(args)
+                stop_at[20] = "timeout"
+                self.assertEqual(sweep.run_campaign(args), 1)
+                self.assertFalse(
+                    json.loads((args.reports / "campaign.json").read_text())["complete"]
+                )
+                self.assertEqual(sweep.run_campaign(args), 1)
+            self.assertEqual(
+                calls,
+                [
+                    (0, 10, None),
+                    (10, 20, None),
+                    (10, 20, "chunk-0000010-0000020.attempt-1"),
+                    (20, 25, None),
+                    (20, 25, "chunk-0000020-0000025.attempt-1"),
+                ],
+            )
+            campaign = json.loads((args.reports / "campaign.json").read_text())
+            self.assertTrue(campaign["complete"])
+            self.assertFalse(campaign["passed"])
+            self.assertEqual(campaign["outcome_counts"], {"PASS": 24, "LAUNCHED_NO_RESULT": 1})
+            self.assertIn("- 13: LAUNCHED_NO_RESULT", (args.reports / "campaign.md").read_text())
+
+            calls.clear()
+            args.reports = root / "listed"
+            args.solution_indices = [3, 21]
+            args.solution_index_range_end = None
+            with (
+                patch.object(sweep, "run", side_effect=fake_run),
+                patch.object(sweep, "catalogue_end", return_value=40),
+            ):
+                self.assertEqual(sweep.run_campaign(args), 0)
+            self.assertEqual(calls, [(0, 10, None), (20, 30, None)])
+
+            def empty_run(args):
+                args.reports.mkdir()
+                raise plan.EmptySelection("No solution indices in the requested range")
+
+            args.reports = root / "empty"
+            args.solution_indices = None
+            args.solution_index_range_end = 10
+            with patch.object(sweep, "run", side_effect=empty_run):
+                self.assertEqual(sweep.run_campaign(args), 0)
+            self.assertTrue(json.loads((args.reports / "campaign.json").read_text())["complete"])
+
+    def test_parallel_regular_inventory_matches_serial(self):
+        from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename, indices in (("first", [0, 1, 2]), ("second", [3, 4, 5])):
+                records = [solution(i) for i in indices]
+                if filename == "second":
+                    records[1]["problemType"]["sparse"] = True
+                path = root / f"{filename}_gfx942.dat"
+                writeMessagePack(path, {"solutions": records, "library": {}})
+                path.with_suffix(".co").write_bytes(b"kernel")
+            serial = plan.make_plan(root, "gfx942", {}, 1, 5, policy=plan.REGULAR_POLICY)
+            parallel = plan.make_plan(
+                root, "gfx942", {}, 1, 5, policy=plan.REGULAR_POLICY, workers=2
+            )
+            self.assertEqual(parallel, serial)
+            self.assertEqual(serial["coverage_gaps"], {"sparse": 1})
+            outcomes = [j.get("planning_outcome") for j in serial["jobs"]]
+            self.assertEqual(outcomes, [None, None, None, "UNSUPPORTED_FEATURE"])
+            records[0]["sizeMapping"]["globalSplitU"] = 0
+            writeMessagePack(root / "second_gfx942.dat", {"solutions": records, "library": {}})
+            with self.assertRaisesRegex(ValueError, "invalid globalSplitU"):
+                plan.make_plan(root, "gfx942", {}, 0, None, policy=plan.REGULAR_POLICY, workers=2)
+
+    def test_ranges_preserve_sparse_ids_and_hardware_exclusions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in (19, 10, 13, 17)]
+            records[2]["hardwarePredicate"] = {"type": "CUCount", "value": 128}
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(
+                root, "gfx942", {"simd_count": 1024, "simd_per_cu": 4}, 10, 18
+            )
+            self.assertEqual([j["solutions"][0]["index"] for j in manifest["jobs"]], [10, 13, 17])
+            self.assertEqual(manifest["jobs"][1]["planning_outcome"], "EXCLUDED_HARDWARE")
+            self.assertEqual(manifest["solutions"], 3)
+            with self.assertRaisesRegex(ValueError, "No solution indices"):
+                plan.make_plan(root, "gfx942", {"simd_count": 1024, "simd_per_cu": 4}, 11, 13)
+            for begin, end in ((-1, 1), (10, 10), (10, 9), (0, 1 << 32), (True, 10)):
+                with self.subTest(begin=begin, end=end), self.assertRaises(ValueError):
+                    plan.make_plan(root, "gfx942", {}, begin, end)
+
+    def test_regular_runner_honors_serialized_size_predicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = solution(7)
+            record["problemPredicate"] = {
+                "type": "And",
+                "value": [
+                    {"type": "SizeEqual", "index": dim, "value": value}
+                    for dim, value in ((0, 64), (1, 64), (3, 128))
+                ],
+            }
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": [record]}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY)
+            row = yaml.safe_load(manifest["jobs"][0]["bench_yaml"])[0]
+            self.assertEqual(
+                (row["solution_index"], row["M"], row["N"], row["K"]), (7, 64, 64, 128)
+            )
+
+    def test_regular_variant_records_actual_shape_and_scalars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = solution(7)
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": [record]}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            variant = plan.make_plan(
+                root,
+                "gfx942",
+                {},
+                7,
+                8,
+                policy=plan.REGULAR_POLICY,
+                reduction_blocks=3,
+                alpha=2,
+                beta=1,
+            )
+            self.assertEqual(
+                variant["case_parameters"],
+                {"reduction_blocks": 3, "alpha": 2, "beta": 1},
+            )
+            row = yaml.safe_load(variant["jobs"][0]["bench_yaml"])[0]
+            self.assertEqual((row["K"], row["alpha"], row["beta"]), (96, 2, 1))
+            self.assertEqual(variant["jobs"][0]["cases"][0]["shape"], [64, 96, 1, 96])
+            baseline = plan.make_plan(root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY)
+            self.assertNotEqual(baseline["jobs"], variant["jobs"])
+            for bad in (0, -1, True):
+                with (
+                    self.subTest(blocks=bad),
+                    self.assertRaisesRegex(ValueError, "reduction_blocks"),
+                ):
+                    plan.make_plan(
+                        root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY, reduction_blocks=bad
+                    )
+            with self.assertRaisesRegex(ValueError, "require regular-v1"):
+                plan.make_plan(root, "gfx942", {}, 7, 8, alpha=2)
+
+    def test_cli_ranges_optional_deadline_and_retired_sampling_options(self):
+        required = [
+            "sweep",
+            "--backend",
+            "bench",
+            "--target",
+            "gfx942",
+            "--rocjitsu-revision",
+            "a" * 40,
+        ]
+        for name in ("rocjitsu", "client", "config", "library-dir", "reports"):
+            required += ["--" + name, "."]
+        for flags, begin, end, timeout, suite_timeout in (
+            ([], 0, None, 120, None),
+            (
+                [
+                    "--solution-index-range-begin",
+                    "4000",
+                    "--solution-index-range-end",
+                    "8000",
+                    "--timeout",
+                    "300",
+                    "--suite-timeout",
+                    "7200",
+                ],
+                4000,
+                8000,
+                300,
+                7200,
+            ),
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sweep, "run", return_value=0) as run,
+            ):
+                self.assertEqual(sweep.main(), 0)
+                args = run.call_args.args[0]
+                self.assertEqual(
+                    (
+                        args.solution_index_range_begin,
+                        args.solution_index_range_end,
+                        args.timeout,
+                        args.suite_timeout,
+                    ),
+                    (begin, end, timeout, suite_timeout),
+                )
+                self.assertEqual(args.policy, plan.REGULAR_POLICY)
+                self.assertEqual((args.reduction_blocks, args.alpha, args.beta), (8, 1, 0))
+        with (
+            patch.object(
+                sys, "argv", required + ["--reduction-blocks", "3", "--alpha", "2", "--beta", "1"]
+            ),
+            patch.object(sweep, "run", return_value=0) as run,
+        ):
+            self.assertEqual(sweep.main(), 0)
+            args = run.call_args.args[0]
+            self.assertEqual((args.reduction_blocks, args.alpha, args.beta), (3, 2, 1))
+        for flags in (
+            ["--solutions", "20"],
+            ["--seed", "0"],
+            ["--all-solutions"],
+            ["--solution-index", "7"],
+            ["--solution-index-range-begin", "-1"],
+            ["--solution-index-range-begin", "7", "--solution-index-range-end", "7"],
+            ["--solution-index-range-end", "2147483649"],
+            ["--timeout", "nan"],
+            ["--timeout", "0"],
+            ["--suite-timeout", "inf"],
+            ["--suite-timeout", "-1"],
+            ["--reduction-blocks", "0"],
+            ["--alpha", "nan"],
+            ["--beta", "inf"],
+            ["--chunk-size", "0"],
+            ["--chunk-size", "10", "--resume-from", "old"],
+            ["--solution-indices", "/nonexistent/indices.txt"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sys, "stderr", io.StringIO()),
+                patch.object(sweep, "run") as run,
+            ):
+                with self.assertRaises(SystemExit):
+                    sweep.main()
+                run.assert_not_called()
+        with tempfile.TemporaryDirectory() as tmp:
+            listed = Path(tmp) / "indices.txt"
+            listed.write_text("# gradient\n12\n\n7  # E\n")
+            flags = ["--solution-indices", str(listed), "--chunk-size", "5"]
+            with (
+                patch.object(sys, "argv", required + flags),
+                patch.object(sweep, "run_campaign", return_value=0) as campaign,
+            ):
+                self.assertEqual(sweep.main(), 0)
+                self.assertEqual(campaign.call_args.args[0].solution_indices, [12, 7])
+                self.assertEqual(campaign.call_args.args[0].chunk_size, 5)
+            listed.write_text("# none\n")
+            with (
+                patch.object(sys, "argv", required + flags[:2]),
+                patch.object(sys, "stderr", io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                sweep.main()
+
+    def test_cli_hardware_profiles_do_not_require_a_redundant_config(self):
+        required = [
+            "sweep",
+            "--backend",
+            "bench",
+            "--target",
+            "gfx950",
+            "--rocjitsu-revision",
+            "a" * 40,
+        ]
+        for name in ("rocjitsu", "client", "library-dir", "reports"):
+            required += ["--" + name, "."]
+        flags = ["--hardware-profile", "first.json", "--hardware-profile", "second.json"]
+        with (
+            patch.object(sys, "argv", required + flags),
+            patch.object(sweep, "run", return_value=0) as run,
+        ):
+            self.assertEqual(sweep.main(), 0)
+            self.assertIsNone(run.call_args.args[0].config)
+            self.assertEqual(
+                run.call_args.args[0].hardware_profiles, [Path("first.json"), Path("second.json")]
+            )
+        with (
+            patch.object(sys, "argv", required + ["--hardware-profile-template", "t.json"]),
+            patch.object(sweep, "run", return_value=0) as run,
+        ):
+            self.assertEqual(sweep.main(), 0)
+            self.assertEqual(
+                run.call_args.args[0].hardware_profile_template, Path("t.json").resolve()
+            )
+        for flags in (
+            ["--hardware-profile-template", "t.json", "--config", "c.json"],
+            ["--hardware-profile-template", "t.json", "--hardware-profile", "first.json"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sys, "stderr", io.StringIO()),
+                patch.object(sweep, "run") as run,
+                self.assertRaises(SystemExit),
+            ):
+                sweep.main()
+
+    def test_native_chip_fallback_is_directed_and_profile_batches_do_not_mix(self):
+        devices = {
+            "mi350": {"device_id": 0x75A0, "simd_count": 1024, "simd_per_cu": 4},
+            "mi355": {"device_id": 0x75A3, "simd_count": 1024, "simd_per_cu": 4},
+        }
+        for chip in (0x75A0, 0x75B0, 0x75A2, 0x75B2, 0x75A3, 0x75B3, 0x75A8, 0x75B8):
+            device = {**devices["mi355"], "device_id": chip}
+            self.assertTrue(
+                plan.matches_hardware({"type": "PciChipId", "value": 0x75A0}, "gfx950", device)
+            )
+            self.assertFalse(
+                plan.matches_hardware(
+                    {"type": "PciChipId", "value": 0x75A2}, "gfx950", devices["mi355"]
+                )
+            )
+        self.assertFalse(
+            plan.matches_hardware(
+                {"type": "PciChipId", "value": 0x75A3}, "gfx950", devices["mi350"]
+            )
+        )
+        self.assertFalse(
+            plan.matches_hardware(
+                {"type": "PciChipId", "value": 0x75A0}, "gfx942", devices["mi350"]
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(4)]
+            for i, record in enumerate(records):
+                record["hardwarePredicate"] = {
+                    "type": "And",
+                    "value": [
+                        {"type": "Processor", "value": "gfx950"},
+                        {"type": "PciChipId", "value": 0x75A0 if i % 2 else 0x75A3},
+                        {"type": "CUCount", "value": 256},
+                    ],
+                }
+            path = root / "library_gfx950.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"kernel")
+            manifest = plan.make_plan(
+                root, "gfx950", {}, 0, 4, plan.REGULAR_POLICY, profiles=devices
+            )
+            self.assertEqual(
+                [j["profile"] for j in manifest["jobs"]],
+                ["mi355", "mi350", "mi355", "mi350"],
+            )
+            batches = plan.make_batches(manifest["jobs"], 64, group_by_shard=True)
+            self.assertEqual([[j["id"] for j in b] for b in batches], [[0, 2], [1, 3]])
+            single = plan.make_plan(
+                root, "gfx950", {}, 0, 4, plan.REGULAR_POLICY, profiles={"mi355": devices["mi355"]}
+            )
+            self.assertEqual(len(plan.make_batches(single["jobs"], 64, group_by_shard=True)), 1)
+
+    def test_devices_derived_from_a_template_cover_the_catalogue_predicates(self):
+        processor = {"type": "Processor", "value": "gfx950"}
+        chip = lambda value: {"type": "PciChipId", "value": value}
+        cus = lambda value: {"type": "CUCount", "value": value}
+        predicates = [
+            processor,
+            {"type": "And", "value": [processor, chip(0x75A0)]},
+            {"type": "And", "value": [processor, cus(128), chip(0x75A0)]},
+            {"type": "And", "value": [processor, {"type": "Or", "value": [chip(0x75A3)]}]},
+            {"type": "And", "value": [processor, cus(256), chip(0x75A8)]},
+            {"type": "Processor", "value": "gfx942"},
+        ]
+        template = {"device_id": 0x75A0, "simd_count": 1024, "simd_per_cu": 4, "other": 1}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for number, shard in enumerate((predicates[:3], predicates[3:])):
+                records = [solution(i + 10 * number) for i in range(len(shard))]
+                for record, predicate in zip(records, shard):
+                    record["hardwarePredicate"] = {"type": "AMDGPU", "value": predicate}
+                path = root / f"shard{number}_gfx950.dat"
+                path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            devices = plan.derive_devices(root, "gfx950", template)
+            self.assertEqual(plan.derive_devices(root, "gfx950", template, workers=2), devices)
+        self.assertEqual(devices[0], template)
+        self.assertEqual(
+            sorted((d["device_id"], d["simd_count"] // 4) for d in devices[1:]),
+            [(0x75A0, 128), (0x75A3, 256), (0x75A8, 256)],
+        )
+        self.assertTrue(all(d["other"] == 1 for d in devices))
+        self.assertEqual(
+            next(d for d in devices if d["device_id"] == 0x75A8)["marketing_name"],
+            "gfx950 emulated PCI 0x75a8, 256 CUs",
+        )
+        for predicate in predicates[:-1]:
+            self.assertTrue(any(plan.matches_hardware(predicate, "gfx950", d) for d in devices))
+
+    def test_template_profiles_are_written_and_identified_by_their_configuration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(2)]
+            records[1]["hardwarePredicate"] = {
+                "type": "And",
+                "value": [
+                    {"type": "Processor", "value": "gfx942"},
+                    {"type": "CUCount", "value": 1},
+                ],
+            }
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"kernel")
+            template = root / "template.json"
+            template.write_text(
+                json.dumps(
+                    {
+                        "vm": {
+                            "gpu": {
+                                "device": {
+                                    "gfx_target_version": 90402,
+                                    "simd_count": 8,
+                                    "simd_per_cu": 4,
+                                    "num_shader_engines": 1,
+                                    "num_shader_arrays_per_engine": 1,
+                                    "num_cu_per_sh": 2,
+                                }
+                            }
+                        },
+                        "topology": {
+                            "root": {
+                                "name": "soc",
+                                "type": "soc",
+                                "children": [{"name": "cu[0:2]", "type": "compute_unit"}],
+                            }
+                        },
+                    }
+                )
+            )
+            failures = root / "failures.yaml"
+            failures.write_text(yaml.safe_dump({**failure_list(), "failures": []}))
+            manifests = []
+            for reports in ("first", "second"):
+                args = SimpleNamespace(
+                    reports=root / reports,
+                    backend="tensile",
+                    workers=1,
+                    policy=plan.POLICY,
+                    target="gfx942",
+                    library_dir=root,
+                    solution_index_range_begin=0,
+                    solution_index_range_end=None,
+                    config=None,
+                    hardware_profiles=None,
+                    hardware_profile_template=template,
+                    rocjitsu=path.with_suffix(".co"),
+                    client=path.with_suffix(".co"),
+                    known_failures=failures,
+                    rocjitsu_revision="a" * 40,
+                    run_known_failures=True,
+                )
+                args.reports.mkdir()
+                manifest, configs = sweep.prepare(args)
+                manifests.append(manifest)
+            self.assertEqual(sorted(configs), ["profile-000", "profile-001"])
+            written = json.loads(configs["profile-001"].read_text())
+            self.assertEqual(written["vm"]["gpu"]["device"]["simd_count"], 4)
+            self.assertEqual(written["topology"], json.loads(template.read_text())["topology"])
+            self.assertEqual([j["profile"] for j in manifest["jobs"]], list(configs))
+            hashes = [{k: p["sha256"] for k, p in m["profiles"].items()} for m in manifests]
+            self.assertEqual(hashes[0], hashes[1])
+
+    def test_explicit_profile_rejects_conflicting_device_and_topology_resources(self):
+        config = {
+            "vm": {
+                "gpu": {
+                    "device": {
+                        "device_id": 0x75A3,
+                        "gfx_target_version": 90500,
+                        "simd_count": 8,
+                        "simd_per_cu": 4,
+                        "num_shader_engines": 1,
+                        "num_shader_arrays_per_engine": 1,
+                        "num_cu_per_sh": 2,
+                    }
+                }
+            },
+            "topology": {
+                "root": {
+                    "name": "soc",
+                    "type": "soc",
+                    "children": [{"name": "cu[0:2]", "type": "compute_unit"}],
+                }
+            },
+        }
+        plan.validate_profile(config, "gfx950")
+        # A product can enable fewer CUs than its topology has slots.
+        partial = copy.deepcopy(config)
+        partial["vm"]["gpu"]["device"]["simd_count"] = 4
+        plan.validate_profile(partial, "gfx950")
+        for field, value in (
+            ("gfx_target_version", 90402),
+            ("simd_count", 9),
+            ("num_cu_per_sh", 3),
+            ("device_id", 123),
+            ("simd_count", 16),
+        ):
+            bad = copy.deepcopy(config)
+            bad["vm"]["gpu"]["device"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                plan.validate_profile(bad, "gfx950")
+
+    def test_abort_retains_completed_record_and_distinguishes_launch_from_no_launch(
+        self,
+    ):
+        jobs = [job() for _ in range(4)]
+        for i, j in enumerate(jobs):
+            j.update(id=i, cases=j["cases"][:1], target_dispatches_per_case=1)
+            j["solutions"][0] = {
+                "index": i,
+                "name": f"solution-{i}",
+                "kernel": f"kernel-{i}",
+            }
+        text = (
+            bench_log(jobs[0])
+            + sweep.target_dispatch_line(jobs[1])
+            + "\n[rj warn] invalid encoding\n"
+        )
+        results = sweep.classify_bench_batch(jobs, text, 1)
+        self.assertEqual(results[0]["warnings"], {})
+        self.assertEqual(
+            [r["outcome"] for r in results],
+            [
+                "VALIDATED_IN_FAILED_PROCESS",
+                "LAUNCHED_NO_RESULT",
+                "UNEXECUTED",
+                "UNEXECUTED",
+            ],
+        )
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1, 0, 0])
+        self.assertEqual(
+            results[0]["cases"][0]["numerical"],
+            {"norm_error": 0, "atol": 0.00001, "rtol": 0.00001},
+        )
+        self.assertFalse(results[0]["index_failed"])
+        self.assertFalse(results[2]["index_failed"])
+        self.assertEqual(results[0]["warnings"], {})
+        self.assertEqual(len(results[0]["process_diagnostics"]["warnings"]), 1)
+        ambiguous = sweep.classify_bench_batch(jobs, bench_log(jobs[2]), 1)
+        self.assertNotIn("UNEXECUTED", [c["status"] for r in ambiguous for c in r["cases"]])
+        wrong_symbol = text.replace('symbol="kernel-1"', 'symbol="wrong"')
+        self.assertNotIn(
+            "UNEXECUTED",
+            [r["outcome"] for r in sweep.classify_bench_batch(jobs, wrong_symbol, 1)],
+        )
+        rejected = sweep.classify_bench_batch(
+            jobs, bench_log(jobs[0]) + "error: NO solution found!\n", 0
+        )
+        self.assertEqual(
+            [r["outcome"] for r in rejected],
+            [
+                "VALIDATED_IN_FAILED_PROCESS",
+                "NATIVE_REJECTED",
+                "UNEXECUTED",
+                "UNEXECUTED",
+            ],
+        )
+
+    def test_recovery_reuses_profile_and_yaml_and_preserves_failed_process(self):
+        self.exercise_recovery()
+
+    def test_recovery_crash_preserves_other_indices_and_original_attempt(self):
+        self.exercise_recovery(recovery_error=True)
+
+    def test_recovery_stops_after_one_batch_with_no_progress(self):
+        self.exercise_recovery(no_progress=True)
+
+    def exercise_recovery(self, recovery_error=False, no_progress=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(4)]
+            for r in records:
+                r["hardwarePredicate"] = {"type": "Processor", "value": "gfx950"}
+            path = root / "library_gfx950.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            client = path.with_suffix(".co")
+            client.write_bytes(b"kernel")
+            for name in (
+                "hipblaslt_gentest.py",
+                "hipblaslt_template.yaml",
+                "hipblaslt_common.yaml",
+            ):
+                (root / name).write_bytes(b"converter")
+            config = root / "config.json"
+            config.write_text(json.dumps({"vm": {"gpu": {"device": {}}}}))
+            failures = root / "failures.yaml"
+            data = failure_list()
+            data["failures"] = []
+            failures.write_text(yaml.safe_dump(data))
+            args = SimpleNamespace(
+                reports=root / "reports",
+                backend="bench",
+                workers=1,
+                batch_size=64,
+                continue_on_failure=True,
+                recover_unexecuted=True,
+                policy=plan.REGULAR_POLICY,
+                timeout=120,
+                suite_timeout=1500,
+                target="gfx950",
+                library_dir=root,
+                solution_index_range_begin=0,
+                solution_index_range_end=4,
+                config=config,
+                rocjitsu=client,
+                client=client,
+                known_failures=failures,
+                rocjitsu_revision="a" * 40,
+                run_known_failures=True,
+            )
+            inputs, configs = [], []
+
+            def execute(command, log, timeout, env):
+                rows = yaml.safe_load(Path(command[-1]).with_suffix(".yaml").read_text())["Tests"]
+                inputs.append(rows)
+                configs.append(command[command.index("--config") + 1])
+                jobs = [
+                    {
+                        "id": row["solution_index"],
+                        "solutions": [
+                            {
+                                "index": row["solution_index"],
+                                "name": f"solution-{row['solution_index']}",
+                                "kernel": f"kernel-{row['solution_index']}",
+                            }
+                        ],
+                        "cases": [
+                            {
+                                "id": "regular",
+                                "shape": [row[k] for k in ("M", "N", "batch_count", "K")],
+                            }
+                        ],
+                        "target_dispatches_per_case": 1,
+                    }
+                    for row in rows
+                ]
+                if no_progress:
+                    log.write_text("")
+                    return 1
+                if len(inputs) == 1:
+                    log.write_text(
+                        bench_log(jobs[0])
+                        + sweep.target_dispatch_line(jobs[1])
+                        + "\n[rj warn] invalid encoding\n"
+                    )
+                    return 1
+                if recovery_error and jobs[0]["id"] == 2:
+                    case = jobs[0]["cases"][0]
+                    log.write_text(
+                        f"[hipblaslt-case-v1] BEGIN 0 {jobs[0]['solutions'][0]['index']} "
+                        + " ".join(map(str, case["shape"]))
+                        + "\n"
+                        + sweep.target_dispatch_line(jobs[0])
+                        + "\n"
+                    )
+                    return 1
+                log.write_text("".join(bench_log(j) for j in jobs))
+                return 0
+
+            with (
+                patch.object(sweep, "physical_cpus", return_value=[0]),
+                patch.object(sweep, "convert_bench_input", return_value=0),
+                patch.object(sweep, "execute_command", side_effect=execute),
+            ):
+                self.assertEqual(sweep.run(args), 1)
+            summary = json.loads((args.reports / "summary.json").read_text())
+            if no_progress:
+                self.assertEqual([len(rows) for rows in inputs], [4, 4])
+                self.assertEqual(summary["outcome_counts"], {"UNEXECUTED": 4})
+                self.assertEqual(summary["numerical_index_counts"], {"INCOMPLETE": 4})
+                self.assertEqual(summary["accounted_cases"], 4)
+                self.assertEqual(summary["recovered_indices"], list(range(4)))
+                self.assertEqual(summary["failed_batch_ids"], [0])
+                self.assertTrue(all(len(r["attempts"]) == 2 for r in summary["results"]))
+                self.assertFalse(summary["passed"])
+                return
+            self.assertEqual(
+                [len(rows) for rows in inputs], [4, 2, 1] if recovery_error else [4, 2]
+            )
+            self.assertEqual(inputs[1], inputs[0][2:])
+            if recovery_error:
+                self.assertEqual(inputs[2], [inputs[0][3]])
+            self.assertEqual(len(set(configs)), 1)
+            self.assertEqual(
+                summary["outcome_counts"],
+                {
+                    "VALIDATED_IN_FAILED_PROCESS": 1,
+                    "LAUNCHED_NO_RESULT": 2 if recovery_error else 1,
+                    "PASS_RECOVERED": 1 if recovery_error else 2,
+                },
+            )
+            self.assertEqual(summary["recovered_indices"], [2, 3])
+            self.assertEqual(summary["failed_batch_ids"], [0])
+            self.assertCountEqual(
+                summary["failed_process_ids"],
+                (["batch-000", "batch-000-recovery-001"] if recovery_error else ["batch-000"]),
+            )
+            self.assertEqual(summary["accounted_cases"], 4)
+            self.assertEqual([r["index"] for r in summary["index_outcomes"]], list(range(4)))
+            self.assertEqual(summary["results"][2]["attempts"][0]["outcome"], "UNEXECUTED")
+            self.assertFalse(summary["passed"])
+
+    def test_batches_preserve_selection_and_group_shards_in_index_range_order(self):
+        jobs = []
+        for i, (shard, index) in enumerate(
+            (("z", 101), ("a", 300), ("z", 100), ("m", 200), ("a", 301))
+        ):
+            j = job()
+            j.update(id=i, library=shard)
+            j["solutions"][0]["index"] = index
+            jobs.append(j)
+        before = copy.deepcopy(jobs)
+        batches = plan.make_batches(jobs, 2, group_by_shard=True)
+        self.assertEqual([[j["id"] for j in b] for b in batches], [[0, 2], [3, 1], [4]])
+        self.assertEqual(jobs, before)
+        self.assertEqual(plan.make_batches([], 8, group_by_shard=True), [])
+        with self.assertRaises(ValueError):
+            plan.make_batches(jobs, 0, group_by_shard=True)
+
+    def test_bench_batch_checks_aliases_and_all_diagnostics(self):
+        jobs = [job(), job(), job()]
+        for i, j in enumerate(jobs):
+            j["id"] = i
+            j["solutions"][0]["index"] += i
+            j["cases"] = j["cases"][:1]
+            j["target_dispatches_per_case"] = 1
+        # All three indices deliberately share the same shape, name and kernel.
+        logs = [bench_log(j) for j in jobs]
+        text = "".join(logs)
+        results = sweep.classify_bench_batch(jobs, text, 0)
+        self.assertTrue(all(not r["failed"] for r in results))
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1, 1])
+        for broken, rc in (
+            (text + "RACE after final record\n", 0),
+            ("[rj warn] before first record\n" + text, 0),
+            (text + "[rj warn] shutdown\n", 0),
+            (text + sweep.target_dispatch_line(jobs[0]) + "\n", 0),
+            (text + logs[-1], 0),
+            ("".join(logs[:1]), 124),
+            (text, -6),
+        ):
+            with self.subTest(output=broken, rc=rc):
+                results = sweep.classify_bench_batch(jobs, broken, rc)
+                self.assertTrue(all(r["failed"] for r in results))
+                self.assertEqual(results[0]["cases"][0]["status"], "PASSED")
+        for broken in (
+            text.replace("--Solution index: 8", "--Solution index: 7"),
+            text.replace("0.00001", "nan", 1),
+            text.replace(sweep.target_dispatch_line(jobs[0]), "wrong symbol", 1),
+            "".join(reversed(logs)),
+            "".join(logs[:1] + logs[2:]),
+        ):
+            with self.subTest(output=broken):
+                self.assertTrue(
+                    any(r["failed"] for r in sweep.classify_bench_batch(jobs, broken, 0))
+                )
+
+    def test_process_diagnostics_preserve_index_results(self):
+        jobs = [job(), job()]
+        for i, j in enumerate(jobs):
+            j.update(id=i, batch_id=0)
+            j["solutions"][0]["index"] = 7 + i
+            j["cases"] = j["cases"][:1]
+            j["target_dispatches_per_case"] = 1
+        for diagnostic, rc in (("RACE example\n", 0), ("", -6)):
+            with self.subTest(diagnostic=diagnostic, rc=rc):
+                results = sweep.classify_bench_batch(
+                    jobs, diagnostic + "".join(bench_log(j) for j in jobs), rc
+                )
+                self.assertTrue(all(r["cases"][0]["status"] == "PASSED" for r in results))
+                manifest = dict(
+                    backend="bench",
+                    solution_index_range={"begin": 7, "end": 9},
+                    policy=plan.REGULAR_POLICY,
+                    preparation_seconds=0,
+                    artifact_fingerprint="test",
+                    jobs=jobs,
+                )
+                report = sweep.render_report(manifest, {"results": results, "passed": False})
+                self.assertNotIn("Failed batches:", report)
+                self.assertNotIn("Batch seconds", report)
+                self.assertIn("| 7 | VALIDATED_IN_FAILED_PROCESS | 1/1 |", report)
+                self.assertIn("| 8 | VALIDATED_IN_FAILED_PROCESS | 1/1 |", report)
+                self.assertNotIn("| FAIL |", report)
+
+    def test_batch_queue_is_asynchronous_and_accounts_for_claimed_indices(self):
+        slow = threading.Event()
+        snapshots = []
+        batches = [[{"id": i}, {"id": i + 1}] for i in (6, 2, 4, 0)]
+
+        def execute(batch, slot):
+            if batch[0]["id"] == 6:
+                self.assertTrue(slow.wait(2))
+            if batch[0]["id"] == 0:
+                slow.set()
+            return [{"id": j["id"], "failed": False, "cases": []} for j in batch]
+
+        result = sweep.run_queue(
+            batches, 2, execute, lambda value: snapshots.append(copy.deepcopy(value))
+        )
+        self.assertEqual(result["assigned_job_ids"], [6, 7, 2, 3, 4, 5, 0, 1])
+        self.assertEqual([r["id"] for r in result["results"]], list(range(8)))
+        self.assertEqual(result["unstarted"], [])
+        self.assertEqual(result["max_active"], 2)
+        self.assertIsNone(result["stop"])
+        self.assertEqual([r["id"] for r in snapshots[0]["completed"]], [2, 3])
+
+    def test_recovery_enters_shared_queue_after_pending_work(self):
+        owner = threading.get_ident()
+        release = threading.Event()
+        starts = []
+        starts_lock = threading.Lock()
+
+        def execute(batch, slot):
+            with starts_lock:
+                starts.append(tuple(j["id"] for j in batch))
+            if batch[0]["id"] == 2:
+                self.assertTrue(release.wait(2))
+            if batch[0]["id"] == 3:
+                release.set()
+            return [
+                {
+                    "id": j["id"],
+                    "failed": j["id"] == 1 and len(batch) == 2,
+                    "outcome": ("UNEXECUTED" if j["id"] == 1 and len(batch) == 2 else "PASS"),
+                    "errors": [],
+                    "cases": [
+                        {"status": ("UNEXECUTED" if j["id"] == 1 and len(batch) == 2 else "PASSED")}
+                    ],
+                }
+                for j in batch
+            ]
+
+        def recover(batch, completed):
+            self.assertEqual(threading.get_ident(), owner)
+            return [[{"id": 1}]] if len(batch) == 2 else []
+
+        result = sweep.run_queue(
+            [[{"id": 0}, {"id": 1}], [{"id": 2}], [{"id": 3}]],
+            2,
+            execute,
+            lambda _: None,
+            continue_on_failure=True,
+            recover=recover,
+        )
+        self.assertLess(starts.index((3,)), starts.index((1,)))
+        self.assertEqual([r["id"] for r in result["results"]], [0, 1, 2, 3])
+        self.assertEqual(result["assigned_job_ids"], [0, 1, 2, 3])
+        self.assertEqual(len(result["results"][1]["attempts"]), 2)
+
+    def test_batched_run_filters_skips_and_preserves_partial_failure_accounting(self):
+        for failure, continuation in (
+            (None, False),
+            ("partial", False),
+            ("race", True),
+            ("exception", False),
+        ):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                reports, summary, invocations = self.exercise_skips(
+                    Path(tmp),
+                    "bench",
+                    ["tile", "mn_edge"],
+                    indices=(7, 8, 9, 10, 11),
+                    batch_size=3,
+                    failure=failure,
+                    continue_on_failure=continuation,
+                )
+                expected = [7, 8, 9, 10, 11] if failure is None or continuation else [7, 8, 9]
+                if failure == "exception":
+                    expected = [7]
+                self.assertEqual(invocations, expected)
+                self.assertEqual(summary["accounted_cases"], 20)
+                self.assertEqual(summary["counts"]["SKIPPED"], 2)
+                self.assertEqual(
+                    len(summary["unstarted_cases"]),
+                    0 if failure is None or continuation else 8,
+                )
+                if failure == "partial":
+                    self.assertEqual(summary["counts"]["PASSED"], 2)
+                    self.assertEqual(len(summary["missing"]), 0)
+                    self.assertEqual(summary["counts"]["UNEXECUTED"], 8)
+                self.assertEqual(summary["passed"], failure is None)
+                for result in summary["results"]:
+                    saved = json.loads(
+                        (reports / f"solution-{result['id']:03}.result.json").read_text()
+                    )
+                    self.assertEqual(saved, result)
+                if failure is None:
+                    inputs = sorted(reports.glob("batch-*.yaml"))
+                    self.assertEqual(len(inputs), 2)
+                    self.assertEqual(
+                        [len(yaml.safe_load(p.read_text())["Tests"]) for p in inputs],
+                        [10, 8],
+                    )
+
+    def test_regular_policy_streams_both_formats_and_preserves_range_prefix(self):
+        from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(7)]
+            for record in records:
+                record["hardwarePredicate"]["value"] = "gfx950"
+            records[4]["sizeMapping"].update(
+                tileProcessingStrategy="StreamK", streamK=3, globalSplitU=0
+            )
+            records[5]["sizeMapping"].update(streamK=3, globalSplitU=0, depthU=256)
+            records[5]["problemType"].update(
+                operationIdentifier="Contraction_l_Alik_Bljk_Cijk_Dijk",
+                transA=True,
+                transB=False,
+                aType="Float4",
+                bType="Float4",
+                cType="Half",
+                dType="Half",
+                mxBlockA=32,
+                mxBlockB=32,
+                mxTypeA="E8",
+                mxTypeB="E8",
+                mxScaleFormat=1,
+            )
+            records[6]["problemType"]["useGateResidual"] = True
+            records[0]["sizeMapping"]["globalSplitU"] = 4
+            path = root / "library_gfx950.dat"
+            path.with_suffix(".co").write_bytes(b"kernel")
+            for indexed in (False, True):
+                with self.subTest(indexed=indexed):
+                    writeMessagePack(path, {"solutions": records, "library": {}}, indexed=indexed)
+                    full = plan.make_plan(root, "gfx950", {}, 0, 6, policy=plan.REGULAR_POLICY)
+                    small = plan.make_plan(root, "gfx950", {}, 0, 2, policy=plan.REGULAR_POLICY)
+                    self.assertEqual(small["jobs"], full["jobs"][:2])
+                    self.assertEqual(full["planned_cases"], 6)
+                    self.assertEqual(full["coverage_gaps"], {"useGateResidual": 1})
+                    selected = next(j for j in full["jobs"] if j["solutions"][0]["index"] == 0)
+                    self.assertEqual(selected["cases"][0]["shape"], [64, 96, 1, 1024])
+                    row = yaml.safe_load(selected["bench_yaml"])[0]
+                    self.assertEqual(
+                        (row["iters"], row["cold_iters"], row["solution_index"]),
+                        (0, 0, 0),
+                    )
+                    self.assertEqual(row["lda"], 64)
+                    persistent = next(j for j in full["jobs"] if j["solutions"][0]["index"] == 4)
+                    self.assertEqual(persistent["cases"][0]["shape"], [64, 96, 1, 256])
+                    mx = next(j for j in full["jobs"] if j["solutions"][0]["index"] == 5)
+                    self.assertEqual(mx["cases"][0]["shape"], [64, 96, 1, 2048])
+                    row = yaml.safe_load(mx["bench_yaml"])[0]
+                    self.assertEqual(
+                        (row["scaleA"], row["scaleB"], row["initialization"]),
+                        (1001, 1001, "hpl"),
+                    )
+            records[0]["sizeMapping"]["globalSplitU"] = 0
+            writeMessagePack(path, {"solutions": records, "library": {}}, indexed=True)
+            with self.assertRaisesRegex(ValueError, "invalid globalSplitU"):
+                plan.make_plan(root, "gfx950", {}, 0, None, policy=plan.REGULAR_POLICY)
+
+    def test_complex_regular_bench_requires_one_dispatch_and_identity(self):
+        j = job()
+        j.update(
+            cases=[{"id": "regular", "shape": [64, 96, 1, 256]}],
+            target_dispatches_per_case=1,
+        )
+        text = bench_log(j)
+        text = text.replace("k,norm_error", "k,alpha,beta,norm_error").replace(
+            "64,96,1,256,0,", "64,96,1,256,(1,0),(0,0),0,"
+        )
+        self.assertFalse(sweep.classify_bench(j, text, 0)["failed"])
+        for bad in (
+            text + sweep.target_dispatch_line(j) + "\n",
+            text.replace("--Solution index: 7", "--Solution index: 8"),
+            text + "RACE test\nEND_RACE\n",
+        ):
+            self.assertTrue(sweep.classify_bench(j, bad, 0)["failed"])
+
+    def test_bench_conversion_uses_matching_template_and_active_interpreter(self):
+        directory = Path(__file__).resolve().parents[2] / "tests"
+        template = directory / "data/hipblaslt_template.yaml"
+        if not (directory / "hipblaslt_gentest.py").is_file():
+            prefix = Path(os.environ.get("ROCM_PATH", Path(__file__).resolve().parents[4]))
+            directory = prefix / "bin"
+            template = directory / "hipblaslt_template.yaml"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, source in (
+                ("hipblaslt_gentest.py", directory / "hipblaslt_gentest.py"),
+                ("hipblaslt_template.yaml", template),
+                ("hipblaslt_common.yaml", template.with_name("hipblaslt_common.yaml")),
+            ):
+                (root / name).write_bytes(source.read_bytes())
+            stem = root / "input"
+            stem.with_suffix(".yaml").write_text(
+                "Tests:\n" + yaml.safe_dump(sweep.bench_options(job()))
+            )
+            self.assertEqual(
+                sweep.convert_bench_input(root / "bench", stem, 10, os.environ.copy()),
+                0,
+                stem.with_suffix(".conversion.log").read_text(),
+            )
+            self.assertTrue(stem.with_suffix(".data").read_bytes().startswith(b"hipBLASLt\0"))
+            command = json.loads(stem.with_suffix(".conversion.command.json").read_text())
+            self.assertEqual(command[0], sys.executable)
+
+    def test_known_failures_follow_kernel_names_across_artifact_changes(self):
+        j = job()
+        j["code_objects"] = ["kernel.co"]
+        original = {
+            "target": "gfx942",
+            "backend": "tensile",
+            "policy": plan.POLICY,
+            "input_sha256": {"library.dat": "1" * 64, "kernel.co": "2" * 64},
+            "jobs": [j],
+        }
+        data = failure_list()
+        data["failures"][0]["cases"] = ["tile"]
+        data["failures"][0]["backends"] = ["tensile"]
+        for difference in (
+            None,
+            "index",
+            "metadata",
+            "code",
+            "solution",
+            "kernel",
+            "target",
+            "backend",
+            "planning",
+        ):
+            with self.subTest(difference=difference):
+                manifest = copy.deepcopy(original)
+                if difference == "index":
+                    manifest["jobs"][0]["solutions"][0]["index"] = 8
+                elif difference == "metadata":
+                    manifest["input_sha256"]["library.dat"] = "3" * 64
+                elif difference == "code":
+                    manifest["input_sha256"]["kernel.co"] = "3" * 64
+                elif difference == "solution":
+                    manifest["jobs"][0]["solutions"][0]["name"] = "different-settings"
+                elif difference == "kernel":
+                    manifest["jobs"][0]["solutions"][0]["kernel"] = "different-kernel"
+                elif difference == "target":
+                    manifest["target"] = "gfx950"
+                elif difference == "backend":
+                    manifest["backend"] = "bench"
+                elif difference == "planning":
+                    manifest["jobs"][0]["planning_error"] = "Missing code object"
+                before = copy.deepcopy(manifest["jobs"])
+                apply_known_failures(manifest, yaml.safe_dump(data), "a" * 40)
+                cases = manifest["jobs"][0]["cases"]
+                self.assertEqual(
+                    [c["id"] for c in cases if c.get("skip")],
+                    (
+                        ["tile"]
+                        if difference in (None, "index", "metadata", "code", "solution")
+                        else []
+                    ),
+                )
+                for case in cases:
+                    case.pop("skip", None)
+                self.assertEqual(
+                    manifest["jobs"],
+                    before,
+                    "skips must not replace or reshape selections",
+                )
+
+    def test_kernel_skip_applies_to_every_solution_using_the_name(self):
+        jobs = [job(), job(), job()]
+        for i, j in enumerate(jobs):
+            j["id"] = i
+            j["solutions"][0].update(index=7 + i, name=f"solution-{7 + i}")
+        jobs[1]["cases"][0]["shape"] = [128, 192, 1, 256]
+        jobs[2]["solutions"][0]["kernel"] = "different-kernel"
+        manifest = {
+            "target": "gfx942",
+            "backend": "tensile",
+            "policy": plan.POLICY,
+            "jobs": jobs,
+        }
+        data = failure_list()
+        data["failures"][0]["cases"] = ["tile"]
+        apply_known_failures(manifest, yaml.safe_dump(data), "a" * 40)
+        self.assertEqual(manifest["known_failures"]["skipped_cases"], 2)
+        self.assertEqual(
+            [[c["id"] for c in j["cases"] if c.get("skip")] for j in jobs],
+            [["tile"], ["tile"], []],
+        )
+
+    def test_known_failure_schema_revision_and_overlap_guards(self):
+        for change in (
+            "missing_tracking",
+            "bad_case",
+            "bad_name",
+            "unknown_key",
+        ):
+            with self.subTest(change=change):
+                data = failure_list()
+                entry = data["failures"][0]
+                if change == "missing_tracking":
+                    entry["tracking"] = []
+                elif change == "bad_case":
+                    entry["cases"] = ["typo"]
+                elif change == "bad_name":
+                    entry["kernel_names"] = [7]
+                else:
+                    entry["case"] = ["tile"]
+                with self.assertRaises(ValueError):
+                    known_failures(yaml.safe_dump(data))
+        for change in ("revision", "policy", "overlap"):
+            with self.subTest(change=change):
+                data = failure_list()
+                manifest = {
+                    "target": "gfx942",
+                    "backend": "tensile",
+                    "policy": plan.POLICY,
+                    "input_sha256": {"library.dat": "1" * 64, "kernel.co": "2" * 64},
+                    "jobs": [{**job(), "code_objects": ["kernel.co"]}],
+                }
+                revision = "a" * 40
+                if change == "revision":
+                    revision = "b" * 40
+                elif change == "policy":
+                    manifest["policy"] = "new-policy"
+                else:
+                    duplicate = copy.deepcopy(data["failures"][0])
+                    duplicate["id"] = "overlap"
+                    data["failures"].append(duplicate)
+                with self.assertRaises(ValueError):
+                    apply_known_failures(manifest, yaml.safe_dump(data), revision)
+
+    def exercise_skips(
+        self,
+        root,
+        backend,
+        cases,
+        indices=(7, 8),
+        recheck=False,
+        failure=None,
+        batch_size=1,
+        continue_on_failure=False,
+        suite_timeout=None,
+        reports_name="reports",
+        resume_from=None,
+        expected_exit=None,
+    ):
+        """Use the real planner/list/runner; only the native subprocess is simulated."""
+        library = root / "library_gfx942.dat"
+        library.write_bytes(
+            msgpack.packb({"solutions": [solution(i) for i in indices]}, use_bin_type=True)
+        )
+        code_object = root / "library_gfx942.co"
+        code_object.write_bytes(b"kernel")
+        for name in (
+            "hipblaslt_gentest.py",
+            "hipblaslt_template.yaml",
+            "hipblaslt_common.yaml",
+        ):
+            (root / name).write_bytes(b"test-conversion-tool")
+        config = root / "config.json"
+        config.write_text(json.dumps({"vm": {"gpu": {"device": {}}}}))
+        data = failure_list()
+        entry = data["failures"][0]
+        entry["cases"] = cases
+        if not cases:
+            data["failures"] = []
+        path = root / "failures.yaml"
+        path.write_text(yaml.safe_dump(data))
+        args = SimpleNamespace(
+            reports=root / reports_name,
+            resume_from=resume_from,
+            backend=backend,
+            workers=1,
+            batch_size=batch_size,
+            continue_on_failure=continue_on_failure,
+            timeout=120,
+            suite_timeout=suite_timeout,
+            target="gfx942",
+            library_dir=root,
+            solution_index_range_begin=min(indices),
+            solution_index_range_end=max(indices) + 1,
+            config=config,
+            rocjitsu=code_object,
+            client=code_object,
+            known_failures=path,
+            rocjitsu_revision=("b" if recheck else "a") * 40,
+            run_known_failures=recheck,
+        )
+        invocations = []
+
+        def execute(command, log, timeout, env):
+            native_input = (
+                Path(command[-1]).with_suffix(".yaml").read_text()
+                if backend == "bench"
+                else Path(command[-1]).read_text()
+            )
+            groups = {}
+            if backend == "tensile":
+                options = [line.split("=", 1) for line in native_input.splitlines()]
+                index = int(next(v for k, v in options if k == "solution-start-idx"))
+                shapes = [list(map(int, v.split(","))) for k, v in options if k == "problem-size"]
+            else:
+                rows = yaml.safe_load(native_input)["Tests"]
+                for row in rows:
+                    groups.setdefault(row["solution_index"], []).append(
+                        [row[k] for k in ("M", "N", "batch_count", "K")]
+                    )
+                self.assertLessEqual(len(groups), batch_size)
+            if backend == "tensile":
+                groups[index] = shapes
+            self.assertGreater(timeout, 120 * (len(groups) - 1))
+            self.assertLessEqual(timeout, 120 * len(groups))
+            outputs = []
+            for index, shapes in groups.items():
+                expected = [
+                    c
+                    for c in plan.derive_cases(solution(index))
+                    if recheck or index != 7 or c["id"] not in cases
+                ]
+                self.assertEqual(
+                    shapes,
+                    [c["shape"] for c in expected],
+                    "known failures reached native input",
+                )
+                invocations.append(index)
+                if failure == "exception":
+                    raise ValueError("native adapter failed")
+                native_job = {
+                    "solutions": [
+                        {
+                            "index": index,
+                            "name": f"solution-{index}",
+                            "kernel": f"kernel-{index}",
+                        }
+                    ],
+                    "cases": expected,
+                }
+                text = success_log(native_job) if backend == "tensile" else bench_log(native_job)
+                outputs.append(text)
+            text = "".join(outputs[:1] if failure == "partial" else outputs)
+            if failure == "race":
+                text += "RACE new finding\nEND_RACE\n"
+            elif failure == "warning":
+                text += "[rj warn] new unsupported instruction\n"
+            elif failure == "dispatch":
+                text = text.replace(sweep.target_dispatch_line(native_job) + "\n", "", 1)
+            elif failure == "numerical":
+                text = (
+                    text.replace(",PASSED", ",FAILED", 1)
+                    if backend == "tensile"
+                    else text.replace("0.00001", "nan", 1)
+                )
+            log.write_text(text)
+            return 124 if failure == "partial" else 0
+
+        with (
+            patch.object(sweep, "physical_cpus", return_value=[0]),
+            patch.object(sweep, "convert_bench_input", return_value=0),
+            patch.object(sweep, "execute_command", side_effect=execute),
+        ):
+            self.assertEqual(
+                sweep.run(args),
+                int(failure is not None) if expected_exit is None else expected_exit,
+            )
+        summary = json.loads((args.reports / "summary.json").read_text())
+        manifest = json.loads((args.reports / "manifest.json").read_text())
+        self.assertEqual(manifest["planned_cases"], 4 * len(indices))
+        self.assertEqual(summary["accounted_cases"], 4 * len(indices))
+        self.assertEqual((args.reports / "known_failures.yaml").read_bytes(), path.read_bytes())
+        self.assertEqual(manifest["known_failures"]["sha256"], plan.sha256(path))
+        return args.reports, summary, invocations
+
+    def test_resume_after_lost_summary_uses_batch_receipts_and_original_indices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", ["tile"], indices=(7, 8, 9))
+            for path in reports.glob("solution-*.result.json"):
+                path.unlink()
+            for name in (
+                "batch-001.result.json",
+                "batch-002.result.json",
+                "summary.json",
+                "progress.json",
+            ):
+                (reports / name).unlink()
+            retained = {p.name: p.read_bytes() for p in reports.iterdir()}
+            resumed, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                ["tile"],
+                indices=(7, 8, 9),
+                reports_name="resumed",
+                resume_from=reports,
+            )
+            self.assertEqual(invocations, [8, 9])
+            self.assertEqual(summary["resume"]["carried_job_ids"], [0])
+            self.assertEqual([r["index"] for r in summary["index_outcomes"]], [7, 8, 9])
+            self.assertEqual(summary["counts"], {"PASSED": 11, "SKIPPED": 1})
+            self.assertEqual(summary["accounted_cases"], 12)
+            self.assertEqual(summary["results"][0]["resumed_from"], str(reports))
+            self.assertTrue(summary["passed"])
+            self.assertFalse(summary["fully_validated"])
+            self.assertEqual({p.name: p.read_bytes() for p in reports.iterdir()}, retained)
+            self.assertTrue((resumed / "solution-000.result.json").exists())
+
+    def test_resume_retains_races_and_executes_unstarted_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, invocations = self.exercise_skips(root, "bench", [], failure="race")
+            self.assertEqual(invocations, [7])
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                reports_name="resumed",
+                resume_from=reports,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [8])
+            self.assertFalse(summary["passed"])
+            self.assertEqual(summary["counts"], {"PASSED": 8})
+            self.assertEqual(summary["failed_batch_ids"], [])
+            self.assertEqual(summary["resume"]["prior_failed_process_ids"], ["batch-000"])
+            self.assertTrue(summary["results"][0]["process_diagnostics"]["race_headers"])
+
+    def test_resume_retries_timeout_without_erasing_previous_attempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [], failure="partial", batch_size=2)
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                batch_size=1,
+                reports_name="resumed",
+                resume_from=reports,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [7, 8])
+            self.assertEqual(summary["resume"]["retry_job_ids"], [0, 1])
+            self.assertEqual(summary["accounted_cases"], 8)
+            self.assertEqual(summary["outcome_counts"], {"PASS_RECOVERED": 2})
+            self.assertEqual(summary["failed_batch_ids"], [])
+            for result in summary["results"]:
+                self.assertEqual(result["attempts"][0]["returncode"], 124)
+                self.assertEqual(result["attempts"][1]["returncode"], 0)
+                self.assertTrue(result["failed"])
+
+    def test_resume_complete_selection_never_launches_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [], indices=(7, 8, 9))
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                indices=(7, 8, 9),
+                reports_name="resumed",
+                resume_from=reports,
+            )
+            self.assertEqual(invocations, [])
+            self.assertTrue(summary["fully_validated"])
+            self.assertEqual(summary["processes"], [])
+            self.assertEqual(summary["accounted_cases"], 12)
+
+    def test_resume_complete_selection_still_honors_preparation_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [])
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                reports_name="resumed",
+                resume_from=reports,
+                suite_timeout=1e-12,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [])
+            self.assertEqual(summary["stop"]["reason"], "suite-timeout")
+            self.assertEqual(summary["accounted_cases"], 8)
+            self.assertFalse(summary["passed"])
+
+    def test_resume_rejects_changed_artifacts_tools_profiles_policy_and_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [])
+            original = json.loads((reports / "manifest.json").read_text())
+            changes = {
+                "artifact_fingerprint": "new library",
+                "tools": {},
+                "rocjitsu_revision": "b" * 40,
+                "known_failures": {},
+                "solution_index_range": {"begin": 8, "end": 9},
+                "backend": "tensile",
+                "policy": "new policy",
+                "case_parameters": {"reduction_blocks": 3, "alpha": 2, "beta": 1},
+                "profiles": {"default": {"sha256": "new profile"}},
+                "jobs": [{**original["jobs"][0], "cases": []}],
+            }
+            for key, value in changes.items():
+                with self.subTest(key=key):
+                    manifest = copy.deepcopy(original)
+                    manifest[key] = value
+                    with self.assertRaisesRegex(ValueError, "Cannot resume"):
+                        sweep.resume_results(reports, manifest)
+
+    def test_resume_old_regular_manifest_uses_its_fixed_default_scalars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY)
+            manifest.update(
+                backend="bench",
+                tools={},
+                rocjitsu_revision="a" * 40,
+                known_failures={},
+                profiles={"default": {"sha256": "profile"}},
+            )
+            legacy = copy.deepcopy(manifest)
+            del legacy["case_parameters"]
+            (root / "manifest.json").write_text(json.dumps(legacy))
+            self.assertEqual(sweep.resume_results(root, manifest)[0], [])
+            variant = copy.deepcopy(manifest)
+            variant["case_parameters"]["beta"] = 1
+            with self.assertRaisesRegex(ValueError, "case_parameters changed"):
+                sweep.resume_results(root, variant)
+
+    def test_resume_an_interrupted_continuation_retains_carried_and_retry_evidence(self):
+        for failure in ("race", "partial"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                reports, _, _ = self.exercise_skips(
+                    root, "bench", [], failure=failure, batch_size=2
+                )
+                with (
+                    patch.object(
+                        sweep, "run_queue", side_effect=RuntimeError("orchestration shutdown")
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "orchestration shutdown"),
+                ):
+                    self.exercise_skips(
+                        root,
+                        "bench",
+                        [],
+                        reports_name="interrupted",
+                        resume_from=reports,
+                    )
+                _, summary, invocations = self.exercise_skips(
+                    root,
+                    "bench",
+                    [],
+                    reports_name="resumed",
+                    resume_from=root / "interrupted",
+                    expected_exit=1,
+                )
+                self.assertEqual(invocations, [7, 8] if failure == "partial" else [])
+                self.assertFalse(summary["passed"])
+                self.assertEqual(summary["accounted_cases"], 8)
+                if failure == "partial":
+                    self.assertEqual(summary["results"][1]["attempts"][0]["returncode"], 124)
+                else:
+                    self.assertTrue(summary["results"][0]["process_diagnostics"]["race_headers"])
+
+    def test_resume_batch_only_recovery_retains_original_failed_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [], failure="partial", batch_size=2)
+            manifest = json.loads((reports / "manifest.json").read_text())
+            recovered_job = manifest["jobs"][1]
+            recovered = sweep.classify_bench_batch([recovered_job], bench_log(recovered_job), 0)[0]
+            recovered.update(batch_id=0, attempt_id="batch-000-recovery-001")
+            sweep.write_json(
+                reports / "batch-000-recovery-001.result.json", {"results": [recovered]}
+            )
+            for path in reports.glob("solution-*.result.json"):
+                path.unlink()
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                reports_name="resumed",
+                resume_from=reports,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [7])
+            result = summary["results"][1]
+            self.assertEqual(result["outcome"], "PASS_RECOVERED")
+            self.assertEqual(result["attempts"][0]["outcome"], "UNEXECUTED")
+            self.assertEqual(result["attempts"][1]["outcome"], "PASS")
+            self.assertTrue(result["failed"])
+
+    def test_resume_keeps_qualified_index_after_later_infrastructure_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports, _, _ = self.exercise_skips(Path(tmp), "bench", [])
+            manifest = json.loads((reports / "manifest.json").read_text())
+            prior = json.loads((reports / "solution-000.result.json").read_text())
+            error = {
+                "id": prior["id"],
+                "failed": True,
+                "outcome": "INFRASTRUCTURE_ERROR",
+                "errors": ["report write failed"],
+                "cases": [
+                    {
+                        "case_id": c["case_id"],
+                        "shape": c["shape"],
+                        "status": "INFRASTRUCTURE_ERROR",
+                    }
+                    for c in prior["cases"]
+                ],
+            }
+            sweep.write_json(reports / "batch-999.result.json", {"results": [error]})
+            (reports / "solution-000.result.json").unlink()
+            carried, retry = sweep.resume_results(reports, manifest)
+            retained = next(r for r in carried if r["id"] == prior["id"])
+            self.assertEqual(retry, {})
+            self.assertEqual(retained["outcome"], "PASS_RETAINED")
+            self.assertTrue(retained["failed"])
+            self.assertEqual(sweep.numerical_index_counts([retained]), {"PASSED": 1})
+            self.assertEqual(retained["latest_attempt_errors"], ["report write failed"])
+
+    def test_progress_checkpoints_do_not_rewrite_full_reports_for_every_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            writes = []
+            write = sweep.write_text
+
+            def record(path, value):
+                writes.append(path.name)
+                write(path, value)
+
+            with (
+                patch.object(sweep, "write_text", side_effect=record),
+                patch.object(sweep, "CHECKPOINT_SECONDS", float("inf")),
+            ):
+                reports, summary, _ = self.exercise_skips(
+                    Path(tmp),
+                    "bench",
+                    [],
+                    indices=(7, 8, 9, 10, 11),
+                )
+            self.assertEqual(writes.count("summary.md"), 3)
+            self.assertEqual(writes.count("progress.json"), 1)
+            self.assertEqual(len(list(reports.glob("solution-*.result.json"))), 5)
+            self.assertEqual(summary["accounted_cases"], 20)
+
+    def test_optional_suite_deadline_preserves_per_batch_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports, summary, invocations = self.exercise_skips(
+                Path(tmp), "bench", ["tile"], recheck=True
+            )
+            self.assertEqual(invocations, [7, 8])
+            self.assertTrue(summary["fully_validated"])
+            self.assertIsNone(summary["suite_timeout"])
+            self.assertIsNone(json.loads((reports / "settings.json").read_text())["suite_timeout"])
+
+    def test_full_and_partial_skips_filter_inputs_and_allow_following_jobs(self):
+        for backend in ("tensile", "bench"):
+            for cases, indices in (
+                ([c["id"] for c in job()["cases"]], (7,)),
+                ([c["id"] for c in job()["cases"]], (7, 8)),
+                (["tile", "mn_edge"], (7, 8)),
+            ):
+                with (
+                    self.subTest(backend=backend, cases=cases, indices=indices),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    reports, summary, invocations = self.exercise_skips(
+                        Path(tmp), backend, cases, indices
+                    )
+                    self.assertEqual(invocations, [i for i in indices if i != 7 or len(cases) < 4])
+                    self.assertEqual(
+                        summary["counts"].get("PASSED", 0),
+                        4 * len(indices) - len(cases),
+                    )
+                    self.assertEqual(summary["counts"]["SKIPPED"], len(cases))
+                    self.assertEqual(summary["missing"], [])
+                    self.assertEqual(summary["unstarted_cases"], [])
+                    self.assertTrue(summary["passed"])
+                    self.assertFalse(summary["fully_validated"])
+                    self.assertIsNone(summary["stop"])
+                    self.assertIn(
+                        "Run status: PASS WITH SKIPS.",
+                        (reports / "summary.md").read_text(),
+                    )
+                    for case in summary["results"][0]["cases"]:
+                        if case["status"] == "SKIPPED":
+                            self.assertEqual(case["target_dispatches"], 0)
+                            self.assertIn("12963", case["known_failure"]["tracking"][0])
+                    if len(cases) == 4:
+                        self.assertIsNone(summary["results"][0]["returncode"])
+                        self.assertEqual(summary["results"][0]["target_dispatches"], 0)
+                        self.assertFalse((reports / "batch-000.command.json").exists())
+
+    def test_remaining_case_failures_still_stop_the_sweep(self):
+        for backend in ("tensile", "bench"):
+            for failure in ("race", "warning", "dispatch", "numerical", "exception"):
+                with (
+                    self.subTest(backend=backend, failure=failure),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    _, summary, invocations = self.exercise_skips(
+                        Path(tmp), backend, ["tile", "mn_edge"], failure=failure
+                    )
+                    self.assertEqual(invocations, [7])
+                    self.assertFalse(summary["passed"])
+                    self.assertFalse(summary["fully_validated"])
+                    self.assertEqual(summary["stop"]["reason"], "job-failure")
+                    self.assertEqual(summary["counts"]["SKIPPED"], 2)
+                    self.assertEqual(len(summary["unstarted_cases"]), 4)
+                    if failure == "exception":
+                        self.assertEqual(summary["counts"]["INFRASTRUCTURE_ERROR"], 2)
+                        self.assertEqual(len(summary["missing"]), 0)
+
+    def test_recheck_executes_known_cases_and_keeps_strict_validation(self):
+        for backend in ("tensile", "bench"):
+            for failure in (None, "race"):
+                with (
+                    self.subTest(backend=backend, failure=failure),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    _, summary, invocations = self.exercise_skips(
+                        Path(tmp),
+                        backend,
+                        [c["id"] for c in job()["cases"]],
+                        recheck=True,
+                        failure=failure,
+                    )
+                    self.assertEqual(invocations, [7] if failure else [7, 8])
+                    self.assertEqual(summary["counts"].get("SKIPPED", 0), 0)
+                    self.assertEqual(summary["fully_validated"], failure is None)
+
+    def test_shipped_known_failures_are_valid(self):
+        data = known_failures(Path(sweep.__file__).with_name("known_failures.yaml").read_text())
+        self.assertTrue(data["rocjitsu_revision"])
+
+    def test_native_and_compressed_messagepack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "library_gfx942.co").write_bytes(b"object")
+            payload = msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
+            for name, data in [
+                ("library_gfx942.dat", payload),
+                ("library_gfx942.dat.zlib", zlib.compress(payload)),
+            ]:
+                path = root / name
+                path.write_bytes(data)
+                manifest = plan.make_plan(root, "gfx942", {}, 7, 8)
+                self.assertEqual(manifest["jobs"][0]["solutions"][0]["index"], 7)
+
+    def test_corrupt_metadata_is_rejected_before_inventory(self):
+        payload = msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "library_gfx942.dat.zlib"
+            for data in (
+                zlib.compress(payload) + b"trailing",
+                zlib.compress(payload)[:-1],
+            ):
+                with self.subTest(data=data[-8:]):
+                    path.write_bytes(data)
+                    with self.assertRaises(ValueError):
+                        plan.make_plan(root, "gfx942", {}, 7, 8)
+            path.unlink()
+            path = root / "library_gfx942.dat"
+            path.write_bytes(payload + payload)
+            with self.assertRaises(ValueError):
+                plan.make_plan(root, "gfx942", {}, 7, 8)
+
+    def test_hardware_constraints_are_not_bypassed(self):
+        device = {"device_id": 0x74A1, "simd_count": 1216, "simd_per_cu": 4}
+        predicate = {
+            "type": "AMDGPU",
+            "value": {
+                "type": "And",
+                "value": [
+                    {"type": "Processor", "value": "gfx942"},
+                    {"type": "CUCount", "value": 304},
+                ],
+            },
+        }
+        self.assertTrue(plan.matches_hardware(predicate, "gfx942", device))
+        self.assertFalse(plan.matches_hardware(predicate, "gfx950", device))
+        self.assertFalse(plan.matches_hardware({"type": "Unknown"}, "gfx942", device))
+
+    def test_cli_batch_defaults_and_limits(self):
+        required = [
+            "sweep",
+            "--target",
+            "gfx942",
+            "--rocjitsu-revision",
+            "a" * 40,
+        ]
+        for name in ("rocjitsu", "client", "config", "library-dir", "reports"):
+            required += ["--" + name, "."]
+        for backend, flags, size in (
+            ("bench", [], 32),
+            ("tensile", [], 1),
+            (
+                "bench",
+                ["--batch-size", "16", "--workers", "8", "--continue-on-failure"],
+                16,
+            ),
+            ("bench", ["--workers", "64", "--recover-unexecuted"], 32),
+            ("bench", ["--workers", "96"], 32),
+        ):
+            with (
+                self.subTest(backend=backend, flags=flags),
+                patch.object(sys, "argv", required + ["--backend", backend] + flags),
+                patch.object(sweep, "run", return_value=0) as run,
+            ):
+                self.assertEqual(sweep.main(), 0)
+                self.assertEqual(run.call_args.args[0].batch_size, size)
+                self.assertEqual(
+                    run.call_args.args[0].continue_on_failure,
+                    "--continue-on-failure" in flags,
+                )
+        for flags in (
+            ["--backend", "tensile", "--batch-size", "2"],
+            ["--backend", "bench", "--batch-size", "0"],
+            ["--backend", "bench", "--workers", "0"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sys, "stderr", io.StringIO()),
+                patch.object(sweep, "run") as run,
+            ):
+                with self.assertRaises(SystemExit):
+                    sweep.main()
+                run.assert_not_called()
+
+    def test_shapes_follow_each_kernels_tile_and_depth(self):
+        first, second = plan.derive_cases(solution(0)), plan.derive_cases(
+            solution(1, (128, 32, 1), 64)
+        )
+        self.assertEqual(first[0]["shape"], [64, 96, 1, 32])
+        self.assertEqual(second[0]["shape"], [128, 32, 1, 64])
+        self.assertTrue(first[2]["m_tail"] and first[2]["n_tail"] and first[3]["k_tail"])
+        self.assertEqual(len({tuple(c["shape"]) for c in first}), 4)
+
+    def test_size_constraints_adjust_shapes_without_bypassing_them(self):
+        s = solution(0)
+        s["problemPredicate"]["value"] = [
+            {"type": "LeadingFree0SizesGreaterOrEqual", "value": 128},
+            {"type": "Free0SizeMultiple", "index": 0, "value": 8},
+            {"type": "BoundSizeMultiple", "index": -1, "value": 32},
+            {"type": "GlobalSplitUCheckMinK", "value": [32, 4]},
+        ]
+        cases = plan.derive_cases(s)
+        self.assertTrue(
+            all(
+                c["shape"][0] >= 128 and c["shape"][0] % 8 == 0 and c["shape"][3] >= 128
+                for c in cases
+            )
+        )
+        self.assertTrue(all(not c["k_tail"] for c in cases))
+        s["problemPredicate"]["value"].append({"type": "SizeLessThan", "index": 0, "value": 64})
+        with self.assertRaisesRegex(ValueError, "constraints"):
+            plan.derive_cases(s)
+
+    def test_jit_plan_uses_current_metadata_and_keeps_unschedulable_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "library_gfx942.dat.zlib"
+            (root / "library_gfx942.co").write_bytes(b"object")
+            s = solution(7)
+
+            def write(s):
+                path.write_bytes(
+                    zlib.compress(msgpack.packb({"solutions": [s]}, use_bin_type=True))
+                )
+
+            write(s)
+            device = {"device_id": 0x74A1, "simd_count": 1216, "simd_per_cu": 4}
+            first = plan.make_plan(root, "gfx942", device, 0, None)
+            s["sizeMapping"]["depthU"] = 64
+            write(s)
+            second = plan.make_plan(root, "gfx942", device, 0, None)
+            self.assertNotEqual(first["artifact_fingerprint"], second["artifact_fingerprint"])
+            self.assertNotEqual(first["jobs"][0]["cases"], second["jobs"][0]["cases"])
+            s["sizeMapping"]["macroTile"] = [8192, 8192, 1]
+            write(s)
+            failed = plan.make_plan(root, "gfx942", device, 0, None)
+            self.assertEqual(failed["jobs"][0]["solutions"][0]["index"], 7)
+            self.assertIn("planning_error", failed["jobs"][0])
+            self.assertEqual(len(failed["jobs"][0]["cases"]), 4)
+
+    def test_ranges_include_aliases_and_keep_unsupported_solutions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first, alias, unsupported = solution(7), solution(8), solution(9)
+            alias["kernelName"] = first["kernelName"]
+            alias["name"] = first["name"]
+            unsupported["problemType"]["groupedGemm"] = True
+            (root / "library_gfx942.dat").write_bytes(
+                msgpack.packb({"solutions": [first, alias, unsupported]}, use_bin_type=True)
+            )
+            (root / "library_gfx942.co").write_bytes(b"object")
+            result = plan.make_plan(root, "gfx942", {}, 7, 10)
+            self.assertEqual(result["selection"], "solution-index-range")
+            self.assertEqual(result["kernels"], 2)
+            self.assertEqual(result["planned_cases"], 12)
+            self.assertEqual([j["solutions"][0]["index"] for j in result["jobs"]], [7, 8, 9])
+            self.assertIn("outside the client adapter scope", result["jobs"][2]["planning_error"])
+            full = plan.make_plan(root, "gfx942", {})
+            self.assertEqual(full["selection"], "solution-index-range")
+            self.assertEqual(full["solutions"], 3)
+            self.assertEqual(full["inventory"]["outside_adapter_scope"], 1)
+            self.assertEqual(full["jobs"], result["jobs"])
+            with self.assertRaisesRegex(ValueError, "No solution indices"):
+                plan.make_plan(root, "gfx942", {}, 10, 11)
+
+    def test_native_metadata_stays_authoritative_for_each_adapter(self):
+        j = job()
+        self.assertEqual(sweep.client_options(j, Path("results"))["solution-start-idx"], 7)
+        rows = sweep.bench_options(j)
+        self.assertEqual([r["K"] for r in rows], [c["shape"][3] for c in j["cases"]])
+        self.assertTrue(all(r["solution_index"] == 7 and r["algo_method"] == 2 for r in rows))
+        self.assertTrue(
+            all(r["norm_check"] and r["norm_check_assert"] and r["allclose_check"] for r in rows)
+        )
+
+    def test_bench_preserves_fnuz_compute_inputs_with_half_storage(self):
+        # Shipping solution 236890 stores Half but computes with two FNUZ formats.
+        j = job()
+        j["problem_type"].update(
+            aType="Half",
+            bType="Half",
+            cType="Half",
+            dType="Half",
+            computeInputTypeA="Float8_fnuz",
+            computeInputTypeB="BFloat8_fnuz",
+        )
+        rows = sweep.bench_options(j)
+        self.assertTrue(all(r["a_type"] == r["b_type"] == "f16_r" for r in rows))
+        self.assertTrue(all(r["compute_input_typeA"] == "f8_fnuz_r" for r in rows))
+        self.assertTrue(all(r["compute_input_typeB"] == "bf8_fnuz_r" for r in rows))
+
+    def test_integer_bench_inputs_use_native_compute_type(self):
+        # Bench accepts INT8 storage, but rejects an explicit INT8 compute-input
+        # override. Its unset default selects the integer path from compute_type.
+        for output_type, bench_type in (("Int8", "i8_r"), ("Int32", "i32_r")):
+            with self.subTest(output_type=output_type):
+                j = job()
+                j["problem_type"].update(
+                    aType="Int8",
+                    bType="Int8",
+                    cType=output_type,
+                    dType=output_type,
+                    computeType="Int32",
+                    computeInputTypeA="Int8",
+                    computeInputTypeB="Int8",
+                )
+                for row in sweep.bench_options(j):
+                    self.assertEqual(row["a_type"], "i8_r")
+                    self.assertEqual(row["b_type"], "i8_r")
+                    self.assertEqual(row["d_type"], bench_type)
+                    self.assertEqual(row["compute_type"], "c_i32_r")
+                    self.assertNotIn("compute_input_typeA", row)
+                    self.assertNotIn("compute_input_typeB", row)
+
+    def test_duplicate_artifact_indices_fail_before_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for shard in ("first", "second"):
+                (root / f"{shard}_gfx942.dat").write_bytes(
+                    msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True)
+                )
+            with self.assertRaisesRegex(ValueError, "Duplicate solution index 7"):
+                plan.make_plan(root, "gfx942", {}, 0, None)
+
+    def test_run_accounts_for_unsupported_and_unstarted_cases(self):
+        jobs = [job(), job()]
+        jobs[0]["planning_error"] = "No bounded shapes"
+        jobs[0]["cases"] = [{"id": c["id"], "shape": None} for c in jobs[0]["cases"]]
+        jobs[1]["id"] = 1
+        manifest = {
+            "jobs": jobs,
+            "library_dir": "unused",
+            "artifact_fingerprint": "test",
+            "planned_cases": 8,
+            "solution_index_range": {"begin": 0, "end": None},
+            "policy": plan.POLICY,
+            "preparation_seconds": 0,
+        }
+        for backend in ("tensile", "bench"):
+            manifest["backend"] = backend
+            with tempfile.TemporaryDirectory() as tmp:
+                args = SimpleNamespace(
+                    reports=Path(tmp) / "reports",
+                    backend=backend,
+                    workers=1,
+                    batch_size=1,
+                    timeout=1,
+                    suite_timeout=1500,
+                )
+                with (
+                    patch.object(sweep, "prepare", return_value=(manifest, None)),
+                    patch.object(sweep, "physical_cpus", return_value=[0]),
+                    patch.object(sweep, "execute_command") as execute,
+                ):
+                    self.assertEqual(sweep.run(args), 1)
+                    execute.assert_not_called()
+                summary = json.loads((args.reports / "summary.json").read_text())
+                self.assertEqual(summary["counts"], {"INVALID_INPUT": 4})
+                self.assertEqual(len(summary["unstarted_cases"]), 4)
+                self.assertEqual(summary["missing"], [])
+                self.assertEqual(summary["accounted_cases"], 8)
+                self.assertFalse(summary["passed"])
+                report = (args.reports / "summary.md").read_text()
+                self.assertIn("| 7 | INVALID_INPUT | 0/4 | 0/", report)
+                self.assertIn("| 7 | NOT RUN |", report)
+                self.assertIn("Run status: FAIL.", report)
+
+    def test_suite_budget_charges_preparation_and_preserves_accounting(self):
+        for backend in ("tensile", "bench"):
+            for phase in ("preparation", "process", "completed", "within_budget"):
+                with (
+                    self.subTest(backend=backend, phase=phase),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    jobs = [job() for _ in range(2 if phase in ("preparation", "process") else 1)]
+                    for n, j in enumerate(jobs):
+                        j.update(id=n, code_objects=[])
+                    manifest = {
+                        "jobs": jobs,
+                        "backend": backend,
+                        "library_dir": "unused",
+                        "artifact_fingerprint": "test",
+                        "planned_cases": 4 * len(jobs),
+                        "solution_index_range": {"begin": 0, "end": None},
+                        "policy": plan.POLICY,
+                        "preparation_seconds": 2,
+                    }
+                    args = SimpleNamespace(
+                        reports=Path(tmp) / "reports",
+                        backend=backend,
+                        workers=1,
+                        batch_size=1,
+                        timeout=120,
+                        suite_timeout=5,
+                        rocjitsu=Path("emulator"),
+                        client=Path("client"),
+                    )
+                    clock = [0]
+
+                    def prepare(_):
+                        clock[0] = 6 if phase == "preparation" else 2
+                        return manifest, {"default": Path("config")}
+
+                    def execute(command, log, timeout, env):
+                        # Preparation leaves only three of the five seconds.
+                        self.assertEqual(timeout, 3)
+                        clock[0] = 4 if phase == "within_budget" else 5
+                        log.write_text(
+                            ""
+                            if phase == "process"
+                            else success_log() if backend == "tensile" else bench_log()
+                        )
+                        return 124 if phase == "process" else 0
+
+                    with (
+                        patch.object(sweep.time, "monotonic", side_effect=lambda: clock[0]),
+                        patch.object(sweep, "prepare", side_effect=prepare),
+                        patch.object(sweep, "physical_cpus", return_value=[0]),
+                        patch.object(sweep, "convert_bench_input", return_value=0),
+                        patch.object(sweep, "execute_command", side_effect=execute) as launch,
+                    ):
+                        self.assertEqual(sweep.run(args), int(phase != "within_budget"))
+                    self.assertEqual(launch.call_count, int(phase != "preparation"))
+                    summary = json.loads((args.reports / "summary.json").read_text())
+                    self.assertEqual(summary["accounted_cases"], manifest["planned_cases"])
+                    self.assertEqual(summary["suite_timeout"], 5)
+                    self.assertEqual(summary["suite_seconds"], clock[0])
+                    settings = json.loads((args.reports / "settings.json").read_text())
+                    self.assertEqual(settings["suite_timeout"], 5)
+                    report = (args.reports / "summary.md").read_text()
+                    if phase == "within_budget":
+                        self.assertTrue(summary["passed"])
+                        self.assertIsNone(summary["stop"])
+                    else:
+                        self.assertFalse(summary["passed"])
+                        self.assertEqual(summary["stop"]["reason"], "suite-timeout")
+                        self.assertIn("Stopped: suite-timeout.", report)
+                    self.assertEqual(
+                        len(summary["unstarted_cases"]),
+                        8 if phase == "preparation" else 4 if phase == "process" else 0,
+                    )
+                    self.assertEqual(
+                        len(summary["missing"]),
+                        4 if phase == "process" and backend == "tensile" else 0,
+                    )
+                    if phase == "process":
+                        self.assertIn(
+                            "Suite time budget exhausted",
+                            summary["results"][0]["errors"],
+                        )
+                    if phase in ("completed", "within_budget"):
+                        self.assertEqual(summary["counts"], {"PASSED": 4})
+                    else:
+                        self.assertIn("| 7 | NOT RUN |", report)
+
+    def test_report_distinguishes_numerical_pass_from_race_failure(self):
+        manifest = {
+            "backend": "tensile",
+            "solution_index_range": {"begin": 0, "end": None},
+            "policy": "a|b",
+            "preparation_seconds": 0,
+            "artifact_fingerprint": "test",
+            "jobs": [job()],
+        }
+        result = sweep.classify_tensile(job(), success_log(), 0)
+        report = sweep.render_report(manifest, {"results": [result], "passed": True})
+        self.assertIn("| 7 | PASS | 4/4 | 4/4 |", report)
+        self.assertIn("a&#124;b", report)
+        result = sweep.classify_tensile(job(), success_log() + "RACE example\n", 0)
+        report = sweep.render_report(manifest, {"results": [result], "passed": False})
+        self.assertIn("| 7 | FAIL | 4/4 | 4/4 |", report)
+        self.assertIn("1 race reports", report)
+        self.assertNotIn("| PASS |", report)
+
+    def test_per_case_dispatch_proof_rejects_redistributed_or_wrong_symbols(self):
+        dispatch = sweep.target_dispatch_line(job()) + "\n"
+        for classify, text in [
+            (sweep.classify_tensile, success_log()),
+            (sweep.classify_bench, bench_log()),
+        ]:
+            # Same total launches but zero for the first case, extras for the next.
+            count = 2 if classify is sweep.classify_bench else 1
+            changed = text.replace(dispatch * count, "", 1)
+            changed = changed.replace(dispatch * count, dispatch * (2 * count), 1)
+            self.assertTrue(classify(job(), changed, 0)["failed"])
+            changed = text.replace('symbol="kernel-7"', 'symbol="wrong"', 1)
+            self.assertTrue(classify(job(), changed, 0)["failed"])
+
+    def test_numerical_and_dispatch_evidence_required(self):
+        for classify, text in [
+            (sweep.classify_tensile, success_log()),
+            (sweep.classify_bench, bench_log()),
+        ]:
+            self.assertFalse(classify(job(), text, 0)["failed"])
+            self.assertTrue(classify(job(), text, 1)["failed"])
+            self.assertTrue(
+                classify(job(), text.replace("[rocjitsu] Kernel dispatch:", "missing:", 1), 0)[
+                    "failed"
+                ]
+            )
+            for suffix in [
+                "RACE kernel=? dispatch=9\nEND_RACE\n",
+                "[rj warn] unsupported HW_ID\n",
+            ]:
+                self.assertTrue(classify(job(), text + suffix, 0)["failed"])
+        self.assertTrue(
+            sweep.classify_tensile(job(), success_log().replace(",PASSED", ",NO_CHECK", 1), 0)[
+                "failed"
+            ]
+        )
+
+    def test_missing_duplicate_and_rejected_cases_fail(self):
+        text = success_log()
+        record = next(line for line in text.splitlines() if ",PASSED" in line)
+        for changed in [
+            text.replace(record + "\n", "", 1),
+            text + record + "\n",
+            text.replace(",PASSED", ",DID_NOT_SATISFY_ASSERTS", 1),
+        ]:
+            self.assertTrue(sweep.classify_tensile(job(), changed, 0)["failed"])
+        text = bench_log()
+        for changed in [
+            text.replace("index: 7", "index: 8", 1),
+            text.replace("kernel name:    kernel-7", "kernel name:    wrong", 1),
+            text.replace("0.00001", "failed", 1),
+            text.replace("0.00001", "nan", 1),
+            text + text,
+        ]:
+            self.assertTrue(sweep.classify_bench(job(), changed, 0)["failed"])
+
+    def test_four_workers_and_no_duplicate_assignment(self):
+        gate = threading.Barrier(4)
+
+        def execute(task, slot):
+            if task["id"] < 4:
+                gate.wait(timeout=2)
+            time.sleep(0.01)
+            return {"id": task["id"], "failed": False, "cases": []}
+
+        result = run_single_queue([{"id": i} for i in range(10)], 4, execute, lambda _: None)
+        self.assertEqual(result["max_active"], 4)
+        self.assertEqual([r["id"] for r in result["results"]], list(range(10)))
+
+    def test_failure_stops_new_jobs_but_finishes_inflight(self):
+        gate = threading.Barrier(4)
+
+        def execute(task, slot):
+            gate.wait(timeout=2)
+            if task["id"]:
+                time.sleep(0.05)
+            return {"id": task["id"], "failed": task["id"] == 0, "cases": []}
+
+        result = run_single_queue([{"id": i} for i in range(10)], 4, execute, lambda _: None)
+        self.assertEqual(result["unstarted"], list(range(4, 10)))
+        self.assertEqual(result["stop"]["in_flight"], 3)
+        self.assertEqual(len(result["results"]), 4)
+
+    def test_worker_exception_is_a_failure(self):
+        def execute(task, slot):
+            raise ValueError("malformed output")
+
+        result = run_single_queue([{"id": i} for i in range(2)], 1, execute, lambda _: None)
+        self.assertEqual(result["unstarted"], [1])
+        self.assertTrue(result["results"][0]["failed"])
+
+    def test_suite_expiry_stops_assignment_and_drains_four_workers(self):
+        clock = [0]
+        gate = threading.Barrier(4, action=lambda: clock.__setitem__(0, 5))
+
+        def execute(task, slot):
+            gate.wait(timeout=2)
+            return {"id": task["id"], "failed": False, "cases": []}
+
+        with patch.object(sweep.time, "monotonic", side_effect=lambda: clock[0]):
+            result = run_single_queue(
+                [{"id": i} for i in range(10)], 4, execute, lambda _: None, deadline=5
+            )
+        self.assertEqual(result["stop"]["reason"], "suite-timeout")
+        self.assertEqual(result["stop"]["in_flight"], 3)
+        self.assertEqual(result["unstarted"], list(range(4, 10)))
+        self.assertEqual([r["id"] for r in result["results"]], list(range(4)))
+        self.assertTrue(all(not r["failed"] for r in result["results"]))
+
+    def test_expired_command_budget_never_launches(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(sweep.subprocess, "Popen") as launch,
+        ):
+            result = sweep.execute_command(["unused"], Path(tmp) / "log", 0, {})
+            self.assertEqual(result, 124)
+            launch.assert_not_called()
+
+    def test_timeout_kills_child_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            childfile = Path(tmp) / "child"
+            code = (
+                'import subprocess,time,pathlib; p=subprocess.Popen(["sleep","60"]); pathlib.Path('
+                + repr(str(childfile))
+                + ").write_text(str(p.pid)); time.sleep(60)"
+            )
+            result = sweep.execute_command(
+                [sys.executable, "-c", code], Path(tmp) / "log", 0.3, dict(os.environ)
+            )
+            self.assertEqual(result, 124)
+            stat = Path("/proc") / childfile.read_text() / "stat"
+            try:
+                state = stat.read_text().split(") ")[1].split()[0]
+            except (FileNotFoundError, ProcessLookupError):
+                state = "exited"
+            self.assertIn(state, {"exited", "Z", "X"})
+
+    def test_progress_failure_stops_queue_and_is_reported(self):
+        def progress(value):
+            raise OSError("No space left")
+
+        result = run_single_queue(
+            [{"id": i} for i in range(2)],
+            1,
+            lambda task, slot: {"id": task["id"], "failed": False, "cases": []},
+            progress,
+        )
+        self.assertEqual(result["unstarted"], [1])
+        self.assertEqual(result["stop"]["trigger_job"], 0)
+        self.assertTrue(result["results"][0]["failed"])
+        self.assertIn("No space left", result["results"][0]["errors"][0])
+        self.assertEqual(result["results"][0]["outcome"], "INFRASTRUCTURE_ERROR")
+
+    def test_progress_error_retains_completed_index_validation(self):
+        def progress(value):
+            raise OSError("No space left")
+
+        result = sweep.run_queue(
+            [[{"id": 0}]],
+            1,
+            lambda batch, slot: [
+                {
+                    "id": 0,
+                    "failed": False,
+                    "outcome": "PASS",
+                    "errors": [],
+                    "cases": [{"status": "PASSED"}],
+                }
+            ],
+            progress,
+        )["results"][0]
+        self.assertEqual(result["outcome"], "PASS_RETAINED")
+        self.assertTrue(result["failed"])
+        self.assertEqual(sweep.numerical_index_counts([result]), {"PASSED": 1})
+        self.assertIn("No space left", result["latest_attempt_errors"][0])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

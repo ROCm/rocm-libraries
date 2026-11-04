@@ -172,6 +172,23 @@ TEST(CandidateSearch_pre_checkin, RunsEachCandidateInOrderAndPicksTheFastest)
     EXPECT_EQ(host.log, expected);
 }
 
+TEST(CandidateSearch_pre_checkin, ZeroTimedIterationsKeepsTheValidationResult)
+{
+    HostSearch host;
+    host.launch_us = {100};
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls = 1;
+
+    const auto result = host.run(search, cpu_timing(0));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 0u);
+    EXPECT_EQ(result.best_timing.hot_iters, 0);
+    EXPECT_EQ(result.best_timing.samples, 0);
+    const std::vector<std::string> expected{"prepare 0", "cold 0 0", "measuring 0", "measured 0"};
+    EXPECT_EQ(host.log, expected);
+}
+
 // With a skip ratio, a candidate whose cold launches take more than the best cold time
 // divided by the ratio is dropped before it is timed, and cannot win.
 TEST(CandidateSearch_pre_checkin, SkipSlowDropsOnlyACandidateWithSlowColdLaunches)

@@ -45,7 +45,7 @@
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
-// Ungated: generateW4A16Input is used even without the MX data generator.
+#include "matmul_result.hpp"
 #include "near.hpp"
 #include "norm.hpp"
 #include "relaunch_compare.hpp"
@@ -53,6 +53,7 @@
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+// Ungated: generateW4A16Input is used even without the MX data generator.
 #include "w4a16_datagen.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -1298,6 +1299,7 @@ void check(hipStream_t                   stream,
            hipDataType                   Tbias,
            hipDataType                   Taux,
            hipDataType                   Tc,
+           MatmulResult&                 validation,
            hipblasLtBatchMode_t          batchMode = HIPBLASLT_BATCH_MODE_STRIDED)
 {
     // fetch GPU
@@ -1539,7 +1541,12 @@ void check(hipStream_t                   stream,
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+                const bool passed
+                    = norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type);
+                validation.record_norm(passed);
+#ifdef GOOGLE_TEST
+                CHECK_SUCCESS(passed);
+#endif
             }
             if(!can_compare)
             {
@@ -1551,6 +1558,8 @@ void check(hipStream_t                   stream,
             }
             else if(!(worst_error < limit))
             {
+                // A single bad batch fails this case even when the summed error passes.
+                validation.record_norm(false);
                 hipblaslt_bench_options::verification_failures()++;
                 hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
                                << worst_batch << " has norm_error " << worst_error
@@ -1571,7 +1580,13 @@ void check(hipStream_t                   stream,
                                                                     Tc));
                     hipblaslt_error += norm_error;
                     if(arg.norm_check_assert)
-                        CHECK_SUCCESS(norm_check(norm_error, Tc));
+                    {
+                        const bool passed = norm_check(norm_error, Tc);
+                        validation.record_norm(passed);
+#ifdef GOOGLE_TEST
+                        CHECK_SUCCESS(passed);
+#endif
+                    }
                 }
                 if(!arg.gradient && arg.use_e)
                 {
@@ -1588,8 +1603,12 @@ void check(hipStream_t                   stream,
                     hipblaslt_error += norm_error;
                     if(arg.norm_check_assert)
                     {
-                        CHECK_SUCCESS(
-                            norm_check(norm_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
+                        const bool passed = norm_check(
+                            norm_error, Taux, arg.compute_type, arg.a_type, arg.b_type);
+                        validation.record_norm(passed);
+#ifdef GOOGLE_TEST
+                        CHECK_SUCCESS(passed);
+#endif
                     }
                 }
                 if(arg.gradient && arg.bias_vector)
@@ -1607,7 +1626,11 @@ void check(hipStream_t                   stream,
                     hipblaslt_error += norm_error;
                     if(arg.norm_check_assert)
                     {
-                        CHECK_SUCCESS(norm_check(norm_error, Tbias));
+                        const bool passed = norm_check(norm_error, Tbias);
+                        validation.record_norm(passed);
+#ifdef GOOGLE_TEST
+                        CHECK_SUCCESS(passed);
+#endif
                     }
                 }
             }
@@ -1819,7 +1842,7 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
             "Invalid compute_input_typeA "
             + std::string(hip_datatype_to_string(real_compute_input_typeA)));
 
-    if(real_compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
+    if(real_compute_input_typeB != HIPBLASLT_DATATYPE_INVALID
        && !supported_compute_input_types.count(real_compute_input_typeB))
         throw std::invalid_argument(
             "Invalid compute_input_typeB "
@@ -1847,9 +1870,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TciA,
                               hipDataType      TciB,
                               hipDataType      Tbias,
-                              hipDataType      Taux);
+                              hipDataType      Taux,
+                              MatmulResult&    result);
+
+void testing_matmul(const Arguments& arg, MatmulResult& result);
 
 void testing_matmul(const Arguments& arg)
+{
+    MatmulResult result;
+    testing_matmul(arg, result);
+}
+
+void testing_matmul(const Arguments& arg, MatmulResult& result)
 {
     hipDataType tiA = arg.a_type;
     hipDataType tiB = arg.b_type;
@@ -2028,25 +2060,33 @@ void testing_matmul(const Arguments& arg)
             if(real_bias_type == HIP_R_16BF)
             {
                 return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16BF, real_aux_type);
+                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16BF, real_aux_type, result);
             }
             else
             {
                 return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type);
+                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type, result);
             }
         }
         else
         {
             if(real_bias_type == HIP_R_16F || real_bias_type == HIP_R_16BF)
             {
-                return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, real_bias_type, real_aux_type);
+                return testing_matmul_with_bias(arg_revised,
+                                                tiA,
+                                                tiB,
+                                                to,
+                                                tc,
+                                                tciA,
+                                                tciB,
+                                                real_bias_type,
+                                                real_aux_type,
+                                                result);
             }
             else
             {
                 return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type);
+                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type, result);
             }
         }
     }
@@ -2055,12 +2095,12 @@ void testing_matmul(const Arguments& arg)
         if(real_bias_type == HIP_R_16F)
         {
             return testing_matmul_with_bias(
-                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16F, real_aux_type);
+                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16F, real_aux_type, result);
         }
         else
         {
             return testing_matmul_with_bias(
-                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type);
+                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type, result);
         }
     }
     else if(to == HIP_R_16BF)
@@ -2068,12 +2108,12 @@ void testing_matmul(const Arguments& arg)
         if(real_bias_type == HIP_R_16BF)
         {
             return testing_matmul_with_bias(
-                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16BF, real_aux_type);
+                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16BF, real_aux_type, result);
         }
         else
         {
             return testing_matmul_with_bias(
-                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type);
+                arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type, result);
         }
     }
     else if(to == HIP_R_32F || to == HIP_R_32I || to == HIP_R_8I || to == HIP_R_64F
@@ -2081,7 +2121,7 @@ void testing_matmul(const Arguments& arg)
     {
         //set Tbias to To
         return testing_matmul_with_bias(
-            arg_revised, tiA, tiB, to, tc, tciA, tciB, to, real_aux_type);
+            arg_revised, tiA, tiB, to, tc, tciA, tciB, to, real_aux_type, result);
     }
     // shouldn't arrive here
     hipblaslt_test_invalid{}(arg);
@@ -2123,7 +2163,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TciA,
                               hipDataType      TciB,
                               hipDataType      Tbias,
-                              hipDataType      Taux)
+                              hipDataType      Taux,
+                              MatmulResult&    result)
 {
     hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
     hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
@@ -6351,6 +6392,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Tbias,
                       Taux,
                       Talpha,
+                      result,
                       batchMode);
                 report_failed_solution(failures_before,
                                        handle,
@@ -6890,6 +6932,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
+            MatmulResult        candidateValidation;
             double              hipblaslt_error   = 0.0;
             double              hipblaslt_atol    = 1;
             double              hipblaslt_rtol    = 1;
@@ -6976,6 +7019,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Tbias,
                       Taux,
                       Talpha,
+                      candidateValidation,
                       batchMode);
                 report_failed_solution(failures_before,
                                        handle,
@@ -7026,6 +7070,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);
             }
 
+            if(candidateValidation.norm_passed)
+                result.record_norm(*candidateValidation.norm_passed);
+
             if(arg.print_solution_found || tuningEnv)
             {
                 // A tuning run records the winner's kernel name, which comes
@@ -7060,6 +7107,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                             handle, heuristicResult[sol].algo);
                     }
                 }
+#ifndef GOOGLE_TEST
+                hipblaslt_cout << "[hipblaslt-case-v1] RESULT " << solutionIndex << " "
+                               << result.numerical_status() << std::endl;
+#endif
                 ArgumentModel<argument_param>{}.log_args(
                     Talpha,
                     hipblaslt_cout,
@@ -7477,4 +7528,5 @@ void testing_matmul_with_bias(const Arguments& arg,
     // The stream is destroyed by stream_owner after the device buffers (see its declaration).
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
+    result.completed = true;
 }
