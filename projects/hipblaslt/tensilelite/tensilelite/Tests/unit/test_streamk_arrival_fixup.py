@@ -327,7 +327,7 @@ def _dtype(name):
     return SimpleNamespace(**checks)
 
 
-def _fixup_batch(compute, hpa=False, data=None, overwrite=True, regsPerData=1):
+def _fixup_batch(compute, hpa=False, data=None, overwrite=True, regsPerData=1, sumIdx=(0,), gwvw=1):
     dest = "BFloat16" if compute == "BFloat16" else compute
     kernel = {
         "StoreSyncOpt": 0, "EnableMatrixInstruction": True, "MIWaveGroup": [2, 2],
@@ -349,13 +349,15 @@ def _fixup_batch(compute, hpa=False, data=None, overwrite=True, regsPerData=1):
     ss = SimpleNamespace(
         optSingleColVgpr=0, optSharedColVgpr=0, optSGPRUsage="", optSrdIncForRow=0,
         setupStoreElementsForBatch=lambda *args, **kwargs: None,
-        elementAddr=[SimpleNamespace(addrCVgpr=10, addrDVgpr=11)], elementData=[20],
-        elementMask=[30], elementSumIdx=[0], sharedColDVgprs=False,
-        checkInTempVgprC=lambda: None,
+        elementAddr=[SimpleNamespace(addrCVgpr=10 + 2 * e, addrDVgpr=11 + 2 * e) for e in range(len(sumIdx))],
+        elementData=[20 + 4 * e for e in range(len(sumIdx))],
+        elementMask=[30 + e for e in range(len(sumIdx))], elementSumIdx=list(sumIdx),
+        sharedColDVgprs=False, checkInTempVgprC=lambda: None,
         cfg=SimpleNamespace(numVgprsPerDataPerVI=regsPerData, halfDataRegPerVI=False),
     )
     cvt = SimpleNamespace(vgprBf16Mask=40, vgprFp32Nan=41, vgprBf16Inc=42)
-    module = StreamKHybrid().fixupBatch(writer, kernel, ss, 0, False, 1, [(0, 0, 0, 0)], None, None,
+    elements = [(0, 0, 0, e) for e in range(len(sumIdx))]
+    module = StreamKHybrid().fixupBatch(writer, kernel, ss, 0, False, gwvw, elements, None, None,
                                   50, cvt, None, 60, None, None, overwrite=overwrite)
     return list(module.flatitems())
 
@@ -396,3 +398,25 @@ def test_overwrite_prefills_identity_before_add(compute, hpa, data, regsPerData,
 def test_accumulating_fixup_has_no_prefill(compute, hpa):
     assert _prefills(_fixup_batch(compute, hpa, overwrite=False,
                                   regsPerData=2 if compute == "Double" else 1)) == []
+
+
+@pytest.mark.parametrize("compute,hpa,sumIdx,gwvw,regsPerData,addClass,addRegs", [
+    ("Half", False, (0, 1), 1, 1, VAddPKF16, 1),     # two elements pk-add into one register
+    ("Half", False, (0, 2), 2, 1, VAddPKF16, 1),
+    ("Half", True, (0, 2), 2, 1, VFmaMixF32, 1),
+    ("Single", False, (0, 2), 2, 1, VAddF32, 1),
+    ("Double", False, (0, 2), 2, 2, VAddF64, 2),
+])
+def test_overwrite_prefills_each_register_once_before_its_first_add(
+        compute, hpa, sumIdx, gwvw, regsPerData, addClass, addRegs):
+    items = _fixup_batch(compute, hpa, sumIdx=sumIdx, gwvw=gwvw, regsPerData=regsPerData)
+    targets = [_valuc_index(m.getParams()[0]) for m in _prefills(items)]
+    assert targets and len(targets) == len(set(targets)), "each register is prefilled at most once"
+    seen = set()
+    for i in items:
+        if isinstance(i, VMovB32) and "ValuC" in str(i.getParams()[0]):
+            assert _valuc_index(i.getParams()[0]) not in seen, "no prefill after an add to its register"
+        elif isinstance(i, addClass):
+            first = _valuc_index(i.getParams()[0])
+            seen.update(range(first, first + addRegs))
+    assert set(targets) == seen, "every added register was prefilled first"

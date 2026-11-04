@@ -2989,11 +2989,16 @@ class StreamK(TileProcessingStrategy):
         module = Module("StreamK Common fixupBatch")
 
         # overwrite: set each add's destination to -0.0 (0 for integers) first.
-        # -0 + x == x bit for bit, so every add path stays unchanged.
+        # -0 + x == x bit for bit, so every add path stays unchanged. A register
+        # several adds share (packed f16 at gwvw 1) is set once, before the first.
+        prefilled = set()
         def prefill(regIdx, numRegs=1, isInt=False, isPackedHalf=False, is64=False):
             if not overwrite:
                 return
             for r in range(numRegs):
+                if regIdx + r in prefilled:
+                    continue
+                prefilled.add(regIdx + r)
                 if isInt:
                     val = 0
                 elif isPackedHalf:
