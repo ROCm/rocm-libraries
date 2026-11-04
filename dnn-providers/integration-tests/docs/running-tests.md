@@ -200,6 +200,45 @@ Each timed test prints one line:
   1 + warmup + iterations calls. The other kernels fill the inputs or run the
   reference.
 
+### 5. Check stream capture (`--graph-capture`)
+
+`--graph-capture` checks that the engine can run inside HIP stream capture and
+replay. The bundle test first verifies the engine output in the usual way. If
+the output passes, the harness captures one more execution of the same plan
+into a HIP graph on the handle's stream (`hipStreamBeginCapture` in global
+mode). It instantiates the graph and replays it 3 times. Before each replay it
+resets the output tensors to the sentinel, outside capture. After each replay it
+verifies the outputs with the same oracle and tolerance as the eager run. C++
+graph tests do not support it.
+
+```bash
+build/bin/hipdnn_integration_tests \
+    --test-article build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so \
+    --test-engine  hipkernel:Gfx950AttentionDense \
+    --gtest_filter='quick_*' \
+    --graph-capture
+```
+
+- It needs a GPU.
+- An engine that does not report the `SUPPORTS_GRAPH_CAPTURE` behavior note is
+  **skipped**, not failed. The skip message names the note. A filter that
+  selects only such engines gives an all-skipped run, so count the skips.
+- The harness allocates the plan workspace before capture begins. The
+  engine must not allocate or synchronize inside `execute`.
+- The test fails with `graph capture failed: …` when a HIP step fails. The
+  message names the step and the `hip` error. The harness ends the capture
+  before it returns, so the stream is never left capturing.
+- A replay output that differs from the oracle fails the test. The failure is
+  tagged `graph-capture replay`.
+- Only a test that verifies its outputs and reaches the capture step prints a
+  `[ CAPTURE ]` line. A pass at an enforcement-level rung (APPLICABLE or
+  BUILDABLE) and a skip are not captured, so count the `[ CAPTURE ]` lines.
+- Each captured test prints a `[ CAPTURE ]` line and records the `graph_capture`
+  property (`replayed`, `declined`, `failed` or `mismatch`) in `--gtest_output`
+  files.
+- It cannot be combined with `--benchmark`: autotune synchronizes and times
+  with events, which a capturing stream forbids.
+
 ### The build reads a copy of the bundles
 
 CMake copies `integration-test-bundles/` into `build/lib/integration-test-bundles/`
@@ -230,6 +269,7 @@ Otherwise, you test the old tree.
 | `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
 | `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
 | `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
+| `--graph-capture` | | off | Capture each verified bundle test into a HIP graph and replay it. See [Check stream capture](#5-check-stream-capture---graph-capture). |
 | `--gtest_*` | | | Passed through to GTest. |
 
 The binary refuses these flag combinations (exit 1):
@@ -243,6 +283,9 @@ The binary refuses these flag combinations (exit 1):
   `--benchmark-iterations` less than 1, or `--benchmark-warmup` less than 0.
 - `--benchmark` together with `--skip-graph-validation`, `--capture-bundles`
   or `--write-support-claims`. These modes do not execute the graph.
+- `--graph-capture` together with `--benchmark`, `--skip-graph-validation`,
+  `--capture-bundles`, `--write-support-claims`, `--no-bundles` or
+  `HIPDNN_TEST_ALLOW_BUNDLES=0`.
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run

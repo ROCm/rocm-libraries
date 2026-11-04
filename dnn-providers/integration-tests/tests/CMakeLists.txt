@@ -77,6 +77,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
     TestBenchmark.cpp
+    TestCapture.cpp
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp

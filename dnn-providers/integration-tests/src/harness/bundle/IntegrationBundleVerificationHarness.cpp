@@ -494,7 +494,9 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
         return engineDidNotRun(engine);
     }
     auto outcome = compareAgainstGolden(engine.outputs);
+    _replayVerifier = [this](OutputTensors& outputs) { return compareAgainstGolden(outputs); };
     benchmarkIfVerified(session, engine.outputs, outcome);
+    captureIfVerified(session, engine.outputs, outcome);
     return outcome;
 }
 
@@ -518,6 +520,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
         if(_bundle->hasGoldenOutputs)
         {
             outcome = compareAgainstGolden(engine.outputs);
+            _replayVerifier
+                = [this](OutputTensors& outputs) { return compareAgainstGolden(outputs); };
         }
         else
         {
@@ -529,6 +533,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
         outcome = runOracleChain(engine.outputs, oracles);
     }
     benchmarkIfVerified(session, engine.outputs, *outcome);
+    captureIfVerified(session, engine.outputs, *outcome);
     return *outcome;
 }
 
@@ -554,7 +559,20 @@ VerificationOutcome
         switch(result.status)
         {
         case RefStatus::RAN:
-            return compareOutputs(engineOutputs, refOutputs, result.site, verifierFor(ref->type));
+        {
+            const auto verifier = verifierFor(ref->type);
+            auto outcome = compareOutputs(engineOutputs, refOutputs, result.site, verifier);
+            if(_deps.policy.graphCapture.has_value())
+            {
+                // The replay is judged against this same oracle output, so it has to
+                // outlive this call.
+                _oracleOutputs = std::move(refOutputs);
+                _replayVerifier = [this, site = result.site, verifier](OutputTensors& outputs) {
+                    return compareOutputs(outputs, _oracleOutputs, site, verifier);
+                };
+            }
+            return outcome;
+        }
         case RefStatus::CAPABILITY_MISS:
             chain.declined(label + " (cannot run this op: " + result.message + ")");
             break;
@@ -910,6 +928,58 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
         hipdnn_frontend::AutotuneResult failed;
         failed.errorMessage = e.what();
         _benchmark = failed;
+    }
+}
+
+namespace
+{
+
+// In place, because a captured graph has its buffer addresses baked in. The device
+// upload is a plain copy, so it must not run inside a capture.
+void resetOutputsToSentinel(OutputTensors& outputs, bool useDevice)
+{
+    for(auto& [uid, tensor] : outputs)
+    {
+        tensor->fillWithSentinelValue();
+        tensor->markHostModified();
+        if(useDevice)
+        {
+            static_cast<void>(tensor->rawDeviceData());
+        }
+    }
+}
+
+} // namespace
+
+void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& session,
+                                                             OutputTensors& engineOutputs,
+                                                             const VerificationOutcome& outcome)
+{
+    if(!_deps.policy.graphCapture.has_value() || outcome.status != OutcomeStatus::PASSED
+       || outcome.depth != VerificationDepth::VERIFIED)
+    {
+        return;
+    }
+    // A throw here must not reach TestBody()'s catch, for the same reason as in
+    // benchmarkIfVerified().
+    try
+    {
+        const bool useDevice = _deps.policy.useDevice();
+        auto variantPack = buildVariantPack(engineOutputs, useDevice);
+
+        ReplayHooks hooks;
+        hooks.resetOutputs = [&] { resetOutputsToSentinel(engineOutputs, useDevice); };
+        hooks.checkOutputs = [&] {
+            SCOPED_TRACE("graph-capture replay");
+            markOutputsModified(engineOutputs);
+            return _replayVerifier(engineOutputs).status == OutcomeStatus::PASSED;
+        };
+        _capture = _deps.engineRunner->captureReplay(
+            session, variantPack, *_deps.policy.graphCapture, hooks);
+    }
+    catch(const std::exception& e)
+    {
+        _capture = CaptureResult::failed(e.what());
     }
 }
 

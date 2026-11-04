@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <iosfwd>
 #include <memory>
@@ -26,6 +27,8 @@
 
 #include "harness/BenchmarkReport.hpp"
 #include "harness/BundleMetadata.hpp"
+#include "harness/Capture.hpp"
+#include "harness/CaptureReport.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/GraphSession.hpp"
@@ -240,7 +243,19 @@ public:
         {
             reportBenchmark(*_benchmark);
         }
+        if(_capture.has_value())
+        {
+            reportCapture(*_capture);
+        }
         reportOutcome(outcome);
+        // After the verdict is committed and reported: an engine that does not claim
+        // graph-capture safety is out of this lane, not broken, and the verified pass
+        // above is still true for it.
+        if(_capture.has_value() && _capture->status == CaptureResult::Status::DECLINED
+           && !HasFailure())
+        {
+            GTEST_SKIP() << "--graph-capture: " << _capture->message;
+        }
     }
 
     /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
@@ -500,6 +515,13 @@ private:
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
+    // Under --graph-capture, captures the engine on the outputs `outcome` just verified,
+    // replays it and verifies every replay with _replayVerifier. Keeps the result for
+    // TestBody() to report. Does nothing for any other outcome.
+    void captureIfVerified(GraphSession& session,
+                           OutputTensors& engineOutputs,
+                           const VerificationOutcome& outcome);
+
     // Under --benchmark, times the engine on the outputs `outcome` just verified and
     // keeps the result for TestBody() to report. Does nothing for any other outcome.
     void benchmarkIfVerified(GraphSession& session,
@@ -561,6 +583,12 @@ private:
     TensorMap _inputs;
     // Set by benchmarkIfVerified(); reported at the end of TestBody().
     std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
+    // Set by captureIfVerified(); reported at the end of TestBody().
+    std::optional<CaptureResult> _capture;
+    // Re-runs the comparison that verified the eager outputs, on `outputs`. Set with
+    // every verified comparison; _oracleOutputs backs it for a reference oracle.
+    std::function<VerificationOutcome(OutputTensors&)> _replayVerifier;
+    OutputTensors _oracleOutputs;
 };
 
 } // namespace hipdnn_integration_tests::bundle

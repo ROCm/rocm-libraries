@@ -24,6 +24,7 @@
 #include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
 #include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
@@ -205,6 +206,15 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--benchmark-warmup")
             .scan<'i', int>()
             .help("Untimed executions before timing (default 30). Requires --benchmark.");
+        parser.add_argument("--graph-capture")
+            .default_value(false)
+            .implicit_value(true)
+            .help("After a bundle test verifies the engine's outputs, capture the same "
+                  "execution into a HIP graph on the handle's stream, replay it a few "
+                  "times into reset outputs and verify the replayed outputs against the "
+                  "same oracle. Engines that do not report the SUPPORTS_GRAPH_CAPTURE "
+                  "behavior note are skipped. Needs a GPU; cannot be combined with "
+                  "--benchmark.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -415,6 +425,31 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        hipdnn_integration_tests::CaptureRequest captureRequest;
+        captureRequest.enabled = parser.get<bool>("--graph-capture");
+        captureRequest.benchmark = benchmarkRequest.enabled;
+        captureRequest.skipGraphValidation = skipGraphValidation;
+        captureRequest.captureBundles = captureDir.has_value();
+        captureRequest.writeSupportClaims = writeSupportClaims;
+        // TestConfig applies the same env override later; it wins over --no-bundles.
+        {
+            const auto bundlesEnv = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+            if(bundlesEnv == "0" || bundlesEnv == "false")
+            {
+                captureRequest.bundlesDisabled = true;
+            }
+            else if(bundlesEnv != "1" && bundlesEnv != "true")
+            {
+                captureRequest.bundlesDisabled = !allowBundles;
+            }
+        }
+        auto graphCapture = hipdnn_integration_tests::resolveCapture(captureRequest);
+        if(graphCapture.error.has_value())
+        {
+            std::cerr << "Error: " << *graphCapture.error << "\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -429,6 +464,7 @@ int main(int argc, char** argv) noexcept
         opts.captureDir = std::move(captureDir);
         opts.writeSupportClaims = writeSupportClaims;
         opts.benchmark = benchmark.settings;
+        opts.graphCapture = graphCapture.settings;
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
