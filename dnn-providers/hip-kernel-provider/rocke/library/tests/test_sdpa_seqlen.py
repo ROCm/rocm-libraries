@@ -173,7 +173,12 @@ _BAD_LENGTHS = [
     ("seq_len_q", [2, 1], 1, r"seq_len_q: every length must satisfy 0 <= len <= 1"),
     ("seq_len_q", [-1, 1], 1, "seq_len_q: every length must be >= 0"),
     ("seq_len_q", [1, 1, 1], 1, "seq_len_q: expected 2 per-batch lengths, got 3"),
-    ("seq_len_kv", [17, 16], 16, r"seq_len_kv: every length must satisfy 0 <= len <= 16"),
+    (
+        "seq_len_kv",
+        [17, 16],
+        16,
+        r"seq_len_kv: every length must satisfy 0 <= len <= 16",
+    ),
     ("seq_len_kv", [-1, 16], 16, "seq_len_kv: every length must be >= 0"),
     ("seq_len_kv", [16], 16, "seq_len_kv: expected 2 per-batch lengths, got 1"),
 ]

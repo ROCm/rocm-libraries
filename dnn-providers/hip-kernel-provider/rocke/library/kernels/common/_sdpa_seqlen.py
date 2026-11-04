@@ -87,9 +87,7 @@ def sdpa_seqlens(seqlen_q=None, seqlen_kv=None, *, batch, s_q_max, s_kv_max):
     if seqlen_q is None:
         return None, None
     len_q = validate_lengths(seqlen_q, batch=batch, s_max=s_q_max, name="SEQ_LEN_Q")
-    len_kv = validate_lengths(
-        seqlen_kv, batch=batch, s_max=s_kv_max, name="SEQ_LEN_KV"
-    )
+    len_kv = validate_lengths(seqlen_kv, batch=batch, s_max=s_kv_max, name="SEQ_LEN_KV")
     return len_q, len_kv
 
 

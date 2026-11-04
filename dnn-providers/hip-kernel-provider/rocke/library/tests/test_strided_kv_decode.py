@@ -315,7 +315,9 @@ def test_strided_dispatch_follows_the_kernel_gate(arch):
                 hdim_q=head_size,
                 hdim_v=head_size,
             )
-            ok, why = au._explicit_path_supported(attention_problem(req), None, "3d", arch)
+            ok, why = au._explicit_path_supported(
+                attention_problem(req), None, "3d", arch
+            )
             assert candidate.admits(req) == (ok, "supported" if ok else why), (
                 ratio,
                 head_size,

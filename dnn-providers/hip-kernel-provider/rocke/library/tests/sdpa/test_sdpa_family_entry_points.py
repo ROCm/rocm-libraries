@@ -122,7 +122,9 @@ def test_lse_tuning_sweep_includes_the_tiled_2d_path_on_a_prefill_shape():
     restricted to the shape the auto route would naturally pick."""
     for arch in ARCHES:
         extra = {"right_bound": 0} if arch == "gfx942" else {}
-        req = _request(arch=arch, s_q=128, s_kv=128, stats=packed((2, 4, 128, 1)), **extra)
+        req = _request(
+            arch=arch, s_q=128, s_kv=128, stats=packed((2, 4, 128, 1)), **extra
+        )
         assert sdpa_unified_candidates(req)
         unified = [
             spec

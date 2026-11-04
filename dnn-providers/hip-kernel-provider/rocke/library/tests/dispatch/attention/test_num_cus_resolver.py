@@ -794,7 +794,9 @@ class TestNumCusResolver(unittest.TestCase):
                 ),
             ):
                 resolved = A.attention_problem(_req(num_cus=0, arch="gfx942", **shape))
-                unfloored = A.attention_problem(_req(num_cus=38, arch="gfx942", **shape))
+                unfloored = A.attention_problem(
+                    _req(num_cus=38, arch="gfx942", **shape)
+                )
                 assert resolved.num_cus == 38, shape
                 assert resolved.select_path() == unfloored.select_path(), shape
                 assert au._num_segments(resolved, "gfx942") == au._num_segments(

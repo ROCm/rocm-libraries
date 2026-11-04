@@ -155,7 +155,11 @@ class TestDispatchedMixedCohort:
     ):
         import dataclasses
 
-        from dispatch.attention import AttentionRequest, attention_problem, dispatch_attention
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_problem,
+            dispatch_attention,
+        )
         from kernels import run_unified_attention_torch
 
         P = _harness()

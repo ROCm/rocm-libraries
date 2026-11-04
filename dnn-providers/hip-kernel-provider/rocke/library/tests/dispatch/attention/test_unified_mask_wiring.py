@@ -496,7 +496,9 @@ class TestBandNormalization(unittest.TestCase):
                 self.assertFalse(moving)
 
     def test_problem_carries_the_band(self):
-        p = attention_problem(_req(mask_type=NO_MASK, sliding_window=256, right_bound=64))
+        p = attention_problem(
+            _req(mask_type=NO_MASK, sliding_window=256, right_bound=64)
+        )
         self.assertTrue(p.causal_top_left)
         self.assertEqual((p.right_bound, p.sliding_window), (64, 256))
         d = attention_problem(_req(mask_type=BOTTOM_RIGHT))
@@ -675,7 +677,9 @@ class TestBandDistinctIdentity(unittest.TestCase):
     def test_3d_cache_key_separates_masks(self):
         with _GfxArch("gfx950"):
             keys = {
-                au._tiled_3d_cache_key(attention_problem(_req(seqlen_q=2, **kw)), "gfx950")
+                au._tiled_3d_cache_key(
+                    attention_problem(_req(seqlen_q=2, **kw)), "gfx950"
+                )
                 for kw in (
                     dict(mask_type=BOTTOM_RIGHT),
                     dict(mask_type=TOP_LEFT),
@@ -794,7 +798,9 @@ class TestBandLowering(unittest.TestCase):
         from builders.common import attention_spec_builder as bld
 
         with _GfxArch("gfx950"):
-            spec = bld._spec_gfx950_generic(attention_problem(_req(mask_type=NO_MASK)), "gfx950")
+            spec = bld._spec_gfx950_generic(
+                attention_problem(_req(mask_type=NO_MASK)), "gfx950"
+            )
         self.assertEqual(spec.right_bound, -1)
         for over in (dict(use_alibi=True), dict(use_qq_bias=True)):
             with self.subTest(**over), self.assertRaises(ValueError):
@@ -860,7 +866,9 @@ class TestBandOffGfx950(unittest.TestCase):
                     attention_problem(_req(mask_type=NO_MASK, arch=arch)).default_mask
                 )
                 # Legacy convention: a window on the default mask is a causal window.
-                p = attention_problem(_req(mask_type=NO_MASK, sliding_window=256, arch=arch))
+                p = attention_problem(
+                    _req(mask_type=NO_MASK, sliding_window=256, arch=arch)
+                )
                 self.assertTrue(p.default_mask)
                 self.assertEqual(p.sliding_window, 256)
 
