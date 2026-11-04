@@ -14,9 +14,10 @@
  * Each kernel below puts one of those shapes in a loop of TRIPS unrolled trips
  * and lowers it with the C++ engine. In the LLVM IR, every local name must be
  * defined once, and every local and global name the kernel reads must be
- * defined. tests/core/test_unrolled_for_nested_regions.py builds the same
- * kernels in Python, checks that both engines emit the same text, and runs them
- * on a GPU.
+ * defined. One more kernel holds two rolled loops side by side whose names
+ * would collide when the second renames its values.
+ * tests/core/test_unrolled_for_nested_regions.py builds the same kernels in
+ * Python, checks that both engines emit the same text, and runs them on a GPU.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -284,6 +285,39 @@ std::string unrolled_loop_in_unrolled_loop()
     return k.finish_and_lower(loop.op->results[0]);
 }
 
+/* Two rolled scf.for loops one after the other, both with induction variable
+ * j; the first carries a value named `first_carried`, the second one named s. */
+std::string rolled_loops_side_by_side(const std::string& first_carried)
+{
+    Kernel k("rolled_loops_side_by_side");
+    rocke_value_t* carried = k.lane;
+    for(const std::string& name : {first_carried, std::string("s")})
+    {
+        rocke_for_t loop = k.loop(carried, k.c(2), "j", name.c_str(), /*unroll=*/false);
+        k.body(loop, [&](rocke_value_t* j, rocke_value_t* s) { return rocke_b_add(&k.b, s, j); });
+        carried = loop.op->results[0];
+    }
+    return k.finish_and_lower(carried);
+}
+
+/* When two loops share their names, the second renames its values and carries
+ * %s.for.header.<n>. In this kernel the first loop gives its own carried value
+ * that name, so the second loop's renamed name is taken too. */
+std::string loop_named_like_a_renamed_loop_value()
+{
+    static const std::regex renamed_carried(R"(%(s\.for\.header\.[0-9]+) = phi)");
+    const std::string plain = rolled_loops_side_by_side("s");
+    std::smatch renamed;
+    if(!std::regex_search(plain, renamed, renamed_carried))
+    {
+        check(false,
+              "loop_named_like_a_renamed_loop_value: the second loop did not rename its "
+              "carried value");
+        return "";
+    }
+    return rolled_loops_side_by_side(renamed[1].str());
+}
+
 /* The names `text` defines and reads, by sigil ('%' local, '@' global). A name
  * is defined by an assignment ("<name> = ..."), as a parameter or function in a
  * define / declare line, or (locals) as a block label ("<label>:"). */
@@ -384,6 +418,7 @@ int main()
         {"rolled_loops_side_by_side_in_unrolled_loop", rolled_loops_side_by_side_in_unrolled_loop},
         {"shared_memory_in_nested_if", shared_memory_in_nested_if},
         {"unrolled_loop_in_unrolled_loop", unrolled_loop_in_unrolled_loop},
+        {"loop_named_like_a_renamed_loop_value", loop_named_like_a_renamed_loop_value},
     };
     for(const auto& [name, lower] : cases)
     {

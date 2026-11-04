@@ -474,6 +474,46 @@ def test_loops_side_by_side_may_share_names():
     assert_target_accepts(text, "gfx942")
 
 
+def _rolled_loops_side_by_side(first_carried):
+    """Two rolled loops one after the other, both with induction variable
+    ``j``; the first carries a value named ``first_carried``, the second one
+    named ``s``."""
+    b, _, z, lane = _kernel("rolled_loops_side_by_side")
+    carried = lane
+    for name in (first_carried, "s"):
+        rolled = _inner_loop(b, "j", name, carried, unroll=False)
+        with rolled as (j, (s,)):
+            b.scf_yield(b.add(s, j))
+        carried = rolled.results[0]
+    b.global_store(z, lane, carried)
+    b.ret()
+    return b.kernel
+
+
+def _loop_named_like_a_renamed_loop_value():
+    """When two loops share their names, the second renames its values and
+    carries ``%s.for.header.<n>``. In this kernel the first loop gives its own
+    carried value that name, so the second loop's renamed name is taken too."""
+    plain = lower_kernel_to_llvm(_rolled_loops_side_by_side("s"), arch="gfx942")
+    renamed = re.search(r"%(s\.for\.header\.\d+) = phi", plain)
+    assert renamed is not None, "the second loop did not rename its carried value"
+    return _rolled_loops_side_by_side(renamed[1])
+
+
+def test_a_loop_named_like_a_renamed_loop_value_defines_each_name_once():
+    """Checks the text ``lower_kernel_to_llvm`` emits, so it runs without the
+    C++ engine binding too; ``tests/core/test_unrolled_for_nested_regions.cpp``
+    checks the C++ engine's text."""
+    text = lower_kernel_to_llvm(_loop_named_like_a_renamed_loop_value(), arch="gfx942")
+    assert _names_defined_more_than_once(text) == []
+    assert _names_read_but_never_defined(text) == []
+    assert_target_accepts(text, "gfx942")
+
+
+def test_both_engines_rename_a_loop_named_like_a_renamed_loop_value_alike():
+    lower_with_both_engines(_loop_named_like_a_renamed_loop_value(), "gfx942")
+
+
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_both_engines_emit_the_same_text(case, flavor):

@@ -1750,12 +1750,39 @@ struct ll_rename_scope
     }
 };
 
-/* True when an earlier rolled scf.for's header defined `name`. */
-static bool ll_loop_header_name_defined(const rocke_lower_t* L, const char* name)
+/* True when an earlier rolled scf.for's header defined `name` + `suffix`. */
+static bool
+    ll_loop_header_name_defined(const rocke_lower_t* L, const char* name, const char* suffix)
 {
+    const size_t name_len = strlen(name);
     for(size_t i = 0; i < L->loop_header_names.len; i++)
     {
-        if(strcmp(L->loop_header_names.data[i], name) == 0)
+        const char* defined = L->loop_header_names.data[i];
+        if(strncmp(defined, name, name_len) == 0 && strcmp(defined + name_len, suffix) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* True when an earlier rolled scf.for's header defined the induction variable
+ * `iv_name` or a carried value of `op`, with `suffix` added. */
+static bool ll_any_loop_header_name_defined(const rocke_lower_t* L,
+                                            const rocke_op_t* op,
+                                            const char* iv_name,
+                                            int64_t num_iter,
+                                            const char* suffix)
+{
+    if(ll_loop_header_name_defined(L, iv_name, suffix))
+    {
+        return true;
+    }
+    for(int i = 0; i < (int)num_iter; i++)
+    {
+        const char* mname = NULL;
+        if(ll_iter_meta(op, i, &mname, NULL) && mname
+           && ll_loop_header_name_defined(L, mname, suffix))
         {
             return true;
         }
@@ -1782,23 +1809,27 @@ static void ll_record_loop_header_name(rocke_lower_t* L, const char* name, const
  * once per trip of an unrolled loop around it. LLVM needs every name defined
  * once, so the first loop to define a name keeps it, and a loop that would
  * define a name again adds ".<header_label>" (unique in the kernel) to all of
- * its names. */
+ * its names. An earlier loop may have named a value like that itself
+ * ("%s.for.header.5"), so while a suffixed name is still taken the loop adds
+ * ".<header_label>.<n>" instead, for the first n = 1, 2, ... that leaves all of
+ * its names free. */
 static const char* ll_claim_loop_header_names(rocke_lower_t* L,
                                               const rocke_op_t* op,
                                               const char* iv_name,
                                               int64_t num_iter,
                                               const char* header_label)
 {
-    bool taken = ll_loop_header_name_defined(L, iv_name);
-    for(int i = 0; i < (int)num_iter && !taken; i++)
+    const char* suffix = "";
+    for(int attempt = 0; ll_any_loop_header_name_defined(L, op, iv_name, num_iter, suffix);
+        attempt++)
     {
-        const char* mname = NULL;
-        if(ll_iter_meta(op, i, &mname, NULL) && mname)
+        suffix = attempt == 0 ? rocke_arena_printf(&L->arena, ".%s", header_label)
+                              : rocke_arena_printf(&L->arena, ".%s.%d", header_label, attempt);
+        if(!suffix)
         {
-            taken = ll_loop_header_name_defined(L, mname);
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
         }
     }
-    const char* suffix = taken ? rocke_arena_printf(&L->arena, ".%s", header_label) : "";
     ll_record_loop_header_name(L, iv_name, suffix);
     for(int i = 0; i < (int)num_iter; i++)
     {
