@@ -7939,15 +7939,14 @@ static rocblaslt_status
     // separately. Under uniform summation order, only a kernel that declares it
     // and can keep it for this problem is eligible, as on the Tensile path.
     auto accepts = [&](const TensileLite::ContractionSolution& solution) {
-        if(solution.hardwarePredicate && !(*solution.hardwarePredicate)(*hardware))
-            return false;
-        return (!solution.problemPredicate || (*solution.problemPredicate)(tensileProblem))
+        return rocblaslt::rocRollerKernelAccepts(solution, tensileProblem, *hardware)
                && solution.uniformSummationOrderSupported(tensileProblem, *hardware);
     };
     // Heuristic conversion reports workspace requirements but does not filter
     // them, so reject kernels that exceed the caller's budget here.
     auto fitsWorkspace = [&](const TensileLite::ContractionSolution& solution) {
-        return solution.requiredWorkspaceSize(tensileProblem, *hardware) <= maxWorkSpaceBytes;
+        return rocblaslt::rocRollerKernelFitsWorkspace(
+            solution, tensileProblem, *hardware, maxWorkSpaceBytes);
     };
 
     // The fill check looks at the first few matches even when fewer are asked for.
