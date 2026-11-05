@@ -85,7 +85,9 @@ add_executable(
     blocked_scaling_test.cpp
     blocked_selection_plan_test.cpp
 )
-target_link_libraries(hostnumerics-blocked-tests PRIVATE roc::hostnumerics GTest::gtest_main)
+# Tests that include private sources compile their OpenMP helpers.
+target_link_libraries(hostnumerics-blocked-tests
+    PRIVATE roc::hostnumerics GTest::gtest_main OpenMP::OpenMP_CXX)
 add_test(NAME hostnumerics-blocked-tests COMMAND hostnumerics-blocked-tests)
 
 # Allocation fault injection is isolated from the other test executables.
@@ -96,7 +98,7 @@ target_include_directories(
 )
 target_link_libraries(
     hostnumerics-gemm-resource-failure-tests
-    PRIVATE roc::hostnumerics GTest::gtest_main
+    PRIVATE roc::hostnumerics GTest::gtest_main OpenMP::OpenMP_CXX
 )
 if(TARGET hostnumerics-blas)
     target_link_libraries(
@@ -165,6 +167,7 @@ if(TARGET hostnumerics-blas)
         PRIVATE
             roc::hostnumerics-blas
             GTest::gtest_main
+            OpenMP::OpenMP_CXX
     )
     add_test(
         NAME hostnumerics-blas-tests-one-thread
