@@ -185,6 +185,20 @@ namespace TensileLite::Serialization
             mapRequired(io, key, value);
         }
 
+        /// Mirrors the production outputs: a value equal to the one an absent
+        /// key would produce is not recorded, so the fixture carries the same
+        /// keys a written document would.
+        template <typename T>
+        static void mapOptional(PolicyMappingOutput& io,
+                                const char*          key,
+                                T&                   value,
+                                T const&             defaultValue)
+        {
+            if(value == defaultValue)
+                return;
+            mapRequired(io, key, value);
+        }
+
         static bool outputting(PolicyMappingOutput&)
         {
             return true;
@@ -387,6 +401,16 @@ namespace
             size["streamKForceDPOnly"] = object(policy.legacyForceDP);
         }
 
+        /// A selector equal to what an absent key means is not written at all,
+        /// so presence is only required of the other values.
+        void expectSelector(const char* key, const char* value, const char* absent)
+        {
+            if(std::string(value) == absent)
+                EXPECT_EQ(size.count(key), 0u) << key << " means " << absent << " when absent";
+            else
+                EXPECT_EQ(size.at(key).template as<std::string>(), value);
+        }
+
         void expectPolicy(const SizeMapping& value, const PolicyCase& policy)
         {
             EXPECT_EQ(std::string(toString(value.tileProcessingStrategy)), policy.strategy);
@@ -442,8 +466,8 @@ namespace
         auto decoded = readSize();
         expectPolicy(decoded, GetParam());
         size = output(decoded);
-        EXPECT_EQ(size.at("tileProcessingStrategy").as<std::string>(), GetParam().strategy);
-        EXPECT_EQ(size.at("workAssignment").as<std::string>(), GetParam().assignment);
+        expectSelector("tileProcessingStrategy", GetParam().strategy, "None");
+        expectSelector("workAssignment", GetParam().assignment, "StaticGrid");
         EXPECT_EQ(size.count("streamK"), 0u);
         EXPECT_EQ(size.count("streamKForceDPOnly"), 0u);
         expectPolicy(readSize(), GetParam());
@@ -473,6 +497,22 @@ namespace
                              [](const ::testing::TestParamInfo<PolicyCase>& info) {
                                  return std::string(info.param.strategy) + info.param.assignment;
                              });
+
+    TEST_F(PersistentExecutionPolicySerializationTest,
+           DeviceScalarAlphaCapabilityRoundTripsOnlyInProblemType)
+    {
+        for(int mode : {0, 1, 2, 3, 5, 6, 7})
+        {
+            SCOPED_TRACE(mode);
+            problem["useScaleAlphaVec"] = object(mode);
+            auto decoded = readSolution();
+            EXPECT_EQ(decoded->problemType.useScaleAlphaVec, mode);
+            internalArgs = output(decoded->internalArgsSupport);
+            EXPECT_EQ(internalArgs.count("deviceScalarAlpha"), 0u);
+            problem = output(decoded->problemType);
+            EXPECT_EQ(readSolution()->problemType.useScaleAlphaVec, mode);
+        }
+    }
 
     TEST_F(PersistentExecutionPolicySerializationTest, OmittedSelectorsDefaultToNonPersistent)
     {
@@ -674,6 +714,22 @@ namespace
         }
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, OccupancyProbeRoundTrips)
+    {
+        canonical(policies[4]);
+        ContractionSolution::InternalArgsSupport args;
+        args.occupancyProbe = true;
+        internalArgs        = output(args);
+        EXPECT_TRUE(readSolution()->internalArgsSupport.occupancyProbe);
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, MissingOccupancyProbeDefaultsToFalse)
+    {
+        canonical(policies[4]);
+        internalArgs.erase("occupancyProbe");
+        EXPECT_FALSE(readSolution()->internalArgsSupport.occupancyProbe);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, ArgumentLayoutV1RequiresDataParallel)
     {
         internalArgs["persistentLoopArgsVersion"] = object(1);
@@ -800,4 +856,59 @@ namespace
         auto grid              = emittedDescriptor.at("grid").as<std::vector<std::string>>();
         EXPECT_EQ(grid, (std::vector<std::string>{"StreamKWithBatch", "One", "One"}));
     }
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterVersionTwoRoundTrips)
+    {
+        canonical(policies[2]);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 4, 1});
+        auto legacy = readSolution();
+        EXPECT_FALSE(legacy->usesStreamKSpatialCluster());
+        EXPECT_EQ(legacy->internalArgsSupport.persistentLoopArgsVersion, 0);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.y, 4u);
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        for(int outer : {0, 1, 2})
+        {
+            internalArgs["version"] = object(outer);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        internalArgs["version"] = object(3);
+        auto decoded = readSolution();
+        EXPECT_TRUE(decoded->usesStreamKSpatialCluster());
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
+        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
+        internalArgs = output(decoded->internalArgsSupport);
+        size = output(decoded->sizeMapping);
+        EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterLayoutRejectsInvalidPolicyAndShape)
+    {
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        internalArgs["version"] = object(3);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 1, 1});
+        for(const auto& policy : policies)
+        {
+            SCOPED_TRACE(::testing::Message() << policy.strategy << '/' << policy.assignment);
+            canonical(policy);
+            if(std::string(policy.strategy) == "StreamK"
+               && std::string(policy.assignment) == "StaticGrid")
+                EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+            else
+                EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        canonical(policies[2]);
+        for(uint32_t n : {2, 4, 8})
+        {
+            size["clusterDim"] = object(std::vector<uint32_t>{1, n, 1});
+            EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+        }
+        for(const auto& shape : std::vector<std::vector<uint32_t>>{
+                {1, 1, 1}, {1, 16, 1}, {3, 1, 1}, {16, 1, 1}, {4, 8, 1}, {2, 1, 2}})
+        {
+            size["clusterDim"] = object(shape);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
 }

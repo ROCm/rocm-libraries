@@ -46,7 +46,7 @@
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -198,8 +198,6 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
                 passFeatureConfig.dagFeatures.dsSpread = moduleOptions.DsSpread;
-                passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
-                    moduleOptions.WmmaBarrierCoverCycles;
                 passFeatureConfig.dagFeatures.dsCatchUpPace = moduleOptions.DsCatchUpPace;
                 passFeatureConfig.dagFeatures.dsBatchWmmas = moduleOptions.DsBatchWmmas;
                 passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
@@ -207,6 +205,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
                 passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
                     moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
+                passFeatureConfig.dagFeatures.waitAluScoreboard = moduleOptions.EnableESM2;
                 passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;
@@ -233,7 +232,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.EnableLoopCarriedTokenDeps;
                 // A deep WMMA queue issues WMMAs back-to-back: one wait before the first.
                 waitCntOptions.mergeWaitsInWmmaRuns =
-                    moduleOptions.WmmaQueueDepth > 1 && moduleOptions.WmmaQueueCoverCycles > 0;
+                    moduleOptions.WmmaQueueDepth > 1 && moduleOptions.WmmaQueueCoverCycles != 0;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
@@ -275,7 +274,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
                 /*rule3SignalLeadCycles=*/
                 resolvedKnobs.clusterBarrierRule3SignalLeadCycles,
-                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop));
+                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop,
+                /*reduceClusterBarrierPerLoop=*/resolvedKnobs.reduceClusterBarrierPerLoop));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can
@@ -345,7 +345,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // covers final per-function code, while SW-prefetch owns its hints' XCnt
     // waits.
     constexpr bool kEnableXcntDrainProfile = false;
-    mpm.addPass(createGfx1250HazardModulePass(kEnableXcntDrainProfile));
+    mpm.addPass(createGfx1250XnackHazardModulePass(kEnableXcntDrainProfile));
 
     // Flatten callees + byte-layout tail (entry only, single linear stream).
     {

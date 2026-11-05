@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "dd69ba28-01e1-52e7-acbf-b22a64603271",
+  "name": "flydsl rmsnorm: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_rmsnorm.kernel_match"
+}

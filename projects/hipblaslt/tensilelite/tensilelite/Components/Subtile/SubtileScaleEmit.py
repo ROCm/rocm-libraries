@@ -22,7 +22,7 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SNop, SXorB32,
+    SAddCU32, SAddU32, SSubU32, SLShiftLeftB32, SMovB32, SNop, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -82,15 +82,29 @@ def emitScaleLRLoad(ti, writer, kernel):
 # Scale GR ptr update
 # ---------------------------------------------------------------------------
 
-def emitScaleGRPtrUpdate(ti, writer, kernel):
+def emitScaleGRPtrUpdate(ti, writer, kernel, holdOnLastIter=False):
   """Advance scale SRD base pointer by one depthU iteration."""
+  # Deferred: SubtileGREmit imports this module, so it cannot be imported here
+  # at module scope.
+  from .SubtileGREmit import emitSrdAdvance
+
   module = Module()
   tc = ti.tc
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
-  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
-  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0))
+  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
+  # Dual-period MXFP8 only: shrink num_records in lock-step with the base advance
+  # so base+num_records stays pinned to the tile's scale-buffer end.  computeLoadSrd
+  # sized Srd+2 one full ScaleGroupSpan high ((numLine+1)*span) precisely to absorb
+  # this shrink: across the K-loop the base slides one span forward, so the window
+  # stays wide enough for every real top-group read and tightens to exactly the tile
+  # end at the last real epoch -- clamping the trailing phantom prefetch (which would
+  # otherwise read one group past the scale allocation and fault at deep K).  Other
+  # swizzled-scale kernels (e.g. MXFP4) keep the legacy fixed num_records.
+  if kernel.get("_DualPeriodMXFP8"):
+    module.add(SSubU32(dst=sgpr(f"Srd{tc}+2"), src0=sgpr(f"Srd{tc}+2"), src1=inc,
+                       comment="shrink num_records in lock-step with base advance"))
   return module
 
 
@@ -388,9 +402,9 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 ##################################################
 # Scale SRD pointer update: advance scale SRD by scaleDepthU * scaleBpe bytes.
 #
-def globalReadScalePtrUpdates(tc, writer, kernel):
+def globalReadScalePtrUpdates(tc, writer, kernel, holdOnLastIter=False):
   ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-  return emitScaleGRPtrUpdate(ti_, writer, kernel)
+  return emitScaleGRPtrUpdate(ti_, writer, kernel, holdOnLastIter)
 
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
