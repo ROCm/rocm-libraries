@@ -152,13 +152,19 @@ rocsparse_status rocsparse::cscsv_max_nnz_launch_find(rocsparse::cscsv_max_nnz_l
     return rocsparse_status_success;
 }
 
-namespace rocsparse
+rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
+                                           rocsparse_operation         trans,
+                                           rocsparse_const_spmat_descr A,
+                                           rocsparse_analysis_policy   analysis_policy,
+                                           rocsparse_solve_policy      solve_policy,
+                                           rocsparse_cscsv_info        info,
+                                           size_t                      buffer_size_in_bytes,
+                                           void*                       buffer)
 {
-    static rocsparse_status cscsv_column_analysis(rocsparse_handle            handle,
-                                                  rocsparse_const_spmat_descr A,
-                                                  rocsparse_cscsv_info        info)
+    ROCSPARSE_ROUTINE_TRACE;
+    if(trans == rocsparse_operation_none)
     {
-        ROCSPARSE_ROUTINE_TRACE;
+        // The CSC analysis is not shared through the matrix info.
         hipStream_t               stream = handle->stream;
         const rocsparse_mat_descr descr  = A->descr;
         const int64_t             m      = A->cols;
@@ -230,24 +236,6 @@ namespace rocsparse
         info->set(rocsparse_operation_none, descr->fill_mode, trm_info.release());
         return rocsparse_status_success;
     }
-}
-
-rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
-                                           rocsparse_operation         trans,
-                                           rocsparse_const_spmat_descr A,
-                                           rocsparse_analysis_policy   analysis_policy,
-                                           rocsparse_solve_policy      solve_policy,
-                                           rocsparse_cscsv_info        info,
-                                           size_t                      buffer_size_in_bytes,
-                                           void*                       buffer)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-    if(trans == rocsparse_operation_none)
-    {
-        // The CSC analysis is not shared through the matrix info.
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_column_analysis(handle, A, info));
-        return rocsparse_status_success;
-    }
 
     rocsparse_csrsv_info csrsv_info{};
     switch(analysis_policy)
@@ -266,8 +254,17 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
     }
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_transposed_analysis(
-        handle, trans, A, analysis_policy, solve_policy, &csrsv_info, buffer));
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr mat_csr;
+    rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis(handle,
+                                                        rocsparse::cscsv_operation_to_csr(trans),
+                                                        &mat_csr,
+                                                        analysis_policy,
+                                                        solve_policy,
+                                                        &csrsv_info,
+                                                        buffer));
 
     switch(analysis_policy)
     {
@@ -295,6 +292,16 @@ bool rocsparse::cscsv_is_analyzed(rocsparse_cscsv_info        info,
     {
         return info->get(rocsparse_operation_none, A->descr->fill_mode) != nullptr;
     }
-    return (info->get_csrsv_info() != nullptr)
-           && rocsparse::cscsv_transposed_is_analyzed(info->get_csrsv_info(), trans, A);
+    if(info->get_csrsv_info() == nullptr)
+    {
+        return false;
+    }
+
+    // The transposed analysis is stored under the CSR operation and the flipped fill mode.
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr mat_csr;
+    rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
+    return info->get_csrsv_info()->get(rocsparse::cscsv_operation_to_csr(trans),
+                                       descr_csr.fill_mode)
+           != nullptr;
 }
