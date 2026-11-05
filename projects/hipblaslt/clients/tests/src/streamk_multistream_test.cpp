@@ -29,7 +29,7 @@
 // the flag-synchronised remainder path, since a pass would be meaningless
 // otherwise.
 
-#include "test_process.hpp"
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
@@ -85,16 +85,16 @@ namespace
             , m_prior(m_hadPrior ? std::getenv("TENSILE_DB") : "")
             , m_savedCerr(std::cerr.rdbuf(m_captured.rdbuf()))
         {
-            hipblaslt_test::setEnv("TENSILE_DB", kLaunchSummaryBit, 1);
+            hipblaslt_clients::setEnv("TENSILE_DB", kLaunchSummaryBit, 1);
             hipblaslt_debug_reload();
         }
 
         ~LaunchSummaryCapture()
         {
             if(m_hadPrior)
-                hipblaslt_test::setEnv("TENSILE_DB", m_prior.c_str(), 1);
+                hipblaslt_clients::setEnv("TENSILE_DB", m_prior.c_str(), 1);
             else
-                hipblaslt_test::unsetEnv("TENSILE_DB");
+                hipblaslt_clients::unsetEnv("TENSILE_DB");
             hipblaslt_debug_reload();
             std::cerr.rdbuf(m_savedCerr);
         }

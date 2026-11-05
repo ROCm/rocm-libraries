@@ -268,6 +268,8 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     # on no shard.
     add_executable(hipblaslt-test-tuning-store
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/src/tuning_store_test.cpp")
+    target_include_directories(hipblaslt-test-tuning-store
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/common/include")
     target_link_libraries(hipblaslt-test-tuning-store
         PRIVATE
             hipblaslt-tuning-store

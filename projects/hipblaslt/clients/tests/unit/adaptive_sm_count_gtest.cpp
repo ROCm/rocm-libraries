@@ -7,7 +7,7 @@
 // Estimator::beforeLaunch/afterProbe over a hand-filled probe slot array.
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
-#include "test_process.hpp"
+#include "client_process.hpp"
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
@@ -690,9 +690,9 @@ namespace
         static void set(const char* name, const char* value)
         {
             if(value)
-                hipblaslt_test::setEnv(name, value, 1);
+                hipblaslt_clients::setEnv(name, value, 1);
             else
-                hipblaslt_test::unsetEnv(name);
+                hipblaslt_clients::unsetEnv(name);
         }
 
         static constexpr const char* kVariables[] = {kEnvEnable, kEnvForce};

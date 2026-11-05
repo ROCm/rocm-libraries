@@ -6,8 +6,8 @@
 // link the store directly, so they need neither a device nor the hooks
 // hipblaslt-test uses.
 
-#include "../../common/include/test_process.hpp"
 #include "TuningCacheStore.hpp"
+#include "client_process.hpp"
 
 #include <gtest/gtest.h>
 
@@ -224,9 +224,9 @@ namespace
             for(const auto& [name, value] : m_savedEnv)
             {
                 if(value)
-                    hipblaslt_test::setEnv(name.c_str(), value->c_str(), 1);
+                    hipblaslt_clients::setEnv(name.c_str(), value->c_str(), 1);
                 else
-                    hipblaslt_test::unsetEnv(name.c_str());
+                    hipblaslt_clients::unsetEnv(name.c_str());
             }
         }
 
@@ -879,7 +879,7 @@ namespace
 
     TEST_F(TuningStore, AppendAfterInterruptedLineKeepsTheNewRow)
     {
-        const auto        pid = hipblaslt_test::processId();
+        const auto        pid = hipblaslt_clients::processId();
         const std::string path
             = ::testing::TempDir() + "hipblaslt_tuning_torn_" + std::to_string(pid) + ".txt";
         const auto key   = halfKey();
@@ -911,8 +911,8 @@ namespace
     // minutes of GPU work for it to spend.
     TEST_F(TuningStore, PrivilegedProcessIgnoresTheTuningEnvironment)
     {
-        hipblaslt_test::setEnv("HIPBLASLT_TUNING_MODE", "tune", 1);
-        hipblaslt_test::setEnv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", "tune", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
 
         const auto ordinary = TuningModeConfig::fromEnvironment(false);
         EXPECT_EQ(ordinary.mode, TuningMode::Tune);
@@ -931,17 +931,17 @@ namespace
     // nothing.
     TEST_F(TuningStore, ModeNeedsAKnownValueAndAPath)
     {
-        hipblaslt_test::setEnv("HIPBLASLT_TUNING_MODE", "online", 1);
-        hipblaslt_test::setEnv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", "online", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
         EXPECT_EQ(TuningModeConfig::fromEnvironment(false).mode, TuningMode::Off);
 
-        hipblaslt_test::setEnv("HIPBLASLT_TUNING_MODE", "cache", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", "cache", 1);
         const auto cache = TuningModeConfig::fromEnvironment(false);
         EXPECT_TRUE(cache.reads());
         EXPECT_FALSE(cache.writes());
 
-        hipblaslt_test::setEnv("HIPBLASLT_TUNING_MODE", "tune", 1);
-        hipblaslt_test::unsetEnv("HIPBLASLT_TUNING_CACHE_PATH");
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", "tune", 1);
+        hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_CACHE_PATH");
         const auto noPath = TuningModeConfig::fromEnvironment(false);
         EXPECT_EQ(noPath.mode, TuningMode::Tune);
         EXPECT_FALSE(noPath.reads());
@@ -1073,7 +1073,7 @@ namespace
     // back.
     TEST_F(TuningStore, AppendedRowsReadBackFromTheFile)
     {
-        const auto        pid = hipblaslt_test::processId();
+        const auto        pid = hipblaslt_clients::processId();
         const std::string path
             = ::testing::TempDir() + "hipblaslt_tuning_store_" + std::to_string(pid) + ".txt";
         std::remove(path.c_str());
