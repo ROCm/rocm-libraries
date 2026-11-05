@@ -25,7 +25,7 @@ TEST(Package, AmdGpuLayout) {
 
     std::vector<uint8_t> gfx950Input(32 * 8);
     std::iota(gfx950Input.begin(), gfx950Input.end(), uint8_t{0});
-    const auto gfx950Plan = planMxScaleStorage({32, 8}, 32, MxScaleStorageLayout::Gfx950);
+    const MxScaleStoragePlan gfx950Plan({32, 8}, 32, MxScaleStorageLayout::Gfx950);
     auto gfx950 = copyMxScaleStorageToPhysicalLayout(
         reinterpret_cast<const std::byte*>(gfx950Input.data()), gfx950Input.size(), gfx950Plan);
     ASSERT_EQ(gfx950.size(), 32 * 8);
@@ -38,7 +38,7 @@ TEST(Package, AmdGpuLayout) {
 
     std::vector<uint8_t> gfx1250Input(2 * 5);
     std::iota(gfx1250Input.begin(), gfx1250Input.end(), uint8_t{1});
-    const auto gfx1250Plan = planMxScaleStorage({2, 5}, 32, MxScaleStorageLayout::Gfx1250);
+    const MxScaleStoragePlan gfx1250Plan({2, 5}, 32, MxScaleStorageLayout::Gfx1250);
     auto gfx1250 = copyMxScaleStorageToPhysicalLayout(
         reinterpret_cast<const std::byte*>(gfx1250Input.data()), gfx1250Input.size(), gfx1250Plan);
     const std::array<std::byte, 16> expectedGfx1250{

@@ -13,6 +13,7 @@
 #include "detail/checked_arithmetic.hpp"
 #include "detail/exact_integer.hpp"
 #include "detail/runtime_tensor_io.hpp"
+#include "detail/threading.hpp"
 
 namespace roc::hostnumerics {
 namespace {
@@ -171,13 +172,13 @@ std::vector<uint64_t> project(const Tensor& tensor, std::span<const uint64_t> pr
     const size_t columns = tensor.shape()[transpose ? 0 : 1];
     const detail::RuntimeMatrixReader<int64_t> reader(tensor);
     std::vector<uint64_t> result(rows);
-#pragma omp parallel for if (rows * columns >= 16384)
-    for (ptrdiff_t r = 0; r < static_cast<ptrdiff_t>(rows); ++r) {
-        ModularAccumulator sum;
-        for (size_t c = 0; c < columns; ++c)
-            sum.append(freivaldsResidue(transpose ? reader(c, r) : reader(r, c)), probe[c]);
-        result[r] = sum.value();
-    }
+    detail::forEachParallelIndex(
+        rows, detail::saturatedProduct(rows, columns), true, 16384, [&](size_t r) {
+            ModularAccumulator sum;
+            for (size_t c = 0; c < columns; ++c)
+                sum.append(freivaldsResidue(transpose ? reader(c, r) : reader(r, c)), probe[c]);
+            result[r] = sum.value();
+        });
     return result;
 }
 FreivaldsPreparationFailure unsupported(std::string reason) {

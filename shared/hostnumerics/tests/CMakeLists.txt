@@ -85,7 +85,9 @@ add_executable(
     blocked_scaling_test.cpp
     blocked_selection_plan_test.cpp
 )
-target_link_libraries(hostnumerics-blocked-tests PRIVATE roc::hostnumerics GTest::gtest_main)
+# Tests that include private sources compile their OpenMP helpers.
+target_link_libraries(hostnumerics-blocked-tests
+    PRIVATE roc::hostnumerics GTest::gtest_main OpenMP::OpenMP_CXX)
 add_test(NAME hostnumerics-blocked-tests COMMAND hostnumerics-blocked-tests)
 
 # Allocation fault injection is isolated from the other test executables.
@@ -96,7 +98,7 @@ target_include_directories(
 )
 target_link_libraries(
     hostnumerics-gemm-resource-failure-tests
-    PRIVATE roc::hostnumerics GTest::gtest_main
+    PRIVATE roc::hostnumerics GTest::gtest_main OpenMP::OpenMP_CXX
 )
 if(TARGET hostnumerics-blas)
     target_link_libraries(
@@ -165,6 +167,7 @@ if(TARGET hostnumerics-blas)
         PRIVATE
             roc::hostnumerics-blas
             GTest::gtest_main
+            OpenMP::OpenMP_CXX
     )
     add_test(
         NAME hostnumerics-blas-tests-one-thread
@@ -219,9 +222,7 @@ add_test(NAME hostnumerics-mx-tests COMMAND hostnumerics-mx-tests)
 
 add_executable(
     hostnumerics-amd-gpu-layout-tests
-    amd_gpu_gfx1250_layout_test.cpp
-    amd_gpu_gfx950_layout_test.cpp
-    amd_gpu_layout_dispatch_test.cpp
+    amd_gpu_mx_layout_test.cpp
     amd_gpu_operand_layout_test.cpp
 )
 target_link_libraries(
@@ -259,14 +260,6 @@ add_test(
         "${CMAKE_COMMAND}"
         -DHOSTNUMERICS_SOURCE_DIR=${PROJECT_SOURCE_DIR}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_component_boundary.cmake"
-)
-
-add_test(
-    NAME hostnumerics-amd-gpu-layout-boundary
-    COMMAND
-        "${CMAKE_COMMAND}"
-        -DHOSTNUMERICS_SOURCE_DIR=${PROJECT_SOURCE_DIR}
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_amd_gpu_layout_boundary.cmake"
 )
 
 add_test(

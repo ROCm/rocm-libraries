@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "detail/reference_gemm.hpp"
-#include "detail/threading.hpp"
 
 namespace roc::hostnumerics {
 namespace {
