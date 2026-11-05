@@ -22,11 +22,11 @@ namespace rocRoller::hostnumerics
             return type == DataType::E4M3 || type == DataType::E5M3 || type == DataType::E8M0;
         }
 
-        Tensor normalizeBlockScale(Tensor      values,
-                                   size_t      freeExtent,
-                                   size_t      reductionExtent,
-                                   size_t      blockSize,
-                                   char const* name)
+        void validateBlockScaleShape(Tensor const& values,
+                                     size_t        freeExtent,
+                                     size_t        reductionExtent,
+                                     size_t        blockSize,
+                                     char const*   name)
         {
             if(blockSize == 0)
                 throw std::runtime_error("rocRoller scale block size must be nonzero.");
@@ -36,8 +36,6 @@ namespace rocRoller::hostnumerics
             if(values.shape() != Shape{freeExtent, blockCount})
                 throw std::runtime_error(std::string("rocRoller ") + name
                                          + " scales must have shape [free extent, K block].");
-
-            return values;
         }
     }
 
@@ -137,15 +135,17 @@ namespace rocRoller::hostnumerics
 
         MatmulOptions options(ScalarType::Float32);
         if(scaleA)
-            options.blockScaleA = roc::hostnumerics::MatmulBlockScale{
-                normalizeBlockScale(
-                    std::move(*scaleA), a.shape()[0], a.shape()[1], scaleBlockSize, "A"),
-                scaleBlockSize};
+        {
+            validateBlockScaleShape(*scaleA, a.shape()[0], a.shape()[1], scaleBlockSize, "A");
+            options.blockScaleA
+                = roc::hostnumerics::MatmulBlockScale{std::move(*scaleA), scaleBlockSize};
+        }
         if(scaleB)
-            options.blockScaleB = roc::hostnumerics::MatmulBlockScale{
-                normalizeBlockScale(
-                    std::move(*scaleB), b.shape()[1], b.shape()[0], scaleBlockSize, "B"),
-                scaleBlockSize};
+        {
+            validateBlockScaleShape(*scaleB, b.shape()[1], b.shape()[0], scaleBlockSize, "B");
+            options.blockScaleB
+                = roc::hostnumerics::MatmulBlockScale{std::move(*scaleB), scaleBlockSize};
+        }
 
         const size_t rows = a.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
@@ -177,19 +177,14 @@ namespace rocRoller::hostnumerics
                              float                                    alpha,
                              float                                    beta)
     {
-        return computeHostReference(
-            inputs.a,
-            inputs.b,
-            inputs.c,
-            runtimeScaleA ? std::move(runtimeScaleA)
-                          : (inputs.scaleA ? std::optional<roc::hostnumerics::Tensor>(inputs.scaleA)
-                                           : std::nullopt),
-            runtimeScaleB ? std::move(runtimeScaleB)
-                          : (inputs.scaleB ? std::optional<roc::hostnumerics::Tensor>(inputs.scaleB)
-                                           : std::nullopt),
-            scaleBlockSize,
-            alpha,
-            beta);
+        return computeHostReference(inputs.a,
+                                    inputs.b,
+                                    inputs.c,
+                                    runtimeScaleA ? std::move(runtimeScaleA) : inputs.scaleA,
+                                    runtimeScaleB ? std::move(runtimeScaleB) : inputs.scaleB,
+                                    scaleBlockSize,
+                                    alpha,
+                                    beta);
     }
 
     HostComparisonResult compareHostReference(roc::hostnumerics::Tensor observed,
