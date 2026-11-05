@@ -818,13 +818,15 @@ def build_of(row: dict) -> tuple:
     return tuple(str(row.get(name, "unknown")) for name in BUILD_FIELDS)
 
 
-def comparability_problems(rows: Iterable[dict]) -> list:
+def comparability_problems(rows: Iterable[dict], require_cold: bool = True) -> list:
     """Why ``rows`` are not timings that can be ranked together, one sentence
     each (empty when they can): they come from more than one build
     (:data:`BUILD_FIELDS`; a ``tuning_id`` names a configuration, not the code
-    or compiler that built it), some were not timed in cold memory, or their
-    ``rotate_mb`` differs. The one place these rules live: the report withholds
-    on them, stage 2 refuses stage-1 rows with them, ``--summarize`` warns."""
+    or compiler that built it), some were not timed in cold memory (skipped with
+    ``require_cold=False``: a deliberate warm run is comparable with itself), or
+    their ``rotate_mb`` differs. The one place these rules live: the report
+    withholds on them, stage 2 refuses stage-1 rows with them and
+    ``--summarize`` withholds its ranking on them."""
     rows = list(rows)
     problems = []
     builds = sorted({build_of(r) for r in rows})
@@ -835,7 +837,7 @@ def comparability_problems(rows: Iterable[dict]) -> list:
             "their times are not one measurement; re-time them at one build"
         )
     warm = [r for r in rows if not is_cold(r)]
-    if warm:
+    if require_cold and warm:
         problems.append(
             f"{len(warm)} of {len(rows)} rows were not timed in cold memory "
             f"(rotate_mb {sorted({r['rotate_mb'] for r in warm})} MiB below the "
@@ -855,14 +857,33 @@ def summarize(rows: list, out=None, require_auto: bool = True) -> int:
     """Print the best configuration per shape against ``auto``. Returns 1 if
     there are no rows, any row failed the gate, raised or could not be timed,
     or (with ``require_auto``; a windowed stage-1 run times ``auto`` in one
-    window only) a shape has no timed ``auto`` row; else 0."""
+    window only) a shape has no timed ``auto`` row, or the rows it ranks (each
+    shape's stage-2 rows, else its stage-1 rows) are not comparable
+    (:func:`comparability_problems`): it then prints ``WITHHELD`` and no
+    ranking. Warm rows alone only warn: a deliberate debugging run. Else 0."""
     out = out or sys.stdout
     if not rows:
         print("no rows to summarize", file=out)
         return 1
     exit_code = 0
-    for problem in comparability_problems(rows):
-        print(f"WARNING: {problem}", file=out)
+    by_shape = rows_by_shape(rows)
+    scored = [
+        r
+        for shape_rows in by_shape.values()
+        for r in shape_rows
+        if r["stage"] == shape_summary(shape_rows)["stage"]
+    ]
+    problems = comparability_problems(scored, require_cold=False)
+    for problem in problems:
+        print(f"WITHHELD: {problem}", file=out)
+    if problems:
+        return 1
+    if not all(is_cold(r) for r in scored):
+        print(
+            "WARNING: some rows were not timed in cold memory (--rotate-mb below "
+            "the cold target): debugging only",
+            file=out,
+        )
     print(
         f"{'shape':<36} {'stage':>5} {'timed':>5} {'best_us':>9} {'auto_us':>9} "
         f"{'auto/best':>9}  best tuning_id  knobs",

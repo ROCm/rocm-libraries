@@ -632,18 +632,30 @@ def test_rows_round_trip_through_json_and_refuse_a_foreign_file(tmp_path):
         sweep.load_rows([str(tmp_path / "other.json")])
 
 
-def test_summarize_warns_on_rows_that_cannot_be_ranked_together(capsys):
+def test_summarize_withholds_the_ranking_of_scored_rows_that_cannot_be_ranked(capsys):
+    """It ranks each shape's stage-2 rows (stage 1 when it has none): those are
+    the rows that must be one build and one rotation, not a warning beside a
+    ranking of them."""
+    rows = _rows()
+    rows[3]["sha"] = "def"  # a stage-2 row: scored
+    assert sweep.summarize(rows) == 1
+    out = capsys.readouterr().out
+    assert "WITHHELD" in out and "2 builds" in out and SHAPE.label not in out
+    rows = _rows()
+    rows[3]["rotate_mb"] = 2048  # still cold, but not the rotation of the others
+    assert sweep.summarize(rows) == 1
+    out = capsys.readouterr().out
+    assert "mix rotate_mb values" in out and SHAPE.label not in out
+    # Stage 1 is not ranked when stage 2 exists: its rows cannot make it unsound.
     rows = _rows()
     rows[1]["sha"] = "def"
     assert sweep.summarize(rows) == 0
-    out = capsys.readouterr().out
-    assert "WARNING" in out and "2 builds" in out
-    rows = _rows()
-    rows[1]["rotate_mb"] = 2048  # still cold, but not the rotation of the others
-    sweep.summarize(rows)
-    assert "mix rotate_mb values" in capsys.readouterr().out
-    sweep.summarize(_rows())
-    assert "WARNING" not in capsys.readouterr().out
+    assert "WITHHELD" not in capsys.readouterr().out
+    # With no stage 2, stage 1 is what is ranked.
+    rows = _rows()[:2]
+    rows[1]["sha"] = "def"
+    assert sweep.summarize(rows, require_auto=False) == 1
+    assert "2 builds" in capsys.readouterr().out
 
 
 def test_summarize_prefers_stage_two_and_fails_closed(capsys):
@@ -663,9 +675,11 @@ def test_summarize_prefers_stage_two_and_fails_closed(capsys):
     assert "auto configuration not timed" in capsys.readouterr().out
     # A windowed stage-1 run times auto in one window only.
     assert sweep.summarize(rows[:2], require_auto=False) == 0
-    rows[0]["rotate_mb"] = 0
+    # A deliberate warm run is comparable with itself: it warns, still ranks.
+    rows[2]["rotate_mb"] = rows[3]["rotate_mb"] = 0
     sweep.summarize(rows)
-    assert "WARNING" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "WITHHELD" not in out
 
 
 def test_stage2_from_files_splits_shapes_across_shards(monkeypatch, tmp_path):
@@ -1726,7 +1740,8 @@ def test_rotation_below_the_cold_target_is_not_cold(capsys):
     assert not sweep.is_cold(dict(cold, rotate_mb=0))
     assert not sweep.is_cold({"rotate_mb": 1024})  # no recorded target
     rows = _rows()
-    rows[0]["rotate_mb"] = 8
+    for row in rows[2:]:  # stage 2 is what ``summarize`` ranks
+        row["rotate_mb"] = 8
     sweep.summarize(rows)
     assert "not timed in cold memory" in capsys.readouterr().out
 
