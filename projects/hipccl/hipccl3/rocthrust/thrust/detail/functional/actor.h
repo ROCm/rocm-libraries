@@ -36,20 +36,15 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
-#include <thrust/detail/type_traits.h> // for internal::decay_t
 #include <thrust/tuple.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#include _THRUST_STD_INCLUDE(utility)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <tuple>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/decay.h)
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace functional
+namespace detail::functional
 {
 // An actor is a node in an expression template
 template <typename Eval>
@@ -83,7 +78,6 @@ struct is_actor<actor<T>> : _THRUST_STD::true_type
 {};
 
 // a node selecting and returning one of the arguments to the entire expression template
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <unsigned int Pos>
 struct argument
 {
@@ -94,17 +88,6 @@ struct argument
     return thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...});
   }
 };
-#else
-template <unsigned int Pos>
-struct argument
-{
-  template <typename... Ts>
-  THRUST_HOST_DEVICE auto eval(Ts&&... args) const -> decltype(::std::get<Pos>(::std::forward_as_tuple(args...)))
-  {
-    return ::std::get<Pos>(::std::forward_as_tuple(args...));
-  }
-};
-#endif
 
 template <unsigned int Pos>
 struct placeholder
@@ -199,7 +182,7 @@ struct value
 };
 
 template <typename T>
-THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<::internal::decay_t<T>>>
+THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<_THRUST_STD::decay_t<T>>>
 {
   return {{THRUST_FWD(x)}};
 }
@@ -227,6 +210,5 @@ THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr1& subexpr1, const SubExpr2
   return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
     {{_THRUST_STD::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
 }
-} // namespace functional
-} // namespace detail
+} // namespace detail::functional
 THRUST_NAMESPACE_END

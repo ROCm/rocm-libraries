@@ -37,13 +37,7 @@
 
 #include <gtest/gtest.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-#else
-#  include <thrust/detail/algorithm_wrapper.h>
-
-#  include <limits>
-#endif
+#include _THRUST_STD_INCLUDE(__algorithm/min.h)
 
 #define TEST_EVENT_WAIT(e) test_event_wait(e)
 

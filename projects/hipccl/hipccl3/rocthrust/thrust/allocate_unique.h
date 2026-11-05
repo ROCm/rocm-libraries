@@ -16,12 +16,13 @@
 #endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_algorithms.h>
-#include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_deduction.h>
-#include <thrust/detail/type_traits.h> // for internal::remove_cvref_t
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -65,7 +66,7 @@ struct allocator_delete final
 
   void operator()(pointer p)
   {
-    using traits = detail::allocator_traits<::internal::remove_cvref_t<Allocator>>;
+    using traits = detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>;
     typename traits::allocator_type alloc_T(alloc_);
 
     if (nullptr != detail::pointer_traits<pointer>::get(p))
@@ -141,7 +142,7 @@ struct array_allocator_delete final
 
   void operator()(pointer p)
   {
-    using traits = detail::allocator_traits<::internal::remove_cvref_t<Allocator>>;
+    using traits = detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>;
     typename traits::allocator_type alloc_T(get_allocator());
     if (nullptr != detail::pointer_traits<pointer>::get(p))
     {
@@ -200,14 +201,14 @@ THRUST_HOST_DEVICE tagged_deleter<Pointer, Lambda> make_tagged_deleter(Lambda&& 
 //! Creates a \p std::unique_ptr holding a new object of type \p T, constructed with \p args, using \p alloc as the
 //! allocator.
 template <typename T, typename Allocator, typename... Args>
-THRUST_HOST std::unique_ptr<
-  T,
-  allocator_delete<
-    T,
-    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
+THRUST_HOST
+std::unique_ptr<T,
+                allocator_delete<T,
+                                 typename detail::allocator_traits<
+                                   _THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
 allocate_unique(Allocator const& alloc, Args&&... args)
 {
-  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -229,10 +230,10 @@ THRUST_HOST std::unique_ptr<
   T,
   uninitialized_allocator_delete<
     T,
-    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
+    typename detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
 uninitialized_allocate_unique(Allocator const& alloc)
 {
-  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -256,7 +257,7 @@ THRUST_HOST std::unique_ptr<
                            Allocator>::type>::type>::template rebind_traits<T>::allocator_type>>
 allocate_unique_n(Allocator const& alloc, Size n, Args&&... args)
 {
-  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -278,10 +279,10 @@ THRUST_HOST std::unique_ptr<
   T[],
   uninitialized_array_allocator_delete<
     T,
-    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
+    typename detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
 uninitialized_allocate_unique_n(Allocator const& alloc, Size n)
 {
-  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<_THRUST_STD::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 

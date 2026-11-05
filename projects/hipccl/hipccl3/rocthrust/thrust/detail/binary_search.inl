@@ -27,9 +27,22 @@
 #endif // no system header
 #include <thrust/binary_search.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/detail/adl/binary_search.h>
-#include <thrust/system/detail/generic/binary_search.h>
 #include <thrust/system/detail/generic/select_system.h>
+
+// Include all active backend system implementations (generic, sequential, host and device)
+#include <thrust/system/detail/generic/binary_search.h>
+#include <thrust/system/detail/sequential/binary_search.h>
+#include __THRUST_HOST_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(binary_search.h)
+#include __THRUST_DEVICE_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(binary_search.h)
+
+// Some build systems need a hint to know which files we could include
+#if 0
+#  include <thrust/system/cpp/detail/binary_search.h>
+#  include <thrust/system/cuda/detail/binary_search.h>
+#  include <thrust/system/hip/detail/binary_search.h>
+#  include <thrust/system/omp/detail/binary_search.h>
+#  include <thrust/system/tbb/detail/binary_search.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -110,7 +123,7 @@ THRUST_HOST_DEVICE bool binary_search(
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -123,7 +136,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -333,7 +346,7 @@ bool binary_search(ForwardIterator first, ForwardIterator last, const T& value, 
 }
 
 template <typename ForwardIterator, typename LessThanComparable>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 equal_range(ForwardIterator first, ForwardIterator last, const LessThanComparable& value)
 {
   using thrust::system::detail::generic::select_system;
@@ -346,7 +359,7 @@ equal_range(ForwardIterator first, ForwardIterator last, const LessThanComparabl
 }
 
 template <typename ForwardIterator, typename T, typename StrictWeakOrdering>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 equal_range(ForwardIterator first, ForwardIterator last, const T& value, StrictWeakOrdering comp)
 {
   using thrust::system::detail::generic::select_system;

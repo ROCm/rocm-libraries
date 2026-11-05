@@ -31,8 +31,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
-#include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>
@@ -40,12 +38,20 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/tuple.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
-#endif
-
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
+#include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory) // for ::new
+#include _THRUST_STD_INCLUDE(__new/device_new.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_const.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -95,6 +101,25 @@ struct tuple_binary_predicate
   mutable Predicate pred;
 };
 
+template <class Predicate, class NewType, class OutputType>
+struct new_value_if_f
+{
+  Predicate pred;
+  NewType new_value;
+
+  template <class T>
+  THRUST_DEVICE OutputType operator()(T const& x)
+  {
+    return pred(x) ? new_value : x;
+  }
+
+  template <class T, class P>
+  THRUST_DEVICE OutputType operator()(T const& x, P const& y)
+  {
+    return pred(y) ? new_value : x;
+  }
+};
+
 // We need to mark proxy iterators as such
 template <>
 inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::discard_iterator::__discard_proxy> = true;
@@ -104,6 +129,9 @@ inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__tabulate_proxy<Fn, 
 
 template <class Iter, class Fn>
 inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__transform_output_proxy<Iter, Fn>> = true;
+
+template <class Iter, class InputFn, class OutputFn>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__transform_input_output_proxy<Iter, InputFn, OutputFn>> = true;
 
 template <typename T>
 inline constexpr bool is_non_const_reference_v =
@@ -219,7 +247,7 @@ struct device_destroy_functor
 
 template <typename System, typename T>
 struct destroy_functor
-    : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
+    : thrust::detail::eval_if<_THRUST_STD::is_convertible_v<System, thrust::host_system_tag>,
                               _THRUST_STD::type_identity<host_destroy_functor<T>>,
                               _THRUST_STD::type_identity<device_destroy_functor<T>>>
 {};
@@ -287,7 +315,22 @@ struct compare_first
     return comp(thrust::raw_reference_cast(_THRUST_STD::get<0>(x)), thrust::raw_reference_cast(_THRUST_STD::get<0>(y)));
   }
 }; // end compare_first
-
 } // end namespace detail
-
 THRUST_NAMESPACE_END
+
+_THRUST_LIBCXX_NAMESPACE_BEGIN
+template <typename Predicate, typename IntegralType>
+struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::detail::predicate_to_integral<Predicate, IntegralType>>
+    : proclaims_copyable_arguments<Predicate>
+{};
+
+template <typename Predicate>
+struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::detail::tuple_binary_predicate<Predicate>>
+    : proclaims_copyable_arguments<Predicate>
+{};
+
+template <class Predicate, class NewType, class OutputType>
+struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::detail::new_value_if_f<Predicate, NewType, OutputType>>
+    : proclaims_copyable_arguments<Predicate>
+{};
+_THRUST_LIBCXX_NAMESPACE_END
