@@ -19,6 +19,8 @@ Documentation for rocFFT is available at
 * Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
   factors silently falling back to running the transform on a single device.  Such plans may now
   perform better.
+* Fixed data races on work memory that could cause sporadic incorrect results for
+  multi-device transforms requiring work memory.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 
