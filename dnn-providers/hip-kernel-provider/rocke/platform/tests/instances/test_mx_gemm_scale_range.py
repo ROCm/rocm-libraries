@@ -36,15 +36,12 @@ Checks:
 from __future__ import annotations
 
 import ctypes
-import importlib.util
-import os
 import re
 import struct
 from typing import NamedTuple
 
 import numpy as np
 import pytest
-
 from rocke.helpers import compile_kernel
 from rocke.helpers.compile import lower_kernel_for_comgr
 from rocke.helpers.mx_scale import exact_mx_scale_split
@@ -54,6 +51,8 @@ from rocke.instances.common.mx_gemm import (
     mx_gemm_element_format,
     mx_gemm_grid,
 )
+from rocke.tests.engines import all_engines_backend
+from rocke.tests.gpu import current_device_arch_in
 
 _NAN_CODE = 255
 _BIAS = 127
@@ -175,24 +174,10 @@ _MX_GPU_ARCHS = ("gfx942", "gfx950")
 
 @pytest.fixture(scope="module")
 def mx_gpu_arch():
-    """The arch of HIP device 0 if it is one the MX GEMM supports; skip
-    otherwise, or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the
-    device is not (``ROCKE_REQUIRE_GFX950=1`` or ``ROCKE_REQUIRE_GFX942=1``)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        arch = get_device_arch(0)
-    except Exception as exc:  # no HIP runtime on this host
-        arch = f"no GPU ({exc})"
-    for required in _MX_GPU_ARCHS:
-        if (
-            os.environ.get(f"ROCKE_REQUIRE_{required.upper()}") == "1"
-            and arch != required
-        ):
-            pytest.fail(f"requires a {required} GPU; found {arch}")
-    if arch not in _MX_GPU_ARCHS:
-        pytest.skip(f"requires a gfx942 or gfx950 GPU; found {arch}")
-    return arch
+    """The current GPU's arch if it is one the MX GEMM supports; skip otherwise,
+    or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the GPU is not
+    (``ROCKE_REQUIRE_GFX950=1`` or ``ROCKE_REQUIRE_GFX942=1``)."""
+    return current_device_arch_in(_MX_GPU_ARCHS)
 
 
 def _run_on_gpu(arch, groups) -> np.ndarray:
@@ -201,9 +186,8 @@ def _run_on_gpu(arch, groups) -> np.ndarray:
     from rocke.runtime.hip_module import Runtime
 
     spec = MxGemmSpec(M=16, N=16, K=32 * len(groups), mantissa_dtype="bf8e5m2")
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
     artifact = compile_kernel(
-        build_mx_gemm(spec, arch=arch), arch=arch, backend=backend
+        build_mx_gemm(spec, arch=arch), arch=arch, backend=all_engines_backend()
     )
     a_bytes = [_bf8_byte(arch, group[0]) for group in groups]
     b_bytes = [_bf8_byte(arch, group[1]) for group in groups]
@@ -430,9 +414,8 @@ def mx_gemm(request) -> _LoweredMxGemm:
     binding), for each target and mantissa type the builder supports."""
     arch, dtype = request.param
     spec = MxGemmSpec(M=16, N=16, K=64, mantissa_dtype=dtype)
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
     lowered = lower_kernel_for_comgr(
-        build_mx_gemm(spec, arch=arch), arch=arch, backend=backend
+        build_mx_gemm(spec, arch=arch), arch=arch, backend=all_engines_backend()
     )
     element_format = mx_gemm_element_format(dtype, arch)
     return _LoweredMxGemm(arch, element_format, _KernelIR(lowered.llvm_text))

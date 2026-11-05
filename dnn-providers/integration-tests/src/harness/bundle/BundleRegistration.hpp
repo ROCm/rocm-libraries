@@ -154,6 +154,41 @@ struct SkippedLoad
 // load for some other reason and should be skipped quietly.
 using LoadOutcome = std::variant<LoadedBundle, FailedLoad, SkippedLoad>;
 
+// Whether a discovered bundle's metadata says expected_rejection, read without
+// loading the bundle: classifyBundle() asks it of a bundle that failed to load, where
+// there is no loaded metadata to consult. False whenever the metadata cannot be read,
+// which includes an absent file -- a malformed one already failed with its own message.
+inline bool requestsExpectedRejection(const DiscoveredBundle& disc, SweepManifestCache& sweeps)
+{
+    try
+    {
+        if(!disc.isTemplateSweepCase())
+        {
+            const auto metadata = hipdnn_integration_tests::loadBundleMetadata(disc.jsonPath);
+            return metadata.has_value() && metadata->expectedRejection;
+        }
+
+        const auto& sweep = sweeps.get(disc);
+        if(!sweep.manifest.has_value())
+        {
+            return false;
+        }
+        const auto* caseJson = sweep.manifest->findCase(disc.sweep->caseId);
+        if(caseJson == nullptr || !caseJson->contains("metadata")
+           || caseJson->at("metadata").is_null())
+        {
+            return false;
+        }
+        return hipdnn_integration_tests::parseBundleMetadataJson(caseJson->at("metadata"),
+                                                                 disc.diagnosticPath().string())
+            .expectedRejection;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
 // Attempts to load one discovered bundle and classifies the outcome. Split out
 // from registerBundleTests() so the decision (did this bundle load, and if
 // not, why) is a pure function that can be unit tested without touching
@@ -200,6 +235,20 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc, SweepManifestCac
                               disc.testName,
                               "Failed to load bundle " + diagnosticPath.string() + ": "
                                   + toString(*error)};
+        }
+        // An expected-rejection bundle that cannot load is not "rejected by the
+        // engine": it never reached one, and a quiet skip would let a bundle made
+        // invalid at the schema level pass for a working one. The invalidity has to be
+        // something only an engine can see.
+        if(requestsExpectedRejection(disc, sweeps))
+        {
+            return FailedLoad{disc.suiteName,
+                              disc.testName,
+                              "Failed to load expected_rejection bundle " + diagnosticPath.string()
+                                  + ": " + toString(*error)
+                                  + "; the engine can only reject a bundle that loads, so make it "
+                                    "invalid in a way the engine sees (a shape, type or "
+                                    "attribute it does not support), not in its JSON or schema"};
         }
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
@@ -353,7 +402,7 @@ inline std::optional<std::vector<LoadedBundle>>
     loadDiscoveredBundles(const DiscoveredBundleSet& discovered, bool countFound, bool countClaims)
 {
     // Load all bundles eagerly, once, at registration time; classifyBundle()
-    // decides each outcome. Three failures get a synthetic failing test
+    // decides each outcome. Four failures get a synthetic failing test
     // registered in place of the bundle (see detail::registerSyntheticBundleTest())
     // instead of just an ERROR log, so they turn the suite red rather than
     // quietly shrinking it:
@@ -366,6 +415,9 @@ inline std::optional<std::vector<LoadedBundle>>
     //   - golden blobs with no metadata at all
     //     (LoadError::UNVALIDATABLE_GOLDEN_DATA): pulling the data must never
     //     delete a test.
+    //   - an expected_rejection bundle (metadata flag) that cannot load at all: it
+    //     must reach an engine to be rejected by one, so a quiet skip would let it
+    //     pass for a working bundle.
     // Every other load failure (malformed graph JSON, invalid graph, a bad sweep
     // case) keeps the original behavior: logged and skipped, no test registered.
     // A bundle's tensor blobs are not read here: it records where they are, and its
@@ -408,8 +460,13 @@ inline std::optional<std::vector<LoadedBundle>>
         }
         // The locator the registered test will carry, not a second derivation of it --
         // the coverage number has to count the file the run reads.
-        if(countClaims
-           && std::filesystem::exists(std::get<LoadedBundle>(outcome).claimLocator.sidecarPath))
+        // The predicate matches shouldObserveClaims() in the harness: an
+        // expected-rejection bundle is never queried, so counting its sidecar (a sweep
+        // case shares one with its claimed siblings) would seed a denominator nothing
+        // can satisfy.
+        const auto& loaded = std::get<LoadedBundle>(outcome);
+        if(countClaims && std::filesystem::exists(loaded.claimLocator.sidecarPath)
+           && !excludedFromSupportClaims(loaded.bundle->metadata))
         {
             supportClaimCoverage().graphsWithClaims++;
         }

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -226,9 +226,9 @@ void potf2_potrf_getError(const rocblas_handle handle,
         // (TODO: For now, the algorithm is modifying the whole input matrix even when
         //  it is not positive definite. So we only check the principal nn-by-nn submatrix.
         //  Once this is corrected, nn could be always equal to n.)
-        *max_err = (uplo == rocblas_fill_lower)
-            ? norm_error_lowerTr('F', nn, nn, lda, hA[b], hARes[b])
-            : norm_error_upperTr('F', nn, nn, lda, hA[b], hARes[b]);
+        err = (uplo == rocblas_fill_lower) ? norm_error_lowerTr('F', nn, nn, lda, hA[b], hARes[b])
+                                           : norm_error_upperTr('F', nn, nn, lda, hA[b], hARes[b]);
+        *max_err = rocblas_max_nan(err, (*max_err));
     }
 
     // also check info for non positive definite cases
