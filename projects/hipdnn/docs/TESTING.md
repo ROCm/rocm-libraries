@@ -133,7 +133,7 @@ Labels on a PR change what CI runs. Required GitHub checks are configured outsid
 
 | Check | What it runs |
 |-------|--------------|
-| `hipdnn-superbuild-ci.yml` | Source-only rocKE asset contracts run on Linux and Windows after Python setup and before configure, through `dnn-providers/hip-kernel-provider/tests/run_rocke_asset_source_contracts.py`; skipped tests or an uncollected required module fail the job. Superbuild on Linux (gfx942 target) and Windows (gfx1151 target), then `ctest --test-dir build --output-on-failure --no-tests=error`, which produces no JUnit file. Triggers on PRs that touch `projects/hipdnn/**` or `dnn-providers/**`, and nightly. Skips the builds when every changed file is documentation (`*.md`, `*.rst`, `docs/**`); the skipped job counts as passing |
+| `hipdnn-superbuild-ci.yml` | Superbuild on Linux (gfx942 target) and Windows (gfx1151 target), then `ctest --test-dir build --output-on-failure --no-tests=error`, which produces no JUnit file. Triggers on PRs that touch `projects/hipdnn/**` or `dnn-providers/**`, and nightly. Skips the builds when every changed file is documentation (`*.md`, `*.rst`, `docs/**`); the skipped job counts as passing |
 | `therock-multi-arch-ci.yml` | `standard` tier on Linux gfx94X and Windows gfx110X for the affected components |
 | `therock-multi-arch-ci-asan.yml` | ASAN build (host-ASAN with `ci:host-asan`), only with `ci:asan` or `ci:host-asan`; no tests |
 

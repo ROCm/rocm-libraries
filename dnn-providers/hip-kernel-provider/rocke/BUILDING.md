@@ -132,44 +132,6 @@ from rocke.assets import platform_root, dsl_docs_dir, shape_utils_dir
 Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
 `ROCKE_DSL_DOCS`.
 
-### External hipDNN SDPA contract-test inputs
-
-The standalone SDK does not infer paths into an embedding repository. To stage
-external hipDNN SDPA test inputs, supply both CMake variables:
-
-```sh
-cmake -S rocke/platform -B sdk-build \
-      -DROCKE_HIPDNN_SDPA_TEMPLATE="$SDPA_TEMPLATE" \
-      -DROCKE_HIPDNN_SDPA_BUNDLES_DIR="$SDPA_BUNDLES"
-```
-
-When the library's installed contract tests are enabled, the template must be
-an existing file and the bundle root an existing directory. Partial or invalid
-explicit inputs fail configuration. With neither input set,
-these external comparisons remain optional. The provider supplies available
-monorepo defaults before adding the SDK and leaves explicit overrides untouched.
-
-Only selected `SdpaFwd` golden graphs are staged; `Default` graphs and metadata,
-support and sweep files are excluded. Their bundle-relative paths are retained.
-When selected graphs are staged, the installed SDPA CTest requires the installed
-template and graphs, so losing that copy is a failure rather than a capability
-skip. A bundle root with no selected graphs provides no external comparison
-coverage and does not enable that requirement.
-
-### External provider pack-header test inputs
-
-`ROCKE_HKP_PACKS_DIR` independently supplies the directory containing
-`Gfx950AttentionDenseGeometry.hpp` and `Gfx950AttentionUnified3DGeometry.hpp`.
-Explicit inputs must contain both files. An omitted or empty input keeps these
-provider-specific comparisons optional; the embedding provider supplies its
-available defaults without overriding explicit values or depending on SDPA
-inputs.
-
-The headers are copied beside the installed attention host tests. When staged,
-that cohort uses `--rocke-require-hkp-pack-headers`: missing installed headers
-fail instead of skipping or falling back to a source checkout. Other test
-cohorts and standalone SDK use retain their existing policy.
-
 ## C++ engine
 
 The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its

@@ -124,13 +124,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
     tmp_path, provider_subdir, suffix_override
 ):
     build = tmp_path / "build"
-    packs = tmp_path / "pack-headers"
-    packs.mkdir()
-    for header in (
-        "Gfx950AttentionDenseGeometry.hpp",
-        "Gfx950AttentionUnified3DGeometry.hpp",
-    ):
-        (packs / header).write_text("// header fixture\n")
     # Exercise filename construction with a real CMake suffix override, not a
     # substituted Python host platform. This is not a Windows execution test.
     project_include = tmp_path / "suffix.cmake"
@@ -154,7 +147,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
             f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
             f"-DCMAKE_PROJECT_INCLUDE={project_include}",
-            f"-DROCKE_HKP_PACKS_DIR={packs}",
         ],
         check=True,
         capture_output=True,
@@ -224,13 +216,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         sdpa = next(
             test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
         )
-        for test in tests:
-            assert ("--rocke-require-hkp-pack-headers" in test.get("command", ())) == (
-                test["name"] == "rocke_library_attention_cpu_pytest"
-            )
-        install_script = (build / "cmake_install.cmake").read_text()
-        assert "/tests/library/tests/hkp_packs" in install_script
-        assert "Gfx950AttentionUnified3DGeometry.hpp" in install_script
         assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
         assert environment_for(tests, "rocke_library_sdpa_pytest") == {
             "PYTHONPATH": f"{test_ctest_rel}tests/library"

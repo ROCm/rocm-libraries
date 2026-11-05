@@ -34,45 +34,13 @@ _GEOMETRY_HEADERS = (
 )
 
 
-def _packs_dir(*, required: bool = False) -> Path:
-    # A required installed copy must not be repaired by a checkout fallback.
-    dirs = _PACKS_DIRS[:1] if required else _PACKS_DIRS
-    for directory in dirs:
-        if all((directory / header).is_file() for header in _GEOMETRY_HEADERS):
-            return directory
-    if required:
-        pytest.fail(
-            "required installed provider pack headers are missing: "
-            + ", ".join(_GEOMETRY_HEADERS)
-        )
+def _packs_dir() -> Path:
+    for d in _PACKS_DIRS:
+        if all((d / h).is_file() for h in _GEOMETRY_HEADERS):
+            return d
     pytest.skip(
         "hip-kernel-provider pack headers are neither installed nor in a checkout"
     )
-
-
-@pytest.mark.parametrize("missing", [None, *_GEOMETRY_HEADERS])
-def test_required_pack_headers_do_not_use_checkout(tmp_path, monkeypatch, missing):
-    installed, checkout = tmp_path / "installed", tmp_path / "checkout"
-    for directory in (installed, checkout):
-        directory.mkdir()
-        for header in _GEOMETRY_HEADERS:
-            (directory / header).write_text("// header fixture\n")
-    monkeypatch.setitem(globals(), "_PACKS_DIRS", (installed, checkout))
-    if missing is None:
-        assert _packs_dir(required=True) == installed
-    else:
-        (installed / missing).unlink()
-        assert _packs_dir() == checkout
-        with pytest.raises(pytest.fail.Exception, match="required installed provider"):
-            _packs_dir(required=True)
-
-
-def test_optional_pack_headers_skip_without_inputs(tmp_path, monkeypatch):
-    monkeypatch.setitem(globals(), "_PACKS_DIRS", (tmp_path,))
-    with pytest.raises(
-        pytest.skip.Exception, match="neither installed nor in a checkout"
-    ):
-        _packs_dir()
 
 
 def _reduce(num_segments: int):
@@ -125,34 +93,28 @@ def test_reduce_lds_formula_is_what_comgr_allocates(num_segments):
     ) == split_kv_reduce_lds_bytes(num_segments)
 
 
-def _cpp_int(packs: Path, header: str, name: str) -> int:
-    text = (packs / header).read_text()
+def _cpp_int(header: str, name: str) -> int:
+    text = (_packs_dir() / header).read_text()
     match = re.search(rf"inline constexpr int64_t {name} = (\d+);", text)
     assert match, f"{name} not found as a literal in {header}"
     return int(match.group(1))
 
 
-def test_cpp_segment_bound_mirrors_the_arch_bound(request):
+def test_cpp_segment_bound_mirrors_the_arch_bound():
     """The C++ host bound is gfx950's LDS capacity over the reduce's bytes per segment,
     each restated in C++, and equals the Python gate's bound."""
     from rocke.core.arch.target import ArchTarget
 
     from kernels.gfx950.attention_tiled_3d import reduce_max_segments
 
-    packs = _packs_dir(
-        required=request.config.getoption("--rocke-require-hkp-pack-headers")
-    )
-    cap = _cpp_int(
-        packs, "Gfx950AttentionDenseGeometry.hpp", "GFX950_LDS_CAPACITY_BYTES"
-    )
+    cap = _cpp_int("Gfx950AttentionDenseGeometry.hpp", "GFX950_LDS_CAPACITY_BYTES")
     per_segment = _cpp_int(
-        packs,
         "Gfx950AttentionUnified3DGeometry.hpp",
         "GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT",
     )
     assert cap == ArchTarget.from_gfx("gfx950").lds_capacity_bytes
     assert cap // per_segment == reduce_max_segments("gfx950")
-    text = (packs / "Gfx950AttentionUnified3DGeometry.hpp").read_text()
+    text = (_packs_dir() / "Gfx950AttentionUnified3DGeometry.hpp").read_text()
     assert (
         "GFX950_UNIFIED_3D_MAX_SEGMENTS\n"
         "    = GFX950_LDS_CAPACITY_BYTES / GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT;"

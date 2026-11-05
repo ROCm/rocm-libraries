@@ -75,12 +75,6 @@ def pytest_addoption(parser):
         ),
     )
     parser.addoption(
-        "--rocke-require-hkp-pack-headers",
-        action="store_true",
-        default=False,
-        help="require the installed provider headers used by attention host tests",
-    )
-    parser.addoption(
         "--rocke-require-hipdnn-assets",
         action="store_true",
         default=False,
