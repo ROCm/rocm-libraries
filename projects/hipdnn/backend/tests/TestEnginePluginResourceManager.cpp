@@ -3226,8 +3226,8 @@ TEST(TestEnginePluginResourceManager, RaggedOffsetMultiplierGraphIncludesMultipl
 
 // A cu_seq_len graph needs a plugin at or above K_CU_SEQ_LEN_MIN_API_VERSION. Older plugins
 // would silently ignore the fields, so they must be excluded before getApplicableEngineIds.
-// - 1.4.0: predates the ragged-offset multiplier too.
-// - 1.5.0: UHD prediction entry points, no cu_seq_len support.
+// - 1.4.0: the ragged-offset multiplier floor, the newest graph-feature floor below cu_seq_len.
+// - 1.5.0: UHD prediction entry points; a graph-feature-free release with no cu_seq_len support.
 namespace
 {
 void expectCuSeqLenGraphExcludesPluginAt(std::string_view pluginApiVersion)
@@ -3259,7 +3259,7 @@ void expectCuSeqLenGraphExcludesPluginAt(std::string_view pluginApiVersion)
 }
 } // namespace
 
-TEST(TestEnginePluginResourceManager, CuSeqLenGraphExcludesPluginBelowRaggedOffsetMultiplier)
+TEST(TestEnginePluginResourceManager, CuSeqLenGraphExcludesPluginAtRaggedOffsetMultiplierFloor)
 {
     expectCuSeqLenGraphExcludesPluginAt(hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION);
 }

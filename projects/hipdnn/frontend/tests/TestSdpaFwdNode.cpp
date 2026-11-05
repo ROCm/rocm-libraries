@@ -1009,7 +1009,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenFirstDimEqualsBatch)
     EXPECT_NE(err.err_msg.find("cu_seq_len_kv dim[0]"), std::string::npos) << err.err_msg;
 }
 
-// cuDNN's 1-D (B+1) form is promoted to (B+1,1,1,1) by set_cu_seq_len_*, so it validates.
+// cuDNN's 1-D (B+1) form is promoted to (B+1,1,1,1) during validation, so it validates.
 TEST(TestSdpaFwdNode, PreValidateSucceedsWithOneDimCuSeqLen)
 {
     auto attrs = makeCuSeqLenAttrs();
@@ -1039,8 +1039,8 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotRank4)
     EXPECT_NE(err.err_msg.find("cu_seq_len_q must be rank-4"), std::string::npos) << err.err_msg;
 }
 
-// Promotion happens at set time, so dims given afterwards are not promoted.
-TEST(TestSdpaFwdNode, PreValidateFailsOneDimCuSeqLenWhoseDimsAreSetAfterTheSetter)
+// Promotion happens at validation, so the order of the setter and the dims does not matter.
+TEST(TestSdpaFwdNode, PreValidateSucceedsWhenOneDimCuSeqLenDimsAreSetAfterTheSetter)
 {
     auto attrs = makeCuSeqLenAttrs();
     auto cuQ = std::make_shared<TensorAttributes>();
@@ -1048,8 +1048,37 @@ TEST(TestSdpaFwdNode, PreValidateFailsOneDimCuSeqLenWhoseDimsAreSetAfterTheSette
     attrs.set_cu_seq_len_q(cuQ);
     cuQ->set_dim({3});
     auto err = preValidate(std::move(attrs));
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
-    EXPECT_NE(err.err_msg.find("cu_seq_len_q must be rank-4"), std::string::npos) << err.err_msg;
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+// The caller's handle (and so its uid) stays valid: the promotion edits the tensor in place and
+// keeps a given leading stride.
+TEST(TestSdpaFwdNode, PreValidatePromotesOneDimCuSeqLenInPlaceKeepingTheLeadingStride)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    auto cuQ = makeCuSeqLen({3});
+    cuQ->set_stride({4});
+    auto cuKv = makeCuSeqLen({3});
+    attrs.set_cu_seq_len_q(cuQ);
+    attrs.set_cu_seq_len_kv(cuKv);
+    ASSERT_EQ(preValidate(std::move(attrs)).code, error_code_t::OK);
+
+    EXPECT_EQ(cuQ->get_dim(), (std::vector<int64_t>{3, 1, 1, 1}));
+    EXPECT_EQ(cuQ->get_stride(), (std::vector<int64_t>{4, 1, 1, 1}));
+    EXPECT_EQ(cuKv->get_dim(), (std::vector<int64_t>{3, 1, 1, 1}));
+    EXPECT_EQ(cuKv->get_stride(), (std::vector<int64_t>{1, 1, 1, 1}));
+}
+
+// A tensor that is already rank-4 keeps its dims and strides.
+TEST(TestSdpaFwdNode, PreValidateLeavesFourDimCuSeqLenUntouched)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    auto cuQ = makeCuSeqLen({3, 1, 1, 1});
+    cuQ->set_stride({2, 1, 1, 1});
+    attrs.set_cu_seq_len_q(cuQ);
+    ASSERT_EQ(preValidate(std::move(attrs)).code, error_code_t::OK);
+
+    EXPECT_EQ(cuQ->get_stride(), (std::vector<int64_t>{2, 1, 1, 1}));
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenTrailingDimNotOne)

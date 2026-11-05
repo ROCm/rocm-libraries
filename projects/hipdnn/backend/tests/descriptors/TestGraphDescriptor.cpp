@@ -1233,9 +1233,11 @@ TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
 
 namespace
 {
-flatbuffers::FlatBufferBuilder makeSdpaFwdGraph(bool withCuSeqLen)
+flatbuffers::FlatBufferBuilder
+    makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
     const std::vector<int64_t> dims = {2, 8, 16, 64};
     const std::vector<int64_t> strides = {8192, 1024, 64, 1};
     return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
@@ -1252,11 +1254,12 @@ flatbuffers::FlatBufferBuilder makeSdpaFwdGraph(bool withCuSeqLen)
                                                                /*withScale=*/false,
                                                                /*withStats=*/false,
                                                                /*alibiMask=*/false,
-                                                               /*paddingMask=*/withCuSeqLen,
+                                                               /*paddingMask=*/cuSeqLenSides
+                                                                   != CuSeqLenSides::NONE,
                                                                /*causalMask=*/false,
                                                                /*overrideShapeEnabled=*/false,
                                                                DataType::UNSET,
-                                                               withCuSeqLen);
+                                                               cuSeqLenSides);
 }
 
 hipdnn_data_sdk::utilities::Version stampedVersion(GraphDescriptor& descriptor)
@@ -1277,7 +1280,7 @@ TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForEmptyDescriptor)
 
 TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForSdpaGraphWithoutCuSeqLen)
 {
-    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/false);
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::NONE);
     auto serializedGraph = builder.Release();
 
     GraphDescriptor descriptor;
@@ -1301,7 +1304,7 @@ TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForNonSdpaGraph)
 
 TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsCuSeqLenFloorForSdpaGraphWithCuSeqLen)
 {
-    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/true);
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
     auto serializedGraph = builder.Release();
 
     GraphDescriptor descriptor;
@@ -1312,9 +1315,31 @@ TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsCuSeqLenFloorForSdpaGraphWit
               hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
 }
 
+// The frontend accepts the mixed forms (cu_seq_len on one side, seq_len on the other), so
+// either side alone must flag the graph and stamp the 1.6.0 floor; otherwise such a graph would
+// reach plugins that know nothing about cu_seq_len.
+TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsFloorWhenOnlyOneSideIsCumulative)
+{
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto builder = makeSdpaFwdGraph(sides);
+        auto serializedGraph = builder.Release();
+
+        GraphDescriptor descriptor;
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+        EXPECT_TRUE(descriptor.hasCuSeqLen());
+        EXPECT_EQ(
+            stampedVersion(descriptor),
+            hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+    }
+}
+
 TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesSerializationRoundTrip)
 {
-    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/true);
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
     auto serializedGraph = builder.Release();
 
     GraphDescriptor original;
@@ -1330,7 +1355,7 @@ TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesSerializationRoundTrip)
 
 TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesJsonRoundTrip)
 {
-    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/true);
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
     auto serializedGraph = builder.Release();
 
     GraphDescriptor original;

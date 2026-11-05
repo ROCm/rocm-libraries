@@ -61,8 +61,18 @@ protected:
         }
     }
 
-    /// Builds a standard SdpaFwd graph for round-trip testing.
-    static std::shared_ptr<TestableGraph> buildGraph()
+    /// The attributes of the standard round-trip graph.
+    static SdpaAttributes defaultAttributes()
+    {
+        SdpaAttributes attrs;
+        attrs.set_name("test_op");
+        attrs.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+        return attrs;
+    }
+
+    /// Builds an SdpaFwd graph over the standard Q/K/V tensors for round-trip testing.
+    static std::shared_ptr<TestableGraph> buildGraph(const SdpaAttributes& attrs
+                                                     = defaultAttributes())
     {
         auto graph = std::make_shared<TestableGraph>();
         graph->set_name("SdpaFwdLiftingTestGraph")
@@ -81,10 +91,6 @@ protected:
         auto v = std::make_shared<TensorAttributes>();
         v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
         v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
-
-        SdpaAttributes attrs;
-        attrs.set_name("test_op");
-        attrs.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
 
         auto results = graph->sdpa(q, k, v, attrs);
         results[0]->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("o");
@@ -758,24 +764,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeSetRoundTrip)
 // uids, names, type and promoted shape.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCuSeqLenRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("SdpaFwdCuSeqLen")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto q = std::make_shared<TensorAttributes>();
-    q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("q").set_data_type(DataType::FLOAT);
-    q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
-
-    auto k = std::make_shared<TensorAttributes>();
-    k->set_uid(K_SDPA_TENSOR_K_UID).set_name("k").set_data_type(DataType::FLOAT);
-    k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
-
-    auto v = std::make_shared<TensorAttributes>();
-    v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
-    v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
-
     // Batch is 2, so each cumulative tensor holds B+1 = 3 prefix sums as a 1-D tensor.
     auto cuSeqLenQ = std::make_shared<TensorAttributes>();
     cuSeqLenQ->set_uid(K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID)
@@ -789,15 +777,9 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCuSeqLenRoundTrip)
         .set_data_type(DataType::INT32);
     cuSeqLenKv->set_dim({K_SDPA_TENSOR_K_DIMS[0] + 1}).set_stride({1});
 
-    SdpaAttributes attrs;
-    attrs.set_name("test_op")
-        .set_diagonal_alignment(DiagonalAlignment::TOP_LEFT)
-        .set_padding_mask(true)
-        .set_cu_seq_len_q(cuSeqLenQ)
-        .set_cu_seq_len_kv(cuSeqLenKv);
-
-    auto results = graph->sdpa(q, k, v, attrs);
-    results[0]->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("o");
+    auto attrs = defaultAttributes();
+    attrs.set_padding_mask(true).set_cu_seq_len_q(cuSeqLenQ).set_cu_seq_len_kv(cuSeqLenKv);
+    auto graph = buildGraph(attrs);
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;

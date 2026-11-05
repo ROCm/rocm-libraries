@@ -114,8 +114,8 @@ TEST(TestVersion, CuSeqLenMinApiVersionIsAboveUhdApiVersion)
     EXPECT_TRUE(uhdApiVersion < cuSeqLenMin);
 }
 
-// Plugins built from this SDK report HIPDNN_ENGINE_API_VERSION. It must reach the highest
-// graph-feature floor, or no plugin from this tree could serve such a graph.
+// HIPDNN_ENGINE_API_VERSION is the newest engine API this SDK implements, so it must reach the
+// highest graph-feature floor.
 TEST(TestVersion, SdkEngineApiVersionReachesMaxSupportedFloor)
 {
     const Version sdkVersion{std::string_view{HIPDNN_ENGINE_API_VERSION}};

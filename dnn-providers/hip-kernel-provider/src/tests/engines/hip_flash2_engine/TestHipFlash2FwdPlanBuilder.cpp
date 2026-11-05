@@ -227,7 +227,8 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsCuSeqLen)
 
     const std::vector<int64_t> dims{1, 32, 2048, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    const auto build = [&](bool withCuSeqLen) {
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    const auto build = [&](CuSeqLenSides cuSeqLenSides) {
         return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
             dims,
             strides,
@@ -246,18 +247,23 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsCuSeqLen)
             /*causalMask=*/false,
             /*overrideShapeEnabled=*/false,
             hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-            withCuSeqLen);
+            cuSeqLenSides);
     };
 
-    auto baseline = build(false);
+    auto baseline = build(CuSeqLenSides::NONE);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baselineGraph(
         baseline.GetBufferPointer(), baseline.GetSize());
     ASSERT_TRUE(_builder.isApplicable(_handle, baselineGraph));
 
-    auto withCuSeqLen = build(true);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuGraph(
-        withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
-    EXPECT_FALSE(_builder.isApplicable(_handle, cuGraph));
+    // Each side alone must decline the graph, not only both together.
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV, CuSeqLenSides::BOTH})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto withCuSeqLen = build(sides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuGraph(
+            withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, cuGraph));
+    }
 }
 
 TEST_F(TestHipFlash2FwdPlanBuilder, RejectsUnsupportedHeadDim256)

@@ -121,7 +121,8 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool overrideShapeEnabled = false,
                         hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
                         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                        bool withCuSeqLen = false)
+                        hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides
+                        = hipdnn_test_sdk::utilities::CuSeqLenSides::NONE)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -149,7 +150,7 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         causalMask,
         overrideShapeEnabled,
         mmaCoreMode,
-        withCuSeqLen);
+        cuSeqLenSides);
 }
 
 // No ASM forward kernel implements cu_seq_len_*. padding_mask stays false so only the
@@ -173,22 +174,28 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
         baseline.GetBufferPointer(), baseline.GetSize());
     ASSERT_TRUE(_planBuilder.isApplicable(_handle, baselineWrapper));
 
-    auto withCuSeqLen = createSdpaFwdGraph(dims,
-                                           dims,
-                                           DataType::BFLOAT16,
-                                           DataType::FLOAT,
-                                           /*withAttnMask=*/false,
-                                           /*withScale=*/false,
-                                           /*withStats=*/false,
-                                           /*alibiMask=*/false,
-                                           /*paddingMask=*/false,
-                                           /*causalMask=*/false,
-                                           /*overrideShapeEnabled=*/false,
-                                           DataType::UNSET,
-                                           /*withCuSeqLen=*/true);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuWrapper(
-        withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, cuWrapper));
+    // Each side alone must decline the graph, not only both together.
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV, CuSeqLenSides::BOTH})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto withCuSeqLen = createSdpaFwdGraph(dims,
+                                               dims,
+                                               DataType::BFLOAT16,
+                                               DataType::FLOAT,
+                                               /*withAttnMask=*/false,
+                                               /*withScale=*/false,
+                                               /*withStats=*/false,
+                                               /*alibiMask=*/false,
+                                               /*paddingMask=*/false,
+                                               /*causalMask=*/false,
+                                               /*overrideShapeEnabled=*/false,
+                                               DataType::UNSET,
+                                               sides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuWrapper(
+            withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, cuWrapper));
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)

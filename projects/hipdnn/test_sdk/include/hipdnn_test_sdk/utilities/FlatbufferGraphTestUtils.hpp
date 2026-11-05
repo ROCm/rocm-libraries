@@ -2801,6 +2801,15 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+/// Which sides of an SDPA forward graph carry a cumulative sequence length tensor.
+enum class CuSeqLenSides
+{
+    NONE,
+    Q,
+    KV,
+    BOTH,
+};
+
 inline flatbuffers::FlatBufferBuilder
     createValidSdpaFwdGraph(const std::vector<int64_t>& qDims,
                             const std::vector<int64_t>& qStrides,
@@ -2821,7 +2830,7 @@ inline flatbuffers::FlatBufferBuilder
                             bool overrideShapeEnabled = false,
                             hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
                             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                            bool withCuSeqLen = false)
+                            CuSeqLenSides cuSeqLenSides = CuSeqLenSides::NONE)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2899,32 +2908,32 @@ inline flatbuffers::FlatBufferBuilder
 
     flatbuffers::Optional<int64_t> cuSeqLenQUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> cuSeqLenKvUid = flatbuffers::nullopt;
-    if(withCuSeqLen)
-    {
-        // cu_seq_len_q / cu_seq_len_kv: INT32 [batch + 1, 1, 1, 1]
-        const std::vector<int64_t> cuSeqLenDims = {qDims[0] + 1, 1, 1, 1};
-        const std::vector<int64_t> cuSeqLenStrides = {1, 1, 1, 1};
-        const auto cuQUid = uid++;
-        tensorAttributes.push_back(
-            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder,
-                cuQUid,
-                "cu_seq_len_q",
-                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-                &cuSeqLenStrides,
-                &cuSeqLenDims));
-        cuSeqLenQUid = flatbuffers::Optional<int64_t>(cuQUid);
-        const auto cuKvUid = uid++;
-        tensorAttributes.push_back(
-            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder,
-                cuKvUid,
-                "cu_seq_len_kv",
-                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
-                &cuSeqLenStrides,
-                &cuSeqLenDims));
-        cuSeqLenKvUid = flatbuffers::Optional<int64_t>(cuKvUid);
-    }
+    const bool withCuSeqLenQ
+        = cuSeqLenSides == CuSeqLenSides::Q || cuSeqLenSides == CuSeqLenSides::BOTH;
+    const bool withCuSeqLenKv
+        = cuSeqLenSides == CuSeqLenSides::KV || cuSeqLenSides == CuSeqLenSides::BOTH;
+    // cu_seq_len_q / cu_seq_len_kv: INT32 [batch + 1, 1, 1, 1]
+    const std::vector<int64_t> cuSeqLenDims = {qDims[0] + 1, 1, 1, 1};
+    const std::vector<int64_t> cuSeqLenStrides = {1, 1, 1, 1};
+    const auto addCuSeqLen
+        = [&](bool enabled, const char* name, flatbuffers::Optional<int64_t>& uidOut) {
+              if(!enabled)
+              {
+                  return;
+              }
+              const auto cuUid = uid++;
+              tensorAttributes.push_back(
+                  hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                      builder,
+                      cuUid,
+                      name,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                      &cuSeqLenStrides,
+                      &cuSeqLenDims));
+              uidOut = flatbuffers::Optional<int64_t>(cuUid);
+          };
+    addCuSeqLen(withCuSeqLenQ, "cu_seq_len_q", cuSeqLenQUid);
+    addCuSeqLen(withCuSeqLenKv, "cu_seq_len_kv", cuSeqLenKvUid);
 
     auto sdpaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaAttributes(
         builder,
@@ -3015,7 +3024,7 @@ inline flatbuffers::FlatBufferBuilder
                             bool overrideShapeEnabled = false,
                             hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
                             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                            bool withCuSeqLen = false)
+                            CuSeqLenSides cuSeqLenSides = CuSeqLenSides::NONE)
 {
     return createValidSdpaFwdGraph(qDims,
                                    qStrides,
@@ -3035,7 +3044,7 @@ inline flatbuffers::FlatBufferBuilder
                                    causalMask,
                                    overrideShapeEnabled,
                                    mmaCoreMode,
-                                   withCuSeqLen);
+                                   cuSeqLenSides);
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(

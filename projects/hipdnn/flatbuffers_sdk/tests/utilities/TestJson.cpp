@@ -256,6 +256,46 @@ TEST(TestJson, GraphToJsonAndBack)
     }
 }
 
+// Each cumulative sequence length UID has its own writer and reader line, so each side is
+// round-tripped alone: dropping one line must lose that side.
+TEST(TestJson, SdpaCuSeqLenRoundTripsPerSide)
+{
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    const std::vector<int64_t> dims = {2, 8, 16, 64};
+    const std::vector<int64_t> strides = {8192, 1024, 64, 1};
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV})
+    {
+        const bool qSide = sides == CuSeqLenSides::Q;
+        SCOPED_TRACE(qSide ? "cu_seq_len_q" : "cu_seq_len_kv");
+        auto graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                                                strides,
+                                                                                dims,
+                                                                                strides,
+                                                                                dims,
+                                                                                strides,
+                                                                                dims,
+                                                                                strides,
+                                                                                DataType::HALF,
+                                                                                DataType::FLOAT,
+                                                                                false,
+                                                                                false,
+                                                                                false,
+                                                                                false,
+                                                                                true,
+                                                                                false,
+                                                                                false,
+                                                                                DataType::UNSET,
+                                                                                sides);
+        const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+        const auto* sdpa = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+        ASSERT_NE(sdpa, nullptr);
+        ASSERT_EQ(sdpa->cu_seq_len_q_tensor_uid().has_value(), qSide);
+        ASSERT_EQ(sdpa->cu_seq_len_kv_tensor_uid().has_value(), !qSide);
+
+        toJsonAndBackTestSuite(graph, qSide ? "cu_seq_len_q" : "cu_seq_len_kv");
+    }
+}
+
 TEST(TestJson, GraphVersionSerializesToJson)
 {
     flatbuffers::FlatBufferBuilder builder;

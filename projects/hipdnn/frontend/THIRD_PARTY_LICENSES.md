@@ -6,11 +6,15 @@ hipDNN contains source code derived from the following third-party project.
 
 ## NVIDIA cuDNN frontend
 
-- **Version:** v1.24.0 (commit c4a97621eca52fa0c3a1862a411a16be580b25c6)
+- **Version:** v1.24.0 (commit c4a97621eca52fa0c3a1862a411a16be580b25c6) for the shim and the
+  files below, except `hipdnn_frontend/attributes/SdpaAttributes.hpp`, which also follows
+  v1.25.0 (commit e46d7082450264ce05cf898f8740011c4896f817; `promote_1d_index_tensor_to_4d` from
+  `include/cudnn_frontend/node/scaled_dot_product_flash_attention.h`)
 - **License:** MIT
 - **Project:** https://github.com/NVIDIA/cudnn-frontend
 - **Use:** Portions of the cuDNN-compatibility shim (`include/hipdnn_compatibility/`)
-  and of `hipdnn_frontend/Types.hpp` and `hipdnn_frontend/Error.hpp` are derived
+  and of `hipdnn_frontend/Types.hpp`, `hipdnn_frontend/Error.hpp` and
+  `hipdnn_frontend/attributes/SdpaAttributes.hpp` are derived
   from cuDNN frontend. The cuDNN-shim samples (`samples/cudnn_shim/ConvFprop.cpp`,
   `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp`, `Pointwise.cpp`) mirror
   upstream samples. Each such file carries a "Portions derived from NVIDIA cuDNN
