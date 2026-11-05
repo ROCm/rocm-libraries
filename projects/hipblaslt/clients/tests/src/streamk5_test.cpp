@@ -16,7 +16,7 @@
 //     Each debug test calls GTEST_SKIP() when no SK5 debug line is emitted,
 //     because SK5 kernel availability depends on the loaded device library.
 
-#include "test_process.hpp"
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
@@ -162,9 +162,9 @@ namespace
         const bool        hadSk5   = (priorSk5 != nullptr);
 
         // Environment setup — must precede any TensileLite call.
-        hipblaslt_test::setEnv("TENSILE_DB", "0x100000", /*overwrite=*/1);
+        hipblaslt_clients::setEnv("TENSILE_DB", "0x100000", /*overwrite=*/1);
         if(p.forceEnvSet)
-            hipblaslt_test::setEnv(
+            hipblaslt_clients::setEnv(
                 "TENSILE_STREAMK5_FORCE_MODE", std::to_string(p.forceEnvVal).c_str(), 1);
         // Update the Debug singleton inside libhipblaslt.so.
         hipblaslt_debug_reload();
@@ -172,15 +172,15 @@ namespace
         // Called on every exit path to restore env and cerr to prior state.
         auto cleanup = [&]() {
             if(hadDb)
-                hipblaslt_test::setEnv("TENSILE_DB", savedDb.c_str(), 1);
+                hipblaslt_clients::setEnv("TENSILE_DB", savedDb.c_str(), 1);
             else
-                hipblaslt_test::unsetEnv("TENSILE_DB");
+                hipblaslt_clients::unsetEnv("TENSILE_DB");
             if(p.forceEnvSet)
             {
                 if(hadSk5)
-                    hipblaslt_test::setEnv("TENSILE_STREAMK5_FORCE_MODE", savedSk5.c_str(), 1);
+                    hipblaslt_clients::setEnv("TENSILE_STREAMK5_FORCE_MODE", savedSk5.c_str(), 1);
                 else
-                    hipblaslt_test::unsetEnv("TENSILE_STREAMK5_FORCE_MODE");
+                    hipblaslt_clients::unsetEnv("TENSILE_STREAMK5_FORCE_MODE");
             }
             hipblaslt_debug_reload();
             std::cerr.rdbuf(savedCerr);

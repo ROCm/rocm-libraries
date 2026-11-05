@@ -11,7 +11,7 @@
 #include <unistd.h>
 #endif
 
-namespace hipblaslt_test
+namespace hipblaslt_clients
 {
 #ifdef _WIN32
     inline int setEnv(const char* name, const char* value, int overwrite)

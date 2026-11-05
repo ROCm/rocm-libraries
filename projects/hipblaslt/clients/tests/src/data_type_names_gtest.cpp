@@ -3,7 +3,7 @@
 
 // The API log names the data types that the library accepts.
 
-#include "test_process.hpp"
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
 
@@ -34,9 +34,9 @@ namespace
         void set(const char* value)
         {
             if(value)
-                hipblaslt_test::setEnv(m_name, value, 1);
+                hipblaslt_clients::setEnv(m_name, value, 1);
             else
-                hipblaslt_test::unsetEnv(m_name);
+                hipblaslt_clients::unsetEnv(m_name);
         }
 
         const char*                m_name;
