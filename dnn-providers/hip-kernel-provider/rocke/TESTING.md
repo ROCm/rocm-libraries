@@ -528,7 +528,11 @@ or configuration is not substituted for the runner's selection. Manual runs
 may set both variables; without a configuration override, the test uses the
 build's `CMAKE_BUILD_TYPE`, or Release when that cache entry is empty or absent.
 The test remains excluded from installed platform pytest because its CMake
-configuration and installation checks need the source build tree.
+configuration and installation checks need the source build tree. The
+configuration-reader and minimal-SDK relocation regressions instead live in
+`platform/tests/tools/test_run_all.py`, which installed platform CI collects.
+They use the same non-test consumer helper, but construct a tiny SDK locally
+and do not require a source checkout or an ambient engine build.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform

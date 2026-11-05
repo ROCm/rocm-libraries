@@ -59,6 +59,11 @@ building and validating its own source-tree engine artifacts. This executes the
 relocated C/C++ CMake consumers in `test_engine_linkage.py`, including the C99
 MMA source/result query contract. Ad hoc pytest may supply a fresh build explicitly;
 these source/CMake-dependent tests are excluded from installed platform pytest.
+Configuration selection and minimal-SDK single-/multi-config regressions live
+in `tools/test_run_all.py`, which is installed and collected by platform CI.
+Both suites use the non-test `tools/relocation_consumer.py` helper. The C99
+consumer checks header/runtime consistency; exact ABI and structure-layout pins
+remain in the native catalog and portable-IR ABI contract suites.
 
 See [the pre-merge testing strategy](../../TESTING.md#51-before-merging-source-backends-and-installed-ci)
 for the required source backend matrix and installed CI replay procedure.

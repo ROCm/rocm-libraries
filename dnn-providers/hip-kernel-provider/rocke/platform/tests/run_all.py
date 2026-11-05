@@ -110,6 +110,22 @@ def relative_path_guard() -> int:
     return 0
 
 
+def relocation_config(build: Path, selected: str | None = None) -> str:
+    """Honor an explicit harness selection or a manual single-config default."""
+    if selected is not None:
+        if not selected:
+            raise ValueError(
+                "ROCKE_LINK_TEST_CONFIG must name a nonempty configuration"
+            )
+        return selected
+    for line in (build / "CMakeCache.txt").read_text().splitlines():
+        if line.startswith("CMAKE_BUILD_TYPE:") and "=" in line:
+            build_type = line.split("=", 1)[1]
+            if build_type:
+                return build_type
+    return "Release"
+
+
 def ctest_tests(
     build_root: Path, config: str, pattern: str | None = None
 ) -> list[dict]:

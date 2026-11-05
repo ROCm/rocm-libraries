@@ -727,3 +727,85 @@ def test_multi_config_build_supplies_its_archive(runner, monkeypatch, tmp_path):
     archive = build / "Release" / "librocke_core.a"
     assert archive.is_file()
     assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive.resolve())
+
+
+@pytest.mark.parametrize("cache_type", ["STRING", "UNINITIALIZED"])
+@pytest.mark.parametrize(
+    ("build_type", "explicit_config", "expected"),
+    [("Debug", None, "Debug"), ("Debug", "Release", "Release"), ("", None, "Release")],
+)
+def test_relocation_config_preserves_manual_build_default(
+    runner, tmp_path, cache_type, build_type, explicit_config, expected
+):
+    (tmp_path / "CMakeCache.txt").write_text(
+        f"CMAKE_BUILD_TYPE:{cache_type}={build_type}\n"
+    )
+    assert runner.relocation_config(tmp_path, explicit_config) == expected
+
+
+def test_relocation_config_rejects_empty_selection(runner, tmp_path):
+    with pytest.raises(ValueError, match="ROCKE_LINK_TEST_CONFIG must name a nonempty"):
+        runner.relocation_config(tmp_path, "")
+
+
+@pytest.mark.parametrize("generator", ["Ninja", "Ninja Multi-Config"])
+@pytest.mark.parametrize("config", ["Release", "Debug"])
+@pytest.mark.parametrize("explicit_config", [False, True])
+def test_relocation_consumer_uses_selected_cmake_configuration(
+    runner, monkeypatch, tmp_path, generator, config, explicit_config
+):
+    """Installed CI exercises configuration handling with a minimal exported SDK."""
+    if not all(shutil.which(tool) for tool in ("cmake", "ninja")):
+        pytest.skip("CMake and Ninja required for relocation configuration regression")
+    path = Path(__file__).with_name("relocation_consumer.py")
+    spec = importlib.util.spec_from_file_location("runner_relocation_consumer", path)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    source = tmp_path / "sdk"
+    source.mkdir()
+    (source / "rocke").mkdir()
+    (source / "rocke" / "lower_llvm.h").write_text(
+        'extern "C" void rocke_lower_kernel_to_llvm_ex();\n'
+    )
+    (source / "engine.cpp").write_text(
+        'extern "C" void rocke_lower_kernel_to_llvm_ex() {}\n'
+    )
+    (source / "ckcConfig.cmake").write_text(
+        "include(CMakeFindDependencyMacro)\n"
+        "find_dependency(Threads)\n"
+        'include("${CMAKE_CURRENT_LIST_DIR}/ckcTargets.cmake")\n'
+    )
+    (source / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.18)\n"
+        "project(relocation_fixture LANGUAGES CXX)\n"
+        "find_package(Threads REQUIRED)\n"
+        "add_library(rocke_core STATIC engine.cpp)\n"
+        "target_link_libraries(rocke_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})\n"
+        "target_include_directories(rocke_core PUBLIC\n"
+        "  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include>)\n"
+        "install(TARGETS rocke_core EXPORT ckcTargets ARCHIVE DESTINATION lib)\n"
+        "install(DIRECTORY rocke DESTINATION include)\n"
+        "install(EXPORT ckcTargets NAMESPACE ckc:: DESTINATION lib/cmake/ckc)\n"
+        "install(FILES ckcConfig.cmake DESTINATION lib/cmake/ckc)\n"
+    )
+    build = tmp_path / "sdk-build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(source),
+            "-B",
+            str(build),
+            "-G",
+            generator,
+            f"-DCMAKE_BUILD_TYPE={config}",
+        ],
+        check=True,
+    )
+    # Build only this configuration: a wrong install cannot use another arm's artifacts.
+    subprocess.run(["cmake", "--build", str(build), "--config", config], check=True)
+    monkeypatch.setenv("CMAKE_GENERATOR", generator)
+    selected = runner.relocation_config(build, config if explicit_config else None)
+    consumer_root = tmp_path / "relocation"
+    consumer_root.mkdir()
+    helper.run_relocated_consumer(consumer_root, build, selected, "cpp_lowerer")
