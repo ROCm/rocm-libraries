@@ -797,7 +797,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
-| `configs/gfx950_conv_dgrad_aot.profile.yaml` | Not a generator config: the gfx950 dgrad AOT profile that the `tools/` scripts read through `--profile` |
+| `configs/gfx950_conv_dgrad_aot.profile.yaml` | Not a generator config and not read by any tool: a human-readable summary of the parameters `tools/make_conv_dgrad_aot_config.py` and `tools/enumerate_conv_dgrad_aot_instances.py` hard-code (slug, provider root, dialect, builder, source); kept for reference only |
 
 ## Generated variant sets: `variants`
 

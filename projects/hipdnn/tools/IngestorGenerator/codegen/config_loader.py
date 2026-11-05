@@ -228,6 +228,7 @@ def load_config(path: Path) -> IngestorConfig:
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         native_symbols_from=engine_raw.get("native_symbols_from", ""),
+        native_symbols_from_slug=engine_raw.get("native_symbols_from_slug"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
     )
@@ -1369,6 +1370,7 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
         "census_name_symbol",
         "native_symbols_from",
+        "native_symbols_from_slug",
         "shared_workspace",
         "slug",
     }
@@ -1765,6 +1767,12 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"scoped 'namespace:local' like engine.name: the engine whose registered "
             f"native symbols this engine's descriptors name. Omit it to name this "
             f"engine's own."
+        )
+    if config.engine.native_symbols_from_slug and not borrowed:
+        raise ConfigError(
+            "engine.native_symbols_from_slug is only meaningful alongside "
+            "engine.native_symbols_from: it states the borrowed engine's own "
+            "slug_override, which only matters when symbols are borrowed."
         )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(

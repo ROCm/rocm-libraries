@@ -635,6 +635,56 @@ TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsLoadedAndReportedOnce)
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reported) << "the report repeated";
 }
 
+/// CORR-4: `KernelIngestorSharedState` holds one `std::shared_ptr<IKernelHeuristic>`
+/// per descriptor set, handed out identically to every `KernelIngestorStateManager`
+/// built over it -- i.e. to every Container a provider serves that descriptor set to
+/// (MakeEngine.hpp: "This is how a provider serves a descriptor set to every Container
+/// after loading it once."). A genuine model-load failure is cached on that one shared
+/// instance (see ABrokenModelIsLoadedAndReportedOnce above), so it is reported and
+/// refused exactly once process-wide, not once per Container: a second Container
+/// holding the same shared_ptr sees the already-cached refusal and does not re-load,
+/// re-report, or recover from a now-valid artifact either.
+TEST(TestIngestorUhdKernelHeuristic, ABrokenModelsFailureIsSharedAcrossEveryHolderOfTheHeuristic)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_kernel_heuristic_broken_shared_across_containers"));
+    // The artifact embeds a features hash its descriptor does not declare (§6.3 check 3).
+    (void)writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
+    // One heuristic instance, as KernelIngestorSharedState builds once per descriptor set.
+    const std::shared_ptr<IKernelHeuristic> sharedHeuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "model.bin"), {}, KNOBS, FIELDS);
+    ASSERT_NE(sharedHeuristic, nullptr);
+    // Two Containers' independent references into that one shared state -- as two
+    // KernelIngestorStateManagers built over one KernelIngestorSharedState would each
+    // hold (TestKernelIngestorStateManager's
+    // TwoManagersOverOneSharedStateKeepSeparateWinnerCaches is the analogous idiom for
+    // the winner cache, which IS per-manager; this heuristic's failure cache is not).
+    const std::shared_ptr<IKernelHeuristic> firstContainer = sharedHeuristic;
+    const std::shared_ptr<IKernelHeuristic> secondContainer = sharedHeuristic;
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto fromFirst = firstContainer->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(fromFirst.size(), 2U);
+    EXPECT_EQ(fromFirst.front()->kernelId, testId(0x01)); // declared order
+    const auto reported = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    EXPECT_GT(reported, 0U) << "the broken model was not reported";
+
+    // A valid artifact in its place is not read by the second Container either: the
+    // refusal is shared state, not a per-Container cache that would retry and recover.
+    (void)writeFixture(dir.path(), preferLargeTiles());
+    const auto fromSecond = secondContainer->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(fromSecond.size(), 2U);
+    EXPECT_EQ(fromSecond.front()->kernelId, testId(0x01))
+        << "a second Container recovered from a failure the first Container already cached";
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reported)
+        << "a second Container re-reported a failure already cached by the first";
+}
+
 TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrder)
 {
     // RFC 0019 §6.3 check 1.

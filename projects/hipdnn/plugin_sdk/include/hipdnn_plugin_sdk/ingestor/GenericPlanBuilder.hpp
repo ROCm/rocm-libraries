@@ -1390,6 +1390,13 @@ private:
                             + std::to_string(selection.alignedSharedBytes) + " bytes)");
                 }
             }
+            if(ranked)
+            {
+                // catalog.entries (and therefore kept, filterSlot/withinWorkspace being
+                // order-preserving) is already rank-ordered, so no orderLikeRankedCatalog
+                // step is needed first -- unlike predictConfiguration's unslotted path.
+                applyShortlistLimit(kept, settings.shortlistLimit);
+            }
             if(slot == 0)
             {
                 selection.bound = std::move(catalog.bound);

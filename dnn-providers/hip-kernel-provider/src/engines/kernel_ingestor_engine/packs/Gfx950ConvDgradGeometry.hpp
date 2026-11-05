@@ -16,8 +16,6 @@
 #include <utility>
 #include <vector>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
-
 /// @file Gfx950ConvDgradGeometry.hpp
 /// The launch contract of hipkernel:Gfx950ConvDgradAot, the shape-generic backward-data
 /// (dgrad) AOT-instance engine: the instances its catalog describes, the problem it
@@ -31,11 +29,49 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad
 {
 
-// Pure helpers shared with the forward engine, unchanged.
-using gfx950_conv_fwd::ceilDiv;
-using gfx950_conv_fwd::LaunchGeometry;
-using gfx950_conv_fwd::magicDivision;
-using gfx950_conv_fwd::MagicDivision;
+// Pure helpers formerly shared with the (now-removed) forward AOT engine's geometry
+// header, unchanged.
+struct LaunchGeometry
+{
+    unsigned int gridX;
+    unsigned int gridY;
+    unsigned int gridZ;
+    unsigned int blockX;
+};
+
+/// ceil(a / b) for a >= 0, b > 0, without the overflow of a + b - 1.
+inline int64_t ceilDiv(int64_t a, int64_t b)
+{
+    return a == 0 ? 0 : 1 + (a - 1) / b;
+}
+
+/// One (multiplier, shift) pair of rocKE's calculate_magic_numbers in
+/// rocke/platform/python/rocke/helpers/transforms.py, a port of CK Tile's
+/// magic_division32_bit_range. The kernel reads the multiplier with an unsigned mul-hi,
+/// so it is passed as the i32 with the same bit pattern (conv_args._magic_as_i32).
+struct MagicDivision
+{
+    int32_t multiplier;
+    int32_t shift;
+};
+
+inline std::optional<MagicDivision> magicDivision(int64_t divisor)
+{
+    if(divisor < 1 || divisor > std::numeric_limits<int32_t>::max())
+    {
+        return std::nullopt;
+    }
+    int32_t shift = 0;
+    while((int64_t{1} << shift) < divisor)
+    {
+        ++shift;
+    }
+    // 2^shift - divisor < divisor <= 2^31, so the shifted value fits in 63 bits and the
+    // quotient plus one stays below 2^32.
+    const auto d = static_cast<uint64_t>(divisor);
+    const uint64_t multiplier = ((((uint64_t{1} << shift) - d) << 32) / d) + 1;
+    return MagicDivision{static_cast<int32_t>(static_cast<uint32_t>(multiplier)), shift};
+}
 
 constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
 constexpr int64_t I32_MIN = std::numeric_limits<int32_t>::min();
@@ -308,9 +344,9 @@ struct SubGemm
 /// row-major order, with cumulative block ranges over (gemm_m / tile_m) x (gemm_n /
 /// tile_n) tiles. Ported from the PYTHON reference, per group: gemm_n = C / groups and
 /// gemm_k = y_dot_slice * x_dot_slice * K / groups. rocKE's C++ twin
-/// rocke_enumerate_sub_gemms reads the total C and K instead, which is wrong for
-/// groups > 1 (rocKE uses only its record count); it is deliberately not what this
-/// follows. std::nullopt when a tile is not positive or any record field leaves i32.
+/// rocke_enumerate_sub_gemms (conv_implicit_gemm_dgrad.cpp) agrees: it also divides by
+/// groups, via rocke_conv_problem_cpg/kpg. std::nullopt when a tile is not positive or
+/// any record field leaves i32.
 inline std::optional<std::vector<SubGemm>> enumerateSubGemms(
     const Problem& p, const Geometry& g, int64_t tileM, int64_t tileN, int64_t tileK)
 {
@@ -1485,8 +1521,24 @@ constexpr std::array<std::string_view, 14> DIRECT_DGRAD_KERNARG_NAMES{"p_N",
                                                                       "p_dX_stride_wi"};
 
 /// The forward direct ABI (A, D strides) the fused, 4c and MFMA compute passes take on the
-/// transposed problem.
-using gfx950_conv_fwd::DIRECT_KERNARG_NAMES;
+/// transposed problem. Formerly shared with the (now-removed) forward AOT engine's
+/// geometry header, unchanged: conv_direct_arg_names(direction="fwd") in conv_abi.py.
+/// Filter extents, stride and padding are compiled into the direct kernels, so they are
+/// not arguments.
+constexpr std::array<std::string_view, 14> DIRECT_KERNARG_NAMES{"p_N",
+                                                                "p_Hi",
+                                                                "p_Wi",
+                                                                "p_Ho",
+                                                                "p_Wo",
+                                                                "p_groups",
+                                                                "p_total_c",
+                                                                "p_total_k",
+                                                                "p_A_stride_n",
+                                                                "p_A_stride_hi",
+                                                                "p_A_stride_wi",
+                                                                "p_D_stride_n",
+                                                                "p_D_stride_ho",
+                                                                "p_D_stride_wo"};
 
 /// directValues: the 14 values of the direct dgrad block (DIRECT_DGRAD_KERNARG_NAMES)
 /// for the dgrad problem -- its extents, then dY's NHWK strides and dX's NHWC strides.
@@ -1970,7 +2022,8 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
         const auto t = transposedProblem(problem, g);
         const auto blockGroups = knobs.blockGroups;
         const auto blockQ = knobs.blockQ;
-        if(!t || blockGroups < 16 || blockQ < 4 || problem.groups % blockGroups != 0)
+        if(!t || blockGroups < 16 || blockQ < 4 || blockQ % 4 != 0
+           || problem.groups % blockGroups != 0)
         {
             return std::nullopt;
         }

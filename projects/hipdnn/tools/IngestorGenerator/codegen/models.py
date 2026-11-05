@@ -439,6 +439,11 @@ class EngineSpec:
     #: test-only engine serving a subset of a shipped engine's catalog through the
     #: shipped engine's registered code. Empty names this engine's own symbols.
     native_symbols_from: str = ""
+    #: The borrowed engine's own slug, when it differs from the naive snake_case of
+    #: its local name (i.e. that engine declares its own ``slug_override``). Only
+    #: meaningful with ``native_symbols_from`` set; this config has no way to look up
+    #: the other engine's config to learn its override on its own.
+    native_symbols_from_slug: str | None = None
     #: RFC 0021 §6: the bound token holding the shared workspace region's size;
     #: only a slotted engine has one. Empty omits ``shared_workspace``.
     shared_workspace: str = ""
@@ -645,10 +650,16 @@ class IngestorConfig:
     def native_symbol_namespace(self) -> str:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
         becomes ``hipkernel.conv_fwd``. An engine naming ``native_symbols_from``
-        takes that engine's namespace instead of its own."""
+        takes that engine's namespace instead of its own -- using
+        ``native_symbols_from_slug`` verbatim when the borrowed engine itself
+        declares a ``slug_override`` (this config cannot see that engine's own
+        config to learn it unprompted), else the naive snake_case fallback."""
         if self.engine.native_symbols_from:
             namespace, local_name = self.engine.native_symbols_from.split(":", 1)
-            local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+            local_snake = (
+                self.engine.native_symbols_from_slug
+                or re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+            )
             return f"{namespace}.{local_snake}"
         local_snake = self.engine.slug.replace("-", "_")
         if self.engine.slug_override is None:

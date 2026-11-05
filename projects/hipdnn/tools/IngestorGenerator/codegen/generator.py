@@ -261,10 +261,11 @@ def mint_ids(
             engine.uhd[1:] if engine and engine.uhd else ()
         ):
             promoted_id = promoted_doc["id"]
-            assert promoted_id not in claimed, (
-                f"promoted UHD id {promoted_id!r} collides with another "
-                "descriptor's id"
-            )
+            if promoted_id in claimed:
+                raise ValueError(
+                    f"promoted UHD id {promoted_id!r} collides with another "
+                    "descriptor's id"
+                )
             claimed.add(promoted_id)
             ids[("uhd_promoted", index)] = promoted_id
     if not config.is_slotted:
@@ -388,7 +389,8 @@ def mint_ids(
             ids[slot] = take(None)
     for slot in dropped:
         ids[slot] = take(None)
-    assert len(set(ids.values())) == len(ids), "mint_ids assigned an id twice"
+    if len(set(ids.values())) != len(ids):
+        raise ValueError("mint_ids assigned an id twice")
     return ids
 
 
