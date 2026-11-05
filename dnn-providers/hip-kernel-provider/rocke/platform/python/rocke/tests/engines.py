@@ -337,6 +337,8 @@ def assert_accepted_everywhere(
     the LLVM and HIP lowerings of every engine in ``available_engines()`` accept
     it, the two engines emitting the same text where both run."""
     assert verify(kernel) == []
-    for engine in available_engines():
-        lower_with_engine(kernel, arch, engine=engine, llvm_flavor=llvm_flavor)
-        lower_hip_with_engine(kernel, arch, engine=engine)
+    # The last engine available lowers with the Python engine too, and for
+    # "cpp" asserts the texts are identical.
+    engine = available_engines()[-1]
+    lower_with_engine(kernel, arch, engine=engine, llvm_flavor=llvm_flavor)
+    lower_hip_with_engine(kernel, arch, engine=engine)

@@ -6,9 +6,10 @@
  * lowerings refuse what an scf.if_else or an scf.for body cannot hold, and an
  * scf.yield where nothing takes it, with the Python engine's types and texts.
  *
- * An scf.for's carried-value counts agree, and its body yields only at its
- * end, one value per carried value, of its type, ending in that yield whenever
- * the loop carries any.
+ * An scf.for's carried-value counts agree, its iter_args metadata names each
+ * carried value and its type (which the loop's result shares), and its body
+ * yields only at its end, one value per carried value, of its type, ending in
+ * that yield whenever the loop carries any.
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
@@ -522,6 +523,98 @@ void a_loop_whose_carried_counts_disagree_is_refused()
                   "loop with a disagreeing result count");
 }
 
+/* The loop's iter_args metadata attr, to edit as serialized IR could leave it
+ * (the attr API hands out only a read-only view). */
+rocke_attr_value_t& iter_args_metadata(rocke_op_t* loop_op)
+{
+    for(int e = 0; e < loop_op->attrs.count; ++e)
+    {
+        if(std::string(loop_op->attrs.entries[e].key) == "iter_args")
+            return loop_op->attrs.entries[e].value;
+    }
+    fprintf(stderr, "FAIL: the loop has no iter_args metadata\n");
+    std::exit(1);
+}
+
+/* Serialized IR can give a loop iter_args metadata that is not a list, has the
+ * wrong number of entries, or whose entries do not describe the carried
+ * values; the verifier and both lowerings refuse it, the HIP lowering
+ * included. Each loop yields its init value, so its body does not depend on
+ * the metadata naming the carried value. */
+void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
+{
+    struct metadata_case
+    {
+        const char* what;
+        void (*edit)(rocke_ir_builder_t* b, rocke_op_t* loop_op);
+        std::string message;
+    };
+    const metadata_case cases[] = {
+        {"metadata that is not a list",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_str(b, &loop_op->attrs, "iter_args", "invalid");
+         },
+         "scf.for iter_args metadata must be a list"},
+        /* The parser stores a bare map as a list of count -1. */
+        {"metadata that is a bare map",
+         [](rocke_ir_builder_t*, rocke_op_t* loop_op) {
+             iter_args_metadata(loop_op).u.list.count = -1;
+         },
+         "scf.for iter_args metadata must be a list"},
+        {"metadata with no entries",
+         [](rocke_ir_builder_t*, rocke_op_t* loop_op) {
+             iter_args_metadata(loop_op).u.list.count = 0;
+         },
+         "scf.for declares 1 iter_args but has 0 metadata entries"},
+        {"a metadata entry that is not a map",
+         [](rocke_ir_builder_t*, rocke_op_t* loop_op) {
+             iter_args_metadata(loop_op).u.list.items[0] = nullptr;
+         },
+         "scf.for iter_arg 0 metadata must be a map"},
+        {"a metadata entry with an empty name",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_str(b, iter_args_metadata(loop_op).u.list.items[0], "name", "");
+         },
+         "scf.for iter_arg 0 metadata has no name"},
+        {"a metadata entry whose name is not a string",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_int(b, iter_args_metadata(loop_op).u.list.items[0], "name", 0);
+         },
+         "scf.for iter_arg 0 metadata has no name"},
+        {"a metadata entry whose type is not a string",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_int(b, iter_args_metadata(loop_op).u.list.items[0], "type", 0);
+         },
+         "scf.for: the loop value '%acc' has no type name; its iv_type attr or iter_args entry "
+         "must name its type"},
+        {"a metadata entry naming another type",
+         [](rocke_ir_builder_t* b, rocke_op_t* loop_op) {
+             rocke_attr_set_str(b, iter_args_metadata(loop_op).u.list.items[0], "type", "f32");
+         },
+         "scf.for iter_arg %acc metadata type 'f32' does not match init type 'i32'"},
+        {"a result of another type",
+         [](rocke_ir_builder_t*, rocke_op_t* loop_op) { loop_op->results[0]->type = rocke_f32(); },
+         "scf.for result type 'f32' does not match iter_arg %acc type 'i32'"},
+    };
+    for(const metadata_case& metadata : cases)
+    {
+        Kernel k("loop_metadata");
+        rocke_op_t* loop_op = nullptr;
+        k.build_carrying_loop(
+            4,
+            false,
+            [&k, &loop_op](const rocke_for_t& loop) {
+                loop_op = loop.op;
+                rocke_b_scf_yield(&k.b, &k.lane, 1);
+            },
+            false);
+        rocke_b_ret(&k.b);
+        metadata.edit(&k.b, loop_op);
+        check_refused(
+            k, ROCKE_ERR_VALUE, metadata.message, std::string("loop with ") + metadata.what);
+    }
+}
+
 /* Well-formed loops lower: one that carries a value, one that carries none
  * with and without an empty closing yield, and one whose body holds a loop and
  * an if/else with results, whose own yields are theirs. */
@@ -610,6 +703,7 @@ int main()
     a_loop_yield_that_does_not_match_the_carried_values_is_refused();
     each_loop_is_held_to_its_own_carried_values();
     a_loop_whose_carried_counts_disagree_is_refused();
+    a_loop_whose_iter_args_metadata_is_malformed_is_refused();
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
