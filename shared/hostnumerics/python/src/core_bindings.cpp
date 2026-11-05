@@ -2,22 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
-#include <nanobind/stl/complex.h>
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
-#include <nanobind/stl/vector.h>
 
-#include <algorithm>
-#include <complex>
-#include <cstdint>
-#include <cstring>
-#include <limits>
-#include <optional>
-#include <roc/hostnumerics/validation.hpp>
-#include <span>
+#include <roc/hostnumerics/scalar_type.hpp>
 #include <string>
-#include <utility>
-#include <vector>
 
 #include "bindings.hpp"
 
@@ -62,53 +50,6 @@ void registerCoreBindings(nb::module_& module) {
         .value("Float64", ScalarType::Float64)
         .value("ComplexFloat32", ScalarType::ComplexFloat32)
         .value("ComplexFloat64", ScalarType::ComplexFloat64);
-
-    nb::enum_<MathMode>(module, "MathMode")
-        .value("Default", MathMode::Default)
-        .value("XFloat32", MathMode::XFloat32);
-
-    nb::enum_<AccumulationRounding>(module, "AccumulationRounding")
-        .value("TypeDefault", AccumulationRounding::TypeDefault)
-        .value("FullPrecision", AccumulationRounding::FullPrecision)
-        .value("AfterProductAndSum", AccumulationRounding::AfterProductAndSum);
-
-    nb::enum_<GemmBackend>(module, "GemmBackend")
-        .value("Automatic", GemmBackend::Automatic)
-        .value("Blocked", GemmBackend::Blocked);
-
-    nb::enum_<OutputConversion>(module, "OutputConversion")
-        .value("Default", OutputConversion::Default)
-        .value("SaturatingInt8", OutputConversion::SaturatingInt8);
-
-    nb::enum_<Activation>(module, "Activation")
-        .value("None_", Activation::None)
-        .value("Absolute", Activation::Absolute)
-        .value("ClippedRelu", Activation::ClippedRelu)
-        .value("Relu", Activation::Relu)
-        .value("Gelu", Activation::Gelu)
-        .value("GeluDerivative", Activation::GeluDerivative)
-        .value("GeluScaling", Activation::GeluScaling)
-        .value("LeakyRelu", Activation::LeakyRelu)
-        .value("ReluDerivative", Activation::ReluDerivative)
-        .value("Sigmoid", Activation::Sigmoid)
-        .value("Tanh", Activation::Tanh)
-        .value("Silu", Activation::Silu)
-        .value("Swish", Activation::Swish)
-        .value("Clamp", Activation::Clamp);
-}
-
-void registerSelectionBindings(nb::module_& module) {
-    nb::enum_<StructuredSparsitySelection>(module, "StructuredSparsitySelection")
-        .value("Fixed", StructuredSparsitySelection::Fixed)
-        .value("Random", StructuredSparsitySelection::Random);
-
-    nb::enum_<ActivationApplication>(module, "ActivationApplication")
-        .value("Forward", ActivationApplication::Forward)
-        .value("Gradient", ActivationApplication::Gradient);
-
-    nb::enum_<ReductionOperation>(module, "ReductionOperation")
-        .value("Sum", ReductionOperation::Sum)
-        .value("MaximumAbsolute", ReductionOperation::MaximumAbsolute);
 
     nb::class_<ScalarTypeInfo>(module, "ScalarTypeInfo")
         .def_prop_ro("name", [](const ScalarTypeInfo& info) { return std::string(info.name); })
