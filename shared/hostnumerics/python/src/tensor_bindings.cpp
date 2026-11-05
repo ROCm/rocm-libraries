@@ -175,22 +175,6 @@ std::optional<ptrdiff_t> elementProduct(ptrdiff_t left, ptrdiff_t right) {
     return left * right;
 }
 
-ptrdiff_t checkedElementDelta(ptrdiff_t stride, size_t elementCount) {
-    if (stride == 0 || elementCount == 0) return 0;
-    if (!std::in_range<ptrdiff_t>(elementCount))
-        throw std::runtime_error("Tensor stride extent exceeds ptrdiff_t.");
-    const auto product = elementProduct(stride, static_cast<ptrdiff_t>(elementCount));
-    if (!product) throw std::runtime_error("Tensor stride product exceeds ptrdiff_t.");
-    return *product;
-}
-
-ptrdiff_t checkedElementOffsetAdd(ptrdiff_t left, ptrdiff_t right) {
-    if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
-        (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
-        throw std::runtime_error("Tensor element offset exceeds ptrdiff_t.");
-    return left + right;
-}
-
 Tensor tensorGetItem(const Tensor& tensor, nb::handle key) {
     const nb::tuple keys =
         nb::isinstance<nb::tuple>(key) ? nb::borrow<nb::tuple>(key) : nb::make_tuple(key);
@@ -281,9 +265,9 @@ Tensor tensorGetItem(const Tensor& tensor, nb::handle key) {
         throw std::runtime_error("Tensor slice stride exceeds ptrdiff_t.");
     ptrdiff_t offset = tensor.layout().offset();
     if (!empty) {
-        for (size_t axis = 0; axis < rank; ++axis)
-            offset = checkedElementOffsetAdd(
-                offset, checkedElementDelta(tensor.layout().stride(axis), starts[axis]));
+        const auto start = tensor.layout().elementOffset(starts);
+        if (!start) throw std::runtime_error(start.error().message());
+        offset = *start;
     }
     return tensor.shareStorageWithLayout(
         Layout(Shape(std::move(viewDimensions)), std::move(viewStrides), offset));
@@ -335,34 +319,27 @@ Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType
         empty = empty || extent == 0;
     }
 
-    Shape shape(std::move(tensorDimensions));
+    const Layout bufferLayout(Shape(std::move(tensorDimensions)), std::move(tensorStrides), 0);
     if (empty) {
         return Tensor::copyEncodedBackingStorage(
-            type, Layout(std::move(shape), std::move(tensorStrides), 0),
+            type, bufferLayout,
             std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
     }
     if (!view.buf) throw std::runtime_error("Nonempty NumPy Tensor has a null data pointer.");
 
-    ptrdiff_t lowerOffset = 0;
-    ptrdiff_t upperOffset = 0;
-    for (size_t dimension = 0; dimension < tensorStrides.size(); ++dimension) {
-        const ptrdiff_t delta = checkedElementDelta(tensorStrides[dimension], shape[dimension] - 1);
-        if (delta < 0)
-            lowerOffset = checkedElementOffsetAdd(lowerOffset, delta);
-        else
-            upperOffset = checkedElementOffsetAdd(upperOffset, delta);
-    }
-
+    // Offsets relative to the buffer pointer; lower <= 0 <= upper for a nonempty buffer.
+    const auto bounds = bufferLayout.getElementBounds();
+    if (!bounds) throw std::runtime_error(bounds.error().message());
+    const auto [lowerOffset, upperOffset] = *bounds;
     if (lowerOffset == std::numeric_limits<ptrdiff_t>::min())
         throw std::runtime_error("NumPy Tensor base offset overflow.");
     const ptrdiff_t normalizedOffset = -lowerOffset;
-    const ptrdiff_t normalizedUpper = checkedElementOffsetAdd(upperOffset, normalizedOffset);
-    if (!std::in_range<size_t>(normalizedOffset) || !std::in_range<size_t>(normalizedUpper))
-        throw std::runtime_error("NumPy Tensor addressed range exceeds size_t.");
+    const auto normalizedUpper = detail::LayoutOffset::getOffsetAdd(upperOffset, normalizedOffset);
+    if (!normalizedUpper) throw std::runtime_error("NumPy Tensor addressed range overflow.");
 
     const size_t prefixBytes =
         checkedStorageBytes(static_cast<size_t>(normalizedOffset), storageType.itemSize);
-    const size_t normalizedUpperSize = static_cast<size_t>(normalizedUpper);
+    const size_t normalizedUpperSize = static_cast<size_t>(*normalizedUpper);
     if (normalizedUpperSize == std::numeric_limits<size_t>::max())
         throw std::runtime_error("NumPy Tensor addressed range overflow.");
     const size_t storageBytes = checkedStorageBytes(normalizedUpperSize + 1, storageType.itemSize);
@@ -375,7 +352,7 @@ Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType
         throw std::runtime_error("NumPy Tensor storage address overflow.");
 
     return Tensor::copyEncodedBackingStorage(
-        type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
+        type, Layout(bufferLayout.shape(), bufferLayout.strides(), normalizedOffset),
         std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
                                    storageBytes));
 }
