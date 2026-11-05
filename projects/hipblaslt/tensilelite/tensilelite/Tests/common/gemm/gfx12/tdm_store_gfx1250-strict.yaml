@@ -15,6 +15,10 @@ GlobalParameters:
   DataInitTypeD: 2
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
+  DataInitTypeBias: 3
+  DataInitTypeScaleAlphaVec: 3
+  DataInitTypeScaleA: 3
+  DataInitTypeScaleB: 3
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
@@ -191,3 +195,111 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
           - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+  ########################################
+  # Bias, ScaleAlphaVec and activation along M, read by every store batch: with TDMStore the
+  # vectors go after the staged D tile in LDS.
+  ########################################
+  -
+    - &problem_type_bf16_epilogue
+      <<: *problem_type_bf16
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - TDMStore: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 128]
+          - Exact: [511, 512, 1, 128]
+          - Exact: [257, 512, 1, 128]
+          - Exact: [510, 512, 1, 128]
+          - Exact: [508, 512, 1, 128]
+          - Exact: [504, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+        - BiasTypeArgs: ['s', 'b']
+        - ActivationArgs:
+          - [Enum: relu]
+          - [Enum: gelu]
+  ########################################
+  # The same epilogue with non-atomic StreamK=3.
+  ########################################
+  -
+    - *problem_type_bf16_epilogue
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - AdaptiveGemm: [1]
+        - TDMStore: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: gelu]
+  ########################################
+  # F8 input with ScaleAB Scalar (folded into alpha) and Vector (ScaleA and ScaleB in LDS).
+  ########################################
+  -
+    - &problem_type_f8_epilogue
+      <<: *problem_type_bf16_epilogue
+      DataType: F8
+      UseScaleAB: Scalar
+    - &solution_f8
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+  -
+    - <<: *problem_type_f8_epilogue
+      UseScaleAB: Vector
+    - *solution_f8

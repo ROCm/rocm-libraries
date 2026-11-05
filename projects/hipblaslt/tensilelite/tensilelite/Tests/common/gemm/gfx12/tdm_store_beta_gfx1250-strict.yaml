@@ -15,6 +15,8 @@ GlobalParameters:
   DataInitTypeD: 2
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
+  DataInitTypeBias: 3
+  DataInitTypeScaleAlphaVec: 3
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
@@ -29,7 +31,7 @@ BenchmarkProblems:
   # beta != 0: a TDMStore kernel keeps buffer_store in its beta != 0 epilogue.
   ########################################
   -
-    - # ProblemType TN
+    - &problem_type_bf16 # ProblemType TN
       OperationType: GEMM
       DataType: b
       DestDataType: b
@@ -59,3 +61,36 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [511, 512, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # The beta != 0 epilogue of a TDMStore kernel reads the bias and ScaleAlphaVec vectors after
+  # the staged tile too.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]

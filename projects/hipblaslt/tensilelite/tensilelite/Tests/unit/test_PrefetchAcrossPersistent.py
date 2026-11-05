@@ -1792,6 +1792,26 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
 
 
+@pytest.mark.parametrize("streamk", [0, 3])
+def test_tdm_store_puts_the_vector_epilogue_after_the_staged_tile(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64, ScheduleIterAlg=3,
+                         TDMStore=1, StreamK=streamk, StreamKForceDPOnly=0,
+                         ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert asm
+    staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
+    assert sol["LdsOffsetBias"] == (staged + 15) // 16 * 16
+    assert sol["LdsOffsetBiasNonGSU"] == sol["LdsOffsetBias"]
+    assert sol["LdsOffsetBiasGSU"] == sol["LdsOffsetBias"]
+    assert sol["LdsNumBytes"] >= sol["LdsOffsetBias"] + 256 * 4 * 2
+    # The moved vectors can still overlap the main-loop LDS, so every preload barriers before its stores.
+    preloads = [s for s in re.split(r"store (?:bias|scaleAlpha)\b", asm)[:-1] if "buffer_load" in s]
+    assert preloads
+    for preload in preloads:
+        assert "wait for all global loads." in preload[preload.rindex("buffer_load"):]
+
+
 # PAP and RAP on TDMFuse 1-3.
 
 

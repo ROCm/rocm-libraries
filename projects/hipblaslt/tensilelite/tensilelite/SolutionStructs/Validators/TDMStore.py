@@ -34,8 +34,9 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
   stores it once, after the last store batch, with one tensor_store_from_lds per wave.
   That needs a 16-bit HPA output written directly to D, by a GlobalSplitU=1 kernel or as the
   final store of a non-atomic StreamK=3 tile, no LDS data kept from one persistent tile to the
-  next, a store epilogue that uses no LDS of its own, and MacroTile1 split evenly across the
-  waves.
+  next, and MacroTile1 split evenly across the waves. The block also computes the elements
+  outside D and bounds only the D store, so besides D the epilogue may only read the bias and
+  ScaleAlphaVec vectors along M and the ScaleAB vectors, which go after the staged tile in LDS.
   """
   if not state["TDMStore"]:
     return True
@@ -63,9 +64,11 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
     reason = "TDMStore does not support CompactLoopStore"
   elif pt["FusedGemmA2A"]:
     reason = "TDMStore does not support FusedGemmA2A"
-  elif pt["UseE"] or pt["UseBias"] or pt["UseScaleAlphaVec"] or pt["UseScaleAB"] or pt["UseScaleCD"] \
-      or pt["ActivationType"] != "none" or pt["OutputAmaxD"]:
-    reason = "TDMStore does not support E, bias, scale vectors, ScaleAB, ScaleCD, activation or AmaxD"
+  elif pt["UseE"] or pt["Gradient"] or pt["UseGateResidual"] or pt["UseScaleCD"] or pt["OutputAmaxD"] \
+      or pt["GroupedGemm"]:
+    reason = "TDMStore does not support E, Gradient, gate residual, ScaleCD, AmaxD or GroupedGemm"
+  elif pt["UseBias"] > 1 or pt["UseScaleAlphaVec"] > 1:
+    reason = "TDMStore supports bias and ScaleAlphaVec only along M"
   elif state["MacroTile1"] % (state["NumThreads"] // state["WavefrontSize"]) != 0:
     reason = "TDMStore requires MacroTile1 to be a multiple of the number of waves"
   else:

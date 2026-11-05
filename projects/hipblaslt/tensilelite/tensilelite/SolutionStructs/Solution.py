@@ -7437,15 +7437,17 @@ class Solution(collections.abc.Mapping):
       and not state["ProblemType"]["Gradient"])
     state["_SeparateEpilogueLds"] = bool(
       state["_PersistentVectorEpilogueLds"] and state["PrefetchAcrossPersistent"])
-    if state["_SeparateEpilogueLds"]:
-      epilogueOffset = int(math.ceil(ldsNumBytes / 16) * 16)
+    tdmStoreBytes = state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["DestDataType"].numBytes())
+    if state["_SeparateEpilogueLds"] or (state["TDMStore"] and epilogueSize):
+      # Every TDM store batch reads the vectors while the D tile is staged from offset 0.
+      epilogueOffset = int(math.ceil((tdmStoreBytes if state["TDMStore"] else ldsNumBytes) / 16) * 16)
       state["LdsOffsetBias"] = epilogueOffset
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
     if state["TDMStore"]:
       # The TDM store stages the whole D tile from offset 0, over the main-loop LDS.
-      ldsNumBytes = max(ldsNumBytes, state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["DestDataType"].numBytes()))
+      ldsNumBytes = max(ldsNumBytes, tdmStoreBytes)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
     if state["ProblemType"]["OutputAmaxD"]:

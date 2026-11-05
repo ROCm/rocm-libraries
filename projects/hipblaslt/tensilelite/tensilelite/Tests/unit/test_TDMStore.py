@@ -44,6 +44,9 @@ def _state(**overrides):
     "HighPrecisionAccumulate": True,
     "FusedGemmA2A": False,
     "UseE": False,
+    "Gradient": False,
+    "UseGateResidual": False,
+    "GroupedGemm": False,
     "UseBias": 0,
     "UseScaleAlphaVec": 0,
     "UseScaleAB": "",
@@ -82,6 +85,20 @@ def test_accepts_non_atomic_streamk3():
   assert validateTDMStore(_state(TileProcessingStrategy="StreamK", GlobalSplitU=0), False)
 
 
+@pytest.mark.parametrize("overrides", [
+  {"UseBias": 1},
+  {"UseScaleAlphaVec": 1},
+  {"UseScaleAB": "Scalar"},
+  {"UseScaleAB": "Vector"},
+  {"ActivationType": "relu"},
+  {"ActivationType": "hipblaslt_all"},
+  {"UseBias": 1, "UseScaleAlphaVec": 1, "ActivationType": "hipblaslt_all",
+   "TileProcessingStrategy": "StreamK", "GlobalSplitU": 0},
+])
+def test_accepts_epilogue_vectors_and_activation(overrides):
+  assert validateTDMStore(_state(**overrides), False)
+
+
 def test_disabled_is_not_validated():
   assert validateTDMStore(_state(TDMStore=0, ISA=(9, 5, 0), GlobalSplitU=4), False)
 
@@ -104,12 +121,14 @@ def test_disabled_is_not_validated():
   {"CompactLoopStore": True},
   {"FusedGemmA2A": True},
   {"UseE": True},
-  {"UseBias": 1},
-  {"UseScaleAlphaVec": 1},
-  {"UseScaleAB": "Scalar"},
+  {"Gradient": True},
+  {"UseGateResidual": True},
   {"UseScaleCD": True},
-  {"ActivationType": "relu"},
   {"OutputAmaxD": True},
+  {"GroupedGemm": True},
+  {"UseBias": 2},
+  {"UseBias": 3},
+  {"UseScaleAlphaVec": 2},
   {"NumThreads": 96},
 ])
 def test_rejects_unsupported(overrides):

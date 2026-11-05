@@ -21282,7 +21282,8 @@ class KernelWriterAssembly(KernelWriter):
       barrier = SBarrier(comment="reuse vector epilogue LDS scratch")
       barrier.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
       module.add(barrier)
-    elif kernel["LdsOffsetBias"] == 0:
+    elif kernel["LdsOffsetBias"] == 0 or kernel["TDMStore"]:
+      # After a TDM store tile the vectors can still be inside the main-loop LDS.
       module.add(SBarrier(comment="wait for all global loads."))
 
     # rearrange them and add waitcnt
