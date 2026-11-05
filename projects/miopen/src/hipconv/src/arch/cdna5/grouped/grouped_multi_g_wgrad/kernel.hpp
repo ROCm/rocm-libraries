@@ -97,12 +97,10 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
 
     using ElemT = ::ToType<DT>;
 
-    namespace bn           = bunnies;
-    using arch             = bn::arch_mi400;
-    constexpr bool is_tf32 = DT == hipconv::DataType::tf32;
-    constexpr bn::fpfmt data_fpfmt =
-        is_tf32 ? bn::fpfmt::e8m10
-                : (DT == hipconv::DataType::bf16 ? bn::fpfmt::e8m7 : bn::fpfmt::e5m10);
+    namespace bn                      = bunnies;
+    using arch                        = bn::arch_mi400;
+    constexpr bool is_tf32            = DT == hipconv::DataType::tf32;
+    constexpr bn::fpfmt data_fpfmt    = bn::fpfmt_of<DT>;
     constexpr bn::fpfmt compute_fpfmt = is_tf32 ? bn::fpfmt::e8m10_e8m7x2split : data_fpfmt;
     using MatA                        = arch::matrix<data_fpfmt, 16, 32, bn::use::A>;
     using MatB                        = arch::matrix<data_fpfmt, 32, 16, bn::use::B>;
@@ -401,6 +399,7 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const Device&,
                  const ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -480,7 +479,7 @@ public:
     // The base GroupedWgradConvKernel::is_applicable pins channels_per_group to
     // one group_channels(); here the span mixes G in {4,8,16,32}, so we accept
     // any of those at the family level and let is_valid_config pick the exact G.
-    bool is_applicable(const ConvParams& par) const override
+    bool is_applicable(const Device& /*dev*/, const ConvParams& par) const override
     {
         using namespace hipconv;
         const bool ok_fp16bf16 =
@@ -519,7 +518,7 @@ public:
         return true;
     }
 
-    bool is_valid_config(const ConvParams& par) const override
+    bool is_valid_config(const Device& dev, const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -527,10 +526,10 @@ public:
         // handle any group count, so no waves divisibility requirement.
         if(par.channels_per_group() != cfg_.group_size)
             return false;
-        return get_launch_params(par).dynamic_shared_bytes <= kMaxDynamicLds;
+        return get_launch_params(dev, par).dynamic_shared_bytes <= kMaxDynamicLds;
     }
 
-    size_t get_workspace_size(const ConvParams& par) const override
+    size_t get_workspace_size(const Device& /*dev*/, const ConvParams& par) const override
     {
         if(!cfg_.split_k)
             return 0;
@@ -543,7 +542,15 @@ public:
         return (size_t)num_partitions * dW_total * sizeof(float);
     }
 
-    LaunchParams get_launch_params(const ConvParams& par) const override
+    // Without split_k, launch_impl adds every partition into dW atomically; with it, a second
+    // kernel sums the partitions from the workspace.
+    bool is_deterministic(const Device& dev, const ConvParams& par) const override
+    {
+        const LaunchParams lp = get_launch_params(dev, par);
+        return cfg_.split_k || lp.grid.y * lp.grid.z <= 1;
+    }
+
+    LaunchParams get_launch_params(const Device& /*dev*/, const ConvParams& par) const override
     {
         constexpr int Q_TILE   = 16;
         constexpr int DEL_COLS = 2 * Q_TILE;
