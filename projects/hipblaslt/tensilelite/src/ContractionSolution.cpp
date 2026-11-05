@@ -2830,8 +2830,11 @@ namespace TensileLite
         if(!enableCluster || sizeMapping.isPersistent())
             return true;
 
+        // The limit counts clusters. grid.y is already a whole number of
+        // clusters, and clusterDim.z is 1, so grid.z is the cluster count in z.
         dim3 grid = clusterLaunchGrid(problem, hardware);
-        return grid.z <= KernelInvocation::MaxClusterGridDimZ;
+        return divideUp(grid.y, sizeMapping.clusterDim.y) <= KernelInvocation::MaxClusterGridDimYZ
+               && grid.z <= KernelInvocation::MaxClusterGridDimYZ;
     }
 
     namespace
