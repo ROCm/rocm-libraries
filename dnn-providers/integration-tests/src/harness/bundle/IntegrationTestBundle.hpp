@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -841,6 +843,569 @@ inline void checkAliasRules(const hipdnn_integration_tests::BundleMetadata& meta
     }
 }
 
+// Runs `step` and rethrows any exception that is not a BundleMetadataError as a
+// BundleMetadataError that names `where`.
+template <typename Step>
+inline decltype(auto) rethrowAsBundleMetadataError(const std::string& where, Step&& step)
+{
+    try
+    {
+        return std::forward<Step>(step)();
+    }
+    catch(const hipdnn_integration_tests::BundleMetadataError&)
+    {
+        throw;
+    }
+    catch(const std::exception& e)
+    {
+        std::string message = where;
+        message += ": ";
+        message += e.what();
+        throw hipdnn_integration_tests::BundleMetadataError(message);
+    }
+}
+
+// The sweep-level `version` of the sweep at `sweepPath`: 1 when the key is absent, else
+// the integer 1 or 2. `where` names the sweep case in the thrown message.
+inline int checkSweepVersion(const nlohmann::json* version,
+                             const std::filesystem::path& sweepPath,
+                             const std::string& where)
+{
+    if(version == nullptr)
+    {
+        return 1;
+    }
+    if(version->is_number_integer() && (*version == 1 || *version == 2))
+    {
+        return version->get<int>();
+    }
+    std::string message = where;
+    message += ": sweep version ";
+    message += version->dump();
+    message += " in ";
+    message += sweepPath.string();
+    message += " is not 1 or 2";
+    throw hipdnn_integration_tests::BundleMetadataError(message);
+}
+
+inline std::string formatUidList(const std::vector<int64_t>& uids)
+{
+    std::string text = "[";
+    for(size_t i = 0; i < uids.size(); ++i)
+    {
+        if(i != 0)
+        {
+            text += ", ";
+        }
+        text += std::to_string(uids[i]);
+    }
+    text += ']';
+    return text;
+}
+
+// A node port is a key that ends in "_tensor_uid", directly under the "inputs" or
+// "outputs" object of a node.
+inline bool isNodePortKey(const std::string& key)
+{
+    constexpr std::string_view SUFFIX = "_tensor_uid";
+    return key.size() >= SUFFIX.size()
+           && key.compare(key.size() - SUFFIX.size(), SUFFIX.size(), SUFFIX.data(), SUFFIX.size())
+                  == 0;
+}
+
+// The uid a JSON value holds: an integer, or a float with an integral value. A float
+// such as 3.0 converts to the same uid when the graph is built.
+inline std::optional<int64_t> uidOf(const nlohmann::json& value)
+{
+    if(value.is_number_integer())
+    {
+        return value.get<int64_t>();
+    }
+    if(!value.is_number_float())
+    {
+        return std::nullopt;
+    }
+    constexpr double INT64_BOUND = 9223372036854775808.0;
+    const auto number = value.get<double>();
+    if(std::trunc(number) != number || number < -INT64_BOUND || number >= INT64_BOUND)
+    {
+        return std::nullopt;
+    }
+    return static_cast<int64_t>(number);
+}
+
+inline bool holdsUid(const nlohmann::json& value, const std::unordered_set<int64_t>& uids)
+{
+    const auto uid = uidOf(value);
+    return uid.has_value() && uids.count(*uid) != 0;
+}
+
+// Removes the tensors in `uids` from `graphJson` and sets each node port that holds one
+// of them to null. Nothing else changes, and no uid is renumbered.
+inline nlohmann::json pruneAbsentTensors(nlohmann::json graphJson, const std::vector<int64_t>& uids)
+{
+    const std::unordered_set<int64_t> absent(uids.begin(), uids.end());
+
+    if(graphJson.contains("tensors") && graphJson.at("tensors").is_array())
+    {
+        auto kept = nlohmann::json::array();
+        for(auto& tensor : graphJson.at("tensors"))
+        {
+            if(!tensor.is_object() || !tensor.contains("uid")
+               || !holdsUid(tensor.at("uid"), absent))
+            {
+                kept.push_back(std::move(tensor));
+            }
+        }
+        graphJson["tensors"] = std::move(kept);
+    }
+
+    if(graphJson.contains("nodes") && graphJson.at("nodes").is_array())
+    {
+        for(auto& node : graphJson.at("nodes"))
+        {
+            for(const char* side : {"inputs", "outputs"})
+            {
+                if(!node.is_object() || !node.contains(side) || !node.at(side).is_object())
+                {
+                    continue;
+                }
+                auto& ports = node.at(side);
+                for(auto it = ports.begin(); it != ports.end(); ++it)
+                {
+                    if(isNodePortKey(it.key()) && holdsUid(it.value(), absent))
+                    {
+                        it.value() = nullptr;
+                    }
+                }
+            }
+        }
+    }
+
+    return graphJson;
+}
+
+// Appends to `found` the path of each integer below `json` that equals `uid` and sits
+// under a key whose name holds "uid", directly or through arrays. `path` names `json`;
+// `underUidKey` says whether `json` itself sits under such a key.
+inline void findUidReferences(const nlohmann::json& json,
+                              int64_t uid,
+                              bool underUidKey,
+                              const std::string& path,
+                              std::vector<std::string>& found)
+{
+    if(json.is_object())
+    {
+        for(auto it = json.begin(); it != json.end(); ++it)
+        {
+            std::string childPath = path;
+            childPath += '.';
+            childPath += it.key();
+            findUidReferences(
+                it.value(), uid, it.key().find("uid") != std::string::npos, childPath, found);
+        }
+        return;
+    }
+    if(json.is_array())
+    {
+        for(size_t i = 0; i < json.size(); ++i)
+        {
+            std::string childPath = path;
+            childPath += '[';
+            childPath += std::to_string(i);
+            childPath += ']';
+            findUidReferences(json.at(i), uid, underUidKey, childPath, found);
+        }
+        return;
+    }
+    if(underUidKey && uidOf(json) == uid)
+    {
+        found.push_back(path);
+    }
+}
+
+// Where the nodes of a template hold one uid: the nodes that hold it in a node port, and
+// the path of each other place.
+struct NodeUidUse
+{
+    std::set<size_t> portNodes;
+    std::vector<std::string> otherPaths;
+};
+
+inline NodeUidUse findNodeUidUse(const nlohmann::json& templateJson, int64_t uid)
+{
+    NodeUidUse use;
+    if(!templateJson.contains("nodes") || !templateJson.at("nodes").is_array())
+    {
+        return use;
+    }
+
+    const auto& nodes = templateJson.at("nodes");
+    for(size_t index = 0; index < nodes.size(); ++index)
+    {
+        const auto& node = nodes.at(index);
+        std::string nodePath = "nodes[";
+        nodePath += std::to_string(index);
+        nodePath += ']';
+        if(!node.is_object())
+        {
+            findUidReferences(node, uid, false, nodePath, use.otherPaths);
+            continue;
+        }
+        for(auto field = node.begin(); field != node.end(); ++field)
+        {
+            std::string fieldPath = nodePath;
+            fieldPath += '.';
+            fieldPath += field.key();
+            const bool portSide = (field.key() == "inputs" || field.key() == "outputs")
+                                  && field.value().is_object();
+            if(!portSide)
+            {
+                findUidReferences(field.value(),
+                                  uid,
+                                  field.key().find("uid") != std::string::npos,
+                                  fieldPath,
+                                  use.otherPaths);
+                continue;
+            }
+            for(auto port = field.value().begin(); port != field.value().end(); ++port)
+            {
+                if(isNodePortKey(port.key()) && uidOf(port.value()) == uid)
+                {
+                    use.portNodes.insert(index);
+                    continue;
+                }
+                std::string portPath = fieldPath;
+                portPath += '.';
+                portPath += port.key();
+                findUidReferences(port.value(),
+                                  uid,
+                                  port.key().find("uid") != std::string::npos,
+                                  portPath,
+                                  use.otherPaths);
+            }
+        }
+    }
+    return use;
+}
+
+// The paths outside the nodes where the template refers to `uid`, other than the "uid"
+// key of a tensor entry.
+inline std::vector<std::string> findOtherUidReferences(const nlohmann::json& templateJson,
+                                                       int64_t uid)
+{
+    std::vector<std::string> found;
+    if(!templateJson.is_object())
+    {
+        return found;
+    }
+    for(auto field = templateJson.begin(); field != templateJson.end(); ++field)
+    {
+        if(field.key() == "nodes")
+        {
+            continue;
+        }
+        if(field.key() != "tensors" || !field.value().is_array())
+        {
+            findUidReferences(field.value(),
+                              uid,
+                              field.key().find("uid") != std::string::npos,
+                              field.key(),
+                              found);
+            continue;
+        }
+        const auto& tensors = field.value();
+        for(size_t index = 0; index < tensors.size(); ++index)
+        {
+            std::string tensorPath = "tensors[";
+            tensorPath += std::to_string(index);
+            tensorPath += ']';
+            const auto& tensor = tensors.at(index);
+            if(!tensor.is_object())
+            {
+                findUidReferences(tensor, uid, false, tensorPath, found);
+                continue;
+            }
+            for(auto key = tensor.begin(); key != tensor.end(); ++key)
+            {
+                if(key.key() == "uid")
+                {
+                    continue;
+                }
+                std::string keyPath = tensorPath;
+                keyPath += '.';
+                keyPath += key.key();
+                findUidReferences(
+                    key.value(), uid, key.key().find("uid") != std::string::npos, keyPath, found);
+            }
+        }
+    }
+    return found;
+}
+
+// Throws BundleMetadataError naming `where` for the first node port of the template that
+// holds neither null nor a uid, for example a `${case.*}` placeholder. The pruning cannot
+// tell whether such a port holds an absent uid.
+inline void checkNodePortsAreLiteral(const nlohmann::json& templateJson, const std::string& where)
+{
+    if(!templateJson.contains("nodes") || !templateJson.at("nodes").is_array())
+    {
+        return;
+    }
+    const auto& nodes = templateJson.at("nodes");
+    for(size_t index = 0; index < nodes.size(); ++index)
+    {
+        const auto& node = nodes.at(index);
+        for(const char* side : {"inputs", "outputs"})
+        {
+            if(!node.is_object() || !node.contains(side) || !node.at(side).is_object())
+            {
+                continue;
+            }
+            const auto& ports = node.at(side);
+            for(auto port = ports.begin(); port != ports.end(); ++port)
+            {
+                if(!isNodePortKey(port.key()) || port.value().is_null()
+                   || uidOf(port.value()).has_value())
+                {
+                    continue;
+                }
+                std::string message = where;
+                message += ": absent_tensors needs a uid or null in each node port, and nodes[";
+                message += std::to_string(index);
+                message += "].";
+                message += side;
+                message += '.';
+                message += port.key();
+                message += " holds ";
+                message += port.value().dump();
+                throw hipdnn_integration_tests::BundleMetadataError(message);
+            }
+        }
+    }
+}
+
+inline std::string
+    absentTensorMessage(const std::string& where, int64_t uid, const std::string& rule)
+{
+    std::string message = where;
+    message += ": absent tensor ";
+    message += std::to_string(uid);
+    message += ' ';
+    message += rule;
+    return message;
+}
+
+// A sweep case with `absent_tensors`, checked against its template: the template with
+// the absent tensors removed, the case metadata and the absent uids.
+struct AbsentTensorCase
+{
+    nlohmann::json graphTemplate;
+    hipdnn_integration_tests::BundleMetadata metadata;
+    std::vector<int64_t> uids;
+};
+
+// The rules that tie a case's names to its absent tensors. A case names an absent tensor
+// in none of: values.tensors, a key of another case value (`${case.<field>.<uid>}`),
+// tensor_patches, the metadata `inputs`, the metadata `aliases`.
+inline void
+    checkCaseDoesNotNameAbsentTensors(const nlohmann::json& caseJson,
+                                      const hipdnn_integration_tests::BundleMetadata& metadata,
+                                      const std::unordered_set<int64_t>& absent,
+                                      const std::vector<int64_t>& uids,
+                                      const std::string& where)
+{
+    using hipdnn_integration_tests::BundleMetadataError;
+
+    if(caseJson.contains("values") && caseJson.at("values").is_object())
+    {
+        const auto& values = caseJson.at("values");
+        if(values.contains("tensors"))
+        {
+            const auto& tensors = values.at("tensors");
+            if(!tensors.is_array())
+            {
+                throw std::runtime_error("values.tensors must be an array");
+            }
+            for(const auto& entry : tensors)
+            {
+                const auto uid = entry.at("uid").get<int64_t>();
+                if(absent.count(uid) != 0)
+                {
+                    throw BundleMetadataError(
+                        absentTensorMessage(where, uid, "has a values.tensors entry"));
+                }
+            }
+        }
+        for(const int64_t uid : uids)
+        {
+            const auto uidKey = std::to_string(uid);
+            for(auto field = values.begin(); field != values.end(); ++field)
+            {
+                if(field.key() == "tensors" || !field.value().is_object()
+                   || !field.value().contains(uidKey))
+                {
+                    continue;
+                }
+                std::string rule = "is a key of the case value values.";
+                rule += field.key();
+                rule += '.';
+                rule += uidKey;
+                throw BundleMetadataError(absentTensorMessage(where, uid, rule));
+            }
+        }
+    }
+
+    if(caseJson.contains("tensor_patches") && caseJson.at("tensor_patches").is_array())
+    {
+        for(const auto& patch : caseJson.at("tensor_patches"))
+        {
+            const auto uid = patch.at("uid").get<int64_t>();
+            if(absent.count(uid) != 0)
+            {
+                throw BundleMetadataError(
+                    absentTensorMessage(where, uid, "has a tensor_patches entry"));
+            }
+        }
+    }
+
+    for(const int64_t uid : uids)
+    {
+        if(metadata.inputs.has_value() && metadata.inputs->count(uid) != 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "has a metadata inputs entry"));
+        }
+    }
+
+    for(const auto& alias : metadata.aliases)
+    {
+        if(absent.count(alias.uid) != 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, alias.uid, "is the view of a metadata aliases entry"));
+        }
+        if(absent.count(alias.ofUid) != 0)
+        {
+            throw BundleMetadataError(absentTensorMessage(
+                where, alias.ofUid, "is the owner of a metadata aliases entry"));
+        }
+    }
+}
+
+// Checks a sweep case that has `absent_tensors` against its template and returns the
+// pruned template. Every rule throws BundleMetadataError naming `where`, and the absent
+// uid where there is one. Runs before placeholder expansion: the placeholders of an
+// absent tensor have no case value.
+inline AbsentTensorCase prepareAbsentTensors(const nlohmann::json& templateJson,
+                                             const nlohmann::json& caseJson,
+                                             int sweepVersion,
+                                             const std::string& where)
+{
+    using hipdnn_integration_tests::BundleMetadataError;
+
+    if(!caseJson.contains("metadata") || caseJson.at("metadata").is_null())
+    {
+        throw BundleMetadataError(where
+                                  + ": absent_tensors needs case metadata with format_version 2");
+    }
+    auto metadata
+        = hipdnn_integration_tests::parseBundleMetadataJson(caseJson.at("metadata"), where);
+    if(metadata.formatVersion < 2)
+    {
+        throw BundleMetadataError(where + ": absent_tensors needs format_version 2");
+    }
+
+    if(sweepVersion != 2)
+    {
+        throw BundleMetadataError(where + ": absent_tensors needs sweep version 2, not "
+                                  + std::to_string(sweepVersion));
+    }
+
+    const auto& list = caseJson.at("absent_tensors");
+    if(!list.is_array() || list.empty())
+    {
+        throw BundleMetadataError(
+            where + ": absent_tensors must be a non-empty array of integer tensor uids");
+    }
+    std::vector<int64_t> uids;
+    std::unordered_set<int64_t> absent;
+    for(const auto& entry : list)
+    {
+        if(!entry.is_number_integer())
+        {
+            throw BundleMetadataError(
+                where + ": absent_tensors must be a non-empty array of integer tensor uids");
+        }
+        const auto uid = entry.get<int64_t>();
+        if(!absent.insert(uid).second)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is named twice in absent_tensors"));
+        }
+        uids.push_back(uid);
+    }
+
+    const auto templateUids = collectTemplateTensorUids(templateJson);
+    for(const int64_t uid : uids)
+    {
+        if(templateUids.count(uid) == 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is not a tensor of the template"));
+        }
+    }
+
+    checkCaseDoesNotNameAbsentTensors(caseJson, metadata, absent, uids, where);
+
+    if(caseJson.contains("golden") && !caseJson.at("golden").is_null())
+    {
+        throw BundleMetadataError(where
+                                  + ": absent_tensors and golden data do not mix; remove the "
+                                    "golden pointer or the absent tensors");
+    }
+
+    for(const auto& tensor : templateJson.at("tensors"))
+    {
+        const auto uid = tensor.at("uid").get<int64_t>();
+        if(absent.count(uid) == 0 || !tensor.contains("virtual") || tensor.at("virtual") == false)
+        {
+            continue;
+        }
+        throw BundleMetadataError(absentTensorMessage(where,
+                                                      uid,
+                                                      tensor.at("virtual") == true
+                                                          ? "is virtual"
+                                                          : "has a virtual flag that is not a "
+                                                            "literal boolean in the template"));
+    }
+
+    checkNodePortsAreLiteral(templateJson, where);
+    for(const int64_t uid : uids)
+    {
+        const auto use = findNodeUidUse(templateJson, uid);
+        if(use.portNodes.size() > 1)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is held by node ports of more than one node"));
+        }
+        if(!use.otherPaths.empty())
+        {
+            throw BundleMetadataError(absentTensorMessage(
+                where, uid, "is held by a node outside a node port, at " + use.otherPaths.front()));
+        }
+        const auto references = findOtherUidReferences(templateJson, uid);
+        if(!references.empty())
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is referenced at " + references.front()));
+        }
+    }
+
+    auto graphTemplate = pruneAbsentTensors(templateJson, uids);
+    return {std::move(graphTemplate), std::move(metadata), std::move(uids)};
+}
+
 } // namespace detail
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
@@ -950,7 +1515,12 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
 // INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, two exceptions
 // propagate uncaught: a BundleMetadataError from a malformed metadata block, and
-// a RuntimePassByValueInvariantError from buildGraphBuffer().
+// a RuntimePassByValueInvariantError from buildGraphBuffer(). A sweep `version`
+// other than 1 or 2 also throws BundleMetadataError, and so does a case that
+// breaks an `absent_tensors` rule, has an unbuildable graph or has no output left.
+// A case with `absent_tensors` loads from a copy of the template without those
+// tensors, made before the placeholders are expanded. An expansion error in such a
+// case is still INVALID_SWEEP_CASE.
 inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
                                             SweepManifestCache& sweeps)
 {
@@ -972,11 +1542,26 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         return LoadError::INVALID_SWEEP_CASE;
     }
 
+    const auto where = discovered.diagnosticPath().string();
+    const int sweepVersion = detail::rethrowAsBundleMetadataError(where, [&] {
+        return detail::checkSweepVersion(sweep.manifest->version(), discovered.jsonPath, where);
+    });
+
+    std::optional<detail::AbsentTensorCase> absent;
+    if(caseJson->contains("absent_tensors"))
+    {
+        absent.emplace(detail::rethrowAsBundleMetadataError(where, [&] {
+            return detail::prepareAbsentTensors(*templateJson, *caseJson, sweepVersion, where);
+        }));
+    }
+    const nlohmann::json& graphTemplate
+        = absent.has_value() ? absent->graphTemplate : *templateJson;
+
     nlohmann::json expandedGraph;
     std::optional<std::filesystem::path> goldenDirectory;
     try
     {
-        expandedGraph = detail::expandTemplateGraph(*templateJson, *caseJson, discovered);
+        expandedGraph = detail::expandTemplateGraph(graphTemplate, *caseJson, discovered);
         goldenDirectory = detail::resolveSweepGoldenDirectory(discovered.jsonPath, *caseJson);
         detail::applyTensorPatches(expandedGraph, *caseJson);
     }
@@ -988,6 +1573,12 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     flatbuffers::DetachedBuffer graphBuffer;
     if(!detail::buildGraphBuffer(expandedGraph, graphBuffer))
     {
+        if(absent.has_value())
+        {
+            throw hipdnn_integration_tests::BundleMetadataError(
+                where + ": the graph with absent tensors " + detail::formatUidList(absent->uids)
+                + " does not build; a removed tensor fills a port the op requires");
+        }
         return LoadError::INVALID_GRAPH_SCHEMA;
     }
 
@@ -1010,6 +1601,13 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         }
     }
 
+    if(absent.has_value() && bundle.outputTensorUids.empty())
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(where + ": removing "
+                                                            + detail::formatUidList(absent->uids)
+                                                            + " leaves no output to compare");
+    }
+
     // Golden blobs without metadata cannot be validated, so that combination is
     // UNVALIDATABLE_GOLDEN_DATA and hard-fails downstream (see LoadError). Mirrors
     // the direct-bundle path above.
@@ -1024,18 +1622,25 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     // anchors the case, so an absent block is MISSING_METADATA. A present but
     // malformed block is an authoring error: parseBundleMetadataJson() throws
     // BundleMetadataError, which is left to propagate (a typo in the metadata
-    // block must not quietly delete the case).
-    if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
+    // block must not quietly delete the case). A case with absent tensors already
+    // has its metadata parsed.
+    if(absent.has_value())
     {
-        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
-                                    : LoadError::MISSING_METADATA;
+        bundle.metadata = std::move(absent->metadata);
     }
-    bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
-        caseJson->at("metadata"), discovered.diagnosticPath().string());
+    else
+    {
+        if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
+        {
+            return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
+                                        : LoadError::MISSING_METADATA;
+        }
+        bundle.metadata
+            = hipdnn_integration_tests::parseBundleMetadataJson(caseJson->at("metadata"), where);
+    }
 
     const bool goldenDeclared = goldenOutputsPresent || goldenDirectory.has_value();
-    detail::checkGoldenDeclarationRules(
-        bundle.metadata, goldenDeclared, discovered.diagnosticPath().string());
+    detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, where);
 
     if(goldenDirectory.has_value())
     {
@@ -1048,7 +1653,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
                             bundle.graphWrapper(),
                             bundle.outputTensorUids,
                             goldenDeclared || bundle.blobs.has_value(),
-                            discovered.diagnosticPath().string());
+                            where);
 
     return bundle;
 }

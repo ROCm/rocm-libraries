@@ -196,12 +196,14 @@ Resolution rules (`IntegrationTestBundle.hpp`):
 
 | Field | Required | Meaning |
 |---|---|---|
+| `version` | no | `1` or `2`; `1` when absent. A case with [`absent_tensors`](#optional-tensors--absent_tensors) needs `2`. Any other value fails every case of the sweep. |
 | `cases[]` | yes | One test per entry. |
 | `cases[].id` | yes | Non-empty string, unique within the sweep. Becomes the GTest test name. |
 | `cases[].values` | no | Placeholder values; `values.tensors[]` holds per-tensor values keyed by `uid` (each `uid` must exist in the template, once). |
 | `cases[].metadata` | **yes** | Same schema as a [metadata sidecar](#metadata-sidecar--namemetajson), including `no_cpu_reference`, `no_gpu_reference` and `expected_rejection`. A case without it fails to load. For rule R4, the `golden` object with a `path` of the same case counts as declared golden data. A case with `expected_rejection: true` must not have a `golden` object: that is a load error ([details](#expected-rejection-bundles)). |
 | `cases[].golden` | no | `{"path": "golden/<CaseId>/tensors.dvc"}`. If absent or `null`, the case is graph-only. If present without a string `path`, it is an error. |
 | `cases[].tensor_patches` | no | Structural per-tensor edits applied after placeholder expansion; see below. |
+| `cases[].absent_tensors` | no | Uids of template tensors that this case does not have; see [Optional tensors](#optional-tensors--absent_tensors). Needs sweep `version` 2 and case metadata with `format_version` 2. |
 
 Case ids are handles, not descriptions. `import_graph.py` generates them as
 `{shape}_{dtype}_{layout}_{≤3 salient attrs}[_{hash6}]`. It adds the `hash6`
@@ -228,6 +230,70 @@ not carry a baked `value`:
 expanded graph. If a tensor keeps `is_runtime_pass_by_value: true` and a `value`,
 it fails validation at load.
 
+#### Optional tensors — `absent_tensors`
+
+One template can hold the union of the tensors of a set of cases, for example
+with and without a sink, a bias or Stats. Each case then names the template
+tensors that its graph does not have:
+
+```json
+"absent_tensors": [7, 9]
+```
+
+For that case, the harness removes each named tensor from a copy of the
+template. It sets each node port that holds the uid to `null`. It does this
+before it expands the placeholders, so an absent tensor needs no case values.
+Nothing else in the template changes, and no uid changes.
+
+A **node port** is a key whose name ends in `_tensor_uid`, directly under the
+`inputs` or `outputs` object of a node. `null` in a node port is the usual form
+of an optional port that the graph does not use. A port that holds the uid as a
+number with no fraction (`7.0`) also holds the uid.
+
+An absent tensor costs nothing at run time. It gets no allocation, no fill, no
+variant-pack entry and no comparison. The fill draws the seeds of the other
+inputs in uid order without it. Give each input its own `seed` in the metadata
+`inputs`, so that the contents of an input do not change when another tensor is
+absent.
+
+These cases fail to load. The case registers as a failing test, and the message
+names the case, the uid (where there is one) and the rule:
+
+- The case has no `metadata` block, or its metadata has `format_version` 1.
+- The sweep `version` is not 2. A sweep without `version` has version 1.
+- `absent_tensors` is not a non-empty array of integers, or names a uid twice.
+- A uid is not a tensor of the template.
+- The case names an absent tensor in other fields: a `values.tensors[]` entry,
+  a key directly under another case value (for example `values.alignment.<uid>`), a
+  `tensor_patches` entry, a metadata `inputs` entry (a seed-only entry too), or
+  a metadata `aliases` entry as the view or as the owner.
+- The case declares golden data (a `golden` value that is not `null`). Absent
+  tensors and golden data do not go together.
+- The template tensor is virtual, or its `virtual` flag is not a literal
+  boolean in the template (for example a `${case.*}` placeholder).
+- A node port of the template holds a value that is not a uid or `null`, for
+  example a `${case.*}` placeholder. The harness cannot tell whether that port
+  holds an absent tensor.
+- Node ports of more than one node hold the uid, for example the output of one
+  node that is the input of another node.
+- A node holds the uid in a field that is not a node port, for example a flat
+  uid list such as `output_tensor_uids`. The harness looks for the uid under
+  each key whose name holds `uid`.
+- Another template field refers to the uid, for example the
+  `ragged_offset_tensor_uid` of another tensor.
+- The graph does not build: an absent tensor fills a port that the op requires.
+- No output remains to compare.
+
+A single-graph bundle has no `absent_tensors`: its graph has exactly its
+tensors.
+
+Always set `format_version` to `2` in the metadata of a case that uses
+`absent_tensors`. A harness that does not know `format_version` 2 rejects the
+metadata. A harness that knows `format_version` 2 but not `absent_tensors`
+ignores the key and the sweep `version`. It expands the full template, so an
+absent tensor with placeholder dims makes the case fail expansion, and that
+harness skips the case.
+
 ## Metadata sidecar — `{Name}.meta.json`
 
 This file holds provenance and run guards for a single-graph bundle. **Every
@@ -237,7 +303,7 @@ parses it.
 
 | Field | Type | Effect |
 |---|---|---|
-| `format_version` | int | **Required, `1` or `2`.** Metadata that uses a version-2 feature must use `2`; metadata that uses a version-2 feature with `1` is rejected. A harness rejects a version that it does not know. The version-2 features are the `values` [fill kind](#input-fill-specs), `archs` and [`aliases`](#tensors-that-share-memory--aliases). |
+| `format_version` | int | **Required, `1` or `2`.** Metadata that uses a version-2 feature must use `2`; metadata that uses a version-2 feature with `1` is rejected. A harness rejects a version that it does not know. The version-2 features are the `values` [fill kind](#input-fill-specs), `archs` and [`aliases`](#tensors-that-share-memory--aliases), and [`absent_tensors`](#optional-tensors--absent_tensors) in a sweep case. |
 | `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. Not applicable to an expected-rejection bundle: `expected_rejection` overrides it. |
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
@@ -793,7 +859,7 @@ execution_settings:
 | Format | Parsed / checked by | When it fails |
 |---|---|---|
 | Graph `.json` | `IntegrationTestBundle.hpp` | Case dropped from registration with an `ERROR` log line; the run stays green with one test fewer |
-| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph |
+| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph. A sweep `version` other than 1 or 2 registers a **failing** test for each case of the sweep. A case that breaks an [`absent_tensors`](#optional-tensors--absent_tensors) rule registers a **failing** test; an expansion error in such a case is dropped like any other |
 | `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key, an unknown or malformed [fill spec](#input-fill-specs), an `archs` value that is not a non-empty array of base arch names, an [`aliases`](#tensors-that-share-memory--aliases) entry that the metadata or the graph rejects, a version-2 feature in version-1 metadata) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
 | `expected_rejection` bundle or case | `BundleMetadata.hpp` at load; the harness at run time; `reference-data-scripts/verify_golden_bundles.py`; `scripts/verify_support_claims.py` | `enforcement_level` and the oracle fields do not apply (it overrides them). Golden data next to it is a load error (`BundleMetadataError`) and a verifier error. A support claim that names it fails the C++ test and is a verifier error. A bundle that does not load is a red `FailedLoad` test, not a dropped case. [Details](#expected-rejection-bundles) |
 | `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for new bundles (not for an expected-rejection bundle), but not enforced: a missing sidecar means "no claims" at run time and is not reported by the verifier. A sidecar that does not parse, and a broken claim, fail that bundle's test |
@@ -802,5 +868,6 @@ execution_settings:
 | `test_categories*.yaml` | `shared/ctest/parse_test_categories.py` | CMake **warning** at configure; that target's tier suites are not generated, so `ctest -L <tier>` runs fewer tests, with no other notice. Check the configure log or `ctest -N -L <tier>` |
 
 The load problems that register a *failing* test are these: a tensor marked
-`is_runtime_pass_by_value` that still carries a baked `value`, and malformed
-metadata (above).
+`is_runtime_pass_by_value` that still carries a baked `value`, malformed
+metadata, a sweep `version` other than 1 or 2, and a case that breaks an
+`absent_tensors` rule (above).
