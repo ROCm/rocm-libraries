@@ -34,11 +34,12 @@ struct OperandTile {
 
 namespace detail {
 
-// Compiled bridge for the type-independent validation and copying used by
-// copyOperandToPhysicalLayout. A null output requests only validation.
-void copyOperandBytes(const std::byte* operand, size_t elementCount, size_t elementSize,
-                      OperandExtents extents, const std::optional<OperandSwizzle>& swizzle,
-                      const std::optional<OperandTile>& tile, std::byte* output);
+// Type-independent implementation of copyOperandToPhysicalLayout. `operand`
+// and `output` each hold `elementCount` elements of `elementSize` bytes.
+void copyOperandBytes(const std::byte* operand, std::byte* output, size_t elementCount,
+                      size_t elementSize, OperandExtents extents,
+                      const std::optional<OperandSwizzle>& swizzle,
+                      const std::optional<OperandTile>& tile);
 
 }  // namespace detail
 
@@ -52,7 +53,7 @@ void copyOperandBytes(const std::byte* operand, size_t elementCount, size_t elem
  * result is a copy of `operand`. Logical coordinates are unchanged; only their
  * storage offsets move.
  *
- * `T` must be trivially copyable. The returned vector owns its storage.
+ * `T` must be trivially copyable.
  *
  * @throws std::runtime_error if `operand` does not hold extents.k * extents.mn
  * elements, a swizzle or tile violates its constraints, an extent is not
@@ -66,12 +67,10 @@ std::vector<T> copyOperandToPhysicalLayout(const std::vector<T>& operand, Operan
     static_assert(std::is_trivially_copyable_v<T>,
                   "AMD GPU physical-layout conversions require trivially copyable elements");
 
-    const auto* operandBytes = reinterpret_cast<const std::byte*>(operand.data());
-    detail::copyOperandBytes(operandBytes, operand.size(), sizeof(T), extents, swizzle, tile,
-                             nullptr);
     std::vector<T> output(operand.size());
-    detail::copyOperandBytes(operandBytes, operand.size(), sizeof(T), extents, swizzle, tile,
-                             reinterpret_cast<std::byte*>(output.data()));
+    detail::copyOperandBytes(reinterpret_cast<const std::byte*>(operand.data()),
+                             reinterpret_cast<std::byte*>(output.data()), operand.size(), sizeof(T),
+                             extents, swizzle, tile);
     return output;
 }
 

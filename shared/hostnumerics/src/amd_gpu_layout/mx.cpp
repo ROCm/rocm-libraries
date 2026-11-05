@@ -1,13 +1,83 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <stdexcept>
 
 #include "detail/checked_arithmetic.hpp"
-#include "detail/gfx1250_mx_layout.hpp"
-#include "detail/gfx950_mx_layout.hpp"
+#include "parallel_chunks.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout {
+namespace {
+using detail::parallelForChunks;
+using ::roc::hostnumerics::detail::checkedAdd;
+using ::roc::hostnumerics::detail::checkedMultiply;
+
+constexpr std::string_view sizeOverflow = "MX scale storage size overflows size_t.";
+
+size_t roundUp(size_t value, size_t multiple) {
+    const size_t remainder = value % multiple;
+    return remainder == 0 ? value : checkedAdd(value, multiple - remainder, sizeOverflow);
+}
+
+// Number of consecutive fast-dimension scales in each gfx1250 tile.
+size_t gfx1250TileSize(size_t blockSize) {
+    if (blockSize != 16 && blockSize != 32)
+        throw std::runtime_error("gfx1250 MX scale layout requires a block size of 16 or 32.");
+    return 128 / blockSize;
+}
+
+size_t physicalByteCountFor(std::array<size_t, 2> naturalShape, size_t blockSize,
+                            MxScaleStorageLayout layout, size_t naturalByteCount) {
+    switch (layout) {
+        case MxScaleStorageLayout::Natural:
+            return naturalByteCount;
+        case MxScaleStorageLayout::Gfx950:
+            return checkedMultiply(roundUp(naturalShape[0], 32), roundUp(naturalShape[1], 8),
+                                   sizeOverflow);
+        case MxScaleStorageLayout::Gfx1250:
+            return checkedMultiply(naturalShape[0],
+                                   roundUp(naturalShape[1], gfx1250TileSize(blockSize)),
+                                   sizeOverflow);
+    }
+    throw std::runtime_error("Invalid MX scale storage layout.");
+}
+
+// gfx950 stores each zero-padded 32 x 8 tile of [row, column] scales
+// contiguously, column tiles fastest. Within a tile, with
+// row = 16 * rowHalf + rowLane and column = 4 * columnHalf + columnLane, the
+// scales are ordered [columnLane, rowLane, columnHalf, rowHalf], rowHalf fastest.
+void copyGfx950Scales(const std::byte* natural, std::byte* physical, size_t rows, size_t columns) {
+    const size_t columnTiles = roundUp(columns, 8) / 8;
+    parallelForChunks(rows, rows * columns, [&](size_t begin, size_t end) noexcept {
+        for (size_t row = begin; row < end; ++row) {
+            const size_t rowTile = row / 32;
+            const size_t rowHalf = row / 16 % 2;
+            const size_t rowLane = row % 16;
+            for (size_t column = 0; column < columns; ++column) {
+                const size_t tile = rowTile * columnTiles + column / 8;
+                const size_t columnHalf = column / 4 % 2;
+                const size_t columnLane = column % 4;
+                const size_t destination =
+                    (((tile * 4 + columnLane) * 16 + rowLane) * 2 + columnHalf) * 2 + rowHalf;
+                physical[destination] = natural[row * columns + column];
+            }
+        }
+    });
+}
+
+void copyGfx1250Scales(const std::byte* natural, std::byte* physical, size_t slow, size_t fast,
+                       size_t tileSize) {
+    parallelForChunks(slow, slow * fast, [&](size_t begin, size_t end) noexcept {
+        for (size_t slowIndex = begin; slowIndex < end; ++slowIndex)
+            for (size_t fastIndex = 0; fastIndex < fast; ++fastIndex)
+                physical[(fastIndex / tileSize * slow + slowIndex) * tileSize +
+                         fastIndex % tileSize] = natural[slowIndex * fast + fastIndex];
+    });
+}
+}  // namespace
+
 MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view architectureName) {
     const auto matchesArchitectureToken = [architectureName](std::string_view token) {
         return architectureName == token ||
@@ -22,66 +92,39 @@ MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view ar
     return MxScaleStorageLayout::Natural;
 }
 
-MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
-                                      MxScaleStorageLayout layout) {
+MxScaleStoragePlan::MxScaleStoragePlan(std::array<size_t, 2> naturalShape, size_t blockSize,
+                                       MxScaleStorageLayout layout)
+    : m_layout(layout), m_naturalShape(naturalShape), m_blockSize(blockSize) {
     if (blockSize == 0) throw std::runtime_error("MX scale block size must be nonzero.");
-    const size_t naturalByteCount = ::roc::hostnumerics::detail::checkedMultiply(
-        naturalShape[0], naturalShape[1], "MX natural scale storage");
-    size_t physicalByteCount = naturalByteCount;
-
-    switch (layout) {
-        case MxScaleStorageLayout::Natural:
-            break;
-        case MxScaleStorageLayout::Gfx950:
-            physicalByteCount = detail::copyGfx950ScaleStorageBytes(
-                nullptr, naturalByteCount, 1, naturalShape[0], naturalShape[1], nullptr);
-            break;
-        case MxScaleStorageLayout::Gfx1250:
-            physicalByteCount = detail::copyGfx1250ScaleStorageBytes(
-                nullptr, naturalByteCount, 1, naturalShape[0], naturalShape[1], blockSize, nullptr);
-            break;
-        default:
-            throw std::runtime_error("Invalid MX scale storage layout.");
-    }
-
-    return {layout, naturalShape, blockSize, naturalByteCount, physicalByteCount};
+    m_naturalByteCount = checkedMultiply(naturalShape[0], naturalShape[1], sizeOverflow);
+    m_physicalByteCount = physicalByteCountFor(naturalShape, blockSize, layout, m_naturalByteCount);
 }
 
 std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
                                                           size_t naturalScaleByteCount,
                                                           const MxScaleStoragePlan& plan) {
-    const MxScaleStoragePlan expected =
-        planMxScaleStorage(plan.naturalShape, plan.blockSize, plan.layout);
-    if (plan.naturalByteCount != expected.naturalByteCount ||
-        plan.physicalByteCount != expected.physicalByteCount)
-        throw std::runtime_error("MX scale storage plan is inconsistent.");
     if (naturalScaleStorage == nullptr && naturalScaleByteCount != 0)
         throw std::runtime_error("MX scale layout input storage is null.");
-    if (naturalScaleByteCount != expected.naturalByteCount)
+    if (naturalScaleByteCount != plan.naturalByteCount())
         throw std::runtime_error("MX scale storage does not match its plan.");
+    // An empty natural shape has no padded physical bytes in any layout.
+    if (naturalScaleByteCount == 0) return {};
 
-    if (plan.layout == MxScaleStorageLayout::Natural) {
-        if (naturalScaleByteCount == 0) return {};
-        return {naturalScaleStorage, naturalScaleStorage + naturalScaleByteCount};
-    }
-
-    std::vector<std::byte> output(expected.physicalByteCount, std::byte{0});
-    switch (plan.layout) {
-        case MxScaleStorageLayout::Gfx950: {
-            detail::copyGfx950ScaleStorageBytes(naturalScaleStorage, naturalScaleByteCount, 1,
-                                                plan.naturalShape[0], plan.naturalShape[1],
-                                                output.data());
-            return output;
-        }
-        case MxScaleStorageLayout::Gfx1250: {
-            detail::copyGfx1250ScaleStorageBytes(naturalScaleStorage, naturalScaleByteCount, 1,
-                                                 plan.naturalShape[0], plan.naturalShape[1],
-                                                 plan.blockSize, output.data());
-            return output;
-        }
+    std::vector<std::byte> physical(plan.physicalByteCount());
+    const auto [slow, fast] = plan.naturalShape();
+    switch (plan.layout()) {
         case MxScaleStorageLayout::Natural:
+            std::copy_n(naturalScaleStorage, naturalScaleByteCount, physical.begin());
+            break;
+        case MxScaleStorageLayout::Gfx950:
+            copyGfx950Scales(naturalScaleStorage, physical.data(), slow, fast);
+            break;
+        case MxScaleStorageLayout::Gfx1250:
+            copyGfx1250Scales(naturalScaleStorage, physical.data(), slow, fast,
+                              gfx1250TileSize(plan.blockSize()));
             break;
     }
-    throw std::runtime_error("Invalid MX scale storage layout.");
+    return physical;
 }
+
 }  // namespace roc::hostnumerics::amd_gpu_layout

@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 #include "detail/checked_arithmetic.hpp"
-#include "detail/mx_layout_common.hpp"
+#include "parallel_chunks.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout::detail {
 namespace {
@@ -53,9 +53,70 @@ void requireDivisible(size_t extent, size_t tile, const char* message) {
     if (extent % tile != 0) throw std::runtime_error(message);
 }
 
-DimensionShufflePlan makeOperandPlan(size_t elementCount, OperandExtents extents,
-                                     const std::optional<OperandSwizzle>& swizzle,
-                                     const std::optional<OperandTile>& tile) {
+// Factors of the natural element index, fastest first, and the order in which
+// the physical layout stores those factors, fastest first.
+struct OperandPermutation {
+    std::vector<size_t> sizes;
+    std::vector<size_t> physicalOrder;
+};
+
+OperandPermutation operandPermutation(OperandExtents extents,
+                                      const std::optional<OperandSwizzle>& swizzle,
+                                      const std::optional<OperandTile>& tile) {
+    if (tile && (tile->k == 0 || tile->mn == 0))
+        throw std::runtime_error("Operand tile extents must be nonzero.");
+
+    if (!swizzle) {
+        requireDivisible(extents.k, tile->k, "Operand K extent must be divisible by the tile.");
+        requireDivisible(extents.mn, tile->mn, "Operand MN extent must be divisible by the tile.");
+        return {{tile->k, extents.k / tile->k, tile->mn, extents.mn / tile->mn}, {0, 2, 1, 3}};
+    }
+
+    const SwizzleFactors factors = swizzleFactors(*swizzle);
+    if (!tile) {
+        requireDivisible(extents.k, swizzle->tileK,
+                         "Operand K extent must be divisible by the swizzle tile.");
+        requireDivisible(extents.mn, swizzle->tileMN,
+                         "Operand MN extent must be divisible by the swizzle tile.");
+        OperandPermutation permutation{
+            {factors.vgprIndex, factors.vgprBlock, factors.simdBlock, extents.k / swizzle->tileK,
+             lanesPerSimd, factors.simdIndexIndex, factors.simdIndexBlock,
+             extents.mn / swizzle->tileMN},
+            {}};
+        if (swizzle->tileMN == 64)
+            permutation.physicalOrder = {6, 1, 2, 3, 4, 5, 0, 7};
+        else if (swizzle->subTileK == 4)
+            permutation.physicalOrder = {6, 2, 1, 3, 4, 5, 0, 7};
+        else
+            permutation.physicalOrder = {1, 2, 0, 3, 4, 5, 6, 7};
+        return permutation;
+    }
+
+    requireDivisible(tile->k, swizzle->tileK,
+                     "Operand tile K extent must be divisible by the swizzle tile.");
+    requireDivisible(tile->mn, swizzle->tileMN,
+                     "Operand tile MN extent must be divisible by the swizzle tile.");
+    requireDivisible(extents.k, tile->k, "Operand K extent must be divisible by the tile.");
+    requireDivisible(extents.mn, tile->mn, "Operand MN extent must be divisible by the tile.");
+    OperandPermutation permutation{
+        {factors.vgprIndex, factors.vgprBlock, factors.simdBlock, tile->k / swizzle->tileK,
+         extents.k / tile->k, lanesPerSimd, factors.simdIndexIndex, factors.simdIndexBlock,
+         tile->mn / swizzle->tileMN, extents.mn / tile->mn},
+        {}};
+    if (swizzle->tileMN == 64)
+        permutation.physicalOrder = {7, 1, 2, 3, 5, 6, 0, 8, 4, 9};
+    else if (swizzle->subTileK == 4)
+        permutation.physicalOrder = {7, 2, 1, 3, 5, 6, 0, 8, 4, 9};
+    else
+        permutation.physicalOrder = {1, 2, 0, 3, 5, 6, 7, 8, 4, 9};
+    return permutation;
+}
+}  // namespace
+
+void copyOperandBytes(const std::byte* operand, std::byte* output, size_t elementCount,
+                      size_t elementSize, OperandExtents extents,
+                      const std::optional<OperandSwizzle>& swizzle,
+                      const std::optional<OperandTile>& tile) {
     const size_t expectedElementCount = ::roc::hostnumerics::detail::checkedMultiply(
         extents.k, extents.mn, "Operand extents: size multiplication overflow");
     if (elementCount != expectedElementCount) {
@@ -65,80 +126,32 @@ DimensionShufflePlan makeOperandPlan(size_t elementCount, OperandExtents extents
         throw std::runtime_error(message.str());
     }
 
-    DimensionShufflePlan plan;
     if (!swizzle && !tile) {
-        plan.identity = true;
-        return plan;
-    }
-    if (tile && (tile->k == 0 || tile->mn == 0))
-        throw std::runtime_error("Operand tile extents must be nonzero.");
-
-    std::vector<size_t> dimensionOrder;
-    if (!swizzle) {
-        requireDivisible(extents.k, tile->k, "Operand K extent must be divisible by the tile.");
-        requireDivisible(extents.mn, tile->mn, "Operand MN extent must be divisible by the tile.");
-        plan.sizes = {tile->k, extents.k / tile->k, tile->mn, extents.mn / tile->mn};
-        dimensionOrder = {0, 2, 1, 3};
-    } else {
-        const SwizzleFactors factors = swizzleFactors(*swizzle);
-        if (!tile) {
-            requireDivisible(extents.k, swizzle->tileK,
-                             "Operand K extent must be divisible by the swizzle tile.");
-            requireDivisible(extents.mn, swizzle->tileMN,
-                             "Operand MN extent must be divisible by the swizzle tile.");
-            plan.sizes = {factors.vgprIndex,      factors.vgprBlock,
-                          factors.simdBlock,      extents.k / swizzle->tileK,
-                          lanesPerSimd,           factors.simdIndexIndex,
-                          factors.simdIndexBlock, extents.mn / swizzle->tileMN};
-            if (swizzle->tileMN == 64)
-                dimensionOrder = {6, 1, 2, 3, 4, 5, 0, 7};
-            else if (swizzle->subTileK == 4)
-                dimensionOrder = {6, 2, 1, 3, 4, 5, 0, 7};
-            else
-                dimensionOrder = {1, 2, 0, 3, 4, 5, 6, 7};
-        } else {
-            requireDivisible(tile->k, swizzle->tileK,
-                             "Operand tile K extent must be divisible by the swizzle tile.");
-            requireDivisible(tile->mn, swizzle->tileMN,
-                             "Operand tile MN extent must be divisible by the swizzle tile.");
-            requireDivisible(extents.k, tile->k, "Operand K extent must be divisible by the tile.");
-            requireDivisible(extents.mn, tile->mn,
-                             "Operand MN extent must be divisible by the tile.");
-            plan.sizes = {factors.vgprIndex,          factors.vgprBlock,
-                          factors.simdBlock,          tile->k / swizzle->tileK,
-                          extents.k / tile->k,        lanesPerSimd,
-                          factors.simdIndexIndex,     factors.simdIndexBlock,
-                          tile->mn / swizzle->tileMN, extents.mn / tile->mn};
-            if (swizzle->tileMN == 64)
-                dimensionOrder = {7, 1, 2, 3, 5, 6, 0, 8, 4, 9};
-            else if (swizzle->subTileK == 4)
-                dimensionOrder = {7, 2, 1, 3, 5, 6, 0, 8, 4, 9};
-            else
-                dimensionOrder = {1, 2, 0, 3, 5, 6, 7, 8, 4, 9};
-        }
-    }
-
-    plan.sourceStrides = computeStrides(plan.sizes);
-    plan.destinationStrides = computeShuffledStrides(plan.sizes, dimensionOrder);
-    return plan;
-}
-}  // namespace
-
-void copyOperandBytes(const std::byte* operand, size_t elementCount, size_t elementSize,
-                      OperandExtents extents, const std::optional<OperandSwizzle>& swizzle,
-                      const std::optional<OperandTile>& tile, std::byte* output) {
-    const DimensionShufflePlan plan = makeOperandPlan(elementCount, extents, swizzle, tile);
-    validateByteStorage(elementCount, elementCount, elementSize, "Operand layout");
-    if (output == nullptr) return;
-
-    if (plan.identity) {
         if (elementCount != 0) std::memcpy(output, operand, elementCount * elementSize);
         return;
     }
 
-    const size_t totalElements = validateShuffle(elementCount, plan);
-    forEachShuffledElement(plan, totalElements, [&](size_t sourceIndex, size_t destinationIndex) {
-        copyElement(operand, sourceIndex, output, destinationIndex, elementSize);
+    const OperandPermutation permutation = operandPermutation(extents, swizzle, tile);
+    const std::vector<size_t>& sizes = permutation.sizes;
+    std::vector<size_t> physicalStrides(sizes.size());
+    size_t stride = 1;
+    for (const size_t dimension : permutation.physicalOrder) {
+        physicalStrides[dimension] = stride;
+        stride *= sizes[dimension];
+    }
+
+    parallelForChunks(elementCount, elementCount, [&](size_t begin, size_t end) noexcept {
+        for (size_t source = begin; source < end; ++source) {
+            size_t remaining = source;
+            size_t destination = 0;
+            for (size_t dimension = 0; dimension < sizes.size(); ++dimension) {
+                destination += remaining % sizes[dimension] * physicalStrides[dimension];
+                remaining /= sizes[dimension];
+            }
+            std::memcpy(output + destination * elementSize, operand + source * elementSize,
+                        elementSize);
+        }
     });
 }
+
 }  // namespace roc::hostnumerics::amd_gpu_layout::detail
