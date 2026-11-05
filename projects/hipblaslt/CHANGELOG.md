@@ -30,6 +30,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
+* Non-grouped `hipblasLtMatmul` calls using `HIPBLASLT_POINTER_MODE_DEVICE` now return `HIPBLAS_STATUS_INTERNAL_ERROR` instead of proceeding without support for device alpha and device beta.
 * Uniform summation order is temporarily off by default on RDNA (gfx11, gfx120x), where it disables StaggerU and slows some GEMMs. It stays on by default elsewhere, and explicit settings still override it.
 * Persistent launch controls now use `TENSILE_PERSISTENT_*` environment names, and Hybrid assignment uses `--hybrid_assignment_policy` in `hipblaslt-bench` and `HybridAssignmentPolicy` in TensileLite YAML. Legacy environment, CLI, and YAML aliases remain supported. Preferred environment names take precedence; conflicting old and new CLI or YAML values are rejected.
 * `--global-parameters` and `--benchmark-parameters` values are now parsed as Python literals via `ast.literal_eval` instead of `eval`, correctly handling values containing `=` and rejecting non-literal expressions with an `argparse.ArgumentTypeError`.
