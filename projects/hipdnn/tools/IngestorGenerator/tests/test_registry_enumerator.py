@@ -461,6 +461,10 @@ def _feature_not_in_spec_fields(m):
     m["enumerate"]["spec_fields"] = ["dtype", "tile_m", "tile_n"]
 
 
+def _feature_not_a_reduction_feature(m):
+    m["reduction"] = {"fields": {"feature": ["dtype"], "performance": []}}
+
+
 @pytest.mark.parametrize(
     "mutate, offender",
     [
@@ -471,6 +475,7 @@ def _feature_not_in_spec_fields(m):
         (_feature({"name_token": "_b", "free_fields": ["tile_x"]}), "subset"),
         (_feature_not_metadata, "metadata_fields"),
         (_feature_not_in_spec_fields, "spec_fields"),
+        (_feature_not_a_reduction_feature, "reduction.fields.feature"),
         (lambda m: m["enumerate"].update(space="full"), "free_fields"),
         (_feature({"name_token": "_b", "free_fields": ["tile_m"]}), "subset"),
         (
@@ -509,6 +514,7 @@ def _feature_not_in_spec_fields(m):
         "unknown-free-field",
         "not-a-metadata-field",
         "not-a-spec-field",
+        "not-a-reduction-feature",
         "free-fields-under-full-space",
         "free-fields-not-a-subset",
         "feature-is-a-free-field",

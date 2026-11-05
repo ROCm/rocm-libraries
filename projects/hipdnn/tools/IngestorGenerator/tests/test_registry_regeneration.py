@@ -483,6 +483,46 @@ def test_g5_catches_a_misspelled_and_an_unclaimed_dtype(manifest):
         _vocabulary_gaps(vocabulary, "// no literals")
 
 
+#: The gfx950 dense pack's one statement of the additive-bias index bound (inclusive).
+_CPP_MAX_BIAS_INDEX = re.compile(
+    r"constexpr int64_t MAX_BIAS_INDEX\s*=\s*std::numeric_limits<(\w+)>::max\(\);"
+)
+_INT_MAX = {"int32_t": 2**31 - 1}
+
+
+def _cpp_max_bias_index(text: str) -> int:
+    found = _CPP_MAX_BIAS_INDEX.findall(text)
+    assert len(found) == 1, f"expected one MAX_BIAS_INDEX definition, found {found}"
+    assert found[0] in _INT_MAX, f"MAX_BIAS_INDEX bound by {found[0]}"
+    return _INT_MAX[found[0]]
+
+
+def test_the_bias_index_bound_is_the_same_in_both_engines():
+    """rocKE's dense kernel indexes the additive bias in i32 and its host validators
+    refuse an element index at ADDITIVE_BIAS_INDEX_LIMIT (exclusive); the hipDNN
+    gfx950 dense pack refuses a bias graph by MAX_BIAS_INDEX (inclusive). Neither
+    side can import the other, so this reads both."""
+    manifest = enumerator.load_manifest(
+        str(_ROOT / "configs" / "gfx950_attention_dense.engine.yaml")
+    )
+    if not _ROCKE_LIBRARY.is_dir():
+        pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
+    enumerator.bind_provider(manifest.get("provider_root"))
+    bias = importlib.import_module("kernels.common._attention_additive_bias")
+    text = _matcher_source(manifest).read_text()
+    assert _cpp_max_bias_index(text) == bias.ADDITIVE_BIAS_INDEX_LIMIT - 1
+
+
+def test_the_bias_bound_tie_reads_one_definition():
+    """The positive control: a changed width, a missing and a repeated definition
+    each fail rather than reading some other value."""
+    line = "constexpr int64_t MAX_BIAS_INDEX = std::numeric_limits<int32_t>::max();"
+    assert _cpp_max_bias_index(line) == 2**31 - 1
+    for text in (line.replace("int32_t>", "int64_t>"), "// none", line + "\n" + line):
+        with pytest.raises(AssertionError, match="MAX_BIAS_INDEX"):
+            _cpp_max_bias_index(text)
+
+
 def _hydration_failures(manifest: dict, specs: list) -> list:
     """What `hkp_pack` does to a rocke spec before compiling it: hydrate the builder's
     spec dataclass with ``build_spec`` and ask the builder's support predicate. Neither

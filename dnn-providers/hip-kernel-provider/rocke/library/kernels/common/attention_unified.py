@@ -61,7 +61,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import (
-    ADDITIVE_BIAS_INDEX_LIMIT as _I32_LIMIT,
+    ADDITIVE_BIAS_INDEX_LIMIT,
     append_additive_bias_signature,
     check_additive_bias_reach,
     check_additive_bias_tensor,
@@ -5998,7 +5998,7 @@ def _validate_additive_bias(
         ("additive_bias_head_stride", head_stride),
         ("additive_bias_sq_stride", sq_stride),
     ):
-        if not 0 <= stride < _I32_LIMIT:
+        if not 0 <= stride < ADDITIVE_BIAS_INDEX_LIMIT:
             raise ValueError(f"{name}={stride} must be in [0, 2**31)")
     max_idx = (
         (problem.num_seqs - 1) * batch_stride

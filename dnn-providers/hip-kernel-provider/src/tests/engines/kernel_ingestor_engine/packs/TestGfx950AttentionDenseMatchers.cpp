@@ -365,20 +365,18 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     }
     if(spec.bias.has_value())
     {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder,
-            BIAS_UID,
-            nullptr,
-            spec.bias->dataType,
-            &spec.bias->strides,
-            &spec.bias->dims,
-            spec.bias->isVirtual,
-            data_objects::TensorValue::NONE,
-            0,
-            spec.bias->passByValue,
-            spec.bias->raggedOffsetUid.has_value()
-                ? flatbuffers::Optional<int64_t>(*spec.bias->raggedOffsetUid)
-                : flatbuffers::nullopt));
+        tensors.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       BIAS_UID,
+                                                       nullptr,
+                                                       spec.bias->dataType,
+                                                       &spec.bias->strides,
+                                                       &spec.bias->dims,
+                                                       spec.bias->isVirtual,
+                                                       data_objects::TensorValue::NONE,
+                                                       0,
+                                                       spec.bias->passByValue,
+                                                       spec.bias->raggedOffsetUid));
     }
 
     const auto attributesFor = [&]() {
@@ -2806,7 +2804,8 @@ std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
 }
 
 /// The base graph with an fp32 bias of @p dims, packed unless @p strides is given.
-GraphSpec withBias(std::vector<int64_t> dims, std::optional<std::vector<int64_t>> strides = {})
+GraphSpec withBias(std::vector<int64_t> dims,
+                   const std::optional<std::vector<int64_t>>& strides = {})
 {
     GraphSpec spec;
     BiasTensorSpec bias;

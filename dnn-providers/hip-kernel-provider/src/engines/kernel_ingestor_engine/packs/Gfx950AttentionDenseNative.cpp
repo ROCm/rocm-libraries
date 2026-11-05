@@ -112,8 +112,9 @@ constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx950_attention_dense.bia
 /// The largest bias stride and bias element index a launch may use: the kernel takes each
 /// stride as an int32_t and addresses the bias with 32-bit element offsets. rocKE states the
 /// same bound as ADDITIVE_BIAS_INDEX_LIMIT (an exclusive 2^31) in
-/// kernels/common/_attention_additive_bias.py. additiveBiasFor() and the saved-plan reader
-/// both check against this one constant.
+/// kernels/common/_attention_additive_bias.py. additiveBiasFor(), the dispatch's bound-token
+/// reader (attentionDenseBinding()) and the saved-plan reader all check against this one
+/// constant; test_registry_regeneration.py ties it to the rocKE limit.
 constexpr int64_t MAX_BIAS_INDEX = std::numeric_limits<int32_t>::max();
 
 /// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
@@ -881,11 +882,12 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
     if(read(BIAS_TOKEN) != 0)
     {
-        // graph_match binds strides in [0, 2^31); re-checked so a wrapped kernarg cannot
-        // reach the kernel from a binding graph_match did not produce.
+        // graph_match binds strides in [0, MAX_BIAS_INDEX] (the message's [0, 2^31));
+        // re-checked so a wrapped kernarg cannot reach the kernel from a binding
+        // graph_match did not produce.
         const auto readStride = [&read](std::string_view token) {
             const int64_t value = read(token);
-            if(value < 0 || value > std::numeric_limits<int32_t>::max())
+            if(value < 0 || value > MAX_BIAS_INDEX)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -1569,11 +1571,16 @@ Gfx950AttentionDenseLaunchInputs
     // the unversioned name, is refused against v2, the current plain contract.
     const auto& symbol = inputs.dispatchSymbol;
     const bool withBias = symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3;
-    requireLaunchContract(inputs,
-                          symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                              ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                          : withBias ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
-                                     : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    std::string_view expected = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+    if(symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1)
+    {
+        expected = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
+    }
+    else if(withBias)
+    {
+        expected = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3;
+    }
+    requireLaunchContract(inputs, expected);
     std::vector<std::string_view> names{GFX950_ATTENTION_DENSE_Q_UID_VALUE,
                                         GFX950_ATTENTION_DENSE_K_UID_VALUE,
                                         GFX950_ATTENTION_DENSE_V_UID_VALUE,

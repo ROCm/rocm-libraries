@@ -17,8 +17,9 @@ spec, KMD, metadata, bindings and name, and holds any other varying field at the
 registry default (with a WARN unless ``ignored``). The default spec carries
 ``default: true``. A ``feature_fields`` entry names a boolean spec field a cell
 can turn on. It is unrelated to ``reduction.fields.feature`` (the cell-defining
-fields of variant reduction), where it should also be listed, or reduction treats
-the feature's on and off kernels as one cell. A kernel holding it at a value other than
+fields of variant reduction), but when that list is given it must name the field
+(the manifest check refuses it otherwise), or reduction would treat the feature's
+on and off kernels as one cell. A kernel holding it at a value other than
 its dataclass default (turned on) inserts the entry's ``name_token`` after the
 name template's last slot, e.g. ``..._bn64_addb.gfx950``; given ``free_fields``
 it sweeps only those, and given ``select`` only the specs with those values;
@@ -208,6 +209,15 @@ def _validate_manifest(path: str, manifest: dict) -> None:
         "enumerate.feature_fields",
         "a mapping of spec field name to {name_token, free_fields, select}",
     )
+    # Reduction keys its cells by reduction.fields.feature; a feature left out of it
+    # would fold the feature's on and off kernels into one cell and rank them against
+    # each other. A malformed block is left to check_reduction's own message.
+    reduction = manifest.get("reduction")
+    reduction_fields = reduction.get("fields") if isinstance(reduction, dict) else None
+    reduced = (
+        reduction_fields.get("feature") if isinstance(reduction_fields, dict) else None
+    )
+    reduced = reduced if isinstance(reduced, list) else []
     for name, entry in (features or {}).items():
         where = f"enumerate.feature_fields.{name}"
         _require(
@@ -242,6 +252,12 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             path,
             where,
             "listed in specialization.metadata_fields",
+        )
+        _require(
+            not reduced or name in reduced,
+            path,
+            where,
+            "listed in reduction.fields.feature",
         )
         narrowed = entry.get("free_fields")
         _require(
