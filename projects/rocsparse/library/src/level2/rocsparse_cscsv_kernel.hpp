@@ -37,7 +37,6 @@ namespace rocsparse
                                                         const void*          csc_row_ind,
                                                         void*                csc_diag_ind,
                                                         void*                dependency_count,
-                                                        void*                max_nnz,
                                                         void*                zero_pivot,
                                                         rocsparse_index_base idx_base,
                                                         rocsparse_diag_type  diag_type,
@@ -46,6 +45,15 @@ namespace rocsparse
     rocsparse_status cscsv_analysis_launch_find(rocsparse::cscsv_analysis_launch_t* launch,
                                                 rocsparse_indextype                 i_type,
                                                 rocsparse_indextype                 j_type);
+
+    // Longest column, written to workspace[0]; workspace holds s_cscsv_blocksize offsets.
+    typedef rocsparse_status (*cscsv_max_nnz_launch_t)(rocsparse_handle handle,
+                                                       int64_t          m,
+                                                       const void*      csc_col_ptr,
+                                                       void*            workspace);
+
+    rocsparse_status cscsv_max_nnz_launch_find(rocsparse::cscsv_max_nnz_launch_t* launch,
+                                               rocsparse_indextype                i_type);
 
     typedef rocsparse_status (*cscsv_init_launch_t)(rocsparse_handle handle,
                                                     int64_t          m,
@@ -89,9 +97,6 @@ namespace rocsparse
     // Lanes per column: smallest power of two covering the longest column, capped at the
     // wavefront size.
     uint32_t cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size);
-
-    // Bytes of the analysis buffer, which holds the longest column.
-    size_t cscsv_column_analysis_buffer_size();
 
     // Bytes of the solve buffer: ticket, unresolved dependencies and partial sums.
     size_t cscsv_column_solve_buffer_size(int64_t             m,
