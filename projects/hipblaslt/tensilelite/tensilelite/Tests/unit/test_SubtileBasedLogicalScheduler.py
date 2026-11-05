@@ -5255,8 +5255,8 @@ class TestPartitionZeroIssueOrder:
         placer.place(1, (0, load))
         _rightAlignM0AndVmem(placer)
         found = positions(placer)
-        assert found["m0-0"] == 2 * width + width - 2
-        assert found["gr-0"] == 2 * width + width - 1
+        assert found["m0-0"] == 2 * width
+        assert found["gr-0"] == 2 * width + 1
 
         blocked = _SlotPlacer(
             intervals=3, numModules=1, pathOrders=[],
@@ -5272,8 +5272,8 @@ class TestPartitionZeroIssueOrder:
         blocked.place(2 * width, (0, SBarrier(comment="stop")))
         _rightAlignM0AndVmem(blocked)
         found = positions(blocked)
-        assert found["m0-1"] == width + width - 2
-        assert found["gr-1"] == width + width - 1
+        assert found["m0-1"] == width
+        assert found["gr-1"] == width + 1
         assert found["stop"] == 2 * width
 
     def test_short_c1_tail_spills_scale_refresh_into_c0(self):
@@ -5406,10 +5406,10 @@ class TestPartitionZeroIssueOrder:
         }
         assert [located[name] for name in (
             "m0-extra", "m0-0", "gr-0", "m0-1", "gr-1", "stop"
-        )] == [7, 8, 9, 13, 14, 18]
-        assert located["m0-0"] % 5 == 3
+        )] == [9, 10, 11, 15, 16, 18]
+        assert located["m0-0"] % 5 == 0
         assert located["gr-0"] == located["m0-0"] + 1
-        assert located["m0-1"] % 5 == 3
+        assert located["m0-1"] % 5 == 0
         assert located["gr-1"] == located["m0-1"] + 1
 
     def test_right_align_keeps_gr_address_updates_with_their_loads(self):
@@ -5469,18 +5469,18 @@ class TestPartitionZeroIssueOrder:
         }
         assert [located[name] for name in (
             "m0-0", "gr-0", "srd", "carry", "swap", "m0-1", "gr-1", "stop"
-        )] == [8, 9, 10, 11, 12, 13, 14, 18]
+        )] == [10, 11, 12, 13, 14, 15, 16, 18]
 
-    def test_right_align_pushes_an_occupied_tail_slot_down(self):
+    def test_right_align_uses_an_empty_slot0_and_slot4(self):
         from rocisa.container import DSModifiers, mgpr, sgpr, vgpr
         from rocisa.instruction import BufferLoadB128, DSLoadB128, SBarrier, SMovB32
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _SchedulingRules, _SlotPlacer, _rightAlignM0AndVmem)
 
         width = 5
-        rules = _SchedulingRules(totalSlots=2 * width)
+        rules = _SchedulingRules(totalSlots=3 * width)
         placer = _SlotPlacer(
-            intervals=2, numModules=1, pathOrders=[],
+            intervals=3, numModules=1, pathOrders=[],
             validators=[
                 rules.oneDtlLoadPerInterval,
                 rules.noDsReadOrValuInFirstSlot,
@@ -5496,10 +5496,14 @@ class TestPartitionZeroIssueOrder:
         read = DSLoadB128(
             dst=vgpr(20, 4), src=vgpr(2),
             ds=DSModifiers(offset=0), comment="ds")
+        # Slot 0 and slot 4 of the second shadow are empty. The ds_read
+        # in slot 1 has to move down so the bundle can take slots 0 and 1.
         placer.place(0, (0, setup))
         placer.place(1, (0, load))
-        placer.place(width - 2, (0, read))
-        placer.place(2 * width - 1, (0, SBarrier(comment="stop")))
+        placer.place(width + 1, (0, read))
+        placer.place(width + 2, (0, SMovB32(dst=sgpr(3), src=0, comment="mid-a")))
+        placer.place(width + 3, (0, SMovB32(dst=sgpr(4), src=0, comment="mid-b")))
+        placer.place(2 * width, (0, SBarrier(comment="stop")))
 
         _rightAlignM0AndVmem(placer)
 
@@ -5508,7 +5512,9 @@ class TestPartitionZeroIssueOrder:
             for pos, slot in enumerate(placer._placed)
             for item in slot
         }
-        assert located["m0-0"] == width - 2
-        assert located["gr-0"] == width - 1
-        assert located["ds"] == width + 1
-        assert located["stop"] == 2 * width - 1
+        assert located["m0-0"] == width
+        assert located["gr-0"] == width + 1
+        assert located["ds"] == width + 2
+        assert located["mid-a"] == width + 3
+        assert located["mid-b"] == width + 4
+        assert located["stop"] == 2 * width
