@@ -122,8 +122,8 @@ Compiled through comgr from the llvm24 IR, with the LLVM 24 compiler the CI test
 | kernel | VGPR | SGPR | LDS (B) | scratch (B) |
 |---|---|---|---|---|
 | `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_bf16` | 255 | 48 | 27904 | 0 |
-| `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_split_bf16` | 255 | 52 | 27904 | 0 |
+| `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_split_bf16` | 254 | 54 | 27904 | 0 |
 | `mla_decode_combine_h64_rkv512_w4_bf16` | 26 | 26 | 0 | 0 |
 | `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_bf16` | 255 | 48 | 27904 | 0 |
-| `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_split_bf16` | 255 | 52 | 27904 | 0 |
+| `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_split_bf16` | 254 | 54 | 27904 | 0 |
 | `mla_decode_combine_h128_rkv512_w4_bf16` | 26 | 26 | 0 | 0 |

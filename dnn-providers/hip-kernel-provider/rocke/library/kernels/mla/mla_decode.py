@@ -1011,7 +1011,16 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
         # the combine to skip its acc row, so the 512-wide row is never stored
         # -- in a ragged batch, the short sequences' trailing segments are all
         # empty. has_tiles is workgroup-uniform.
-        row_id = b.add(b.mul(b.add(b.mul(token, num_seg_p), seg), b.const_i32(H)), head)
+        # The wave-uniform part of the row goes through readfirstlane so the
+        # compiler cannot reassociate it into h0 + lane_row (the prologue's
+        # `head`) and keep that VGPR live across the key loop: one LLVM 24
+        # build spilled it on gfx942. lane_row is live through the loop anyway.
+        row_id = b.add(
+            b.readfirstlane(
+                b.add(b.mul(b.add(b.mul(token, num_seg_p), seg), b.const_i32(H)), h0)
+            ),
+            lane_row,
+        )
         row = b.add(b.mul(row_id, b.const_i32(R_KV)), r_lane)
         with b.scf_if(has_tiles):
             for off, elems in chunks:
