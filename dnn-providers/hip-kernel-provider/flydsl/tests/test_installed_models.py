@@ -1,12 +1,14 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""The generator binds the trained models installed beside an op.
+"""The generator binds the trained models installed beside an op, as ``uhd_gen promote`` does.
 
-``uhd_gen promote`` files a model at ``heuristics/<ued-id>/<role>/<arch>/<metric>/``;
-``gen_descriptors.py`` owns the UED, so it must bind every such model under its role and
-arch key -- otherwise a regeneration drops the model and ``--check`` refuses a tree that
-ships one. Host-only, no ``dvc pull``.
+``uhd_gen promote`` files a model at ``heuristics/<ued-id>/<role>/<arch>/<metric>/`` (a
+metric-less one directly under ``<role>/<arch>/``) and binds it in the UED: a list per arch
+key for a scoring role, one id for ``predict_applicable_kernels``. ``gen_descriptors.py`` owns
+the UED, so it must bind every such model the same way -- otherwise a regeneration drops the
+model, rewrites promote's binding, or ``--check`` refuses a tree that ships one. Host-only, no
+``dvc pull``.
 """
 
 from __future__ import annotations
@@ -26,13 +28,25 @@ UED_ID = gen_descriptors._uuid(f"ued/{OP}")
 FIELDS = {"dtype": "string", "N": "int"}
 
 
-def _install(op_dir: Path, role: str, arch: str, model_id: str, **overrides) -> Path:
-    doc = {
-        "id": model_id,
-        "score": {"metric": "tflops"},
-        "trained_against": {"ued": {"id": UED_ID}},
-    } | overrides
-    folder = op_dir / "heuristics" / UED_ID / role / arch / "tflops"
+def _install(
+    op_dir: Path,
+    role: str,
+    arch: str,
+    model_id: str,
+    metric: str | None = "tflops",
+    **overrides,
+) -> Path:
+    doc = (
+        {
+            "id": model_id,
+            "trained_against": {"ued": {"id": UED_ID}},
+        }
+        | ({"score": {"metric": metric}} if metric else {})
+        | overrides
+    )
+    folder = op_dir / "heuristics" / UED_ID / role / arch
+    if metric:
+        folder /= metric
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{model_id}.uhd.json"
     path.write_text(json.dumps(doc), encoding="utf-8")
@@ -57,9 +71,12 @@ def test_an_arch_model_binds_under_its_arch_and_keeps_the_default(
     assert ued["predict_engine"] == {
         "default": ops.estimate_uhd_id,
         "gfx942": ops.estimate_uhd_id,
-        "gfx950": "model-950",
+        "gfx950": ["model-950"],
     }
-    assert ued["sort_kernel_catalog"] == {"default": ops.uhd_id, "gfx942": "ranker-942"}
+    assert ued["sort_kernel_catalog"] == {
+        "default": ops.uhd_id,
+        "gfx942": ["ranker-942"],
+    }
 
 
 def test_a_default_model_replaces_only_its_own_metric(tmp_path: Path) -> None:
@@ -68,7 +85,7 @@ def test_a_default_model_replaces_only_its_own_metric(tmp_path: Path) -> None:
     _install(tmp_path, "predict_engine", "default", "model")
     _install(tmp_path, "sort_kernel_catalog", "default", "ranker")
     ued = _ued(tmp_path)
-    assert ued["predict_engine"] == {"default": "model"}
+    assert ued["predict_engine"] == {"default": ["model"]}
     native = gen_descriptors.OpDescriptors(OP, FIELDS).uhd_id
     assert ued["sort_kernel_catalog"] == {"default": [native, "ranker"]}
 
@@ -82,11 +99,24 @@ def test_no_installed_model_leaves_the_engine_as_generated(tmp_path: Path) -> No
     )
 
 
+def test_a_metric_less_model_binds_from_its_arch_folder(tmp_path: Path) -> None:
+    _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker", metric=None)
+    _install(
+        tmp_path, "predict_applicable_kernels", "gfx950", "applicable", metric=None
+    )
+    ued = _ued(tmp_path)
+    native = gen_descriptors.OpDescriptors(OP, FIELDS).uhd_id
+    assert ued["sort_kernel_catalog"] == {"default": native, "gfx942": ["ranker"]}
+    # Not a metric-keyed role: promote binds the one id, not a list.
+    assert ued["predict_applicable_kernels"] == {"gfx950": "applicable"}
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
         ({"trained_against": {"ued": {"id": "another-engine"}}}, "trained against UED"),
         ({"score": {"metric": "time"}}, "filed under metric 'tflops'"),
+        ({"score": {}}, "filed under metric 'tflops'"),
     ],
 )
 def test_a_misfiled_model_is_refused(
@@ -97,8 +127,23 @@ def test_a_misfiled_model_is_refused(
         gen_descriptors.installed_models(tmp_path, UED_ID)
 
 
+def test_a_metric_model_outside_its_metric_folder_is_refused(tmp_path: Path) -> None:
+    path = _install(tmp_path, "predict_engine", "gfx950", "model", metric=None)
+    doc = json.loads(path.read_text(encoding="utf-8")) | {"score": {"metric": "tflops"}}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(gen_descriptors.HkpPackError, match="filed under metric None"):
+        gen_descriptors.installed_models(tmp_path, UED_ID)
+
+
 def test_two_models_for_one_metric_on_one_key_are_refused(tmp_path: Path) -> None:
     _install(tmp_path, "predict_engine", "gfx950", "first")
     _install(tmp_path, "predict_engine", "gfx950", "second")
-    with pytest.raises(gen_descriptors.HkpPackError, match="second 'tflops' model"):
+    with pytest.raises(gen_descriptors.HkpPackError, match="second tflops model"):
+        gen_descriptors.installed_models(tmp_path, UED_ID)
+
+
+def test_two_models_on_a_single_model_role_are_refused(tmp_path: Path) -> None:
+    _install(tmp_path, "predict_applicable_kernels", "gfx950", "first", metric=None)
+    _install(tmp_path, "predict_applicable_kernels", "gfx950", "second", metric=None)
+    with pytest.raises(gen_descriptors.HkpPackError, match="which binds one"):
         gen_descriptors.installed_models(tmp_path, UED_ID)

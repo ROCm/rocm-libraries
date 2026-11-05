@@ -185,45 +185,56 @@ TUNING_FIELDS = {
 ENGINE_ESTIMATE_METRIC = "tflops"
 
 # Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
-# `heuristics/<ued-id>/<role>/<arch>/<metric>/`, and the UED binds each under its role and
-# arch key. The generator owns the UED, so it derives those bindings from what is
-# installed: a regeneration keeps every trained model, and `--check` accepts a tree with
-# models in it. A model under a gfx key wins over `default` on that arch (RFC 0020 §4.6),
-# so the native ranker and the estimate slot stay the fallback everywhere else.
+# `heuristics/<ued-id>/<role>/<arch>/<metric>/` (a metric-less model directly under
+# `<role>/<arch>/`), and the UED binds each under its role and arch key. The generator owns
+# the UED, so it derives those bindings from what is installed: a regeneration keeps every
+# trained model, and `--check` accepts a tree with models in it. A model under a gfx key
+# wins over `default` on that arch (RFC 0020 §4.6), so the native ranker and the estimate
+# slot stay the fallback everywhere else.
+#
+# `uhd_gen promote` is the reference for every binding: the roles it accepts, where it
+# installs, and the form it writes (uhd_gen/promote.py `_rebind`). A scoring role binds a
+# list per arch key, one UHD per ranking metric; `predict_applicable_kernels` binds one UHD.
+# The IngestorGenerator emits the same form from its `engine.heuristics` config (#15101).
 HEURISTICS_DIR = "heuristics"
-_SCORING_ROLES = ("sort_kernel_catalog", "predict_engine")
+_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
+_METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
 _ARCH_KEY = re.compile(r"default|gfx[0-9a-f]+")
 
 
 def installed_models(
     op_dir: Path, ued_id: str
-) -> dict[str, dict[str, list[tuple[str, str]]]]:
-    """Role -> arch key -> [(metric, UHD id)] of the trained models installed for an op.
+) -> dict[str, dict[str, list[tuple[str | None, str]]]]:
+    """Role -> arch key -> [(metric or None, UHD id)] of the trained models installed for an op.
 
-    Refuses a model filed anywhere but its own engine's, role's, arch's and metric's
-    folder, one trained against another engine, and two models for one metric on one
-    key -- the loader would disable that metric there (RFC 0019 §3.1).
+    Refuses a model filed anywhere but its own engine's, role's, arch's and (if it has one)
+    metric's folder, one trained against another engine, and two models one key would bind
+    for the same metric -- the loader would disable that metric there (RFC 0019 §3.1) -- or,
+    for a role that is not metric-keyed, two models on one key.
     """
     root = op_dir / HEURISTICS_DIR
-    installed: dict[str, dict[str, list[tuple[str, str]]]] = {}
+    installed: dict[str, dict[str, list[tuple[str | None, str]]]] = {}
     for path in sorted(root.rglob("*.uhd.json")) if root.is_dir() else []:
         parts = path.relative_to(root).parts
-        if len(parts) != 5 or parts[0] != ued_id:
+        if len(parts) not in (4, 5) or parts[0] != ued_id:
             raise HkpPackError(
                 f"{path}: a trained model is installed at "
-                f"{HEURISTICS_DIR}/{ued_id}/<role>/<arch>/<metric>/"
+                f"{HEURISTICS_DIR}/{ued_id}/<role>/<arch>/[<metric>/]"
             )
-        _, role, arch, metric, _ = parts
-        if role not in _SCORING_ROLES or not _ARCH_KEY.fullmatch(arch):
+        role, arch = parts[1], parts[2]
+        folder_metric = parts[3] if len(parts) == 5 else None
+        if role not in _ROLES or not _ARCH_KEY.fullmatch(arch):
             raise HkpPackError(
-                f"{path}: '{role}/{arch}' is not a scoring role and arch key "
-                f"({', '.join(_SCORING_ROLES)}; default or gfx<id>)"
+                f"{path}: '{role}/{arch}' is not a role and arch key uhd_gen promote "
+                f"binds ({', '.join(_ROLES)}; default or gfx<id>)"
             )
         doc = json.loads(path.read_text(encoding="utf-8"))
-        if (doc.get("score") or {}).get("metric") != metric:
+        metric = (doc.get("score") or {}).get("metric")
+        if metric != folder_metric:
             raise HkpPackError(
-                f"{path}: filed under metric '{metric}' but its score.metric is "
-                f"{(doc.get('score') or {}).get('metric')!r}"
+                f"{path}: filed under metric {folder_metric!r} but its score.metric is "
+                f"{metric!r}; promote files a model under its metric, a metric-less one "
+                "directly under the arch"
             )
         trained = ((doc.get("trained_against") or {}).get("ued") or {}).get("id")
         if trained != ued_id:
@@ -231,10 +242,14 @@ def installed_models(
                 f"{path}: trained against UED {trained!r}, not this engine's {ued_id}"
             )
         models = installed.setdefault(role, {}).setdefault(arch, [])
+        if role not in _METRIC_ROLES and models:
+            raise HkpPackError(
+                f"{path}: a second model for {role}/{arch}, which binds one"
+            )
         if any(existing == metric for existing, _ in models):
             raise HkpPackError(
-                f"{path}: a second '{metric}' model for {role}/{arch}; the loader would "
-                "disable that metric on that key"
+                f"{path}: a second {metric or '(metric-less)'} model for {role}/{arch}; "
+                "the loader would disable that metric on that key"
             )
         models.append((metric, doc["id"]))
     return installed
@@ -384,7 +399,7 @@ class OpDescriptors:
         self,
         op: str,
         fields: dict[str, str],
-        installed: dict[str, dict[str, list[tuple[str, str]]]] | None = None,
+        installed: dict[str, dict[str, list[tuple[str | None, str]]]] | None = None,
     ) -> None:
         self.op = op
         self.stem = f"flydsl_{op}"
@@ -451,9 +466,27 @@ class OpDescriptors:
             roles["predict_engine"].setdefault(
                 arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
             )
+        # Each value as `uhd_gen promote` writes it, so promoting into this UED and
+        # regenerating bind the same values (promote appends a new arch key; this sorts):
+        # a key a scoring role binds a trained model under is a list (one UHD per metric), as
+        # promote's rebinding leaves it; a key only the generator fills (the native ranker,
+        # the estimate's slot) stays the bare id it writes.
+        trained = {
+            model
+            for by_arch in self.installed.values()
+            for models in by_arch.values()
+            for _, model in models
+        }
+
+        def bound(role: str, ids: list[tuple[str | None, str]]) -> str | list[str]:
+            models = [model for _, model in ids]
+            if role in _METRIC_ROLES and trained.intersection(models):
+                return models
+            return models[0] if len(models) == 1 else models
+
         for role, by_arch in roles.items():
             engine[role] = {
-                arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]
+                arch: bound(role, ids)
                 for arch, ids in sorted(
                     by_arch.items(), key=lambda item: (item[0] != "default", item[0])
                 )
