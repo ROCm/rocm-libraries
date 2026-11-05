@@ -125,11 +125,12 @@ namespace
         ~window_array()
         {
             if(mapped_size_ != 0)
-                (void)hipMemUnmap(mapped_, mapped_size_);
+                rocsparse_clients_log_hip_error("hipMemUnmap", hipMemUnmap(mapped_, mapped_size_));
             if(handle_ != nullptr)
-                (void)hipMemRelease(handle_);
+                rocsparse_clients_log_hip_error("hipMemRelease", hipMemRelease(handle_));
             if(base_ != nullptr)
-                (void)hipMemAddressFree(base_, reserved_);
+                rocsparse_clients_log_hip_error("hipMemAddressFree",
+                                                hipMemAddressFree(base_, reserved_));
         }
 
         hipError_t create(int device, size_t size, size_t first, const std::vector<I>& values)

@@ -96,8 +96,10 @@ extern "C" {
  * 8: rocke_direct_fwd_wmma_spec_t gained strided_view, fold_n and poly_view
  *    at its end, which changes its size; rocke_direct_conv_problem_total_c /
  *    _total_k return long long (they returned int), which changes their
- *    signature. */
-#define ROCKE_ABI_VERSION 8
+ *    signature.
+ * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
+ *    changes its size. */
+#define ROCKE_ABI_VERSION 9
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

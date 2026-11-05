@@ -39,10 +39,6 @@
 #define _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR 0
 #define _HIPCUB_REQUIRED_LIBCXX_VERSION_PATCH 0
 
-// TODO: remove this once we truly depend on libhipcxx 3.4.
-// When this is dropped, verify with 'LIBHIPCXX_NO_LEGACY_COMPAT=1'.
-#define LIBHIPCXX_IGNORE_DEPRECATED_LEGACY_COMPAT 1
-
 #define _HIPCUB_REQUIRED_LIBCXX_VERSION                                                            \
     _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR * 1000000 + _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR * 1000 \
         + _HIPCUB_REQUIRED_LIBCXX_VERSION_PATCH
@@ -62,11 +58,11 @@
 #if HIPCUB_HAS_INCLUDE(<cuda/std/version>)
     #include <cuda/std/version>
     // If version matches and '_CUDA_VSTD' is available.
-    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/std/LIB)
         #define _HIPCUB_LIBCXX ::cuda
-        #define _HIPCUB_STD ::cuda::std
+        #define _HIPCUB_STD _CUDA_VSTD
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
         #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD
@@ -76,13 +72,13 @@
 #if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
     #include <hip/std/version>
     // If version matches and '_CUDA_VSTD' is available.
-    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/std/LIB)
         // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
         #define _HIPCUB_LIBCXX ::hip
         // In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
-        #define _HIPCUB_STD ::hip::std
+        #define _HIPCUB_STD _CUDA_VSTD
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
         #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD

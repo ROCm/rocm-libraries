@@ -658,3 +658,21 @@ def test_a_shape_only_an_also_section_lists_is_covered(probe, capsys):
             1 if gaps else 0
         )
     assert "covered: 1 shapes" in capsys.readouterr().out
+
+
+def test_manifest_heuristics_reach_the_generated_engine_and_its_ued(probe):
+    """A promoted model's per-arch binding lives in the manifest's `engine` block: the
+    enumerator copies that block into the config it writes (so regeneration gate g4's
+    engine equality holds), and the generator emits it after `default`."""
+    from codegen.config_loader import load_config
+    from codegen.generator import build_ued, mint_ids
+
+    model = "8b3c960a-a47c-4ce3-96f8-343befdbc543"
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["engine"]["heuristics"] = {"sort_kernel_catalog": {"gfx942": [model]}}
+    assert _run_probe(probe, manifest) == 0
+    config = load_config(probe.out)
+    assert config.engine.heuristics == {"sort_kernel_catalog": {"gfx942": [model]}}
+    catalog = build_ued(config, mint_ids(config))["sort_kernel_catalog"]
+    assert list(catalog) == ["default", "gfx942"]
+    assert catalog["gfx942"] == [model]

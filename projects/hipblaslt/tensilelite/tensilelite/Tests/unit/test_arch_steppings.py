@@ -54,11 +54,17 @@ from tensilelite.Common.Architectures import (
 )
 from tensilelite import GpuArch
 from tensilelite.CustomYamlLoader import archMatch
-from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.Capabilities import applyArchCapOverrides
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.Types import IsaInfo, IsaVersion
 from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
 from tensilelite.SolutionStructs.Solution import Solution
+from toolchain_test_helpers import (
+    copy_isa_info_map,
+    shared_assembler,
+    shared_isa_info_map,
+    shared_isa_info_map_or_skip,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -299,12 +305,23 @@ def gfx1250_cxx():
         pytest.skip(f"amdclang++ is unavailable: {e}")
 
 
+# This module keeps its own ``gfx1250_iim`` rather than using the shared one from
+# conftest.py, for three reasons:
+#   * The shared map is the raw probe and is read-only. These tests pin what an entry
+#     point produces for ``--architecture gfx1250``: the probe followed by
+#     ``applyArchCapOverrides``. That function rewrites the map in place, so it has to
+#     run on a private copy (``copy_isa_info_map``), never on the shared object.
+#   * ``gfx1250_strict_iim`` below derives from this map (a copy plus the strict
+#     deltas), and the tests assert that probe-then-override composition.
+#   * Today gfx1250 declares no overrides, so the copy equals the shared map. Running
+#     the real sequence here keeps the tests honest if gfx1250 ever gains a delta; with
+#     the shared map they would silently stop covering it.
+# It requests ``gfx1250_cxx`` so that a machine without amdclang++ skips the module
+# cleanly.
 @pytest.fixture(scope="module")
 def gfx1250_iim(gfx1250_cxx):
     """v1: exactly what an entry point produces for ``--architecture gfx1250``."""
-    iim = makeIsaInfoMap([ISA_GFX1250], gfx1250_cxx)
-    if not iim[ISA_GFX1250].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
+    iim = copy_isa_info_map(shared_isa_info_map_or_skip("gfx1250"))
     applyArchCapOverrides(iim, [GFX1250])
     return iim
 
@@ -354,17 +371,8 @@ def test_wmma_arb_stall_bit_offset_is_declared_per_arch(gfx1250_cxx, gfx1250_iim
     own table; stinkytofu's copy is pinned separately in test_comgr.py."""
     assert gfx1250_iim[ISA_GFX1250].archCaps[CAP_ARB_STALL_OFFSET] == 2
     absent = IsaVersion(12, 0, 0)
-    iim = makeIsaInfoMap([absent], gfx1250_cxx)
+    iim = shared_isa_info_map(absent)
     assert iim[absent].archCaps[CAP_ARB_STALL_OFFSET] == -1
-
-
-@pytest.fixture(scope="module")
-def assembler(gfx1250_cxx):
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
-
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(gfx1250_cxx, bundler, "default").assembler
 
 
 @pytest.fixture(scope="module")
@@ -472,8 +480,11 @@ def _make_params(iim, mi, **overrides):
     return params
 
 
-def _derive(iim, assembler, capsys, mi, **overrides):
-    sol = Solution(_make_params(iim, mi, **overrides), False, True, False, assembler, iim)
+def _derive(iim, capsys, mi, **overrides):
+    # The assembler comes from shared_assembler() here, not from a fixture: a
+    # session-scoped fixture is set up before the module-scoped gfx1250_cxx, so on a
+    # machine without amdclang++ it would raise an error instead of skipping.
+    sol = Solution(_make_params(iim, mi, **overrides), False, True, False, shared_assembler(), iim)
     return sol, capsys.readouterr().out
 
 
@@ -483,8 +494,8 @@ def _derive(iim, assembler, capsys, mi, **overrides):
 FP4_32X16_MI = [32, 16, 128, 1, 1, 2, 1, 2, 1]
 
 
-def test_fp4_32x16_accepted_on_gfx1250(_gp_gfx1250, gfx1250_iim, assembler, capsys):
-    sol, out = _derive(gfx1250_iim, assembler, capsys, FP4_32X16_MI)
+def test_fp4_32x16_accepted_on_gfx1250(_gp_gfx1250, gfx1250_iim, capsys):
+    sol, out = _derive(gfx1250_iim, capsys, FP4_32X16_MI)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert FP4_32X16_REASON not in out
     # Anchor the physical-vs-effective distinction: SourceSwap=True transposes the
@@ -494,14 +505,14 @@ def test_fp4_32x16_accepted_on_gfx1250(_gp_gfx1250, gfx1250_iim, assembler, caps
     assert sol["MatrixInstM"] == 16 and sol["MatrixInstN"] == 32
 
 
-def test_fp4_32x16_rejected_on_gfx1250_strict(_gp_gfx1250, gfx1250_strict_iim, assembler, capsys):
+def test_fp4_32x16_rejected_on_gfx1250_strict(_gp_gfx1250, gfx1250_strict_iim, capsys):
     """v0 lacks the fp4 32x16 WMMA opcode.
 
     With SourceSwap=True the effective MatrixInstM is 16, so a guard on
     MatrixInstM==32 would NOT fire here -- this only passes because the guard
     uses the physical MIBlock[0]==32.
     """
-    sol, out = _derive(gfx1250_strict_iim, assembler, capsys, FP4_32X16_MI)
+    sol, out = _derive(gfx1250_strict_iim, capsys, FP4_32X16_MI)
     assert sol.get("Valid") is False
     assert FP4_32X16_REASON in out
 
@@ -512,7 +523,7 @@ def test_fp4_32x16_rejected_on_gfx1250_strict(_gp_gfx1250, gfx1250_strict_iim, a
 
 
 def test_fp4_32x16_rejected_on_gfx1250_strict_without_source_swap(
-    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, assembler, capsys
+    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, capsys
 ):
     """The other half of the SourceSwap space, and a real shipped shape
     (streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml is 32x16 fp4 with SourceSwap false).
@@ -522,11 +533,11 @@ def test_fp4_32x16_rejected_on_gfx1250_strict_without_source_swap(
     covers both, which only the physical MIBlock does. The v1 leg keeps the
     rejection attributable to the stepping rather than to the config.
     """
-    v1, _ = _derive(gfx1250_iim, assembler, capsys, FP4_32X16_MI, SourceSwap=False)
+    v1, _ = _derive(gfx1250_iim, capsys, FP4_32X16_MI, SourceSwap=False)
     assert v1.get("Valid") is True, "SourceSwap=False 32x16 fp4 must derive on v1"
 
     sol, out = _derive(
-        gfx1250_strict_iim, assembler, capsys, FP4_32X16_MI, SourceSwap=False
+        gfx1250_strict_iim, capsys, FP4_32X16_MI, SourceSwap=False
     )
     assert sol["MIBlock"][0] == 32 and sol["MIBlock"][1] == 16
     assert sol.get("Valid") is False
@@ -552,7 +563,7 @@ MIXED_MAC_PARAMS = dict(
 
 
 def test_mixed_mac_type_fp4_is_covered_by_the_same_gate(
-    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, assembler, capsys
+    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, capsys
 ):
     """The opcode is selected by the WMMA operand format (MacDataType), so a gate
     keyed on the memory format (DataTypeA/B) would look like a hole for configs
@@ -568,7 +579,7 @@ def test_mixed_mac_type_fp4_is_covered_by_the_same_gate(
     derivable, so the rejection comes from the stepping and not from the config.
     """
     v1, _ = _derive(
-        gfx1250_iim, assembler, capsys, FP4_32X16_MI,
+        gfx1250_iim, capsys, FP4_32X16_MI,
         ProblemType=dict(MIXED_MAC), **MIXED_MAC_PARAMS
     )
     assert v1.get("Valid") is True, "mixed-operand config must be derivable on v1"
@@ -577,7 +588,7 @@ def test_mixed_mac_type_fp4_is_covered_by_the_same_gate(
     assert v1["MIBlock"][0] == 32 and v1["MIBlock"][1] == 16
 
     v0, out = _derive(
-        gfx1250_strict_iim, assembler, capsys, FP4_32X16_MI,
+        gfx1250_strict_iim, capsys, FP4_32X16_MI,
         ProblemType=dict(MIXED_MAC), **MIXED_MAC_PARAMS
     )
     assert v0.get("Valid") is False
@@ -590,16 +601,16 @@ def test_mixed_mac_type_fp4_is_covered_by_the_same_gate(
 MULTICAST_MI = [16, 16, 128, 1, 1, 2, 2, 2, 2]
 
 
-def test_multicast_on_for_gfx1250(_gp_gfx1250, gfx1250_iim, assembler, capsys):
-    sol, out = _derive(gfx1250_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
+def test_multicast_on_for_gfx1250(_gp_gfx1250, gfx1250_iim, capsys):
+    sol, out = _derive(gfx1250_iim, capsys, MULTICAST_MI, ClusterDim=[2, 1])
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert sol["Multicast"] is True
     assert sol["ClusterBarrier"] is True
 
 
-def test_multicast_forced_off_on_gfx1250_strict(_gp_gfx1250, gfx1250_strict_iim, assembler, capsys):
+def test_multicast_forced_off_on_gfx1250_strict(_gp_gfx1250, gfx1250_strict_iim, capsys):
     """v0 has no TDM-multicast, but clustering itself stays valid."""
-    sol, out = _derive(gfx1250_strict_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
+    sol, out = _derive(gfx1250_strict_iim, capsys, MULTICAST_MI, ClusterDim=[2, 1])
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert sol["Multicast"] is False
     # ClusterBarrier is a separate feature v0 supports; it must stay enabled.
@@ -607,13 +618,13 @@ def test_multicast_forced_off_on_gfx1250_strict(_gp_gfx1250, gfx1250_strict_iim,
 
 
 def test_sk_multicast_loads_forced_off_on_gfx1250_strict(
-    _gp_gfx1250, gfx1250_strict_iim, assembler, capsys
+    _gp_gfx1250, gfx1250_strict_iim, capsys
 ):
     """SK3 ForceDPOnly cluster stays Valid on the stepping; multicast is off."""
     from tensilelite.Common import streamKCluster, streamKMulticast
 
     sol, out = _derive(
-        gfx1250_strict_iim, assembler, capsys, MULTICAST_MI,
+        gfx1250_strict_iim, capsys, MULTICAST_MI,
         ClusterDim=[2, 1], StreamK=3, StreamKForceDPOnly=1, GlobalSplitU=0,
     )
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
@@ -630,10 +641,10 @@ def test_sk_multicast_loads_forced_off_on_gfx1250_strict(
 # symbol. This fails loudly if anyone reintroduces one.
 # =========================================================================== #
 def test_kernel_names_identical_across_steppings(
-    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, assembler, capsys
+    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, capsys
 ):
-    v1, _ = _derive(gfx1250_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
-    v0, _ = _derive(gfx1250_strict_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
+    v1, _ = _derive(gfx1250_iim, capsys, MULTICAST_MI, ClusterDim=[2, 1])
+    v0, _ = _derive(gfx1250_strict_iim, capsys, MULTICAST_MI, ClusterDim=[2, 1])
     assert v1.get("Valid") is True and v0.get("Valid") is True
     # Derived state genuinely differs, so this is not a vacuous comparison.
     assert v1["Multicast"] != v0["Multicast"]
@@ -821,12 +832,12 @@ def test_gfx1250_strict_streamk_keeps_the_xcnt_drain(gfx1250_cxx):
 # pins it as a known property rather than leaving it a latent surprise.
 # =========================================================================== #
 def test_multicast_rederived_from_build_caps_after_yaml_roundtrip(
-    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, assembler, capsys, tmp_path
+    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, capsys, tmp_path
 ):
     from tensilelite import LibraryIO
     from tensilelite.SolutionStructs import ProblemSizes
 
-    sol, out = _derive(gfx1250_strict_iim, assembler, capsys, MULTICAST_MI, ClusterDim=[2, 1])
+    sol, out = _derive(gfx1250_strict_iim, capsys, MULTICAST_MI, ClusterDim=[2, 1])
     assert sol.get("Valid") is True, f"base solution rejected: {out!r}"
     assert sol["Multicast"] is False
 
@@ -843,7 +854,7 @@ def test_multicast_rederived_from_build_caps_after_yaml_roundtrip(
     _sizes, parsed = LibraryIO.parseSolutionsData(
         data,
         path,
-        assembler,
+        shared_assembler(),
         splitGSU=False,
         printSolutionRejectionReason=True,
         printIndexAssignmentInfo=False,
@@ -860,7 +871,7 @@ def test_multicast_rederived_from_build_caps_after_yaml_roundtrip(
     _sizes, reparsed = LibraryIO.parseSolutionsData(
         LibraryIO.read(path),
         path,
-        assembler,
+        shared_assembler(),
         splitGSU=False,
         printSolutionRejectionReason=True,
         printIndexAssignmentInfo=False,

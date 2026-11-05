@@ -171,6 +171,13 @@ namespace TensileLite
             return true;
         }
 
+        std::vector<float> DenseLayer::weights() const
+        {
+            if(W == nullptr)
+                return {};
+            return std::vector<float>(W->weight.begin(), W->weight.end());
+        }
+
         std::vector<dtype>& activation(std::vector<dtype>& F)
         {
             for(auto& f : F) // relu

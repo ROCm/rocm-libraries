@@ -435,6 +435,9 @@ class EngineSpec:
     #: slug splits before every capital, so a local name ending in a digit-capital pair
     #: (``Unified2D``) would come out as ``unified2_d``.
     slug_override: str | None = None
+    #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
+    #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
+    heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:

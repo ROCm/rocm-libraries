@@ -116,6 +116,10 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "LibraryLogic requires benchmark data to build the library table",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/streamk/gfx950/sk_dynamic_contiguous.yaml",
+        "validates output and synchronizer after back-to-back launches",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/streamk/sk_hybrid.yaml",
         "validates output and synchronizer after back-to-back launches",
     ),

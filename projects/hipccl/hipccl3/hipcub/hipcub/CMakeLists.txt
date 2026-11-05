@@ -42,7 +42,7 @@ target_include_directories(hipcub
 if(HIP_COMPILER STREQUAL "clang")
   target_link_libraries(hipcub
     INTERFACE
-      roc::rocprim_hip libhipcxx::libhipcxx
+      roc::rocprim_hip
   )
 else()
   # On CUDA platform we don't want to export hipcub target with
@@ -78,7 +78,7 @@ rocm_install(
 if(HIP_COMPILER STREQUAL "clang")
   rocm_export_targets(
     TARGETS hip::hipcub
-    DEPENDS PACKAGE rocprim PACKAGE libhipcxx
+    DEPENDS PACKAGE rocprim
     NAMESPACE hip::
   )
 else()
@@ -87,3 +87,4 @@ else()
     NAMESPACE hip::
   )
 endif()
+

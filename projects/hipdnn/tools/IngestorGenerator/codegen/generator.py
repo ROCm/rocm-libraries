@@ -458,13 +458,22 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "graph_match": {"native": config.graph_match_symbol},
         "metadata": ids["kmd"],
     }
+    bindings = config.engine.heuristics
     if config.engine.has_heuristic:
         # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
-        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
+        # Arch entries follow `default`, where `uhd_gen promote` inserts them.
+        ued["sort_kernel_catalog"] = {
+            "default": ids["uhd"],
+            **bindings.get("sort_kernel_catalog", {}),
+        }
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
         ued["behavior_notes"] = list(config.engine.behavior_notes)
+    # `promote` appends a new role at the end of the document.
+    for role, arches in bindings.items():
+        if role != "sort_kernel_catalog":
+            ued[role] = dict(arches)
     return ued
 
 

@@ -150,9 +150,12 @@ _RTC_WIDE_Q_PRELOAD_VGPR_BUDGET = 216
 # Variants whose kernel is written for any wave size (scalar FMA, one lane per
 # channel or per channel and column): their spec takes the target's wave size,
 # so the binary matches the wave size the identity records (and the tiled and
-# column-streamed validators require it). Every other variant is a wave64 MFMA
-# kernel and keeps its spec default, which its validator checks against the
-# target.
+# column-streamed validators require it). The one other spec that takes it is
+# the Toeplitz matrix form of the windowed depthwise dgrad (knob ``mfma``),
+# whose atom follows the target's waves: see direct_spec_takes_target_wave,
+# the single home of the rule. Every other variant keeps its spec default
+# (wave64 for the MFMA kernels, wave32 for the gfx1250 WMMA ones), which its
+# validator checks against the target.
 DIRECT_WAVE_PARAMETRIC = frozenset(
     {
         "direct_depthwise",
@@ -164,18 +167,36 @@ DIRECT_WAVE_PARAMETRIC = frozenset(
 )
 
 
+def direct_spec_takes_target_wave(variant: str, knobs: dict) -> bool:
+    """Whether the spec of ``variant`` built with ``knobs`` takes the target's
+    wave size (rather than keeping its spec default).
+
+    True for the :data:`DIRECT_WAVE_PARAMETRIC` variants and for the Toeplitz
+    matrix form of the windowed depthwise dgrad (``mfma``): the MFMA at wave64,
+    the WMMA at wave32. Its VALU form groups threads in logical wave64s on
+    every target and keeps the default. The one rule behind the spec
+    (:func:`make_direct_spec`), the wave size the build records
+    (``direct_aot_jobs.direct_kernel_for_job``) and the cache guard
+    (:func:`direct_entry_wave_reason`).
+    """
+    if variant in DIRECT_WAVE_PARAMETRIC:
+        return True
+    return variant == "direct_depthwise_dgrad_win" and bool(knobs.get("mfma"))
+
+
 def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     """The spec ``variant`` builds for ``problem``.
 
     For the MFMA dgrad pipeline this is the spec of its compute pass (a
     forward kernel on the transposed problem); the weight transforms are
     derived from the original problem separately. ``wave_size`` is the
-    target's; only the :data:`DIRECT_WAVE_PARAMETRIC` variants take it.
+    target's; only the specs :func:`direct_spec_takes_target_wave` names take
+    it, and an explicit ``wave_size`` knob that conflicts with it is rejected.
     """
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_nongrouped as dn
 
-    if variant in DIRECT_WAVE_PARAMETRIC:
+    if direct_spec_takes_target_wave(variant, knobs):
         if "wave_size" in knobs and knobs["wave_size"] != wave_size:
             raise ValueError(
                 f"knob wave_size {knobs['wave_size']!r} conflicts with wave_size "
@@ -693,18 +714,19 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
 
 
 def direct_entry_wave_reason(
-    variant: str, identity_wave_size: int, meta: dict
+    variant: str, identity_wave_size: int, meta: dict, knobs: dict
 ) -> str | None:
-    """Why a cached binary of ``variant`` cannot launch at its identity's wave
-    size, or ``None`` when it can.
+    """Why a cached binary of ``variant``/``knobs`` cannot launch at its
+    identity's wave size, or ``None`` when it can.
 
-    The launch geometry of a :data:`DIRECT_WAVE_PARAMETRIC` kernel follows the
-    spec's ``wave_size`` (block size, channels per block), so it has to be the
-    one the binary was built with. The build records it as ``spec_wave_size``;
-    an entry without it predates the record and was built at the wave64 spec
-    default, whatever wave size its identity says.
+    The launch geometry of a kernel whose spec takes the target's wave size
+    (:func:`direct_spec_takes_target_wave`) follows the spec's ``wave_size``
+    (block size, channels per block), so it has to be the one the binary was
+    built with. The build records it as ``spec_wave_size``; an entry without
+    it predates the record and is taken as built at the wave64 spec default,
+    whatever wave size its identity says (so a wave32 entry is rebuilt).
     """
-    if variant not in DIRECT_WAVE_PARAMETRIC:
+    if not direct_spec_takes_target_wave(variant, knobs):
         return None
     built = meta.get("spec_wave_size", 64)
     if built != identity_wave_size:

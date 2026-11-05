@@ -104,10 +104,11 @@ const char* rocke_ll_matrix_decl_key_at(int index);
 
 /* ---------------------------------------------------------- anyptr overloads */
 
-/* One accepted address space of an llvm_anyptr_ty intrinsic, with the LLVM
- * pointer text that names it. Mirrors one entry of the Python
- * _S_PREFETCH_INST_PTR_TYPES / _AV_B128_PTR_TYPES dicts; every entry needs a
- * matching "<key>.p<space>" row in ROCKE_LL_INTRINSIC_DECLS. */
+/* One accepted address space of a pointer operand, with the LLVM pointer text
+ * that names it. Mirrors one entry of the Python _S_PREFETCH_INST_PTR_TYPES /
+ * _AV_B128_PTR_TYPES / _GLOBAL_LOAD_PTR_TYPES dicts; an entry of an
+ * llvm_anyptr_ty intrinsic's table needs a matching "<key>.p<space>" row in
+ * ROCKE_LL_INTRINSIC_DECLS. */
 typedef struct rocke_ll_anyptr_space
 {
     int space;
@@ -120,6 +121,8 @@ extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[];
 extern const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT;
 extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
 extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_GLOBAL_LOAD_PTR_TYPES[];
+extern const int ROCKE_LL_GLOBAL_LOAD_PTR_TYPES_COUNT;
 
 /* The resolver that consumes these tables is rocke_ll_anyptr_space, declared
  * with the other rocke_lower_t helpers below. */
@@ -585,11 +588,38 @@ const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p);
  * _Lowerer._ptr_llvm_type). */
 const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v);
 
-/* Address space of an llvm_anyptr_ty operand, validated against `allowed`
- * (Python _Lowerer._anyptr_space). Also writes the matching pointer text to
- * *out_ptr_ty when non-NULL. Fails (does not return) for a space the intrinsic
- * does not accept: the space is part of the overload, so the mangled name, the
- * declare, and the call site all have to agree with the pointer's real type. */
+/* The kernel parameter `v` names, or NULL for any other value (Python
+ * _Lowerer._param_of). */
+const rocke_param_t* rocke_ll_value_param(const rocke_lower_t* L, const rocke_value_t* v);
+
+/* Fail (ROCKE_ERR_TYPE, does not return) unless the module types `ptr` as
+ * `expected`, the LLVM pointer text of the `space` the op names (Python
+ * _Lowerer._require_header_ptr, same text). An op that names its pointer in
+ * one fixed space checks it here: a parameter's addr_space override (such as
+ * "constant") moves its header type away from the IR type the IR rules check,
+ * and the message blames the override only when it moved the header.
+ * `op_name` is the op's builder; `operand` names the pointer operand ("ptr",
+ * "src_ptr", ...). */
+void rocke_ll_require_header_ptr(rocke_lower_t* L,
+                                 const char* op_name,
+                                 const rocke_value_t* ptr,
+                                 const char* operand,
+                                 const char* space,
+                                 const char* expected);
+
+/* rocke_ll_require_header_ptr for an op that names its pointer
+ * ptr addrspace(1) (Python _Lowerer._require_global_header_ptr). */
+void rocke_ll_require_global_header_ptr(rocke_lower_t* L,
+                                        const char* op_name,
+                                        const rocke_value_t* ptr,
+                                        const char* operand);
+
+/* Address space of a pointer operand, validated against `allowed` (Python
+ * _Lowerer._anyptr_space). Also writes the matching pointer text to
+ * *out_ptr_ty when non-NULL. Fails (ROCKE_ERR_TYPE, does not return) for a
+ * space the op does not accept: the space is part of an llvm_anyptr_ty
+ * intrinsic's overload and of a plain load, so the call site has to name the
+ * pointer's real type. */
 int rocke_ll_anyptr_space(rocke_lower_t* L,
                           const char* op,
                           const rocke_value_t* ptr,

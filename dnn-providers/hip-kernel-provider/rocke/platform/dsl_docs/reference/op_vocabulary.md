@@ -106,6 +106,13 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
+A pointer parameter declared `addr_space="constant"` is `ptr addrspace(4)` in the kernel header. The
+three global loads above read through it as `load addrspace(4)`; they refuse a flat or LDS pointer.
+Every other op that addresses global memory through it (the stores, atomics and flag ops above,
+`cooperative_global_store`, `global_prefetch`, `global_load_tr16_b128`, the cluster loads, and the
+copies between global memory and LDS) is refused by the LLVM lowering of both engines. Each of these
+refusals is a `TypeError` (`ROCKE_ERR_TYPE` in the C++ engine) that names the op's builder.
+
 ### Global pointers
 
 | Op name                  | Builder             | LLVM emission                                        | HIP emission |
@@ -153,6 +160,15 @@ i16, f16, bf16, i32, f32, i64, f64); one access moves 1, 2, 4, 8 or 16 bytes. Th
 access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: a load past
 `num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
 i64 elements, so those two lower through LLVM only.
+
+`buffer_rsrc` takes a global pointer: the intrinsic's overload names `ptr addrspace(1)`, so a
+parameter declared `addr_space="constant"` (`ptr addrspace(4)` in the kernel header) is refused by
+the LLVM lowering of both engines, as the `global_ptr_*` ops refuse it. `num_bytes` is i32 or i64 at
+llvm22 and later (an i32 is zero-extended); llvm20's intrinsic takes an i32 `num_records`, so an i64
+`num_bytes` is refused there. The HIP lowering passes `num_records` to
+`__builtin_amdgcn_make_buffer_rsrc` cast to `(int)`, which would truncate a wider byte count, so it
+refuses any `num_bytes` but i32. It keeps a constant-space pointer, since the HIP signature declares
+every pointer parameter alike and the builtin takes a `void*`.
 
 ## MFMA
 
