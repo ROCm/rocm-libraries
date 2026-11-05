@@ -889,6 +889,13 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "source_only" EXCLUDE
     )
 
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/how-to/choose-gemm-for-solution.md"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/Utilities"
+        RENAME gemm_problem_for_solution.md
+        COMPONENT tests
+    )
+
     # Scripts used by unit tests
     install(
         FILES

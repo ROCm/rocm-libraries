@@ -327,3 +327,5 @@ If you want to submit an issue, you can do so on
 [GitHub](https://github.com/ROCm/rocm-libraries/issues).
 
 To contribute to our repository, you can create a GitHub pull request.
+
+See [Choose one GEMM problem from a solution index](docs/how-to/choose-gemm-for-solution.md) for constructing workloads from a built device library.
