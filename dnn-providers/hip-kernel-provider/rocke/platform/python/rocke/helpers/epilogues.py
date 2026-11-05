@@ -380,7 +380,7 @@ class CShuffleEpilogue:
     war_barriers: int = 1
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
-    # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
+    # WMMA path: set by from_grid_op(); uses dst.frag_len / dst_layout().coord().
     mma_op: Optional["MmaOp"] = None
 
     @property

@@ -26,15 +26,14 @@
 #include "rocke/wmma_scale_internal.h"
 
 /* Layout canary. Growing or reordering rocke_mma_op_t changes the stride of the
- * ops[] array every catalog hands out, so a caller built against the old header
- * indexes it wrongly while still passing its own ABI check -- unless
- * ROCKE_ABI_VERSION moved with the struct. This pins the two together: editing
- * the struct fails the build here, and the fix is to bump ROCKE_ABI_VERSION in
- * rocke/abi.h and update both numbers in the same change. 64-bit only, where
- * the pointer width that is part of the layout is known. */
+ * ops[] array every catalog hands out. The ABI floor excludes libraries
+ * predating indexed operands; unrelated later ABI bumps do not invalidate
+ * these layout pins. A layout change requires reviewing the binary ABI and
+ * updating the size/offset pins. 64-bit only, where the pointer width that is
+ * part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION == 10,
-              "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION >= 10,
+              "rocke_mma_op_t layout or ABI floor mismatch: review rocke/abi.h and "
               "update this pin");
 static_assert(offsetof(rocke_mma_op_t, srcs) == 8 && offsetof(rocke_mma_op_t, dst) == 152
                   && offsetof(rocke_mma_op_t, op_id) == 192

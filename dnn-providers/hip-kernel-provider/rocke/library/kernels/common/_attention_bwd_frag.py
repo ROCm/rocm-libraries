@@ -7,7 +7,7 @@ loader.
 
 Everything here is driven by the catalog lane maps of
 :class:`rocke.core.arch.target.MmaOp` (``a_layout``, ``b_layout``,
-``c_layout``). The maps are evaluated twice:
+``dst_layout``). The maps are evaluated twice:
 
 * on an *integer* builder (:class:`IntLaneBuilder`) for every lane and slot, at
   build time, to prove facts (contiguity, affinity, the relabel) and to derive
@@ -545,12 +545,12 @@ def emit_c_to_a(
     ``bf16_cast``, see :mod:`._attention_bwd_valu`). ``lane`` (the lane id in
     the wave) is needed only for the ``"xlane16"`` exchange.
     """
-    from ._attention_bwd_valu import cast_c_frag
+    from ._attention_bwd_valu import cast_dst_frag
 
     if len(c_tiles) != plan.c_tiles:
         raise ValueError(f"plan needs {plan.c_tiles} C tiles, got {len(c_tiles)}")
     elem = ir_type(dtype)
-    cast = [cast_c_frag(b, t, elem, bf16_cast) for t in c_tiles]
+    cast = [cast_dst_frag(b, t, elem, bf16_cast) for t in c_tiles]
     if plan.kind == "direct":
         cf = cast[0].type.count
         if plan.slot_src == tuple((s // cf, s % cf) for s in range(len(plan.slot_src))):

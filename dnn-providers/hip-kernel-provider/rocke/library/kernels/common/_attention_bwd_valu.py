@@ -81,7 +81,7 @@ __all__ = [
     "STATS_VECS",
     "NATIVE_BF16_CVT_ARCHS",
     "batched_stats_rows",
-    "cast_c_frag",
+    "cast_dst_frag",
     "check_stats_vec_layout",
     "rne_noguard_bf16",
     "softmax_p",
@@ -126,7 +126,7 @@ def rne_noguard_bf16(b: IRBuilder, frag: Value) -> Value:
     return b.vec_bitcast(b.vec_pack(words, I32), VectorType(BF16, n))
 
 
-def cast_c_frag(b: IRBuilder, frag: Value, elem, bf16_cast: str = "generic") -> Value:
+def cast_dst_frag(b: IRBuilder, frag: Value, elem, bf16_cast: str = "generic") -> Value:
     """Round an fp32 result fragment to the I/O dtype ``elem`` under ``bf16_cast``."""
     if bf16_cast == "generic":
         return b.vec_cast_f32_to(frag, elem)

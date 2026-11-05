@@ -180,7 +180,7 @@ from ._attention_bwd_sched import (
 from ._attention_bwd_sinks import DqSink, DqSlot, PendingDq
 from ._attention_bwd_valu import (
     batched_stats_rows,
-    cast_c_frag,
+    cast_dst_frag,
     check_stats_vec_layout,
     softmax_p,
     stats_rows_neg,
@@ -2275,7 +2275,7 @@ class BwdTileStep:
         g0 = self.geom.g0
         for fm in range(g0.frags_m):
             for fn in range(g0.frags_n):
-                half = cast_c_frag(b, frags[fm][fn], self.elem, self.geom.bf16_cast)
+                half = cast_dst_frag(b, frags[fm][fn], self.elem, self.geom.bf16_cast)
                 for s, (r, c) in enumerate(
                     g0.acc_coords(b, self.lane, self.o0, fm, fn)
                 ):

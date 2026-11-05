@@ -1705,7 +1705,8 @@ def store_wmma_acc(
     """Scatter one lane's ``<c_per_lane x f32>`` WMMA accumulator to a window.
 
     Walks the ``c_per_lane`` accumulator slots, resolves each slot's
-    ``(row, col)`` from the atom's verified ``c_layout`` map, optionally applies
+    ``(row, col)`` from the resolved MMA op's verified ``dst_layout`` map,
+    optionally applies
     ``transform(b, value_f32, slot, row, col)`` (e.g. the online-softmax
     ``* inv_l[row]`` rescale), demotes f32 -> the window dtype, and issues one
     scalar store per slot — the same per-element epilogue the hand-rolled

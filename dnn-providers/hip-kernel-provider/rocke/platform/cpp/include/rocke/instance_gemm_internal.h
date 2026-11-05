@@ -419,7 +419,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       bool n_base_first);
 
 /* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
- * c_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
+ * destination-layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,
