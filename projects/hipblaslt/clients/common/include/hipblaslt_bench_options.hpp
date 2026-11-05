@@ -11,8 +11,8 @@
 
 struct Arguments;
 
-// Process-wide CLI knobs that hipblaslt-bench reads directly instead of through
-// the YAML-backed Arguments struct.
+// Process-wide CLI settings for hipblaslt-bench. apply_to resolves the settings
+// represented in Arguments before a benchmark case enters the shared client code.
 //
 // cotenant_cus is the workgroup count of a busy kernel kept resident on a separate
 // stream during timed runs (0 disables it); cotenant_max_occupancy caps its
@@ -25,9 +25,9 @@ struct Arguments;
 // so the library default applies. streamk_tile_scheduling_mode_str() holds the raw
 // CLI token (off|on|auto or 0|1|2) before client.cpp resolves it.
 //
-// uniform_summation_order sets the handle request as {0=off, 1=on}, so both
-// descriptor and C++ APIs inherit it. A YAML case overrides the CLI value;
-// leaving both unset keeps the library default.
+// uniform_summation_order is {0=off, 1=on, -1=unspecified}. apply_to preserves an
+// explicit case value and otherwise uses the CLI value. The client handle applies
+// the resolved request; leaving both inputs unspecified keeps the library default.
 //
 // verification_failures counts the -v checks of D that failed: one per gemm, per solution,
 // for each of the norm and allclose checks, plus one per solution whose post_bench_verify_iters
@@ -52,6 +52,6 @@ namespace hipblaslt_bench_options
     bool&        verify_strict();
     int64_t&     verification_failures();
     int          verification_exit_code(int ret);
-    void         apply_strict_verification(Arguments& arg);
+    void         apply_to(Arguments& arg);
     int32_t&     post_bench_verify_iters();
 }

@@ -5,12 +5,27 @@
  *
  *******************************************************************************/
 #include "hipblaslt_bench_options.hpp"
+#include "hipblaslt_arguments.hpp"
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
 
 namespace hipblaslt_bench_options
 {
+    void apply_to(Arguments& arg)
+    {
+        if(arg.uniform_summation_order < 0)
+            arg.uniform_summation_order = uniform_summation_order();
+
+        if(verify_strict())
+        {
+            arg.norm_check     = 1;
+            arg.allclose_check = 1;
+            // Let the benchmark collect every failure before choosing its exit code.
+            arg.norm_check_assert = false;
+        }
+    }
+
     int32_t& cotenant_cus()
     {
         static int32_t v = 0;
