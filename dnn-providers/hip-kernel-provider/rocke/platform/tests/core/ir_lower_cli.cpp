@@ -15,16 +15,15 @@
  *     arch     ISA target gfx string; defaults to "gfx950".
  *     ir_file  path to serialized IR; "-" or omitted reads stdin.
  *   ir_lower_cli --hip-batch
- *     Lowers many kernels to HIP source in one process, each with the defaults
- *     rocke_engine.lower_serialized_ir_hip uses. stdin holds one frame per
- *     kernel, "<arch> <byte count>\n" then that many bytes of serialized IR;
- *     stdout gets one frame per kernel in order, "<status> <byte count>\n" then
- *     the bytes: the HIP source when the status is 0, else the engine's
- *     refusal message, with the rocke_status_t code the engine returned, as
- *     rocke_engine.lower_serialized_ir_hip reports them. A refusal is data,
- *     not a failure: the process exits 0 once every frame is answered, and 2
- *     on a malformed or empty frame (the binding refuses empty IR outright)
- *     or when stdout cannot be written.
+ *     Lowers many kernels to HIP source in one process, each through
+ *     rocke_lower_serialized_ir_to_hip, which the binding's
+ *     lower_serialized_ir_hip also calls. stdin holds one frame per kernel,
+ *     "<arch> <byte count>\n" then that many bytes of serialized IR; stdout
+ *     gets one frame per kernel in order, "<status> <byte count>\n" then the
+ *     bytes: the HIP source when the status is 0, else the engine's refusal
+ *     message, with the rocke_status_t code the engine returned. A refusal is
+ *     data, not a failure: the process exits 0 once every frame is answered,
+ *     and 2 on a malformed frame or when stdout cannot be written.
  *
  * All streams are binary, so the text is passed through unchanged on every
  * host. Without --hip-batch, any parse or lowering failure writes a clean
@@ -65,51 +64,31 @@ std::string read_all(FILE* f)
     return text;
 }
 
-// Parse `ir_text` and lower it to HIP source for `arch`, as
-// rocke_engine.lower_serialized_ir_hip does. Returns ROCKE_OK with the source
-// in `out`, or the engine's status with its message in `out`, with the
-// binding's fallback text when the engine set none. (A parse that returns no
-// kernel and no error status, which the parser does not do, is reported as
-// ROCKE_ERR_VALUE, since status 0 marks source here.)
-rocke_status_t lower_to_hip(const std::string& ir_text, const char* arch, std::string* out)
+// Lower one --hip-batch kernel and write its reply frame: the source with status
+// 0, or the engine's status and refusal message. False when the reply cannot be
+// allocated or written.
+bool write_hip_frame(const std::string& ir_text, const char* arch)
 {
-    rocke_ir_builder_t b;
-    if(rocke_ir_builder_init(&b, "ir_lower_cli") != ROCKE_OK)
+    rocke_strbuf_t source;
+    rocke_strbuf_t message;
+    if(rocke_strbuf_init(&source, 0) != 0)
     {
-        *out = "builder init failed (OOM)";
-        return ROCKE_ERR_OOM;
+        return false;
     }
-    rocke_kernel_def_t* kernel = nullptr;
-    rocke_status_t st = rocke_ir_parse(ir_text.c_str(), &b, &kernel);
-    if(st != ROCKE_OK || !kernel)
+    if(rocke_strbuf_init(&message, 0) != 0)
     {
-        const char* msg = rocke_ir_builder_error(&b);
-        *out = (msg && *msg) ? msg : "unknown parse error";
-        rocke_ir_builder_free(&b);
-        return st != ROCKE_OK ? st : ROCKE_ERR_VALUE;
+        rocke_strbuf_free(&source);
+        return false;
     }
-    rocke_strbuf_t text;
-    if(rocke_strbuf_init(&text, 0) != 0)
-    {
-        *out = "output allocation failed";
-        rocke_ir_builder_free(&b);
-        return ROCKE_ERR_OOM;
-    }
-    rocke_lower_hip_opts_t opts = {};
-    opts.arch = arch;
-    st = rocke_lower_kernel_to_hip(&b, kernel, &opts, &text);
-    if(st == ROCKE_OK)
-    {
-        *out = rocke_strbuf_cstr(&text);
-    }
-    else
-    {
-        const char* msg = rocke_ir_builder_error(&b);
-        *out = (msg && *msg) ? msg : "unknown lowering error";
-    }
-    rocke_strbuf_free(&text);
-    rocke_ir_builder_free(&b);
-    return st;
+    const rocke_status_t st
+        = rocke_lower_serialized_ir_to_hip(ir_text.c_str(), arch, &source, &message);
+    const char* reply = rocke_strbuf_cstr(st == ROCKE_OK ? &source : &message);
+    const size_t reply_size = std::strlen(reply);
+    const bool written = std::fprintf(stdout, "%d %zu\n", (int)st, reply_size) > 0
+                         && std::fwrite(reply, 1, reply_size, stdout) == reply_size;
+    rocke_strbuf_free(&message);
+    rocke_strbuf_free(&source);
+    return written;
 }
 
 // The largest serialized kernel a --hip-batch frame may carry; a larger count
@@ -133,21 +112,13 @@ int lower_hip_batch()
             std::fprintf(stderr, "ir_lower_cli: malformed --hip-batch frame header\n");
             return 2;
         }
-        if(size == 0)
-        {
-            std::fprintf(stderr, "ir_lower_cli: empty IR input in a --hip-batch frame\n");
-            return 2;
-        }
         std::string ir_text(size, '\0');
         if(std::fread(&ir_text[0], 1, size, stdin) != size)
         {
             std::fprintf(stderr, "ir_lower_cli: --hip-batch frame shorter than its count\n");
             return 2;
         }
-        std::string result;
-        const rocke_status_t st = lower_to_hip(ir_text, arch, &result);
-        std::fprintf(stdout, "%d %zu\n", (int)st, result.size());
-        if(std::fwrite(result.data(), 1, result.size(), stdout) != result.size())
+        if(!write_hip_frame(ir_text, arch))
         {
             std::fprintf(stderr, "ir_lower_cli: cannot write the --hip-batch reply\n");
             return 2;

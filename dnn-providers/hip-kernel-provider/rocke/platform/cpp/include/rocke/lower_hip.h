@@ -12,8 +12,9 @@
  *
  * This is the HIP-source mirror of the LLVM-IR path: the same IR in, a
  * human-readable HIP TU out, byte-identical to the Python lowerer's output for
- * the default gfx950 arch. The only entry point is rocke_lower_kernel_to_hip();
- * the rest of the file is shared internal plumbing in lower_hip_internal.h.
+ * the default gfx950 arch. The entry points are rocke_lower_kernel_to_hip() and,
+ * for a kernel held as serialized IR text, rocke_lower_serialized_ir_to_hip();
+ * the lowerer's shared internal plumbing is in lower_hip_internal.h.
  *
  * Binds strictly to the FROZEN IR contract in rocke/ir.h. No new IR types are
  * introduced here -- only the arch seam (rocke_hip_arch_t) and the output struct
@@ -98,6 +99,22 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
                                          const rocke_kernel_def_t* kernel,
                                          const rocke_lower_hip_opts_t* opts,
                                          rocke_strbuf_t* out);
+
+/* Parse the serialized ck.dsl.ir/v1 kernel `ir_text` (rocke/ir_serialize.h)
+ * and lower it as rocke_lower_kernel_to_hip does with `arch` (NULL => gfx950)
+ * and every other option at its default: the route for a host that holds a
+ * kernel as text rather than as a KernelDef. On ROCKE_OK the source is appended
+ * to `out`. On any other status the reason -- the parser's or the lowerer's
+ * message, or one naming the step that failed; never empty -- is appended to
+ * `message`, and `out` is unspecified. NULL or empty `ir_text` is
+ * ROCKE_ERR_VALUE ("empty IR input"), and so is a NULL `out` ("no output
+ * buffer"). `message` is optional: NULL means "do not report the reason", and
+ * the status is the same as with a buffer. The caller owns and initialises
+ * each buffer it passes. */
+rocke_status_t rocke_lower_serialized_ir_to_hip(const char* ir_text,
+                                                const char* arch,
+                                                rocke_strbuf_t* out,
+                                                rocke_strbuf_t* message);
 
 #ifdef __cplusplus
 } /* extern "C" */
