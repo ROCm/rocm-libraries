@@ -1664,8 +1664,10 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
-          # RAP: one buffer set per resident k-tile, matching the grown allocation.
-          numBiFactor *= self.rapResidentKTiles(kernel)
+          # RAP: a buffer set per iteration of every resident k-tile, matching the
+          # grown allocation.
+          if kernel["ReuseAcrossPersistent"]:
+            numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
           if self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
@@ -1801,8 +1803,10 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
-        # RAP: one buffer set per resident k-tile, matching the grown allocation.
-        numBiFactor *= self.rapResidentKTiles(kernel)
+        # RAP: a buffer set per iteration of every resident k-tile, matching the
+        # grown allocation.
+        if kernel["ReuseAcrossPersistent"]:
+          numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         if self.states.lrvwTileA > 1:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices

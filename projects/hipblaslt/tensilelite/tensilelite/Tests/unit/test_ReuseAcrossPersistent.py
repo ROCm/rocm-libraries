@@ -175,7 +175,7 @@ def _make_params(gfx1250_iim, **overrides):
     isa = gfxToIsa("gfx1250")
     # [M, N, K, B, ?, MIWaveTile0, MIWaveTile1, WaveGroup0, WaveGroup1]
     # -> MacroTile 64x256, NumWaves 4.
-    mi = [16, 16, 128, 1, 1, 2, 8, 2, 2]
+    mi = overrides.pop("MatrixInstruction", [16, 16, 128, 1, 1, 2, 8, 2, 2])
     pt = overrides.pop("ProblemType", {})
     problem_type = {
         "OperationType": "GEMM",
@@ -779,6 +779,31 @@ def test_rap_kernel_generates_with_the_gl2_prefetch(_gp_gfx1250, gfx1250_iim, as
     assert len(labels) == len(set(labels))
 
 
+def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(
+    _gp_gfx1250, gfx1250_iim, assembler
+):
+    """Resident buffers are numbered k-tile * LoopIters + u, prefetch slots or not.
+
+    BF16's MatrixInstK 32 at DepthU 128 runs four iterations per k-tile against
+    the two buffer sets that PrefetchLocalRead 1 holds without ClusterLocalRead,
+    so sizing the resident block by the prefetch slots leaves half of its
+    buffers undefined, and the assembler rejects them.
+    """
+    bf16 = dict(DataType="B", DestDataType="B", ComputeDataType="s", HighPrecisionAccumulate=True)
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=bf16,
+                                MatrixInstruction=[16, 16, 32, 1, 1, 4, 4, 1, 4],
+                                DepthU=128, AssertSummationElementMultiple=128,
+                                PrefetchLocalRead=1, ClusterLocalRead=0, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    assert (sol["LoopIters"], sol["PrefetchLocalRead"], sol["ClusterLocalRead"]) == (4, 1, 0)
+    source = _kernelSource(sol, assembler)
+    defined = set(re.findall(r"^\.set (vgprValuA_X\d+_I0),", source, re.M))
+    used = set(re.findall(r"\b(vgprValuA_X\d+_I0)\b", source))
+    assert used <= defined, f"undefined: {sorted(used - defined)[:4]}"
+    assert len(defined) == sol["_RAPNumResidentKTiles"] * sol["LoopIters"]
+
+
 # ---------------------------------------------------------------------------
 # k_max model. Pinned to the two audited gfx1250 configs, whose true bounds were
 # measured by sweeping the resident k-tile count until rapCheckStoreNeutrality
@@ -839,6 +864,12 @@ def test_rap_kmax_model_shares_a_2d_scale_vgpr_across_vector_width():
     # VectorWidth 2 WaveTiles share one VGPR: R 66 -> (1024 - 128 - 256 - 40) / 66.
     assert _kMax(8, {"MIInputPerThreadMXSA": 1, "VectorWidthMXSA": 2},
                  MXBlockA=128, MXBlockFreeA=128) == 9
+
+
+def test_rap_kmax_model_prices_every_iteration_of_a_k_tile():
+    # Four iterations hold four buffer sets whatever the prefetch slots number:
+    # R 4 x 34 = 136 -> (1024 - 128 - 256 - 40) / 136.
+    assert _kMax(8, {"LoopIters": 4, "ClusterLocalRead": 0, "PrefetchLocalRead": 1}) == 4
 
 
 def test_rap_kmax_model_declines_when_the_store_cannot_be_priced():

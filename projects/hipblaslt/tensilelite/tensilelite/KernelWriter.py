@@ -8592,10 +8592,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # pack or input conversion DTV case, need double buffer (LoopIters * 2)
         numVgprBufferA = self.states.numVgprBuffer if not (self.states.packDTVA or self.states.convDTVA) else kernel["LoopIters"] * 2
         numVgprBufferB = self.states.numVgprBuffer if not (self.states.packDTVB or self.states.convDTVB) else kernel["LoopIters"] * 2
-        # RAP gives A and its MX scales one buffer set per resident k-tile rather
-        # than one per prefetch slot, so the whole K extent is addressable at
-        # once. B is untouched: it is still reloaded every tile.
-        numVgprBufferA *= self.rapResidentKTiles(kernel)
+        # RAP gives A and its MX scales a buffer set per iteration of every
+        # resident k-tile rather than one per prefetch slot, so the whole K extent
+        # is addressable at once: rapResidentBufferIdx numbers them k-tile *
+        # LoopIters + u, which outruns the prefetch slots whenever
+        # PrefetchLocalRead + 1 < LoopIters without ClusterLocalRead. B is
+        # untouched: it is still reloaded every tile.
+        if kernel["ReuseAcrossPersistent"]:
+          numVgprBufferA = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         valuBlocks  = self.states.numVgprBuffer * kernel["InnerUnroll"] # for Sparse
         valuBlocksA = (1.5 if kernel["HalfPLRA"] else numVgprBufferA) * kernel["InnerUnroll"]
         valuBlocksB = (1.5 if kernel["HalfPLRB"] else numVgprBufferB) * kernel["InnerUnroll"]
