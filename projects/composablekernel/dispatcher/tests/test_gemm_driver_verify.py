@@ -905,7 +905,7 @@ def _peak_rss(dtype, problem, mode):
     got = subprocess.run([sys.executable, "-c", _RSS_JOB, json.dumps(paths),
                           f"gemm_{dtype}_rcr_x", json.dumps(problem), mode],
                          capture_output=True, text=True, check=True).stdout.split()
-    if got == ["skip"]:
+    if got[-1:] == ["skip"]:  # "call" mode prints its warm-up result first
         pytest.skip("/proc/self/clear_refs is not writable")
     bound = GS.host_compute_bytes(problem, dtype) - GS.HOST_FIXED_BYTES + (128 << 20)
     assert int(got[-1]) <= bound, (problem, int(got[-1]), bound)
