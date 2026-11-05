@@ -51,8 +51,8 @@ public:
     uint32_t nnz_per_thread{}; // nnz-per-thread granularity (1 / 4 / 8)
     int64_t  max_row_nnz{}; // longest row length (row-skew signal)
 
-    _rocsparse_csrmv_nnzsplit_info()                                                 = default;
-    _rocsparse_csrmv_nnzsplit_info(const _rocsparse_csrmv_nnzsplit_info&)            = delete;
+    _rocsparse_csrmv_nnzsplit_info()                                      = default;
+    _rocsparse_csrmv_nnzsplit_info(const _rocsparse_csrmv_nnzsplit_info&) = delete;
     _rocsparse_csrmv_nnzsplit_info& operator=(const _rocsparse_csrmv_nnzsplit_info&) = delete;
 
     // Does not free the id buffer: clear() must be called before end of life.
@@ -85,4 +85,4 @@ public:
     {
         return static_cast<J*>(this->get_starting_block_ids());
     }
-}* rocsparse_csrmv_nnzsplit_info;
+} * rocsparse_csrmv_nnzsplit_info;

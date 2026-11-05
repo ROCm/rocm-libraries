@@ -81,7 +81,7 @@ typedef struct _rocsparse_csrmv_info
     static rocsparse::csrmv_alg choose_alg(const _rocsparse_csrmv_info* csrmv_info,
                                            rocsparse_operation          operation);
 
-} *rocsparse_csrmv_info, *rocsparse_cscmv_info;
+} * rocsparse_csrmv_info, *rocsparse_cscmv_info;
 
 namespace rocsparse
 {
