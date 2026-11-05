@@ -149,10 +149,13 @@ def parse_table(
 
     ``source`` names where ``text`` came from (by default the committed
     table). Raises ``ValueError`` naming ``source`` and the offending entry
-    when the document is not a :data:`SCHEMA` table or an entry has the wrong
-    shape or type.
+    when the text is not JSON, is not a :data:`SCHEMA` table, or an entry has
+    the wrong shape or type.
     """
-    doc = json.loads(text)
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{source}: not valid JSON: {exc}") from exc
     schema = doc.get("schema") if isinstance(doc, dict) else None
     if schema != SCHEMA:
         raise ValueError(

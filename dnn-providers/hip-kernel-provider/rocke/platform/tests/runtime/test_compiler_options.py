@@ -21,6 +21,7 @@ Whether the committed answers match the loaded compiler is the CTest gate
 from __future__ import annotations
 
 import dataclasses
+import json
 import subprocess
 import textwrap
 from collections.abc import Callable, Iterator
@@ -139,8 +140,10 @@ def _committed_with(old: str, new: str) -> str:
             ),
         ),
         ('"20": {', '"llvm20": {', r"has the keys \['llvm20'\], expected LLVM major"),
+        # A JSON syntax error names the file too, not only a line and column.
+        ('"options": {', '"options": [', r"not valid JSON: "),
     ],
-    ids=["schema", "accepted_not_bool", "verified_on_not_str", "key", "major"],
+    ids=["schema", "accepted_not_bool", "verified_on_not_str", "key", "major", "json"],
 )
 def test_parse_table_refuses_a_malformed_table(
     old: str, new: str, message: str
@@ -148,6 +151,39 @@ def test_parse_table_refuses_a_malformed_table(
     """Each refusal names the file and the entry that is wrong."""
     with pytest.raises(ValueError, match=message) as err:
         table.parse_table(_committed_with(old, new), source="edited.json")
+    assert str(err.value).startswith("edited.json: ")
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [
+        (("options",), r"options=\[\], expected an object mapping each option"),
+        (
+            ("options", OPTION),
+            rf"'{OPTION}' is \[\], expected an object keyed by LLVM major",
+        ),
+        (
+            ("options", OPTION, "20"),
+            (
+                rf"'{OPTION}' on LLVM 20 is \[\], expected an object with the keys "
+                "accepted, evidence, verified_on"
+            ),
+        ),
+    ],
+    ids=["options", "column", "cell"],
+)
+def test_parse_table_refuses_a_list_where_an_object_belongs(
+    path: tuple[str, ...], message: str
+) -> None:
+    """Every level of the table must be a JSON object; a list at any level is
+    refused with the file and the entry named, not read or indexed."""
+    doc = json.loads(table.TABLE_PATH.read_text(encoding="utf-8"))
+    parent = doc
+    for key in path[:-1]:
+        parent = parent[key]
+    parent[path[-1]] = []
+    with pytest.raises(ValueError, match=message) as err:
+        table.parse_table(json.dumps(doc), source="edited.json")
     assert str(err.value).startswith("edited.json: ")
 
 
