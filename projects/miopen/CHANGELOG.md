@@ -74,7 +74,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvHipDirectDepthwiseFwd3d`, a depthwise forward 3D convolution solver for RDNA
   (`gfx101X`, `gfx103X`, `gfx110X`, `gfx115X`, `gfx117X`, `gfx120X`). It covers fp32, fp16 and
   bf16, NCDHW and NDHWC, filters up to 7x7 per depth slice with any depth, stride, padding and
-  dilation, and channel multipliers. On gfx1151 it is 12x to 20x faster than
+  dilation, and channel multipliers. On gfx1151 it is 13x to 22x faster than
   `ConvDirectNaiveConvFwd` on 512-channel 5x5x5 depthwise convolutions and is selected through
   Find mode.
 
