@@ -64,7 +64,7 @@ constexpr const char* BLOCK_N_KNOB = "block_n";
 constexpr const char* SAVE_LOAD_CASE = "D64_Bm128Bn64";
 
 using Mask = SdpaMask;
-using GraphShape = SdpaShape;
+using GraphShape = IngestorSdpaGraphSpec;
 
 struct Tile
 {

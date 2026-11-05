@@ -122,7 +122,7 @@ constexpr const char* SAVE_LOAD_PERSISTENT_LSE_CASE = "Persist_Gqa40x8WNotAMulti
 constexpr const char* LSE_SUFFIX = "_Lse";
 
 using Mask = SdpaMask;
-using GraphShape = SdpaShape;
+using GraphShape = IngestorSdpaGraphSpec;
 
 struct Tile
 {

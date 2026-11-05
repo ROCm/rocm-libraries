@@ -428,7 +428,7 @@ enum class SdpaMask
 };
 
 // One SDPA forward graph: its tensors' shapes and the attributes a case varies.
-struct SdpaShape
+struct IngestorSdpaGraphSpec
 {
     hipdnn_frontend::DataType dataType;
     int64_t headSize;
@@ -512,7 +512,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
 // explicitly unless the shape omits it. O is laid out explicitly: the frontend's default for
 // an unset output is packed BHSD, which the engines decline. A shape with stats binds the
 // stats output as the frontend does, FLOAT [B, Hq, Sq, 1], packed.
-inline SdpaGraph buildSdpaGraph(const std::string& name, const SdpaShape& shape)
+inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraphSpec& shape)
 {
     constexpr int64_t Q_UID = 1;
     constexpr int64_t K_UID = 2;
