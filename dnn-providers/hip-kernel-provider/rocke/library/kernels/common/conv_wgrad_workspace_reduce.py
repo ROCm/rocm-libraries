@@ -119,6 +119,27 @@ class WgradReduceSpec:
         return kernel_name_join(self.name, *parts)
 
 
+#: The problem :func:`wgrad_reduce_aot_spec` names its kernel after. The kernel
+#: reads every extent from its kernargs, so the problem only reaches the symbol
+#: name; pinning it makes the cached binary's name a function of the dtype and
+#: replica count alone.
+_AOT_NAME_PROBLEM = ConvProblem(N=1, Hi=1, Wi=1, C=1, K=1, Y=1, X=1)
+
+
+def wgrad_reduce_aot_spec(dtype_d: str, ws_replicas: int) -> WgradReduceSpec:
+    """The shape-independent Stage 2 an AOT cache holds for ``dtype_d`` and
+    ``ws_replicas``: the default tile, launched on any problem with that
+    problem's own :func:`wgrad_reduce_grid` and extents."""
+    if ws_replicas < 1:
+        raise ValueError(f"ws_replicas must be >= 1 (got {ws_replicas})")
+    return WgradReduceSpec(
+        problem=_AOT_NAME_PROBLEM,
+        dtype_d=dtype_d,
+        name="rocke_conv_wgrad_ws_reduce",
+        ws_replicas=ws_replicas,
+    )
+
+
 def build_conv_wgrad_workspace_reduce(
     spec: WgradReduceSpec,
     *,

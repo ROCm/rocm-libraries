@@ -25,6 +25,12 @@ calls on ``split_k=-1`` (see :func:`kernels.conv.kernel_label.strip_launch_suffi
 binary was built with an atomic-accumulate epilogue at all
 (``WgradConvSpec``'s ``_needs_atomic``), so an instance baked ``split_k == 1``
 is held to degree 1 regardless of the resolved shape (:func:`_wgrad_split_k`).
+A two-stage instance (``two_stage``) reduces its split-K slices into an f32
+scratch of ``ws_replicas`` dW-sized slabs instead of into dW, so it serves
+every shape its binary takes -- including the odd dW rows the packed 16-bit
+atomic cannot address -- whenever the scratch fits the i32 ABI and K splits at
+least two ways; a second kernel, ``direct_wgrad_ws_reduce``, folds the slabs
+into dW (:func:`_instance_helpers`).
 Five of its seven direct families store one partial
 dW slot per block instead of an atomic add and need a second kernel,
 ``direct_wgrad_fold``, to sum the partitions -- wired the same way the MFMA
@@ -527,22 +533,23 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
         if identity.direction == "wgrad":
-            if identity.two_stage:
-                # Phase 0 (dispatch/grouped_convolution.py): the Stage 2
-                # fp32-workspace reduce kernel this binary's ABI needs is not
-                # wired into launch_plan_for yet -- a declared gap, not a
-                # silent wrong plan, until it is.
-                return False, (
-                    "two-stage wgrad (Stage 2 reduce) is not wired in the "
-                    "dispatcher yet"
-                )
             # WgradConvSpec runs the unfolded problem (see _gemm_problem's
             # docstring: "every other problem (and wgrad) launches as it
             # is"), so admission is checked against it, not the fwd/dgrad
             # width-folded view.
-            return identity_supports_problem(
+            ok, why = identity_supports_problem(
                 identity, _conv_problem(req), req.llvm_flavor
             )
+            if not ok or not identity.two_stage:
+                return ok, why
+            # A two-stage binary has no unsplit form, and its scratch is
+            # addressed through an i32 byte count: the split-K resolution
+            # refuses exactly the shapes it cannot launch.
+            try:
+                _wgrad_split_k(identity, req)
+            except ValueError as e:
+                return False, f"two-stage wgrad: {e}"
+            return True, "ok"
         return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
@@ -617,6 +624,14 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     return _direct_geometry(spec)[1]
 
 
+def _ws_replicas(identity: KernelIdentity) -> int:
+    """Scratch slabs per group of a two-stage wgrad binary. Identities that
+    predate the field were all built with the default count."""
+    from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
+
+    return identity.ws_replicas or _DEFAULT_WS_REPLICAS
+
+
 def _split_c(identity: KernelIdentity) -> int:
     """The C-split degree of a forward direct instance (1: not split)."""
     if not identity.is_direct or identity.direction != "direct_fwd":
@@ -631,8 +646,20 @@ def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
     filter and channel counts alone, so the AOT cache keys them with padding
     and stride zeroed: every instance sharing a filter shares them. A split-C
     forward instance launches the reduction that folds its fp32 partial sums
-    into the output after it; it bakes no shape, only the degree.
+    into the output after it; it bakes no shape, only the degree. A two-stage
+    wgrad instance launches the fold of its f32 scratch slabs into dW after
+    it; that bakes only the dtype and the slab count.
     """
+    if identity.direction == "wgrad" and identity.needs_stage2:
+        from kernels.conv.direct_aot_jobs import _ws_reduce_identity
+
+        reduce_id = _ws_reduce_identity(
+            identity.arch,
+            identity.wave_size,
+            _ws_replicas(identity),
+            identity.dtype_d,
+        )
+        return (dataclasses.replace(reduce_id, llvm_flavor=identity.llvm_flavor),)
     split_c = _split_c(identity)
     if split_c > 1:
         from kernels.conv.direct_aot_jobs import _split_reduce_identity
@@ -688,7 +715,10 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
     if not spec.is_direct:
         return tuple(
             conv_args_signature(
-                spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
+                spec.dtype,
+                direction=spec.direction,
+                is_3d=spec.identity.is_3d,
+                two_stage=spec.direction == "wgrad" and spec.identity.two_stage,
             )
         )
     # The MFMA dgrad's own kernel, and the FPROP_SINGLE dgrad variants
@@ -818,7 +848,12 @@ class ConvLaunchStep:
     ``identity`` is ``None``, ``kernel`` holds its ``name`` and
     ``build(arch) -> KernelDef``, and ``kernargs`` spells every kernarg of
     ``signature`` in order: ``("buf", buffer, byte_offset)``,
-    ``("bytes", buffer)`` (its size) or ``("i32", value)``.
+    ``("bytes", buffer)`` (its size) or ``("i32", value)``. An AOT helper whose
+    ABI is not a convolution's (the two-stage wgrad's Stage 2) spells its
+    kernargs the same way.
+
+    ``workspace`` names the buffer a two-stage wgrad kernel's ``ws_ptr`` /
+    ``ws_bytes`` pair binds.
     """
 
     identity: KernelIdentity | None
@@ -830,6 +865,7 @@ class ConvLaunchStep:
     scalars: tuple[tuple[str, int], ...] = ()
     kernel: object = None
     kernargs: tuple = ()
+    workspace: str | None = None
 
 
 @dataclass(frozen=True)
@@ -842,7 +878,10 @@ class ConvLaunchPlan:
     ``dy``/``w``/``dx`` (dgrad), the caller-allocated scratch in
     ``workspaces`` (name -> bytes, no initial contents), and for implicit-GEMM
     dgrad ``sub_gemms``, a device copy of the i32 table ``sub_gemm_table``
-    (``num_sub_gemms`` records).
+    (``num_sub_gemms`` records). ``zero`` names the buffers to clear before
+    every run, because a step accumulates into them: dW under an
+    implicit-GEMM wgrad's packed split-K atomic or an unfolded direct wgrad
+    pipeline's atomic add, the f32 scratch under a two-stage wgrad.
     """
 
     steps: tuple[ConvLaunchStep, ...]
@@ -854,6 +893,7 @@ class ConvLaunchPlan:
     # already assumes, so it is only threaded through when it would change
     # anything.
     split_k: int = 1
+    zero: tuple[str, ...] = ()
 
     def values(
         self, step: ConvLaunchStep, ptrs: Mapping[str, int], sizes: Mapping[str, int]
@@ -889,6 +929,9 @@ class ConvLaunchPlan:
             }
         if self.split_k != 1:
             extras["split_k"] = self.split_k
+        if step.workspace is not None:
+            extras["ws_ptr"] = ptrs[step.workspace]
+            extras["ws_bytes"] = sizes[step.workspace]
         return step.args.to_launch_values(
             ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d], **extras
         )
@@ -919,14 +962,18 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         if spec.direction == "wgrad":
             # WgradConvSpec runs the raw (unfolded) problem -- see _grid.
             split_k = _wgrad_split_k(ident, req)
+            problem = _conv_problem(req)
             args = ConvArgs.from_problem(
-                _conv_problem(req),
+                problem,
                 direction="wgrad",
                 tile_m=ident.tile_m,
                 tile_n=ident.tile_n,
                 tile_k=ident.tile_k,
             )
-            return ConvLaunchPlan((step(args),), split_k=split_k)
+            if not ident.needs_stage2:
+                zero = ("dw",) if split_k > 1 else ()
+                return ConvLaunchPlan((step(args),), split_k=split_k, zero=zero)
+            return _wgrad_two_stage_plan(spec, problem, step(args), split_k)
         args = ConvArgs.from_problem(
             _gemm_problem(req),
             direction=spec.direction,
@@ -955,7 +1002,9 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
             args = ConvArgs.from_problem(launch_spec.problem, direction="fwd")
         else:
             args = ConvArgs.from_problem(problem, direction=spec.direction)
-        return ConvLaunchPlan((step(args),))
+        # The unfolded direct wgrad pipelines atomic-add into their fp32 dW.
+        zero = ("dw",) if spec.direction == "wgrad" else ()
+        return ConvLaunchPlan((step(args),), zero=zero)
     if ident.algorithm in DIRECT_WGRAD_FOLDED:
         # The pass stores one partial slot per partition into the scratch
         # ``ws``; the fold sums them into dW (written whole, no zeroing), as
@@ -1048,6 +1097,54 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         )
     )
     return ConvLaunchPlan(tuple(steps), direct_dgrad_workspaces(problem, knobs))
+
+
+def _wgrad_two_stage_plan(
+    spec: ConvInstanceSpec, problem: ConvProblem, conv: ConvLaunchStep, split_k: int
+) -> ConvLaunchPlan:
+    """Stage 1 f32-atomic-adds its slices into the zeroed scratch ``ws``;
+    Stage 2 folds the scratch's slabs into dW, written whole (as
+    :func:`kernels.common.conv_implicit_gemm_wgrad_two_stage.build_implicit_gemm_conv_wgrad_two_stage`
+    pipelines them)."""
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        wgrad_workspace_nbytes,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        wgrad_reduce_grid,
+        wgrad_reduce_signature,
+    )
+
+    (reduce_id,) = spec.helpers
+    reduce_spec = WgradReduceSpec(
+        problem=problem,
+        dtype_d=reduce_id.dtype_d,
+        groups=problem.groups,
+        ws_replicas=_ws_replicas(spec.identity),
+    )
+    fold = ConvLaunchStep(
+        reduce_id,
+        wgrad_reduce_grid(reduce_spec),
+        (reduce_spec.block_size, 1, 1),
+        tuple(wgrad_reduce_signature(reduce_spec)),
+        ("ws", None, "dw"),
+        kernargs=(
+            ("buf", "ws", 0),
+            ("buf", "dw", 0),
+            ("i32", reduce_spec.wg_M),
+            ("i32", reduce_spec.wg_N),
+            ("bytes", "ws"),
+            ("bytes", "dw"),
+            ("i32", problem.groups),
+        ),
+    )
+    ws_bytes = wgrad_workspace_nbytes(problem, _ws_replicas(spec.identity))
+    return ConvLaunchPlan(
+        (dataclasses.replace(conv, workspace="ws"), fold),
+        {"ws": ws_bytes},
+        split_k=split_k,
+        zero=("ws",),
+    )
 
 
 # ---------------------------------------------------------------------------

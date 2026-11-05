@@ -57,8 +57,10 @@
 // no geometry at all and therefore admit every problem of their dtype -- unlike dgrad there
 // is no tilde/halo/patch capability to gate on) and every packaged direct wgrad pipeline
 // (kernel_family 1: direct_wgrad, direct_wgrad_tiled, direct_wgrad_dw, direct_wgrad_dw_cols,
-// direct_wgrad_dw_mfma, direct_wgrad_gather, direct_wgrad_grouped_mfma), plus the
-// direct_wgrad_fold helper (kernel_family 2) the engine never offers as a candidate.
+// direct_wgrad_dw_mfma, direct_wgrad_gather, direct_wgrad_grouped_mfma), plus the helpers
+// (kernel_family 2: the direct_wgrad_fold of the folded pipelines and the
+// direct_wgrad_ws_reduce Stage 2 of the two-stage implicit-GEMM instances) the engine never
+// offers as candidates.
 //
 // Unlike dgrad's suite, this one does not hardcode a per-graph instance census against the
 // Python builder: because an implicit-GEMM wgrad instance bakes nothing, "how many catalog
@@ -93,7 +95,7 @@ constexpr int64_t DIRECT_FAMILY = 1;
 constexpr int64_t HELPER_FAMILY = 2;
 /// Every direct_variant a selectable kernel carries, "none" being implicit GEMM: the
 /// packaged wgrad direct pipelines of builders/common/convolution_backward_filter.py
-/// (AOT_WGRAD_DIRECT_ALGORITHMS), less the fold helper, which never serves a problem.
+/// (AOT_WGRAD_DIRECT_ALGORITHMS), less the helpers, which never serve a problem.
 constexpr std::array<const char*, 8> VARIANTS{"none",
                                               "direct_wgrad",
                                               "direct_wgrad_tiled",

@@ -44,8 +44,9 @@
 /// hipkernel:Gfx950ConvWgradAot: shape-generic AOT instances of rocKE's backward-weight
 /// (wgrad) convolution kernels. Each kernel is one rocKE wgrad KernelIdentity: an
 /// implicit-GEMM tile (kernel_family 0), one of rocKE's seven direct wgrad pipelines
-/// (kernel_family 1), or the partial-slot fold the five folded pipelines run after their
-/// pass (kernel_family 2, never matched; a folded dispatch loads it beside its instance).
+/// (kernel_family 1), or a helper (kernel_family 2, never matched): the partial-slot fold
+/// the five folded pipelines run after their pass, or the Stage 2 fold a two-stage
+/// implicit-GEMM instance runs after its own; a dispatch loads it beside its instance.
 /// Matching is the launch plan of Gfx950ConvWgradGeometry.hpp: a kernel serves a graph
 /// exactly when it has a plan there, and the dispatch runs that plan. Mirrors
 /// rocke/library/builders/common/convolution_backward_filter.py.
@@ -362,19 +363,21 @@ std::optional<wgrad::AotInstance> aotInstance(const KernelDefinition& kernel)
     return wgrad::parseAotInstance(KernelMetadata{kernel});
 }
 
-/// Where a fold helper is looked up: the same pack, the same archive, the instance's dtype
-/// and the fold's taps (gfx950_conv_wgrad_aot_fold_fields).
+/// Where a helper is looked up: the same pack, the same archive, the instance's dtype, the
+/// helper variant and what it bakes -- the fold's taps (gfx950_conv_wgrad_aot_fold_fields)
+/// or the Stage 2 fold's ws_replicas (gfx950_conv_wgrad_aot_ws_reduce_fields).
 struct HelperKey
 {
     std::string archive;
     DescriptorId packId;
     wgrad::ElementType dtype;
-    int64_t taps;
+    wgrad::DirectVariant variant;
+    int64_t parameter;
 
     bool operator<(const HelperKey& other) const
     {
-        return std::tie(archive, packId, dtype, taps)
-               < std::tie(other.archive, other.packId, other.dtype, other.taps);
+        return std::tie(archive, packId, dtype, variant, parameter)
+               < std::tie(other.archive, other.packId, other.dtype, other.variant, other.parameter);
     }
 };
 
@@ -445,22 +448,34 @@ HelperRegistry& helperRegistry()
     return s_registry;
 }
 
-/// The fold a folded instance runs on @p problem: its taps follow the problem's filter
-/// and (per-channel folds) cpg, which the capability match pins to the instance's own.
-std::optional<KernelDefinition> findFold(const KernelDefinition& kernel,
-                                         const wgrad::AotInstance& instance,
-                                         const wgrad::Problem& problem,
-                                         const wgrad::Geometry& geometry)
+/// The helper a plan step of @p instance launches on @p problem: a folded instance's fold,
+/// whose taps follow the problem's filter and (per-channel folds) cpg, which the
+/// capability match pins to the instance's own; a two-stage instance's Stage 2, keyed by
+/// its ws_replicas.
+std::optional<KernelDefinition> findHelper(const KernelDefinition& kernel,
+                                           const wgrad::AotInstance& instance,
+                                           wgrad::PlanKernel helper,
+                                           const wgrad::Problem& problem,
+                                           const wgrad::Geometry& geometry)
 {
-    if(!instance.direct)
+    if(helper == wgrad::PlanKernel::FOLD && instance.direct)
     {
-        return std::nullopt;
+        return helperRegistry().find(HelperKey{
+            archiveOf(kernel),
+            kernel.packId,
+            instance.dtype,
+            wgrad::DirectVariant::FOLD,
+            wgrad::foldTaps(instance.direct->variant, problem.y, problem.x, geometry.cpg)});
     }
-    return helperRegistry().find(
-        HelperKey{archiveOf(kernel),
-                  kernel.packId,
-                  instance.dtype,
-                  wgrad::foldTaps(instance.direct->variant, problem.y, problem.x, geometry.cpg)});
+    if(helper == wgrad::PlanKernel::WS_REDUCE && instance.implicit)
+    {
+        return helperRegistry().find(HelperKey{archiveOf(kernel),
+                                               kernel.packId,
+                                               instance.dtype,
+                                               wgrad::DirectVariant::WS_REDUCE,
+                                               wgrad::effectiveWsReplicas(*instance.implicit)});
+    }
+    return std::nullopt;
 }
 
 /// What hipkernel:Gfx950ConvWgradAot reads of one kernel on every graph, decoded from its
@@ -478,8 +493,8 @@ AotPrepared decodeAot(const KernelDefinition& kernel)
 
 /// The KernelPrepareFn registered under the kernel matcher's symbol: the SDK runs it once
 /// per kernel when the engine loads, so matching a graph reads AotPrepared instead of
-/// parsing some fifty metadata fields per kernel. It also files each fold helper for the
-/// folded pipelines to find. Must not throw.
+/// parsing some fifty metadata fields per kernel. It also files each helper for the
+/// instances that launch it to find. Must not throw.
 std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
 {
     try
@@ -488,10 +503,14 @@ std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
         const auto& instance = prepared->instance;
         if(instance && instance->family == wgrad::KernelFamily::HELPER && instance->direct)
         {
+            const auto variant = instance->direct->variant;
             helperRegistry().add(HelperKey{archiveOf(kernel),
                                            kernel.packId,
                                            instance->dtype,
-                                           instance->direct->knobs.taps},
+                                           variant,
+                                           variant == wgrad::DirectVariant::WS_REDUCE
+                                               ? instance->direct->wsReplicas
+                                               : instance->direct->knobs.taps},
                                  kernel);
         }
         return prepared;
@@ -516,7 +535,7 @@ const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scrat
 
 /// The plan of @p kernel on @p matched when it is packaged code of a reviewed launch
 /// contract that computes it: the family the graph's dW dtype admits, the instance's plan
-/// (dtype pinned there), and the fold of a folded pipeline present in its pack. The one
+/// (dtype pinned there), and every helper the plan launches present in its pack. The one
 /// path every native hook takes, so the matcher, workspaceBytes() and prepare() can never
 /// disagree on what is served.
 std::optional<wgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
@@ -536,8 +555,9 @@ std::optional<wgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
     }
     for(const auto& step : plan->steps)
     {
-        if(step.kernel == wgrad::PlanKernel::FOLD
-           && !findFold(kernel, *prepared.instance, matched.problem, matched.geometry))
+        if(step.kernel != wgrad::PlanKernel::SELF
+           && !findHelper(
+               kernel, *prepared.instance, step.kernel, matched.problem, matched.geometry))
         {
             return std::nullopt;
         }
@@ -634,14 +654,39 @@ std::vector<ArgumentSpec> arguments(const std::array<std::string_view, Pointers>
     return out;
 }
 
+/// The two-stage implicit-GEMM block: the one-stage one with (ws_ptr*, ws_bytes) before
+/// ks / ks_count (conv_args_signature(direction="wgrad", two_stage=True)).
+std::vector<ArgumentSpec> twoStageArguments()
+{
+    auto out = arguments<3>(
+        {"dY", "X", "dW"}, {"dY_bytes", "X_bytes", "dW_bytes"}, wgrad::IMPLICIT_KERNARG_NAMES);
+    const auto at = out.begin() + 6 + wgrad::TWO_STAGE_WS_POSITION;
+    out.insert(at, {{"ws_ptr", true}, {"ws_bytes", false}});
+    return out;
+}
+
+/// The Stage 2 fold's (ws_ptr*, dw_ptr*, wg_M, wg_N, ws_bytes, dw_bytes, groups)
+/// (wgrad_reduce_signature).
+std::vector<ArgumentSpec> wsReduceArguments()
+{
+    std::vector<ArgumentSpec> out{{"ws_ptr", true}, {"dw_ptr", true}};
+    for(const auto name : wgrad::WS_REDUCE_KERNARG_NAMES)
+    {
+        out.push_back({name, false});
+    }
+    return out;
+}
+
 /// The signature of a step's ABI: the 48-argument one-stage implicit-GEMM wgrad block
-/// (conv_args_signature(direction="wgrad")), the 20-argument direct wgrad block with its
-/// fp32 D, and the fold's (A*, D*, A_bytes, D_bytes, parts, channels)
-/// (dw_wgrad_fold_signature).
+/// (conv_args_signature(direction="wgrad")) and its 50-argument two-stage form, the
+/// 20-argument direct wgrad block with its fp32 D, the fold's (A*, D*, A_bytes, D_bytes,
+/// parts, channels) (dw_wgrad_fold_signature), and the Stage 2 fold's.
 const std::vector<KernelArgument>& stepSignature(wgrad::Abi abi)
 {
     static const auto s_implicit = kernelSignature(arguments<3>(
         {"dY", "X", "dW"}, {"dY_bytes", "X_bytes", "dW_bytes"}, wgrad::IMPLICIT_KERNARG_NAMES));
+    static const auto s_twoStage = kernelSignature(twoStageArguments());
+    static const auto s_wsReduce = kernelSignature(wsReduceArguments());
     static const auto s_direct = kernelSignature(arguments<3>(
         {"A", "B", "D"}, {"A_bytes", "B_bytes", "D_bytes"}, wgrad::DIRECT_WGRAD_KERNARG_NAMES));
     static const auto s_fold = kernelSignature(
@@ -652,6 +697,10 @@ const std::vector<KernelArgument>& stepSignature(wgrad::Abi abi)
         return s_implicit;
     case wgrad::Abi::DIRECT_WGRAD:
         return s_direct;
+    case wgrad::Abi::IMPLICIT_TWO_STAGE:
+        return s_twoStage;
+    case wgrad::Abi::WS_REDUCE:
+        return s_wsReduce;
     case wgrad::Abi::FOLD:
     default:
         return s_fold;
@@ -697,12 +746,14 @@ public:
                       std::array<int64_t, 3> bytes,
                       std::vector<PreparedStep> steps,
                       std::vector<wgrad::Workspace> workspaces,
-                      bool zeroDw)
+                      bool zeroDw,
+                      bool zeroWs)
         : _binding(binding)
         , _bytes(bytes)
         , _steps(std::move(steps))
         , _workspaces(std::move(workspaces))
         , _zeroDw(zeroDw)
+        , _zeroWs(zeroWs)
     {
     }
 
@@ -727,6 +778,10 @@ public:
     {
         return _zeroDw;
     }
+    bool zeroWs() const
+    {
+        return _zeroWs;
+    }
 
 private:
     Binding _binding;
@@ -735,6 +790,7 @@ private:
     std::vector<PreparedStep> _steps;
     std::vector<wgrad::Workspace> _workspaces;
     bool _zeroDw;
+    bool _zeroWs;
 };
 
 class ConvWgradDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -745,9 +801,10 @@ public:
     {
     }
 
-    /// The plan's workspace: the folded pipelines' partial slots; none for implicit GEMM or
-    /// the atomic direct pipelines. A kernel the graph does not admit needs none: prepare()
-    /// refuses it, through the same aotKernelPlan.
+    /// The plan's workspace: the folded pipelines' partial slots or a two-stage instance's
+    /// f32 scratch; none for one-stage implicit GEMM or the atomic direct pipelines. A
+    /// kernel the graph does not admit needs none: prepare() refuses it, through the same
+    /// aotKernelPlan.
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
@@ -787,20 +844,22 @@ public:
                 steps.push_back({loadKernel(_loader, context, kernel, step), std::move(step)});
                 continue;
             }
-            const auto fold = findFold(kernel, instance, matched->problem, matched->geometry);
-            if(!fold)
+            const auto helper
+                = findHelper(kernel, instance, step.kernel, matched->problem, matched->geometry);
+            if(!helper)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_wgrad folded instance has no fold helper in its pack");
+                    "gfx950_conv_wgrad instance has no helper of its plan in its pack");
             }
-            steps.push_back({loadKernel(_loader, context, *fold, step), std::move(step)});
+            steps.push_back({loadKernel(_loader, context, *helper, step), std::move(step)});
         }
         return std::make_unique<PreparedConvWgrad>(matched->binding,
                                                    matched->tensorBytes(),
                                                    std::move(steps),
                                                    plan->workspaces,
-                                                   plan->zeroDw);
+                                                   plan->zeroDw,
+                                                   plan->zeroWs);
     }
 
     void launch(const Handle& handle,
@@ -880,6 +939,13 @@ public:
             // Split-K slices and the atomic direct pipelines accumulate into dW.
             checkHip(hipMemsetAsync(dw, 0, static_cast<size_t>(bytes[2]), stream), "dW zero-fill");
         }
+        if(wgradPrepared.zeroWs())
+        {
+            // Two-stage slices accumulate into the f32 scratch.
+            const auto [ws, wsBytes] = region(wgrad::Buffer::WS);
+            checkHip(hipMemsetAsync(ws, 0, static_cast<size_t>(wsBytes), stream),
+                     "workspace zero-fill");
+        }
         for(const auto& [code, step] : wgradPrepared.steps())
         {
             std::array<void*, 3> pointers{};
@@ -895,18 +961,28 @@ public:
                 sizes[i] = static_cast<int32_t>(size);
             }
             std::vector<void*> params;
+            void* wsPointer = nullptr;
             if(step.abi == wgrad::Abi::FOLD)
             {
                 params = {&pointers[0], &pointers[2], &sizes[0], &sizes[2]};
+            }
+            else if(step.abi == wgrad::Abi::WS_REDUCE)
+            {
+                params = {&pointers[0], &pointers[2]};
             }
             else
             {
                 params
                     = {&pointers[0], &pointers[1], &pointers[2], &sizes[0], &sizes[1], &sizes[2]};
             }
-            for(const auto& value : step.values)
+            for(size_t i = 0; i < step.values.size(); ++i)
             {
-                params.push_back(const_cast<int32_t*>(&value));
+                if(step.abi == wgrad::Abi::IMPLICIT_TWO_STAGE && i == wgrad::TWO_STAGE_WS_POSITION)
+                {
+                    wsPointer = region(wgrad::Buffer::WS).first;
+                    params.push_back(&wsPointer);
+                }
+                params.push_back(const_cast<int32_t*>(&step.values[i]));
             }
             code.kernelForStream(stream).launchWithParams(stream, params.data());
         }

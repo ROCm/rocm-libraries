@@ -167,7 +167,7 @@ vocabulary:
   layout: {NHWC: NHWC}
   pipeline: {mem: mem, compv3: compv3, compv4: compv4, direct: direct}
   epilogue: {cshuffle: cshuffle, default: default, direct: direct}
-  direct_variant: {none: none, direct_wgrad: direct_wgrad, direct_wgrad_tiled: direct_wgrad_tiled, direct_wgrad_dw: direct_wgrad_dw, direct_wgrad_dw_cols: direct_wgrad_dw_cols, direct_wgrad_dw_mfma: direct_wgrad_dw_mfma, direct_wgrad_gather: direct_wgrad_gather, direct_wgrad_grouped_mfma: direct_wgrad_grouped_mfma, direct_wgrad_fold: direct_wgrad_fold}
+  direct_variant: {none: none, direct_wgrad: direct_wgrad, direct_wgrad_tiled: direct_wgrad_tiled, direct_wgrad_dw: direct_wgrad_dw, direct_wgrad_dw_cols: direct_wgrad_dw_cols, direct_wgrad_dw_mfma: direct_wgrad_dw_mfma, direct_wgrad_gather: direct_wgrad_gather, direct_wgrad_grouped_mfma: direct_wgrad_grouped_mfma, direct_wgrad_fold: direct_wgrad_fold, direct_wgrad_ws_reduce: direct_wgrad_ws_reduce}
 
 # The cpp_mirror names below are the native pack's: packs/Gfx950ConvWgradNative.cpp and
 # packs/Gfx950ConvWgradGeometry.hpp (not yet landed -- Phase 3/4). Both sides build one
@@ -186,20 +186,20 @@ launch_surface:
   - name: launch_plan
     python_source: builders/common/convolution_backward_filter.py:gfx950_conv_wgrad_aot_plan
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradGeometry.hpp:instancePlan
-    kmd_fields: [kernel_family, direct_variant, tile_m, tile_n, tile_k, vector_size_a, vector_size_b, vector_size_c, grouped, group_merge, split_k, two_stage, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, cpg, kpg]
-    guard: The instance serves the problem exactly when a plan exists. Implicit GEMM follows rocKE's identity_supports_problem and gfx950_conv_wgrad_aot_split_k (which always re-resolves the real split-K degree from the problem, exactly as dispatch.grouped_convolution._wgrad_split_k -- the catalog's own baked split_k is never read back). A two_stage instance is a valid, packageable spec but refuses to plan (the Stage 2 reduce is not wired here either, mirroring dispatch.grouped_convolution's own refusal) -- a declared gap, not a silent mis-plan. Direct kernels follow direct_kernel_sweep's own offer; the two families that write dW directly (direct_wgrad, direct_wgrad_tiled) need it zeroed first, the other five need the fold helper launched after them into the same scratch workspace. library/tests/test_convolution_backward_filter_aot_packaging.py checks the plan against rocKE's own offer and launch values.
+    kmd_fields: [kernel_family, direct_variant, tile_m, tile_n, tile_k, vector_size_a, vector_size_b, vector_size_c, grouped, group_merge, ws_replicas, split_k, two_stage, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, cpg, kpg]
+    guard: The instance serves the problem exactly when a plan exists. Implicit GEMM follows rocKE's identity_supports_problem and gfx950_conv_wgrad_aot_split_k (which always re-resolves the real split-K degree from the problem, exactly as dispatch.grouped_convolution._wgrad_split_k -- the catalog's own baked split_k is never read back). A two_stage instance carries no dW-row parity rule (that is the packed 16-bit atomic's): it plans wherever K splits at least two ways and its ws_replicas f32 scratch fits the i32 ABI (resolve_conv_split_k with the workspace reduction, no unsplit candidate), zeroes that scratch, launches itself into it and then the direct_wgrad_ws_reduce Stage 2 that folds it into dW -- exactly dispatch.grouped_convolution's two-stage plan. Direct kernels follow direct_kernel_sweep's own offer; the two families that write dW directly (direct_wgrad, direct_wgrad_tiled) need it zeroed first, the other five need the fold helper launched after them into the same scratch workspace. library/tests/test_convolution_backward_filter_aot_packaging.py checks the plan against rocKE's own offer and launch values.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvWgradGeometry.cpp
   - name: kernargs_and_execution
     python_source: builders/common/convolution_backward_filter.py:gfx950_conv_wgrad_aot_step_signature
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradNative.cpp:stepSignature
     kmd_fields: [dtype, kernel_family, direct_variant]
-    guard: One kernarg signature per step ABI -- the implicit-GEMM wgrad ABI (dY, X, dW, byte sizes, the problem values and, when split_k != 1, the degree itself), the direct wgrad ABI (fp32 dW), and the fold helper's (parts, channels scalars after A, D). The GPU suite poisons dW and compares every catalog instance with the CPU reference.
+    guard: One kernarg signature per step ABI -- the implicit-GEMM wgrad ABI (dY, X, dW, byte sizes, the problem values and, when split_k != 1, the degree itself), the direct wgrad ABI (fp32 dW), the fold helper's (parts, channels scalars after A, D), the two-stage implicit-GEMM ABI (the implicit one with ws_ptr, ws_bytes before ks, ks_count) and the Stage 2 fold's (ws_ptr, dw_ptr, wg_M, wg_N, ws_bytes, dw_bytes, groups). The GPU suite poisons dW and compares every catalog instance with the CPU reference.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvWgrad.cpp
   - name: helper_fold
     python_source: builders/common/convolution_backward_filter.py:gfx950_conv_wgrad_aot_fold_fields
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradNative.cpp:aotKernelPlan
     kmd_fields: [kernel_family, direct_variant, dtype, taps]
-    guard: The five partial-slot families (direct_wgrad_dw, direct_wgrad_dw_cols, direct_wgrad_dw_mfma, direct_wgrad_gather, direct_wgrad_grouped_mfma) each name a fold-helper step; the native pack resolves it in the same kpack by kernel_family 2, direct_variant direct_wgrad_fold, dtype and taps alone -- a fold helper bakes no filter, stride, padding or channel count at all, unlike dgrad's transpose/reorganize helpers which still bake a filter. A missing helper refuses the instance.
+    guard: The five partial-slot families (direct_wgrad_dw, direct_wgrad_dw_cols, direct_wgrad_dw_mfma, direct_wgrad_gather, direct_wgrad_grouped_mfma) each name a fold-helper step; the native pack resolves it in the same kpack by kernel_family 2, direct_variant direct_wgrad_fold, dtype and taps alone -- a fold helper bakes no filter, stride, padding or channel count at all, unlike dgrad's transpose/reorganize helpers which still bake a filter. A two-stage implicit-GEMM instance names a direct_wgrad_ws_reduce step, resolved by kernel_family 2, that direct_variant, dtype and ws_replicas (gfx950_conv_wgrad_aot_ws_reduce_fields). A missing helper refuses the instance.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvWgradMatchers.cpp
   - name: fallback_selection
     python_source: builders/common/convolution_backward_filter.py:gfx950_conv_wgrad_aot_runtime_candidates
@@ -210,6 +210,6 @@ launch_surface:
   - name: workspace
     python_source: builders/common/convolution_backward_filter.py:Gfx950ConvWgradPlan
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradNative.cpp:workspaceBytes
-    kmd_fields: [kernel_family, direct_variant, taps]
-    guard: The plan's workspace regions (the fold's per-partition scratch only; the implicit-GEMM wgrad launch bakes no sub-GEMM table or MFMA weight scratch the way dgrad/fwd do, so it asks for no workspace). Every kernel uses static LDS only; prepare requests zero dynamic shared memory.
+    kmd_fields: [kernel_family, direct_variant, taps, two_stage, ws_replicas]
+    guard: The plan's workspace regions (the fold's per-partition scratch, or a two-stage implicit-GEMM instance's groups * ws_replicas * kpg * Y * X * cpg f32 scratch, zeroed before every launch; a one-stage implicit-GEMM launch bakes no sub-GEMM table or MFMA weight scratch the way dgrad/fwd do, so it asks for no workspace). Every kernel uses static LDS only; prepare requests zero dynamic shared memory.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvWgrad.cpp

@@ -24,14 +24,13 @@ fp16/bf16 activations, symmetric padding. Eight families are packaged:
   ``> 1`` is whether the packaged binary was built with an atomic-accumulate
   epilogue at all (``WgradConvSpec``'s ``_needs_atomic``), so a ``split_k ==
   1`` instance is held to degree 1 regardless of what the cost model would
-  otherwise pick. The two-stage
-  (f32 workspace + Stage 2 reduce) path is a declared gap: a two-stage
-  instance is still a valid, packageable spec
-  (``supports_gfx950_conv_wgrad_aot`` accepts it, since it is exactly what the
-  catalog built), but :func:`gfx950_conv_wgrad_aot_plan` refuses to plan one
-  -- mirroring Phase 0's dispatcher refusal
-  (``dispatch.grouped_convolution._admits``) exactly, since its Stage 2 kernel
-  is not wired here either.
+  otherwise pick. A two-stage instance (``two_stage``) splits K into an f32
+  scratch of ``ws_replicas`` dW-sized slabs per group instead of
+  atomic-adding a packed 16-bit pair into dW, so it carries no dW-row parity
+  rule: it serves every problem its binary takes on which K splits at least
+  two ways and the scratch fits the i32 ABI -- exactly
+  ``dispatch.grouped_convolution._admits``'s two-stage offer -- and its plan
+  zeroes the scratch, launches the instance, then the Stage 2 fold.
 * **Direct** (``kernel_family`` 1), every one of rocKE's seven wgrad direct
   pipelines (``direct_wgrad``, ``direct_wgrad_tiled``, ``direct_wgrad_dw``,
   ``direct_wgrad_dw_cols``, ``direct_wgrad_dw_mfma``, ``direct_wgrad_gather``,
@@ -44,9 +43,11 @@ fp16/bf16 activations, symmetric padding. Eight families are packaged:
   whole, so it needs no zeroing. Reuses
   :mod:`kernels.conv.direct_variants`'s ``(variant, problem, knobs)`` table
   rather than re-deriving any of the seven families' shape rules.
-* **Fold helper** (``kernel_family`` 2): ``direct_wgrad_fold``, packaged so
-  the five folded pipelines' handler can load it; never serves a problem on
-  its own.
+* **Helpers** (``kernel_family`` 2), never serving a problem on their own:
+  ``direct_wgrad_fold``, packaged so the five folded pipelines' handler can
+  load it, and ``direct_wgrad_ws_reduce``, the two-stage implicit GEMM's
+  Stage 2 (one per dtype and ``ws_replicas``, which it records in that field;
+  every extent is a kernarg).
 
 :func:`gfx950_conv_wgrad_aot_plan` is the launch of one instance on one
 problem -- rocKE's own offer (``identity_supports_problem``,
@@ -106,6 +107,7 @@ DIRECT_VARIANT_WGRAD_DW_MFMA = "direct_wgrad_dw_mfma"
 DIRECT_VARIANT_WGRAD_GATHER = "direct_wgrad_gather"
 DIRECT_VARIANT_WGRAD_GROUPED_MFMA = "direct_wgrad_grouped_mfma"
 HELPER_VARIANT_FOLD = "direct_wgrad_fold"
+HELPER_VARIANT_WS_REDUCE = "direct_wgrad_ws_reduce"
 _DIRECT_VARIANTS = (
     DIRECT_VARIANT_WGRAD,
     DIRECT_VARIANT_WGRAD_TILED,
@@ -115,7 +117,7 @@ _DIRECT_VARIANTS = (
     DIRECT_VARIANT_WGRAD_GATHER,
     DIRECT_VARIANT_WGRAD_GROUPED_MFMA,
 )
-_HELPER_VARIANTS = (HELPER_VARIANT_FOLD,)
+_HELPER_VARIANTS = (HELPER_VARIANT_FOLD, HELPER_VARIANT_WS_REDUCE)
 #: The five families that store partial slots and need the fold helper
 #: (``kernels.conv.direct_variants.DIRECT_WGRAD_FOLDED``).
 _FOLDED_VARIANTS = (
@@ -136,10 +138,8 @@ _PER_CHANNEL_FOLD_VARIANTS = (DIRECT_VARIANT_WGRAD_GATHER, DIRECT_VARIANT_WGRAD_
 AOT_WGRAD_DIRECT_ALGORITHMS = {
     variant: (KERNEL_FAMILY_DIRECT, variant) for variant in _DIRECT_VARIANTS
 }
-AOT_WGRAD_DIRECT_ALGORITHMS[HELPER_VARIANT_FOLD] = (
-    KERNEL_FAMILY_WGRAD_HELPER,
-    HELPER_VARIANT_FOLD,
-)
+for _helper in _HELPER_VARIANTS:
+    AOT_WGRAD_DIRECT_ALGORITHMS[_helper] = (KERNEL_FAMILY_WGRAD_HELPER, _helper)
 
 #: The implicit-GEMM fields of a direct or helper instance hold exactly what
 #: a direct identity leaves them at (mirrors dgrad's ``_DIRECT_PLACEHOLDERS``).
@@ -242,7 +242,11 @@ AOT_WGRAD_DIRECT_KNOBS = {
         "waves_q": "waves_q",
     },
     HELPER_VARIANT_FOLD: {"taps": "taps"},
+    HELPER_VARIANT_WS_REDUCE: {"ws_replicas": "ws_replicas"},
 }
+#: Knobs carried in an implicit-GEMM field rather than a knob field of their
+#: own: the Stage 2 fold's slab count is the instance's ``ws_replicas``.
+_KNOBS_IN_IMPLICIT_FIELDS = ("ws_replicas",)
 #: Every knob field name across every variant, each defaulting to 0 (no wgrad
 #: direct knob is a bool or has a nonzero "unset" meaning, unlike dgrad's
 #: ``lds_pad``/``waves_per_eu``).
@@ -250,6 +254,7 @@ _KNOB_DEFAULTS = {
     name: 0
     for mapping in AOT_WGRAD_DIRECT_KNOBS.values()
     for name in mapping.values()
+    if name not in _KNOBS_IN_IMPLICIT_FIELDS
 }
 #: Fields appended after the implicit-GEMM ones. An implicit-GEMM instance
 #: leaves each at this value; a direct or helper instance leaves the knobs
@@ -490,17 +495,15 @@ class Gfx950ConvWgradAotSpec:
     this binary at all, so the resolved degree is held to 1 regardless of
     what the problem shape would otherwise call for. It otherwise exists so
     the reconstructed identity (:meth:`to_identity`) hashes back to
-    ``instance_id``. ``two_stage`` is carried the same way, purely for
-    identity reconstruction: a spec with it set is a valid, packageable
-    instance (``supports_gfx950_conv_wgrad_aot`` accepts it), but
-    :func:`gfx950_conv_wgrad_aot_plan` refuses to plan it, mirroring
-    ``dispatch.grouped_convolution._admits``'s refusal exactly (the Stage 2
-    reduce kernel is not wired into this adapter either). Two-stage instances
-    are explicitly out of scope for this phase, not silently mis-planned.
+    ``instance_id``. ``two_stage`` selects the f32-scratch reduction: its
+    plan launches the ``direct_wgrad_ws_reduce`` helper of the same dtype and
+    ``ws_replicas`` after the instance.
 
     A two-stage *implicit-GEMM* instance is the only one; the direct and
     helper families have no two-stage form at all (the catalog never bakes
-    one), so ``two_stage`` is always 0 on those.
+    one), so ``two_stage`` is always 0 on those. ``ws_replicas`` is 0 on them
+    too, except on the ``direct_wgrad_ws_reduce`` helper, which records its
+    slab count there.
     """
 
     dtype: str
@@ -582,6 +585,11 @@ class Gfx950ConvWgradAotSpec:
         return self.kernel_family == KERNEL_FAMILY_WGRAD_HELPER
 
     @property
+    def is_ws_reduce(self) -> bool:
+        """The two-stage implicit GEMM's Stage 2 fold."""
+        return self.direct_variant == HELPER_VARIANT_WS_REDUCE
+
+    @property
     def is_folded(self) -> bool:
         """A direct instance whose pipeline needs the fold helper after it."""
         return self.direct_variant in _FOLDED_VARIANTS
@@ -640,6 +648,15 @@ class Gfx950ConvWgradAotSpec:
             "wave_size": self.wave_size,
             "llvm_flavor": PACKAGED_LLVM_FLAVOR,
         }
+        if self.is_ws_reduce:
+            from dataclasses import replace as _replace
+
+            from kernels.conv.direct_aot_jobs import _ws_reduce_identity
+
+            return _replace(
+                _ws_reduce_identity(_ARCH, self.wave_size, self.ws_replicas, self.dtype),
+                llvm_flavor=PACKAGED_LLVM_FLAVOR,
+            )
         if self.is_direct:
             return KernelIdentity(
                 direction="direct_wgrad_helper" if self.is_helper else "direct_wgrad",
@@ -765,6 +782,10 @@ class Gfx950ConvWgradAotSpec:
         for shapes it cannot compute."""
         if not self.is_direct:
             raise ValueError("only a direct/helper instance has a capability probe")
+        if self.is_ws_reduce:
+            raise ValueError(
+                "the two-stage Stage 2 fold bakes no capability; it has no probe"
+            )
         from kernels.conv.direct_aot_jobs import DirectCaps, probe_problem
 
         caps = DirectCaps(
@@ -783,7 +804,14 @@ class Gfx950ConvWgradAotSpec:
         )
 
     def to_direct_spec(self):
-        """The rocKE builder spec for the capability probe problem."""
+        """The rocKE builder spec for the capability probe problem (the
+        shape-independent spec for the Stage 2 fold)."""
+        if self.is_ws_reduce:
+            from kernels.common.conv_wgrad_workspace_reduce import (
+                wgrad_reduce_aot_spec,
+            )
+
+            return wgrad_reduce_aot_spec(self.dtype, self.ws_replicas)
         return self.rocke_direct_spec(self.probe_problem())
 
     def kernel_name(self) -> str:
@@ -826,6 +854,20 @@ def gfx950_conv_wgrad_aot_fold_fields(spec: Gfx950ConvWgradAotSpec) -> dict:
     }
 
 
+def gfx950_conv_wgrad_aot_ws_reduce_fields(spec: Gfx950ConvWgradAotSpec) -> dict:
+    """The Stage 2 fold a two-stage implicit-GEMM instance pulls in, as the
+    KMD field values that identify it in the catalog: its dtype and slab
+    count (``dispatch.grouped_convolution._instance_helpers``)."""
+    if spec.is_direct or not spec.two_stage:
+        raise ValueError("only a two-stage implicit-GEMM instance has a Stage 2")
+    return {
+        "dtype": spec.dtype,
+        "kernel_family": KERNEL_FAMILY_WGRAD_HELPER,
+        "direct_variant": HELPER_VARIANT_WS_REDUCE,
+        "ws_replicas": spec.ws_replicas or _wgrad._DEFAULT_WS_REPLICAS,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -847,6 +889,10 @@ def _direct_error(spec: Gfx950ConvWgradAotSpec) -> str:
     """The direct and helper instance contract, before rocKE's validators."""
     for name, value in _DIRECT_PLACEHOLDERS.items():
         actual = getattr(spec, name)
+        if name == "ws_replicas" and spec.is_ws_reduce:
+            if type(actual) is not int or not 1 <= actual <= _INT32_MAX:
+                return "the Stage 2 fold records its ws_replicas, a positive count"
+            continue
         if actual != value or type(actual) is not type(value):
             return f"a direct instance must set {name} to {value!r}, got {actual!r}"
     if spec.wave_size != _WAVE_SIZE:
@@ -860,7 +906,7 @@ def _direct_error(spec: Gfx950ConvWgradAotSpec) -> str:
     if spec.is_helper:
         for name in _DIRECT_CAPABILITY_FIELDS:
             if getattr(spec, name) != 0:
-                return f"a fold-helper instance records {name} as 0"
+                return f"a helper instance records {name} as 0"
     else:
         for name in _DIRECT_CAPABILITY_FIELDS:
             value = getattr(spec, name)
@@ -918,9 +964,7 @@ def supports_gfx950_conv_wgrad_aot(
     spec: Gfx950ConvWgradAotSpec, *, arch: str = _ARCH
 ) -> tuple[bool, str]:
     """Whether ``spec`` is a packageable instance; rocKE's validators decide
-    last. Unlike :func:`gfx950_conv_wgrad_aot_plan`, a two-stage implicit-GEMM
-    instance is a perfectly valid, packageable spec -- it is the *planning*
-    of one this adapter refuses (the Stage 2 reduce is not wired)."""
+    last."""
     if arch != _ARCH:
         return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
     if not isinstance(spec, Gfx950ConvWgradAotSpec):
@@ -1022,7 +1066,7 @@ def supports_gfx950_conv_wgrad_aot(
 # The launch plan
 # ---------------------------------------------------------------------------
 
-#: The kernel a plan step launches: the instance itself, or the fold helper.
+#: The kernel a plan step launches: the instance itself, or a helper.
 KERNEL_SELF = "self"
 #: The ABI a plan step launches with.
 #: ``implicit_wgrad``: the implicit-GEMM wgrad block (``dY, X, dW``, byte
@@ -1032,15 +1076,29 @@ ABI_IMPLICIT = "implicit_wgrad"
 ABI_DIRECT_WGRAD = "direct_wgrad"
 #: ``fold``: the fold helper's ``parts, channels`` scalars after ``A, D``.
 ABI_FOLD = "fold"
-#: Buffers a step binds: the three graph tensors, and the fold scratch.
+#: ``implicit_wgrad_two_stage``: the implicit-GEMM block with the scratch
+#: pair (``ws_ptr``, ``ws_bytes``) before ``ks``/``ks_count``. Its values
+#: are every i32 after the operands' byte sizes; the scratch pointer is the
+#: ``ws`` workspace.
+ABI_IMPLICIT_TWO_STAGE = "implicit_wgrad_two_stage"
+#: ``ws_reduce``: the Stage 2 fold's ``ws_ptr, dw_ptr`` then ``wg_M, wg_N,
+#: ws_bytes, dw_bytes, groups``.
+ABI_WS_REDUCE = "ws_reduce"
+#: Buffers a step binds: the three graph tensors, and the scratch.
 BUFFER_DY = "dy"
 BUFFER_X = "x"
 BUFFER_DW = "dw"
 BUFFER_WS = "ws"
 
 #: The integer codes :meth:`Gfx950ConvWgradPlan.serialize` writes.
-PLAN_KERNEL_CODES = {KERNEL_SELF: 0, HELPER_VARIANT_FOLD: 1}
-PLAN_ABI_CODES = {ABI_IMPLICIT: 0, ABI_DIRECT_WGRAD: 1, ABI_FOLD: 2}
+PLAN_KERNEL_CODES = {KERNEL_SELF: 0, HELPER_VARIANT_FOLD: 1, HELPER_VARIANT_WS_REDUCE: 2}
+PLAN_ABI_CODES = {
+    ABI_IMPLICIT: 0,
+    ABI_DIRECT_WGRAD: 1,
+    ABI_FOLD: 2,
+    ABI_IMPLICIT_TWO_STAGE: 3,
+    ABI_WS_REDUCE: 4,
+}
 PLAN_BUFFER_CODES = {None: -1, BUFFER_DY: 0, BUFFER_X: 1, BUFFER_DW: 2, BUFFER_WS: 3}
 
 _FNV_OFFSET = 0xCBF29CE484222325
@@ -1052,9 +1110,8 @@ _U64 = (1 << 64) - 1
 class Gfx950ConvWgradStep:
     """One kernel launch of a plan.
 
-    ``kernel`` is :data:`KERNEL_SELF` or :data:`HELPER_VARIANT_FOLD`;
-    ``buffers`` the ``A``, ``B`` and ``D`` operands (the fold's ``B`` is
-    ``None``). ``values`` are the by-value i32 arguments after the operands
+    ``kernel`` is :data:`KERNEL_SELF` or a helper variant; ``buffers`` the
+    ``A``, ``B`` and ``D`` operands (a helper's ``B`` is ``None``). ``values`` are the by-value i32 arguments after the operands
     and their byte sizes, in ABI order; for implicit GEMM that is the problem
     values and, when ``split_k != 1``, ``split_k`` itself. The workgroup is
     ``(block, 1, 1)``.
@@ -1071,7 +1128,8 @@ class Gfx950ConvWgradStep:
 @dataclass(frozen=True)
 class Gfx950ConvWgradPlan:
     """Everything hipkernel:Gfx950ConvWgradAot does to run one instance on one
-    problem, in order: zero dW when ``zero_dw``, then launch ``steps``.
+    problem, in order: zero dW when ``zero_dw`` and the ``ws`` workspace when
+    ``zero_ws``, then launch ``steps``.
 
     ``launched`` is the problem the kernels see -- unfolded, the graph's own
     (wgrad's reduction spans the whole batch, so there is no batch-slicing
@@ -1089,6 +1147,7 @@ class Gfx950ConvWgradPlan:
     #: the spec -- see :func:`gfx950_conv_wgrad_aot_split_k`). 1 everywhere a
     #: launch does not split.
     split_k: int = 1
+    zero_ws: bool = False
 
     @property
     def workspace_bytes(self) -> int:
@@ -1113,6 +1172,7 @@ class Gfx950ConvWgradPlan:
         """The plan as one integer sequence, the native pack's format."""
         out = [
             int(self.zero_dw),
+            int(self.zero_ws),
             self.split_k,
             self.workspace_bytes,
             len(self.workspaces),
@@ -1150,6 +1210,15 @@ def gfx950_conv_wgrad_aot_step_signature(abi: str, dtype: str) -> list[dict]:
         )
 
         return dw_wgrad_fold_signature(DwWgradFoldSpec(taps=1))
+    if abi == ABI_IMPLICIT_TWO_STAGE:
+        return conv_args_signature(dtype, direction="wgrad", two_stage=True)
+    if abi == ABI_WS_REDUCE:
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            wgrad_reduce_aot_spec,
+            wgrad_reduce_signature,
+        )
+
+        return wgrad_reduce_signature(wgrad_reduce_aot_spec(dtype, 1))
     raise ValueError(f"unknown step ABI {abi!r}")
 
 
@@ -1159,9 +1228,14 @@ def _fits_i32(values) -> bool:
 
 def _launch_values(conv_args, bytes_: tuple[int, int, int], **extra) -> tuple:
     """``ConvArgs.to_launch_values`` past the operands and their sizes, as
-    ``(name, value)`` pairs in ABI order."""
+    ``(name, value)`` pairs in ABI order -- the by-value ones: a two-stage
+    launch's ``ws_ptr`` is the ``ws`` workspace, bound at launch."""
     values = conv_args.to_launch_values(0, 0, 0, *bytes_, **extra)
-    names = [name for name, _ in conv_args.arg_names()]
+    names = [
+        name
+        for name, _ in conv_args.arg_names(two_stage="ws_ptr" in extra)
+        if name != "ws_ptr"
+    ]
     return tuple((name, values[name]) for name in names[6:])
 
 
@@ -1198,6 +1272,9 @@ def gfx950_conv_wgrad_aot_split_k(
     """
     if spec.split_k == 1:
         return 1
+    # Raises ValueError for a two-stage instance on a problem it cannot
+    # launch (one K tile, no gridDim.z budget, or a scratch past i32): it has
+    # no unsplit form to fall back to.
     from kernels.common.conv_split_k import resolve_conv_split_k
 
     resolved = resolve_conv_split_k(
@@ -1222,22 +1299,21 @@ def _implicit_plan(
     spec: Gfx950ConvWgradAotSpec, problem: Gfx950ConvWgradProblem
 ) -> tuple[Gfx950ConvWgradPlan | None, str]:
     """rocKE's offer for an implicit-GEMM wgrad binary
-    (``identity_supports_problem``) plus the launch bounds the 32-bit launch
-    needs, mirroring ``dispatch.grouped_convolution._grid``'s wgrad branch."""
+    (``identity_supports_problem``; for a two-stage one also a split-K degree
+    its scratch can carry) plus the launch bounds the 32-bit launch needs,
+    mirroring ``dispatch.grouped_convolution._grid``'s wgrad branch."""
     from kernels.conv.kernel_identity import identity_supports_problem
 
-    if spec.two_stage:
-        return None, (
-            "two-stage wgrad (Stage 2 reduce) is not wired in this adapter "
-            "yet (mirrors dispatch.grouped_convolution._admits's refusal)"
-        )
     identity = spec.to_identity()
     p = problem.to_problem()
     ok, why = identity_supports_problem(identity, p, llvm_flavor=identity.llvm_flavor)
     if not ok:
         return None, why
     threads = spec.warp_m * spec.warp_n * spec.wave_size
-    split_k = gfx950_conv_wgrad_aot_split_k(spec, problem)
+    try:
+        split_k = gfx950_conv_wgrad_aot_split_k(spec, problem)
+    except ValueError as exc:
+        return None, f"two-stage wgrad: {exc}"
     args = ConvArgs.from_problem(
         p, direction="wgrad", tile_m=spec.tile_m, tile_n=spec.tile_n, tile_k=spec.tile_k
     )
@@ -1250,20 +1326,77 @@ def _implicit_plan(
     why = _grid_reason(grid, threads, _INT32_MAX)
     if why:
         return None, f"wgrad tile grid: {why}"
-    values = _launch_values(args, problem.tensor_bytes(dw_bytes=2), split_k=split_k)
+    tensors = problem.tensor_bytes(dw_bytes=2)
+    if not spec.two_stage:
+        values = _launch_values(args, tensors, split_k=split_k)
+        if not _fits_i32(v for _, v in values):
+            return None, "a launch value leaves the signed 32-bit kernel ABI"
+        step = Gfx950ConvWgradStep(
+            KERNEL_SELF,
+            ABI_IMPLICIT,
+            grid,
+            threads,
+            (BUFFER_DY, BUFFER_X, BUFFER_DW),
+            values,
+        )
+        return (
+            Gfx950ConvWgradPlan(
+                launched=problem, steps=(step,), zero_dw=split_k > 1, split_k=split_k
+            ),
+            "ok",
+        )
+
+    # Two-stage: Stage 1 f32-atomic-adds its slices into the zeroed scratch,
+    # Stage 2 folds the scratch's slabs into dW, written whole.
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        wgrad_workspace_nbytes,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        wgrad_reduce_grid,
+    )
+
+    replicas = spec.ws_replicas or _wgrad._DEFAULT_WS_REPLICAS
+    ws_bytes = wgrad_workspace_nbytes(p, replicas)
+    values = _launch_values(args, tensors, split_k=split_k, ws_ptr=0, ws_bytes=ws_bytes)
     if not _fits_i32(v for _, v in values):
         return None, "a launch value leaves the signed 32-bit kernel ABI"
-    step = Gfx950ConvWgradStep(
+    stage1 = Gfx950ConvWgradStep(
         KERNEL_SELF,
-        ABI_IMPLICIT,
+        ABI_IMPLICIT_TWO_STAGE,
         grid,
         threads,
         (BUFFER_DY, BUFFER_X, BUFFER_DW),
         values,
     )
+    reduce_spec = WgradReduceSpec(
+        problem=p, dtype_d=spec.dtype, groups=p.groups, ws_replicas=replicas
+    )
+    reduce_grid = wgrad_reduce_grid(reduce_spec)
+    why = _grid_reason(reduce_grid, reduce_spec.block_size, _INT32_MAX)
+    if why:
+        return None, f"Stage 2: {why}"
+    stage2 = Gfx950ConvWgradStep(
+        HELPER_VARIANT_WS_REDUCE,
+        ABI_WS_REDUCE,
+        reduce_grid,
+        reduce_spec.block_size,
+        (BUFFER_WS, None, BUFFER_DW),
+        (
+            ("wg_M", reduce_spec.wg_M),
+            ("wg_N", reduce_spec.wg_N),
+            ("ws_bytes", ws_bytes),
+            ("dw_bytes", tensors[2]),
+            ("groups", p.groups),
+        ),
+    )
     return (
         Gfx950ConvWgradPlan(
-            launched=problem, steps=(step,), zero_dw=split_k > 1, split_k=split_k
+            launched=problem,
+            steps=(stage1, stage2),
+            workspaces=((BUFFER_WS, 0, ws_bytes),),
+            split_k=split_k,
+            zero_ws=True,
         ),
         "ok",
     )
@@ -1382,10 +1515,9 @@ def gfx950_conv_wgrad_aot_plan(
     make it: implicit GEMM through ``identity_supports_problem`` on the
     problem (unfolded -- wgrad has no patch/tilde form), the direct pipelines
     through ``identity_supports_problem`` and ``direct_spec_for_problem``. On
-    top come the launch bounds of the 32-bit dispatch. A two-stage instance is
-    refused outright (see :class:`Gfx950ConvWgradAotSpec`'s docstring); every
-    other instance that ``supports_gfx950_conv_wgrad_aot`` accepts either
-    plans here or is refused with a reason naming rocKE's own rule.
+    top come the launch bounds of the 32-bit dispatch. Every instance that
+    ``supports_gfx950_conv_wgrad_aot`` accepts, helpers aside, either plans
+    here or is refused with a reason naming rocKE's own rule.
     """
     error = _problem_error(problem)
     if error:
@@ -1393,7 +1525,7 @@ def gfx950_conv_wgrad_aot_plan(
     if problem.dtype != spec.dtype:
         return None, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
     if spec.is_helper:
-        return None, "the fold helper is launched only by its pipeline"
+        return None, "a helper is launched only by its pipeline"
     try:
         if spec.is_direct:
             return _direct_plan(spec, problem)

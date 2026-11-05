@@ -480,16 +480,20 @@ def _cache_side_admits(spec, req) -> bool:
     if ident.dtype_a != req.dtype:
         return False
     if not ident.is_direct:
-        if ident.direction == "wgrad" and ident.two_stage:
-            # Declared Phase 0 gap: gc._admits refuses these too (see its
-            # docstring) -- the Stage 2 reduce kernel is not wired into
-            # launch_plan_for, so there is nothing for this harness to
-            # build a comparable launch plan from either.
-            return False
         from benchmarks.common.benchmark_implicit_gemm_conv import _launch_problem
 
         problem = _launch_problem(spec.direction, _implicit_problem(req))
-        return KernelCache.supports_problem(ident, problem)[0]
+        if not KernelCache.supports_problem(ident, problem)[0]:
+            return False
+        if ident.direction == "wgrad" and ident.two_stage:
+            # A two-stage binary launches only at a degree >= 2 into a scratch
+            # its i32 ws_bytes can address; the resolution the run path calls
+            # raises for any other shape.
+            try:
+                _wgrad_degree(ident, problem)
+            except ValueError:
+                return False
+        return True
     if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
@@ -539,11 +543,81 @@ class _UploadRecorder:
     def alloc(self, nbytes):
         return self.PTR
 
+    def memset(self, ptr, value, nbytes):
+        pass
+
     def memcpy_h2d(self, dst, src, nbytes):
         import numpy as np
 
         raw = ctypes.string_at(src, nbytes)
         self.table = tuple(int(v) for v in np.frombuffer(raw, dtype=np.int32))
+
+
+def _wgrad_degree(ident, problem) -> int:
+    """The split-K degree the run path launches a split wgrad binary at,
+    resolved here independently of gc._wgrad_split_k (not through it), so the
+    comparison stays a cross-check of the dispatcher's wiring rather than a
+    tautology."""
+    from kernels.common.conv_split_k import resolve_conv_split_k
+
+    return resolve_conv_split_k(
+        "wgrad",
+        problem,
+        arch=ident.arch,
+        dtype=ident.dtype_d,
+        tile_m=ident.tile_m,
+        tile_n=ident.tile_n,
+        tile_k=ident.tile_k,
+        block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+        group_merge=ident.group_merge,
+        ws_replicas=ident.ws_replicas,
+        reduction="workspace" if ident.two_stage else "atomic",
+        epilogue=None if ident.two_stage else ident.epilogue,
+        allow_unsplit=not ident.two_stage,
+    ).split_k
+
+
+def _stage2_step(ident, problem, ptrs, sizes):
+    """The two-stage Stage 2 the implicit-GEMM run path launches after a cached
+    two-stage binary (_stage2_reduce / _stage2_launch), with the cached
+    shape-independent fold as its identity."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _stage2_launch,
+        _ws_replicas_of,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        wgrad_reduce_signature,
+    )
+
+    s2 = WgradReduceSpec(
+        problem=problem,
+        dtype_d=ident.dtype_d,
+        groups=problem.groups,
+        ws_replicas=_ws_replicas_of(ident),
+    )
+    values, config = _stage2_launch(
+        s2,
+        ws_ptr=ptrs["ws"],
+        ws_bytes=sizes["ws"],
+        dw_ptr=ptrs["dw"],
+        dw_bytes=sizes["dw"],
+    )
+    (want,) = gc._instance_helpers(ident)
+    assert (want.direction, want.algorithm, json.loads(want.knobs), want.dtype_d) == (
+        "direct_wgrad_helper",
+        "direct_wgrad_ws_reduce",
+        {"ws_replicas": _ws_replicas_of(ident)},
+        ident.dtype_d,
+    )
+    return (
+        want,
+        tuple(config.grid),
+        tuple(config.block),
+        [a["name"] for a in wgrad_reduce_signature(s2)],
+        ("ws", None, "dw"),
+        values,
+    )
 
 
 def _cache_side_plan(spec, req, ptrs, sizes):
@@ -571,29 +645,16 @@ def _cache_side_plan(spec, req, ptrs, sizes):
             # builder calls on split_k=-1. Resolved here independently of
             # gc._wgrad_split_k (not through it), so this stays a cross-check
             # of the dispatcher's wiring rather than a tautology.
-            if ident.split_k == 1:
-                split_k = 1
-            else:
-                from kernels.common.conv_split_k import resolve_conv_split_k
-
-                split_k = resolve_conv_split_k(
-                    "wgrad",
-                    problem,
-                    arch=ident.arch,
-                    dtype=ident.dtype_d,
-                    tile_m=ident.tile_m,
-                    tile_n=ident.tile_n,
-                    tile_k=ident.tile_k,
-                    block_size=ident.warp_m * ident.warp_n * ident.wave_size,
-                    group_merge=ident.group_merge,
-                    ws_replicas=ident.ws_replicas,
-                    reduction="workspace" if ident.two_stage else "atomic",
-                    epilogue=None if ident.two_stage else ident.epilogue,
-                    allow_unsplit=not ident.two_stage,
-                ).split_k
+            split_k = 1 if ident.split_k == 1 else _wgrad_degree(ident, problem)
         extras, grid = _extras_and_grid(
             direction, problem, ident, rt, ident.dtype_a, split_k=split_k
         )
+        workspaces = {}
+        if "ws_ptr" in extras:
+            # The run path allocates the scratch itself; the dispatcher names
+            # it "ws" and leaves the allocation to its caller.
+            workspaces = {"ws": extras["ws_bytes"]}
+            extras = {**extras, "ws_ptr": ptrs["ws"], "ws_bytes": sizes["ws"]}
         buffers = gc._OPERANDS[direction]
         values = ks._launch_values_for(
             direction,
@@ -611,7 +672,9 @@ def _cache_side_plan(spec, req, ptrs, sizes):
             buffers,
             values,
         )
-        return [step], {}, rt.table
+        if not workspaces:
+            return [step], {}, rt.table
+        return [step, _stage2_step(ident, problem, ptrs, sizes)], workspaces, rt.table
     plan, why, helpers = _direct_plan(spec, req)
     assert plan is not None, why
     steps = [
@@ -670,12 +733,14 @@ def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
         assert dict(plan.workspaces) == workspaces, name
         assert plan.sub_gemm_table == table, name
         # The dispatch result describes the instance's own kernel: the last
-        # step, except a split-C or wgrad-fold instance, whose reduction
-        # runs after it (first step).
+        # step, except a split-C, wgrad-fold or two-stage wgrad instance,
+        # whose reduction runs after it (first step).
         _ident = result.spec.identity
         own = plan.steps[
             0
-            if gc._split_c(_ident) > 1 or _ident.algorithm in DIRECT_WGRAD_FOLDED
+            if gc._split_c(_ident) > 1
+            or _ident.algorithm in DIRECT_WGRAD_FOLDED
+            or _ident.needs_stage2
             else -1
         ]
         assert own.identity == result.spec.identity, name
@@ -1172,3 +1237,72 @@ def test_wgrad_implicit_gemm_split_k_matches_resolve_conv_split_k(shape):
         assert want >= 1
         plan = gc.launch_plan_for(req, spec)
         assert plan.split_k == want
+
+
+def _two_stage_results(req):
+    return [r for r in gc.dispatch_conv_grouped_all(req) if r.spec.identity.two_stage]
+
+
+def test_two_stage_wgrad_serves_odd_and_even_dw_rows():
+    """The two-stage scratch path has no dW-row parity rule (the packed 16-bit
+    atomic does): it is admitted for odd C/groups and even alike, and every
+    plan clears its scratch -- not dW -- and folds it with the shared reduce."""
+    for C in (33, 64):
+        req = _req(direction="wgrad", N=32, C=C, K=64, Hi=20, Wi=20, Y=3, X=3, pad_h=1, pad_w=1)
+        results = _two_stage_results(req)
+        assert results, f"C={C}: no two-stage instance admitted"
+        for r in results:
+            plan = gc.launch_plan_for(r.request, r.spec)
+            assert plan.split_k >= 2
+            assert plan.zero == ("ws",)
+            conv, fold = plan.steps
+            assert conv.workspace == "ws" and fold.buffers == ("ws", None, "dw")
+            assert fold.identity == r.spec.helpers[0]
+            assert {a["name"] for a in conv.signature} >= {"ws_ptr", "ws_bytes"}
+
+
+def test_one_stage_split_wgrad_zeroes_dw():
+    req = _req(direction="wgrad", N=32, C=64, K=64, Hi=20, Wi=20, Y=3, X=3, pad_h=1, pad_w=1)
+    for r in gc.dispatch_conv_grouped_all(req):
+        ident = r.spec.identity
+        if ident.is_direct or ident.two_stage:
+            continue
+        plan = gc.launch_plan_for(r.request, r.spec)
+        assert plan.zero == (("dw",) if plan.split_k > 1 else ())
+        assert not plan.workspaces
+
+
+def test_two_stage_wgrad_refuses_a_single_k_tile():
+    """N * Ho * Wo within one K tile leaves nothing to split, and a two-stage
+    binary has no unsplit form: refused by name, never planned at degree 1."""
+    req = _req(
+        direction="wgrad", N=1, C=64, K=64, Hi=2, Wi=2, Y=1, X=1, pad_h=0, pad_w=0
+    )
+    assert not _two_stage_results(req)
+    ident = next(
+        s.identity
+        for s in gc.registered_conv_grouped_instances(_ARCH, direction="wgrad")
+        if s.identity.two_stage and s.identity.dtype_a == "fp16"
+    )
+    ok, why = gc._admits(ident, req)
+    assert not ok and why.startswith("two-stage wgrad:"), why
+
+
+def test_two_stage_workspace_matches_the_kernel_scratch_size():
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        wgrad_two_stage_workspace_nbytes,
+    )
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    req = _req(direction="wgrad", N=8, C=96, K=96, G=24, Hi=24, Wi=24, Y=3, X=3, pad_h=1, pad_w=1)
+    results = _two_stage_results(req)
+    assert results
+    for r in results:
+        plan = gc.launch_plan_for(r.request, r.spec)
+        spec = WgradConvSpec(
+            problem=gc._conv_problem(r.request),
+            split_k=plan.split_k,
+            two_stage=True,
+            ws_replicas=gc._ws_replicas(r.spec.identity),
+        )
+        assert plan.workspaces == {"ws": wgrad_two_stage_workspace_nbytes(spec)}

@@ -36,6 +36,7 @@ from kernels.conv.direct_variants import (
     DIRECT_WAVE_PARAMETRIC,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
+    DIRECT_WGRAD_WS_REDUCE as _WS_REDUCE,
     direct_wgrad_fold_knobs,
     dgrad_rtc_vgprs,
     direct_dgrad_weight_transforms,
@@ -2040,6 +2041,22 @@ def _split_reduce_job(
     )
 
 
+def _ws_reduce_identity(
+    arch: str, wave_size: int, ws_replicas: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The Stage 2 a two-stage implicit-GEMM wgrad binary with ``ws_replicas``
+    scratch slabs launches after itself."""
+    return _identity(
+        arch,
+        wave_size,
+        _WS_REDUCE,
+        "direct_wgrad_helper",
+        _NO_CAPS,
+        {"ws_replicas": ws_replicas},
+        dtype,
+    )
+
+
 def _caps_of(identity: KernelIdentity) -> DirectCaps:
     return DirectCaps(
         KH=identity.filter_h,
@@ -2413,7 +2430,7 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    if variant == _SPLIT_REDUCE:
+    if variant in (_SPLIT_REDUCE, _WS_REDUCE):
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
@@ -2463,6 +2480,23 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
                 f"the direct grid cannot build this identity: {identity.label()}"
             )
         return _job(identity, _NO_CAPS, {"split_c": split_c})
+    if identity.algorithm == _WS_REDUCE:
+        replicas = knobs.get("ws_replicas")
+        rebuilt = (
+            _ws_reduce_identity(
+                identity.arch, identity.wave_size, replicas, identity.dtype_a
+            )
+            if isinstance(replicas, int) and replicas >= 1
+            else None
+        )
+        if (
+            rebuilt is None
+            or replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity
+        ):
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _NO_CAPS, {"ws_replicas": replicas})
     if identity.direction in ("direct_dgrad_helper", "direct_wgrad_helper"):
         rebuilt = _helper_identity(
             identity.arch,

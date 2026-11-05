@@ -745,7 +745,17 @@ def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -
 
     plans = {r.spec.name: launch_plan_for(r.request, r.spec) for r in sel.results}
     rt = Runtime()
-    sizes = {in_name: In_t.nbytes, out_name: Out_t.nbytes}
+    # The direct wgrad pipelines write an fp32 dW (conv_abi's direct wgrad D)
+    # whatever the activation dtype, so dW is allocated at that width and each
+    # instance is verified against the dtype it writes; a 16-bit buffer would
+    # take an fp32 store past its end.
+    out_f32 = None
+    if direction == "wgrad" and any(r.spec.is_direct for r in sel.results):
+        out_f32 = torch.empty(*w_shape, dtype=torch.float32)
+    sizes = {
+        in_name: In_t.nbytes,
+        out_name: max(Out_t.nbytes, out_f32.nbytes if out_f32 is not None else 0),
+    }
     sizes[second_name if second_name else "w"] = (
         Second_t.nbytes if second_name else W_t.nbytes
     )
@@ -831,18 +841,15 @@ def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -
                     n_skipped += 1
                     continue
 
-                # Implicit-GEMM wgrad with a resolved split-K degree reduces
-                # across thread blocks with an atomic add into dW (two-stage
-                # wgrad, which reduces through its own workspace instead, is
-                # refused at admission -- see dispatch.grouped_convolution's
-                # _admits), so dW must be zeroed before every launch, not just
-                # once: a repeated (warmup/iters/verify) run would otherwise
-                # keep accumulating onto the previous call's result.
-                needs_zero = direction == "wgrad" and plan.split_k > 1
-
-                def run(bound=bound, needs_zero=needs_zero):
-                    if needs_zero:
-                        rt.memset(ptrs[out_name], 0, sizes[out_name])
+                # What the plan accumulates into -- dW under the packed
+                # split-K atomic, the f32 scratch under two-stage wgrad -- is
+                # cleared before every run, not once: a repeated
+                # (warmup/iters/verify) run would otherwise add onto the
+                # previous call's result. Queued on the launch stream, so a
+                # timed run is not drained for it.
+                def run(bound=bound, zero=plan.zero):
+                    for name in zero:
+                        rt.memset_async(ptrs[name], 0, sizes[name], 0)
                     for launch in bound:
                         launch()
 
@@ -852,7 +859,7 @@ def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -
                         rt,
                         run,
                         ptrs[out_name],
-                        Out_t,
+                        out_f32 if out_f32 is not None and spec.is_direct else Out_t,
                         ref_out,
                         spec.name,
                         args.dump_fail,
@@ -986,7 +993,7 @@ def _list_case(sel) -> None:
     for r in sel.results:
         mark = "*" if r.spec.name == sel.default_pick else " "
         helpers = (
-            f" (after {len(r.spec.helpers)} weight transforms)"
+            f" (with {len(r.spec.helpers)} helper kernel(s))"
             if r.spec.helpers
             else ""
         )

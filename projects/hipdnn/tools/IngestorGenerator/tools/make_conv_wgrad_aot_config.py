@@ -13,18 +13,17 @@ symbols (no ``native_symbols_from``).
 
 Every entry must be a gfx950 wgrad identity in fp16 or bf16 that the packaged launch
 runs: an implicit-GEMM identity of the wgrad AOT sweep
-(``benchmarks/common/kernel_sweep.py``) that is not two-stage (the Stage 2 reduce is
-not wired in the adapter), or a wgrad identity of the direct sweep
-(``benchmarks/common/direct_kernel_sweep.py``) of a packaged algorithm
-(:func:`packaged_direct_algorithms`), including the five partial-slot families' fold
-helper (``direct_wgrad_helper``). The helper is packaged as a kernel of its own family
-(``kernel_family`` 2) that the kernel matcher never admits; the folded direct dispatch
+(``benchmarks/common/kernel_sweep.py``), one-stage or two-stage, or a wgrad identity of
+the direct sweep (``benchmarks/common/direct_kernel_sweep.py``) of a packaged algorithm
+(:func:`packaged_direct_algorithms`), including the helpers (``direct_wgrad_helper``):
+the five partial-slot families' fold and the two-stage implicit GEMM's Stage 2
+(``direct_wgrad_ws_reduce``). A helper is packaged as a kernel of its own family
+(``kernel_family`` 2) that the kernel matcher never admits; the dispatch that needs it
 loads it from the same pack. Anything else is listed with its reason and the tool
 exits non-zero, unless ``--skip-unsupported`` is given.
 
 The shipped catalog is ``configs/gfx950_conv_wgrad_aot_<dtype>.instances.json``,
-written by ``tools/enumerate_conv_wgrad_aot_instances.py`` (which also drops every
-two-stage identity before this tool ever sees one)::
+written by ``tools/enumerate_conv_wgrad_aot_instances.py``::
 
     python tools/make_conv_wgrad_aot_config.py --rocke-root "$ROCKE" \\
         --instances configs/gfx950_conv_wgrad_aot_{fp16,bf16}.instances.json \\
@@ -93,10 +92,8 @@ _CARRIED = (
     # still carried: it is read back by to_identity() for an implicit-GEMM instance, so
     # it must round-trip to instance_id like any other carried field.
     "split_k",
-    # A packageable, but not plannable, gap (gfx950_conv_wgrad_aot_plan refuses to plan
-    # one): a two-stage identity is still a valid spec this converter accepts, carried
-    # the same way. tools/enumerate_conv_wgrad_aot_instances.py drops every two-stage
-    # identity before it reaches this catalog, so every shipped instance states 0 here.
+    # The f32-scratch reduction: the plan launches the direct_wgrad_ws_reduce helper of
+    # the same dtype and ws_replicas after a two-stage instance.
     "two_stage",
 )
 _BOOL_CARRIED = (
@@ -343,6 +340,7 @@ _DIRECT_VARIANT_NAMES = {
     "direct_wgrad_gather": "gfx950_conv_wgrad_aot_gather_{dtype}_{instance_id}",
     "direct_wgrad_grouped_mfma": "gfx950_conv_wgrad_aot_groupedmfma_{dtype}_{instance_id}",
     "direct_wgrad_fold": "gfx950_conv_wgrad_aot_fold_{dtype}_{instance_id}",
+    "direct_wgrad_ws_reduce": "gfx950_conv_wgrad_aot_wsreduce_{dtype}_{instance_id}",
 }
 
 _bind_rocke = _fwd._bind_rocke
@@ -498,12 +496,13 @@ def _direct_instance_spec(identity):
         # gfx950_conv_wgrad_aot_fold_fields, which builds a helper's fields from a
         # folded spec rather than from this raw identity).
         fields.update(dict.fromkeys(_HELPER_CAPABILITY_FIELDS, 0))
+    # A helper's knob may live in an implicit-GEMM field (the Stage 2 fold's
+    # ws_replicas), so it overrides the placeholder rather than repeating it.
     spec = Gfx950ConvWgradAotSpec(
         dtype=identity.dtype_a,
         instance_id=identity.stable_hash(),
         wave_size=identity.wave_size,
-        **DIRECT_PLACEHOLDERS,
-        **fields,
+        **{**DIRECT_PLACEHOLDERS, **fields},
     )
     return _checked(spec)
 

@@ -19,6 +19,7 @@ from dataclasses import replace
 __all__ = [
     "DIRECT_WGRAD_FOLD",
     "DIRECT_WGRAD_FOLDED",
+    "DIRECT_WGRAD_WS_REDUCE",
     "DIRECT_DGRAD_REORGANIZE",
     "DIRECT_DGRAD_REORGANIZE_RTC",
     "DIRECT_DGRAD_TRANSPOSE",
@@ -125,12 +126,18 @@ DIRECT_WGRAD_FOLDED = (
     "direct_wgrad_gather",
     "direct_wgrad_grouped_mfma",
 )
+# Stage 2 of the two-stage implicit-GEMM wgrad: folds the f32 split-K scratch's
+# ws_replicas slabs per group into dW. Its extents are kernargs, so like the
+# split-C reduction it is shape-independent -- one binary per dtype and replica
+# count, cached under the wgrad helpers and found by exact identity.
+DIRECT_WGRAD_WS_REDUCE = "direct_wgrad_ws_reduce"
 _HELPERS = (
     DIRECT_DGRAD_TRANSPOSE,
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE_RTC,
     DIRECT_DGRAD_REORGANIZE_RTC,
     DIRECT_WGRAD_FOLD,
+    DIRECT_WGRAD_WS_REDUCE,
 )
 # Register budget for the MFMA dgrad fprop pass's preloaded weights and
 # accumulators (see direct_mfma_knobs_reason): three quarters of the 512-VGPR
@@ -358,6 +365,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return DwWgradFoldSpec(name="rocke_direct_wgrad_fold", **knobs)
     if variant == DIRECT_SPLIT_REDUCE:
         return dn.DirectSplitReduceSpec(dtype=problem.dtype, **knobs)
+    if variant == DIRECT_WGRAD_WS_REDUCE:
+        from kernels.common.conv_wgrad_workspace_reduce import wgrad_reduce_aot_spec
+
+        return wgrad_reduce_aot_spec(problem.dtype, **knobs)
     if variant == DIRECT_DGRAD_TRANSPOSE:
         return dc.DirectTransposeWeightsDgradSpec(problem=problem)
     if variant == DIRECT_DGRAD_REORGANIZE:
@@ -608,6 +619,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_wgrad_gather as wg
     from kernels.common import conv_direct_wgrad_tiled as wt
     from kernels.common import conv_fwd_small_wmma as fs
+    from kernels.common import conv_wgrad_workspace_reduce as wr
 
     builders = {
         DIRECT_DGRAD_WMMA: dwm.build_direct_dgrad_wmma,
@@ -645,6 +657,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DGRAD_TRANSPOSE_RTC: dc.build_direct_transpose_weights_dgrad,
         DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
         DIRECT_SPLIT_REDUCE: dn.build_direct_conv_split_reduce,
+        DIRECT_WGRAD_WS_REDUCE: wr.build_conv_wgrad_workspace_reduce,
     }
     return builders[variant](spec, arch=arch)
 

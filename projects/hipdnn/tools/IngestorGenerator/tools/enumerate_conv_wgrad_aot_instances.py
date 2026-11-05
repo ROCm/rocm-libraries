@@ -12,14 +12,6 @@ instances rocKE registers that the pack must not ship (for example a rocKE kerne
 to compute wrong results), each with a reason -- the one legitimate thing hand curation
 used to do beyond mirroring rocKE.
 
-Separately, and unconditionally (not a curated exclusion): a two-stage implicit-GEMM
-identity is a valid rocKE instance (``supports_gfx950_conv_wgrad_aot`` accepts it), but
-its Stage 2 reduce kernel is not wired into the adapter yet
-(``gfx950_conv_wgrad_aot_plan`` refuses to plan one, mirroring
-``dispatch.grouped_convolution``'s own refusal). A catalog that shipped one would offer
-a kernel the pack can never actually launch, so :func:`drop_two_stage` removes every
-``two_stage`` identity before anything else runs, and the count removed is reported.
-
 Implicit-GEMM entries must be identities of the wgrad AOT sweep
 (``benchmarks/common/kernel_sweep.py``) and direct entries wgrad identities of the
 direct sweep (``benchmarks/common/direct_kernel_sweep.py``), for gfx950, fp16 or bf16.
@@ -30,8 +22,11 @@ The five partial-slot direct families (``kernels.conv.direct_variants.DIRECT_WGR
 launch a fold helper (``direct_wgrad_fold``) the labels do not name. rocKE's own
 ``direct_wgrad_fold_knobs()`` decides its knobs, in launch order, from the folded
 identity's filter and channels-per-group; this tool asks it rather than restating the
-rule, so a pipeline whose fold changes comes out right too. The helper is never
-selectable on its own.
+rule, so a pipeline whose fold changes comes out right too. Likewise a two-stage
+implicit-GEMM identity launches the Stage 2 fold of its f32 scratch
+(``direct_wgrad_ws_reduce``), which the dispatcher names
+(``dispatch.grouped_convolution._instance_helpers``). Helpers are never selectable on
+their own.
 
 The output is one JSON list per dtype (:data:`INSTANCE_LIST`), one compact identity
 per line, ordered by family (implicit GEMM, direct, helper), then ``stable_hash``::
@@ -62,8 +57,7 @@ INSTANCE_LIST = "gfx950_conv_wgrad_aot_{dtype}.instances.json"
 DEFAULT_OUTPUT_DIR = _fwd.DEFAULT_OUTPUT_DIR
 #: Known-bug exclusions: instances rocKE registers that this pack must not ship,
 #: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
-#: file means no exclusions. Two-stage instances are not named here -- they are
-#: dropped unconditionally by :func:`drop_two_stage`, not by curation.
+#: file means no exclusions.
 EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_wgrad_aot.excludes.json"
 #: The family order of the written lists.
 FAMILIES = ("implicit", "direct", "helper")
@@ -93,23 +87,10 @@ def family(identity: dict) -> str:
     return "direct"
 
 
-def drop_two_stage(identities: list) -> tuple:
-    """``(kept, dropped_count)``: every ``two_stage`` identity removed.
-
-    A two-stage implicit-GEMM instance is a packageable rocKE spec, but its Stage 2
-    reduce kernel has no adapter yet (``gfx950_conv_wgrad_aot_plan`` refuses to plan
-    one); shipping it would offer a kernel the pack can never launch. Only
-    implicit-GEMM identities can be two-stage -- the direct and helper families have
-    no two-stage form at all -- but this checks every entry regardless, so a future
-    direct two-stage variant would not slip through unnoticed.
-    """
-    kept = [i for i in identities if not i.get("two_stage")]
-    return kept, len(identities) - len(kept)
-
-
 def sweep_hashes(dtype: str, jobs: int) -> set:
     """``stable_hash`` of every valid wgrad identity of rocKE's implicit-GEMM AOT
-    grid and of its direct grid (the fold helper included), for ``dtype``."""
+    grid and of its direct grid (the fold helper included), and of the Stage 2
+    each two-stage implicit-GEMM one launches, for ``dtype``."""
     from benchmarks.common import kernel_sweep
     from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
     from rocke.core.arch import ArchTarget
@@ -121,7 +102,13 @@ def sweep_hashes(dtype: str, jobs: int) -> set:
     direct = enumerate_direct_jobs(
         arch=ARCH, target=target, directions=("wgrad",), dtype=dtype, jobs=jobs
     )
-    return {job.identity.stable_hash() for job in [*implicit, *direct]}
+    from dispatch.grouped_convolution import _instance_helpers
+
+    identities = [job.identity for job in [*implicit, *direct]]
+    # The two-stage Stage 2 is no sweep job of its own: it is the helper the
+    # dispatcher names for a two-stage implicit-GEMM identity.
+    stage2 = [h for i in identities if i.needs_stage2 for h in _instance_helpers(i)]
+    return {i.stable_hash() for i in [*identities, *stage2]}
 
 
 def helper_identities(identity: dict) -> list:
@@ -154,12 +141,24 @@ def helper_identities(identity: dict) -> list:
     return [replace(helper, llvm_flavor=ident.llvm_flavor).to_dict()]
 
 
+def stage2_identities(identity: dict) -> list:
+    """The Stage 2 a two-stage implicit-GEMM identity launches, as the dispatcher
+    names it (``_instance_helpers``); ``[]`` for anything else."""
+    from benchmarks.common.kernel_cache import KernelIdentity
+    from dispatch.grouped_convolution import _instance_helpers
+
+    ident = KernelIdentity.from_dict(identity)
+    if ident.direction != "wgrad" or not ident.needs_stage2:
+        return []
+    return [helper.to_dict() for helper in _instance_helpers(ident)]
+
+
 def with_helpers(identities: list) -> list:
-    """``identities`` plus the fold helper each folded entry needs, each once, in
-    order."""
+    """``identities`` plus the helper each entry needs (the fold of a folded direct
+    entry, the Stage 2 of a two-stage implicit-GEMM one), each once, in order."""
     out, seen = [], set()
     for identity in identities:
-        for entry in [identity, *helper_identities(identity)]:
+        for entry in [identity, *helper_identities(identity), *stage2_identities(identity)]:
             key = stable_hash(entry)
             if key not in seen:
                 seen.add(key)
@@ -220,7 +219,6 @@ def main(argv=None) -> int:
         )
         return 1
     listed = [i for i in rocke_catalog if identity_label(i) not in excludes]
-    listed, two_stage_count = drop_two_stage(listed)
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
         print(
@@ -238,10 +236,6 @@ def main(argv=None) -> int:
         return 1
 
     lists, failed = {}, False
-    print(
-        f"{two_stage_count} two-stage implicit-GEMM instance(s) excluded "
-        "(Stage 2 reduce not wired; see builders/common/convolution_backward_filter.py)"
-    )
     print(f"{'dtype':6s} {'implicit':>8s} {'direct':>6s} {'helper':>6s}")
     for dtype in sorted(DTYPES):
         identities = with_helpers([i for i in listed if i["dtype_a"] == dtype])

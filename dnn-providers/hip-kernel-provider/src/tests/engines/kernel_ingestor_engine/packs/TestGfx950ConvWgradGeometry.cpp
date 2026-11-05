@@ -87,9 +87,9 @@ std::string describe(const Problem& p)
 // Golden plans
 // ---------------------------------------------------------------------------------------
 
-#if 0  // superseded by PlansMatchTheAdapterOverTheCatalog/FullPlansMatchTheAdapter below,
-       // which are generated from the real shipped catalog and stay correct across a
-       // split-K fix like the one that made these hand-pasted digests stale.
+#if 0 // superseded by PlansMatchTheAdapterOverTheCatalog/FullPlansMatchTheAdapter below, \
+    // which are generated from the real shipped catalog and stay correct across a        \
+    // split-K fix like the one that made these hand-pasted digests stale.
 /// One (problem, instance) of the adapter: whether it plans, and if so its split-K degree
 /// and Plan.digest(). Up to ten served instances of the shipped catalog per problem
 /// (plus one of each family the ten miss) and four refused ones (two-stage ones among
@@ -340,7 +340,7 @@ TEST(TestGfx950ConvWgradGeometry, PlansMatchTheAdapterOverTheGoldenTable)
     // Implicit GEMM and all seven direct pipelines are among the served rows.
     EXPECT_EQ(servedByFamily.size(), 8U);
 }
-#endif  // superseded golden table
+#endif // superseded golden table
 
 /// One family's full plan on one problem, Plan.serialize() verbatim.
 struct SerializedCase
@@ -404,39 +404,39 @@ std::vector<SerializedCase> serializedCases()
     // clang-format off
     return {
         {"direct_wgrad", dense3x3, directInstance(DirectVariant::WGRAD, f3, wgradKnobs),
-         {1, 1, 0, 0, 1, 0, 1, 16, 1, 2, 64, 0, 1, 2, 14, 2, 28, 28, 28, 28, 1, 64, 64, 50176, 1792, 64, 50176, 1792, 64},
-         0xf46590ce830ff8b8ULL},
+         {1, 0, 1, 0, 0, 1, 0, 1, 16, 1, 2, 64, 0, 1, 2, 14, 2, 28, 28, 28, 28, 1, 64, 64, 50176, 1792, 64, 50176, 1792, 64},
+         0x3694f6228f5b3538ULL},
         {"direct_wgrad_tiled", dense3x3, directInstance(DirectVariant::TILED, f3, tiledKnobs),
-         {1, 1, 0, 0, 1, 0, 1, 8, 1, 1, 256, 0, 1, 2, 14, 2, 28, 28, 28, 28, 1, 64, 64, 50176, 1792, 64, 50176, 1792, 64},
-         0x56640a189986775cULL},
+         {1, 0, 1, 0, 0, 1, 0, 1, 8, 1, 1, 256, 0, 1, 2, 14, 2, 28, 28, 28, 28, 1, 64, 64, 50176, 1792, 64, 50176, 1792, 64},
+         0x1259e70a434173dcULL},
         {"implicit_gemm", dense3x3,
          implicitInstance({128, 128, 32, 2, 2, 8, 8, 8, Epilogue::CSHUFFLE, 1, 1, false, true, false}),
-         {1, 4, 0, 0, 1, 0, 0, 5, 1, 4, 256, 0, 1, 2, 42, 2, 28, 28, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 1, 28, 28, 64, 64, 64,
+         {1, 0, 4, 0, 0, 1, 0, 0, 5, 1, 4, 256, 0, 1, 2, 42, 2, 28, 28, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 1, 28, 28, 64, 64, 64,
           576, 1568, 50176, 1792, 64, 50176, 1792, 64, 576, 192, 64, 613566757, 5, 613566757, 5, 1431655766, 2, 1, 6, 1, 5, 416, 4},
-         0x013070143a4847b3ULL},
+         0x04e78421cf5e4433ULL},
         {"direct_wgrad_grouped_mfma", groupedCpg4,
          directInstance(DirectVariant::GROUPED_MFMA, {3, 3, 1, 1, 1, 1, 1, 1, 4, 4}, groupedKnobs),
-         {0, 1, 147456, 1, 3, 0, 147456, 2, 0, 1, 8, 1, 2, 256, 0, 1, 3, 14, 2, 28, 28, 28, 28, 128, 512, 512, 401408, 14336,
+         {0, 0, 1, 147456, 1, 3, 0, 147456, 2, 0, 1, 8, 1, 2, 256, 0, 1, 3, 14, 2, 28, 28, 28, 28, 128, 512, 512, 401408, 14336,
           512, 401408, 14336, 512, 1, 2, 288, 1, 1, 1024, 3, -1, 2, 2, 2, 512},
-         0x5c6b4b2fbad2b364ULL},
+         0xad4b687810b9f3c4ULL},
         {"direct_wgrad_dw", depthwise3x3, directInstance(DirectVariant::DW, f3c1, dwKnobs),
-         {0, 1, 129024, 1, 3, 0, 129024, 2, 0, 1, 1, 56, 1, 64, 0, 1, 3, 14, 4, 56, 56, 56, 56, 64, 64, 64, 200704, 3584, 64,
+         {0, 0, 1, 129024, 1, 3, 0, 129024, 2, 0, 1, 1, 56, 1, 64, 0, 1, 3, 14, 4, 56, 56, 56, 56, 64, 64, 64, 200704, 3584, 64,
           200704, 3584, 64, 1, 2, 9, 1, 1, 1024, 3, -1, 2, 2, 56, 64},
-         0x7729e8b4a559786cULL},
+         0x77ab07b0e6c07c0cULL},
         {"direct_wgrad_dw_mfma", depthwise3x3, directInstance(DirectVariant::DW_MFMA, f3c1, dwMfmaKnobs),
-         {0, 1, 147456, 1, 3, 0, 147456, 2, 0, 1, 1, 4, 16, 256, 0, 1, 3, 14, 4, 56, 56, 56, 56, 64, 64, 64, 200704, 3584, 64,
+         {0, 0, 1, 147456, 1, 3, 0, 147456, 2, 0, 1, 1, 4, 16, 256, 0, 1, 3, 14, 4, 56, 56, 56, 56, 64, 64, 64, 200704, 3584, 64,
           200704, 3584, 64, 1, 2, 9, 1, 1, 1024, 3, -1, 2, 2, 64, 64},
-         0xdc1cd7541308849aULL},
+         0xba912ebef5185fbaULL},
         {"direct_wgrad_dw_cols", stemC3,
          directInstance(DirectVariant::DW_COLS, {11, 11, 1, 1, 5, 5, 1, 1, 1, 1}, colsKnobs),
-         {0, 1, 11616, 1, 3, 0, 11616, 2, 0, 1, 11, 8, 1, 256, 0, 1, 3, 14, 4, 64, 64, 64, 64, 3, 3, 3, 12288, 192, 3, 12288,
+         {0, 0, 1, 11616, 1, 3, 0, 11616, 2, 0, 1, 11, 8, 1, 256, 0, 1, 3, 14, 4, 64, 64, 64, 64, 3, 3, 3, 12288, 192, 3, 12288,
           192, 3, 1, 2, 6, 1, 1, 1024, 3, -1, 2, 2, 8, 3},
-         0x789796c418c9dd72ULL},
+         0x95489fe640d49792ULL},
         {"direct_wgrad_gather", gatherC24,
          directInstance(DirectVariant::GATHER, {3, 3, 1, 1, 1, 1, 1, 1, 24, 0}, gatherKnobs),
-         {0, 1, 2654208, 1, 3, 0, 2654208, 2, 0, 1, 4, 24, 1, 64, 0, 1, 3, 14, 4, 56, 56, 56, 56, 1, 24, 128, 401408, 7168,
+         {0, 0, 1, 2654208, 1, 3, 0, 2654208, 2, 0, 1, 4, 24, 1, 64, 0, 1, 3, 14, 4, 56, 56, 56, 56, 1, 24, 128, 401408, 7168,
           128, 75264, 1344, 24, 1, 2, 432, 1, 1, 1024, 3, -1, 2, 2, 24, 128},
-         0xedab2b76da6f11bcULL},
+         0x586b6f8dfc26c11cULL},
     };
     // clang-format on
 }
@@ -585,10 +585,30 @@ TEST(TestGfx950ConvWgradGeometry, SplitKCandidatesFollowTheLadderAndXcdRules)
     }
     EXPECT_NE(std::find(groupedDegrees.begin(), groupedDegrees.end(), 24), groupedDegrees.end());
     EXPECT_EQ(std::find(groupedDegrees.begin(), groupedDegrees.end(), 12), groupedDegrees.end());
-    // The degree never passes the packed atomic's accuracy cap.
+    // The degree never passes the packed atomic's accuracy cap; the f32 workspace has none.
     const wgrad::SplitKProblem deep{16, 16, 1 << 24, 1, 2, 2};
-    EXPECT_LE(wgrad::selectSplitK(deep, {16, 16, 16, 1}, cost.atomicBf16BytesPerLatency, cost),
-              wgrad::ATOMIC_16BIT_MAX_SPLIT_K);
+    const wgrad::SplitKReduction atomic{cost.atomicBf16BytesPerLatency,
+                                        wgrad::ATOMIC_16BIT_MAX_SPLIT_K};
+    EXPECT_LE(wgrad::selectSplitK(deep, {16, 16, 16, 1}, atomic, true, cost),
+              std::optional<int64_t>(wgrad::ATOMIC_16BIT_MAX_SPLIT_K));
+    const wgrad::SplitKReduction workspace{cost.atomicFp32BytesPerLatency, std::nullopt, true, 8};
+    EXPECT_GT(wgrad::selectSplitK(deep, {16, 16, 16, 1}, workspace, false, cost),
+              std::optional<int64_t>(wgrad::ATOMIC_16BIT_MAX_SPLIT_K));
+    // Without the unsplit candidate a reduction with no room to split has no degree.
+    const wgrad::SplitKProblem oneTile{16, 16, 16, 1, 2, 2};
+    EXPECT_FALSE(wgrad::selectSplitK(oneTile, {16, 16, 16, 1}, workspace, false, cost));
+    EXPECT_EQ(wgrad::selectSplitK(oneTile, {16, 16, 16, 1}, atomic, true, cost),
+              std::optional<int64_t>(1));
+}
+
+TEST(TestGfx950ConvWgradGeometry, TheFp16PackedAtomicSharesTheBf16Bandwidth)
+{
+    // split_k_planner's gfx950 atomic_bytes_per_latency: fp16 takes bf16's constant once
+    // its lowering stopped fencing every add.
+    const wgrad::SplitKCostModel cost{};
+    EXPECT_EQ(cost.atomicFp16BytesPerLatency, 328579.7);
+    EXPECT_EQ(cost.atomicBf16BytesPerLatency, 328579.7);
+    EXPECT_EQ(cost.atomicFp32BytesPerLatency, 1344520.3);
 }
 
 TEST(TestGfx950ConvWgradGeometry, TheSplitKDegreeIsALaunchValueNotTheBakedPlaceholder)
@@ -602,11 +622,13 @@ TEST(TestGfx950ConvWgradGeometry, TheSplitKDegreeIsALaunchValueNotTheBakedPlaceh
     const auto a = wgrad::instancePlan(dense3x3, implicitInstance(auto_));
     const auto b = wgrad::instancePlan(dense3x3, implicitInstance(placeholder));
     ASSERT_TRUE(a && b);
-    EXPECT_EQ(a->splitK, 4);
+    // resolve_conv_split_k's degree for this problem and tile (fp16 shares bf16's atomic
+    // bandwidth, so both dtypes resolve 17).
+    EXPECT_EQ(a->splitK, 17);
     EXPECT_EQ(wgrad::planDigest(*a), wgrad::planDigest(*b));
-    EXPECT_EQ(a->steps[0].grid[2], 4);
-    // ks = ceil(1568 / (32 * 4)) * 32.
-    EXPECT_EQ(a->steps[0].values[wgrad::IMPLICIT_KERNARG_NAMES.size() - 2], 416);
+    EXPECT_EQ(a->steps[0].grid[2], 17);
+    // ks = ceil(1568 / (32 * 17)) * 32.
+    EXPECT_EQ(a->steps[0].values[wgrad::IMPLICIT_KERNARG_NAMES.size() - 2], 96);
     // A one-stage binary built split (its packed-atomic epilogue) still needs an even
     // store vector: vector_size_c 1 refuses, the unsplit-built twin serves.
     placeholder.vectorC = 1;
@@ -620,23 +642,64 @@ TEST(TestGfx950ConvWgradGeometry, TheSplitKDegreeIsALaunchValueNotTheBakedPlaceh
 // Refusals
 // ---------------------------------------------------------------------------------------
 
-TEST(TestGfx950ConvWgradGeometry, TwoStageInstancesAreRefusedWithTheAdaptersReason)
+TEST(TestGfx950ConvWgradGeometry, TwoStagePlansZeroTheScratchAndFoldItIntoDw)
 {
     const Problem dense3x3{2, 64, 64, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 1, FP16};
-    ImplicitInstance oneStage{128, 128, 32, 2, 2, 8, 8, 8, Epilogue::CSHUFFLE, 1, 2};
-    auto twoStage = oneStage;
-    twoStage.twoStage = true;
-    EXPECT_TRUE(wgrad::instancePlan(dense3x3, implicitInstance(oneStage)));
-    EXPECT_FALSE(wgrad::instancePlan(dense3x3, implicitInstance(twoStage)));
-    EXPECT_FALSE(wgrad::implicitPlan(dense3x3, twoStage));
-    const auto reason = wgrad::staticRefusal(implicitInstance(twoStage));
-    ASSERT_TRUE(reason);
-    // gfx950_conv_wgrad_aot_plan's refusal, verbatim.
-    EXPECT_EQ(*reason,
-              "two-stage wgrad (Stage 2 reduce) is not wired in this adapter yet (mirrors "
-              "dispatch.grouped_convolution._admits's refusal)");
-    EXPECT_FALSE(wgrad::staticRefusal(implicitInstance(oneStage)));
-    // The fold helper never serves on its own either.
+    ImplicitInstance twoStage{128, 128, 32, 2, 2, 8, 8, 1, Epilogue::DEFAULT, 1, 2, true};
+    twoStage.wsReplicas = 8;
+    // Odd dW rows (Y * X * cpg = 297) are the packed atomic's to refuse, not the
+    // scratch's: the two-stage instance serves both.
+    auto oddC = dense3x3;
+    oddC.c = 33;
+    twoStage.vectorB = 1;
+    for(const auto& problem : {dense3x3, oddC})
+    {
+        const auto plan = wgrad::instancePlan(problem, implicitInstance(twoStage));
+        ASSERT_TRUE(plan) << describe(problem);
+        EXPECT_FALSE(wgrad::staticRefusal(implicitInstance(twoStage)));
+        EXPECT_GE(plan->splitK, 2);
+        EXPECT_FALSE(plan->zeroDw);
+        EXPECT_TRUE(plan->zeroWs);
+        const auto wgN = problem.y * problem.x * problem.c;
+        // groups * ws_replicas * wg_M * wg_N f32.
+        const auto ws = plan->workspace(wgrad::Buffer::WS);
+        ASSERT_TRUE(ws);
+        EXPECT_EQ(ws->offset, 0);
+        EXPECT_EQ(ws->bytes, 8 * 64 * wgN * 4);
+        ASSERT_EQ(plan->steps.size(), 2U);
+        const auto& stage1 = plan->steps[0];
+        EXPECT_EQ(stage1.abi, wgrad::Abi::IMPLICIT_TWO_STAGE);
+        EXPECT_EQ(stage1.values.size(), wgrad::IMPLICIT_KERNARG_NAMES.size() + 1);
+        EXPECT_EQ(stage1.values[wgrad::TWO_STAGE_WS_POSITION], ws->bytes);
+        EXPECT_EQ(stage1.values.back(), plan->splitK);
+        EXPECT_EQ(stage1.grid[2], plan->splitK);
+        const auto& stage2 = plan->steps[1];
+        EXPECT_EQ(stage2.kernel, wgrad::PlanKernel::WS_REDUCE);
+        EXPECT_EQ(stage2.abi, wgrad::Abi::WS_REDUCE);
+        EXPECT_EQ(stage2.buffers,
+                  (std::array<wgrad::Buffer, 3>{
+                      wgrad::Buffer::WS, wgrad::Buffer::NONE, wgrad::Buffer::DW}));
+        EXPECT_EQ(stage2.block, 256);
+        EXPECT_EQ(stage2.grid, (std::array<int64_t, 3>{(wgN + 63) / 64, 16, 1}));
+        EXPECT_EQ(stage2.values,
+                  (std::vector<int32_t>{64,
+                                        static_cast<int32_t>(wgN),
+                                        static_cast<int32_t>(ws->bytes),
+                                        static_cast<int32_t>(64 * wgN * 2),
+                                        1}));
+    }
+    // One K tile leaves nothing to split, and a two-stage binary has no unsplit form.
+    const Problem oneTile{1, 64, 64, 2, 2, 1, 1, 1, 1, 0, 0, 1, 1, 1, FP16};
+    EXPECT_FALSE(wgrad::instancePlan(oneTile, implicitInstance(twoStage)));
+    auto oneStage = twoStage;
+    oneStage.twoStage = false;
+    oneStage.splitK = 1;
+    EXPECT_TRUE(wgrad::instancePlan(oneTile, implicitInstance(oneStage)));
+}
+
+TEST(TestGfx950ConvWgradGeometry, HelpersNeverServeOnTheirOwn)
+{
+    const Problem dense3x3{2, 64, 64, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 1, FP16};
     DirectKnobs fold{};
     fold.taps = 9;
     AotInstance helper{wgrad::KernelFamily::HELPER,
@@ -645,6 +708,12 @@ TEST(TestGfx950ConvWgradGeometry, TwoStageInstancesAreRefusedWithTheAdaptersReas
                        wgrad::DirectInstance{DirectVariant::FOLD, {}, fold}};
     EXPECT_EQ(wgrad::staticRefusal(helper), wgrad::HELPER_REFUSAL);
     EXPECT_FALSE(wgrad::instancePlan(dense3x3, helper));
+    AotInstance stage2{wgrad::KernelFamily::HELPER,
+                       FP16,
+                       std::nullopt,
+                       wgrad::DirectInstance{DirectVariant::WS_REDUCE, {}, {}, 8}};
+    EXPECT_EQ(wgrad::staticRefusal(stage2), wgrad::HELPER_REFUSAL);
+    EXPECT_FALSE(wgrad::instancePlan(dense3x3, stage2));
 }
 
 TEST(TestGfx950ConvWgradGeometry, TheInstanceDtypeIsPinned)
@@ -808,6 +877,26 @@ Metadata foldMetadata(int64_t taps)
     return m;
 }
 
+Metadata wsReduceMetadata(int64_t wsReplicas)
+{
+    auto m = baseMetadata();
+    m.fields["kernel_family"] = int64_t{2};
+    m.fields["direct_variant"] = std::string("direct_wgrad_ws_reduce");
+    m.fields["ws_replicas"] = wsReplicas;
+    return m;
+}
+
+Metadata twoStageMetadata()
+{
+    auto m = implicitMetadata();
+    m.fields["two_stage"] = int64_t{1};
+    m.fields["split_k"] = int64_t{2};
+    m.fields["ws_replicas"] = int64_t{8};
+    m.fields["epilogue"] = std::string("default");
+    m.fields["vector_size_c"] = int64_t{1};
+    return m;
+}
+
 TEST(TestGfx950ConvWgradGeometry, ParsesEachFamilyFromItsMetadata)
 {
     const auto implicit = wgrad::parseAotInstance(implicitMetadata());
@@ -834,13 +923,16 @@ TEST(TestGfx950ConvWgradGeometry, ParsesEachFamilyFromItsMetadata)
     EXPECT_EQ(fold->family, wgrad::KernelFamily::HELPER);
     EXPECT_EQ(fold->direct->knobs.taps, 9);
 
-    auto twoStage = implicitMetadata();
-    twoStage.fields["two_stage"] = int64_t{1};
-    twoStage.fields["split_k"] = int64_t{2};
-    twoStage.fields["ws_replicas"] = int64_t{8};
-    const auto parsedTwoStage = wgrad::parseAotInstance(twoStage);
-    ASSERT_TRUE(parsedTwoStage) << "a two-stage instance is packageable, only never planned";
+    const auto parsedTwoStage = wgrad::parseAotInstance(twoStageMetadata());
+    ASSERT_TRUE(parsedTwoStage && parsedTwoStage->implicit);
     EXPECT_TRUE(parsedTwoStage->implicit->twoStage);
+    EXPECT_EQ(parsedTwoStage->implicit->wsReplicas, 8);
+
+    const auto stage2 = wgrad::parseAotInstance(wsReduceMetadata(8));
+    ASSERT_TRUE(stage2 && stage2->direct);
+    EXPECT_EQ(stage2->family, wgrad::KernelFamily::HELPER);
+    EXPECT_EQ(stage2->direct->variant, DirectVariant::WS_REDUCE);
+    EXPECT_EQ(stage2->direct->wsReplicas, 8);
 }
 
 TEST(TestGfx950ConvWgradGeometry, RefusesMalformedOrOutOfContractMetadata)
@@ -882,6 +974,11 @@ TEST(TestGfx950ConvWgradGeometry, RefusesMalformedOrOutOfContractMetadata)
     refuses(foldMetadata(9), "kernel_family", int64_t{1});
     refuses(foldMetadata(9), "filter_h", int64_t{3});
     refuses(foldMetadata(9), "prefetch", int64_t{2});
+    refuses(foldMetadata(9), "ws_replicas", int64_t{8});
+    refuses(wsReduceMetadata(8), "ws_replicas", int64_t{0});
+    refuses(wsReduceMetadata(8), "taps", int64_t{9});
+    refuses(wsReduceMetadata(8), "kernel_family", int64_t{1});
+    refuses(dwMetadata(), "ws_replicas", int64_t{8});
 
     // direct_wgrad takes both channel counts at run time; gather bakes cpg only.
     auto runtime = dwMetadata();
@@ -932,18 +1029,18 @@ TEST(TestGfx950ConvWgradGeometry, EveryCatalogInstanceParses)
                 ++directByVariant[entry.text("direct_variant")];
             }
         }
-        // 46 implicit GEMM + 67 selectable direct + 9 fold-helper instances per dtype (the
-        // gfx950 wgrad AOT catalog: see IngestorGenerator's
+        // 156 implicit GEMM (110 two-stage) + 67 selectable direct + 9 fold helpers + the
+        // Stage 2 fold per dtype (the gfx950 wgrad AOT catalog: see IngestorGenerator's
         // test_enumerate_conv_wgrad_aot_instances.py / test_make_conv_wgrad_aot_config.py).
-        EXPECT_EQ(implicitCount, 46U) << dtype;
-        EXPECT_EQ(helpers, 9U) << dtype;
+        EXPECT_EQ(implicitCount, 156U) << dtype;
+        EXPECT_EQ(helpers, 10U) << dtype;
         size_t directTotal = 0;
         for(const auto& [variant, count] : directByVariant)
         {
             directTotal += count;
         }
         EXPECT_EQ(directTotal, 67U) << dtype;
-        EXPECT_EQ(catalog::catalog(dtype).size(), 122U) << dtype;
+        EXPECT_EQ(catalog::catalog(dtype).size(), 233U) << dtype;
         // All seven direct pipelines are represented.
         for(const auto* variant : {"direct_wgrad",
                                    "direct_wgrad_tiled",
@@ -992,9 +1089,8 @@ TEST(TestGfx950ConvWgradGeometry, PlansMatchTheAdapterOverTheCatalog)
                 folded ^= (digest >> (8 * byte)) & 0xFFU;
                 folded *= 0x100000001B3ULL;
             }
-            ++servedByFamily[entry.integer("kernel_family") == 0
-                                 ? std::string("implicit")
-                                 : entry.text("direct_variant")];
+            ++servedByFamily[entry.integer("kernel_family") == 0 ? std::string("implicit")
+                                                                 : entry.text("direct_variant")];
         }
         EXPECT_EQ(folded, row.digest) << describe(problem) << " " << row.dtype;
     }
@@ -1174,7 +1270,7 @@ std::optional<std::string> prepareRefusal(const IKernelDispatchHandler<Handle>& 
     {
         const std::string message = error.what();
         if(message.find("convolution contract") != std::string::npos
-           || message.find("fold helper") != std::string::npos)
+           || message.find("helper") != std::string::npos)
         {
             return message;
         }
@@ -1203,16 +1299,16 @@ TEST(TestGfx950ConvWgradNative, GraphMatcherBindsTheWrwTensorsAndRefusesOtherNod
 TEST(TestGfx950ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
 {
     auto oneStage = implicitMetadata();
-    auto twoStage = implicitMetadata();
-    twoStage.fields["two_stage"] = int64_t{1};
-    twoStage.fields["split_k"] = int64_t{2};
-    twoStage.fields["ws_replicas"] = int64_t{8};
     std::vector<KernelDefinition> kernels{kernelOf(oneStage, 1, 70),
-                                          kernelOf(twoStage, 2, 70),
+                                          kernelOf(twoStageMetadata(), 2, 70),
                                           kernelOf(dwMetadata(), 3, 70),
                                           kernelOf(foldMetadata(9), 4, 70),
                                           // The same depthwise instance in a pack without its fold.
-                                          kernelOf(dwMetadata(), 5, 71)};
+                                          kernelOf(dwMetadata(), 5, 71),
+                                          kernelOf(wsReduceMetadata(8), 6, 70),
+                                          // The same two-stage instance in a pack without its
+                                          // Stage 2.
+                                          kernelOf(twoStageMetadata(), 7, 71)};
     prepareAll(kernels);
     const auto& handler = dispatchHandler(GFX950_CONV_WGRAD_AOT);
 
@@ -1229,7 +1325,11 @@ TEST(TestGfx950ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
     };
     const std::vector<Case> cases{
         {"one-stage implicit", dense3x3, false, 0, true, 0},
-        {"two-stage implicit", dense3x3, false, 1, false, 0},
+        // groups * ws_replicas * kpg * Y * X * cpg f32.
+        {"two-stage implicit", dense3x3, false, 1, true, 8 * 64 * 576 * 4},
+        {"two-stage without its Stage 2", dense3x3, false, 6, false, 0},
+        {"the Stage 2 itself", dense3x3, false, 5, false, 0},
+        {"two-stage on an fp32 dW", dense3x3, true, 1, false, 0},
         {"implicit on an fp32 dW", dense3x3, true, 0, false, 0},
         {"depthwise with its fold", depthwise, true, 2, true, 129024},
         {"depthwise on a 16-bit dW", depthwise, false, 2, false, 0},
@@ -1260,14 +1360,14 @@ TEST(TestGfx950ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
             EXPECT_EQ(score, -1.0) << c.what;
         }
     }
-    // The two-stage refusal names the adapter's reason.
+    // A helper's refusal names the adapter's reason.
     const auto denseFixture = wgradFixture(dense3x3, false);
     const auto denseBound = matchesGraph(GFX950_CONV_WGRAD_AOT, denseFixture.context());
     ASSERT_TRUE(denseBound);
-    const auto twoStageRefusal = prepareRefusal(handler, denseFixture, *denseBound, kernels[1]);
-    ASSERT_TRUE(twoStageRefusal);
-    EXPECT_NE(twoStageRefusal->find(std::string(wgrad::TWO_STAGE_REFUSAL)), std::string::npos)
-        << *twoStageRefusal;
+    const auto helperRefusal = prepareRefusal(handler, denseFixture, *denseBound, kernels[5]);
+    ASSERT_TRUE(helperRefusal);
+    EXPECT_NE(helperRefusal->find(std::string(wgrad::HELPER_REFUSAL)), std::string::npos)
+        << *helperRefusal;
     // Bindings other than the graph matcher's are refused.
     auto otherBound = *denseBound;
     otherBound[std::string(GFX950_CONV_WGRAD_AOT.outputToken)] = int64_t{7};

@@ -190,7 +190,8 @@ struct SplitKCostModel
     double loadBytesPerLatency = 19716.8;
     double ctaCost = 0.012296;
     double atomicBf16BytesPerLatency = 328579.7;
-    double atomicFp16BytesPerLatency = 13196.0;
+    double atomicFp16BytesPerLatency = 328579.7;
+    double atomicFp32BytesPerLatency = 1344520.3;
     double fillBytesPerLatency = 43105.9;
     int64_t maxSplitK = 1024;
     double ladderMargin = 0.05;
@@ -200,6 +201,9 @@ struct SplitKCostModel
 constexpr int64_t MAX_GRID_DIM_Z = 65535;
 /// conv_split_k.ATOMIC_16BIT_MAX_SPLIT_K: the packed 16-bit atomic's accuracy cap.
 constexpr int64_t ATOMIC_16BIT_MAX_SPLIT_K = 128;
+/// conv_split_k.MAX_WGRAD_WS_BYTES: the two-stage scratch is addressed through an i32
+/// ws_bytes.
+constexpr int64_t MAX_WGRAD_WS_BYTES = (int64_t{1} << 31) - 4;
 
 /// SplitKProblem: the GEMM a degree is chosen for. zBatch is always batch here (wgrad
 /// rides the group and the slice on grid z together).
@@ -227,14 +231,24 @@ inline int64_t wavesBoundBlocksPerCu(const SplitKKernel& kernel, const SplitKCos
     return std::max<int64_t>(1, cost.maxWavesPerCu / kernel.wavesPerBlock);
 }
 
-/// predict_split_k_cost with the packed 16-bit atomic reduction (the only one a one-stage
-/// wgrad instance has). The arithmetic follows the Python expression for expression --
+/// SplitKReduction: how the slices fold. A one-stage instance has the packed 16-bit atomic
+/// into dW (capped at ATOMIC_16BIT_MAX_SPLIT_K); a two-stage one f32 atomics into a
+/// workspace of workspaceCopies dW-sized slabs, cleared and folded into dW afterwards.
+struct SplitKReduction
+{
+    double atomicBytesPerLatency;
+    std::optional<int64_t> maxSplitK;
+    bool workspace = false;
+    int64_t workspaceCopies = 1;
+};
+
+/// predict_split_k_cost. The arithmetic follows the Python expression for expression --
 /// integer products stay exact integers until they meet a float, as Python's do -- so a
 /// tie or a ladder-margin comparison resolves the same way in both.
 inline double predictSplitKCost(const SplitKProblem& problem,
                                 const SplitKKernel& kernel,
                                 int64_t splitK,
-                                double atomicBytesPerLatency,
+                                const SplitKReduction& reduction,
                                 const SplitKCostModel& cost)
 {
     const auto tm = kernel.tileM;
@@ -274,9 +288,19 @@ inline double predictSplitKCost(const SplitKProblem& problem,
     t += static_cast<double>(ctas) * cost.ctaCost;
     if(splitK > 1)
     {
-        t += static_cast<double>(ctas * mEff * nEff) * 4.0 / atomicBytesPerLatency;
+        t += static_cast<double>(ctas * mEff * nEff) * 4.0 / reduction.atomicBytesPerLatency;
         const auto outBytes = problem.batch * problem.m * problem.n * problem.outputBytes;
-        t += static_cast<double>(outBytes) / cost.fillBytesPerLatency;
+        if(reduction.workspace)
+        {
+            // Clear, then a fold that reads the workspace and writes the output.
+            auto wsBytes = static_cast<double>(problem.batch * problem.m * problem.n) * 4.0;
+            wsBytes *= static_cast<double>(reduction.workspaceCopies);
+            t += (2.0 * wsBytes + static_cast<double>(outBytes)) / cost.fillBytesPerLatency;
+        }
+        else
+        {
+            t += static_cast<double>(outBytes) / cost.fillBytesPerLatency;
+        }
     }
     return t;
 }
@@ -327,24 +351,32 @@ inline std::vector<int64_t> splitKDegrees(const SplitKProblem& problem,
     return degrees;
 }
 
-/// select_split_k_plan with allow_unsplit and one packed 16-bit atomic reduction capped at
-/// ATOMIC_16BIT_MAX_SPLIT_K: the cheapest degree, ties to the smaller one, and a degree off
-/// the power-of-two ladder only when it beats the best ladder degree by ladderMargin.
-inline int64_t selectSplitK(const SplitKProblem& problem,
-                            const SplitKKernel& kernel,
-                            double atomicBytesPerLatency,
-                            const SplitKCostModel& cost)
+/// select_split_k_plan with one reduction: the cheapest degree (1 only when
+/// @p allowUnsplit), ties to the smaller one, and a degree off the power-of-two ladder only
+/// when it beats the best ladder degree by ladderMargin. std::nullopt when no degree is
+/// admissible (Python raises).
+inline std::optional<int64_t> selectSplitK(const SplitKProblem& problem,
+                                           const SplitKKernel& kernel,
+                                           const SplitKReduction& reduction,
+                                           bool allowUnsplit,
+                                           const SplitKCostModel& cost)
 {
     const auto kIters = ceilDiv(problem.k, kernel.tileK);
     const auto zCap = MAX_GRID_DIM_Z / problem.batch;
     const auto cap = std::min({kIters, zCap, cost.maxSplitK});
-    std::vector<std::pair<double, int64_t>> candidates{
-        {predictSplitKCost(problem, kernel, 1, atomicBytesPerLatency, cost), 1}};
-    for(const auto s :
-        splitKDegrees(problem, kernel, cost, std::min(cap, ATOMIC_16BIT_MAX_SPLIT_K)))
+    std::vector<std::pair<double, int64_t>> candidates;
+    if(allowUnsplit)
     {
-        candidates.emplace_back(predictSplitKCost(problem, kernel, s, atomicBytesPerLatency, cost),
-                                s);
+        candidates.emplace_back(predictSplitKCost(problem, kernel, 1, reduction, cost), 1);
+    }
+    const auto reductionCap = reduction.maxSplitK ? std::min(cap, *reduction.maxSplitK) : cap;
+    for(const auto s : splitKDegrees(problem, kernel, cost, reductionCap))
+    {
+        candidates.emplace_back(predictSplitKCost(problem, kernel, s, reduction, cost), s);
+    }
+    if(candidates.empty())
+    {
+        return std::nullopt;
     }
     const auto best = *std::min_element(candidates.begin(), candidates.end());
     if(isPowerOfTwo(best.second))
@@ -375,8 +407,8 @@ enum class KernelFamily : int64_t
 {
     IMPLICIT_GEMM = 0,
     DIRECT = 1,
-    /// direct_wgrad_fold: packaged so the five folded pipelines can load it, never
-    /// admitted by the kernel matcher.
+    /// direct_wgrad_fold and direct_wgrad_ws_reduce: packaged so the folded pipelines
+    /// and the two-stage implicit GEMM can load them, never admitted by the kernel matcher.
     HELPER = 2,
 };
 
@@ -407,11 +439,12 @@ enum class DirectVariant
     GATHER, ///< "direct_wgrad_gather": WgradGatherSpec (folded, per-channel fold).
     GROUPED_MFMA, ///< "direct_wgrad_grouped_mfma": GroupedWgradMfmaSpec (folded, per-channel).
     FOLD, ///< "direct_wgrad_fold": DwWgradFoldSpec (helper).
+    WS_REDUCE, ///< "direct_wgrad_ws_reduce": WgradReduceSpec, the two-stage Stage 2 (helper).
 };
 
 inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
 {
-    static constexpr std::array<std::pair<std::string_view, DirectVariant>, 9> NAMES{{
+    static constexpr std::array<std::pair<std::string_view, DirectVariant>, 10> NAMES{{
         {"none", DirectVariant::NONE},
         {"direct_wgrad", DirectVariant::WGRAD},
         {"direct_wgrad_tiled", DirectVariant::TILED},
@@ -421,6 +454,7 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
         {"direct_wgrad_gather", DirectVariant::GATHER},
         {"direct_wgrad_grouped_mfma", DirectVariant::GROUPED_MFMA},
         {"direct_wgrad_fold", DirectVariant::FOLD},
+        {"direct_wgrad_ws_reduce", DirectVariant::WS_REDUCE},
     }};
     for(const auto& [name, variant] : NAMES)
     {
@@ -430,6 +464,12 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
         }
     }
     return std::nullopt;
+}
+
+/// _HELPER_VARIANTS: the kernels kernel_family 2 packages.
+inline bool isHelperVariant(DirectVariant variant)
+{
+    return variant == DirectVariant::FOLD || variant == DirectVariant::WS_REDUCE;
 }
 
 /// _FOLDED_VARIANTS: the compute pass stores partial slots the fold helper sums into dW.
@@ -476,7 +516,17 @@ struct ImplicitInstance
     bool twoStage = false;
     bool grouped = true;
     bool asyncDma = false;
+    /// Scratch slabs per group of a two-stage binary; 0 is the builder default.
+    int64_t wsReplicas = 0;
 };
+
+/// WgradConvSpec's default ws_replicas (_DEFAULT_WS_REPLICAS).
+constexpr int64_t DEFAULT_WS_REPLICAS = 8;
+
+inline int64_t effectiveWsReplicas(const ImplicitInstance& instance)
+{
+    return instance.wsReplicas > 0 ? instance.wsReplicas : DEFAULT_WS_REPLICAS;
+}
 
 /// What a direct binary compiles in. 0 cpg / kpg: a runtime channel count.
 struct DirectCapabilities
@@ -577,6 +627,7 @@ inline bool directVariantUses(DirectVariant variant, std::string_view knob)
         return among({"prefetch", "rows_per_chunk", "target_blocks", "wave_q4", "waves_q"});
     case DirectVariant::FOLD:
         return knob == "taps";
+    case DirectVariant::WS_REDUCE:
     case DirectVariant::NONE:
     default:
         return false;
@@ -584,11 +635,14 @@ inline bool directVariantUses(DirectVariant variant, std::string_view knob)
 }
 
 /// One direct or helper instance (the direct fields of Gfx950ConvWgradAotSpec).
+/// wsReplicas is the Stage 2 fold's slab count, which it records in the implicit-GEMM
+/// ws_replicas field; 0 for every other variant.
 struct DirectInstance
 {
     DirectVariant variant;
     DirectCapabilities compiled{};
     DirectKnobs knobs{};
+    int64_t wsReplicas = 0;
 };
 
 /// A knob's value, or rocKE's spec default where the instance left it at 0 (every wgrad
@@ -629,13 +683,8 @@ constexpr std::array<std::string_view, 10> DIRECT_CAPABILITY_FIELDS{"filter_h",
                                                                     "cpg",
                                                                     "kpg"};
 
-/// The static refusal of gfx950_conv_wgrad_aot_plan's two-stage branch, verbatim: the
-/// Stage 2 reduce is not wired, so a two-stage instance is packageable but never planned.
-constexpr std::string_view TWO_STAGE_REFUSAL
-    = "two-stage wgrad (Stage 2 reduce) is not wired in this adapter yet (mirrors "
-      "dispatch.grouped_convolution._admits's refusal)";
-/// gfx950_conv_wgrad_aot_plan's refusal of the fold helper, verbatim.
-constexpr std::string_view HELPER_REFUSAL = "the fold helper is launched only by its pipeline";
+/// gfx950_conv_wgrad_aot_plan's refusal of a helper, verbatim.
+constexpr std::string_view HELPER_REFUSAL = "a helper is launched only by its pipeline";
 
 /// The instance a kernel's metadata describes (supports_gfx950_conv_wgrad_aot's field
 /// rules), when it is a complete instance of one family. @p metadata answers
@@ -739,6 +788,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
         instance.groupMerge = *groupMerge;
         instance.splitK = *splitK;
         instance.twoStage = twoStage;
+        instance.wsReplicas = *wsReplicas;
         instance.grouped = flags[1];
         instance.asyncDma = flags[3];
         if(instance.warpM > MAX_BLOCK_THREADS / WAVE_SIZE
@@ -750,13 +800,19 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
     }
 
     const bool helper = *family == KernelFamily::HELPER;
-    if(*variant == DirectVariant::NONE || helper != (*variant == DirectVariant::FOLD)
+    // The Stage 2 fold records its slab count in ws_replicas; every other direct or
+    // helper instance holds the placeholder 0 there.
+    const auto wsReplicas
+        = *variant == DirectVariant::WS_REDUCE
+              ? intIn("ws_replicas", 1, I32_MAX)
+              : (isZero("ws_replicas") ? std::optional<int64_t>(0) : std::nullopt);
+    if(*variant == DirectVariant::NONE || helper != isHelperVariant(*variant)
        || !equalsString("pipeline", "direct") || !equalsString("epilogue", "direct")
        || !equalsString("lds_layout", "default")
        || !std::all_of(GEMM_TUNING_FIELDS.begin(), GEMM_TUNING_FIELDS.end(), isZero)
        || !std::all_of(GEMM_FLAG_FIELDS.begin(), GEMM_FLAG_FIELDS.end(), isZero)
        || !isZero("vector_size_a") || !isZero("vector_size_b") || !isZero("vector_size_c")
-       || !equalsInt("group_merge", 1) || !isZero("ws_replicas") || !isZero("lds_k_pad")
+       || !equalsInt("group_merge", 1) || !wsReplicas || !isZero("lds_k_pad")
        || !equalsInt("split_k", -1))
     {
         return std::nullopt;
@@ -832,7 +888,8 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
         }
         knobs.*member = *value;
     }
-    return AotInstance{*family, *dtype, std::nullopt, DirectInstance{*variant, caps, knobs}};
+    return AotInstance{
+        *family, *dtype, std::nullopt, DirectInstance{*variant, caps, knobs, *wsReplicas}};
 }
 
 // ---------------------------------------------------------------------------------------
@@ -844,6 +901,7 @@ enum class PlanKernel : int64_t
 {
     SELF = 0,
     FOLD = 1,
+    WS_REDUCE = 2,
 };
 
 /// The ABI a step launches with (PLAN_ABI_CODES).
@@ -855,6 +913,11 @@ enum class Abi : int64_t
     DIRECT_WGRAD = 1,
     /// (A*, D*, A_bytes, D_bytes, parts, channels): the fp32 partial slots, then dW.
     FOLD = 2,
+    /// IMPLICIT with the scratch pair before ks / ks_count: the values are the 43 i32
+    /// (IMPLICIT_TWO_STAGE_KERNARG_NAMES), the pointer ws_ptr the WS workspace.
+    IMPLICIT_TWO_STAGE = 3,
+    /// (ws_ptr*, dw_ptr*, wg_M, wg_N, ws_bytes, dw_bytes, groups): the Stage 2 fold.
+    WS_REDUCE = 4,
 };
 
 /// The buffers a step binds (PLAN_BUFFER_CODES).
@@ -887,9 +950,9 @@ struct Workspace
 };
 
 /// Everything the engine does to run one instance on one problem (Gfx950ConvWgradPlan):
-/// zero dW when zeroDw, then launch the steps. splitK is the resolved split-K degree, a
-/// launch value of the implicit-GEMM step (ks_count) and never part of a binary's
-/// identity; 1 wherever a launch does not split.
+/// zero dW when zeroDw and the WS workspace when zeroWs, then launch the steps. splitK is
+/// the resolved split-K degree, a launch value of the implicit-GEMM step (ks_count) and
+/// never part of a binary's identity; 1 wherever a launch does not split.
 struct Plan
 {
     Problem launched;
@@ -898,6 +961,7 @@ struct Plan
     std::vector<Workspace> workspaces;
     bool zeroDw = false;
     int64_t splitK = 1;
+    bool zeroWs = false;
 
     int64_t workspaceBytes() const
     {
@@ -922,12 +986,13 @@ struct Plan
     }
 };
 
-/// Gfx950ConvWgradPlan.serialize: [zero_dw, split_k, workspace_bytes, #workspaces,
+/// Gfx950ConvWgradPlan.serialize: [zero_dw, zero_ws, split_k, workspace_bytes, #workspaces,
 /// (name, offset, bytes)..., #steps, then per step kernel, abi, grid x/y/z, block, the
 /// three buffer codes, #values, values...].
 inline std::vector<int64_t> serializePlan(const Plan& plan)
 {
     std::vector<int64_t> out{plan.zeroDw ? 1 : 0,
+                             plan.zeroWs ? 1 : 0,
                              plan.splitK,
                              plan.workspaceBytes(),
                              static_cast<int64_t>(plan.workspaces.size())};
@@ -1047,6 +1112,18 @@ constexpr std::array<std::string_view, 14> DIRECT_WGRAD_KERNARG_NAMES{"p_N",
 
 /// The fold helper's scalars after (A*, D*, A_bytes, D_bytes) (DW_WGRAD_FOLD_ARGS).
 constexpr std::array<std::string_view, 2> FOLD_KERNARG_NAMES{"parts", "channels"};
+
+/// Where the two-stage ABI puts its scratch pair: after the first 40 implicit-GEMM values
+/// (through p_num_pid_n), before ks / ks_count (conv_abi._wgrad_arg_names).
+constexpr size_t TWO_STAGE_WS_POSITION = 40;
+
+/// The Stage 2 fold's scalars after (ws_ptr*, dw_ptr*) (wgrad_reduce_signature).
+constexpr std::array<std::string_view, 5> WS_REDUCE_KERNARG_NAMES{
+    "wg_M", "wg_N", "ws_bytes", "dw_bytes", "groups"};
+
+/// WgradReduceSpec's default tile: one thread per element of a 4 x 64 dW patch.
+constexpr int64_t WS_REDUCE_TILE_M = 4;
+constexpr int64_t WS_REDUCE_TILE_N = 64;
 
 /// The values for IMPLICIT_KERNARG_NAMES: ConvArgs.to_launch_values for a wgrad
 /// ConvProblem at @p splitK. GEMM M = kpg, N = Y * X * cpg, K = N * Ho * Wo; strides are
@@ -1217,6 +1294,52 @@ inline bool
     return gy <= MAX_GRID_DIM && gx <= MAX_GRID_DIM && p.groups / gm <= MAX_GRID_DIM;
 }
 
+/// wgrad_workspace_nbytes: groups * ws_replicas * wg_M * wg_N f32 -- the unmerged dW,
+/// replicated; std::nullopt past MAX_WGRAD_WS_BYTES.
+inline std::optional<int64_t>
+    twoStageWorkspaceBytes(const Problem& p, const Geometry& g, const ImplicitInstance& instance)
+{
+    const auto bytes
+        = boundedProduct({p.groups, effectiveWsReplicas(instance), g.kpg, p.y * p.x * g.cpg, 4});
+    if(!bytes || *bytes > MAX_WGRAD_WS_BYTES)
+    {
+        return std::nullopt;
+    }
+    return bytes;
+}
+
+/// gfx950_conv_wgrad_aot_split_k for a two-stage binary: resolve_conv_split_k("wgrad",
+/// reduction="workspace", allow_unsplit=False). It has no unsplit form, so a problem
+/// whose scratch leaves i32, or with one K tile or no gridDim.z budget, has no degree
+/// (std::nullopt; Python raises). Otherwise select_split_k_plan scores the f32 workspace
+/// reduction of ws_replicas copies, uncapped, for the merged GEMM.
+inline std::optional<int64_t>
+    resolveTwoStageSplitK(const Problem& p, const Geometry& g, const ImplicitInstance& instance)
+{
+    const auto gm = std::max<int64_t>(1, instance.groupMerge);
+    const auto gridGroups = std::max<int64_t>(1, p.groups / gm);
+    const auto zCap = MAX_GRID_DIM_Z / gridGroups;
+    if(!twoStageWorkspaceBytes(p, g, instance))
+    {
+        return std::nullopt;
+    }
+    const SplitKProblem gemm{
+        g.kpg * gm, p.y * p.x * g.cpg * gm, p.n * g.ho * g.wo, gridGroups, 2, 2};
+    if(ceilDiv(gemm.k, instance.tileK) < 2 || zCap < 2)
+    {
+        return std::nullopt;
+    }
+    const SplitKCostModel cost{};
+    const auto waves = std::max<int64_t>(1, instance.warpM * instance.warpN);
+    const SplitKReduction workspace{
+        cost.atomicFp32BytesPerLatency, std::nullopt, true, effectiveWsReplicas(instance)};
+    return selectSplitK(gemm,
+                        SplitKKernel{instance.tileM, instance.tileN, instance.tileK, waves},
+                        workspace,
+                        false,
+                        cost);
+}
+
 /// gfx950_conv_wgrad_aot_split_k: resolve_conv_split_k("wgrad", reduction="atomic",
 /// epilogue=the instance's, allow_unsplit=True) on gfx950, where the cost model exists.
 /// The packed 16-bit atomic is the only reduction a one-stage binary has; without it (a
@@ -1249,24 +1372,24 @@ inline int64_t resolveSplitK(const Problem& p, const Geometry& g, const Implicit
     }
     const SplitKCostModel cost{};
     const auto waves = std::max<int64_t>(1, instance.warpM * instance.warpN);
-    const auto atomicBandwidth = p.dtype == ElementType::BF16 ? cost.atomicBf16BytesPerLatency
-                                                              : cost.atomicFp16BytesPerLatency;
+    const SplitKReduction atomic{p.dtype == ElementType::BF16 ? cost.atomicBf16BytesPerLatency
+                                                              : cost.atomicFp16BytesPerLatency,
+                                 ATOMIC_16BIT_MAX_SPLIT_K};
     return selectSplitK(gemm,
                         SplitKKernel{instance.tileM, instance.tileN, instance.tileK, waves},
-                        atomicBandwidth,
-                        cost);
+                        atomic,
+                        true,
+                        cost)
+        .value_or(1);
 }
 
-/// _implicit_plan: a two-stage binary refused outright, then rocKE's offer, the split-K
-/// degree, the grid (N tiles, M tiles, groups / group_merge * split_k) of
-/// warp_m * warp_n * 64 threads and the kernargs; dW zeroed whenever the slices
-/// atomic-add into it.
+/// _implicit_plan: rocKE's offer, the split-K degree, the grid (N tiles, M tiles,
+/// groups / group_merge * split_k) of warp_m * warp_n * 64 threads and the kernargs.
+/// One-stage: dW zeroed whenever the slices atomic-add into it. Two-stage: the WS scratch
+/// (offset 0) zeroed, Stage 1 atomic-adding its slices into it, then the Stage 2 fold
+/// writing dW whole over (ceil(wg_N / 64), ceil(kpg / 4), groups) of 256 threads.
 inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitInstance& instance)
 {
-    if(instance.twoStage)
-    {
-        return std::nullopt;
-    }
     const auto geometry = deriveGeometry(problem);
     if(!geometry || !implicitSupportsProblem(problem, *geometry, instance))
     {
@@ -1274,7 +1397,14 @@ inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitIn
     }
     const auto& g = *geometry;
     const auto threads = instance.warpM * instance.warpN * WAVE_SIZE;
-    const auto splitK = resolveSplitK(problem, g, instance);
+    std::optional<int64_t> resolved
+        = instance.twoStage ? resolveTwoStageSplitK(problem, g, instance)
+                            : std::optional<int64_t>(resolveSplitK(problem, g, instance));
+    if(!resolved)
+    {
+        return std::nullopt;
+    }
+    const auto splitK = *resolved;
     const auto gridGroups
         = std::max<int64_t>(1, problem.groups) / std::max<int64_t>(1, instance.groupMerge);
     const std::array<int64_t, 3> grid{ceilDiv(problem.y * problem.x * g.cpg, instance.tileN),
@@ -1289,13 +1419,44 @@ inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitIn
     {
         return std::nullopt;
     }
-    Plan plan{problem, g, {}, {}, splitK > 1, splitK};
+    if(!instance.twoStage)
+    {
+        Plan plan{problem, g, {}, {}, splitK > 1, splitK};
+        plan.steps.push_back(Step{PlanKernel::SELF,
+                                  Abi::IMPLICIT,
+                                  grid,
+                                  threads,
+                                  {Buffer::DY, Buffer::X, Buffer::DW},
+                                  std::move(*values)});
+        return plan;
+    }
+    const auto wsBytes = *twoStageWorkspaceBytes(problem, g, instance);
+    values->insert(values->begin() + TWO_STAGE_WS_POSITION, static_cast<int32_t>(wsBytes));
+    const auto wgN = problem.y * problem.x * g.cpg;
+    const std::array<int64_t, 3> reduceGrid{
+        ceilDiv(wgN, WS_REDUCE_TILE_N), ceilDiv(g.kpg, WS_REDUCE_TILE_M), problem.groups};
+    constexpr int64_t REDUCE_THREADS = WS_REDUCE_TILE_M * WS_REDUCE_TILE_N;
+    if(!gridFits(reduceGrid, REDUCE_THREADS))
+    {
+        return std::nullopt;
+    }
+    Plan plan{problem, g, {}, {{Buffer::WS, 0, wsBytes}}, false, splitK, true};
     plan.steps.push_back(Step{PlanKernel::SELF,
-                              Abi::IMPLICIT,
+                              Abi::IMPLICIT_TWO_STAGE,
                               grid,
                               threads,
                               {Buffer::DY, Buffer::X, Buffer::DW},
                               std::move(*values)});
+    plan.steps.push_back(Step{PlanKernel::WS_REDUCE,
+                              Abi::WS_REDUCE,
+                              reduceGrid,
+                              REDUCE_THREADS,
+                              {Buffer::WS, Buffer::NONE, Buffer::DW},
+                              {static_cast<int32_t>(g.kpg),
+                               static_cast<int32_t>(wgN),
+                               static_cast<int32_t>(wsBytes),
+                               static_cast<int32_t>(g.tensorBytes[2]),
+                               static_cast<int32_t>(problem.groups)}});
     return plan;
 }
 
@@ -1642,7 +1803,7 @@ constexpr int64_t FOLD_THREADS = 16 * 64;
 ///     workspace (WS at offset 0), then the fold summing them into dW, written whole.
 inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstance& instance)
 {
-    if(instance.variant == DirectVariant::NONE || instance.variant == DirectVariant::FOLD
+    if(instance.variant == DirectVariant::NONE || isHelperVariant(instance.variant)
        || problem.strideH != problem.strideW || problem.padH != problem.padW)
     {
         return std::nullopt;
@@ -1733,24 +1894,20 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
 }
 
 /// Why gfx950_conv_wgrad_aot_plan refuses @p instance on every problem, verbatim, or
-/// std::nullopt when only the problem can decide: a two-stage binary (its Stage 2 reduce
-/// is not wired) and the fold helper (launched only by its pipeline).
+/// std::nullopt when only the problem can decide: a helper (launched only by its
+/// pipeline).
 inline std::optional<std::string_view> staticRefusal(const AotInstance& instance)
 {
     if(instance.family == KernelFamily::HELPER)
     {
         return HELPER_REFUSAL;
     }
-    if(instance.implicit && instance.implicit->twoStage)
-    {
-        return TWO_STAGE_REFUSAL;
-    }
     return std::nullopt;
 }
 
 /// gfx950_conv_wgrad_aot_plan: the launch of @p instance on @p problem, or std::nullopt
-/// when it does not compute it (a dtype other than the instance's, a helper, a two-stage
-/// binary, or the family's own rules).
+/// when it does not compute it (a dtype other than the instance's, a helper, or the
+/// family's own rules).
 inline std::optional<Plan> instancePlan(const Problem& problem, const AotInstance& instance)
 {
     if(problem.dtype != instance.dtype || staticRefusal(instance))

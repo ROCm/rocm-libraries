@@ -77,27 +77,30 @@ def test_the_catalog_lists_the_same_kernels_for_both_dtypes(catalog):
     )
 
 
-def test_two_stage_identities_are_dropped_before_anything_else_runs(catalog):
-    kept, dropped = tool.drop_two_stage(catalog)
-    assert dropped == 220
-    assert all(not i.get("two_stage") for i in kept)
-    assert len(kept) + dropped == len(catalog)
-    # Only implicit GEMM has a two-stage form.
-    assert all(i["algorithm"] == "implicit_gemm" for i in catalog if i.get("two_stage"))
-
-
-def test_no_committed_instance_is_two_stage(committed):
-    for dtype, entries in committed.items():
-        assert all(not e.get("two_stage") for e in entries), dtype
+def test_the_two_stage_identities_are_shipped_with_their_stage2(catalog, committed):
+    two_stage = [i for i in catalog if i.get("two_stage")]
+    assert len(two_stage) == 220
+    assert all(i["algorithm"] == "implicit_gemm" for i in two_stage)
+    listed = {tool.stable_hash(e) for d in tool.DTYPES for e in committed[d]}
+    for identity in two_stage:
+        assert tool.stable_hash(identity) in listed
+        (stage2,) = tool.stage2_identities(identity)
+        assert stage2["algorithm"] == "direct_wgrad_ws_reduce"
+        assert tool.stable_hash(stage2) in listed
 
 
 def test_the_lists_add_the_fold_helper_per_dtype_the_folded_families_need(committed):
     for dtype, entries in committed.items():
         helpers = [e for e in entries if tool.family(e) == "helper"]
         assert helpers, dtype
-        assert all(e["algorithm"] == "direct_wgrad_fold" for e in helpers)
+        assert {e["algorithm"] for e in helpers} == {
+            "direct_wgrad_fold",
+            "direct_wgrad_ws_reduce",
+        }
         needed = {
-            tool.stable_hash(h) for e in entries for h in tool.helper_identities(e)
+            tool.stable_hash(h)
+            for e in entries
+            for h in [*tool.helper_identities(e), *tool.stage2_identities(e)]
         }
         listed = {tool.stable_hash(e) for e in helpers}
         assert needed == listed, dtype

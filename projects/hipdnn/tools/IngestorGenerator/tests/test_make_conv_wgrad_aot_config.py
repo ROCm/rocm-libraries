@@ -66,16 +66,16 @@ def specs(identities):
     return sorted(out, key=lambda s: (s.dtype, s.instance_id))
 
 
-def test_the_committed_lists_hold_122_instances_per_dtype_across_all_8_families(specs):
-    """46 implicit-GEMM + 67 direct + 9 fold-helper per dtype: the deliverable set for
-    the gfx950 wgrad AOT catalog (two-stage implicit-GEMM instances excluded), one
-    count per (kernel_family, direct_variant) pair."""
+def test_the_committed_lists_hold_233_instances_per_dtype_across_all_8_families(specs):
+    """156 implicit-GEMM (110 of them two-stage) + 67 direct + 9 fold helpers + the
+    one Stage 2 fold per dtype: the deliverable set for the gfx950 wgrad AOT catalog,
+    one count per (kernel_family, direct_variant) pair."""
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
     for dtype in ("bf16", "fp16"):
         assert by_dtype[dtype] == {
-            (0, "none"): 46,
+            (0, "none"): 156,
             (1, "direct_wgrad"): 5,
             (1, "direct_wgrad_tiled"): 20,
             (1, "direct_wgrad_dw"): 5,
@@ -84,15 +84,27 @@ def test_the_committed_lists_hold_122_instances_per_dtype_across_all_8_families(
             (1, "direct_wgrad_gather"): 16,
             (1, "direct_wgrad_grouped_mfma"): 6,
             (2, "direct_wgrad_fold"): 9,
+            (2, "direct_wgrad_ws_reduce"): 1,
         }
-    assert sum(1 for s in specs if not s.is_helper) == 226
-    assert len(specs) == 244
+    assert sum(1 for s in specs if not s.is_helper) == 446
+    assert sum(1 for s in specs if s.two_stage) == 220
+    assert len(specs) == 466
 
 
-def test_no_shipped_instance_is_two_stage(specs):
-    """enumerate_conv_wgrad_aot_instances.py drops every two-stage identity before
-    this tool ever sees one (its Stage 2 reduce is not wired in the adapter)."""
-    assert all(not spec.two_stage for spec in specs)
+def test_every_two_stage_instance_has_its_stage2_in_the_catalog(specs):
+    """The Stage 2 fold a two-stage instance launches is shipped beside it, keyed by
+    the fields the native pack looks it up by (dtype and ws_replicas)."""
+    from builders.common.convolution_backward_filter import (
+        gfx950_conv_wgrad_aot_ws_reduce_fields,
+    )
+
+    shipped = {
+        (s.dtype, s.ws_replicas) for s in specs if s.direct_variant == "direct_wgrad_ws_reduce"
+    }
+    for spec in specs:
+        if spec.two_stage:
+            fields = gfx950_conv_wgrad_aot_ws_reduce_fields(spec)
+            assert (fields["dtype"], fields["ws_replicas"]) in shipped
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):
@@ -122,8 +134,11 @@ def test_a_fold_helper_instance_bakes_no_geometry(specs):
     helpers = [s for s in specs if s.is_helper]
     assert helpers, "the catalog must carry the fold helper"
     for spec in helpers:
-        assert spec.direct_variant == "direct_wgrad_fold"
-        assert spec.taps > 0
+        assert spec.direct_variant in ("direct_wgrad_fold", "direct_wgrad_ws_reduce")
+        if spec.direct_variant == "direct_wgrad_fold":
+            assert spec.taps > 0 and spec.ws_replicas == 0
+        else:
+            assert spec.taps == 0 and spec.ws_replicas > 0
         for name in (
             "filter_h",
             "filter_w",

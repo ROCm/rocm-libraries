@@ -16,8 +16,10 @@ it comes from (the dispatcher's registered gfx950 wgrad instances --
   representative shape per family, including the resolved split-K degree for
   implicit-GEMM instances (cross-checked directly against
   ``dispatch.grouped_convolution._wgrad_split_k`` / ``resolve_conv_split_k``);
-* a two-stage implicit-GEMM instance is a valid spec but is refused at plan
-  time with a clear reason, never silently mis-planned;
+* a two-stage implicit-GEMM instance plans its Stage 2 fold
+  (``direct_wgrad_ws_reduce``) and scratch exactly as the dispatcher does,
+  on odd and even dW rows alike, and is refused by name only where K cannot
+  split;
 * ``serialize()``/``digest()`` round-trip and are stable.
 """
 
@@ -40,6 +42,8 @@ from builders.common.convolution_backward_filter import (
     gfx950_conv_wgrad_aot_problem_for_request,
     gfx950_conv_wgrad_aot_serves,
     gfx950_conv_wgrad_aot_split_k,
+    gfx950_conv_wgrad_aot_step_signature,
+    gfx950_conv_wgrad_aot_ws_reduce_fields,
     supports_gfx950_conv_wgrad_aot,
     supports_gfx950_conv_wgrad_aot_problem,
 )
@@ -86,6 +90,19 @@ def _spec(identity: KernelIdentity) -> Gfx950ConvWgradAotSpec:
     """The packaged instance of a wgrad catalog identity (what the IG
     converter makes), mirroring the dgrad packaging test's ``_spec``."""
     if identity.is_direct:
+        fields = aot_wgrad_direct_instance_fields(identity)
+        if identity.direction == "direct_wgrad_helper":
+            # As the converter: a helper bakes no capability, whatever rocKE's
+            # helper identity keeps of its feeding pipeline's.
+            fields.update(
+                {
+                    name: 0
+                    for name in fields
+                    if name not in ("kernel_family", "direct_variant")
+                    and name.startswith(("filter_", "stride_", "pad_", "dilation_"))
+                    or name in ("cpg", "kpg")
+                }
+            )
         return Gfx950ConvWgradAotSpec(
             dtype=identity.dtype_a,
             tile_m=0,
@@ -105,7 +122,7 @@ def _spec(identity: KernelIdentity) -> Gfx950ConvWgradAotSpec:
             lds_k_outer=0,
             grouped=0,
             instance_id=identity.stable_hash(),
-            **aot_wgrad_direct_instance_fields(identity),
+            **fields,
         )
     return Gfx950ConvWgradAotSpec(
         dtype=identity.dtype_a,
@@ -129,7 +146,8 @@ def test_wgrad_catalog_has_446_instances_across_all_8_families(catalog):
     assert len(catalog) == 446
     algorithms = {ident.algorithm for ident, _ in catalog}
     assert algorithms == {"implicit_gemm"} | set(AOT_WGRAD_DIRECT_ALGORITHMS) - {
-        "direct_wgrad_fold"
+        "direct_wgrad_fold",
+        "direct_wgrad_ws_reduce",
     }
 
 
@@ -149,15 +167,32 @@ def test_the_catalog_converts_and_reproduces_its_identities(catalog):
 
 
 def test_two_stage_instances_are_valid_specs(catalog):
-    """A two-stage implicit-GEMM instance is exactly as packageable as any
-    other -- it is only the *plan* that refuses it (see
-    ``test_two_stage_instances_are_refused_at_plan_time``)."""
     two_stage = [spec for _, spec in catalog if spec.two_stage]
     assert len(two_stage) == 220
     for spec in two_stage:
         assert not spec.is_direct
         ok, why = supports_gfx950_conv_wgrad_aot(spec)
         assert ok, why
+
+
+def test_the_stage2_helpers_convert_and_reproduce_their_identities(catalog):
+    """Every two-stage instance's Stage 2 is the dispatcher's own helper
+    identity, packageable, and its fields are the ones the instance names."""
+    helpers = {}
+    for ident, spec in catalog:
+        if not spec.two_stage:
+            continue
+        (helper,) = gc._instance_helpers(ident)
+        helpers[helper.stable_hash()] = (helper, spec)
+    assert len(helpers) == 2  # one per dtype: the catalog bakes ws_replicas=8
+    for helper, instance in helpers.values():
+        spec = _spec(helper)
+        assert supports_gfx950_conv_wgrad_aot(spec) == (True, "ok")
+        assert spec.to_identity() == helper
+        assert spec.to_identity().stable_hash() == spec.instance_id
+        fields = gfx950_conv_wgrad_aot_ws_reduce_fields(instance)
+        assert {name: getattr(spec, name) for name in fields} == fields
+        assert spec.kernel_name().startswith("rocke_conv_wgrad_ws_reduce")
 
 
 # ---------------------------------------------------------------------------
@@ -219,11 +254,8 @@ def _req(problem: Gfx950ConvWgradProblem) -> ConvGroupedRequest:
 
 @pytest.mark.parametrize("shape", sorted({**_SHAPES, **_SHAPES_BF16}))
 def test_the_plan_serves_exactly_rockes_offer(catalog, shape):
-    """Phase 0's own offer (``_admits``) and plan (``launch_plan_for``) are the
-    ground truth: a two-stage instance is refused here even where Phase 0
-    would admit it (``_admits`` refuses two-stage before reaching the shape
-    checks at all, so this is never exercised the other way), everything
-    else matches exactly."""
+    """The dispatcher's own offer (``_admits``) is the ground truth, two-stage
+    instances included."""
     problem = {**_SHAPES, **_SHAPES_BF16}[shape]
     req = _req(problem)
     served_families = set()
@@ -232,9 +264,6 @@ def test_the_plan_serves_exactly_rockes_offer(catalog, shape):
             continue
         admits, why_admits = gc._admits(ident, req)
         plan, why_plan = gfx950_conv_wgrad_aot_plan(spec, problem)
-        if spec.two_stage:
-            assert plan is None, ident.label()
-            continue
         assert (plan is not None) == admits, (ident.label(), why_admits, why_plan)
         if plan is not None:
             served_families.add(ident.algorithm)
@@ -246,7 +275,7 @@ def test_every_family_is_reached_by_the_parametrized_shapes(catalog):
     served = set()
     for name, problem in {**_SHAPES, **_SHAPES_BF16}.items():
         for ident, spec in catalog:
-            if ident.dtype_a != problem.dtype or spec.two_stage:
+            if ident.dtype_a != problem.dtype:
                 continue
             plan, _ = gfx950_conv_wgrad_aot_plan(spec, problem)
             if plan is not None:
@@ -280,7 +309,7 @@ def test_implicit_gemm_split_k_matches_resolve_conv_split_k(catalog, shape):
     req = _req(problem)
     checked = 0
     for ident, spec in catalog:
-        if ident.algorithm != "implicit_gemm" or spec.two_stage:
+        if ident.algorithm != "implicit_gemm":
             continue
         if ident.dtype_a != problem.dtype:
             continue
@@ -306,9 +335,9 @@ def test_implicit_gemm_split_k_matches_resolve_conv_split_k(catalog, shape):
                 block_size=ident.warp_m * ident.warp_n * ident.wave_size,
                 group_merge=ident.group_merge,
                 ws_replicas=ident.ws_replicas,
-                reduction="atomic",
-                epilogue=ident.epilogue,
-                allow_unsplit=True,
+                reduction="workspace" if ident.two_stage else "atomic",
+                epilogue=None if ident.two_stage else ident.epilogue,
+                allow_unsplit=not ident.two_stage,
             ).split_k
         got = gfx950_conv_wgrad_aot_split_k(spec, problem)
         assert got == want, ident.label()
@@ -353,25 +382,85 @@ def test_direct_plans_match_the_dispatchers_grid_block_and_buffers(catalog):
 
 
 # ---------------------------------------------------------------------------
-# Two-stage refusal
+# Two-stage
 # ---------------------------------------------------------------------------
 
+#: Shapes for the two-stage plan: odd and even dW rows (the packed 16-bit
+#: atomic's parity rule does not apply to the f32 scratch), grouped, and a
+#: depthwise one the group-merged two-stage rows reach.
+_TWO_STAGE_SHAPES = {
+    "odd_c": _p(32, 20, 20, 33, 64, 3, 3, p=(1, 1)),
+    "even_c": _p(32, 20, 20, 64, 64, 3, 3, p=(1, 1)),
+    "odd_c_bf16": _p(16, 17, 19, 33, 48, 3, 3, p=(1, 1), dtype="bf16"),
+    "grouped": _p(8, 24, 24, 96, 96, 3, 3, p=(1, 1), groups=24),
+    "depthwise": _p(128, 16, 16, 480, 480, 3, 3, p=(1, 1), groups=480),
+    "dense3x3": _SHAPES["dense3x3"],
+}
 
-def test_two_stage_instances_are_refused_at_plan_time(catalog):
-    """Every two-stage instance is refused with a clear reason, for every
-    representative shape -- never silently mis-planned."""
+
+def _byte_values(dispatch_values: dict, names: list) -> tuple:
+    return tuple((name, dispatch_values[name]) for name in names)
+
+
+@pytest.mark.parametrize("shape", sorted(_TWO_STAGE_SHAPES))
+def test_two_stage_plans_match_the_dispatcher(catalog, shape):
+    """A two-stage plan is the dispatcher's launch plan step for step: the
+    grids, blocks, buffers and every by-value kernarg of Stage 1 and the
+    Stage 2 fold, the workspace, the degree, and what each zeroes."""
+    problem = _TWO_STAGE_SHAPES[shape]
+    req = _req(problem)
+    tensors = dict(zip(("dy", "x", "dw"), problem.tensor_bytes(dw_bytes=2)))
+    checked = 0
+    for inst in registered_conv_grouped_instances(_ARCH, direction="wgrad"):
+        ident = inst.identity
+        if not ident.two_stage or ident.dtype_a != problem.dtype:
+            continue
+        spec = _spec(ident)
+        plan, why = gfx950_conv_wgrad_aot_plan(spec, problem)
+        admits, why_admits = gc._admits(ident, req)
+        assert (plan is not None) == admits, (ident.label(), why, why_admits)
+        if plan is None:
+            continue
+        theirs = gc.launch_plan_for(req, inst)
+        assert plan.split_k == theirs.split_k >= 2
+        assert plan.zero_ws and not plan.zero_dw and theirs.zero == ("ws",)
+        assert plan.workspaces == (("ws", 0, theirs.workspaces["ws"]),)
+        sizes = {**tensors, "ws": theirs.workspaces["ws"]}
+        ptrs = {name: 0x1000 * (i + 1) for i, name in enumerate(sizes)}
+        assert [s.kernel for s in plan.steps] == ["self", "direct_wgrad_ws_reduce"]
+        for mine, step in zip(plan.steps, theirs.steps, strict=True):
+            assert mine.grid == step.grid, ident.label()
+            assert (mine.block, 1, 1) == step.block, ident.label()
+            assert mine.buffers == step.buffers, ident.label()
+            values = theirs.values(step, ptrs, sizes)
+            names = [
+                a["name"]
+                for a in gfx950_conv_wgrad_aot_step_signature(mine.abi, spec.dtype)
+                if not a["name"].endswith("_ptr") and a["name"] not in ("dY", "X", "dW")
+            ]
+            if mine.abi == "implicit_wgrad_two_stage":
+                names = names[3:]
+            assert mine.values == _byte_values(values, names), ident.label()
+            assert [a["name"] for a in step.signature] == [
+                a["name"]
+                for a in gfx950_conv_wgrad_aot_step_signature(mine.abi, spec.dtype)
+            ]
+        assert theirs.steps[1].identity == gc._instance_helpers(ident)[0]
+        checked += 1
+    assert checked > 0, shape
+
+
+def test_two_stage_is_refused_where_k_cannot_split(catalog):
+    problem = _p(1, 2, 2, 64, 64, 1, 1)
     refused = 0
-    for name, problem in {**_SHAPES, **_SHAPES_BF16}.items():
-        for ident, spec in catalog:
-            if not spec.two_stage or ident.dtype_a != problem.dtype:
-                continue
-            plan, why = gfx950_conv_wgrad_aot_plan(spec, problem)
-            assert plan is None
-            assert "two-stage" in why
-            ok, why2 = gfx950_conv_wgrad_aot_serves(spec, problem)
-            assert not ok
-            assert why2 == why
-            refused += 1
+    for ident, spec in catalog:
+        if not spec.two_stage or ident.dtype_a != problem.dtype or spec.group_merge > 1:
+            continue
+        plan, why = gfx950_conv_wgrad_aot_plan(spec, problem)
+        assert plan is None
+        assert why.startswith("two-stage wgrad:"), why
+        assert gfx950_conv_wgrad_aot_serves(spec, problem) == (False, why)
+        refused += 1
     assert refused > 0
 
 
@@ -383,7 +472,7 @@ def test_two_stage_instances_are_refused_at_plan_time(catalog):
 def test_the_digest_is_fnv1a_over_the_serialized_plan(catalog):
     plan = None
     for ident, spec in catalog:
-        if spec.is_direct or spec.two_stage:
+        if spec.is_direct:
             continue
         plan, why = gfx950_conv_wgrad_aot_plan(spec, _SHAPES["dense3x3"])
         if plan is not None:
@@ -403,8 +492,6 @@ def test_serialize_and_digest_round_trip_and_are_stable(catalog):
     direct instance."""
     checked = set()
     for ident, spec in catalog:
-        if spec.two_stage:
-            continue
         for name, problem in _SHAPES.items():
             if ident.dtype_a != problem.dtype:
                 continue
