@@ -73,7 +73,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
 | `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
-| `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
+| `tools/` | `test_arch_domain_artifact.py` (source-only structure/probe units), `test_arch_domain_support.py` (source + installed host-only policy controls), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
 > Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
@@ -167,7 +167,10 @@ Four distinct things run here; don't conflate them:
 `rocke_arch_domain_reproducibility` owns the full
 `tools/gen_arch_domain.py --check` sweep. It is deliberately not collected by
 pytest: the sweep starts external compiler/linker processes, has its own timeout
-and resource contract, and is independent of `ROCKE_BACKEND`.
+and resource contract, and is independent of `ROCKE_BACKEND`. The separate
+`tools/test_arch_domain_support.py` units exercise the comparison policy without
+real compiler processes. They run in source pytest and installed `rocke_pytest`,
+using the source or staged generator respectively.
 
 The same logical gate has two registrations: the build-tree entry invokes the
 source tool and committed source column, while the installed entry invokes a

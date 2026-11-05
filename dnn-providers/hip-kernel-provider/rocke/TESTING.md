@@ -478,8 +478,12 @@ Expected crashes and timeouts whose normalized evidence still matches are not
 retried; changed evidence, unexpected verdicts, and unclassified outcomes still
 receive a contention-free retry.
 
-The fast structure and generator units remain source-only in
-`platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
+Structure and compiler-probe units remain source-only in
+`platform/tests/tools/test_arch_domain_artifact.py`. Host-only support-policy
+controls in `platform/tests/tools/test_arch_domain_support.py` run in both source
+pytest and the installed `rocke_pytest` CI entry, using the staged generator in
+installed artifacts. They check loss-fail, gain-pass, invalid records, and method/
+metadata guards without a real compiler. Normal pytest and the
 `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the

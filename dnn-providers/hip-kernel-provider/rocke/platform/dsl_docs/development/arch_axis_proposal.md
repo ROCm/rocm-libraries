@@ -37,7 +37,7 @@ the C++ lowerer does not yet own the same in-engine lookup.
 The staged design is:
 
 - **S1** *(done)* — generate an `arch_domain` table by probing the installed
-  toolchain; commit it, gate regeneration as a no-op, exactly like golden. One
+  toolchain; commit it, gate retained support with a monotonic floor. One
   column per flavor, `(key, arch) → status + evidence`; a plain `key → set of
   arches` proved too lossy (§3.2, §4/S1).
 - **S2** *(warning/corpus gate done; hard rejection proposed)* — make `_need()`

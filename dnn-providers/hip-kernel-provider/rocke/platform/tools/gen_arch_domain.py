@@ -1108,6 +1108,108 @@ def _is_nonblank_string(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _validate_column(doc: object, label: str) -> list[str]:
+    """Validate one comparison column without inferring support from bad data.
+
+    Cross-column equality and capability transitions belong to the comparer.
+    Keep these record rules independent of the other column so an invalid
+    baseline cannot be mistaken for a support gain.
+    """
+    failures: list[str] = []
+    if not isinstance(doc, dict):
+        return [f"{label} column is not a JSON object"]
+    if doc.get("schema") != SCHEMA:
+        failures.append(f"{label} schema must be {SCHEMA!r}")
+    for field in ("toolchain", "keys", "canonical", "processors"):
+        if not isinstance(doc.get(field), dict):
+            failures.append(f"{label} {field} is not a mapping")
+    if failures:
+        return failures
+
+    toolchain = doc["toolchain"]
+    identity = toolchain.get("clang")
+    if not _is_nonblank_string(identity):
+        failures.append(
+            f"{label} toolchain clang must be a nonblank string, got {identity!r}"
+        )
+    for field in ("flavor", "arches", "generator", "probe_cflags", "probe_timeout_s"):
+        if field not in toolchain:
+            failures.append(f"{label} toolchain has no {field}")
+    arches = toolchain.get("arches")
+    if not isinstance(arches, list) or not all(
+        isinstance(arch, str) for arch in arches
+    ):
+        failures.append(f"{label} toolchain arches must be a list of names")
+        return failures
+
+    expected_arches = set(arches)
+    processors = doc["processors"]
+    missing = expected_arches - set(processors)
+    outside = set(processors) - expected_arches
+    if missing:
+        failures.append(f"{label} processors missing answers: {sorted(missing)}")
+    if outside:
+        failures.append(f"{label} processors outside probe scope: {sorted(outside)}")
+    for arch, entry in sorted(processors.items()):
+        if not isinstance(entry, dict) or not isinstance(entry.get("accepted"), bool):
+            failures.append(f"processor {arch}: {label} accepted must be boolean")
+            continue
+        if not entry["accepted"] and not _is_nonblank_string(entry.get("evidence")):
+            failures.append(
+                f"processor {arch}: {label} evidence must be a nonblank string for a rejected processor, got {entry.get('evidence')!r}"
+            )
+
+    for key, row in sorted(doc["keys"].items()):
+        if not isinstance(row, dict):
+            failures.append(f"{key}: {label} architecture row is not a mapping")
+            continue
+        if set(row) != expected_arches:
+            failures.append(
+                f"{key}: {label} architecture coverage does not match probe scope"
+            )
+        for arch, cell in sorted(row.items()):
+            if not isinstance(cell, dict):
+                failures.append(f"{key}/{arch}: {label} cell is not a mapping")
+                continue
+            status = cell.get("status")
+            if (
+                not isinstance(status, str)
+                or status not in _CELL_TRANSITIONS
+                or status == STATUS_PROBE_ERROR
+            ):
+                failures.append(f"{key}/{arch}: {label} invalid status {status!r}")
+            if status != STATUS_OK and not _is_nonblank_string(cell.get("evidence")):
+                failures.append(
+                    f"{key}/{arch}: {label} evidence must be a nonblank string for a non-ok cell, got {cell.get('evidence')!r}"
+                )
+            if "probe_imm" in cell and (
+                status != STATUS_OK or type(cell["probe_imm"]) is not int
+            ):
+                failures.append(
+                    f"{key}/{arch}: {label} probe_imm must be an integer on an ok cell, got {cell['probe_imm']!r}"
+                )
+            verified_on = cell.get("verified_on")
+            if not isinstance(verified_on, str) or verified_on != toolchain.get(
+                "flavor"
+            ):
+                failures.append(
+                    f"{key}/{arch}: {label} verified_on must be {toolchain.get('flavor')!r}, got {verified_on!r}"
+                )
+    return failures
+
+
+def _describe_field_changes(before: dict, after: dict) -> str:
+    """Name changed fields, distinguishing an absent field from a JSON null."""
+    changes = []
+    for field in sorted(set(before) | set(after)):
+        if field in before and field in after and before[field] == after[field]:
+            continue
+        old = repr(before[field]) if field in before else "<missing>"
+        new = repr(after[field]) if field in after else "<missing>"
+        changes.append(f"{field}: baseline={old}, current={new}")
+    return "; ".join(changes)
+
+
 def _compare_support(committed: str, fresh: str) -> _SupportComparison:
     """Compare the support floor, retaining scope and probe-method guards.
 
@@ -1136,60 +1238,29 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
         return result
 
     for label, doc in (("baseline", a), ("current", b)):
-        if not isinstance(doc, dict):
-            result.failures.append(f"{label} column is not a JSON object")
-            continue
-        if doc.get("schema") != SCHEMA:
-            result.failures.append(f"{label} schema must be {SCHEMA!r}")
-        for field in ("toolchain", "keys", "canonical", "processors"):
-            if not isinstance(doc.get(field), dict):
-                result.failures.append(f"{label} {field} is not a mapping")
+        result.failures.extend(_validate_column(doc, label))
     if result.failures:
         return result
 
-    method_fields = ("flavor", "arches", "generator", "probe_cflags", "probe_timeout_s")
-    for label, doc in (("baseline", a), ("current", b)):
-        identity = doc["toolchain"].get("clang")
-        if not _is_nonblank_string(identity):
-            result.failures.append(
-                f"{label} toolchain clang must be a nonblank string, got {identity!r}"
-            )
-        for field in method_fields:
-            if field not in doc["toolchain"]:
-                result.failures.append(f"{label} toolchain has no {field}")
-        arches = doc["toolchain"].get("arches")
-        if not isinstance(arches, list) or not all(
-            isinstance(arch, str) for arch in arches
-        ):
-            result.failures.append(f"{label} toolchain arches must be a list of names")
     a_method, b_method = dict(a["toolchain"]), dict(b["toolchain"])
-    a_method.pop("clang", None)
-    b_method.pop("clang", None)
+    a_method.pop("clang")
+    b_method.pop("clang")
     if a_method != b_method:
-        result.failures.append("toolchain scope or probe method changed")
+        result.failures.append(
+            "toolchain scope or probe method changed -- "
+            + _describe_field_changes(a_method, b_method)
+        )
     excluded = {"keys", "canonical", "processors", "toolchain", "_comment"}
     a_other = {key: value for key, value in a.items() if key not in excluded}
     b_other = {key: value for key, value in b.items() if key not in excluded}
     if a_other != b_other:
-        result.failures.append("artifact metadata changed")
+        result.failures.append(
+            "artifact metadata changed -- " + _describe_field_changes(a_other, b_other)
+        )
     if result.failures:
         return result
 
     expected_arches = set(a_method["arches"])
-    for label, doc in (("baseline", a), ("current", b)):
-        processors = set(doc["processors"])
-        missing = expected_arches - processors
-        outside = processors - expected_arches
-        if missing:
-            result.failures.append(
-                f"{label} processors missing answers: {sorted(missing)}"
-            )
-        if outside:
-            result.failures.append(
-                f"{label} processors outside probe scope: {sorted(outside)}"
-            )
-    if result.failures:
-        return result
 
     a_keys, b_keys = a["keys"], b["keys"]
     if set(a_keys) != set(b_keys):
@@ -1199,22 +1270,8 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
         )
     for key in sorted(set(a_keys) & set(b_keys)):
         before_row, after_row = a_keys[key], b_keys[key]
-        if not isinstance(before_row, dict) or not isinstance(after_row, dict):
-            result.failures.append(f"{key}: architecture row is not a mapping")
-            continue
-        if set(before_row) != expected_arches or set(after_row) != expected_arches:
-            result.failures.append(
-                f"{key}: architecture coverage does not match probe scope"
-            )
-        for arch in sorted(set(before_row) - set(after_row)):
-            result.failures.append(f"missing current cell {key}/{arch}")
-        for arch in sorted(set(after_row) - set(before_row)):
-            result.failures.append(f"new current cell {key}/{arch}: scope changed")
-        for arch in sorted(set(before_row) & set(after_row)):
+        for arch in sorted(expected_arches):
             before_cell, after_cell = before_row[arch], after_row[arch]
-            if not isinstance(before_cell, dict) or not isinstance(after_cell, dict):
-                result.failures.append(f"{key}/{arch}: cell is not a mapping")
-                continue
             before, after = before_cell.get("status"), after_cell.get("status")
             transition = _cell_transition(before, after)
             change = f"{key}/{arch}: {before} -> {after}"
@@ -1228,28 +1285,6 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
                 STATUS_TOOLCHAIN_TIMEOUT,
             ):
                 result.changes["unvalidated"].append(f"{key}/{arch}: {after}")
-            for label, cell in (("baseline", before_cell), ("current", after_cell)):
-                if cell.get("status") != STATUS_OK and not _is_nonblank_string(
-                    cell.get("evidence")
-                ):
-                    result.failures.append(
-                        f"{key}/{arch}: {label} evidence must be a nonblank string for a non-ok cell, got {cell.get('evidence')!r}"
-                    )
-                if "probe_imm" in cell and (
-                    cell.get("status") != STATUS_OK
-                    or type(cell["probe_imm"]) is not int
-                ):
-                    result.failures.append(
-                        f"{key}/{arch}: {label} probe_imm must be an integer on an ok cell, got {cell['probe_imm']!r}"
-                    )
-                verified_on = cell.get("verified_on")
-                if (
-                    not isinstance(verified_on, str)
-                    or verified_on != a_method["flavor"]
-                ):
-                    result.failures.append(
-                        f"{key}/{arch}: {label} verified_on must be {a_method['flavor']!r}, got {verified_on!r}"
-                    )
             if before == after == STATUS_OK and (
                 before_cell.get("probe_imm") != after_cell.get("probe_imm")
             ):
@@ -1257,19 +1292,6 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
 
     for arch in sorted(expected_arches):
         before, after = a["processors"][arch], b["processors"][arch]
-        if (
-            not isinstance(before, dict)
-            or not isinstance(after, dict)
-            or not isinstance(before.get("accepted"), bool)
-            or not isinstance(after.get("accepted"), bool)
-        ):
-            result.failures.append(f"processor {arch}: accepted must be boolean")
-            continue
-        for label, entry in (("baseline", before), ("current", after)):
-            if not entry["accepted"] and not _is_nonblank_string(entry.get("evidence")):
-                result.failures.append(
-                    f"processor {arch}: {label} evidence must be a nonblank string for a rejected processor, got {entry.get('evidence')!r}"
-                )
         if before["accepted"] and not after["accepted"]:
             result.failures.append(f"processor {arch}: accepted -> unsupported")
         elif after["accepted"] and not before["accepted"]:
