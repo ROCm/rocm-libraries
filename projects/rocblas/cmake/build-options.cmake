@@ -95,7 +95,7 @@ if( BUILD_WITH_TENSILE )
   # ROCBLAS_TENSILE_ARCH_SKIPLIST
   # GPU_TARGETS / --offload-arch still include these; TensileCreateLibrary does not.
   # gfx1250 also excludes all target features like gfx1250:xnack+. Set empty to disable.
-  set( ROCBLAS_TENSILE_ARCH_SKIPLIST "amdgcnspirv;gfx1250-strict" CACHE STRING
+  set( ROCBLAS_TENSILE_ARCH_SKIPLIST "gfx1250-strict" CACHE STRING
     "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS" )
 
   if(Tensile_LIBRARY_FORMAT MATCHES "yaml")
