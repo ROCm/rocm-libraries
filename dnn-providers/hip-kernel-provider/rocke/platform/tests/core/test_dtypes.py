@@ -10,7 +10,7 @@ from typing import get_args, get_type_hints
 import pytest
 
 from rocke.core.dtypes import normalize_dtype
-from rocke.core.dtypes import dtype_info
+from rocke.core.dtypes import DTypeCategory, dtype_info, dtype_names
 from rocke.core.arch.target import MmaScaleDType
 from rocke.core import ir
 from rocke.core.ir import FP8E4M3, I8, IRBuilder, Type, dtype_to_ir_type, type_bits
@@ -136,6 +136,21 @@ def test_the_integer_dtypes_are_i8_and_i4_only():
     for name in ("iu8", "iu4"):
         with pytest.raises(ValueError, match="unknown dtype"):
             dtype_info(name)
+
+
+def test_dtype_names_lists_one_category_in_table_order():
+    """Error texts that list the dtypes an operation accepts take the list from
+    the table, so a new dtype appears in them without a second edit."""
+    assert dtype_names(DTypeCategory.INTEGER) == (
+        "i4",
+        "i8",
+        "u4",
+        "u8",
+        "i16",
+        "i32",
+        "i64",
+    )
+    assert dtype_names(DTypeCategory.PREDICATE) == ("i1",)
 
 
 @pytest.mark.parametrize(

@@ -655,9 +655,8 @@ lands.
 Engine-specific tolerances and skips go in the engine TOML and are keyed to the
 generated case ids; the generator's id scheme is
 `<plan items>_<rank>d_i<spatial>_n<N>c<C>k<K>[g<G>]_f<filter>_<dtype>_<layout>[_<activation>]`.
-A change to the generator that renames ids updates `ffm-quick` in
-`miopen-provider/test_categories_integration.yaml` and the TOML globs in the same
-pull request.
+A change to the generator that renames ids updates the TOML globs and exact ids
+in the same pull request.
 
 ---
 

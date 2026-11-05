@@ -16,12 +16,14 @@ from pathlib import Path
 import pytest
 
 from hkp_pack.errors import HkpPackError
+from hkp_pack.sources import kernel_sources
 from hkp_pack.rocke_compile import (
     ROCKE_TARGET_NATIVE,
     _check_support_predicate,
     _module_from_source,
     _require_spec_arch_signature,
     _resolve_spec_class,
+    _resolve_support_predicate,
     build_spec,
     rocke_compile_arch,
 )
@@ -285,6 +287,53 @@ _HAS_ROCKE_LIBRARY = (
 ).is_dir()
 
 
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_the_gfx950_reduce_builder_is_validated_by_its_own_predicate():
+    """The reduce builder reaches ``supports_tiled_reduce_spec`` through the alias, and
+    that predicate -- not the 3D one -- refuses a spec the builder cannot lower."""
+    module = import_module("kernels.gfx950.attention_tiled_3d")
+    builder = "build_unified_attention_reduce_tiled"
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
+    good = spec_cls(
+        head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
+    )
+    _check_support_predicate(module, builder, good, "gfx950")
+    bad = dataclasses.replace(good, head_size=96)
+    with pytest.raises(
+        HkpPackError, match="supports_tiled_reduce_spec.*divisible by 64"
+    ):
+        _check_support_predicate(module, builder, bad, "gfx950")
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_the_gfx950_3d_module_builder_is_validated_by_both_halves():
+    """The segment+reduce module builder resolves its own predicate by derived name, and
+    that predicate refuses a spec only the reduce half cannot lower (a segment count
+    whose per-segment factors overflow the reduce's LDS cache)."""
+    module = import_module("kernels.gfx950.attention_tiled_3d")
+    builder = "build_unified_attention_3d_tiled_module"
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
+    good = spec_cls(
+        head_size=128,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=16,
+    )
+    _check_support_predicate(module, builder, good, "gfx950")
+    bad = dataclasses.replace(
+        good, num_segments=module.reduce_max_segments("gfx950") + 1
+    )
+    with pytest.raises(
+        HkpPackError, match="supports_unified_attention_3d_tiled_module.*LDS"
+    ):
+        _check_support_predicate(module, builder, bad, "gfx950")
+
+
 _DESCRIPTOR_TREE = (
     Path(__file__).resolve().parents[3]
     / "src"
@@ -305,11 +354,9 @@ def _shipped_rocke_checks():
     for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
         pack = json.loads(path.read_text())
         for kernel in pack.get("kernelDescriptors", []):
-            # A multi-launch kernel (RFC 0017 section 15.1) names its builder in each
-            # `sources` entry instead of `kernel_source`.
-            for source in kernel.get("sources", {}).values() or [
-                kernel["kernel_source"]
-            ]:
+            # Every launch of a multi-launch kernel (RFC 0017 section 15.1) is its own
+            # compile, named in its `sources` entry instead of `kernel_source`.
+            for source in kernel_sources(kernel).values():
                 if source.get("kind") != "rocke":
                     continue
                 target = source.get("target", ROCKE_TARGET_NATIVE)
@@ -338,6 +385,36 @@ def test_every_shipped_rocke_builder_passes_the_pack_time_predicate_check():
             )
         except HkpPackError as exc:
             pytest.fail(f"{source}:{builder} @ {arch} ({target}): {exc}")
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_fastkv_register_p_builder_packs_through_its_spec_predicate():
+    """The gfx950 fastKV register-P builder resolves its spec-first predicate by
+    alias; the predicate accepts the experiment's spec and refuses one the
+    builder would raise on."""
+    module = import_module("kernels.gfx950.attention_tiled_2d_fastkv_regp")
+    builder = "build_unified_attention_2d_fastkv_register_p"
+    name, _ = _resolve_support_predicate(module, builder)
+    assert name == "supports_fastkv_register_p_2d_spec"
+    spec = module.make_fastkv_register_p_spec(
+        module.UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+        )
+    )
+    _check_support_predicate(module, builder, spec, "gfx950")
+    no_fast_desc = dataclasses.replace(spec, use_fast_paged_kv_desc=False)
+    with pytest.raises(HkpPackError, match="use_fast_paged_kv_desc"):
+        _check_support_predicate(module, builder, no_fast_desc, "gfx950")
+    # The shared tiled gate admits gfx942 for its narrow builder; this one must not.
+    with pytest.raises(HkpPackError, match="gfx950 kernel"):
+        _check_support_predicate(module, builder, spec, "gfx942")
 
 
 # --- C. Literal validation --------------------------------------------------
