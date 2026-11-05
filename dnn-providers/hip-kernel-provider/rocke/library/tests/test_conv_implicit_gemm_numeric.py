@@ -10,10 +10,10 @@ against the numpy fp32 reference. It moved here from
 library module (the dependency rule is ``library -> platform`` only); the test
 name and assertions are unchanged.
 
-PYTHONPATH for the subprocesses is derived from this file's location so the
-test is portable:
-- ``library/`` (exposes ``builders.*``, ``kernels.*``, ``dispatch.*``)
-- ``platform/python`` (exposes ``rocke.*``)
+The subprocesses import this process's own ``rocke`` package first
+(``rocke_python_command``), with ``library/`` (``builders.*``, ``kernels.*``,
+``dispatch.*``) on their path, in a source checkout and an installed test tree
+alike.
 
 Requires a ROCm GPU and torch; skipped otherwise. Run it as a script, not under
 pytest, in a process that has touched HIP:
@@ -27,19 +27,20 @@ import importlib.util
 import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 import unittest
 
 import pytest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 pytestmark = pytest.mark.gpu
 
-_LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
-_SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
+_LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # the library root
 
 
 # Detect arch via the rocke HIP runtime (no torch). The verify subprocess imports
@@ -57,12 +58,10 @@ class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
 
     def _run(self, *cmd, timeout=300):
-        env = dict(os.environ)
-        env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
+        env = rocke_subprocess_env(python_paths=[_LIBDIR])
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         r = subprocess.run(
-            [sys.executable, *cmd],
-            cwd=str(_LIBDIR),
+            rocke_python_command(*cmd),
             env=env,
             capture_output=True,
             text=True,

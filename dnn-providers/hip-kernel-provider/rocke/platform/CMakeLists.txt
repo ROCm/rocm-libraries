@@ -289,8 +289,9 @@ endif()
 # mirror there too, in library/cpp, so one team owns both halves of the
 # contract. It builds its own archive (rocke_library_core) and pybind module
 # (rocke_library_engine) that link rocke_core; nothing here links back, so
-# rocke_core, rocke_engine and the installed ckc package never carry library
-# code. Added from this directory so it inherits the engine's warning,
+# rocke_core and rocke_engine never carry library code. The installed ckc
+# package exports the archive beside rocke_core as ckc::rocke_library, so its C
+# API stays installed. Added from this directory so it inherits the engine's warning,
 # sanitizer and clang-tidy settings above. Guarded on the sibling tree so a
 # platform-only copy of this directory still configures; keep the guard, it is
 # the copy-able contract.
@@ -526,6 +527,7 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_corpus.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
