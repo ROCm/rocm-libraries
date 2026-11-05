@@ -11,16 +11,21 @@ shape roles: the activation (fwd ``x``, bwd ``dx``, wrw ``x``), the filter
 (fwd ``w``, bwd ``w``, wrw ``dw``) and the response (fwd ``y``, bwd and wrw
 ``dy``). Groups:
 
-- ``dtype`` (exclusive): the dtype of the op's data input.
+- ``dtype`` (exclusive): the dtype of the op's data input: fp32, fp16, bf16,
+  fp64, int8 or one of the four fp8 encodings. FNUZ fp8 keeps its own value,
+  as in the matrix. Any tensor may also be int32, the response an int8
+  convolution accumulates into; int32 is not a data dtype.
 - ``precision:mixed``: the op's non-virtual tensors do not all share one
   dtype. A virtual tensor -- the fp32 intermediate between a conv and its
   fused pointwise -- is not counted: the caller never sees it.
-- ``spatial`` (exclusive): 1, 2 or 3 spatial dims.
+- ``spatial`` (exclusive): 1, 2, 3 or 4 spatial dims.
 - ``layout`` (exclusive): channels first (NCW / NCHW / NCDHW) or channels last
   (NWC / NHWC / NDHWC), read from the strides. A dim of size 1 has no place in
   the order, so it is skipped; a tensor whose remaining order fits both
   layouts (e.g. C = 1) says nothing. The node's layout is the one its
-  telling tensors agree on. If none tells, the graph adds no layout feature.
+  telling tensors agree on, or ``mixed`` when they disagree: the API takes
+  each tensor's strides on their own. If none tells, the graph adds no
+  layout feature.
 - ``groups:grouped``, ``groups:depthwise``: more than one group (activation
   channels / filter channels); depthwise when there are as many groups as
   activation channels.
@@ -52,8 +57,20 @@ from typing import NamedTuple
 from support_features import Feature, FeatureError
 from support_matrix_units import dtype_label
 
+# The float dtypes the other catalogs share; the conv ops take more.
 DTYPES = ("fp32", "fp16", "bf16")
+CONV_DTYPES = (
+    *DTYPES,
+    "fp64",
+    "int8",
+    "fp8e4m3",
+    "fp8e5m2",
+    "fp8e4m3_fnuz",
+    "fp8e5m2_fnuz",
+)
+TENSOR_DTYPES = (*CONV_DTYPES, "int32")
 SPATIAL = {1: "spatial:1d", 2: "spatial:2d", 3: "spatial:3d"}
+CONV_SPATIAL = {**SPATIAL, 4: "spatial:4d"}
 LAYOUTS = ("nchw", "nhwc")
 # The serializer's spelling (Graph.hpp) -> feature id.
 MODES = {
@@ -76,15 +93,16 @@ class Ports(NamedTuple):
 def catalog(ports: Ports) -> tuple[Feature, ...]:
     tensors = (ports.activation, ports.filter, ports.response)
     return (
-        *(Feature(f"dtype:{dtype}", (ports.data,)) for dtype in DTYPES),
+        *(Feature(f"dtype:{dtype}", (ports.data,)) for dtype in CONV_DTYPES),
         Feature(
             "precision:mixed",
             tensors,
             "the non-virtual tensors do not all share one dtype",
         ),
-        *(Feature(spatial, tensors) for spatial in SPATIAL.values()),
+        *(Feature(spatial, tensors) for spatial in CONV_SPATIAL.values()),
         Feature("layout:nchw", tensors, "channels first"),
         Feature("layout:nhwc", tensors, "channels last"),
+        Feature("layout:mixed", tensors, "the tensors' layouts disagree"),
         Feature("groups:grouped", (ports.activation, ports.filter), "groups > 1"),
         Feature(
             "groups:depthwise",
@@ -167,7 +185,7 @@ def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
     if len(ranks) != 1:
         raise FeatureError(f"tensor ranks differ: {sorted(ranks)}")
     spatial = ranks.pop() - 2
-    if spatial not in SPATIAL:
+    if spatial not in CONV_SPATIAL:
         raise FeatureError(f"{spatial} spatial dims are not catalogued")
     for name in PARAMETERS:
         if len(params.get(name) or ()) != spatial:
@@ -185,11 +203,11 @@ def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
 
     data = tensors_by_uid[bound[ports.data]]
     dtype = dtype_label(data.get("data_type"))
-    if dtype not in DTYPES:
+    if dtype not in CONV_DTYPES:
         raise FeatureError(
             f"{ports.data} dtype {data.get('data_type')!r} is not catalogued"
         )
-    stray = {dtype_label(t.get("data_type")) for t in (x, w, y)} - set(DTYPES)
+    stray = {dtype_label(t.get("data_type")) for t in (x, w, y)} - set(TENSOR_DTYPES)
     if stray:
         raise FeatureError(f"tensor dtype(s) {sorted(stray)} are not catalogued")
     seen = {dtype_label(t.get("data_type")) for t in (x, w, y) if not t.get("virtual")}
@@ -208,15 +226,16 @@ def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
         raise FeatureError(f"{w['dims'][0]} filters do not split into {groups} groups")
     check_response(x["dims"], w["dims"], y["dims"], params)
 
-    features = {f"dtype:{dtype}", SPATIAL[spatial], mode}
+    features = {f"dtype:{dtype}", CONV_SPATIAL[spatial], mode}
     if len(seen) > 1:
         features.add("precision:mixed")
 
     telling = [fits for fits in map(tensor_layouts, (x, w, y)) if len(fits) == 1]
     agreed = set().union(*telling)
     if len(agreed) > 1:
-        raise FeatureError("the tensors' layouts disagree")
-    features.update(f"layout:{name}" for name in agreed)
+        features.add("layout:mixed")
+    else:
+        features.update(f"layout:{name}" for name in agreed)
 
     if groups > 1:
         features.add("groups:depthwise" if groups == channels else "groups:grouped")
