@@ -85,7 +85,9 @@ def _norm_spec(spec):
     """Spec identity as the emitter sees it: ``num_seqs`` only reaches IR
     through ``binary_search_iters``, which the 3D decode grid does not emit and
     a runtime-search body (``RUNTIME_SEARCH_ITERS``) does not bake."""
-    fields = dataclasses.asdict(spec)
+    # The spec fields are scalars and strings, so a shallow read is
+    # ``dataclasses.asdict`` without its recursive copy.
+    fields = {f.name: getattr(spec, f.name) for f in dataclasses.fields(spec)}
     fields.pop("num_seqs")
     bakes_search = not getattr(type(spec), "RUNTIME_SEARCH_ITERS", False)
     if bakes_search and not getattr(spec, "use_decode_grid", False):
@@ -138,6 +140,11 @@ def _built_3d(problem, arch):
 # the selectors read: ns 1 vs >=2 and the log2 search buckets; q at 1, 64, 128,
 # 256, 512, 768, 1024, 1536, 2048; k across 16 * T for T in {32, 64}.
 _NUM_SEQS = (1, 2, 3, 4)
+# A 2D body that searches cu_q at runtime reads num_seqs only as the
+# single-batch cohort (1 vs >= 2), so its sweep stops at 2. The 3D split-KV
+# selectors size segments from the batch, and gfx1250 bakes the search, so
+# both keep every value.
+_NUM_SEQS_RUNTIME_SEARCH_2D = (1, 2)
 _SEQLEN_Q = (1, 2, 64, 65, 256, 257, 512, 513, 768, 769, 1024, 1025, 1536, 2048)
 _SEQLEN_K = ("q", 512, 513, 1024, 1025)
 
@@ -180,9 +187,14 @@ def _static_grid(arch):
         )
 
 
-def _sweep(arch):
+def _sweep(arch, path):
+    num_seqs = (
+        _NUM_SEQS_RUNTIME_SEARCH_2D
+        if path == "2d" and au._searches_at_runtime(arch, "2d")
+        else _NUM_SEQS
+    )
     for static in _static_grid(arch):
-        for ns, q, k in itertools.product(_NUM_SEQS, _SEQLEN_Q, _SEQLEN_K):
+        for ns, q, k in itertools.product(num_seqs, _SEQLEN_Q, _SEQLEN_K):
             k = q if k == "q" else k
             if k < q:
                 continue
@@ -191,9 +203,11 @@ def _sweep(arch):
             )
 
 
-# Env states to pool per arch. Routing knobs are read on every launch and can
-# flip mid-process; pooling them catches a selector whose output only changes
-# when a knob flips.
+# Env states to pool per arch on the 2D path. Routing knobs are read on every
+# launch and can flip mid-process; pooling them catches a selector whose output
+# only changes when a knob flips. These knobs steer 2D routing only: on the 3D
+# path every flipped state reproduces the default sweep's keys and kernels, so
+# 3D sweeps once.
 _ENV_STATES = {
     "gfx942": (
         {},
@@ -235,10 +249,11 @@ def test_key_matches_build_identity(routing_env, monkeypatch, arch, path):
     first = {}
     key_of_build = {}
     checked = 0
-    for env in _ENV_STATES.get(arch, ({},)):
+    env_states = _ENV_STATES.get(arch, ({},)) if path == "2d" else ({},)
+    for env in env_states:
         for var, val in env.items():
             monkeypatch.setenv(var, val)
-        for problem in _sweep(arch):
+        for problem in _sweep(arch, path):
             if not supported(problem, arch)[0]:
                 continue
             try:
