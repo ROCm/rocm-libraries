@@ -20,10 +20,11 @@
 #   * gfx942 has v_dot2_f32_f16=1, so the FMA_F16_HPA_DOT2 path uses
 #     VDot2F32F16 (line 52/77) hitting the v_dot2_f32_f16 branch.
 #   * NOTE: on gfx90a, UseDotInstruction is forced False (ISA != 9.4.2),
-#     so FMA_F16_HPA_MAD_MIX would be selected, but its __call__ signature
-#     (writer, m, innerUnroll) mismatches the call site (writer, tPA, tPB, m,
-#     innerUnroll) -- a latent source bug. The test therefore targets gfx942
-#     which is allowed by the task spec ("gfx90a or gfx942").
+#     so FMA_F16_HPA_MAD_MIX is selected.  Its __call__ signature used to
+#     mismatch the call site (writer, tPA, tPB, m, innerUnroll), which made
+#     the class raise before it could emit anything; that is fixed, so the
+#     gfx90a run of this config now reaches it.  Both the dot2 and the mix
+#     path are covered by the test that drives this file.
 
 GlobalParameters:
   SyncsPerBenchmark: 0

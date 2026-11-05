@@ -6,6 +6,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Support for `gfx1030` (RDNA2) graphics processors. RDNA2 has no matrix-core
+  instructions, so this target uses the non-matrix-instruction kernel path:
+  16-bit GEMM runs on the packed `v_dot2c_f32_f16` dot instruction and the new
+  `v_mac_f16` multiply-accumulate, and 8-bit GEMM runs on the new
+  `v_dot4_i32_i8` dot instruction. Build it with `./install.sh -a gfx1030` or
+  with `--gpu-targets gfx1030`.
 * `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
   dirty-buffer check for the handle's inter-workgroup flag buffers, which their
   kernels must leave at zero (`1`, `on` or `true` to enable; anything else
