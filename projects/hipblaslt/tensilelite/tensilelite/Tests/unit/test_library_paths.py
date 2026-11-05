@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Tests for the per-base library path helpers in Run.py.
+"""Tests for the per-base library path helpers in create_library/run.py.
 
 The runtime probe in tensile_host.cpp strips the cooked arch string at the
 first colon (`gfx942:xnack+` -> `gfx942`) before opening

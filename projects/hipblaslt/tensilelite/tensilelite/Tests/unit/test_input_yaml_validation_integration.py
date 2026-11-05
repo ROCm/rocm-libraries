@@ -108,7 +108,7 @@ def test_validator_ordering_global_fires_first(tmp_path):
     on the tensilelite.run.main() entry path.
 
     We exercise the ordering by invoking the two validators in the same
-    order Tensile() does and observing which raises. The bad ProblemType
+    order main() does and observing which raises. The bad ProblemType
     key is intentionally not in the YAML mutation -- it would be caught
     by a separate ProblemType validator if the GlobalParameters one
     didn't abort first.
@@ -118,7 +118,7 @@ def test_validator_ordering_global_fires_first(tmp_path):
     gp = data.setdefault("GlobalParameters", {})
     gp["BoundsCheck"] = False
     # Even if we corrupt the ProblemType too, the GlobalParameters
-    # validator fires before ProblemType construction in the Tensile()
+    # validator fires before ProblemType construction in the main()
     # entry path.
     if "BenchmarkProblems" in data and data["BenchmarkProblems"]:
         ptype = data["BenchmarkProblems"][0][0] if data["BenchmarkProblems"][0] else None

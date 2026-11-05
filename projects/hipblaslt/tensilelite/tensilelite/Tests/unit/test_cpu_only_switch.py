@@ -117,7 +117,7 @@ def test_arg_validation():
     """
     args = _parse(["--cpu-only"])
     assert args.cpuOnly is True
-    # gpuTargets lives on the Tensile() main parser, not addCommonArguments; the common
+    # gpuTargets lives on the main() parser, not addCommonArguments; the common
     # parser must not synthesize or require it, so the attribute is simply absent here.
     assert not hasattr(args, "gpuTargets")
 

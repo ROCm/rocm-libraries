@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for the rocisa backend guard in Tensile.TensileCreateLibrary.Run."""
+"""Unit tests for the rocisa backend guard in tensilelite.create_library.run."""
 import sys
 import types
 

@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.Run`` (the CLI orchestrator).
+"""Characterization tests for ``tensilelite.logic.run`` (the CLI orchestrator).
 
 ``Run`` is Tier C: it wires argparse + toolchain + a ``ParallelMap2`` fan-out
 over ``_runChecks``, with a background progress thread. The strategy

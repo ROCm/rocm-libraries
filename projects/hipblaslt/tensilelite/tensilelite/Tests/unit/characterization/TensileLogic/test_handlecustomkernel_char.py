@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.HandleCustomKernel``.
+"""Characterization tests for ``tensilelite.logic.handle_custom_kernel``.
 
 * ``prepareCustomKernelConfig`` — pure string formatting of an MI-param dict
   into a developer-facing diff. Snapshot the produced text. Inputs are sized so

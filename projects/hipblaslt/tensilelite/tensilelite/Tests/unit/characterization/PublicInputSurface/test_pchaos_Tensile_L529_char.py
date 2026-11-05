@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.py L526 (if) and L529 (elif) config-file guards.
+"""Characterization tests for tensilelite/run.py L526 (if) and L529 (elif) config-file guards.
 
 Branch ID: 01e8ac7f371264a85285039d91ea87c8514acc62
 Source:    tensilelite/run.py:529 (elif)
@@ -123,7 +123,7 @@ class TestAltFormatRejectedHelper:
 # ---------------------------------------------------------------------------
 
 class TestTensileArgparseGuards:
-    """Real Tensile() entry-point tests — assert L526/L529 guards fire or do not fire.
+    """Real main() entry-point tests — assert L526/L529 guards fire or do not fire.
 
     Execution stops at the guard (printExit → sys.exit(-1)) for TRUE witnesses,
     or proceeds past the guard into deeper (file-based) parsing for FALSE witnesses.
@@ -132,7 +132,7 @@ class TestTensileArgparseGuards:
 
     @staticmethod
     def _userArgs(config_files: list, output_path: str, alternate_format: bool = False) -> list:
-        """Build a userArgs list accepted by argparse.parse_args() inside Tensile()."""
+        """Build a userArgs list accepted by argparse.parse_args() inside main()."""
         args = list(config_files) + [output_path]
         if alternate_format:
             args.append("--alternate-format")

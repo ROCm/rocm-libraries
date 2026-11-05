@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for
-``TensileLogic.ValidMatrixInstruction._validateMatrixInstruction``.
+``tensilelite.logic.valid_matrix_instruction._validateMatrixInstruction``.
 
 A thin CLI wrapper around ``Validators.MatrixInstruction.validateMIParameters``:
 run the validator, assert ``solution["Valid"]``, return ``True``; on

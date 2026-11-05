@@ -24,7 +24,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``TensileLogic.ValidWorkGroup._validateWorkGroup``.
+``tensilelite.logic.valid_work_group._validateWorkGroup``.
 
 Targets survivor ``x__validateWorkGroup__mutmut_6``, which replaces the
 diagnostic ``print(f"Error: Validation failed: ...")`` argument in the

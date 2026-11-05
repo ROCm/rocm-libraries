@@ -923,7 +923,7 @@ def _write_min_config(tmp_path, **globalParams):
 
 
 def _stub_tensile_pipeline(monkeypatch, captured):
-    """Stubs every expensive step of `Tensile()` and captures what the benchmark
+    """Stubs every expensive step of `main()` and captures what the benchmark
     pipeline is handed. Mirrors the stub set in test_tensile_backend_config.py."""
     import types
 
@@ -1698,7 +1698,7 @@ def test_createlibrary_entry_point_applies_the_strict_overrides(
 ):
     """``TensileCreateLibrary --architecture=gfx1250-strict`` must derive its solutions
     under v0 capabilities; this is the second of the two entry points, and it
-    reaches the capability map by a different route than ``Tensile()``."""
+    reaches the capability map by a different route than ``main()``."""
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
 
     info = captured["isaInfoMap"][ISA_GFX1250]
