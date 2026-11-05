@@ -790,7 +790,8 @@ rocke_value_t* rocke_gfx942_attn2d_in_warp_row(rocke_gfx942_attn2d_build_ctx_t* 
     /* Python evaluates b.mul(lane_rg, const(4)) BEFORE the trailing const
      * (left-to-right arg order). Bind the mul to a temp so C's arg-eval order
      * does not allocate the trailing const ahead of the mul and shift it. */
-    rocke_value_t* rg4 = rocke_b_mul(ctx->b, rocke_a2d_lane_rg(ctx), rocke_b_const_i32(ctx->b, 4));
+    rocke_value_t* lane_rg = rocke_a2d_lane_rg(ctx);
+    rocke_value_t* rg4 = rocke_b_mul(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 4));
     return rocke_b_add(ctx->b, rg4, rocke_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
 }
 

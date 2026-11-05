@@ -786,15 +786,10 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
                 rocke_iter_arg_t ia[1];
                 ia[0].name = "mx";
                 ia[0].init = neg_inf;
-                mx_loop = rocke_b_scf_for_iter(b,
-                                               rocke_b_const_i32(b, 0),
-                                               rocke_b_const_i32(b, spec->num_segments),
-                                               rocke_b_const_i32(b, 1),
-                                               ia,
-                                               1,
-                                               "s_mx",
-                                               false,
-                                               true);
+                rocke_value_t* lo = rocke_b_const_i32(b, 0);
+                rocke_value_t* hi = rocke_b_const_i32(b, spec->num_segments);
+                rocke_value_t* step = rocke_b_const_i32(b, 1);
+                mx_loop = rocke_b_scf_for_iter(b, lo, hi, step, ia, 1, "s_mx", false, true);
                 rocke_b_region_enter(b, mx_loop.body);
                 {
                     rocke_value_t* sv = mx_loop.iv;
@@ -813,15 +808,10 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
                 rocke_iter_arg_t ia[1];
                 ia[0].name = "den";
                 ia[0].init = zero_f;
-                sum_loop = rocke_b_scf_for_iter(b,
-                                                rocke_b_const_i32(b, 0),
-                                                rocke_b_const_i32(b, spec->num_segments),
-                                                rocke_b_const_i32(b, 1),
-                                                ia,
-                                                1,
-                                                "s_sum",
-                                                false,
-                                                true);
+                rocke_value_t* lo = rocke_b_const_i32(b, 0);
+                rocke_value_t* hi = rocke_b_const_i32(b, spec->num_segments);
+                rocke_value_t* step = rocke_b_const_i32(b, 1);
+                sum_loop = rocke_b_scf_for_iter(b, lo, hi, step, ia, 1, "s_sum", false, true);
                 rocke_b_region_enter(b, sum_loop.body);
                 {
                     rocke_value_t* sv = sum_loop.iv;
@@ -856,15 +846,10 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
                 snprintf(ivname, sizeof(ivname), "s_acc%d", k);
                 ia[0].name = accname;
                 ia[0].init = zero_f;
-                acc_loop = rocke_b_scf_for_iter(b,
-                                                rocke_b_const_i32(b, 0),
-                                                rocke_b_const_i32(b, spec->num_segments),
-                                                rocke_b_const_i32(b, 1),
-                                                ia,
-                                                1,
-                                                ivname,
-                                                false,
-                                                true);
+                rocke_value_t* lo = rocke_b_const_i32(b, 0);
+                rocke_value_t* hi = rocke_b_const_i32(b, spec->num_segments);
+                rocke_value_t* step = rocke_b_const_i32(b, 1);
+                acc_loop = rocke_b_scf_for_iter(b, lo, hi, step, ia, 1, ivname, false, true);
                 rocke_b_region_enter(b, acc_loop.body);
                 {
                     rocke_value_t* sv = acc_loop.iv;

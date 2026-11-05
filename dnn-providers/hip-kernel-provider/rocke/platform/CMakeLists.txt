@@ -461,7 +461,8 @@ if(ROCKE_INSTALL_TESTS)
     # the differential harness (needs compiler + source; its Python-only golden
     # check is installed separately above), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
-    # source tree), and the arch-domain artifact unit tests. The latter remain
+    # source tree), the emission-order checker test (scans cpp/ with a script
+    # from tools/), and the arch-domain artifact unit tests. The latter remain
     # source-only units, while the full regeneration sweep is installed below as
     # its own CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
@@ -485,6 +486,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_dsl_probes.py" EXCLUDE
+              PATTERN "test_check_emission_order.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 

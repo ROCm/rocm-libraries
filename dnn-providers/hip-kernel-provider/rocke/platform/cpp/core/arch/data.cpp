@@ -587,11 +587,11 @@ static void _fragment_layout_a(rocke_ir_builder_t* b,
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c_lanes = rocke_b_const_i32(b, LanesPerGroup);
     index = rocke_b_mod(b, lane, c_lanes);
-    /* Pin the mul (with its constant) before the slot's constant: Python
-     * evaluates add's arguments left to right. */
+    /* Bind each argument in Python's left-to-right order: the div, then the
+     * Chunk constant, then the mul, then the slot's constant. */
     {
-        rocke_value_t* k_run
-            = rocke_b_mul(b, rocke_b_div(b, lane, c_lanes), rocke_b_const_i32(b, Chunk));
+        rocke_value_t* run = rocke_b_div(b, lane, c_lanes);
+        rocke_value_t* k_run = rocke_b_mul(b, run, rocke_b_const_i32(b, Chunk));
         k = rocke_b_add(
             b, k_run, rocke_b_const_i32(b, (slot / Chunk) * LaneGroups * Chunk + slot % Chunk));
     }
@@ -732,12 +732,14 @@ static void _wmma_gfx1250_a_16x16x4_f32(rocke_ir_builder_t* b,
                                         rocke_value_t** out0,
                                         rocke_value_t** out1)
 {
-    rocke_value_t *c2, *c16, *row, *k;
+    rocke_value_t *c2, *c16, *row, *k_half, *k_base, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c2 = rocke_b_const_i32(b, 2);
     c16 = rocke_b_const_i32(b, 16);
     row = rocke_b_mod(b, lane, c16);
-    k = rocke_b_add(b, rocke_b_mul(b, rocke_b_div(b, lane, c16), c2), rocke_b_const_i32(b, slot));
+    k_half = rocke_b_div(b, lane, c16);
+    k_base = rocke_b_mul(b, k_half, c2);
+    k = rocke_b_add(b, k_base, rocke_b_const_i32(b, slot));
     if(out0)
         *out0 = row;
     if(out1)
@@ -751,12 +753,14 @@ static void _wmma_gfx1250_b_16x16x4_f32(rocke_ir_builder_t* b,
                                         rocke_value_t** out0,
                                         rocke_value_t** out1)
 {
-    rocke_value_t *c2, *c16, *col, *k;
+    rocke_value_t *c2, *c16, *col, *k_half, *k_base, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c2 = rocke_b_const_i32(b, 2);
     c16 = rocke_b_const_i32(b, 16);
     col = rocke_b_mod(b, lane, c16);
-    k = rocke_b_add(b, rocke_b_mul(b, rocke_b_div(b, lane, c16), c2), rocke_b_const_i32(b, slot));
+    k_half = rocke_b_div(b, lane, c16);
+    k_base = rocke_b_mul(b, k_half, c2);
+    k = rocke_b_add(b, k_base, rocke_b_const_i32(b, slot));
     if(out0)
         *out0 = k;
     if(out1)
@@ -1626,20 +1630,20 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
 static void mfma_scaled_a(
     rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** row, rocke_value_t** k)
 {
+    rocke_value_t *half, *base;
     *row = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
-    *k = rocke_b_add(
-        b,
-        rocke_b_mul(b, rocke_b_div(b, lane, rocke_b_const_i32(b, 32)), rocke_b_const_i32(b, 32)),
-        rocke_b_const_i32(b, slot));
+    half = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
+    base = rocke_b_mul(b, half, rocke_b_const_i32(b, 32));
+    *k = rocke_b_add(b, base, rocke_b_const_i32(b, slot));
 }
 static void mfma_scaled_f8_a(
     rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** row, rocke_value_t** k)
 {
+    rocke_value_t *half, *base;
     *row = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
-    *k = rocke_b_add(
-        b,
-        rocke_b_mul(b, rocke_b_div(b, lane, rocke_b_const_i32(b, 32)), rocke_b_const_i32(b, 16)),
-        rocke_b_const_i32(b, (slot / 16) * 32 + slot % 16));
+    half = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
+    base = rocke_b_mul(b, half, rocke_b_const_i32(b, 16));
+    *k = rocke_b_add(b, base, rocke_b_const_i32(b, (slot / 16) * 32 + slot % 16));
 }
 static void mfma_scaled_f8_b(
     rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** k, rocke_value_t** col)

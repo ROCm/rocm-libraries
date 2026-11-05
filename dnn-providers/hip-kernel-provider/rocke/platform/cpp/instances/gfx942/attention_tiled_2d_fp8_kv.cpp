@@ -269,15 +269,12 @@ void rocke_gfx942_attn2d_dequant_fp8_lds_to_bf16(rocke_gfx942_attn2d_build_ctx_t
 
     for(c = 0; c < chunks_per_thread; ++c)
     {
-        rocke_value_t* chunk_id = rocke_b_add(
-            b,
-            rocke_b_mul(b, rocke_b_const_i32(b, c), rocke_b_const_i32(b, ctx->THREADS)),
-            ctx->tid);
+        rocke_value_t* chunk_v = rocke_b_const_i32(b, c);
+        rocke_value_t* chunk_base = rocke_b_mul(b, chunk_v, rocke_b_const_i32(b, ctx->THREADS));
+        rocke_value_t* chunk_id = rocke_b_add(b, chunk_base, ctx->tid);
         rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
-        rocke_value_t* col
-            = rocke_b_mul(b,
-                          rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row)),
-                          rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* col_chunk = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_chunk, rocke_b_const_i32(b, CHUNK));
         rocke_value_t* idx_load[3] = {buf_idx, row, col};
         rocke_value_t* fp8_vec = rocke_b_smem_load_vN(b, src, idx_load, 3, rocke_fp8e4m3(), CHUNK);
         rocke_value_t* dequanted[8];
@@ -346,15 +343,12 @@ void rocke_gfx942_attn2d_issue_fp8_dequant_loads(rocke_gfx942_attn2d_build_ctx_t
 
     for(call = 0; call < chunks_per_thread; ++call)
     {
-        rocke_value_t* chunk_id = rocke_b_add(
-            b,
-            rocke_b_mul(b, rocke_b_const_i32(b, call), rocke_b_const_i32(b, ctx->THREADS)),
-            ctx->tid);
+        rocke_value_t* chunk_v = rocke_b_const_i32(b, call);
+        rocke_value_t* chunk_base = rocke_b_mul(b, chunk_v, rocke_b_const_i32(b, ctx->THREADS));
+        rocke_value_t* chunk_id = rocke_b_add(b, chunk_base, ctx->tid);
         rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
-        rocke_value_t* col
-            = rocke_b_mul(b,
-                          rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row)),
-                          rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* col_chunk = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_chunk, rocke_b_const_i32(b, CHUNK));
         rocke_value_t* linear_half_first
             = rocke_b_add(b, rocke_b_mul(b, row, rocke_b_const_i32(b, ctx->HD)), col);
         rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_half_first, NULL);
@@ -565,15 +559,12 @@ void rocke_gfx942_attn2d_issue_v_fp8_mfma_stripe(rocke_gfx942_attn2d_build_ctx_t
 
     for(call = 0; call < chunks_per_thread; ++call)
     {
-        rocke_value_t* chunk_id = rocke_b_add(
-            b,
-            rocke_b_mul(b, rocke_b_const_i32(b, call), rocke_b_const_i32(b, ctx->THREADS)),
-            ctx->tid);
+        rocke_value_t* chunk_v = rocke_b_const_i32(b, call);
+        rocke_value_t* chunk_base = rocke_b_mul(b, chunk_v, rocke_b_const_i32(b, ctx->THREADS));
+        rocke_value_t* chunk_id = rocke_b_add(b, chunk_base, ctx->tid);
         rocke_value_t* token = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
-        rocke_value_t* col
-            = rocke_b_mul(b,
-                          rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row)),
-                          rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* col_chunk = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_chunk, rocke_b_const_i32(b, CHUNK));
         rocke_value_t* linear_first
             = rocke_b_add(b, rocke_b_mul(b, token, rocke_b_const_i32(b, ctx->HD)), col);
         rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_first, NULL);

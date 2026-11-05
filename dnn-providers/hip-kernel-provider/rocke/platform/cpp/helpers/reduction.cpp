@@ -704,8 +704,8 @@ int rocke_block_lds_reduce_with_index(rocke_ir_builder_t* b,
         int ind_offset = 1 << shift;
         rocke_value_t* c_off = rocke_b_const_i32(b, ind_offset);
         rocke_value_t* c_mod = rocke_b_const_i32(b, ind_offset * 2);
-        rocke_value_t* participates
-            = rocke_b_cmp_eq(b, rocke_b_mod(b, tid, c_mod), rocke_b_const_i32(b, 0));
+        rocke_value_t* tid_mod = rocke_b_mod(b, tid, c_mod);
+        rocke_value_t* participates = rocke_b_cmp_eq(b, tid_mod, rocke_b_const_i32(b, 0));
         rocke_if_t iff = rocke_b_scf_if(b, participates);
         rocke_b_region_enter(b, iff.then_region);
         {

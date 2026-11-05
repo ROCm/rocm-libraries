@@ -125,9 +125,9 @@ static rocke_value_t* fh_max_seq_prefix_len(rocke_gfx942_attn2d_build_ctx_t* ctx
     if(ctx->max_seq_prefix_len_v != NULL)
         return ctx->max_seq_prefix_len_v;
     int bm1_div_nqk = (ctx->BLOCK_M - 1) / ctx->NQK;
-    rocke_value_t* msp_raw = rocke_b_add(ctx->b,
-                                         rocke_b_add(ctx->b, ctx->context_len, ctx->qb_start_pos),
-                                         rocke_b_const_i32(ctx->b, bm1_div_nqk + 1));
+    rocke_value_t* q_block_pos = rocke_b_add(ctx->b, ctx->context_len, ctx->qb_start_pos);
+    rocke_value_t* msp_raw
+        = rocke_b_add(ctx->b, q_block_pos, rocke_b_const_i32(ctx->b, bm1_div_nqk + 1));
     return rocke_b_select(
         ctx->b, rocke_b_cmp_lt(ctx->b, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
 }
@@ -252,9 +252,8 @@ static rocke_value_t*
 {
     int atom_idx = r / 4;
     int in_atom = r % 4;
-    return rocke_b_add(ctx->b,
-                       rocke_b_mul(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 4)),
-                       rocke_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
+    rocke_value_t* row = rocke_b_mul(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 4));
+    return rocke_b_add(ctx->b, row, rocke_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
 }
 
 /* ===================================================================== *

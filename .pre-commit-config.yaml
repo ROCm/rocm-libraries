@@ -295,6 +295,43 @@ repos:
           )$
         pass_filenames: false
 
+      # A call with two op-emitting arguments emits them in a compiler-dependent
+      # order, which breaks the C++/Python byte identity. Scans the whole C++
+      # engine and both parity emitter trees, and fails on an allowlist entry
+      # that no longer occurs, so it runs on any change to them or to the tool.
+      - id: rocke-emission-order
+        name: rocKE C++ builder calls emit in a fixed order
+        entry: >-
+          python dnn-providers/hip-kernel-provider/rocke/platform/tools/check_emission_order.py
+          --also dnn-providers/hip-kernel-provider/rocke/library/tests/parity
+        language: python
+        files: >-
+          (?x)^dnn-providers/hip-kernel-provider/rocke/(
+            platform/cpp/.*\.(c|cpp|h|hpp)|
+            platform/tests/instances/parity/.*\.(c|cpp|h|hpp)|
+            library/tests/parity/.*\.(c|cpp|h|hpp)|
+            platform/tools/check_emission_order\.py
+          )$
+        pass_filenames: false
+
+      - id: rocke-emission-order-tests
+        name: rocKE emission-order checker self-tests
+        entry: >-
+          python -m pytest -q -p no:cacheprovider --noconftest
+          dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_check_emission_order.py
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        # The scan hook's files, since some tests name functions in cpp/.
+        files: >-
+          (?x)^dnn-providers/hip-kernel-provider/rocke/(
+            platform/cpp/.*\.(c|cpp|h|hpp)|
+            platform/tests/instances/parity/.*\.(c|cpp|h|hpp)|
+            library/tests/parity/.*\.(c|cpp|h|hpp)|
+            platform/tools/check_emission_order\.py|
+            platform/tests/tools/test_check_emission_order\.py
+          )$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

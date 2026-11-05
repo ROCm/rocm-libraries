@@ -272,10 +272,9 @@ rocke_value_t* rocke_gfx942_attn2d_apply_transposed_pv_regs(rocke_gfx942_attn2d_
                  * the 4 tokens are contiguous along the inner axis -> one wide
                  * read (lines 4596-4628). The naive token base is
                  * k*8 + lane_half32*4. */
-                rocke_value_t* tok_base
-                    = rocke_b_add(B,
-                                  rocke_b_const_i32(B, k * 8),
-                                  rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
+                rocke_value_t* tok_base = rocke_b_const_i32(B, k * 8);
+                tok_base = rocke_b_add(
+                    B, tok_base, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
                 if(ctx->CFV_SCALAR_READ)
                 {
                     /* ISOLATION: 4 scalar n=1 reads, same values/order. */
@@ -483,7 +482,8 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
              * _apply_transposed_pv_regs reuses them. Cache so the per-n apply
              * calls below reuse the same SSA values. */
             ctx->pv_v_buf_v = rocke_b_const_i32(B, 0);
-            ctx->pv_use_hi_v = rocke_b_cmp_eq(B, lane_half32_of(ctx), rocke_b_const_i32(B, 1));
+            rocke_value_t* lane_half32 = lane_half32_of(ctx);
+            ctx->pv_use_hi_v = rocke_b_cmp_eq(B, lane_half32, rocke_b_const_i32(B, 1));
             for(int n = 0; n < ACC_N_TILES; ++n)
             {
                 rocke_value_t* old_acc = rocke_gfx942_attn2d_acc_get(ctx, n, 0);
@@ -583,31 +583,23 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
                 rocke_value_t* acc32 = rocke_b_vec_pack(B, scaled, REGS_PER_LANE, F32);
                 for(int k = 0; k < ctx->T / 16; ++k)
                 {
-                    rocke_value_t* p_off32
-                        = rocke_b_add(B,
-                                      rocke_b_const_i32(B, k * 16),
-                                      rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8)));
+                    rocke_value_t* p_off32 = rocke_b_const_i32(B, k * 16);
+                    p_off32 = rocke_b_add(
+                        B, p_off32, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8)));
                     rocke_value_t* p_row32 = rocke_b_add(B, ctx->wave_row_base, lane_col32);
                     rocke_value_t* pidx[2] = {p_row32, p_off32};
                     rocke_value_t* A_p32 = rocke_b_smem_load_vN(B, ctx->P_lds, pidx, 2, DT, 8);
-                    rocke_value_t* col_group16
-                        = rocke_b_mul(B,
-                                      rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 16)),
-                                      rocke_b_const_i32(B, 16));
-                    rocke_value_t* tr_col32 = rocke_b_add(
-                        B,
-                        col_group16,
-                        rocke_b_mul(B,
-                                    rocke_b_mod(B, lane_col32, rocke_b_const_i32(B, 4)),
-                                    rocke_b_const_i32(B, 4)));
-                    rocke_value_t* tr_row_base32 = rocke_b_add(
-                        B,
-                        rocke_b_add(B,
-                                    rocke_b_const_i32(B, k * 16),
-                                    rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8))),
-                        rocke_b_mod(B,
-                                    rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 4)),
-                                    rocke_b_const_i32(B, 4)));
+                    rocke_value_t* group16 = rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 16));
+                    rocke_value_t* col_group16 = rocke_b_mul(B, group16, rocke_b_const_i32(B, 16));
+                    rocke_value_t* col_in4 = rocke_b_mod(B, lane_col32, rocke_b_const_i32(B, 4));
+                    rocke_value_t* col_off4 = rocke_b_mul(B, col_in4, rocke_b_const_i32(B, 4));
+                    rocke_value_t* tr_col32 = rocke_b_add(B, col_group16, col_off4);
+                    rocke_value_t* k_row_base = rocke_b_const_i32(B, k * 16);
+                    rocke_value_t* half_row_base = rocke_b_add(
+                        B, k_row_base, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8)));
+                    rocke_value_t* quad = rocke_b_div(B, lane_col32, rocke_b_const_i32(B, 4));
+                    rocke_value_t* quad_row = rocke_b_mod(B, quad, rocke_b_const_i32(B, 4));
+                    rocke_value_t* tr_row_base32 = rocke_b_add(B, half_row_base, quad_row);
                     rocke_value_t* col0 = rocke_b_add(B, rocke_b_const_i32(B, n * 32), tr_col32);
                     rocke_value_t* r0idx[3] = {v_buf, tr_row_base32, col0};
                     rocke_value_t* B32_r0 = rocke_b_ds_read_tr16_b64(B, ctx->V_lds, r0idx, 3, DT);
@@ -649,8 +641,8 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
             rocke_value_t* vn_n = rocke_b_const_i32(B, n);
             rocke_value_t* vn_16 = rocke_b_const_i32(B, 16);
             rocke_value_t* v_n_col = rocke_b_add(B, rocke_b_mul(B, vn_n, vn_16), lane_col);
-            rocke_value_t* v_k_chunk_base
-                = rocke_b_mul(B, lane_rg_of(ctx), rocke_b_const_i32(B, 4));
+            rocke_value_t* v_lane_rg = lane_rg_of(ctx);
+            rocke_value_t* v_k_chunk_base = rocke_b_mul(B, v_lane_rg, rocke_b_const_i32(B, 4));
             rocke_value_t* v_buf = rocke_b_const_i32(B, 0);
 
             /* K=16 narrow atom (gfx942): build <4 x dtype> B operand from 4
@@ -663,8 +655,9 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  * bind it to a temp so C arg-eval order does not allocate the
                  * mul's const ahead of it and shift the mul's %value. */
                 rocke_value_t* p_off_base = rocke_b_const_i32(B, k * 16);
+                rocke_value_t* p_lane_rg = lane_rg_of(ctx);
                 rocke_value_t* p_off = rocke_b_add(
-                    B, p_off_base, rocke_b_mul(B, lane_rg_of(ctx), rocke_b_const_i32(B, 4)));
+                    B, p_off_base, rocke_b_mul(B, p_lane_rg, rocke_b_const_i32(B, 4)));
                 rocke_value_t* B_v = rocke_gfx942_attn2d_strided_v_b_operand(
                     ctx, k, v_n_col, v_k_chunk_base, v_buf);
                 for(int atom = 0; atom < M_ATOMS; ++atom)

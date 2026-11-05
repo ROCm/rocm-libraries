@@ -305,9 +305,10 @@ static void rocke_wsp3_producer_load_async(rocke_wsp3_ctx_t* w,
         rocke_value_t* row = rocke_b_div(b, cidx, w->c_chunks_per_row);
         rocke_value_t* col
             = rocke_b_mul(b, rocke_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
-        rocke_value_t* off = rocke_b_add(b,
-                                         rocke_b_mul(b, rocke_b_add(b, w->block_m_off, row), w->K),
-                                         rocke_b_add(b, k_off, col));
+        /* Bound in Python's left-to-right order. */
+        rocke_value_t* row_off = rocke_b_mul(b, rocke_b_add(b, w->block_m_off, row), w->K);
+        rocke_value_t* col_off = rocke_b_add(b, k_off, col);
+        rocke_value_t* off = rocke_b_add(b, row_off, col_off);
         rocke_b_async_buffer_load_lds_addr(
             b, w->a_rsrc, lds, rocke_b_mul(b, off, w->c2), w->zsoff, w->dtl_dwords, 2);
     }
@@ -325,9 +326,10 @@ static void rocke_wsp3_producer_load_async(rocke_wsp3_ctx_t* w,
         rocke_value_t* row = rocke_b_div(b, cidx, w->c_chunks_per_row);
         rocke_value_t* col
             = rocke_b_mul(b, rocke_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
-        rocke_value_t* off = rocke_b_add(b,
-                                         rocke_b_mul(b, rocke_b_add(b, w->block_n_off, row), w->K),
-                                         rocke_b_add(b, k_off, col));
+        /* Bound in Python's left-to-right order. */
+        rocke_value_t* row_off = rocke_b_mul(b, rocke_b_add(b, w->block_n_off, row), w->K);
+        rocke_value_t* col_off = rocke_b_add(b, k_off, col);
+        rocke_value_t* off = rocke_b_add(b, row_off, col_off);
         rocke_b_async_buffer_load_lds_addr(
             b, w->b_rsrc, lds, rocke_b_mul(b, off, w->c2), w->zsoff, w->dtl_dwords, 2);
     }

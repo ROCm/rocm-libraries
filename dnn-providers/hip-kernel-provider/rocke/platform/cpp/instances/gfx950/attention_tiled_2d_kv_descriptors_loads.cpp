@@ -350,8 +350,8 @@ static void rocke__fast_paged_kv_voff_split(rocke_gfx950_attn2d_build_ctx_t* ctx
     if(ctx->I64_KV_ADDR)
     {
         /* base_i64 = zext(physical, i64) << 15 ; return (base_i64, within). */
-        rocke_value_t* base_i64
-            = rocke_b_shl(b, rocke_b_zext(b, physical, rocke_i64()), rocke_b_const_i64(b, 15));
+        rocke_value_t* physical_i64 = rocke_b_zext(b, physical, rocke_i64());
+        rocke_value_t* base_i64 = rocke_b_shl(b, physical_i64, rocke_b_const_i64(b, 15));
         if(out_base_i64)
             *out_base_i64 = base_i64;
         if(out_voff)
