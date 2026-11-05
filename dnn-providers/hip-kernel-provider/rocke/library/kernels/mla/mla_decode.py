@@ -73,7 +73,6 @@ spacing (``DECODE_SCORE_PREFETCH``, ``DECODE_SCORE_FENCE_EVERY``), keyed by
 from __future__ import annotations
 
 import dataclasses
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -90,10 +89,11 @@ from rocke.helpers.attention import (
     mfma_16x16x32_for_dtype as _mfma_16x16x32,
     safe_inv_l as _safe_inv_l,
 )
+from rocke.helpers.attention_fwd_ext import natural_lse_from_log2_stats
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.spec import SignatureBuilder
 
-from .mla_decode_combine import NEG_INIT, WAVE_SIZE, MlaDecodeCombineSpec
+from .mla_decode_combine import WAVE_SIZE, MlaDecodeCombineSpec
 
 # The MLA family's shared core (atom shape, LDS pads, staging width, fragment
 # helpers): the decode pipeline is the prefill's one-wave-per-head loop, so its
@@ -107,10 +107,12 @@ from ._mla_body import (
     MFMA_N,
     V8_PAD,
     WT_PAD,
+    lane_ids,
     pick4,
     query_reduce,
     require_int_fields,
     shift,
+    softmax_consts,
 )
 
 # Decode's own schedule knobs. Most start at the prefill's values -- the same
@@ -559,9 +561,6 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     ROPE_K_ITERS = D_ROPE // SK
     N_R_TILES = R_KV // MFMA_N
 
-    LOG2E = math.log2(math.e)
-    LN2 = math.log(2.0)
-
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
     b.kernel.attrs["agpr_alloc"] = DECODE_AGPR_ALLOC
@@ -607,14 +606,12 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     # ---- prologue: identify (head group, sequence, segment) ----------------
     head_grp = b.block_id_x()
     seq_idx = b.block_id_y()
-    tid = b.thread_id_x()
-    lane = b.mod(tid, b.const_i32(WAVE_SIZE))
-    wave = b.div(tid, b.const_i32(WAVE_SIZE))
-    lane_row = b.mod(lane, b.const_i32(16))
+    lanes = lane_ids(b)
+    tid, lane, wave, lane_row = lanes.tid, lanes.lane, lanes.wave, lanes.lane_row
     # lane_kq: the C fragment's row group (keys of the score, latent rows of
     # the PV). lane_ks: the lane's first K column of a score operand -- the
     # same value for the 16x16x16 atom, twice it for the K-packed 16x16x32.
-    lane_kq = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4))
+    lane_kq = lanes.lane_kq
     lane_ks = (
         lane_kq if SW == 4 else b.mul(b.div(lane, b.const_i32(16)), b.const_i32(SW))
     )
@@ -677,9 +674,8 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     for j in range(ROPE_K_ITERS):
         b.smem_store_vN(qr_lds, [qr_row, shift(b, j * SK, lane_ks)], rope_frags[j], SW)
 
-    scale_log2 = b.fmul(scale_p, b.const_f32(LOG2E))
-    neg_init = b.const_f32(NEG_INIT)
-    zero_f = b.const_f32(0.0)
+    consts = softmax_consts(b, scale_p)
+    scale_log2, neg_init, zero_f = consts.scale_log2, consts.neg_inf, consts.zero
 
     iter_args = [("m", neg_init), ("l", zero_f)]
     iter_args += [(f"acc{t}", b.zero_vec_f32(4)) for t in range(N_R_TILES)]
@@ -1061,7 +1057,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
             )
         # S_k = 0 leaves l = 0, so log2(l) = -inf and the LSE is -inf.
         with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
-            value = b.fmul(b.fadd(m_fin, b.log2(l_fin)), b.const_f32(LN2))
+            value = natural_lse_from_log2_stats(b, m_fin, l_fin)
             b.global_store(
                 lse, b.add(b.mul(token, b.const_i32(H)), head), value, align=4
             )

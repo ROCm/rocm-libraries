@@ -34,15 +34,15 @@ over.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from rocke.core.arch.target import base_arch_from_target_id
 from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.attention import safe_inv_l as _safe_inv_l
+from rocke.helpers.attention_fwd_ext import natural_lse_from_log2_stats
 from rocke.helpers.spec import SignatureBuilder
 
-from ._mla_body import require_int_fields
+from ._mla_body import NEG_INF, require_int_fields
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "NEG_INIT",
@@ -64,7 +64,9 @@ WAVE_SIZE = 64
 SUPPORTED_ARCHES = ("gfx942", "gfx950")
 
 #: The running max every decode latent kernel starts a segment from, and so
-#: the ``m`` an empty segment reports. Finite on purpose: with every segment
+#: the ``m`` an empty segment reports: the MLA family's ``NEG_INF``
+#: (``_mla_body``), which the latent kernel's softmax constants carry, so the
+#: two kernels cannot disagree on it. Finite on purpose: with every segment
 #: empty the merge's ``M`` equals it too, so ``2**(m_s - M)`` is 1 rather than
 #: ``-inf - -inf = NaN``, and ``l = 0`` then zeroes the row.
 #:
@@ -72,9 +74,8 @@ SUPPORTED_ARCHES = ("gfx942", "gfx950")
 #: below ``NEG_INIT`` is weighted like a masked key, so a sequence with no key
 #: above it reads as empty (zero row, ``lse = -inf``). That needs ``|q . k|``
 #: past 1e30 for a single key, far outside any bf16 cache an attention layer
-#: produces; the MLA prefill's running max has the same floor (``NEG_INF`` in
-#: ``_mla_body``).
-NEG_INIT = -1e30
+#: produces; the MLA prefill's running max has the same floor.
+NEG_INIT = NEG_INF
 
 
 @dataclass(frozen=True)
@@ -178,8 +179,6 @@ def build_mla_decode_combine(
     H = spec.num_heads
     R_KV = spec.r_kv
     CPL = spec.cols_per_lane
-    LN2 = math.log(2.0)
-
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.threads
     out = b.param(
@@ -282,6 +281,6 @@ def build_mla_decode_combine(
     )
     b.global_store_vN(out, out_row, b.vec_trunc_f32_to_bf16(vals), CPL, align=2 * CPL)
     with b.scf_if(b.cmp_eq(lane, b.const_i32(0))):
-        value = b.fmul(b.fadd(big_m, b.log2(l_sum)), b.const_f32(LN2))
+        value = natural_lse_from_log2_stats(b, big_m, l_sum)
         b.global_store(lse, b.add(b.mul(token, b.const_i32(H)), head), value, align=4)
     return b.kernel
