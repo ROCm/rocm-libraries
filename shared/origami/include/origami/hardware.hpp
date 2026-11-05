@@ -313,9 +313,18 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1101:
         // AMD Navi 32
         return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
-      case architecture_t::gfx1150:
+      case architecture_t::gfx1150: {
         // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
+        // parallel_mi_cu: 2 (2 SIMD32 per CU, as gfx1151/gfx1153). Was 16, which made
+        // get_mi_latency() 8x too small and every kernel look DRAM-bound.
+        // mem3_perf_ratio: DDR5-5600, 128-bit = 89.6 GB/s (was 0.077, ~230 GB/s modeled).
+        // Modeled DRAM bytes per compute cycle = mem3 * 1e9 / (memoryClockRate_GHz * 1e6) *
+        // 0.18 * N_CU, solved for 89.6 GB/s at the 2.9 GHz peak compute clock, N_CU = 16 and
+        // the 2.8 GHz memory clock HIP reports. Other memory (e.g. LPDDR5X) needs another value.
+        constexpr double mem3_ddr5_5600 = 89.6 / 2.9 / (0.18 * 16) * 2.8e-3;
+        return {1.497, NO_MALL_AVAILABLE, mem3_ddr5_5600, 2, std::make_tuple(0, 0.18, 0), 1.5, 2,
+                32 * 1024};
+      }
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
         return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
