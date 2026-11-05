@@ -68,3 +68,28 @@ set_target_properties(${SDPA_CASE_FLOW_RUNNER_EXE}
 )
 
 add_subdirectory(${_it_src}/sdpa-case-flow-poc/tests ${CMAKE_CURRENT_BINARY_DIR}/case-graph-tests)
+
+# Pytest suite of the SDPA case-flow bundle tools (superset template grouping); needs no build.
+if(Python3_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import pytest, yaml"
+        RESULT_VARIABLE _case_flow_pytest_probe
+        OUTPUT_QUIET ERROR_QUIET
+    )
+endif()
+if(Python3_FOUND AND NOT _case_flow_pytest_probe)
+    set(SDPA_CASE_FLOW_POC_PYTHON_TESTS hipdnn_sdpa_case_flow_poc_python_tests)
+    add_test(
+        NAME ${SDPA_CASE_FLOW_POC_PYTHON_TESTS}
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${_it_src}/../scripts/sdpa_case_flow_poc/bundles/tests
+    )
+    set_tests_properties(${SDPA_CASE_FLOW_POC_PYTHON_TESTS}
+                         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;PYTHONDONTWRITEBYTECODE=1")
+    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML
+        "${_it_src}/sdpa-case-flow-poc/tests/test_categories_case_flow.yaml")
+    _apply_provider_ctest_category_labels(${SDPA_CASE_FLOW_POC_PYTHON_TESTS})
+elseif(Python3_FOUND)
+    message(STATUS "hipdnn_sdpa_case_flow_poc_python_tests not registered: "
+                   "${Python3_EXECUTABLE} cannot import pytest and yaml")
+endif()

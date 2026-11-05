@@ -5,8 +5,9 @@
 # cumulative check target.
 test_categories:
   quick:
-    description: "Unit tests of the SDPA case builder and runner helpers"
+    description: "Unit tests of the SDPA case builder, the runner helpers and the bundle tools"
     test_patterns:
       - "hipdnn_sdpa_case_flow_case_graph_tests"
+      - "hipdnn_sdpa_case_flow_poc_python_tests"
     labels:
       - "quick"

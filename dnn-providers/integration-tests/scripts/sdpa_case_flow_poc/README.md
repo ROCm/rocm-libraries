@@ -25,7 +25,7 @@ show that the method works. The design and the files are described in
 | graph | The hipDNN description of one operation: its tensors (multi-dimensional arrays of numbers), their sizes and the operation's settings. |
 | bundle | A test that the integration suite runs, stored as files in `integration-test-bundles/`. |
 | sweep | One bundle that holds many cases: one graph template (`graph.template.json`) and a list of case values (`sweep.json`). |
-| topology | The set of tensors that a case uses. All cases of one sweep have the same topology. |
+| topology | The set of tensors that a case uses. A sweep's template has the topology of its largest case; a case with fewer tensors names the missing ones in `absent_tensors`. |
 | engine | One implementation of an operation, inside a provider plugin (a shared library that hipDNN loads). Example: `ASM_SDPA_ENGINE`. |
 | reference | A simple, slow program that computes the expected output. hipDNN has a CPU reference and a GPU reference for SDPA. |
 | arch | The GPU architecture name. This plan uses `gfx942` and `gfx950`. |
@@ -240,7 +240,9 @@ these rows are left out of this bundle set. Adding them is planned as a
 follow-up change.
 
 `topology.py --input … --class-values … --out topologies.csv` checks that the
-topology names and the tensor signatures map one to one, and lists them.
+topology names and the tensor signatures map one to one, and lists them. With
+`--grouping-summary <json>` it also writes, per tier, the sweep counts with one
+template per signature and with superset templates (see section 6).
 
 ### 4. Build the runner
 
@@ -288,10 +290,19 @@ must be equal, because no selected row depends on the arch (section 9.2).
 ### 6. Make the bundles
 
 `make_bundles.py` runs `import_graph.py` in grouped mode once per graph, into
-an empty work tree. It sorts the graphs by tier, topology and `case_key`. Each
-run uses `--op-dir SdpaFwdPlan --topology <name> --template-attributes
---template-alignment --skeleton-value-form --only-op-dir --require-marked-sweep
---case-id <dtype_q>_<case_key> --strict`.
+an empty work tree. Per tier, it puts each tensor signature into a superset
+template (`topology.superset_map`): the signatures are taken largest first, and
+each joins the smallest earlier superset that holds all of its tensors and has
+the same scale form, dropout input form, page tables and ragged offsets, else
+it starts a superset. The sweep of a superset is named after the superset's
+signature. The script sorts the graphs by tier, superset, signature size
+(largest first), signature and `case_key`, so a superset's own graphs create
+its template. Each run uses `--op-dir SdpaFwdPlan --topology <name>
+--template-attributes --template-alignment --skeleton-value-form --only-op-dir
+--require-marked-sweep --superset-templates --case-id <dtype_q>_<case_key>
+--strict`. A case with fewer tensors than its template lists them in
+`absent_tensors`, and its metadata has `format_version` 2. `--exact-templates`
+makes one sweep per signature instead (no `--superset-templates`).
 
 ```bash
 python3 $TOOLS/make_bundles.py --selected $OUT/select/selected.csv \
@@ -312,16 +323,20 @@ Useful options:
 
 `placements.csv` maps each `case_key` to its tier, topology, case id, bundle
 path and GTest name (the name of the test in the suite). `report.json` has the
-import times and the sweep sizes.
+import times, the sweep sizes and, per tier, the sweep counts and one-case
+sweep counts with one template per signature and with superset templates.
 
 ### 7. Verify
 
 `make_bundles.py` checks the tree before it reports `OK`:
 
-- each topology is one sweep per tier;
+- each topology (superset) is one sweep per tier;
 - no sweep holds two topologies;
 - the op folder holds no other sweep;
-- every case expands back to its exported graph.
+- every case expands back to its exported graph: the absent tensors leave the
+  template first, then the placeholders expand, then the tensor patches apply;
+- no case names a tensor of its own graph in `absent_tensors`, and each case
+  with absent tensors meets the bundle loader's rules for them.
 
 `import_graph.py --strict` also checks each case when it writes it.
 

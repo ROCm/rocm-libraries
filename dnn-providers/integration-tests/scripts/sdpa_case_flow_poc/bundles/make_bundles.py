@@ -3,13 +3,19 @@
 # SPDX-License-Identifier: MIT
 """Import exported SDPA forward graphs into a bundle tree as grouped sweeps.
 
-For every selected row, sorted by (tier, topology, case_key), the script runs the suite's
-import_graph.py in grouped mode on the row's exported graph, into an empty work tree W that
-holds only <tier>/<OP>/ (so each import scans only these sweeps):
+Rows are grouped into superset templates (topology.superset_map, one map per tier): the
+sweep of a superset holds every row whose signature it can hold, and a row with fewer
+tensors runs as a case that names its missing tensors absent. --exact-templates keeps one
+sweep per signature instead. For every selected row, sorted by tier, topology, signature
+size (largest first, so the superset's own rows create the template), signature and
+case_key, the script runs the suite's import_graph.py in grouped mode on the row's exported
+graph, into an empty work tree W that holds only <tier>/<OP>/ (so each import scans only
+these sweeps):
 
   --graph <export>/<case_key>/<case_key>.json --bundle-dir W --tier T --op-dir OP
   --topology NAME --template-attributes --template-alignment --skeleton-value-form
-  --only-op-dir --require-marked-sweep --case-id <dtype_q>_<case_key> --strict
+  --only-op-dir --require-marked-sweep [--superset-templates]
+  --case-id <dtype_q>_<case_key> --strict
 
 Afterwards it checks that every case of one topology name lands in one sweep per tier
 (<tier>/<OP>/<NAME>/), that no sweep holds two topology names, that the op folder holds no
@@ -18,7 +24,9 @@ it then copies each <tier>/<OP>/ folder of W into TREE; the copy refuses any pat
 in TREE and checks every copied file byte for byte. It writes:
 
   placements.csv  case_key, tier, topology, case_id, bundle_path, gtest_name
-  report.json     per-import times, sweep.json bytes per case, failures, projections
+  report.json     per-import times, sweep.json bytes per case, failures, projections, and
+                  per tier the sweeps and one-case sweeps without and with superset
+                  templates
   timings.csv     per import: tier, topology, cases already in the sweep, seconds
 
 --only-tier, --only-topology and --limit import a subset (for example about 300 rows of the
@@ -67,12 +75,14 @@ def gtest_name(tier, op_dir, topo, cid):
 
 
 def load_rows(selected, class_values):
-    """Selected rows with their topology (_topology) and case id (_case_id)."""
+    """Selected rows with their signature (_signature), topology (_topology) and case id
+    (_case_id)."""
     _, _, rows = select_rows.read_rows(selected)
     model = select_rows.Model(class_values)
     topology.check_one_to_one(model, rows)
     for r in rows:
-        r["_topology"] = topology.row_topology(model, r)
+        r["_signature"] = model.tensors(r, True)
+        r["_topology"] = topology.topology_name(r["_signature"])
         r["_case_id"] = case_id(r)
     if len({r["_case_id"] for r in rows}) != len(rows):
         sys.exit("make_bundles: case ids are not unique")
@@ -107,7 +117,24 @@ def sample_rows(rows, per_tier):
     return out
 
 
-def run_import(import_graph, graph, bundle_dir, row, op_dir, env):
+def assign_supersets(rows):
+    """Set each row's _topology to the name of its superset template (per tier)."""
+    names = topology.superset_topologies([(r["level"], r["_signature"]) for r in rows])
+    for r in rows:
+        r["_topology"] = names[(r["level"], r["_signature"])]
+
+
+def import_order(row):
+    return (
+        TIER_ORDER[row["level"]],
+        row["_topology"],
+        -len(row["_signature"]),
+        row["_signature"],
+        row["case_key"],
+    )
+
+
+def run_import(import_graph, graph, bundle_dir, row, op_dir, env, flags):
     cmd = [
         sys.executable,
         str(import_graph),
@@ -121,7 +148,7 @@ def run_import(import_graph, graph, bundle_dir, row, op_dir, env):
         op_dir,
         "--topology",
         row["_topology"],
-        *GROUPED_FLAGS,
+        *flags,
         "--case-id",
         row["_case_id"],
         "--strict",
@@ -135,10 +162,13 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
     """Problems found in the written tree; empty when every check holds."""
     sys.path.insert(0, str(MIGRATION))
     from bundle_utils import (
+        ABSENT_TENSORS_KEY,
+        absent_case_problems,
         canon,
-        canonical_uid_map_by_name,
-        expand,
+        expand_case,
+        inputs_by_name,
         remap_graph,
+        uid_map_onto,
     )  # noqa: E402
 
     problems = []
@@ -182,13 +212,37 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
             row = cases.get(c["id"])
             if row is None:
                 continue
-            graph = json.loads(
-                (export_dir / row["case_key"] / f"{row['case_key']}.json").read_text()
-            )
-            graph = remap_graph(graph, canonical_uid_map_by_name(graph))
-            if canon(expand(template, c.get("values", {}))) != canon(graph):
+            case_dir = export_dir / row["case_key"]
+            graph = json.loads((case_dir / f"{row['case_key']}.json").read_text())
+            meta = json.loads((case_dir / f"{row['case_key']}.meta.json").read_text())
+            uid_map = uid_map_onto(graph, template)
+            if uid_map is None:
+                problems.append(
+                    f"{sweep_path}:{c['id']} has a tensor name the template lacks"
+                )
+                continue
+            graph_t = remap_graph(graph, uid_map)
+            used = {t["uid"] for t in graph_t.get("tensors", []) if "uid" in t}
+            if used & set(c.get(ABSENT_TENSORS_KEY) or []):
+                problems.append(
+                    f"{sweep_path}:{c['id']} marks absent a tensor its graph has"
+                )
+            for p in absent_case_problems(sweep, template, c):
+                problems.append(f"{sweep_path}:{c['id']} {p}")
+            try:
+                expanded = expand_case(template, c)
+            except ValueError as e:
+                problems.append(f"{sweep_path}:{c['id']} does not expand: {e}")
+                continue
+            if canon(expanded) != canon(graph_t):
                 problems.append(
                     f"{sweep_path}:{c['id']} does not re-expand to its exported graph"
+                )
+            if inputs_by_name(c.get("metadata", {}), expanded) != inputs_by_name(
+                meta, graph
+            ):
+                problems.append(
+                    f"{sweep_path}:{c['id']} inputs differ from its exported metadata"
                 )
     return problems
 
@@ -278,7 +332,10 @@ def main():
         help="import only N rows per tier (a covering sample)",
     )
     ap.add_argument("--only-tier", help="import only rows of this tier")
-    ap.add_argument("--only-topology", help="import only rows of this topology")
+    ap.add_argument(
+        "--only-topology",
+        help="import only rows whose own signature has this topology name",
+    )
     ap.add_argument(
         "--limit",
         type=int,
@@ -287,6 +344,11 @@ def main():
     )
     ap.add_argument(
         "--keep-going", action="store_true", help="continue after a failed import"
+    )
+    ap.add_argument(
+        "--exact-templates",
+        action="store_true",
+        help="one sweep per signature (no superset templates, no absent tensors)",
     )
     args = ap.parse_args()
     subset = bool(args.sample or args.only_tier or args.only_topology or args.limit)
@@ -303,7 +365,10 @@ def main():
         rows = [r for r in rows if r["level"] == args.only_tier]
     if args.only_topology:
         rows = [r for r in rows if r["_topology"] == args.only_topology]
-    rows.sort(key=lambda r: (TIER_ORDER[r["level"]], r["_topology"], r["case_key"]))
+    if not args.exact_templates:
+        assign_supersets(rows)
+    flags = GROUPED_FLAGS + ([] if args.exact_templates else ["--superset-templates"])
+    rows.sort(key=import_order)
     if args.limit:
         rows = rows[: args.limit]
     if not rows:
@@ -332,7 +397,7 @@ def main():
     for n, r in enumerate(rows, 1):
         graph = args.export_dir / r["case_key"] / f"{r['case_key']}.json"
         proc, seconds, cmd = run_import(
-            args.import_graph, graph, args.work_dir, r, args.op_dir, env
+            args.import_graph, graph, args.work_dir, r, args.op_dir, env, flags
         )
         key = (r["level"], r["_topology"])
         times.append(seconds)
@@ -419,7 +484,20 @@ def main():
     mean_time = sum(times) / len(times) if times else 0.0
 
     a, b = fit_line(points)
-    full_sizes = Counter((r["level"], r["_topology"]) for r in all_rows)
+    full_names = (
+        {}
+        if args.exact_templates
+        else topology.superset_topologies(
+            [(r["level"], r["_signature"]) for r in all_rows]
+        )
+    )
+    full_sizes = Counter(
+        (
+            r["level"],
+            full_names.get((r["level"], r["_signature"]), r["_topology"]),
+        )
+        for r in all_rows
+    )
     projected = {lv: 0.0 for lv in select_rows.LEVELS}
     for (tier, _), n_cases in full_sizes.items():
         projected[tier] += (
@@ -453,6 +531,10 @@ def main():
         ),
         "projected_all_selected_cases_mb": round(len(all_rows) * per_case / 1e6, 1),
         "sweeps": sweeps,
+        "superset_templates": not args.exact_templates,
+        "grouping_of_imported_rows": topology.grouping_summary(
+            [(r["level"], r["_signature"]) for r in rows]
+        ),
     }
     with open(args.out_dir / "report.json", "w") as f:
         json.dump(report, f, indent=1)
