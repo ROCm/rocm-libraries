@@ -136,6 +136,12 @@ _CASES = [
      r"vec_x must be 0, 4 or 8 \(got 2\)"),
     ("sc_acc_budget", "sc", {"wave_tiles_k": 4, "wave_tiles_c": 5}, {}, "gfx1250",
      r"small_c accumulators need 160 VGPRs \(> 128\)"),
+    ("sc_uniform_wave_spill", "sc",
+     {"waves_k": 4, "waves_c": 4, "wave_tiles_k": 2, "wave_tiles_c": 2,
+      "vec_x": 4, "sub_steps": 4, "uniform_wave": True}, {}, "gfx1250",
+     r"uniform_wave with more than 8 waves, vec_x=4, sub_steps >= 4 and >= 4 wave "
+     r"tiles spills SGPRs into VGPR lanes and returns an all-zero dW "
+     r"\(got 16 waves, sub_steps=4, 4 wave tiles\)"),
     # ---- is_valid_wgrad_spec: the small_c arch gate
     ("sc_arch", "sc", {}, {}, "gfx1151",
      r"small_c direct wgrad is implemented for wave32 gfx1250 \(got gfx1151\)"),

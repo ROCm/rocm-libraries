@@ -29,12 +29,15 @@
 #include <string.h>
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 
-/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3). */
+/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3): the gfx12 th/scope
+ * encoding. gfx11 and gfx9 read the same bits as glc/slc/dlc, so they take
+ * the default policy 0. */
 #define ROCKE_DW_WGRAD_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
 
 /* Fixed-capacity scratch, checked before any write. The accumulator budget
@@ -211,7 +214,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_wgrad(
     const rocke_direct_conv_problem_t* p;
     int KH, KW, U, PAD, WAVE, CPL, WAVES, RPW, V, RS, RC, ROWW, THREADS, KK, BLOCK_CH;
     int XSPAN, HC, NEW, NA, TILE;
-    int i, k, t, v, rr, s, e, w, k0;
+    int i, k, t, v, rr, s, e, w, k0, cpol;
+    const rocke_archtarget_t* target;
     char reason[ROCKE_ERR_MSG_CAP];
     char names[ROCKE_DW_WGRAD_MAX_ITER][32];
     rocke_value_t* c1;
@@ -244,6 +248,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_wgrad(
         dw_fail(b);
         return NULL;
     }
+    target = rocke_archtarget_from_gfx(arch);
+    cpol = (target != NULL && target->target_family != NULL
+            && strncmp(target->target_family, "gfx12", 5) == 0)
+               ? ROCKE_DW_WGRAD_CPOL_ATOMIC_CASCADE_DEV
+               : 0;
 
     memset(&cx, 0, sizeof cx);
     c->b = b;
@@ -683,8 +692,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_wgrad(
             {
                 rocke_if_t gate = rocke_b_scf_if(b, ok);
                 rocke_b_region_enter(b, gate.then_region);
-                rocke_b_buffer_atomic_fadd_f32(
-                    b, d_rsrc, byte, c->c0, tot, ROCKE_DW_WGRAD_CPOL_ATOMIC_CASCADE_DEV);
+                rocke_b_buffer_atomic_fadd_f32(b, d_rsrc, byte, c->c0, tot, cpol);
                 rocke_b_region_leave(b);
             }
         }

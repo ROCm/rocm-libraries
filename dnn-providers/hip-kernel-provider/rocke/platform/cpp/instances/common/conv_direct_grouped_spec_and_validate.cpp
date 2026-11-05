@@ -2728,6 +2728,8 @@ static bool rocke_wgrad_image_reason(const rocke_direct_conv_wgrad_spec_t* spec,
  * _WGRAD_SMALL_C_MAX_SUB_STEPS. */
 #define ROCKE_WGRAD_SMALL_C_ACC_BUDGET 128
 #define ROCKE_WGRAD_SMALL_C_MAX_SUB_STEPS 8
+/* Small-C uniform_wave spill limit. Python: _WGRAD_SMALL_C_UNIFORM_MAX_WAVES. */
+#define ROCKE_WGRAD_SMALL_C_UNIFORM_MAX_WAVES 8
 
 /* _wgrad_small_c_reason(spec): why a small_c spec cannot be built. Writes the
  * reason and returns true when it cannot. */
@@ -2736,7 +2738,7 @@ static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spe
                                        size_t reason_cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    int acc;
+    int acc, waves, tiles;
 
 #define ROCKE_WGRAD_SC_WHY(...)                                  \
     do                                                           \
@@ -2835,6 +2837,19 @@ static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spe
     {
         ROCKE_WGRAD_SC_WHY(
             "small_c accumulators need %d VGPRs (> %d)", acc, ROCKE_WGRAD_SMALL_C_ACC_BUDGET);
+    }
+    waves = spec->waves_k * spec->waves_c;
+    tiles = spec->wave_tiles_k * spec->wave_tiles_c;
+    if(spec->uniform_wave && waves > ROCKE_WGRAD_SMALL_C_UNIFORM_MAX_WAVES && spec->vec_x == 4
+       && spec->sub_steps >= 4 && tiles >= 4)
+    {
+        ROCKE_WGRAD_SC_WHY("uniform_wave with more than %d waves, vec_x=4, sub_steps >= 4 and >= 4 "
+                           "wave tiles spills SGPRs into VGPR lanes and returns an all-zero dW "
+                           "(got %d waves, sub_steps=%d, %d wave tiles)",
+                           ROCKE_WGRAD_SMALL_C_UNIFORM_MAX_WAVES,
+                           waves,
+                           spec->sub_steps,
+                           tiles);
     }
     return false;
 

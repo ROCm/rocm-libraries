@@ -911,7 +911,7 @@ WGRAD_SMALL_C_CONFIGS = (
     ((4, 4, 2, 2, 4, 2, 4, True), (8, 16, 32)),
     # uniform_wave=False here: with it on, this 16-wave vec_x=4 / sub_steps=4
     # tile spills SGPRs into VGPR lanes at the 128-VGPR cap and the binary
-    # returns an all-zero dW. Off, it verifies.
+    # returns an all-zero dW, so both validators refuse it. Off, it verifies.
     ((4, 4, 2, 2, 4, 4, 4, False), (8, 16, 32)),
 )
 # Depthwise wgrad, VALU kernel (wave32). (chan_per_lane, waves, rows_per_wave,

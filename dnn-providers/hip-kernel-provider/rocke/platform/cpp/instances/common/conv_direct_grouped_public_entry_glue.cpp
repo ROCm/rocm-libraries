@@ -914,34 +914,25 @@ rocke_kernel_def_t* rocke_build_direct_conv_wgrad(rocke_ir_builder_t* b,
     }
 
     /* spec.validate(); is_valid_wgrad_spec(spec, arch); then the
-     * image-per-block variant has its own builder. */
-    if(spec->image_per_block)
+     * image-per-block and small_c variants have their own builders. The
+     * refusal reason goes to the builder's error, which
+     * rocke_direct_conv_wgrad_lower_to_llvm reports. */
+    if(spec->image_per_block || spec->small_c)
     {
         char reason[ROCKE_ERR_MSG_CAP];
+        reason[0] = '\0';
         if(rocke_direct_conv_wgrad_validate(spec, reason, sizeof reason) != ROCKE_OK
            || !rocke_direct_conv_wgrad_is_valid_spec(spec, arch, reason, sizeof reason))
         {
             if(b->status == ROCKE_OK)
             {
                 b->status = ROCKE_ERR_VALUE;
+                snprintf(b->err, sizeof b->err, "%.*s", (int)(sizeof b->err - 1), reason);
             }
             return NULL;
         }
-        return rocke_dconv_wgrad_build_image(b, spec, arch);
-    }
-    if(spec->small_c)
-    {
-        char reason[ROCKE_ERR_MSG_CAP];
-        if(rocke_direct_conv_wgrad_validate(spec, reason, sizeof reason) != ROCKE_OK
-           || !rocke_direct_conv_wgrad_is_valid_spec(spec, arch, reason, sizeof reason))
-        {
-            if(b->status == ROCKE_OK)
-            {
-                b->status = ROCKE_ERR_VALUE;
-            }
-            return NULL;
-        }
-        return rocke_dconv_wgrad_build_small_c(b, spec, arch);
+        return spec->image_per_block ? rocke_dconv_wgrad_build_image(b, spec, arch)
+                                     : rocke_dconv_wgrad_build_small_c(b, spec, arch);
     }
 
     memset(&ctx, 0, sizeof(ctx));

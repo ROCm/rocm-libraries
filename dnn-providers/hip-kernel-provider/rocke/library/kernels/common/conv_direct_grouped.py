@@ -5299,6 +5299,10 @@ def _wgrad_image_reason(spec: "DirectConvWgradSpec") -> str:
 _WGRAD_SMALL_C_ACC_BUDGET = 128
 # Small-C staging depth cap (32-pixel chunks per LDS synchronisation).
 _WGRAD_SMALL_C_MAX_SUB_STEPS = 8
+# Small-C uniform_wave: past this many waves a wave gets 128 VGPRs, and with
+# vec_x=4, sub_steps >= 4 and a 2x2 tile the SGPR column tables spill back to
+# VGPR lanes; the binary then returns an all-zero dW.
+_WGRAD_SMALL_C_UNIFORM_MAX_WAVES = 8
 
 
 def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
@@ -5361,6 +5365,21 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
     acc = 8 * spec.wave_tiles_k * spec.wave_tiles_c
     if acc > _WGRAD_SMALL_C_ACC_BUDGET:
         return f"small_c accumulators need {acc} VGPRs (> {_WGRAD_SMALL_C_ACC_BUDGET})"
+    waves = spec.waves_k * spec.waves_c
+    tiles = spec.wave_tiles_k * spec.wave_tiles_c
+    if (
+        spec.uniform_wave
+        and waves > _WGRAD_SMALL_C_UNIFORM_MAX_WAVES
+        and spec.vec_x == 4
+        and spec.sub_steps >= 4
+        and tiles >= 4
+    ):
+        return (
+            f"uniform_wave with more than {_WGRAD_SMALL_C_UNIFORM_MAX_WAVES} waves, "
+            f"vec_x=4, sub_steps >= 4 and >= 4 wave tiles spills SGPRs into VGPR "
+            f"lanes and returns an all-zero dW (got {waves} waves, "
+            f"sub_steps={spec.sub_steps}, {tiles} wave tiles)"
+        )
     return ""
 
 
@@ -7698,6 +7717,15 @@ def build_direct_depthwise_wgrad(
     ok, why = is_valid_depthwise_wgrad_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid DirectDepthwiseWgradSpec for {arch}: {why}")
+    from rocke.core.arch import ArchTarget
+
+    # CPOL_ATOMIC_CASCADE_DEV is the gfx12 th/scope encoding; gfx11 and gfx9
+    # read the same bits as glc/slc/dlc, so they take the default policy.
+    cpol = (
+        CPOL_ATOMIC_CASCADE_DEV
+        if ArchTarget.from_gfx(arch).target_family.startswith("gfx12")
+        else 0
+    )
     p = spec.problem
     KH, KW, U, PAD = p.KH, p.KW, p.stride, p.PAD
     WAVE = spec.wave_size
@@ -7998,9 +8026,7 @@ def build_direct_depthwise_wgrad(
         off = b.add(slab_off, rs)
         byte = b.mul(off, c4)
         with b.scf_if(ok):
-            b.buffer_atomic_fadd_f32(
-                d_rsrc, byte, c0, tot, cachepolicy=CPOL_ATOMIC_CASCADE_DEV
-            )
+            b.buffer_atomic_fadd_f32(d_rsrc, byte, c0, tot, cachepolicy=cpol)
     return b.kernel
 
 

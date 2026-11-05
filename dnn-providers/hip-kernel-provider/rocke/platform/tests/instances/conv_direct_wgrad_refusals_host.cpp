@@ -11,13 +11,20 @@
  * message of the check it targets. The byte-identity gate never sees a
  * refused spec, so this is what keeps the two validators' refusals in step.
  * Keep the two tables in step.
+ *
+ * It also checks the cache policy of the depthwise wgrad atomics per arch,
+ * like library/tests/test_direct_depthwise_wgrad_cachepolicy.py: the gfx12
+ * th/scope cascade value on gfx12 targets only, 0 on gfx11.
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "rocke/abi.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/ir.h"
+#include "rocke/lower_llvm.h"
 
 #define REASON_CAP 512
 
@@ -316,6 +323,20 @@ static const wgrad_case_t k_wgrad_cases[] = {
      },
      "gfx1250",
      "small_c accumulators need 160 VGPRs (> 128)"},
+    {"sc_uniform_wave_spill",
+     BASE_SC,
+     [](W* s) {
+         s->waves_k = 4;
+         s->waves_c = 4;
+         s->wave_tiles_k = 2;
+         s->wave_tiles_c = 2;
+         s->vec_x = 4;
+         s->sub_steps = 4;
+         s->uniform_wave = 1;
+     },
+     "gfx1250",
+     "uniform_wave with more than 8 waves, vec_x=4, sub_steps >= 4 and >= 4 wave tiles spills "
+     "SGPRs into VGPR lanes and returns an all-zero dW (got 16 waves, sub_steps=4, 4 wave tiles)"},
     /* ---- is_valid_wgrad_spec: the small_c arch gate */
     {"sc_arch",
      BASE_SC,
@@ -477,6 +498,54 @@ static void expect_names_value(const char* id, const char* why)
     }
 }
 
+/* Every cachepolicy attr of the tile.buffer_atomic_fadd_f32 ops under
+ * `region` must be `want`; *count gets the number of atomics seen. */
+static bool dw_atomics_have_policy(const rocke_region_t* region, int64_t want, int* count)
+{
+    int i, r;
+    for(i = 0; i < region->num_ops; ++i)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(strcmp(op->name, "tile.buffer_atomic_fadd_f32") == 0)
+        {
+            int64_t got = -1;
+            ++*count;
+            if(!rocke_attr_get_int(&op->attrs, "cachepolicy", &got) || got != want)
+                return false;
+        }
+        for(r = 0; r < op->num_regions; ++r)
+        {
+            if(!dw_atomics_have_policy(op->regions[r], want, count))
+                return false;
+        }
+    }
+    return true;
+}
+
+static void check_dw_cachepolicy(const char* arch, int64_t want)
+{
+    rocke_direct_depthwise_wgrad_spec_t s = dw_base();
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_direct_depthwise_wgrad_new(&b, &s, arch);
+    int count = 0;
+    if(k == NULL)
+    {
+        fprintf(
+            stderr, "FAIL dw_cachepolicy %s: build failed: %s\n", arch, rocke_ir_builder_error(&b));
+        ++g_failures;
+    }
+    else if(!dw_atomics_have_policy(k->body, want, &count) || count == 0)
+    {
+        fprintf(stderr,
+                "FAIL dw_cachepolicy %s: atomics do not all carry cachepolicy %lld (%d seen)\n",
+                arch,
+                (long long)want,
+                count);
+        ++g_failures;
+    }
+    rocke_ir_builder_free(&b);
+}
+
 int main(void)
 {
     char why[REASON_CAP];
@@ -515,6 +584,19 @@ int main(void)
                        why,
                        c->reason);
         expect_names_value(c->id, why);
+        /* The image-per-block and small_c builders hand the refusal on to
+         * the lowering entry's error, not just a failed status. */
+        if(s.image_per_block || s.small_c)
+        {
+            char* ll = NULL;
+            char err[REASON_CAP];
+            rocke_status_t st;
+            err[0] = '\0';
+            st = rocke_direct_conv_wgrad_lower_to_llvm(
+                &s, c->arch, ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+            expect_refused(c->id, st == ROCKE_OK, err, c->reason);
+            free(ll);
+        }
     }
     for(i = 0; i < sizeof k_dw_cases / sizeof k_dw_cases[0]; ++i)
     {
@@ -528,6 +610,12 @@ int main(void)
                        c->reason);
         expect_names_value(c->id, why);
     }
+
+    /* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3). */
+    check_dw_cachepolicy("gfx1250", 4 | (2 << 3));
+    check_dw_cachepolicy("gfx1201", 4 | (2 << 3));
+    check_dw_cachepolicy("gfx1151", 0);
+    check_dw_cachepolicy("gfx1100", 0);
 
     if(g_failures != 0)
     {

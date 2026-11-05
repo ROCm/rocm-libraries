@@ -42,6 +42,20 @@ class TestBufferAtomicFaddF32(unittest.TestCase):
                 )
                 self.assertIn(f", i32 {cp})", ll)
 
+    def test_builder_rejects_an_invalid_cachepolicy(self):
+        # Non-integers are refused rather than rounded to a valid policy.
+        for bad, msg in (
+            (20.9, "must be an int"),
+            (-0.5, "must be an int"),
+            (True, "must be an int"),
+            ("20", "must be an int"),
+            (-1, "must be in 0..31"),
+            (32, "must be in 0..31"),
+        ):
+            with self.subTest(cachepolicy=bad):
+                with self.assertRaisesRegex(ValueError, msg):
+                    _kernel(bad)
+
     def test_lowering_rejects_an_invalid_cachepolicy_attr(self):
         # Hand-built or imported IR can carry any attr value; the lowerer
         # (like the C++ one) must refuse it rather than coerce it to an int.

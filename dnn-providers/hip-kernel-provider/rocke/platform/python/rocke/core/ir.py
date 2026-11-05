@@ -5897,6 +5897,11 @@ class IRBuilder:
         scope, e.g. :data:`CPOL_ATOMIC_CASCADE_DEV`. The returned pre-add value
         is discarded, so the backend selects the no-return form.
         """
+        # _check_cachepolicy coerces with int(); refuse what it would round.
+        if isinstance(cachepolicy, bool) or not isinstance(cachepolicy, int):
+            raise ValueError(
+                f"buffer_atomic_fadd_f32 cachepolicy must be an int, got {cachepolicy!r}"
+            )
         self._op(
             "tile.buffer_atomic_fadd_f32",
             [rsrc, voffset, soffset, value],
