@@ -442,8 +442,8 @@ rules:
     kind: definition
     form: exclusion
     basis: consistency
-    reason: "A ragged K that reads through Q holds B x S_kv token slots inside Q's B x S_q slots, so a key length longer than the query length reads past Q's buffer."
-    forbid: {tensor_overlap: [inputs_overlap], strides_k: [inherited], batch_packing: [ragged, ragged_kv_side], paged_kv: [absent], seq_q_vs_seq_kv: [shorter]}
+    reason: "A ragged K that is not paged and reads through Q holds B x S_kv token slots inside Q's B x S_q slots, so a key length longer than the query length reads past Q's buffer. A paged K keeps its own page pool."
+    forbid: {tensor_overlap: [inputs_overlap], strides_k: [inherited], batch_packing: [ragged, ragged_kv_side], paged_kv: [absent, v_only], seq_q_vs_seq_kv: [shorter]}
     source: "class_to_value.tensor_overlap.inputs_overlap (K inside Q when head_dim_v > head_dim_qk); class_to_value.batch_packing (a ragged tensor stores B x S token slots)"
     adapted: "Model only: the class values fix which tensor is the view and how a ragged tensor stores its tokens."
     evidence: inferred

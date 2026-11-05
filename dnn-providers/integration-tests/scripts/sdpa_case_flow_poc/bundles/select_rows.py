@@ -53,28 +53,28 @@ DESCALE_AXES = ("descale_q", "descale_k", "descale_v")
 
 # Counts for the CSV named by levels.csv.sha256, with the default parameters.
 EXPECTED = {
-    "rows": 22909,
+    "rows": 22977,
     "content_reasons": {
-        "ragged_offsets": 3585,
-        "page_table_contents": 166,
-        "tensor_overlap": 1310,
-        "arch_dtype": 399,
+        "ragged_offsets": 3769,
+        "page_table_contents": 190,
+        "tensor_overlap": 1314,
+        "arch_dtype": 391,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 874,
-        "dropout_without_rng_dump": 14,
+        "zero_stride_needs_pr14709": 854,
+        "dropout_without_rng_dump": 10,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
         "quick": (1610, 1234, 90, 154, 313, 31, 42.6, 33.0),
-        "standard": (9405, 7301, 253, 468, 1836, 18, 418.5, 311.7),
-        "comprehensive": (4534, 3375, 208, 356, 806, 65, 1328.1, 945.2),
-        "full": (7360, 5295, 265, 482, 1264, 61, 2564.9, 1835.2),
+        "standard": (9434, 7241, 258, 465, 1822, 17, 413.7, 308.3),
+        "comprehensive": (4543, 3346, 211, 354, 795, 73, 1319.5, 939.1),
+        "full": (7390, 5268, 273, 481, 1253, 71, 2541.5, 1818.6),
     },
-    "bundle_rows": 17205,
-    "sweeps": 816,
-    "sweeps_alignment_split": 1460,
+    "bundle_rows": 17089,
+    "sweeps": 832,
+    "sweeps_alignment_split": 1454,
 }
 
 

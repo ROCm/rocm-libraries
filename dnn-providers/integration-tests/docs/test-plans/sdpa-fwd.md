@@ -436,10 +436,10 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,690 | 1,690 | 69.2 | 55.8 | 23.1 % |
-| standard | 9,130 | 10,820 | 571.3 | 429.3 | 31.7 % |
-| comprehensive | 4,438 | 15,258 | 2,233.1 | 1,612.3 | 62.0 % |
-| full | 7,237 | 22,495 | 5,392.4 | 3,872.0 | — |
+| quick | 1,610 | 1,610 | 66.3 | 53.5 | 22.1 % |
+| standard | 9,434 | 11,044 | 581.4 | 437.0 | 32.3 % |
+| comprehensive | 4,543 | 15,587 | 2,294.2 | 1,656.5 | 63.7 % |
+| full | 7,390 | 22,977 | 5,518.4 | 3,962.4 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
@@ -470,9 +470,9 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 22,495 rows. It has no quoted fields. A `-`
-means that a child axis is not active in that row. Each row has 104 columns: 13
-case columns, then 91 axis columns.
+`levels.csv` has one row per case: 22,977 rows. It has no quoted fields. A `-`
+means that a child axis is not active in that row. Each row has 105 columns: 13
+case columns, then 92 axis columns.
 
 **Case columns (13).**
 
@@ -518,20 +518,19 @@ reasons, so the counts overlap and do not add up to the number of excluded rows.
 
 | Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `ragged_offsets` | Ragged offsets are tensor contents. | 3,585 |
-| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 1,310 |
-| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 399 |
-| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 166 |
-| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,142 (874 otherwise expressible) |
-| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 66 (14 otherwise expressible) |
+| `ragged_offsets` | Ragged offsets are tensor contents. | 3,769 |
+| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 1,314 |
+| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 391 |
+| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 190 |
+| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,126 (854 otherwise expressible) |
+| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 82 (10 otherwise expressible) |
 
 These are the rows that the selection step chooses from the current
-`levels.csv`, which has 22,909 rows. 17,205 rows become bundles and 5,704 rows
-are excluded. Of the excluded rows, 4,820 have at least one of the first four
-reasons. The other 884 could be bundles but have an extra reason: 870 have only
-a zero stride, 10 have only dropout without `rng_dump`, and 4 have both. The
-"otherwise expressible" counts in the table, 874 and 14, include those 4 rows
-twice. The bundle set in the tree is regenerated from this selection later.
+`levels.csv`, which has 22,977 rows. 17,089 rows become bundles and 5,888 rows
+are excluded. Of the excluded rows, 5,024 have at least one of the first four
+reasons. The other 864 could be bundles but have an extra reason: 854 have only
+a zero stride and 10 have only dropout without `rng_dump`. The bundle set in
+the tree is regenerated from this selection later.
 
 The selection step never changes the model or the generated rows. It only
 filters. To bring a row back, change the filter and regenerate the bundles.
@@ -539,10 +538,10 @@ filters. To bring a row back, change the filter and regenerate the bundles.
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
 | quick | 1,610 | 1,234 | 90 | 313 | 42.6 / 33.0 |
-| standard | 9,405 | 7,301 | 253 | 1,836 | 394.9 / 294.2 |
-| comprehensive | 4,534 | 3,375 | 208 | 806 | 1,269.9 / 903.9 |
-| full | 7,360 | 5,295 | 265 | 1,264 | 2,436.5 / 1,743.4 |
-| total | 22,909 | 17,205 | 816 | | |
+| standard | 9,434 | 7,241 | 258 | 1,822 | 390.4 / 290.9 |
+| comprehensive | 4,543 | 3,346 | 211 | 795 | 1,261.2 / 897.6 |
+| full | 7,390 | 5,268 | 273 | 1,253 | 2,412.3 / 1,726.3 |
+| total | 22,977 | 17,089 | 832 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -760,9 +759,9 @@ these defects need no skip.
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
   change.
-- 5,704 rows are not bundles. 4,820 of them need contents or settings a bundle
+- 5,888 rows are not bundles. 5,024 of them need contents or settings a bundle
   cannot express (§ 9.1), mostly ragged offsets and tensors that share memory.
-  The other 884 have a zero stride or random dropout without `rng_dump`. They
+  The other 864 have a zero stride or random dropout without `rng_dump`. They
   are rows of the generated CSV, but no bundle holds them.
 - The rejection probes and the API-path variants in `injections.yaml` are not
   bundles. They belong to a rejection suite.

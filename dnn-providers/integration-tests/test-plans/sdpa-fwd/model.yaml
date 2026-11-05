@@ -249,13 +249,13 @@ axes:
       - {id: int32, meaning: "INT32"}
       - {id: int64, meaning: "INT64"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references @ 2fcf1e30202 RaggedSdpaDensify.hpp:274-285 (dense rewrite: INT32 or INT64 offsets, element size through the type mapping), RaggedSdpaFwdSupport.hpp:97-99 (native plan: INT32), FlatbufferDatatypeMapping.hpp:158-159 (no INT64 element type: 'Error: Invalid type')"
-    note: "int64 answer_key no: the dense rewrite takes INT64 offsets, but both references then stop with 'Error: Invalid type' because the test SDK's data-type mapping has no INT64 entry (FlatbufferDatatypeMapping.hpp:159; runner job 68273158, gfx942: every sampled INT64 row that no other value declined, 4 rows)."
+    cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references @ a6a860a8fff RaggedSdpaDensify.hpp:76-82 (dense rewrite: an INT64 element is sized without the test SDK's type mapping), 271-274 (INT32 or INT64 offsets), RaggedSdpaFwdSupport.hpp:97-99 (native plan: INT32)"
+    note: "int64 answer_key yes: the dense rewrite reads INT64 offsets (ALMIOPEN-3154). Both references ran and agreed on 60 clean ragged rows re-run with INT64 offsets, with the same results as INT32 (runner job 68283697, gfx942), and on the one INT64 row of levels.csv 6a630757 that both references ran. ASM_SDPA_ENGINE refuses INT64 offsets."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "element format of the offsets, the same at every size"]
     labels:
       int32: [common, layout, "yes"]
-      int64: [rare, layout, "no"]
+      int64: [rare, layout, "yes"]
 
   - id: o_packing
     kind: child
