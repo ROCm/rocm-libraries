@@ -1,29 +1,6 @@
-/******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of the NVIDIA CORPORATION nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- ******************************************************************************/
+// SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 #pragma once
 
 #include <thrust/detail/config.h>
@@ -50,7 +27,7 @@ InputIt _CCCL_HOST_DEVICE
 remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
 {
   THRUST_CDP_DISPATCH((return cuda_cub::detail::copy_if<cub::SelectImpl::SelectPotentiallyInPlace>(
-                                policy, first, last, stencil, first, _THRUST_STD::not_fn(predicate));),
+                                policy, first, last, stencil, first, ::cuda::std::not_fn(predicate));),
                       (return thrust::remove_if(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);));
 }
 
@@ -60,7 +37,7 @@ InputIt _CCCL_HOST_DEVICE remove_if(execution_policy<Derived>& policy, InputIt f
 {
   THRUST_CDP_DISPATCH(
     (return cuda_cub::detail::copy_if<cub::SelectImpl::SelectPotentiallyInPlace>(
-              policy, first, last, static_cast<cub::NullType*>(nullptr), first, _THRUST_STD::not_fn(predicate));),
+              policy, first, last, static_cast<cub::NullType*>(nullptr), first, ::cuda::std::not_fn(predicate));),
     (return thrust::remove_if(cvt_to_seq(derived_cast(policy)), first, last, predicate);));
 }
 
@@ -83,14 +60,14 @@ OutputIt _CCCL_HOST_DEVICE remove_copy_if(
   OutputIt result,
   Predicate predicate)
 {
-  return cuda_cub::copy_if(policy, first, last, stencil, result, _THRUST_STD::not_fn(predicate));
+  return cuda_cub::copy_if(policy, first, last, stencil, result, ::cuda::std::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate>
 OutputIt _CCCL_HOST_DEVICE
 remove_copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, Predicate predicate)
 {
-  return cuda_cub::copy_if(policy, first, last, result, _THRUST_STD::not_fn(predicate));
+  return cuda_cub::copy_if(policy, first, last, result, ::cuda::std::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>
@@ -102,4 +79,4 @@ remove_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

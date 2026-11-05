@@ -21,14 +21,14 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/pair.h>
 #include <thrust/transform.h>
-#include <thrust/tuple.h>
+#include _THRUST_STD_INCLUDE(tuple)
 #include <thrust/universal_vector.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
-// There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
+// There is an unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
 #if THRUST_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
@@ -142,14 +142,12 @@ TYPED_TEST(TransformInOutTests, BinaryTransform)
   }
 }
 
-TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
+template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void test_unary_simple()
 {
-  using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
+  using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector input{1, -2, 3};
   Vector output(3);
@@ -159,6 +157,13 @@ TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  test_unary_simple<typename TestFixture::input_type>();
 }
 
 template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
@@ -330,18 +335,13 @@ TEST(TransformTests, TestTransformIfUnaryDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(TransformVectorTests, TestTransformBinarySimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void test_binary_simple()
 {
-  using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
 
-  // There is a strange gcc bug here where it believes we would write out of bounds.
-  // It seems to go away if we add one more element that we leave untouched. Luckily 0 - 0 = 0 so all is fine.
-  // Note that we still write the element, so it does not hide a functional thrust bug
   Vector input1{1, -2, 3};
   Vector input2{-4, 5, 6};
   Vector output(3);
@@ -351,6 +351,13 @@ TYPED_TEST(TransformVectorTests, TestTransformBinarySimple) THRUST_DISABLE_BROKE
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input1.size());
   ASSERT_EQ(output, result);
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformBinarySimple)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  test_binary_simple<typename TestFixture::input_type>();
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename UnaryFunction>
@@ -592,14 +599,14 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIteratorZipped) THRUS
       using Iterator1 = typename thrust::host_vector<U>::iterator;
       using Iterator2 = typename thrust::device_vector<U>::iterator;
 
-      using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
-      using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
+      using Tuple1 = _THRUST_STD::tuple<Iterator1, thrust::discard_iterator<>>;
+      using Tuple2 = _THRUST_STD::tuple<Iterator2, thrust::discard_iterator<>>;
 
       using ZipIterator1 = thrust::zip_iterator<Tuple1>;
       using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
-      ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
-      ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
+      ZipIterator1 z1(_THRUST_STD::tuple(h_output.begin(), thrust::make_discard_iterator()));
+      ZipIterator2 z2(_THRUST_STD::tuple(d_output.begin(), thrust::make_discard_iterator()));
 
       ZipIterator1 h_result = thrust::transform(h_input.begin(), h_input.end(), z1, repeat2());
 
@@ -609,8 +616,8 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIteratorZipped) THRUS
 
       ASSERT_EQ(h_output, d_output);
 
-      ASSERT_EQ_QUIET(reference, thrust::get<1>(h_result.get_iterator_tuple()));
-      ASSERT_EQ_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
+      ASSERT_EQ_QUIET(reference, _THRUST_STD::get<1>(h_result.get_iterator_tuple()));
+      ASSERT_EQ_QUIET(reference, _THRUST_STD::get<1>(d_result.get_iterator_tuple()));
     }
   }
 }

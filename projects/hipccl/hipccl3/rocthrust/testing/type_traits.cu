@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -28,7 +27,6 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
-#include <thrust/tuple.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 #include <unittest/unittest.h>
@@ -60,7 +58,7 @@ void TestIsContiguousIterator()
 
   ASSERT_EQUAL(thrust::is_contiguous_iterator_v<thrust::device_ptr<int>>, true);
 
-  using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
+  using HostIteratorTuple = _THRUST_STD::tuple<HostVector::iterator, HostVector::iterator>;
 
   using ConstantIterator  = thrust::constant_iterator<int>;
   using CountingIterator  = thrust::counting_iterator<int>;
@@ -73,114 +71,6 @@ void TestIsContiguousIterator()
   ASSERT_EQUAL(thrust::is_contiguous_iterator_v<ZipIterator>, false);
 }
 DECLARE_UNITTEST(TestIsContiguousIterator);
-
-void TestIsCommutative()
-{
-  {
-    using T  = int;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::multiplies<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_LIBCXX::minimum<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_LIBCXX::maximum<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::logical_or<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::logical_and<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::bit_or<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::bit_and<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::bit_xor<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-
-  {
-    using T  = char;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = short;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = long;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = long long;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = float;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-  {
-    using T  = double;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
-  }
-
-  {
-    using T  = int;
-    using Op = _THRUST_STD::minus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
-  }
-  {
-    using T  = int;
-    using Op = _THRUST_STD::divides<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
-  }
-  {
-    using T  = float;
-    using Op = _THRUST_STD::divides<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
-  }
-  {
-    using T  = float;
-    using Op = _THRUST_STD::minus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
-  }
-
-  {
-    using T  = thrust::tuple<int, int>;
-    using Op = _THRUST_STD::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
-  }
-}
-DECLARE_UNITTEST(TestIsCommutative);
 
 struct NonTriviallyCopyable
 {
@@ -211,25 +101,25 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, thrust::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, _THRUST_STD::complex<float>>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, thrust::complex<float>, char>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
                 "");
 #endif // THRUST_COMPILER(GCC, >=, 7)
   static_assert(thrust::is_trivially_relocatable<
-                  _THRUST_STD::tuple<_THRUST_STD::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
-                                     thrust::tuple<_THRUST_STD::pair<int, thrust::tuple<>>, int>>>::value,
+                  _THRUST_STD::tuple<_THRUST_STD::pair<int, _THRUST_STD::tuple<int, _THRUST_STD::tuple<>>>,
+                                     _THRUST_STD::tuple<_THRUST_STD::pair<int, _THRUST_STD::tuple<>>, int>>>::value,
                 "");
 
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
-  static_assert(!thrust::is_trivially_relocatable<thrust::tuple<int, float, std::string>>::value, "");
+  static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, float, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, float, std::string>>::value, "");
 
   // test propagation of relocatability through pair and tuple
   static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 };
 DECLARE_UNITTEST(TestTriviallyRelocatable);

@@ -1,29 +1,6 @@
-/******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of the NVIDIA CORPORATION nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- ******************************************************************************/
+// SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 #pragma once
 
 #include <thrust/detail/config.h>
@@ -262,7 +239,7 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan(
   thrust::cuda_cub::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, ScanOp scan_op)
 {
   using diff_t           = thrust::detail::it_difference_t<InputIt>;
-  diff_t const num_items = _THRUST_STD::distance(first, last);
+  diff_t const num_items = ::cuda::std::distance(first, last);
   return thrust::cuda_cub::inclusive_scan_n(policy, first, num_items, result, scan_op);
 }
 
@@ -276,7 +253,7 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan(
   ScanOp scan_op)
 {
   using diff_t           = thrust::detail::it_difference_t<InputIt>;
-  diff_t const num_items = _THRUST_STD::distance(first, last);
+  diff_t const num_items = ::cuda::std::distance(first, last);
   return thrust::cuda_cub::inclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 
@@ -284,7 +261,7 @@ template <typename Derived, typename InputIt, typename OutputIt>
 _CCCL_HOST_DEVICE OutputIt
 inclusive_scan(thrust::cuda_cub::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  return thrust::cuda_cub::inclusive_scan(policy, first, last, result, _THRUST_STD::plus<>{});
+  return thrust::cuda_cub::inclusive_scan(policy, first, last, result, ::cuda::std::plus<>{});
 }
 
 _CCCL_EXEC_CHECK_DISABLE
@@ -314,7 +291,7 @@ _CCCL_HOST_DEVICE OutputIt exclusive_scan(
   ScanOp scan_op)
 {
   using diff_t           = thrust::detail::it_difference_t<InputIt>;
-  diff_t const num_items = _THRUST_STD::distance(first, last);
+  diff_t const num_items = ::cuda::std::distance(first, last);
   return thrust::cuda_cub::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 
@@ -322,7 +299,7 @@ template <typename Derived, typename InputIt, typename OutputIt, typename T>
 _CCCL_HOST_DEVICE OutputIt exclusive_scan(
   thrust::cuda_cub::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, T init)
 {
-  return thrust::cuda_cub::exclusive_scan(policy, first, last, result, init, _THRUST_STD::plus<>{});
+  return thrust::cuda_cub::exclusive_scan(policy, first, last, result, init, ::cuda::std::plus<>{});
 }
 
 template <typename Derived, typename InputIt, typename OutputIt>
@@ -337,4 +314,4 @@ THRUST_NAMESPACE_END
 
 #  include <thrust/scan.h>
 
-#endif // NVCC
+#endif // _CCCL_CUDA_COMPILATION()

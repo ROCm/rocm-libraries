@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 - 2023 Advanced Micro Devices, Inc.
+# Copyright 2019 - 2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 add_library(testing_common INTERFACE)
@@ -208,7 +208,6 @@ add_thrust_test("gather")
 add_thrust_test("generate")
 add_thrust_test("inner_product")
 add_thrust_test("is_contiguous_iterator")
-add_thrust_test("is_operator_function_object")
 add_thrust_test("is_partitioned")
 add_thrust_test("is_sorted")
 add_thrust_test("is_sorted_until")

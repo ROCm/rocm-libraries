@@ -176,6 +176,7 @@ void TestEqualWithBigIndexesHelper(int magnitude)
   ASSERT_EQ(has_executed_h, true);
 }
 
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
 TEST(EqualTests, TestEqualWithBigIndexes)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -185,3 +186,4 @@ TEST(EqualTests, TestEqualWithBigIndexes)
   TestEqualWithBigIndexesHelper(32);
   TestEqualWithBigIndexesHelper(33);
 }
+#endif // THRUST_FORCE_32_BIT_OFFSET_TYPE

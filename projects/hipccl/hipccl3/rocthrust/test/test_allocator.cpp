@@ -243,16 +243,15 @@ TEST(AllocatorTests, TestAllocatorTraitsRebind)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   ASSERT_EQ(
-    (_THRUST_STD::is_same<typename thrust::detail::allocator_traits<
-                            thrust::device_malloc_allocator<int>>::template rebind_traits<float>::other,
-                          typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
+    (_THRUST_STD::is_same<
+      typename _THRUST_STD::allocator_traits<thrust::device_malloc_allocator<int>>::template rebind_traits<float>,
+      typename _THRUST_STD::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
     true);
 
-  ASSERT_EQ(
-    (_THRUST_STD::is_same<
-      typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_traits<float>::other,
-      typename thrust::detail::allocator_traits<my_minimal_allocator<float>>>::value),
-    true);
+  ASSERT_EQ((_THRUST_STD::is_same<
+              typename _THRUST_STD::allocator_traits<my_minimal_allocator<int>>::template rebind_traits<float>,
+              typename _THRUST_STD::allocator_traits<my_minimal_allocator<float>>>::value),
+            true);
 }
 
 TEST(AllocatorTests, TestAllocatorTraitsRebindCpp11)
@@ -261,23 +260,23 @@ TEST(AllocatorTests, TestAllocatorTraitsRebindCpp11)
 
   ASSERT_EQ(
     (_THRUST_STD::is_same<
-      typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<int>>::template rebind_alloc<float>,
+      typename _THRUST_STD::allocator_traits<thrust::device_malloc_allocator<int>>::template rebind_alloc<float>,
       thrust::device_malloc_allocator<float>>::value),
     true);
 
-  ASSERT_EQ((_THRUST_STD::is_same<
-              typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_alloc<float>,
-              my_minimal_allocator<float>>::value),
-            true);
+  ASSERT_EQ(
+    (_THRUST_STD::is_same<typename _THRUST_STD::allocator_traits<my_minimal_allocator<int>>::template rebind_alloc<float>,
+                          my_minimal_allocator<float>>::value),
+    true);
 
   ASSERT_EQ(
     (_THRUST_STD::is_same<
-      typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<int>>::template rebind_traits<float>,
-      typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
+      typename _THRUST_STD::allocator_traits<thrust::device_malloc_allocator<int>>::template rebind_traits<float>,
+      typename _THRUST_STD::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
     true);
 
   ASSERT_EQ((_THRUST_STD::is_same<
-              typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_traits<float>,
-              typename thrust::detail::allocator_traits<my_minimal_allocator<float>>>::value),
+              typename _THRUST_STD::allocator_traits<my_minimal_allocator<int>>::template rebind_traits<float>,
+              typename _THRUST_STD::allocator_traits<my_minimal_allocator<float>>>::value),
             true);
 }

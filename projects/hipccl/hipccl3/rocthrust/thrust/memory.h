@@ -1,18 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file thrust/memory.h
  *  \brief Abstractions for Thrust's memory model.
@@ -75,6 +63,10 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see free
  *  \see device_malloc
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy>
 THRUST_HOST_DEVICE pointer<void, DerivedPolicy>
@@ -114,6 +106,10 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::
  *
  *  \see free
  *  \see device_malloc
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE pointer<T, DerivedPolicy>
@@ -168,6 +164,10 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::
  *
  *  \see malloc
  *  \see return_temporary_buffer
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE
@@ -203,6 +203,10 @@ get_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy>&
  *  // deallocate ptr with thrust::free
  *  thrust::free(device_sys, ptr);
  *  \endcode
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename Pointer>
 THRUST_HOST_DEVICE void free(const thrust::detail::execution_policy_base<DerivedPolicy>& system, Pointer ptr);
@@ -250,6 +254,10 @@ THRUST_HOST_DEVICE void free(const thrust::detail::execution_policy_base<Derived
  *
  *  \see free
  *  \see get_temporary_buffer
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename Pointer>
 THRUST_HOST_DEVICE void return_temporary_buffer(
@@ -261,6 +269,10 @@ THRUST_HOST_DEVICE void return_temporary_buffer(
  *  \param ptr The pointer of interest.
  *  \return <tt>ptr.get()</tt>, if the expression is well formed; <tt>ptr</tt>, otherwise.
  *  \see raw_reference_cast
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename Pointer>
 THRUST_HOST_DEVICE typename thrust::detail::pointer_traits<Pointer>::raw_pointer raw_pointer_cast(Pointer ptr);
@@ -275,6 +287,10 @@ THRUST_HOST_DEVICE typename thrust::detail::pointer_traits<Pointer>::raw_pointer
  *  \note There are two versions of \p raw_reference_cast. One for <tt>const</tt> references,
  *        and one for non-<tt>const</tt>.
  *  \see raw_pointer_cast
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 THRUST_HOST_DEVICE typename detail::raw_reference<T>::type raw_reference_cast(T& ref);
@@ -289,6 +305,10 @@ THRUST_HOST_DEVICE typename detail::raw_reference<T>::type raw_reference_cast(T&
  *  \note There are two versions of \p raw_reference_cast. One for <tt>const</tt> references,
  *        and one for non-<tt>const</tt>.
  *  \see raw_pointer_cast
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 THRUST_HOST_DEVICE typename detail::raw_reference<const T>::type raw_reference_cast(const T& ref);

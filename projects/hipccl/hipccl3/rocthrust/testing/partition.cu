@@ -843,7 +843,7 @@ struct is_ordered
   template <typename Tuple>
   THRUST_HOST_DEVICE bool operator()(const Tuple& t) const
   {
-    return thrust::get<0>(t) <= thrust::get<1>(t);
+    return _THRUST_STD::get<0>(t) <= _THRUST_STD::get<1>(t);
   }
 };
 
@@ -854,7 +854,7 @@ void TestPartitionZipIterator()
   Vector data2{2, 1, 2, 2, 1};
 
   using Iterator      = typename Vector::iterator;
-  using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+  using IteratorTuple = _THRUST_STD::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator begin = thrust::make_zip_iterator(data1.begin(), data2.begin());
@@ -880,7 +880,7 @@ void TestPartitionStencilZipIterator()
   Vector stencil2{2, 1, 2, 2, 1};
 
   using Iterator      = typename Vector::iterator;
-  using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+  using IteratorTuple = _THRUST_STD::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator stencil_begin = thrust::make_zip_iterator(stencil1.begin(), stencil2.begin());
@@ -901,7 +901,7 @@ void TestStablePartitionZipIterator()
   Vector data2{2, 0, 3, 2, 1};
 
   using Iterator      = typename Vector::iterator;
-  using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+  using IteratorTuple = _THRUST_STD::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator begin = thrust::make_zip_iterator(data1.begin(), data2.begin());
@@ -927,7 +927,7 @@ void TestStablePartitionStencilZipIterator()
   Vector stencil2{2, 0, 3, 2, 1};
 
   using Iterator      = typename Vector::iterator;
-  using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+  using IteratorTuple = _THRUST_STD::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator stencil_begin = thrust::make_zip_iterator(stencil1.begin(), stencil2.begin());

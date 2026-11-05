@@ -28,10 +28,6 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
-
 using namespace unittest;
 
 struct SumThree
@@ -44,7 +40,7 @@ struct SumThreeTuple
 {
   template <typename Tuple>
   THRUST_HOST_DEVICE auto operator()(Tuple x) const
-    THRUST_DECLTYPE_RETURNS(thrust::get<0>(x) + thrust::get<1>(x) + thrust::get<2>(x))
+    THRUST_DECLTYPE_RETURNS(_THRUST_STD::get<0>(x) + _THRUST_STD::get<1>(x) + _THRUST_STD::get<2>(x))
 }; // end SumThreeTuple
 
 template <typename T>
@@ -52,11 +48,9 @@ struct TestZipFunctionCtor
 {
   void operator()()
   {
-    ASSERT_EQUAL(thrust::zip_function<SumThree>()(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-    ASSERT_EQUAL(thrust::zip_function<SumThree>(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#ifdef __cpp_deduction_guides
-    ASSERT_EQUAL(thrust::zip_function(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#endif // __cpp_deduction_guides
+    ASSERT_EQUAL(thrust::zip_function<SumThree>()(_THRUST_STD::tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+    ASSERT_EQUAL(thrust::zip_function<SumThree>(SumThree{})(_THRUST_STD::tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+    ASSERT_EQUAL(thrust::zip_function(SumThree{})(_THRUST_STD::tuple(1, 2, 3)), SumThree{}(1, 2, 3));
   }
 };
 SimpleUnitTest<TestZipFunctionCtor, type_list<int>> TestZipFunctionCtorInstance;
@@ -66,35 +60,33 @@ struct TestZipFunctionTransform
 {
   void operator()(const size_t n)
   {
-    using namespace thrust;
+    thrust::host_vector<T> h_data0 = unittest::random_samples<T>(n);
+    thrust::host_vector<T> h_data1 = unittest::random_samples<T>(n);
+    thrust::host_vector<T> h_data2 = unittest::random_samples<T>(n);
 
-    host_vector<T> h_data0 = unittest::random_samples<T>(n);
-    host_vector<T> h_data1 = unittest::random_samples<T>(n);
-    host_vector<T> h_data2 = unittest::random_samples<T>(n);
+    thrust::device_vector<T> d_data0 = h_data0;
+    thrust::device_vector<T> d_data1 = h_data1;
+    thrust::device_vector<T> d_data2 = h_data2;
 
-    device_vector<T> d_data0 = h_data0;
-    device_vector<T> d_data1 = h_data1;
-    device_vector<T> d_data2 = h_data2;
-
-    host_vector<T> h_result_tuple(n);
-    host_vector<T> h_result_zip(n);
-    device_vector<T> d_result_zip(n);
+    thrust::host_vector<T> h_result_tuple(n);
+    thrust::host_vector<T> h_result_zip(n);
+    thrust::device_vector<T> d_result_zip(n);
 
     // Tuple base case
 
-    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+    thrust::transform(thrust::make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      thrust::make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
                       h_result_tuple.begin(),
                       SumThreeTuple{});
     // Zip Function
-    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+    thrust::transform(thrust::make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      thrust::make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
                       h_result_zip.begin(),
-                      make_zip_function(SumThree{}));
-    thrust::transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
-                      make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
+                      thrust::make_zip_function(SumThree{}));
+    thrust::transform(thrust::make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+                      thrust::make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
                       d_result_zip.begin(),
-                      make_zip_function(SumThree{}));
+                      thrust::make_zip_function(SumThree{}));
 
     ASSERT_EQUAL(h_result_tuple, h_result_zip);
     ASSERT_EQUAL(h_result_tuple, d_result_zip);
@@ -104,9 +96,9 @@ VariableUnitTest<TestZipFunctionTransform, ThirtyTwoBitTypes> TestZipFunctionTra
 
 struct RemovePred
 {
-  THRUST_HOST_DEVICE bool operator()(const thrust::tuple<uint32_t, uint32_t>& ele1, const float&)
+  THRUST_HOST_DEVICE bool operator()(const _THRUST_STD::tuple<uint32_t, uint32_t>& ele1, const float&)
   {
-    return thrust::get<0>(ele1) == thrust::get<1>(ele1);
+    return _THRUST_STD::get<0>(ele1) == _THRUST_STD::get<1>(ele1);
   }
 };
 template <typename T>
@@ -136,13 +128,14 @@ SimpleUnitTest<TestZipFunctionMixed, type_list<int, float>> TestZipFunctionMixed
 
 struct NestedFunctionCall
 {
-  THRUST_HOST_DEVICE bool
-  operator()(const thrust::tuple<uint32_t, thrust::tuple<thrust::tuple<int, int>, thrust::tuple<int, int>>>& idAndPt)
+  THRUST_HOST_DEVICE bool operator()(
+    const _THRUST_STD::tuple<uint32_t, _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, _THRUST_STD::tuple<int, int>>>&
+      idAndPt)
   {
-    thrust::tuple<thrust::tuple<int, int>, thrust::tuple<int, int>> ele1 = thrust::get<1>(idAndPt);
-    thrust::tuple<int, int> p1                                           = thrust::get<0>(ele1);
-    thrust::tuple<int, int> p2                                           = thrust::get<1>(ele1);
-    return thrust::get<0>(p1) == thrust::get<0>(p2) || thrust::get<1>(p1) == thrust::get<1>(p2);
+    _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, _THRUST_STD::tuple<int, int>> ele1 = _THRUST_STD::get<1>(idAndPt);
+    _THRUST_STD::tuple<int, int> p1                                                     = _THRUST_STD::get<0>(ele1);
+    _THRUST_STD::tuple<int, int> p2                                                     = _THRUST_STD::get<1>(ele1);
+    return _THRUST_STD::get<0>(p1) == _THRUST_STD::get<0>(p2) || _THRUST_STD::get<1>(p1) == _THRUST_STD::get<1>(p2);
   }
 };
 
@@ -174,10 +167,10 @@ SimpleUnitTest<TestNestedZipFunction, type_list<int, float>> TestNestedZipFuncti
 
 struct SortPred
 {
-  THRUST_DEVICE THRUST_FORCEINLINE bool
-  operator()(const thrust::tuple<thrust::tuple<int, int>, int>& a, const thrust::tuple<thrust::tuple<int, int>, int>& b)
+  THRUST_DEVICE THRUST_FORCEINLINE bool operator()(const _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, int>& a,
+                                                   const _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, int>& b)
   {
-    return thrust::get<1>(a) < thrust::get<1>(b);
+    return _THRUST_STD::get<1>(a) < _THRUST_STD::get<1>(b);
   }
 };
 template <typename T>

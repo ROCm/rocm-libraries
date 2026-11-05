@@ -34,13 +34,7 @@ generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Gener
      cudaError_t status;
      THRUST_INDEX_TYPE_DISPATCH(
        status,
-       (CUB_NS_QUALIFIER::detail::transform::dispatch_t<
-         CUB_NS_QUALIFIER::detail::transform::requires_stable_address::no,
-         decltype(count_fixed),
-         ::cuda::std::tuple<>,
-         OutputIt,
-         Predicate,
-         Generator>::dispatch),
+       (CUB_NS_QUALIFIER::detail::transform::dispatch<CUB_NS_QUALIFIER::detail::transform::requires_stable_address::no>),
        count,
        (::cuda::std::tuple<>{}, result, count_fixed, Predicate{}, generator, cuda_cub::stream(policy)));
      throw_on_error(status, "generate_n: failed inside CUB");
@@ -52,8 +46,8 @@ generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Gener
 template <class Derived, class OutputIt, class Generator>
 void _CCCL_HOST_DEVICE generate(execution_policy<Derived>& policy, OutputIt first, OutputIt last, Generator generator)
 {
-  cuda_cub::generate_n(policy, first, _THRUST_STD::distance(first, last), generator);
+  cuda_cub::generate_n(policy, first, ::cuda::std::distance(first, last), generator);
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

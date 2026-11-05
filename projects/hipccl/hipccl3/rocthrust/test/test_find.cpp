@@ -314,6 +314,7 @@ void TestFindWithBigIndexesHelper(int magnitude)
   ASSERT_EQ(distance_high_value, (1ll << magnitude) - 18);
 }
 
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
 TEST(FindTests, TestFindWithBigIndexes)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -323,6 +324,7 @@ TEST(FindTests, TestFindWithBigIndexes)
   TestFindWithBigIndexesHelper(32);
   TestFindWithBigIndexesHelper(33);
 }
+#endif // THRUST_FORCE_32_BIT_OFFSET_TYPE
 
 namespace
 {

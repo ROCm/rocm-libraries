@@ -17,7 +17,7 @@
 
 #include <thrust/sort.h>
 #include <thrust/transform.h>
-#include <thrust/tuple.h>
+#include _THRUST_STD_INCLUDE(tuple)
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -28,9 +28,9 @@ TESTS_DEFINE(TupleSortTests, IntegerTestsParams);
 struct MakeTupleFunctor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
   {
-    return thrust::make_tuple(lhs, rhs);
+    return _THRUST_STD::tuple(lhs, rhs);
   }
 };
 
@@ -38,9 +38,9 @@ template <int N>
 struct GetFunctor
 {
   template <typename Tuple>
-  THRUST_HOST_DEVICE typename thrust::tuple_element<N, Tuple>::type operator()(const Tuple& t)
+  THRUST_HOST_DEVICE typename _THRUST_STD::tuple_element<N, Tuple>::type operator()(const Tuple& t)
   {
-    return thrust::get<N>(t);
+    return _THRUST_STD::get<N>(t);
   }
 };
 
@@ -65,11 +65,11 @@ TYPED_TEST(TupleSortTests, TestTupleStableSort)
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
       // zip up the data
-      host_vector<tuple<T, T>> h_tuples(size);
+      host_vector<_THRUST_STD::tuple<T, T>> h_tuples(size);
       thrust::transform(h_keys.begin(), h_keys.end(), h_values.begin(), h_tuples.begin(), MakeTupleFunctor());
 
       // copy to device
-      device_vector<tuple<T, T>> d_tuples = h_tuples;
+      device_vector<_THRUST_STD::tuple<T, T>> d_tuples = h_tuples;
 
       // sort on host
       thrust::stable_sort(h_tuples.begin(), h_tuples.end());
