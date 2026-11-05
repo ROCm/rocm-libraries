@@ -17,6 +17,8 @@ import sys
 
 import pytest
 
+from rocke.tests.engines import IR_LOWER_CLI_ENV
+
 
 @pytest.fixture
 def runner(monkeypatch):
@@ -28,6 +30,7 @@ def runner(monkeypatch):
     # and a leaked value would let these tests pass without exercising CTest.
     for var, _, _ in module.NATIVE_PARITY_TESTS:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv(IR_LOWER_CLI_ENV, raising=False)
     monkeypatch.delenv("ROCKE_BACKEND", raising=False)
     monkeypatch.delenv("ROCKE_TEST_ENGINE_ARCHIVE", raising=False)
     monkeypatch.delenv("ROCKE_ONLINE_LIB", raising=False)
@@ -519,6 +522,22 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
     assert "ROCKE_STORAGE_TEST" not in runner.native_pytest_env(tmp_path, "Release")
     assert "native storage parity: SKIPPED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "relative", ["tests/rocke_ir_lower_cli", "tests/Release/rocke_ir_lower_cli.exe"]
+)
+def test_built_hip_lowering_program_is_passed_to_pytest(runner, tmp_path, relative):
+    program = tmp_path / relative
+    program.parent.mkdir(parents=True)
+    program.touch()
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env[IR_LOWER_CLI_ENV] == str(program.resolve())
+
+
+def test_missing_hip_lowering_program_reports_the_skip(runner, tmp_path, capsys):
+    assert IR_LOWER_CLI_ENV not in runner.native_pytest_env(tmp_path, "Release")
+    assert "native HIP lowering program: SKIPPED" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("subdir", ["", "Release"])
