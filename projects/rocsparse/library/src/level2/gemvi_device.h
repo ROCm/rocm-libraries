@@ -53,17 +53,10 @@ namespace rocsparse
         const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
         const uint32_t wid = hipThreadIdx_x / WFSIZE;
 
-        // Each threadblock processes WFSIZE rows, where
-        // each wavefront processes a column of these rows, e.g.
-        // WF 0 processes the first column entry from the list of non-zeros
-        // WF 1 processes the second column entry from the list of non-zeros
-        // etc.
+        // Each threadblock processes WFSIZE rows. The sparse vector is split into
+        // contiguous chunks, one per wavefront, so the unrolled x_val and x_ind
+        // loads are adjacent.
         const I row = hipBlockIdx_x * WFSIZE + lid;
-
-        const uint32_t nworkers = (BLOCKSIZE / WFSIZE) * hipGridDim_y; // ncol
-        const uint32_t worker   = (BLOCKSIZE / WFSIZE) * hipBlockIdx_y + wid; // col
-
-        const I tail = static_cast<I>((UNROLL - 1) * nworkers);
 
         // Sub-row sum accumulators
         T sum[UNROLL]{};
@@ -73,46 +66,61 @@ namespace rocsparse
 
         if(row < m)
         {
-            const uint32_t step = UNROLL * nworkers;
+            const uint32_t nworkers = (BLOCKSIZE / WFSIZE) * hipGridDim_y; // ncol
+            const uint32_t worker   = (BLOCKSIZE / WFSIZE) * hipBlockIdx_y + wid; // col
 
-            I i = worker;
-            for(; (nnz - i) > tail; i += step)
+            const I nworkers_i = static_cast<I>(nworkers);
+            const I worker_i   = static_cast<I>(worker);
+
+            // First `remainder` workers receive one extra nonzero.
+            const I chunk     = nnz / nworkers_i;
+            const I remainder = nnz - chunk * nworkers_i;
+            const I extra     = (worker_i < remainder) ? worker_i : remainder;
+            const I begin     = worker_i * chunk + extra;
+            const I count
+                = chunk + ((worker_i < remainder) ? static_cast<I>(1) : static_cast<I>(0));
+            const I end = begin + count;
+
+            constexpr I unroll_i = static_cast<I>(UNROLL);
+
+            I j = begin;
+            for(; end - j >= unroll_i; j += unroll_i)
             {
-                #pragma unroll
+#pragma unroll
                 for(uint32_t u = 0; u < UNROLL; ++u)
                 {
-                    const I j = i + u * nworkers;
-                    columns[u] = (x_ind[j] - idx_base) * lda + row;
-                    values[u]  = x_val[j];
+                    const I idx = j + static_cast<I>(u);
+                    columns[u]  = (x_ind[idx] - idx_base) * lda + row;
+                    values[u]   = x_val[idx];
                 }
-                #pragma unroll
+#pragma unroll
                 for(uint32_t u = 0; u < UNROLL; ++u)
                 {
                     sum[u] = rocsparse::fma(values[u], A[columns[u]], sum[u]);
                 }
             }
 
-            #pragma unroll
+#pragma unroll
             for(uint32_t u = 0; u < UNROLL; ++u)
             {
-                columns[u] = 0;
-                values[u] = static_cast<T>(0);
+                columns[u] = static_cast<I>(0);
+                values[u]  = static_cast<T>(0);
             }
-            #pragma unroll
+#pragma unroll
             for(uint32_t u = 0; u < UNROLL; ++u)
             {
-                const I j = i + u * nworkers;
-                if(j < nnz)
+                const I idx = j + static_cast<I>(u);
+                if(idx < end)
                 {
-                    columns[u] = (x_ind[j] - idx_base) * lda + row;
-                    values[u]  = x_val[j];
+                    columns[u] = (x_ind[idx] - idx_base) * lda + row;
+                    values[u]  = x_val[idx];
                 }
             }
-            #pragma unroll
+#pragma unroll
             for(uint32_t u = 0; u < UNROLL; ++u)
             {
-                const I j = i + u * nworkers;
-                if(j < nnz)
+                const I idx = j + static_cast<I>(u);
+                if(idx < end)
                 {
                     sum[u] = rocsparse::fma(values[u], A[columns[u]], sum[u]);
                 }
