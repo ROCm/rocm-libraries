@@ -789,10 +789,12 @@ def _reject_sites() -> tuple[set, set]:
     """(file, line) of every reject the C++ port mirrors, as two sets.
 
     Statements a case must execute: each ``raise`` in
-    ``AttentionDenseSpec.__post_init__``, each ``return False, ...`` in
-    ``check_dense_spec_preflight``, and each non-None return of a decode check
-    (including a check's own ``return why``, so a check that shares
-    ``_aligned_causal_error`` with another still needs its own case).
+    ``AttentionDenseSpec.__post_init__``, every line of a reason builder it
+    calls (``partial_tile_reason``, so each of its branches has a case), each
+    ``return False, ...`` in ``check_dense_spec_preflight``, and each non-None
+    return of a decode check (including a check's own ``return why``, so a
+    check that shares ``_aligned_causal_error`` with another still needs its
+    own case).
 
     Divisions a case must make raise ``ZeroDivisionError``: the two paged ones in
     ``__post_init__`` (``block_n // num_waves`` and ``block_size %
@@ -839,6 +841,14 @@ def _reject_sites() -> tuple[set, set]:
                     and isinstance(n.value, ast.Tuple)
                     and isinstance(n.value.elts[0], ast.Constant)
                     and n.value.elts[0].value is False
+                }
+            elif mod is spec_mod and node.name == "partial_tile_reason":
+                body = node.body[1:] if ast.get_docstring(node) else node.body
+                sites |= {
+                    (path, n.lineno)
+                    for stmt in body
+                    for n in ast.walk(stmt)
+                    if hasattr(n, "lineno")
                 }
             elif mod is decode_mod and node.name in ("check", "_aligned_causal_error"):
                 sites |= {

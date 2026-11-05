@@ -167,35 +167,6 @@ int rocke_strbuf_append_char(rocke_strbuf_t* sb, char c)
     return sb->append_char(c);
 }
 
-int rocke_strbuf_append_py_repr(rocke_strbuf_t* sb, const char* s)
-{
-    if(s == NULL)
-        return rocke_strbuf_append(sb, "None");
-    const char quote = (strchr(s, '\'') != NULL && strchr(s, '"') == NULL) ? '"' : '\'';
-    int rc = rocke_strbuf_append_char(sb, quote);
-    for(const unsigned char* p = (const unsigned char*)s; *p; ++p)
-    {
-        const unsigned char c = *p;
-        if(c == '\\' || c == (unsigned char)quote)
-        {
-            rc |= rocke_strbuf_append_char(sb, '\\');
-            rc |= rocke_strbuf_append_char(sb, (char)c);
-        }
-        else if(c == '\n')
-            rc |= rocke_strbuf_append(sb, "\\n");
-        else if(c == '\r')
-            rc |= rocke_strbuf_append(sb, "\\r");
-        else if(c == '\t')
-            rc |= rocke_strbuf_append(sb, "\\t");
-        else if(c < 0x20 || c == 0x7f)
-            rc |= rocke_strbuf_appendf(sb, "\\x%02x", (unsigned)c);
-        else
-            rc |= rocke_strbuf_append_char(sb, (char)c);
-    }
-    rc |= rocke_strbuf_append_char(sb, quote);
-    return rc;
-}
-
 int rocke_strbuf_vappendf(rocke_strbuf_t* sb, const char* fmt, va_list ap)
 {
     return sb->vappendf(fmt, ap);

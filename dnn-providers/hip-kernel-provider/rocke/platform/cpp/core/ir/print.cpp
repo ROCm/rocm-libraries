@@ -26,6 +26,33 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Python repr() of an Optional[str] appended to `out`: "None", or
+ * rocke_py_str_repr's text. */
+static void emit_repr_str(rocke_strbuf_t* out, const char* s)
+{
+    if(!s)
+    {
+        rocke_strbuf_append(out, "None");
+        return;
+    }
+    char small[128];
+    const size_t n = rocke_py_str_repr(s, small, sizeof(small));
+    if(n < sizeof(small))
+    {
+        rocke_strbuf_append(out, small);
+        return;
+    }
+    char* big = (char*)malloc(n + 1);
+    if(!big)
+    {
+        out->oom = 1;
+        return;
+    }
+    rocke_py_str_repr(s, big, n + 1);
+    rocke_strbuf_append(out, big);
+    free(big);
+}
+
 /* --------------------------------------------------------------- operands */
 
 /* Python _format_operand: returns v.name (already includes the leading '%'). */
@@ -204,8 +231,8 @@ static void emit_float(rocke_strbuf_t* out, double f)
  * case below. A list attr is a Python List[Dict[str, Any]] (scf.for iter_args
  * metadata), and str(list) renders every contained element with repr(), which
  * differs from the top-level _attr_value (repr single-quotes strings, whereas
- * the top level double-quotes them). Python repr(str) itself is
- * rocke_strbuf_append_py_repr. */
+ * the top level double-quotes them). Python repr(str) itself is emit_repr_str
+ * (rocke_py_str_repr). */
 static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v);
 static void emit_repr_map(rocke_strbuf_t* out, const struct rocke_attr_map* m);
 
@@ -217,7 +244,7 @@ static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
     switch(v->kind)
     {
     case ROCKE_ATTR_STR:
-        rocke_strbuf_append_py_repr(out, v->u.s);
+        emit_repr_str(out, v->u.s);
         break;
     case ROCKE_ATTR_BOOL:
         rocke_strbuf_append(out, v->u.b ? "True" : "False");
@@ -279,7 +306,7 @@ static void emit_repr_map(rocke_strbuf_t* out, const struct rocke_attr_map* m)
             {
                 rocke_strbuf_append(out, ", ");
             }
-            rocke_strbuf_append_py_repr(out, m->entries[i].key);
+            emit_repr_str(out, m->entries[i].key);
             rocke_strbuf_append(out, ": ");
             emit_repr_value(out, &m->entries[i].value);
         }
@@ -480,7 +507,7 @@ static void emit_op(rocke_strbuf_t* out, const rocke_op_t* op, int indent)
         const rocke_region_t* region = op->regions[r];
         emit_pad(out, indent);
         rocke_strbuf_append(out, "  region ");
-        rocke_strbuf_append_py_repr(out, region ? region->label : NULL);
+        emit_repr_str(out, region ? region->label : NULL);
         rocke_strbuf_append(out, " {\n");
         if(region)
         {

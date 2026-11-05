@@ -23,8 +23,8 @@
 #include <string>
 #include <vector>
 
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_spec_set_reason */
-#include "rocke/strbuf.h" /* rocke_strbuf_append_py_repr */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, ROCKE_SPEC_FAIL */
+#include "rocke/ir.h" /* rocke_py_str_repr */
 
 const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_GEOMETRY_COUNT] = {
     {"default", ROCKE_DENSE_DEFAULT_BLOCK_M, ROCKE_DENSE_DEFAULT_BLOCK_N},
@@ -39,14 +39,13 @@ bool streq(const char* a, const char* b)
     return a != NULL && b != NULL && strcmp(a, b) == 0;
 }
 
-/* Python repr() of an Optional[str] (rocke_strbuf_append_py_repr). */
+/* Python repr() of an Optional[str]: "None", or rocke_py_str_repr. */
 std::string py_repr(const char* s)
 {
-    rocke_strbuf_t sb;
-    rocke_strbuf_init(&sb, 0);
-    rocke_strbuf_append_py_repr(&sb, s);
-    std::string out = rocke_strbuf_cstr(&sb);
-    rocke_strbuf_free(&sb);
+    if(s == NULL)
+        return "None";
+    std::string out(rocke_py_str_repr(s, NULL, 0), '\0');
+    rocke_py_str_repr(s, &out[0], out.size() + 1);
     return out;
 }
 

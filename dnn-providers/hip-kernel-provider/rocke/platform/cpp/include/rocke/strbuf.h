@@ -78,13 +78,6 @@ int rocke_strbuf_append_n(rocke_strbuf_t* sb, const char* s, size_t n);
 /* Append a single character. */
 int rocke_strbuf_append_char(rocke_strbuf_t* sb, char c);
 
-/* Append Python repr() of an Optional[str]: "None" for NULL, else the quoted
- * string, double-quoted only when it holds a single quote and no double quote,
- * with \\, the chosen quote, \n, \r, \t escaped and the other C0 controls and
- * DEL as lowercase \xNN. Bytes >= 0x80 pass through verbatim (CPython would
- * decode UTF-8; no caller passes non-ASCII). Returns 0, or -1 on OOM. */
-int rocke_strbuf_append_py_repr(rocke_strbuf_t* sb, const char* s);
-
 /* printf-style append. Returns 0 on success, -1 on OOM (sticky). */
 int rocke_strbuf_appendf(rocke_strbuf_t* sb, const char* fmt, ...);
 int rocke_strbuf_vappendf(rocke_strbuf_t* sb, const char* fmt, va_list ap);

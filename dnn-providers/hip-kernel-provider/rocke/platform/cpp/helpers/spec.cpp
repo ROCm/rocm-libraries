@@ -832,22 +832,8 @@ long long rocke_align_up(long long n, long long mult)
 
 void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
 {
-    if(reason == NULL || cap == 0)
-    {
-        return;
-    }
-    size_t n = strlen(msg);
-    if(n >= cap)
-    {
-        n = cap - 1;
-    }
-    memcpy(reason, msg, n);
-    reason[n] = '\0';
-    /* A cut reason ends in "..." so it is never mistaken for a complete one. */
-    if(n < strlen(msg) && cap >= 4)
-    {
-        memcpy(reason + cap - 4, "...", 4);
-    }
+    /* One truncation rule ("..." on a cut reason), in rocke_spec_set_reasonf. */
+    rocke_spec_set_reasonf(reason, cap, "%s", msg);
 }
 
 void rocke_spec_set_reasonf(char* reason, size_t cap, const char* fmt, ...)
