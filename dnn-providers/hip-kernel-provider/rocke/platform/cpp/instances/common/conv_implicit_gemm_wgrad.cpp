@@ -455,15 +455,11 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     flag_on[n_flags] = s->prefetch_addr ? 1 : 0;
     n_flags++;
 
-    /* register_prefetch only changes the compv3 body, and only together with
-     * prefetch_addr; gated on both so a register_prefetch=true that the
-     * pipeline ignores never tags a byte-identical kernel under a new name.
-     * Mirrors Python. */
+    /* rocke_implicit_gemm_conv_wgrad_is_valid_spec rejects register_prefetch=true
+     * unless prefetch_addr and pipeline="compv3" both hold, so the flag alone
+     * is enough to tag it here. Mirrors Python. */
     flag_names[n_flags] = "rpf";
-    flag_on[n_flags] = (s->register_prefetch && s->prefetch_addr && s->pipeline
-                        && strcmp(s->pipeline, "compv3") == 0)
-                           ? 1
-                           : 0;
+    flag_on[n_flags] = s->register_prefetch ? 1 : 0;
     n_flags++;
     /* Stream-K tags, in the Python flag order: sk, skpers, skr<reduction>
      * (the last only when not the default "linear"). The CTA pool is a launch
@@ -1016,6 +1012,25 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      reason_cap,
                      "prefetch_addr is not supported with %s",
                      s->async_dma ? "async_dma" : "unroll_k");
+        return false;
+    }
+
+    /* register_prefetch only changes the compv3 body, and only together with
+     * prefetch_addr; accepting it anywhere else would tag a byte-identical
+     * kernel under a new name. Mirrors Python _register_prefetch_conflict. */
+    if(s->register_prefetch
+       && (!s->prefetch_addr || !s->pipeline || strcmp(s->pipeline, "compv3") != 0))
+    {
+        if(reason && reason_cap)
+        {
+            if(!s->prefetch_addr)
+                snprintf(reason, reason_cap, "register_prefetch requires prefetch_addr=True");
+            else
+                snprintf(reason,
+                         reason_cap,
+                         "register_prefetch requires pipeline='compv3'; got pipeline='%s'",
+                         s->pipeline ? s->pipeline : "");
+        }
         return false;
     }
 
@@ -3513,8 +3528,10 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx, bool reg
     if(!rocke_ir_builder_ok(b))
         return;
 
-    const bool compv3 = register_prefetch && ctx->spec->pipeline != NULL
-                        && strcmp(ctx->spec->pipeline, "compv3") == 0;
+    /* rocke_implicit_gemm_conv_wgrad_is_valid_spec rejects register_prefetch=true
+     * unless pipeline="compv3" (and this function only runs inside the
+     * prefetch_addr branch), so the flag alone decides the body here. */
+    const bool compv3 = register_prefetch;
     if(compv3)
     {
         /* Prologue: stage tile k_lo into LDS and publish it; the loop starts

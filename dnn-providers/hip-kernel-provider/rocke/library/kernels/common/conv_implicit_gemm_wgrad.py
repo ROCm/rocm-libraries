@@ -780,13 +780,10 @@ class WgradConvSpec:
                 "unroll": self.unroll_k,
                 # A different K-loop body; only tagged when set.
                 "pfa": self.prefetch_addr,
-                # Only changes the compv3 body, and only together with
-                # prefetch_addr; gated on both so a register_prefetch=True
-                # that pipeline ignores never tags a byte-identical kernel
-                # under a new name.
-                "rpf": self.register_prefetch
-                and self.prefetch_addr
-                and self.pipeline == "compv3",
+                # validate()/is_valid_wgrad_spec() reject register_prefetch=True
+                # unless prefetch_addr and pipeline="compv3" both hold, so the
+                # flag alone is enough to tag it here.
+                "rpf": self.register_prefetch,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -970,6 +967,9 @@ class WgradConvSpec:
         _pfa_why = _prefetch_addr_conflict(self)
         if _pfa_why:
             raise ValueError(_pfa_why)
+        _rpf_why = _register_prefetch_conflict(self)
+        if _rpf_why:
+            raise ValueError(_rpf_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1263,6 +1263,26 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         return (
             "prefetch_addr is not supported with unroll_k: the double-buffered "
             "K loop has its own address schedule"
+        )
+    return ""
+
+
+def _register_prefetch_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.register_prefetch`` cannot be honoured, or ``""`` if it can.
+
+    The flag only changes the ``pipeline="compv3"`` body, and only together
+    with ``prefetch_addr``; accepting it anywhere else would tag a
+    byte-identical kernel under a new name. Shared by ``validate`` and
+    ``is_valid_wgrad_spec`` so the hard and soft gates cannot drift apart.
+    """
+    if not spec.register_prefetch:
+        return ""
+    if not spec.prefetch_addr:
+        return "register_prefetch requires prefetch_addr=True"
+    if spec.pipeline != "compv3":
+        return (
+            f"register_prefetch requires pipeline='compv3'; got "
+            f"pipeline={spec.pipeline!r}"
         )
     return ""
 
@@ -1987,6 +2007,9 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _pfa_why = _prefetch_addr_conflict(spec)
     if _pfa_why:
         return False, _pfa_why
+    _rpf_why = _register_prefetch_conflict(spec)
+    if _rpf_why:
+        return False, _rpf_why
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -3333,7 +3356,10 @@ def build_implicit_gemm_conv_wgrad(
         _offs0 = _tile_offsets(k_lo)
         _n_acc = len(accs)
         _n_a = len(_a_slots)
-        if spec.pipeline == "compv3" and spec.register_prefetch:
+        if spec.register_prefetch:
+            # validate()/is_valid_wgrad_spec() reject register_prefetch=True
+            # unless pipeline="compv3" (and we are already inside the
+            # prefetch_addr branch), so the flag alone decides the body here.
             # Prologue: stage tile k_lo into LDS and publish it.
             _st_a = a_sync_loader.issue_slots(
                 b, rsrc=dy_rsrc, slots=_a_slots, offsets=_offs0[:_n_a]

@@ -82,6 +82,17 @@ class TestWgradPrefetchAddrGate(unittest.TestCase):
             "rpf", _spec(prefetch_addr=True, pipeline="compv3").kernel_name()
         )
 
+    def test_register_prefetch_requires_prefetch_addr_and_compv3(self):
+        # register_prefetch only changes the compv3 body, and only together
+        # with prefetch_addr; accepting it anywhere else would tag a
+        # byte-identical kernel under a new name (both of these build, since
+        # the plain loop never reads the flag, but validate() must refuse to
+        # let the inert knob pass through unnoticed).
+        with self.assertRaises(ValueError):
+            _spec(register_prefetch=True).validate()
+        with self.assertRaises(ValueError):
+            _spec(prefetch_addr=True, pipeline="mem", register_prefetch=True).validate()
+
     def test_compv3_prefetches_the_next_tile_across_the_mfmas(self):
         mem = _lower(_spec(prefetch_addr=True))
         cv3 = _lower(
