@@ -155,7 +155,7 @@ std::vector<uint8_t> buildSdpaFwdGraphBuffer(bool withCuSeqLenQ, bool withCuSeqL
         sdpa.cu_seq_len_kv_tensor_uid = addTensor("cu_seq_len_kv");
     }
     auto node = std::make_unique<fb::NodeT>();
-    node->attributes.Set(std::move(sdpa));
+    node->attributes.Set(sdpa);
     graph.nodes.push_back(std::move(node));
 
     flatbuffers::FlatBufferBuilder builder;
