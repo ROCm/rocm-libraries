@@ -5,10 +5,14 @@ more launches keyed by launch name). Every reader of a UKD's kernel goes through
 `kernel_sources`, so a document that carries both, or neither, is refused in one
 place rather than skipped by whichever reader looked at the wrong key.
 
-An authored entry is a rocke `kernel_source` plus an optional `role` naming one of
-the builder's companion kernels; without one it takes the builder's primary
-kernel. A packed entry is a full kpack `kernel_source` with no `role`: its symbol
-and signature are read out of the compiled object, never authored. A UKD with
+An authored entry is a rocke, hip or hsaco `kernel_source`; one map carries one
+kind. A rocke entry adds an optional `role` naming one of the builder's companion
+kernels; without one it takes the builder's primary kernel. A hip entry is the
+single-launch hip shape (`source`, `entry`, `build`) and a hsaco entry the
+single-launch hsaco shape (`file`, `symbol`); `entry` and `symbol` name the
+launch's kernel, and entries that share one compile share one code object. A
+packed entry is a full kpack `kernel_source` with no `role`: its symbol and
+signature are read out of the compiled object, never authored. A UKD with
 `sources` reads at document version 1.1, which the packer stamps.
 
 Launch order carries no meaning here: the pack's native dispatch handler launches
@@ -32,25 +36,26 @@ _SOURCES_VERSION = (1, 1)
 PRIMARY = "(primary)"
 
 #: Entry kinds the packer refuses to take as authored `sources` entries.
-UNSUPPORTED_AUTHORED_KINDS = ("hip", "hsaco", "embedded_source")
+UNSUPPORTED_AUTHORED_KINDS = ("embedded_source",)
 
 
 def refuse_authored_kind(where, name, kind):
-    """The refusal for a `sources` entry that is not authored as rocke.
+    """The refusal for a `sources` entry that cannot be authored.
 
-    Authored entries are rocke only. hip and hsaco are not supported yet,
-    embedded_source is never packed into a code object, and kpack entries are
-    already packed. Any other kind is not a kind at all.
+    Authored entries are rocke, hip or hsaco. embedded_source is never packed
+    into a code object, and kpack entries are already packed. Any other kind is
+    not a kind at all.
     """
     head = f"{where} sources '{name}' has kind '{kind}'"
-    if kind in ("hip", "hsaco"):
-        tail = "which is not yet supported as a sources entry; only 'rocke' entries are"
-    elif kind == "embedded_source":
+    if kind == "embedded_source":
         tail = "which is not packed into a code object, so it cannot be a sources entry"
     elif kind == "kpack":
         tail = "and already-packed entries are not pack input"
     else:
-        tail = "which is not a sources entry kind (expected 'rocke')"
+        tail = (
+            "which is not a sources entry kind "
+            "(expected 'rocke', 'hip' or 'hsaco', or 'kpack' once packed)"
+        )
     return HkpPackError(f"{head}, {tail}")
 
 

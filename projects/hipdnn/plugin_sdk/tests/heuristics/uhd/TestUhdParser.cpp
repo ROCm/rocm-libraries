@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -19,6 +20,8 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+
+#include "../../TestResourcePaths.hpp"
 
 /**
  * @file TestUhdParser.cpp
@@ -103,6 +106,26 @@ nlohmann::json baseDocument(Base base)
         document["custom_library"]
             = {{"library", "lib/scorer.so"}, {"symbol", "scorer"}, {"hash", DIGEST}};
     }
+    return document;
+}
+
+/// The slot provenance forms of RFC 0021 §9 exist only in a 1.1 document.
+nlohmann::json slotKmdForm(nlohmann::json document, const std::string& slot)
+{
+    document["version"] = "1.1";
+    document["trained_against"]["slot"] = slot;
+    return document;
+}
+
+/// A 1.1 native document whose provenance names a slot's KMD per slot (`kmds`) in place of `kmd`.
+nlohmann::json kmdsForm(nlohmann::json document)
+{
+    document["version"] = "1.1";
+    auto& provenance = document["trained_against"];
+    provenance.erase("kmd");
+    provenance["kmds"]
+        = {{{"slot", "prep"}, {"id", "31112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}},
+           {{"slot", "dkdv"}, {"id", "32112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.2"}}};
     return document;
 }
 
@@ -196,7 +219,7 @@ const std::vector<Refusal> REFUSALS = {
     {"RootIsNotAnObject", Base::NATIVE, [](nlohmann::json& doc) { doc = nlohmann::json::array(); }},
     {"UnknownRootKey", Base::NATIVE, [](nlohmann::json& doc) { doc["featuresHash"] = "x"; }},
     {"MissingVersion", Base::NATIVE, [](nlohmann::json& doc) { doc.erase("version"); }},
-    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.1"; }},
+    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.2"; }},
     {"IdIsNotAUuid", Base::NATIVE, [](nlohmann::json& doc) { doc["id"] = "model-1"; }},
     {"EmptyName", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = ""; }},
     {"NameIsNotAString", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = 3; }},
@@ -380,6 +403,61 @@ TEST(TestUhdParser, AcceptsEveryBaseDocument)
     // static_order scores nothing, so it is admitted without an objective.
     const auto ordered = parseUhdConfig(baseDocument(Base::STATIC_ORDER), descriptorPath());
     EXPECT_EQ(ordered.adapterType, "static_order");
+}
+
+/// Each slot provenance form of RFC 0021 §9 is accepted in a 1.1 document, including names the
+/// refusals sit next to.
+TEST(TestUhdParser, AcceptsEachSlotProvenanceForm)
+{
+    const auto base = baseDocument(Base::NATIVE);
+
+    const auto single = parseUhdConfig(slotKmdForm(base, "dkdv_2"), descriptorPath());
+    EXPECT_EQ(single.trainedAgainst.at("slot"), "dkdv_2");
+    EXPECT_TRUE(single.trainedAgainst.contains("kmd"));
+    EXPECT_FALSE(single.trainedAgainst.contains("kmds"));
+
+    const auto many = parseUhdConfig(kmdsForm(base), descriptorPath());
+    EXPECT_FALSE(many.trainedAgainst.contains("kmd"));
+    ASSERT_EQ(many.trainedAgainst.at("kmds").size(), 2U);
+    EXPECT_EQ(many.trainedAgainst.at("kmds")[1].at("slot"), "dkdv");
+
+    // One slot is a valid kmds, and a name may contain digits and underscores after its letter.
+    auto one = kmdsForm(base);
+    one["trained_against"]["kmds"] = nlohmann::json::array({one["trained_against"]["kmds"][0]});
+    one["trained_against"]["kmds"][0]["slot"] = "p_9";
+    EXPECT_NO_THROW(parseUhdConfig(one, descriptorPath()));
+}
+
+/// The `trained_against` header grammar of RFC 0021 §9: the rows the packer, its schema and
+/// `uhd_gen` also run, each a valid form with an RFC 6902 patch.
+TEST(TestUhdParser, ConformsToTheTrainedAgainstSlotCorpus)
+{
+    std::ifstream stream(hipdnn_plugin_sdk::test::uhdGeneratedFixtureDir() / "conformance"
+                         / "trained_against_slots.json");
+    ASSERT_TRUE(stream.is_open());
+    const auto corpus = nlohmann::json::parse(stream);
+    for(const auto& row : corpus.at("rows"))
+    {
+        SCOPED_TRACE(row.at("name").get<std::string>());
+        const auto skip = row.value("skip", nlohmann::json::array());
+        if(std::find(skip.begin(), skip.end(), nlohmann::json("parser")) != skip.end())
+        {
+            continue;
+        }
+        const auto form
+            = corpus.at("bases").at(row.at("base").get<std::string>()).patch(row.at("patch"));
+        auto document = baseDocument(Base::NATIVE);
+        document["version"] = form.at("version");
+        document["trained_against"] = form.at("trained_against");
+        if(row.value("reject", false))
+        {
+            EXPECT_THROW(parseUhdConfig(document, descriptorPath()), std::invalid_argument);
+        }
+        else
+        {
+            EXPECT_NO_THROW(parseUhdConfig(document, descriptorPath()));
+        }
+    }
 }
 
 /// The boundaries the int32 refusals sit next to are themselves accepted.

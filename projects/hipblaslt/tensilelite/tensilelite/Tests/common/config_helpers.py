@@ -93,6 +93,35 @@ def markNamed(name):
     return getattr(pytest.mark, name)
 
 
+def _usingStinkytofuBackend(availableArchs):
+    """Return True when kernels for this config will be built on stinkytofu.
+
+    Checked in order:
+      1. ``ROCISA_BACKEND`` set -> True iff it is ``stinkytofu``.
+      2. Unset + no gfx1250 target -> False (only gfx1250 routes to stinkytofu).
+      3. Unset + gfx1250 target -> True iff rocisa has swapped in the stinkytofu
+         adaptor (a native fallback stays native -> False).
+    """
+    backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if backend:
+        return backend == "stinkytofu"
+
+    if not any("gfx1250" in arch for arch in availableArchs):
+        return False
+
+    try:
+        import rocisa
+    except Exception:
+        return False
+
+    # Read the already-loaded module instead of probing for the standalone
+    # stinkytofu binding: importing _stinkytofu.so alongside native _rocisa.so in
+    # one process registers the same nanobind types twice and aborts the process.
+    # When stinkytofu is unavailable rocisa never swaps the adaptor in, so the
+    # native fallback is already covered by this check returning False.
+    return "rocisa_stinkytofu_adaptor" in (getattr(rocisa, "__file__", "") or "")
+
+
 def configMarks(filepath, rootDir, availableArchs):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
@@ -106,6 +135,7 @@ def configMarks(filepath, rootDir, availableArchs):
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
      - Kernel language(s) used in the YAML
+     - world, with every world the YAML's problems use
     """
     relpath = os.path.relpath(filepath, rootDir)
     components = relpath.split(os.path.sep)
@@ -166,8 +196,7 @@ def configMarks(filepath, rootDir, availableArchs):
             marks.append(pytest.mark.skip)
 
     # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
-    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+    if markNamed("skip-stinkytofu") in marks and _usingStinkytofuBackend(availableArchs):
         marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
 
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
@@ -201,12 +230,18 @@ def configMarks(filepath, rootDir, availableArchs):
     operationTypes = set([problem[0]["OperationType"] for problem in doc["BenchmarkProblems"]])
 
     languages = set()
+    worlds = set()
     for obj, path in walkDict(doc):
         if "KernelLanguage" in path and isinstance(obj, str):
             languages.add(obj)
+        if path.endswith(".world"):
+            worlds.add(obj)
 
     for l in languages:
         marks.append(markNamed(l))
+
+    if worlds:
+        marks.append(pytest.mark.world(*sorted(worlds)))
 
     for dt in dataTypes:
         dataType = DataType(dt)
@@ -237,7 +272,7 @@ def findAvailableArchs(gpu_targets=None):
     return get_available_archs()
 
 
-def findConfigs(rootDir=None, availableArchs=None):
+def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
     """
     Walks rootDir (defaults to trying to find tensilelite/Tests) and returns a
     list of test parameters, one for each YAML file.
@@ -246,6 +281,8 @@ def findConfigs(rootDir=None, availableArchs=None):
         rootDir: Directory to walk for YAML configs. Defaults to tensilelite/Tests.
         availableArchs: Pre-resolved list of GPU architectures.
             When None, calls findAvailableArchs() to auto-detect.
+        splitWorlds: Return one parameter per world for a YAML whose
+            problems use several worlds, each marked with that world alone.
     """
     if rootDir is None:
         rootDir = _TESTS_ROOT_DIR
@@ -286,5 +323,13 @@ def findConfigs(rootDir=None, availableArchs=None):
                         marks.append(pytest.mark.xfail(reason=reason, strict=True))
 
                     relpath = os.path.relpath(filepath, printRoot)
-                    params.append(pytest.param(filepath, marks=marks, id=relpath))
+                    world = next((m for m in marks if m.name == "world"), None)
+                    if world is None or not splitWorlds:
+                        params.append(pytest.param(filepath, marks=marks, id=relpath))
+                        continue
+                    others = [m for m in marks if m is not world]
+                    for w in world.args:
+                        params.append(pytest.param(filepath,
+                                                   marks=others + [pytest.mark.world(w)],
+                                                   id=f"{relpath}-world{w}"))
     return params

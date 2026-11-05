@@ -332,6 +332,98 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn("tensor uid 0", completed.stderr)
             self.assertIn("input tensor contains NaN/Inf", completed.stderr)
 
+    # A padded SDPA batch: the dead row's LSE is -inf by contract (SEM-010).
+    SDPA_FWD_NODES = [
+        {
+            "type": "SdpaAttributes",
+            "inputs": {"q_tensor_uid": 0},
+            "outputs": {"o_tensor_uid": None, "stats_tensor_uid": 1},
+        }
+    ]
+    SDPA_BWD_NODES = [
+        {
+            "type": "SdpaBackwardAttributes",
+            "inputs": {"q_tensor_uid": None, "stats_tensor_uid": 0},
+            "outputs": {"dq_tensor_uid": 1},
+        }
+    ]
+
+    def padded_lse(self, dead_value: float) -> bytes:
+        return struct.pack("<3f", 0.5, dead_value, 1.25)
+
+    def test_sdpa_padded_stats_neg_inf_passes(self) -> None:
+        for label, nodes, padded in (
+            ("forward stats output", self.SDPA_FWD_NODES, "output"),
+            ("backward stats input", self.SDPA_BWD_NODES, "input"),
+        ):
+            with self.subTest(label=label):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    payload = {
+                        "input_bytes": self.filled_bytes("float", 3),
+                        "output_bytes": self.filled_bytes("float", 3),
+                        f"{padded}_bytes": self.padded_lse(float("-inf")),
+                    }
+                    self.write_bundle(
+                        root,
+                        Path("quick/SdpaFwd/bhsd/fp32/padneq/Small"),
+                        input_dims=(3,),
+                        output_dims=(3,),
+                        nodes=nodes,
+                        **payload,
+                    )
+
+                    completed = self.run_verifier(root, require_data=True)
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sdpa_stats_pos_inf_or_nan_fails(self) -> None:
+        for value in (float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_bundle(
+                        root,
+                        Path("quick/SdpaFwd/bhsd/fp32/padneq/Small"),
+                        output_dims=(3,),
+                        output_bytes=self.padded_lse(value),
+                        nodes=self.SDPA_FWD_NODES,
+                    )
+
+                    completed = self.run_verifier(root)
+
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertIn("tensor uid 1", completed.stderr)
+                    self.assertIn(
+                        "SDPA stats tensor contains NaN/+Inf at element index 1",
+                        completed.stderr,
+                    )
+
+    def test_sdpa_neg_inf_outside_stats_fails(self) -> None:
+        # Only the stats tensor may hold -inf; the same value in O is a defect.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bhsd/fp32/padneq/Small"),
+                output_dims=(3,),
+                output_bytes=self.padded_lse(float("-inf")),
+                nodes=[
+                    {
+                        "type": "SdpaAttributes",
+                        "inputs": {"q_tensor_uid": 0},
+                        "outputs": {"o_tensor_uid": 1, "stats_tensor_uid": None},
+                    }
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "output tensor contains NaN/Inf at element index 1", completed.stderr
+            )
+
     def test_flat_output_uid_node_type_is_valid(self) -> None:
         # ReductionAttributes puts "out_tensor_uid" directly on the node instead
         # of nesting it under an "outputs" object like every other node type.
@@ -495,6 +587,500 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             self.assertIn("Small.meta.json", completed.stderr)
             self.assertIn("reference_source", completed.stderr)
+
+    def run_single_graph_with_metadata(
+        self, metadata: dict[str, object], **bundle_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/BatchnormFwdInference/nchw/fp32/Small"),
+                metadata=metadata,
+                **bundle_options,
+            )
+            return self.run_verifier(root)
+
+    def test_reference_flag_must_be_boolean(self) -> None:
+        for flag in ("no_cpu_reference", "no_gpu_reference"):
+            for bad_value in ("yes", 1, None):
+                with self.subTest(flag=flag, value=bad_value):
+                    completed = self.run_single_graph_with_metadata(
+                        {
+                            "generator": "manual",
+                            "reference_source": "manual",
+                            flag: bad_value,
+                        }
+                    )
+
+                    self.assertEqual(completed.returncode, 1, completed.stdout)
+                    self.assertIn("Small.meta.json", completed.stderr)
+                    self.assertIn(f"{flag} must be a boolean", completed.stderr)
+
+    def test_boolean_reference_flags_pass(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": False,
+                "no_gpu_reference": True,
+            }
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_disabling_both_references_without_golden_fails(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("Small.meta.json", completed.stderr)
+        self.assertIn("disables both references", completed.stderr)
+        self.assertIn("declares no golden data", completed.stderr)
+
+    def test_disabling_both_references_with_tensor_manifest_only_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+            write_tensor_manifest=True,
+        )
+
+        self.assertNotIn("disables both references", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_disabling_both_references_with_output_blob_only_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=True,
+        )
+
+        self.assertNotIn("disables both references", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_disabling_one_reference_without_golden_passes(self) -> None:
+        for flag in ("no_cpu_reference", "no_gpu_reference"):
+            with self.subTest(flag=flag):
+                completed = self.run_single_graph_with_metadata(
+                    {"generator": "manual", "reference_source": "manual", flag: True},
+                    write_input_tensor=False,
+                    write_output_tensor=False,
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_non_boolean_reference_flag_does_not_double_report(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": "yes",
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("no_gpu_reference must be a boolean", completed.stderr)
+        self.assertNotIn("disables both references", completed.stderr)
+
+    def test_expected_rejection_must_be_boolean(self) -> None:
+        for bad_value in ("yes", 1, None):
+            with self.subTest(value=bad_value):
+                completed = self.run_single_graph_with_metadata(
+                    {
+                        "generator": "manual",
+                        "reference_source": "manual",
+                        "expected_rejection": bad_value,
+                    },
+                    write_input_tensor=False,
+                    write_output_tensor=False,
+                )
+
+                self.assertEqual(completed.returncode, 1, completed.stdout)
+                self.assertIn("Small.meta.json", completed.stderr)
+                self.assertIn("expected_rejection must be a boolean", completed.stderr)
+
+    def test_non_boolean_expected_rejection_does_not_double_report(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": "yes",
+            },
+            write_input_tensor=True,
+            write_output_tensor=True,
+            write_tensor_manifest=True,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("expected_rejection must be a boolean", completed.stderr)
+        self.assertNotIn("declares golden data", completed.stderr)
+
+    def test_expected_rejection_without_golden_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_expected_rejection_with_tensor_manifest_fails(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+            write_tensor_manifest=True,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("Small.meta.json", completed.stderr)
+        self.assertIn(
+            "is an expected_rejection bundle but declares golden data", completed.stderr
+        )
+
+    def test_expected_rejection_with_output_blobs_fails(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=True,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn(
+            "is an expected_rejection bundle but declares golden data",
+            completed.stderr,
+        )
+
+    # Input blobs alone are not golden data (the loader needs every output's blob),
+    # so they neither trip the expected-rejection rule nor satisfy the both-off one.
+    def test_expected_rejection_with_input_blobs_only_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            write_input_tensor=True,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_both_references_disabled_with_input_blobs_only_fails(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=True,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("disables both references", completed.stderr)
+
+    # A virtual intermediate output has no blob, and the loader does not ask for one:
+    # golden data is declared once every non-virtual output has its blob.
+    def test_both_references_disabled_with_blob_for_real_output_only_passes(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle_dir = root / "quick/BatchnormFwdInference/nchw/fp32/Small"
+            bundle_dir.mkdir(parents=True)
+            tensors = [
+                {"uid": uid, "dims": [1], "strides": [1], "data_type": "float"}
+                | {"virtual": uid == 1}
+                for uid in (0, 1, 2)
+            ]
+            graph = {
+                "nodes": [
+                    {"outputs": {"y_tensor_uid": 1}},
+                    {"outputs": {"y_tensor_uid": 2}},
+                ],
+                "tensors": tensors,
+                "io_data_type": "float",
+                "compute_data_type": "float",
+                "intermediate_data_type": "float",
+                "name": "",
+            }
+            (bundle_dir / "Small.json").write_text(json.dumps(graph))
+            (bundle_dir / "Small.tensor2.bin").write_bytes(self.default_bytes("float"))
+            (bundle_dir / "Small.meta.json").write_text(
+                json.dumps(
+                    {
+                        "generator": "manual",
+                        "reference_source": "manual",
+                        "no_cpu_reference": True,
+                        "no_gpu_reference": True,
+                    }
+                )
+            )
+
+            completed = self.run_verifier(root)
+
+        self.assertNotIn("disables both references", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    # The reference flags are ignored on an expected rejection, so setting both
+    # without golden data is not the both-off error.
+    def test_expected_rejection_with_both_references_disabled_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+        )
+
+        self.assertNotIn("disables both references", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_expected_rejection_false_with_golden_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": False,
+            }
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_checked_in_expected_rejection_example_passes(self) -> None:
+        bundle_dir = (
+            SCRIPT_PATH.parent.parent
+            / "integration-test-bundles/quick/Matmul/ncl/fp32"
+            / "ExpectedRejectionMatmulBatchMismatch"
+        )
+        meta = json.loads(
+            (bundle_dir / "ExpectedRejectionMatmulBatchMismatch.meta.json").read_text()
+        )
+        self.assertIs(meta["expected_rejection"], True)
+
+        completed = self.run_verifier(bundle_dir)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("ERROR", completed.stderr)
+
+    # RFC 0011 4.1 and 4.2: a backward bundle must carry a .meta.json naming the
+    # reference strategy and the forward pass whose O and LSE its gradients were
+    # computed from. Only backward bundles are held to this; forward bundles
+    # migrated from the old test system may have no metadata at all.
+
+    BACKWARD_METADATA = {
+        "generator": "generate_sdpa_bwd_golden.py",
+        "reference_source": "PyTorch 2.14.1",
+        "reference_strategy": "matched_precision",
+        "direction": "backward",
+        "forward_source": {
+            "method": "pytorch_math_backend",
+            "version": "2.14.1",
+            "generated_at": "2026-10-20T00:00:00Z",
+        },
+    }
+
+    def write_backward_bundle(self, root: Path, **overrides: object) -> Path:
+        metadata = {**self.BACKWARD_METADATA, **overrides}
+        metadata = {key: value for key, value in metadata.items() if value is not None}
+        return self.write_bundle(
+            root,
+            Path("quick/SdpaBackward/bhsd/bf16/Small"),
+            metadata=metadata,
+        )
+
+    def test_well_formed_backward_metadata_passes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_backward_metadata_without_forward_source_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, forward_source=None)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "forward_source is required on backward bundles", completed.stderr
+            )
+
+    def test_backward_metadata_without_reference_strategy_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, reference_strategy=None)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "reference_strategy is required on backward bundles", completed.stderr
+            )
+
+    def test_forward_source_must_name_method_version_and_timestamp(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(
+                root, forward_source={"method": "pytorch_math_backend"}
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("forward_source.version is required", completed.stderr)
+            self.assertIn("forward_source.generated_at is required", completed.stderr)
+
+    def test_forward_source_must_be_an_object(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, forward_source="pytorch")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("forward_source must be an object", completed.stderr)
+
+    def test_forward_metadata_does_not_require_forward_source(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bhsd/bf16/Small"),
+                metadata={
+                    "generator": "generate_sdpa_fwd_golden.py",
+                    "reference_source": "PyTorch 2.14.1",
+                    "direction": "forward",
+                },
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_unknown_direction_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, direction="sideways")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("direction must be 'forward' or 'backward'", completed.stderr)
+
+    def _write_pair(self, root: Path, **forward_source_overrides: object):
+        """A backward bundle alongside the forward bundle its metadata names."""
+        self.write_bundle(
+            root,
+            Path("quick/SdpaBackward/bhsd/bf16/Small_fwd_pair"),
+            metadata={
+                "generator": "generate_sdpa_bwd_golden.py",
+                "reference_source": "PyTorch 2.14.1",
+                "reference_strategy": "matched_precision",
+                "direction": "forward",
+                "reference_backend": "pytorch_math_backend",
+                "generated_at": "2026-10-20T00:00:00Z",
+            },
+        )
+        forward_source = {
+            **self.BACKWARD_METADATA["forward_source"],
+            "bundle": "../Small_fwd_pair/Small_fwd_pair.json",
+            **forward_source_overrides,
+        }
+        self.write_backward_bundle(root, forward_source=forward_source)
+
+    def test_matching_forward_source_pairing_passes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_pair(root)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_stale_forward_source_timestamp_fails(self) -> None:
+        """The failure a forward bundle regenerated on its own would produce."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_pair(root, generated_at="2026-01-01T00:00:00Z")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "the forward bundle was regenerated without its backward partner",
+                completed.stderr,
+            )
+
+    def test_mismatched_forward_source_method_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_pair(root, method="cudnn")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("forward_source.method is 'cudnn'", completed.stderr)
+
+    def test_forward_source_naming_an_absent_bundle_is_not_an_error(self) -> None:
+        """Verifying a subtree without the forward partner pulled must still pass."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(
+                root,
+                forward_source={
+                    **self.BACKWARD_METADATA["forward_source"],
+                    "bundle": "../NotPulled/NotPulled.json",
+                },
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_non_graph_json_warns_and_is_ignored(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -831,6 +1417,219 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn(
                 "case 'small_fp32' metadata reference_source", completed.stderr
             )
+
+    def run_sweep_with_metadata(
+        self, metadata: dict[str, object], *, with_golden: bool
+    ) -> subprocess.CompletedProcess[str]:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case(
+                        "small_fp32",
+                        metadata=metadata,
+                        golden_path="" if with_golden else None,
+                    )
+                ],
+            )
+            if with_golden:
+                self.write_sweep_golden_case(
+                    sweep_path.parent,
+                    "small_fp32",
+                    input_bytes=self.default_bytes("float"),
+                    output_bytes=self.default_bytes("float"),
+                )
+            return self.run_verifier(root)
+
+    def test_sweep_case_reference_flag_must_be_boolean(self) -> None:
+        for flag in ("no_cpu_reference", "no_gpu_reference"):
+            for bad_value in ("yes", 1, None):
+                with self.subTest(flag=flag, value=bad_value):
+                    completed = self.run_sweep_with_metadata(
+                        {
+                            "generator": "manual",
+                            "reference_source": "manual",
+                            flag: bad_value,
+                        },
+                        with_golden=True,
+                    )
+
+                    self.assertEqual(completed.returncode, 1, completed.stdout)
+                    self.assertIn(
+                        f"case 'small_fp32' metadata {flag} must be a boolean",
+                        completed.stderr,
+                    )
+
+    def test_sweep_case_boolean_reference_flags_pass(self) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": False,
+            },
+            with_golden=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_case_disabling_both_references_requires_golden(self) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            with_golden=False,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("case 'small_fp32' disables both references", completed.stderr)
+        self.assertIn("declares no golden data", completed.stderr)
+
+    def test_sweep_case_disabling_both_references_with_golden_path_passes(
+        self,
+    ) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            with_golden=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_case_disabling_both_references_with_golden_path_only_passes(
+        self,
+    ) -> None:
+        # golden.path alone declares golden data, even if the file is not pulled.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case(
+                        "small_fp32",
+                        metadata={
+                            "generator": "manual",
+                            "reference_source": "manual",
+                            "no_cpu_reference": True,
+                            "no_gpu_reference": True,
+                        },
+                    )
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertNotIn("disables both references", completed.stderr)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_case_disabling_one_reference_without_golden_passes(self) -> None:
+        for flag in ("no_cpu_reference", "no_gpu_reference"):
+            with self.subTest(flag=flag):
+                completed = self.run_sweep_with_metadata(
+                    {"generator": "manual", "reference_source": "manual", flag: True},
+                    with_golden=False,
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_case_non_boolean_flag_does_not_double_report(self) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": "yes",
+            },
+            with_golden=False,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("no_gpu_reference must be a boolean", completed.stderr)
+        self.assertNotIn("disables both references", completed.stderr)
+
+    def test_sweep_case_expected_rejection_must_be_boolean(self) -> None:
+        for bad_value in ("yes", 1, None):
+            with self.subTest(value=bad_value):
+                completed = self.run_sweep_with_metadata(
+                    {
+                        "generator": "manual",
+                        "reference_source": "manual",
+                        "expected_rejection": bad_value,
+                    },
+                    with_golden=False,
+                )
+
+                self.assertEqual(completed.returncode, 1, completed.stdout)
+                self.assertIn(
+                    "case 'small_fp32' metadata expected_rejection must be a boolean",
+                    completed.stderr,
+                )
+
+    def test_sweep_case_non_boolean_expected_rejection_does_not_double_report(
+        self,
+    ) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": "yes",
+            },
+            with_golden=True,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("expected_rejection must be a boolean", completed.stderr)
+        self.assertNotIn("declares golden data", completed.stderr)
+
+    def test_sweep_case_expected_rejection_without_golden_passes(self) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            with_golden=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_case_expected_rejection_with_golden_path_fails(self) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            with_golden=True,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn(
+            "case 'small_fp32' is an expected_rejection bundle but declares golden data",
+            completed.stderr,
+        )
+
+    def test_sweep_case_expected_rejection_false_with_golden_passes(self) -> None:
+        completed = self.run_sweep_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": False,
+            },
+            with_golden=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_sweep_bundle_missing_sweep_json_fails(self) -> None:
         with TemporaryDirectory() as tmpdir:

@@ -25,6 +25,7 @@
 
 #include "utility.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
 #include <rocalution/rocalution.hpp>
 
@@ -375,5 +376,114 @@ void testing_preconditioner_all(Arguments argus)
     if(vp != NULL)
     {
         delete[] vp;
+    }
+}
+
+template <typename T>
+void testing_itilu0_convergence_history(Arguments argus)
+{
+    // The host backend falls back to ILU0 and records no history
+    if(get_arch_rocalution() == "cpu")
+    {
+        GTEST_SKIP() << "ItILU0 records a convergence history only on the accelerator";
+    }
+
+    LocalMatrix<T> matrix;
+    getLaplacianTestMatrix<T>(argus, matrix);
+    matrix.MoveToAccelerator();
+
+    const int maxiter = 30;
+    const int option  = ItILU0Option::StoppingCriteria | ItILU0Option::ComputeNrmCorrection
+                       | ItILU0Option::ComputeNrmResidual | ItILU0Option::ConvergenceHistory;
+
+    for(ItILU0Algorithm alg :
+        {ItILU0Algorithm::AsyncInPlace, ItILU0Algorithm::AsyncSplit, ItILU0Algorithm::SyncSplit})
+    {
+        SCOPED_TRACE(testing::Message() << "ItILU0Algorithm " << alg);
+
+        ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
+        p.SetAlgorithm(alg);
+        p.SetOptions(option);
+        p.SetMaxIter(maxiter);
+        p.SetTolerance(1e-6);
+        p.SetOperator(matrix);
+        p.Build();
+
+        int           niter   = 0;
+        const double* history = p.GetConvergenceHistory(&niter);
+
+        ASSERT_NE(history, nullptr);
+        ASSERT_GT(niter, 0);
+        ASSERT_LE(niter, maxiter);
+
+        // history holds niter correction norms followed by niter residual norms. rocSPARSE
+        // does not record correction norms for every algorithm, so only residuals are checked.
+        for(int i = niter; i < 2 * niter; ++i)
+        {
+            EXPECT_TRUE(std::isfinite(history[i])) << "history[" << i << "]";
+            EXPECT_GE(history[i], 0.0) << "history[" << i << "]";
+        }
+
+        EXPECT_GT(history[niter], 0.0);
+    }
+
+    LocalVector<T> b;
+    LocalVector<T> x;
+    b.Allocate("b", matrix.GetN());
+    x.Allocate("x", matrix.GetN());
+    b.MoveToAccelerator();
+    x.MoveToAccelerator();
+    b.Ones();
+
+    // Without a norm option, the stopping criteria and the history have to use the residual
+    // norm. Otherwise rocSPARSE stops after the first sweep, which leaves the factors at zero.
+    const int options_without_norm[]
+        = {ItILU0Option::StoppingCriteria,
+           ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory,
+           ItILU0Option::ConvergenceHistory};
+
+    for(int option_without_norm : options_without_norm)
+    {
+        for(ItILU0Algorithm alg : {ItILU0Algorithm::Default,
+                                   ItILU0Algorithm::AsyncInPlace,
+                                   ItILU0Algorithm::AsyncSplit,
+                                   ItILU0Algorithm::SyncSplit})
+        {
+            SCOPED_TRACE(testing::Message()
+                         << "ItILU0Algorithm " << alg << ", options " << option_without_norm);
+
+            ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
+            p.SetAlgorithm(alg);
+            p.SetOptions(option_without_norm);
+            p.SetMaxIter(maxiter);
+            p.SetTolerance(1e-6);
+            p.SetOperator(matrix);
+            p.Build();
+
+            int           niter   = 0;
+            const double* history = p.GetConvergenceHistory(&niter);
+
+            ASSERT_GT(niter, 1);
+            ASSERT_LE(niter, maxiter);
+
+            if((option_without_norm & ItILU0Option::ConvergenceHistory) > 0)
+            {
+                ASSERT_NE(history, nullptr);
+
+                for(int i = niter; i < 2 * niter; ++i)
+                {
+                    EXPECT_TRUE(std::isfinite(history[i])) << "history[" << i << "]";
+                    EXPECT_GE(history[i], 0.0) << "history[" << i << "]";
+                }
+
+                EXPECT_GT(history[niter], 0.0);
+            }
+
+            // Zero factors make the preconditioner the identity
+            x.Zeros();
+            p.Solve(b, &x);
+            x.ScaleAdd(static_cast<T>(-1), b);
+            EXPECT_GT(x.Norm(), 0.1 * b.Norm());
+        }
     }
 }

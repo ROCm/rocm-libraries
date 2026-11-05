@@ -118,6 +118,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseValuesMatchTheV1Contract)
     EXPECT_EQ(values, expected);
     EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
               "hipkernel.gfx950_attention_dense.dispatch.v1");
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+              "hipkernel.gfx950_attention_dense.dispatch.v2");
 
     // The stored double converts back to the float the kernel takes, bit for bit.
     const auto stored = values.find("scale");
@@ -183,10 +185,11 @@ SavedLaunchInputs savedConvFwd()
             convFwdLaunchValues(launch.binding, launch.extents, launch.blockSize)};
 }
 
+// Saved under v2, the contract new plans carry.
 SavedLaunchInputs savedGfx950AttentionDense()
 {
     const auto launch = gfx950AttentionDenseInputs();
-    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
             gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
 }
 
@@ -287,6 +290,28 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseInputsRoundTripThroughTheirValues
     EXPECT_EQ(read.problem.headSize, expected.problem.headSize);
     EXPECT_EQ(read.problem.dataType, expected.problem.dataType);
     EXPECT_EQ(read.blockM, expected.blockM);
+}
+
+// v1 and v2 differ only in the kernel arguments the launch passes, so one value set reads
+// the same under either name, and a version the pack never defined is refused.
+TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
+{
+    auto v1 = savedGfx950AttentionDense();
+    v1.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    const auto fromV1 = readGfx950AttentionDenseLaunchInputs(v1);
+    const auto fromV2 = readGfx950AttentionDenseLaunchInputs(savedGfx950AttentionDense());
+
+    EXPECT_EQ(fromV1.binding.q, fromV2.binding.q);
+    EXPECT_EQ(fromV1.binding.o, fromV2.binding.o);
+    EXPECT_EQ(fromV1.problem.batch, fromV2.problem.batch);
+    EXPECT_EQ(fromV1.problem.seqLenKv, fromV2.problem.seqLenKv);
+    EXPECT_EQ(fromV1.problem.numQueryHeads, fromV2.problem.numQueryHeads);
+    EXPECT_EQ(fromV1.problem.numKvHeads, fromV2.problem.numKvHeads);
+    EXPECT_EQ(fromV1.blockM, fromV2.blockM);
+
+    auto v3 = savedGfx950AttentionDense();
+    v3.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v3";
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, v3, "names no launch-value contract");
 }
 
 TEST(TestPackLaunchValues, PointwiseRefusesMalformedValues)

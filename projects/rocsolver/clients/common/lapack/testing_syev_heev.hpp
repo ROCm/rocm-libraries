@@ -284,7 +284,7 @@ void syev_heev_getError(const rocblas_handle handle,
             // using frobenius norm
             if(hinfo[b][0] == 0)
                 err = norm_error('F', 1, n, 1, hD[b], hDres[b]);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
         else
         {
@@ -306,7 +306,7 @@ void syev_heev_getError(const rocblas_handle handle,
                 // error is ||hA - hARes|| / ||hA||
                 // using frobenius norm
                 err = norm_error('F', n, n, lda, hA[b], hAres[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }

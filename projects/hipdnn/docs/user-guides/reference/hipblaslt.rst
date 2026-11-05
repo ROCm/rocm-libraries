@@ -25,6 +25,11 @@ The hipBLASLt provider plugin supports standalone Matmul (GEMM, general matrix m
 - Transposed inputs: Supported.
 - Batched matmuls: Only equal batch sizes are supported, along with broadcasting when one input has a single batch (batch=1).
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
+- ReLU parameters (``RELU_FWD``): An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope.
+
+  - Standard ReLU: no upper clip and a lower clip of 0 (or unset).
+  - Clamp: ``relu_upper_clip`` set; the lower bound is ``relu_lower_clip``, or 0 if unset (so ReLU6 needs only the upper clip).
+  - Not supported: a non-zero ``relu_lower_clip_slope`` (leaky ReLU; hipBLASLt has no such epilogue), or a non-zero ``relu_lower_clip`` without an upper clip.
 
 The hipBLASLt provider plugin also supports MX (microscaling) block-scaled Matmul. The graph has two ``BlockScaleDequantize`` nodes that feed one Matmul node. It has these constraints:
 

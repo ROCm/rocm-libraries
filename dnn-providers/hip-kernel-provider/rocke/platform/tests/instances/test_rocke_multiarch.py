@@ -18,30 +18,80 @@ import pathlib
 import unittest
 from unittest import mock
 
-from rocke.core.arch import ArchTarget, known_arches, normalize_dtype, validate_arch
-from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
+from rocke.core.arch import (
+    ArchTarget,
+    known_arches,
+    listed_arch_for,
+    normalize_dtype,
+    validate_arch,
+)
+from rocke.core.isa import (
+    BACKEND_REGISTRY,
+    Gfx9MfmaBackend,
+    Gfx11RdnaBackend,
+    Gfx950Backend,
+    backend_for,
+)
 
 _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
 
 
 class TestArchTarget(unittest.TestCase):
     def test_known_arches(self):
-        # CDNA MFMA (gfx90a CDNA2, gfx942/gfx950 CDNA3/4) + RDNA WMMA/wave32
-        # (gfx1151 RDNA3.5, gfx1201 RDNA4, gfx11-generic, gfx12-generic) + gfx1250-class
-        # CDNA/GFX12 WMMA.
+        # CDNA MFMA (gfx908 CDNA1, gfx90a CDNA2, gfx942/gfx950 CDNA3/4) + RDNA
+        # WMMA/wave32 (gfx11-generic and each of its members, gfx12-generic and
+        # each of its members) + gfx1250-class CDNA/GFX12 WMMA.
         self.assertEqual(
             set(known_arches()),
             {
+                "gfx908",
                 "gfx90a",
                 "gfx942",
                 "gfx950",
+                "gfx1100",
+                "gfx1101",
+                "gfx1102",
+                "gfx1103",
+                "gfx1150",
                 "gfx1151",
+                "gfx1152",
+                "gfx1153",
+                "gfx1154",
+                "gfx1200",
                 "gfx1201",
                 "gfx1250",
                 "gfx11-generic",
                 "gfx12-generic",
             },
         )
+
+    def test_gfx908_facts(self):
+        # gfx908 is wave64 MFMA like gfx90a, but its VGPR and AGPR files are
+        # separate 256-entry files per lane where gfx90a has one unified
+        # 512-entry file; kernels size their register budget from these limits.
+        t = ArchTarget.from_gfx("gfx908")
+        self.assertEqual(t.family, "cdna")
+        self.assertEqual(t.wave_size, 64)
+        self.assertEqual(t.lds_capacity_bytes, 65536)
+        self.assertEqual(t.vmcnt_bits, 6)
+        self.assertEqual(t.limits.vgprs, 256)
+        self.assertEqual(t.limits.agprs, 256)
+        self.assertEqual(t.limits.sgprs, 102)
+        self.assertEqual(ArchTarget.from_gfx("gfx90a").limits.vgprs, 512)
+        self.assertEqual(
+            sorted(op.op_id for op in t.mma.ops),
+            [
+                "mfma_f32_16x16x16_f16",
+                "mfma_f32_16x16x4_f32",
+                "mfma_f32_16x16x8_bf16",
+                "mfma_f32_32x32x2_f32",
+                "mfma_f32_32x32x4_bf16",
+                "mfma_f32_32x32x8_f16",
+                "mfma_i32_16x16x16_i8",
+                "mfma_i32_32x32x8_i8",
+            ],
+        )
+        self.assertIsInstance(backend_for("gfx908"), Gfx9MfmaBackend)
 
     def test_gfx1250_facts(self):
         t = ArchTarget.from_gfx("gfx1250")
@@ -115,18 +165,19 @@ class TestArchTarget(unittest.TestCase):
         self.assertFalse(t942.fits_lds(65537))
         self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
         # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
-        # supported on it. The fp4/MX MFMA family is the gfx950-only
-        # combo, so use it for the negative case. The catalog has no
-        # unscaled fp4 row. It lists fp4 in the scaled family only.
+        # supported on it. The dense fp4 combo is gfx950-only: its f8f6f4 MFMA
+        # reads fp4 x fp4, so use it for the negative case. gfx950 also lists
+        # fp4 in its scaled family; gfx942 has neither.
         self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
+        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertFalse(
             t942.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
         )
         t950 = ArchTarget.from_gfx("gfx950")
+        self.assertTrue(t950.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertTrue(
             t950.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
         )
-        self.assertFalse(t950.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertEqual(t942.max_threads_per_block, 1024)
 
     def test_dtype_normalization(self):
@@ -217,8 +268,27 @@ class TestISABackend(unittest.TestCase):
         self.assertIsInstance(backend_for("gfx950"), Gfx950Backend)
 
     def test_unknown_backend_raises(self):
-        with self.assertRaises(KeyError):
+        with self.assertRaises(KeyError) as ctx:
             backend_for("gfx999")
+        # The C++ engine's rocke_backend_for reports the same text
+        # (tests/core/isa_backend_targets.cpp).
+        self.assertEqual(
+            ctx.exception.args[0],
+            f"no ISA backend registered for 'gfx999'; known: {list(known_arches())}",
+        )
+
+    def test_every_known_target_gets_a_backend_under_its_own_name(self):
+        """A target whose row takes its facts from a generic target has no
+        registry row: it gets its generic's backend class, built on its own
+        ArchTarget, so lowering keeps the target's name."""
+        self.assertNotIn("gfx1100", BACKEND_REGISTRY)
+        self.assertIsInstance(backend_for("gfx1100"), Gfx11RdnaBackend)
+        for arch in known_arches():
+            with self.subTest(arch=arch):
+                backend = backend_for(arch)
+                self.assertEqual(backend.arch.gfx, arch)
+                entry = listed_arch_for(arch, BACKEND_REGISTRY)
+                self.assertIs(type(backend), BACKEND_REGISTRY[entry])
 
     def test_preamble_and_waitcnt_shared_for_cdna(self):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM22
@@ -762,6 +832,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.lower_llvm import (
             LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
+            _emission_profile,
             _flavor_for_llvm,
         )
         from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
@@ -788,13 +859,16 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             self.skipTest("cannot determine reference hipcc's LLVM version")
         detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        uses_llvm23_profile = _emission_profile(detected_flavor) is _emission_profile(
+            LLVM_FLAVOR_LLVM23
+        )
         # The address spaces LLVM gained in 5bf967cb132b. Bound unconditionally:
         # the per-arch loop below reads it on the llvm23 path too.
         expected_p10_p15 = (
             "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
         )
 
-        if detected_flavor == LLVM_FLAVOR_LLVM23:
+        if uses_llvm23_profile:
             # rocKE's llvm23 constant is the llvm22 one with TWO independent
             # additions -- the ELF symbol-mangling spec `m:e` after the leading
             # endianness field, and address spaces p10-p15 (upstream
@@ -837,7 +911,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     self.skipTest(f"hipcc cannot target {arch} on this toolchain: {e}")
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
                 if (
-                    detected_flavor == LLVM_FLAVOR_LLVM23
+                    uses_llvm23_profile
                     and toolchain_dl != rocke_dl
                     and toolchain_dl.replace("-i64:64", expected_p10_p15 + "-i64:64", 1)
                     == rocke_dl

@@ -33,7 +33,12 @@ if(BUILD_ADDRESS_SANITIZER)
             set(SANITIZER_COMPILE_FLAGS /fsanitize=address)
             set(SANITIZER_LINK_FLAGS    /fsanitize=address)
         else()
-            set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
+            # Clang's use-after-return instrumentation changes the stack frame layout in a way that
+            # crashes x64 C++ exception dispatch (an access violation inside VCRUNTIME140) when an
+            # exception is thrown or rethrown from inside a catch block. Compiling it out loses only
+            # stack-use-after-return detection.
+            set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer
+                                        -fsanitize-address-use-after-return=never)
             set(SANITIZER_LINK_FLAGS    -fsanitize=address -fno-omit-frame-pointer)
             # The MSVC STL emits /INFERASANLIBS + /DEFAULTLIB:stl_asan.lib for ASAN container
             # annotations, but the x64 MSVC toolset does not ship stl_asan.lib (x86 only), so the

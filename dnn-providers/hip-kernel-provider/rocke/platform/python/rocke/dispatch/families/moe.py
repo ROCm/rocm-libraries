@@ -29,11 +29,8 @@ the selected spec actually names against the per-arch MMA catalog, rather than
 asserting a literal shape that only one arch has. See :data:`_GFX942_F16_RETILE`
 for what gfx942 changes and why.
 
-The fp8 hero atom is the one case the catalog cannot answer: ``16x16x128`` is a
-gfx950-only scaled intrinsic that is not a generic MMA catalog row anywhere, and
-the instance builder skips the catalog guard for ``atom.k == 128`` and raises its
-own arch error instead. The predicate therefore leaves K=128 to the builder and
-checks only the atoms the catalog can express.
+Every atom a spec names, the K=128 fp8 hero atom included, is checked against
+the per-arch MMA catalog.
 
 DEFERRED -- the MoE component pipeline
 --------------------------------------
@@ -193,15 +190,10 @@ def _spec_fp8(req: MoeRequest) -> FusedMegaKernelSpecFp8:
     return FusedMegaKernelSpecFp8(name="moe_fp8")
 
 
-def _atom(spec) -> Tuple[str, int] | None:
-    """``(dtype, atom_k)`` of the MFMA the builder will drive off ``spec``.
-
-    ``None`` when the atom has no generic MMA catalog row to check it against:
-    the fp8 K=128 hero atom lowers to the scaled f8f6f4 instruction, which the
-    catalog does not model and the instance builder gates on itself.
-    """
+def _atom(spec) -> Tuple[str, int]:
+    """``(dtype, atom_k)`` of the MFMA the builder will drive off ``spec``."""
     if isinstance(spec, FusedMegaKernelSpecFp8):
-        return None if spec.gate_up_k == 128 else ("fp8e4m3", spec.gate_up_k)
+        return ("fp8e4m3", spec.gate_up_k)
     return (spec.dtype, spec.warp_tile_k)
 
 
@@ -263,20 +255,18 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         # literal geometry: the spec is arch-dependent, so a hard-coded shape
         # here could disagree with what gets built.
         spec = spec_fn(req)
-        atom = _atom(spec)
-        if atom is not None:
-            dt, atom_k = atom
-            target = ArchTarget.from_gfx(req.arch)
-            if not target.mma.has_shape(
-                family="mma",
-                a_dtype=dt,
-                b_dtype=dt,
-                c_dtype="fp32",
-                m=16,
-                n=16,
-                k=atom_k,
-            ):
-                return False, f"unsupported {dt} 16x16x{atom_k} MoE atom on {req.arch}"
+        dt, atom_k = _atom(spec)
+        target = ArchTarget.from_gfx(req.arch)
+        if not target.mma.has_shape(
+            family="mma",
+            a_dtype=dt,
+            b_dtype=dt,
+            c_dtype="fp32",
+            m=16,
+            n=16,
+            k=atom_k,
+        ):
+            return False, f"unsupported {dt} 16x16x{atom_k} MoE atom on {req.arch}"
         return _tile_covers_shape(req, spec)
 
     def select(req: OperatorRequest):

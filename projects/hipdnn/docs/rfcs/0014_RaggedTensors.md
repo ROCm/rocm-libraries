@@ -2,8 +2,8 @@
 
 - Contributors: hipDNN maintainers
 - **Status**: In progress
-- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), not in the CPU reference as §4.10–4.11 describe.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`). Both executors run every other single-node ragged SDPA graph, forward or backward, through a dense padded rewrite; see §4.10.
+- **Last verified**: 2026-10-26 against `develop` (e7d4664bda9) plus the SDPA reference changes described in §4.10
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -927,13 +927,18 @@ scope for this RFC.
 
 ### 4.10 Plan-layer construction and CPU reference impact
 
-Not yet built. The CPU reference plan layer described in this
-section and in §4.10.1 (including `makeShallowITensor`) does not
-exist. Plan-layer consumption of ragged tensors lives in the GPU
-reference executor: `GpuSdpaRaggedFwdPlan` in
-`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/`
-and `GpuFpReferenceSdpaRagged` in
-`dnn-providers/integration-tests/gpu-ref/`.
+> **Status.** The frontend → flatbuffer → backend → data-SDK plumbing
+> above (including `ragged_offset_multiplier`) is landed. Plan-layer
+> consumption is implemented for SDPA forward on both references:
+> the CPU `SdpaRaggedFwdPlan.hpp` and the GPU `GpuSdpaRaggedFwdPlan.hpp`.
+> These plans accept only an `INT32` `ragged_offset` aux, although the
+> sketches below also allow `int64`. Any other single-node ragged SDPA
+> graph, forward or backward, runs through a dense padded rewrite
+> (`RaggedSdpaDensify.hpp`) that unpacks the ragged tensors, runs the
+> dense plan and packs the outputs back; it accepts `INT32` and `INT64`
+> offsets. No op other than SDPA consumes ragged tensors yet. The §4.11 pre-supplied input bundle is not implemented.
+> The bundle harness loads ragged inputs from golden blobs instead.
+> The sketches below show the intended shape.
 
 The plan's `params` struct caches each ragged tensor's UID, that of
 its `ragged_offset` aux UID, and the primary's

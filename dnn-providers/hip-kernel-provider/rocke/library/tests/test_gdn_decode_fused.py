@@ -13,6 +13,8 @@ import dataclasses as dc
 import itertools
 import unittest
 
+import pytest
+
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
     build_gdn_decode,
@@ -240,6 +242,10 @@ class TestFusedEmission(unittest.TestCase):
                             [e["name"] for e in gdn_decode_signature(s)],
                         )
 
+    # Lowers 344 specs and compiles 116 code objects in one test: about 54 s on the
+    # Windows CI runners, against the suite's 60 s per-test limit, so ordinary runner
+    # variance timed it out. Its own limit leaves headroom without hiding a hang.
+    @pytest.mark.timeout(180)
     def test_lowers_and_compiles_without_scratch(self):
         """Every legal fused tile lowers; the tiles every measured compiler
         keeps at 0 B stay there, including one wave with fuse_conv at

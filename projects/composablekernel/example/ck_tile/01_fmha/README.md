@@ -2,6 +2,12 @@
 
 This folder contains example for fmha(fused multi-head attention) using ck_tile tile-programming implementation. It is a good example to demonstrate the usage of tile-programming API, as well as illustrate the new approach to construct a kernel template and instantiate it(them) while keeping compile time fast.
 
+For a PyTorch API and the full fmha pytest
+matrix using GPU references, see [the Python package](python/README.md). It
+supports pip or setuptools installation and incremental kernel rebuilds. After
+installation, `script/run_python_test.sh` runs the Python tests; normal pytest
+arguments can be passed through to select or report cases.
+
 ## build
 ```
 # 1. In the root of composable_kernel project, create the build directory.
@@ -142,7 +148,7 @@ args:
                 if not equal to h, then this is GQA/MQA case
           -s    seqlen_q. if group-mode, means the average value of seqlen_q (default:3328)
                 total_seqlen_q = seqlen_q * batch, and seqlen_q per batch may vary
-                also with "-s=s0,s1,s2..." comma seperated int to set per batch seqlen(group-mode)
+                also with "-s=s0,s1,s2..." comma-separated ints to set per batch seqlen(group-mode)
         -s_k    seqlen_k (including new key/value), -1 means equal to s (default:-1)
                 also with "-s_k=s0,s1,s2..." comma-separated ints to set seqlen per batch (group mode)
      -s_qpad    seqlen_q stride between 2 batches (group-mode optional) (default:-1)

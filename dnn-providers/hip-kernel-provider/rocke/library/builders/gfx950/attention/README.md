@@ -270,7 +270,13 @@ RocKE **wins every row, 1.16x–1.27x**; geomean **≈1.20x** — re-measured
 This is the algorithmically-honest comparison (same split-KV algorithm, same
 timer, same stream), and the campaign's rework of the 3D segment kernel is
 what carries it. The CK Tile lessons ported into the segment kernel are what
-keep RocKE ahead:
+keep RocKE ahead. The list below is a snapshot of the kernel when this table was
+measured; the 3D decode series
+([#13492](https://github.com/ROCm/rocm-libraries/pull/13492)) has since replaced the
+`P_lds` publish with register-resident P, added a `permlane32_swap` cross-half step and
+dropped the binary search for all-decode batches (`use_decode_grid`); see
+[`ALGORITHM.md` §5](ALGORITHM.md#5-the-3d-split-kv-path--many-ctas-share-a-query-block)
+and [§5.1](ALGORITHM.md#51-inside-the-segment-kernel). The lessons as measured:
 
 - `ds_read_b64_tr_b16` for the PV operand using
   `TransposeLDSLayout<16,K>` lane formulas
@@ -897,6 +903,7 @@ parity + benchmark harnesses and their captured data.
 |---|---|
 | `README.md` | this document — parity methodology + prefill-2D optimization history + results + spec-knob reference |
 | `ALGORITHM.md` | the math + kernel strategy (2D vs 3D split-KV, online softmax, bias/mask order, CDNA mapping) |
+| [`../../common/attention_3d_decode/CASE_STUDY.md`](../../common/attention_3d_decode/CASE_STUDY.md) | case study of the gfx942/gfx950 3D split-KV decode series: mechanisms, what ships by default, per-lever outcomes, honest losses, the replay recipe |
 | [`../common/README.md`](../../common/README.md) | spec-builder knob reference — dispatch branches, per-knob documentation for `use_fast_paged_kv_desc`, `use_transposed_half_local_pv`, `use_mfma32_skip_legacy_qreg`, `use_register_pv`, `use_agpr_alloc_zero`, etc. |
 | `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and RocKE in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
 | `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of RocKE 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |

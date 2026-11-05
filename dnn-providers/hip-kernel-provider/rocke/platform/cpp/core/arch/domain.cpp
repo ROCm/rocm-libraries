@@ -27,18 +27,52 @@ struct column_t
     size_t count;
 };
 
-/* Defines ROCKE_ARCH_DOMAIN_DEFAULT_MODE, the per-flavor cell arrays and
- * ROCKE_ARCH_DOMAIN_COLUMNS. Generated into the build tree; never edit or
- * commit it. */
+/* A lane with no column of its own that enforces another lane's column
+ * (domain.COLUMN_ALIASES). */
+struct column_alias_t
+{
+    const char* flavor;
+    const char* column;
+};
+
+/* A processor a column records its compiler as not accepting
+ * (domain.load(flavor).accepts_processor(processor) is False). */
+struct rejected_processor_t
+{
+    const char* flavor;
+    const char* processor;
+};
+
+/* Defines ROCKE_ARCH_DOMAIN_DEFAULT_MODE, the per-flavor cell arrays,
+ * ROCKE_ARCH_DOMAIN_COLUMNS and the nullptr-terminated
+ * ROCKE_ARCH_DOMAIN_REJECTED_PROCESSORS and ROCKE_ARCH_DOMAIN_ALIASES.
+ * Generated into the build tree; never edit or commit it. */
 #include "rocke/arch_domain_table.inc"
 
-const column_t* find_column(const char* flavor)
+const column_t* find_exact(const char* flavor)
 {
     for(const column_t& c : ROCKE_ARCH_DOMAIN_COLUMNS)
     {
         if(strcmp(c.flavor, flavor) == 0)
         {
             return &c;
+        }
+    }
+    return nullptr;
+}
+
+/* Python: domain.load() -- the flavor's own column, else its alias's. */
+const column_t* find_column(const char* flavor)
+{
+    if(const column_t* own = find_exact(flavor))
+    {
+        return own;
+    }
+    for(const column_alias_t* alias = ROCKE_ARCH_DOMAIN_ALIASES; alias->flavor != nullptr; ++alias)
+    {
+        if(strcmp(alias->flavor, flavor) == 0)
+        {
+            return find_exact(alias->column);
         }
     }
     return nullptr;
@@ -102,6 +136,33 @@ extern "C" const rocke_arch_domain_cell_t* rocke_arch_domain_column(const char* 
         *count = col != nullptr ? col->count : 0;
     }
     return col != nullptr && col->count != 0 ? col->cells : nullptr;
+}
+
+extern "C" const char* rocke_arch_domain_column_flavor(const char* flavor)
+{
+    const column_t* col = flavor != nullptr ? find_column(flavor) : nullptr;
+    return col != nullptr ? col->flavor : flavor;
+}
+
+extern "C" bool
+    rocke_arch_domain_rejects_processor(const char* flavor, const char* processor, size_t len)
+{
+    const column_t* col = flavor != nullptr && processor != nullptr ? find_column(flavor) : nullptr;
+    if(col == nullptr)
+    {
+        return false;
+    }
+    for(const rejected_processor_t* row = ROCKE_ARCH_DOMAIN_REJECTED_PROCESSORS;
+        row->flavor != nullptr;
+        ++row)
+    {
+        if(strcmp(row->flavor, col->flavor) == 0 && strlen(row->processor) == len
+           && strncmp(row->processor, processor, len) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 extern "C" const char* rocke_arch_domain_default_mode(void)

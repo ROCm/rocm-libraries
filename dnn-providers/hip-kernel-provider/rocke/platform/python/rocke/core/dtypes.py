@@ -126,3 +126,14 @@ def dtype_info(name: str) -> DTypeInfo:
     if key not in _DTYPE_INFO:
         raise ValueError(f"unknown dtype {name!r}")
     return _DTYPE_INFO[key]
+
+
+def dtype_names(category: DTypeCategory) -> tuple[str, ...]:
+    """The canonical name of every dtype in ``category``, in table order.
+
+    Error texts that list the dtypes an operation accepts build the list from
+    here, so it cannot drift from the table.
+    """
+    return tuple(
+        name for name, info in _DTYPE_INFO.items() if info.category is category
+    )

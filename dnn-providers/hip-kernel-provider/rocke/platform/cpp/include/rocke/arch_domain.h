@@ -60,6 +60,18 @@ const rocke_arch_domain_cell_t*
  * Python reader cell for cell. */
 const rocke_arch_domain_cell_t* rocke_arch_domain_column(const char* flavor, size_t* count);
 
+/* The flavor whose column `flavor` checks against: its own, else its
+ * domain.COLUMN_ALIASES source, else `flavor` itself. Messages use this so a
+ * refusal names the column Python can load. */
+const char* rocke_arch_domain_column_flavor(const char* flavor);
+
+/* Whether `flavor`'s column records its compiler as not accepting the processor
+ * named by the first `len` bytes of `processor`: Python's
+ * domain.load(flavor).accepts_processor(processor) is False. A lane with no
+ * column of its own answers from the column it borrows; a flavor with no column,
+ * a processor the column has no answer for, or a NULL argument gives false. */
+bool rocke_arch_domain_rejects_processor(const char* flavor, const char* processor, size_t len);
+
 /* Parse a mode as Python's domain.mode() does. NULL, empty and all-whitespace
  * mean the default generated from domain.DEFAULT_MODE; case and surrounding
  * ASCII whitespace are ignored. Anything else returns ROCKE_ERR_VALUE and

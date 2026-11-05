@@ -11,6 +11,7 @@
  *   _emit_zero_acc              -> rocke_gemm_emit_zero_acc
  *   _emit_zero_acc_op           -> rocke_gemm_emit_zero_acc_op
  *   _atom_frag_lengths          -> rocke_gemm_atom_frag_lengths
+ *   _elem_bytes                 -> rocke_gemm_elem_bytes
  *   _choose_load_vec            -> rocke_gemm_choose_load_vec
  *   _emit_smem_load             -> rocke_gemm_emit_smem_load
  *   _hotloop_inst_list          -> rocke_gemm_hotloop_inst_list
@@ -26,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/dtypes.h"
 #include "rocke/helper_rocke.core.arch.h"
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/helper_rocke.helpers.io.h"
@@ -158,18 +160,28 @@ rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _emit_zero_acc_op(b, op): zero accumulator sized from op.c_frag_len.
- *   return b.zero_vec_f32(op.c_frag_len)
+ * _emit_zero_acc_op(b, op): zero accumulator sized from op.c_frag_len and
+ * typed from op.c_dtype.
+ *   return b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len)
  * ====================================================================== */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op)
 {
-    return rocke_b_zero_vec_f32(b, op->c_frag_len);
+    return rocke_b_zero_vec(b, rocke_dtype_to_ir_type(op->c_dtype), op->c_frag_len);
+}
+
+/* ====================================================================== *
+ * _elem_bytes(spec) -> dtype_info(spec.data.dtype_a).encoded_bits // 8
+ * ====================================================================== */
+int rocke_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec)
+{
+    return rocke_dtype_info(spec->data.dtype_a)->encoded_bits / 8;
 }
 
 /* ====================================================================== *
  * _choose_load_vec(spec) -> width.
  *   t = spec.tile
- *   return choose_load_vec(t.tile_m, t.tile_n, t.tile_k, spec.block_size)
+ *   return choose_load_vec(t.tile_m, t.tile_n, t.tile_k, spec.block_size,
+ *                          elem_bytes=_elem_bytes(spec))
  *
  * The internal-header prototype returns int. The shared picker returns a status
  * + out-param; on the Python ValueError path (no usable width) we return 0,
@@ -179,8 +191,8 @@ int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     int vec = 0;
-    rocke_status_t st
-        = rocke_choose_load_vec(t->tile_m, t->tile_n, t->tile_k, spec->block_size, &vec);
+    rocke_status_t st = rocke_choose_load_vec(
+        t->tile_m, t->tile_n, t->tile_k, spec->block_size, rocke_gemm_elem_bytes(spec), &vec);
     if(st != ROCKE_OK)
         return 0; /* Python raises ValueError; unreachable for a valid spec. */
     return vec;
@@ -189,7 +201,8 @@ int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec)
 /* ====================================================================== *
  * _emit_smem_load(b, smem, row, col, n, dtype):
  *   if dtype == F16 and n == 4: return b.smem_load_v4_f16(smem, row, col)
- *   return b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
+ *   v = b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
+ *   return b.vec_extract(v, 0) if n == 1 else v
  *
  * The C smem_load_vN takes an explicit (row, col) index pair as an indices
  * array of length 2, matching the Python (smem, row, col) call.
@@ -205,9 +218,11 @@ rocke_value_t* rocke_gemm_emit_smem_load(rocke_ir_builder_t* b,
         return rocke_b_smem_load_v4_f16(b, smem, row, col);
     {
         rocke_value_t* idx[2];
+        rocke_value_t* v;
         idx[0] = row;
         idx[1] = col;
-        return rocke_b_smem_load_vN(b, smem, idx, 2, dtype, n);
+        v = rocke_b_smem_load_vN(b, smem, idx, 2, dtype, n);
+        return (n == 1) ? rocke_b_vec_extract(b, v, 0) : v;
     }
 }
 

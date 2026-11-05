@@ -204,7 +204,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     (op.a_frag_len, op.b_frag_len, op.c_frag_len), (16, 16, 8)
                 )
 
-    def test_scale_and_scale16_exact_llvm23_abi(self):
+    def test_scale_and_scale16_exact_modern_abi(self):
         cases = (
             (
                 False,
@@ -220,23 +220,24 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 "i64",
             ),
         )
-        for scale16, intrinsic, scale_ty in cases:
-            with self.subTest(scale16=scale16):
-                ll = lower_kernel_to_llvm(
-                    _build_scaled_atom(scale16=scale16),
-                    llvm_flavor="llvm23",
-                    arch="gfx1250",
-                )
-                self.assertIn(f"declare <8 x float> @{intrinsic}", ll)
-                self.assertIn(
-                    "i32 0, <16 x i32>",
-                    next(
-                        line
-                        for line in ll.splitlines()
-                        if f"call <8 x float> @{intrinsic}" in line
-                    ),
-                )
-                self.assertIn(f", {scale_ty} %", ll)
+        for flavor in ("llvm23", "llvm24"):
+            for scale16, intrinsic, scale_ty in cases:
+                with self.subTest(flavor=flavor, scale16=scale16):
+                    ll = lower_kernel_to_llvm(
+                        _build_scaled_atom(scale16=scale16),
+                        llvm_flavor=flavor,
+                        arch="gfx1250",
+                    )
+                    self.assertIn(f"declare <8 x float> @{intrinsic}", ll)
+                    self.assertIn(
+                        "i32 0, <16 x i32>",
+                        next(
+                            line
+                            for line in ll.splitlines()
+                            if f"call <8 x float> @{intrinsic}" in line
+                        ),
+                    )
+                    self.assertIn(f", {scale_ty} %", ll)
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
         # A native rejection is retried in Python unless strict C++ is requested.

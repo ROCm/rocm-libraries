@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "9666a506-6f4a-51a6-a41b-6188d9a3f964",
+  "name": "hipkernel:flydsl_sdpa_aiw",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_aiw.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328"
+  },
+  "metadata": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
+  "knobs": [
+    "block_m",
+    "block_n",
+    "row_subtiles",
+    "waves_per_eu",
+    "k_prefetch_dist",
+    "v_prefetch_dist",
+    "kv_addr_hoist",
+    "block_threads"
+  ]
+}

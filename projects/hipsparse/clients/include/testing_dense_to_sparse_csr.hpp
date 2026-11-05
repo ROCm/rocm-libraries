@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -79,14 +80,12 @@ void testing_dense_to_sparse_csr_bad_arg(const Arguments& argus)
     void*    dbuf         = (void*)dbuf_managed.get();
 
     // Matrix structures
-    hipsparseDnVecDescr_t matA;
     hipsparseSpMatDescr_t matB;
 
     size_t bsize;
 
     // Create matrix structures
-    verify_hipsparse_status_success(
-        hipsparseCreateDnMat(&matA, m, n, ld, ddense_val, dataType, order), "success");
+    hipsparseLocalDnMat matA(m, n, ld, ddense_val, dataType, order);
     verify_hipsparse_status_success(hipsparseCreateCsr(&matB,
                                                        m,
                                                        n,
@@ -137,7 +136,6 @@ void testing_dense_to_sparse_csr_bad_arg(const Arguments& argus)
         hipsparseDenseToSparse_convert(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(matB), "success");
 #endif
 }
@@ -204,8 +202,7 @@ void testing_dense_to_sparse_csr(Arguments argus)
         hipMemcpy(ddense, hdense_val.data(), sizeof(T) * nrow * ncol, hipMemcpyHostToDevice));
 
     // Create dense matrix
-    hipsparseDnMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matA, m, n, ld, ddense, typeT, order));
+    hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     // Create matrices
     hipsparseSpMatDescr_t matB;
@@ -216,8 +213,8 @@ void testing_dense_to_sparse_csr(Arguments argus)
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_analysis(handle, matA, matB, alg, buffer));
 
@@ -363,8 +360,6 @@ void testing_dense_to_sparse_csr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }

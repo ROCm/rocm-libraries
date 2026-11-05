@@ -1378,33 +1378,16 @@ def _flatbuffer_scorer(
                 "descriptor features_hash does not match the shipped model artifact"
             )
 
-    def routing(values, count: int, absent: bool) -> np.ndarray:
-        """A per-node flag vector as `prepareTrees` reads it: supplied entries, then `absent`."""
-        flags = np.full(count, absent, dtype=bool)
-        supplied = np.asarray([] if values is None else values, dtype=bool)[:count]
-        flags[: len(supplied)] = supplied
-        return flags
+    from .artifact import threshold_table, tree_arrays
+
+    # Either tree encoding, decoded as the runtime decodes it; the artifact is verified above.
+    table = threshold_table(model, str(artifact))
 
     def arrays_of(trees) -> list[tuple[np.ndarray, ...]]:
-        # `default_left`/`decision_lte` may be short, read as TreeDataAdapter does: missing
-        # `default_left` is false; absent or empty `decision_lte` is `<=` everywhere, but a
-        # nonempty short one is `<` past its end.
-        arrays = []
-        for tree in trees or []:
-            count = len(tree.leftChildren)
-            lte = tree.decisionLte
-            arrays.append(
-                (
-                    np.asarray(tree.featureIndices, dtype=np.int64),
-                    np.asarray(tree.thresholds, dtype=np.float64),
-                    np.asarray(tree.leftChildren, dtype=np.int64),
-                    np.asarray(tree.rightChildren, dtype=np.int64),
-                    np.asarray(tree.leafValues, dtype=np.float64),
-                    routing(tree.defaultLeft, count, False),
-                    routing(lte, count, lte is None or len(lte) == 0),
-                )
-            )
-        return arrays
+        return [
+            tree_arrays(tree, table, model.numFeatures, f"{artifact} tree {index}")
+            for index, tree in enumerate(trees or [])
+        ]
 
     trees = arrays_of(model.trees)
     base = float(model.baseScore)

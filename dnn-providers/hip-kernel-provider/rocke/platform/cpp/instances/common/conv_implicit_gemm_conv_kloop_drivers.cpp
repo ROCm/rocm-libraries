@@ -168,10 +168,11 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
     /* Start at the slice base, not at a bare zero: wgrad hands the drivers a
      * runtime k_lo and only the forward conv leaves it NULL. Reading ctx->c0
      * here worked while wgrad aliased the two, and silently restarted every
-     * split-K slice from 0 once they came apart. */
+     * split-K slice from 0 once they came apart. The forward split-K binary
+     * also ends at its slice: kloop_k_hi (wgrad sets it to c_K_gemm). */
     for_op = rocke_b_scf_for_iter(b,
                                   (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0,
-                                  ctx->c_K_gemm,
+                                  (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm,
                                   ctx->c_block_k,
                                   iter_args,
                                   num_accs,

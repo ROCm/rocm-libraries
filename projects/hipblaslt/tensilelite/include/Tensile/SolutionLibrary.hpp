@@ -65,7 +65,9 @@ namespace TensileLite
            && solutions.problemType.computeType == problem.computeType()
            && solutions.problemType.groupedGemm == problem.groupedGemm()
            && solutions.problemType.mxBlockA == problem.mxBlockA()
-           && solutions.problemType.mxBlockB == problem.mxBlockB())
+           && solutions.problemType.mxBlockB == problem.mxBlockB()
+           && solutions.problemType.mxBlockFreeA == problem.mxBlockFreeA()
+           && solutions.problemType.mxBlockFreeB == problem.mxBlockFreeB())
             return true;
         return false;
     }
@@ -119,7 +121,7 @@ namespace TensileLite
                                    const MySolution& solution,
                                    const MyProblem&  problem)
     {
-        if(problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() != 0)
             return (*solution.hardwarePredicate)(hardware)
                    && softwarePredicate(
                        SolutionLibrarySearchType::DEFAULT, task, hardware, solution, problem);

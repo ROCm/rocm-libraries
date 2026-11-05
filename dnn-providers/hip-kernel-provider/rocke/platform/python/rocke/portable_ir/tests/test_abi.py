@@ -28,6 +28,8 @@ from rocke.portable_ir.src import abi
 from rocke.portable_ir.src.recipe_bundle import cbor_encode
 from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
 
+ARCHS = ("gfx942", "gfx950")
+
 SPEC = {"D": 4, "dtype": "f32"}
 
 
@@ -297,12 +299,14 @@ class TestCEngineAgrees(unittest.TestCase):
         and the first artifact that needs tracing down cannot be."""
         from rocke.portable_ir.src.recipe_bundle import build_bundle
 
-        block = build_bundle(
-            [{"key": "toy", "arch": "gfx950", "recipe": recipe_toy.make_recipe()}]
-        )["abi"]
-        self.assertTrue(block["engine"], "engine version stamped empty")
-        self.assertTrue(block["build_id"], "build id stamped empty")
-        self.assertEqual(block["min_reader"], 1)
+        for arch in ARCHS:
+            with self.subTest(arch=arch):
+                block = build_bundle(
+                    [{"key": "toy", "arch": arch, "recipe": recipe_toy.make_recipe()}]
+                )["abi"]
+                self.assertTrue(block["engine"], "engine version stamped empty")
+                self.assertTrue(block["build_id"], "build id stamped empty")
+                self.assertEqual(block["min_reader"], 1)
 
     def test_c_vm_refuses_a_future_recipe(self):
         future = from_the_future(recipe_toy.make_recipe())
@@ -326,42 +330,50 @@ class TestCEngineAgrees(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_future_bundle_refused_before_lookup(self):
-        bundle = from_the_future(
-            {
-                "schema": "rocke.bundle/v1",
-                "entries": [
-                    {"key": "toy", "arch": "gfx950", "recipe": recipe_toy.make_recipe()}
-                ],
-            }
-        )
-        blob = cbor_encode(bundle)
-        with self.assertRaises(RuntimeError) as cm:
-            self.online.bundle_cbor_to_llvm(
-                blob, "toy", arch="gfx950", ints={"D": 4}, strs={"dtype": "f32"}
-            )
-        self.assertIn("recipe reader >=", str(cm.exception))
+        for arch in ARCHS:
+            with self.subTest(arch=arch):
+                bundle = from_the_future(
+                    {
+                        "schema": "rocke.bundle/v1",
+                        "entries": [
+                            {
+                                "key": "toy",
+                                "arch": arch,
+                                "recipe": recipe_toy.make_recipe(),
+                            }
+                        ],
+                    }
+                )
+                blob = cbor_encode(bundle)
+                with self.assertRaises(RuntimeError) as cm:
+                    self.online.bundle_cbor_to_llvm(
+                        blob, "toy", arch=arch, ints={"D": 4}, strs={"dtype": "f32"}
+                    )
+                self.assertIn("recipe reader >=", str(cm.exception))
 
     def test_guard_check_reports_too_old_as_error_not_refusal(self):
         """A caller must be able to tell a deployment problem from an
         unsupported shape: the first is fixed by shipping matched artifacts, the
         second by routing elsewhere. Answering 'refused' here would file the
         former under the latter and nobody would ever look."""
-        bundle = {
-            "schema": "rocke.bundle/v1",
-            "entries": [
-                {
-                    "key": "toy",
-                    "arch": "gfx950",
-                    "recipe": from_the_future(recipe_toy.make_recipe()),
+        for arch in ARCHS:
+            with self.subTest(arch=arch):
+                bundle = {
+                    "schema": "rocke.bundle/v1",
+                    "entries": [
+                        {
+                            "key": "toy",
+                            "arch": arch,
+                            "recipe": from_the_future(recipe_toy.make_recipe()),
+                        }
+                    ],
                 }
-            ],
-        }
-        blob = cbor_encode(bundle)
-        with self.assertRaises(RuntimeError) as cm:
-            self.online.check_bundle_guard(
-                blob, "toy", arch="gfx950", ints={"D": 4}, strs={"dtype": "f32"}
-            )
-        self.assertIn("recipe reader >=", str(cm.exception))
+                blob = cbor_encode(bundle)
+                with self.assertRaises(RuntimeError) as cm:
+                    self.online.check_bundle_guard(
+                        blob, "toy", arch=arch, ints={"D": 4}, strs={"dtype": "f32"}
+                    )
+                self.assertIn("recipe reader >=", str(cm.exception))
 
 
 if __name__ == "__main__":

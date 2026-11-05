@@ -58,3 +58,8 @@ Known bugs:
   # size-1 M or N free dim.
   # REMOVE once gfx950 gets a width-1 NT complex kernel.
   - { name: matmul_batch_complex_general_batch_edge, function: matmul, transA: N, transB: T, known_bug_platforms: gfx950 }
+  # ROCM-33823 (#14282): on gfx950, alpha = 0 and beta = 1 complex batched edge
+  # cases leave some D elements unwritten, which now always fail since D is filled
+  # with a NaN sentinel before each verified launch. REMOVE this entry in the PR that
+  # fixes ROCM-33823. Review by 2026-11-16.
+  - { name: matmul_batch_complex_general_batch_edge, function: matmul, alpha: 0, alphai: 0, beta: 1, betai: 0, known_bug_platforms: gfx950 }

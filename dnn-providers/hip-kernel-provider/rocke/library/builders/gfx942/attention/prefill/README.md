@@ -176,7 +176,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | Lever | Config | Mechanism | Verdict |
 |---|---|---|---|
 | 32×32×8 atom + K-loop doubling | all | CDNA3 has no 32×32×16 fp16/bf16 atom; C-layout is identical so softmax/epilogue port unchanged | **shipped** — enablement |
-| Conflict-free V (`perm_b32` store transpose) | **D128 fp16** | V stored transposed → PV A-operand read is one contiguous `ds_read_b64` instead of 4 element-wise `ds_read_u16` | **shipped** — large; identity-preserving |
+| Conflict-free V (`perm_b32` store transpose) | **D128** fp16 and bf16 (`use_cfvst=None` resolves on; bf16 since #14367) | V stored transposed → PV A-operand read is one contiguous `ds_read_b64` instead of 4 element-wise `ds_read_u16` | **shipped** — large; identity-preserving |
 | `exp2_fast` | all | softmax args are provably ≤ 0, so `llvm.exp2`'s guarded range reduction is dead work; bf16 D128 (the last holdout) re-enabled after re-measurement — 0 scratch and lower VGPR on both grids, numerically identical | **shipped** — dominant on the VALU-bound path |
 | Fused softmax rescale | all | exp2 → accumulate → cast → pack in one pass instead of materializing a full f32 `p_vals` matrix | **shipped** — pure live-range relief, bit-identical |
 | Per-config `waves_per_eu` | **bf16 D64** → 4 | forces the allocator low enough that a second workgroup co-resides (1 → 2 WG/CU) | **shipped** — large at long sequences |
@@ -185,12 +185,21 @@ magnitudes live outside the repo per `AGENTS.md`.
 | Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; `persist_decode` orders them (auto: `hq_minor_swz` for large causal MHA, `bt_hkv_minor` for causal below `chiplet_num_xcds` batches) | **shipped** — default at D128 |
 | Default-grid block order | causal | `nonpersist_decode`: batch, then kv head, fastest with longest-first query blocks (`bt_hkv_minor`); Swizzled Head-first (`hq_minor_swz`) for large causal MHA | **shipped** — auto; see the [case study](../../../../../platform/dsl_docs/architecture/attention_thread_block_mapping_case_study.md) |
 
+### Opt-in (off by default)
+
+Measurements, static register and ISA counts, and methodology are in the
+[bf16 D128 CFVST / K double buffering / V prefetch case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md).
+
+| Lever | Config | Mechanism | Verdict |
+|---|---|---|---|
+| K-only LDS double buffering (`lds_num_buffers=2`) | bf16 D128 CFVST causal, `persistent=True`, `block_n=64` only | allocates two K LDS slots while keeping one V LDS slot | **opt-in** — independent of V register prefetch. Not validated at `block_n=32` |
+| V register prefetch (`v_reg_prefetch=True`) | bf16 D128 CFVST causal, `persistent=True`, `block_n=64` only | loads V for the next tile into registers before the current PV; V LDS stays single-buffered | **opt-in** — independent of K LDS buffering; can also be combined with `lds_num_buffers=2` |
+
 ### Evaluated and rejected
 
 | Lever | Why it lost |
 |---|---|
 | Conflict-free V at **D64** | D64 is VGPR-bound; the register round-trip costs more than the LDS-instruction saving |
-| Conflict-free V at **bf16 D128** | spills over the `waves_per_eu=2` cap on the `.1k` MFMA schedule |
 | `exp2_fast` at **bf16 D128** (former holdout) | initially rejected on a measured spill over the `waves_per_eu=2` cap; **revisited and adopted** (see Adopted table) — re-measurement reads 0 scratch and lower VGPR on both grids, so the original reading no longer reproduces |
 | `waves_per_eu=3` at **fp16 D64** | reaches 2 WG/CU but loses more ILP than the second workgroup buys |
 | Drop K/V LDS pads to reach 2 WG/CU at D128 | D128 stays 1 WG/CU even unpadded (register floor co-limits), so it only reintroduces bank conflicts — **catastrophic** |
@@ -200,7 +209,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | cfvst load/store chunking | does not bound register pressure: the later chunks' loads carry no dependency on the earlier ones, so LLVM hoists them above the intervening full `s_waitcnt(vmcnt=0)`, which then covers them anyway |
 | PV-only `s_setprio` | **proven-negative** on gfx942 `attention_tiled_2d`. Note this is one lever in one placement — it is *not* a verdict on the scheduling-intrinsic family, and hand-written `sched_group_barrier` remains open |
 | Diagonal two-phase causal peel | **proven-negative** on gfx942 `attention_tiled_2d`; gated on the bound shifting to compute, which it has not |
-| partial-vmcnt software prefetch | N/A — it is a double-buffering lever and this kernel is single-buffered (NBUF=1), so there is no prefetch to partially overlap. The older "NBUF=2 does not fit 64 KB LDS at D128" reason is **retired**: it only holds at the shipped `block_n=64` (a K-only double buffer, or `block_n=32`, does fit), so what actually closes the door is the measured `block_n=32` verdict in the row above, not the LDS arithmetic |
+| partial-vmcnt software prefetch | N/A on the default build — it is a double-buffering lever and the default build is single-buffered (NBUF=1), so there is no prefetch to partially overlap. A full K+V NBUF=2 fits 64 KB LDS at D128 only at `block_n=32`, which the `block_n=32` row above closes by measurement. The opt-in `lds_num_buffers=2` path doubles only K at `block_n=64`; `v_reg_prefetch=True` independently brings next-tile V into registers. Both paths wait with full `vmcnt(0)`, not a partial one |
 
 ## Bench
 

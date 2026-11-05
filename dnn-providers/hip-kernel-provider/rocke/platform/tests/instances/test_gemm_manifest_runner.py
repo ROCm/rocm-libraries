@@ -29,6 +29,11 @@ args_signature dtype
     Reads the A-pointer type from args_signature; returns True for bf16,
     False for fp16, False when the key is absent.
 
+gfx1201 WMMA probe launch grid
+    The grid the runner launches from the probe's manifest is the grid the
+    gfx1201 WMMA GEMM kernel indexes (``wmma_gemm_grid``) on non-square shapes,
+    where a swapped x/y order would leave tiles unwritten.
+
 These tests are CPU-only, torch-free, and have no GPU dependency.
 """
 
@@ -41,10 +46,17 @@ from typing import Optional, Tuple
 import numpy as np
 
 from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+from rocke.examples.gfx1201.wmma_probe import probe_manifest
+from rocke.helpers.compile import KernelArtifact
 from rocke.helpers.manifest import gemm_args_signature
 from rocke.instances.common.manifest_runner.gemm import (
     _gemm_is_bf16,
     run_gemm_manifest_problem,
+)
+from rocke.instances.gfx1201.wmma_gemm import (
+    WmmaGemmSpec,
+    build_wmma_gemm,
+    wmma_gemm_grid,
 )
 
 
@@ -242,6 +254,29 @@ class TestGemmIsBf16(unittest.TestCase):
 
     def test_missing_signature_returns_false(self):
         self.assertFalse(_gemm_is_bf16({}))
+
+
+class TestGfx1201WmmaProbeLaunchGrid(unittest.TestCase):
+    """The probe launches the grid its kernel indexes, not its transpose."""
+
+    def test_runner_grid_matches_kernel_grid_on_non_square_shapes(self):
+        spec = WmmaGemmSpec(name="wmma_probe_gfx1201")
+        art = KernelArtifact(
+            kernel=build_wmma_gemm(spec, arch="gfx1201"),
+            ir_text="",
+            llvm_text="",
+            hsaco=b"",
+        )
+        # Square shapes cannot tell the two grid orders apart; each of these has
+        # different M and N tile counts, in both directions.
+        for m, n, k in ((32, 64, 48), (128, 48, 32), (16, 256, 160)):
+            with self.subTest(m=m, n=n, k=k):
+                manifest = probe_manifest(art, spec, m, n, k)
+                _, grid, block, *_ = run_gemm_manifest_problem(
+                    manifest, (m, n, k), verify=False
+                )
+                self.assertEqual(grid, wmma_gemm_grid(m, n))
+                self.assertEqual(block, (spec.block_size, 1, 1))
 
 
 if __name__ == "__main__":

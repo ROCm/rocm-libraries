@@ -28,6 +28,8 @@ RAW = (
 
 @unittest.skipUnless(os.name == "posix", "executable profiler fixture requires POSIX")
 class TestWaveScopePmc(unittest.TestCase):
+    ARCH = "gfx950"
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -147,7 +149,7 @@ class TestWaveScopePmc(unittest.TestCase):
                 "--output-dir",
                 str(destination),
                 "--arch",
-                "gfx950",
+                self.ARCH,
                 "--op",
                 "gemm",
                 "--kernel-name",
@@ -435,9 +437,9 @@ class TestWaveScopePmc(unittest.TestCase):
     def test_missing_destination_or_launch_is_rejected(self):
         destination = self.root / "missing-launch"
         for args in (
-            ["--arch", "gfx950", "--", *self.command],
-            ["--output-dir", str(destination), "--arch", "gfx950"],
-            ["--output-dir", str(destination), "--arch", "gfx950", "--"],
+            ["--arch", self.ARCH, "--", *self.command],
+            ["--output-dir", str(destination), "--arch", self.ARCH],
+            ["--output-dir", str(destination), "--arch", self.ARCH, "--"],
         ):
             with self.subTest(args=args):
                 result = self.invoke(args)
@@ -446,6 +448,11 @@ class TestWaveScopePmc(unittest.TestCase):
                 self.assertFalse(destination.exists())
                 self.assertFalse(self.launch_log.exists())
                 self.assertFalse(self.profiler_log.exists())
+
+
+@unittest.skipUnless(os.name == "posix", "executable profiler fixture requires POSIX")
+class TestWaveScopePmcGfx942(TestWaveScopePmc):
+    ARCH = "gfx942"
 
 
 if __name__ == "__main__":

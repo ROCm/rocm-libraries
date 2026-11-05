@@ -419,10 +419,12 @@ validParameters = { # we need to make sure this matches develop
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
-    #   -1 = auto: enable only where it needs no extra LDS reserved.
-    #    0 = off (default): baseline layout.
-    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
-    #            boundary (needs PrefetchGlobalRead=2).
+    #    0 = off (default).
+    #    1 = require interleave; allow additional LDS up to MaxLDS.
+    #        Reject the kernel candidate if the layout or buffering is unsupported.
+    #   -1 = auto: enable only when supported and LDS usage does not exceed mode 0;
+    #        otherwise disable interleave.
+    #
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
@@ -436,11 +438,10 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
-    # Persistent loop: keep the whole K extent of an operand (and its MX
-    # scales) resident in VGPRs across persistent iterations, so every tile after
-    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
-    # traffic. Only valid when every tile a workgroup visits shares that operand,
-    # which the emitted size predicates enforce.
+    # Persistent loop: keep an operand (and its MX scales) resident in VGPRs across persistent tiles,
+    # so tiles that share it skip reloading it. The size predicates cap K at the resident k-tiles;
+    # a K remainder ((AssertSummationElementMultiple % DepthU != 0)) is tail-folded into the main loop, 
+    # so there is no tail loop in RAP kernel.
     #   0 = off (default)
     #   1 = A resident
     #   2 = B resident -- planned, not implemented yet
@@ -1271,10 +1272,37 @@ validParameters = { # we need to make sure this matches develop
     #      when NumWaves>1). Hidden from the kernel name.
     #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
     #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
-    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
-    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   2  {A,MXSA,MXSB} + {B}. With both scales on 4 waves a 2/1/1 split:
+    #      A on waves 0-1, MXSA on wave 2, MXSB on wave 3, B on every wave;
+    #      on 2 waves A on wave 0, MXSA (on A's set) and MXSB (on a set of
+    #      its own) on wave 1, B on both.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2 with A and B exchanged.
+    #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
+    #   so every wave issues a slice of both. The three then issue the same
+    #   loads and differ only in the name, so a sweep need carry just one.
+    #   With MX scales on one tensor only, the scale takes every wave of the
+    #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
+    #   set's waves with it, and the other data tensor rides every wave of
+    #   its own set.
+    #   Solution rejects, naming the limit and what to use instead:
+    #   - a value outside this list;
+    #   - 1-3 without the TDM on both tensors (TDMInst=3), on one wave, or
+    #     with UseSubtileImpl;
+    #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
+    #     divergent decoupled pair;
+    #   - one-sided MX with PrefetchAcrossPersistent on 1-3, where the one
+    #     live scale shares a data tensor's set and PAP refreshes the scale
+    #     descriptors only as a pair;
+    #   - ReuseAcrossPersistent on 1-3 with MX scales, whose null silences
+    #     one tensor by wave parity;
+    #   - one-sided MX off gfx1250 TDM kernels (MXLoadInst=TDM), with
+    #     UseSubtileImpl, with PrefetchAcrossPersistent or
+    #     ReuseAcrossPersistent on a persistent kernel, or at a divergent
+    #     decoupled pair on more than one wave;
+    #   - TDMSplit, which is disabled for every row.
+    #
+    # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
+    # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],

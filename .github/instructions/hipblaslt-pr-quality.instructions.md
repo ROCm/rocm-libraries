@@ -1,10 +1,10 @@
 ---
-applyTo: "projects/hipblaslt/**"
+applyTo: "projects/hipblaslt/**,shared/stinkytofu/**"
 ---
 
 # hipBLASLt PR review guidance (for Copilot code review)
 
-These instructions apply when reviewing pull requests that touch `projects/hipblaslt/**` (the hipBLASLt component, including `tensilelite/`).
+These instructions apply when reviewing pull requests that touch `projects/hipblaslt/**` (the hipBLASLt component, including `tensilelite/`) or `shared/stinkytofu/**` (the instruction scheduler and hazard pass that hipBLASLt kernels go through). For stinkytofu wait, hazard and scheduling changes, apply the overlay's `hazard-safety` change class.
 
 ## Use the hipBLASLt PR-quality skill
 

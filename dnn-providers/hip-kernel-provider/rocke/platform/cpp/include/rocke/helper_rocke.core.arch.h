@@ -99,7 +99,8 @@ const rocke_arch_mma_catalog_t* rocke_archtarget_mma(const rocke_archtarget_t* t
  * {NULL, NULL, ROCKE_MMA_SCALE_NONE} selects unscaled atoms. Invalid filters or
  * ambiguous matches raise ckc::Error; callers handle errors at a C++ boundary.
  * This is the entry point build_universal_gemm uses to resolve the atom from the
- * target catalog. Forwards to rocke_mma_catalog_op_for_shape on t->mma. */
+ * target catalog. Forwards to rocke_mma_catalog_op_for_shape on t->mma with no
+ * result dtype, so it selects only atoms whose result is their accumulator. */
 const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* family,
                                                    const char* a_dtype,

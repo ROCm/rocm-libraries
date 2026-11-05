@@ -59,6 +59,15 @@ def gfx1151_wmma_attention_config(load_test_config):
 
 
 @pytest.fixture
+def multi_launch_config():
+    """A small packaged config whose pack declares ``launches``, for the multi-launch arms
+    of the templates."""
+    return load_config(
+        Path(__file__).parent / "fixtures" / "verify_multi_launch" / "config.yaml"
+    )
+
+
+@pytest.fixture
 def gfx1151_wmma_attention_decode_config(load_test_config):
     return load_test_config("gfx1151_wmma_attention_decode.yaml")
 

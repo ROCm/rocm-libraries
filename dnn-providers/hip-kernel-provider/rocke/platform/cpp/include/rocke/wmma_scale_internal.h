@@ -14,6 +14,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
+#include "rocke/mfma_scale_internal.h"
 #include "rocke/storage.h"
 
 /* Mirrors target._gfx1250_scale_combination_valid and LLVM's supported pairs:
@@ -52,25 +53,15 @@ static inline rocke_fragment_packing_t rocke_scale_fragment(const rocke_scale_pa
     return result;
 }
 
+/* The f8f6f4 operand layout of `dtype` in `abi_words` words over two groups
+ * of 16 lanes (rocke_matrix_operand_layout). */
 static inline rocke_matrix_fragment_layout_t rocke_scaled_matrix_layout(const char* dtype,
                                                                         int abi_words)
 {
     const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
-    int chunk = 0;
-    if(info && (strcmp(info->name, "fp8e4m3") == 0 || strcmp(info->name, "bf8e5m2") == 0))
-        chunk = 16;
-    else if(info
-            && (strcmp(info->name, "fp4e2m1") == 0 || strcmp(info->name, "fp6e2m3") == 0
-                || strcmp(info->name, "fp6e3m2") == 0))
-        chunk = 32;
-    rocke_bit_packing_t bits;
-    rocke_fragment_packing_t fragment;
-    rocke_matrix_fragment_layout_t result;
-    if(!chunk || abi_words < 0 || !rocke_bit_packing_init(&bits, info->encoded_bits, 0)
-       || !rocke_fragment_packing_init(&fragment, &bits, 64, 32, abi_words)
-       || !rocke_matrix_fragment_layout_init(&result, &fragment, chunk, 2, 16))
+    if(!info || rocke_mfma_matrix_format(info->name) < 0 || abi_words < 0)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled matrix layout");
-    return result;
+    return rocke_matrix_operand_layout(info->name, abi_words, 2, 16);
 }
 
 typedef struct rocke_scaled_wmma_op

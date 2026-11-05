@@ -804,6 +804,7 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_q_direct_reg",
             "use_q_reread",
             "use_q_major_grid",
+            "use_qblock_reverse",
         }
     )
 

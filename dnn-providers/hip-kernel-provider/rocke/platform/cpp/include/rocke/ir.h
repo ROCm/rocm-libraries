@@ -475,6 +475,21 @@ typedef enum rocke_opcode
     /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
     ROCKE_OP_ARITH_FDOT2,
 
+    /* tile.buffer_load: dtype-generic scalar buffer load (appended). */
+    ROCKE_OP_TILE_BUFFER_LOAD,
+
+    /* Dtype-generic buffer store (Python IRBuilder.buffer_store_vN). Appended
+     * so no existing index shifts. */
+    ROCKE_OP_TILE_BUFFER_STORE_VN,
+
+    /* Global pointer offset without inbounds (Python
+     * IRBuilder.global_ptr_offset). Appended so no existing index shifts. */
+    ROCKE_OP_TILE_GLOBAL_PTR_OFFSET,
+
+    /* Kernel abort (Python IRBuilder.trap). Appended so no existing index
+     * shifts. */
+    ROCKE_OP_TILE_TRAP,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -594,7 +609,8 @@ typedef struct rocke_if
     rocke_region_t* then_region;
 } rocke_if_t;
 
-/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). */
+/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). The values
+ * the branch that ran yields (rocke_b_scf_if_else_results) are op->results. */
 typedef struct rocke_if_else
 {
     rocke_op_t* op;
@@ -735,8 +751,31 @@ bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* ou
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
 
+/* The scheduler strategies, sorted, as normalize_scheduler_strategy's
+ * ValueError lists them ("...; expected one of: <these>, or None"). The one
+ * C++ list of them: rocke_scheduler_strategy_is_valid reads it. */
+#define ROCKE_SCHEDULER_STRATEGY_CHOICES \
+    "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause"
 /* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
 bool rocke_scheduler_strategy_is_valid(const char* strategy);
+/* normalize_scheduler_strategy's ValueError: returns true (and writes the
+ * reason, word for word, the name quoted as Python's repr by
+ * rocke_py_str_repr) when `strategy` is not NULL and not one of
+ * ROCKE_SCHEDULER_STRATEGY_CHOICES. */
+bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t reason_cap);
+
+/* Python's repr() of the str `s` (UTF-8), as an f-string's {s!r} writes it:
+ * quoted with ' -- or with " when `s` contains ' and no " -- with the
+ * backslash and the quote character escaped, \t \n \r named and every other
+ * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex). Writes
+ * the NUL-terminated text into `out` (truncated to `cap` - 1 characters; NULL
+ * / 0 writes nothing) and returns its full length, like snprintf.
+ *
+ * Supported subset: every ASCII string exactly. Bytes >= 0x80 are copied
+ * unchanged, which is Python's repr for printable non-ASCII characters
+ * (letters, CJK, ...) but not for the non-printable ones Python escapes as
+ * \xNN / \uNNNN / \UNNNNNNNN (e.g. U+00A0, U+0085) or for invalid UTF-8. */
+size_t rocke_py_str_repr(const char* s, char* out, size_t cap);
 
 /* ============================ OPCODE TABLE ============================== */
 
@@ -1531,6 +1570,10 @@ void rocke_b_global_load_lds(rocke_ir_builder_t* b,
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
 rocke_value_t*
     rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+/* `ptr` moved by the i64 `byte_off` bytes, without inbounds: the result may
+ * point outside the allocation (Python IRBuilder.global_ptr_offset). */
+rocke_value_t*
+    rocke_b_global_ptr_offset(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
 /* 64-bit address of a global pointer (``ptrtoint``). */
 rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*
@@ -1541,8 +1584,10 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* soffset,
                                           int dwords);
 /* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
- * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
- * <n x dtype>; out-of-range offsets read zero. */
+ * `dtype` is any scalar whose width is whole bytes, and the `n` elements move
+ * 1, 2, 4, 8 or 16 bytes together. Returns <n x dtype>; out-of-range bytes
+ * read zero. A refused dtype or width sets ROCKE_ERR_VALUE with the Python
+ * builder's text. */
 rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* voffset,
@@ -1553,6 +1598,14 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* Dtype-generic scalar buffer load (one element, out-of-range reads 0): f16 and
+ * bf16 through the i16 intrinsic, f32 and i32 through the i32 one. Port of
+ * Python IRBuilder.buffer_load (op tile.buffer_load, attr elem_type). */
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype);
 /* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
  * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
  * the pinned PR9710 tile.buffer_load_f16_d16 op. */
@@ -1591,6 +1644,37 @@ void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
                                   rocke_value_t* soffset,
                                   rocke_value_t* value,
                                   int dwords);
+/* The four f16/bf16 buffer stores above with the raw buffer store's aux
+ * immediate `cachepolicy` (on gfx12: bits[0:2] = th, bits[3:4] = scope; 1 is
+ * th:TH_STORE_NT). 0 records no attribute, i.e. the plain form. Port of the
+ * Python keyword `cachepolicy=` of IRBuilder.buffer_store_{f16,bf16,vN_f16,
+ * vN_bf16}. */
+void rocke_b_buffer_store_vN_f16_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int dwords,
+                                    int cachepolicy);
+void rocke_b_buffer_store_f16_ex(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int cachepolicy);
+void rocke_b_buffer_store_bf16_ex(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int cachepolicy);
+void rocke_b_buffer_store_vN_bf16_ex(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int dwords,
+                                     int cachepolicy);
 void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* rsrc,
                               rocke_value_t* voffset,
@@ -1602,6 +1686,16 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* soffset,
                                  rocke_value_t* value,
                                  int n);
+/* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN),
+ * the store twin of rocke_b_buffer_load_vN: `value` is a vector of any scalar
+ * whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. Out-of-range
+ * bytes are not written. A refused value sets ROCKE_ERR_VALUE with the Python
+ * builder's text. */
+void rocke_b_buffer_store_vN(rocke_ir_builder_t* b,
+                             rocke_value_t* rsrc,
+                             rocke_value_t* voffset,
+                             rocke_value_t* soffset,
+                             rocke_value_t* value);
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
 rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b,
@@ -1738,6 +1832,12 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               int pad_amount,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
+/* Abort the kernel (Python IRBuilder.trap): llvm.trap, which the backend emits
+ * as s_trap 2 (gfx11: its simulated trap, s_trap 2 then s_sendmsg then an
+ * s_sethalt loop). A taken trap aborts the process on Linux (ROCr), never
+ * returns from the launch on Windows, and stops the wave under a debugger, so
+ * it is a last resort. */
+void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
 void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int group);
@@ -1766,6 +1866,15 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else: both then and else converge at the same join block.
  * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
+/* scf.if_else that yields one value per type in `result_types` (Python
+ * scf_if_else(cond, result_types)): each region ends in rocke_b_scf_yield of
+ * values of those types, and the op's results (handle.op->results) are the
+ * values of the branch that ran. The verifier and the lowerings refuse a region
+ * that does not end that way. */
+rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
+                                            rocke_value_t* cond,
+                                            const rocke_type_t* const* result_types,
+                                            int num_results);
 void rocke_b_ret(rocke_ir_builder_t* b);
 
 /* ---- tile.exec_* (wavelet exec-mask split, MFMA path) ----

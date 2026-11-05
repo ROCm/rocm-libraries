@@ -90,6 +90,7 @@ inline int hipGetDeviceProperties(hipDeviceProp_t* props, int) {
 """
 
 _HOST_FMHA_STUB = """#pragma once
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 namespace ck_tile {
@@ -101,7 +102,7 @@ inline std::string get_device_name() {
     return value == nullptr ? "gfx1250" : value;
 }
 template <bool> struct SimplifiedGenericAttentionMask {};
-enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED };
+enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG };
 enum class BlockAttentionBiasEnum { NO_BIAS, ELEMENTWISE_BIAS, ALIBI };
 enum class BlockAttentionQuantScaleEnum { NO_SCALE, PERTENSOR, BLOCKSCALE, KV_BLOCKSCALE, MX };
 }
@@ -137,6 +138,8 @@ struct fmha_fwd_args {
     const void* sink_ptr = nullptr;
     const void* seqlen_k_ptr = nullptr;
     const void* cu_seqlen_k_ptr = nullptr;
+    const void* o_ptr = nullptr;
+    int stride_o = 1024, nhead_stride_o = 128, batch_stride_o = 262144;
 };
 template <typename Trait, typename Arch> struct dispatch_id;
 template <typename Trait, typename Arch>
@@ -150,13 +153,14 @@ _HOST_MAIN = """
 int main() {
     fmha_fwd_traits t;
     fmha_fwd_args a;
-    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr;
+    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, o_offset;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
-         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr)) return 2;
+         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> o_offset >> a.stride_o
+         >> a.nhead_stride_o >> a.batch_stride_o)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -166,6 +170,7 @@ int main() {
     a.cu_seqlen_k_ptr = has_cu_sk ? &a : nullptr;
     a.seqlen_k_ptr = has_sk_ptr ? &a : nullptr;
     a.sink_ptr = has_sink_ptr ? &a : nullptr;
+    a.o_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + o_offset);
     std::cout << fmha_fwd(t, a, {}) << '\\n';
 }
 """
@@ -213,6 +218,10 @@ class _CompiledDispatcher:
                 _HOST_CXX,
                 "-std=c++17",
                 "-O0",
+                # As in the CK build: a dispatch condition that compares ck_tile::index_t
+                # with the unsigned num_cus fails there.
+                "-Wsign-compare",
+                "-Werror",
                 "-I",
                 str(root),
                 str(root / "fmha_fwd_api.cpp"),
@@ -274,6 +283,10 @@ class _CompiledDispatcher:
             has_cu_sk=0,
             has_sk_ptr=0,
             has_sink_ptr=0,
+            o_offset=0,
+            stride_o=1024,
+            nhead_stride_o=128,
+            batch_stride_o=262144,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -975,6 +988,47 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                     [selected],
                 )
 
+    def test_real_dispatch_d128_o_layout_fallback(self):
+        dispatch, _ = self.compile()
+        for mode, group in (("batch", 0), ("group", 1)):
+            sched = dispatch.expected_id(
+                mode=mode,
+                hdim=128,
+                pipeline="qr_tdm_sched",
+                mask="s_no",
+                lse="f",
+                sink="f",
+            )
+            fallback = dispatch.expected_id(
+                mode=mode,
+                hdim=128,
+                pipeline="qr_tdm",
+                bm0=128,
+                spad="t" if group else "f",
+                mask="s_no",
+                lse="f",
+                sink="f",
+                dpad="f",
+            )
+            rejected = [
+                dict(o_offset=2),
+                dict(stride_o=1028),
+                dict(nhead_stride_o=132),
+                dict(stride_o=-1024),
+                dict(stride_o=16909320),
+            ]
+            accepted = [dict(stride_o=16909312)]
+            (rejected if group == 0 else accepted).append(dict(batch_stride_o=262148))
+            for changes in rejected + accepted:
+                selected = fallback if changes in rejected else sched
+                self.assertEqual(
+                    dispatch.run(
+                        group=group, hdim_q=128, hdim_v=128, seqlen_q=2048, **changes
+                    ),
+                    [selected],
+                    changes,
+                )
+
     def test_real_dispatch_mask_lse_and_unsupported_features(self):
         kernel_filter = (
             "fmha_fwd_d*_bf16_*_nlogits*_nbias*_*lse*_ndropout*_nskip*_nqscale*"
@@ -1533,6 +1587,10 @@ class TestGfx125V128Codegen(unittest.TestCase):
             # All supported scheduled head dimensions use expert scheduling mode.
             d128.replace("d128", "d64"),
             d128.replace("d128", "d64").replace("bf16", "fp16"),
+            # qr_tdm_pingpong without LSE too, while plain qr_tdm (4) and the
+            # qr_tdm_pingpong LSE instances keep the default
+            d128.replace("qr_tdm_sched", "qr_tdm_pingpong"),
+            d128.replace("qr_tdm_sched", "qr_tdm_pingpong").replace("_nlse_", "_lse_"),
         ]
         with tempfile.TemporaryDirectory() as directory:
             script = Path(directory) / "flags.cmake"
@@ -1557,7 +1615,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertTrue(line.startswith(f"{i}:"))
                 self.assertEqual(
                     "-amdgpu-expert-scheduling-mode" in line,
-                    i in (0, 1, 2, 3, 5, 12, 13),
+                    i in (0, 1, 2, 3, 5, 12, 13, 14),
                 )
                 self.assertNotIn("-wwm-regalloc=fast", line)
 
@@ -1850,6 +1908,117 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                 dpad="f",
             )
             self.assertEqual(dispatch.run(group=group, hdim_q=128), [fallback])
+
+    def test_d128_pingpong_tiles(self):
+        # qr_tdm_pingpong runs on its own d128 fp16/bf16 bm0=64 tile only, which no
+        # other pipeline takes; it alone uses the LDS-shuffle epilogue.
+        _, kernels = get_fwd_blobs(["gfx1250"], "*", 600, [128, 192], "simplified")
+        pingpong = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"]
+        self.assertTrue(pingpong)
+        for kernel in kernels:
+            owned = kernel.F_tile.F_pipeline_tag == "qr_tdm_pingpong"
+            self.assertEqual(
+                owned, kernel.F_pipeline.tag == "qr_tdm_pingpong", kernel.name
+            )
+            self.assertEqual(
+                "LdsShuffle2DEpilogue" in kernel.render(), owned, kernel.name
+            )
+        for kernel in pingpong:
+            self.assertIn(kernel.F_dtype, ("fp16", "bf16"))
+            self.assertEqual(kernel.F_hdim, 128)
+            self.assertIn(kernel.F_tile.F_bm0, (16, 64))
+            self.assertIn("BlockFmhaPipelineQRKSVSTdmPingPong", kernel.render())
+
+    def test_d128_pingpong_dispatch(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d128_bf16_*_nlogits*_ndropout*_nskip*_nqscale*_ntrload*",
+            600,
+            [128],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+
+        def kernel(pipeline, bm0, mask="s_no", skpad="f", bias="no", sink="f"):
+            return dispatch.expected_id(
+                hdim=128,
+                mode="batch",
+                pipeline=pipeline,
+                bm0=bm0,
+                mask=mask,
+                skpad=skpad,
+                dpad="f",
+                bias=bias,
+                lse="f",
+                sink=sink,
+            )
+
+        def run(**changes):
+            return dispatch.run(hdim_q=128, hdim_v=128, **changes)
+
+        sched_ids = {
+            index
+            for k, index in dispatch.kernel_ids
+            if k.F_pipeline.tag == "qr_tdm_sched"
+        }
+        square = dict(seqlen_q=532, seqlen_k=532)
+        causal = dict(mask=1, window_size_left=-1, window_size_right=0)
+        # 1280 x 2 (batch, head) pairs: 10 per num_cus (256).
+        big = dict(batch=1280, nhead_q=2, nhead_k=2)
+
+        # On a big grid below 640 rows. The unpadded instance serves any seqlen_k,
+        # except with an elementwise bias, which still needs a tile multiple.
+        self.assertEqual(run(**square, **big), [kernel("qr_tdm_pingpong", 64)])
+        # Up to 16 rows the 16-row tile, under the same grid condition (one m-tile:
+        # 1280 x 2 blocks, and 1792 x 1 at 32 rows).
+        for length, bm0 in ((8, 16), (16, 16), (17, 64)):
+            self.assertEqual(
+                run(seqlen_q=length, seqlen_k=532, **big),
+                [kernel("qr_tdm_pingpong", bm0)],
+            )
+        self.assertEqual(
+            run(seqlen_q=32, seqlen_k=200, batch=1792, nhead_q=1, nhead_k=1),
+            [kernel("qr_tdm_pingpong", 64)],
+        )
+        self.assertEqual(run(seqlen_q=8, seqlen_k=512), [kernel("qr_tdm", 64)])
+        self.assertEqual(
+            run(**square, **big, bias=1),
+            [kernel("qr_tdm_pingpong", 64, skpad="t", bias="bias")],
+        )
+        self.assertEqual(
+            run(seqlen_q=532, seqlen_k=512, bias=1, **big),
+            [kernel("qr_tdm_pingpong", 64, bias="bias")],
+        )
+        self.assertEqual(
+            run(**square, **causal, **big),
+            [kernel("qr_tdm_pingpong", 64, mask="causal")],
+        )
+        # qr_tdm_sched below 640 rows on small grids and from 640 rows on any grid;
+        # where it does not apply (a sink), qr_tdm.
+        self.assertIn(run(**square)[0], sched_ids)
+        # The grid threshold, 2 (batch, head) pairs per num_cus: 256 x 2 >= 2 x 256.
+        self.assertEqual(
+            run(**square, batch=256, nhead_q=2, nhead_k=2),
+            [kernel("qr_tdm_pingpong", 64)],
+        )
+        self.assertIn(run(**square, batch=255, nhead_q=2, nhead_k=2)[0], sched_ids)
+        # Not a block count: 16 x 16 heads of 512 rows (2048 bm0=64 blocks) stay on
+        # qr_tdm_sched.
+        self.assertIn(
+            run(seqlen_q=512, seqlen_k=512, batch=16, nhead_q=16, nhead_k=16)[0],
+            sched_ids,
+        )
+        self.assertIn(run(seqlen_q=640, seqlen_k=640, **big)[0], sched_ids)
+        self.assertEqual(
+            run(**square, **causal, has_sink_ptr=1),
+            [kernel("qr_tdm", 128, mask="causal", skpad="t")],
+        )
+        # Below 128 rows qr_tdm_pingpong needs the big grid too; on a small one qr_tdm
+        # keeps its bm0=64 tile.
+        self.assertEqual(
+            run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
+        )
+        self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
 
 
 if __name__ == "__main__":

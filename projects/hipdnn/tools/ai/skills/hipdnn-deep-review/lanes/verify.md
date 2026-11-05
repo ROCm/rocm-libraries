@@ -36,6 +36,12 @@ one to `IMPORTANT` or above, also run step 3.
      names, inside the changed code or what it calls. Rebuild, rerun, revert, and recheck
      the baseline before the next mutant. Discard a mutant that changes no observable
      behavior. When the reporter already mutated, rerun only the 3 most decisive mutants and state which were reused.
+     Before any mutant, check the named tests' binary compiles the mutated file: a mutant in code the binary does not build survives by
+     construction and proves nothing. Check every configuration that builds the file (the **Options and guards** of
+     `CONTEXT.md` and the area files), not only the default link line or `compile_commands.json`. If one links it into the
+     binary, run the mutant under that configuration or return `UNVERIFIED`. If none does, run no mutant: return
+     `CONFIRMED` only on that link-graph evidence plus the absence of any registered test that exercises the path, and say
+     in **Proof** that no mutant ran.
 4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
 
 ## Handoffs

@@ -86,6 +86,8 @@ def test_ordinary_srd_routes_general_batch_and_gsu(
     writer = SimpleNamespace(
         states=SimpleNamespace(kernel=kernel), allocTmpSgpr=alloc_tmp,
         shiftSrd=lambda ch: Module("gfx950 requires no SRD shift"),
+        # Outside ReuseAcrossPersistent's reuse copy a literal label keeps its name.
+        rapLabel=lambda name: name,
         cmpNamedArgTypeEq=lambda module, value, comment: module.add(
             SCmpEQU32(src0=sgpr("ArgType"), src1=value, comment=comment)),
         sgprs={"GSU": 6, "ArgType": 7, "AddressD": 8, "SrdD": 12},

@@ -91,74 +91,6 @@ rocke_value_t* rocke_warp_grid_warp_n_off(rocke_ir_builder_t* b, const rocke_war
         b, grid->warp_n_idx, rocke_b_const_i32(b, (int64_t)mfmas_n * grid->warp_tile_n));
 }
 
-/* -------------------------------------------------------------- lane_to_output *
- *
- * File-local port of MfmaAtom.lane_to_output (rocke/helpers/atoms.py): the
- * per-lane (row_in_atom, col_in_atom) of accumulator slot `i` within one atom.
- * The two epilogues are the only consumers, so it lives here as a static helper
- * (atoms.h does not yet export it). Returns 0 on success and writes *out_row /
- * *out_col; returns -1 + sets the builder error for the NotImplementedError
- * dispatch miss. */
-static int rocke_epi_lane_to_output(rocke_ir_builder_t* b,
-                                    const rocke_mfma_atom_t* atom,
-                                    rocke_value_t* lane,
-                                    int i,
-                                    rocke_value_t** out_row,
-                                    rocke_value_t** out_col)
-{
-    if(atom->m == 16 && atom->n == 16)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python (atoms.py:572):
-         *   row = b.add(b.mul(m_blk, b.const_i32(c_per_lane)), b.const_i32(i))
-         * The b.mul subtree (and its inner const) runs before b.const_i32(i).
-         * Sequence into temporaries so C arg-evaluation order does not perturb
-         * the SSA numbering. */
-        rocke_value_t* row_mul = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->c_per_lane));
-        rocke_value_t* row_ci = rocke_b_const_i32(b, i);
-        rocke_value_t* row = rocke_b_add(b, row_mul, row_ci);
-        *out_row = row;
-        *out_col = n_in_atom;
-        return 0;
-    }
-    if(atom->m == 32 && atom->n == 32)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        int rb = i / 4;
-        int ri = i % 4;
-        /* Python (atoms.py:580-583):
-         *   row = b.add(
-         *       b.add(b.const_i32(rb * 8), b.mul(m_blk, b.const_i32(4))),
-         *       b.const_i32(ri))
-         * Evaluation order is strictly left-to-right:
-         *   const(rb*8); const(4); mul; inner add; const(ri); outer add.
-         * Sequence into temporaries to keep the SSA numbering byte-identical. */
-        rocke_value_t* rb_ci = rocke_b_const_i32(b, rb * 8);
-        rocke_value_t* row_mul = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, 4));
-        rocke_value_t* row_in = rocke_b_add(b, rb_ci, row_mul);
-        rocke_value_t* ri_ci = rocke_b_const_i32(b, ri);
-        rocke_value_t* row = rocke_b_add(b, row_in, ri_ci);
-        *out_row = row;
-        *out_col = n_in_atom;
-        return 0;
-    }
-    if(atom->m == 4 && atom->n == 4)
-    {
-        rocke_value_t* c4 = rocke_b_const_i32(b, 4);
-        rocke_value_t* lane_in_batch = rocke_b_mod(b, lane, c4);
-        *out_row = rocke_b_const_i32(b, i);
-        *out_col = lane_in_batch;
-        return 0;
-    }
-    rocke_i_set_err(
-        b, ROCKE_ERR_NOTIMPL, "no lane_to_output dispatch for atom %dx%d", atom->m, atom->n);
-    return -1;
-}
-
 /* ============================ DirectEpilogue ============================ */
 
 int rocke_direct_epilogue_row_stride_per_slot(const rocke_direct_epilogue_t* epi)
@@ -289,8 +221,7 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                 rocke_value_t* off_elems;
                 rocke_value_t* off_bytes;
                 rocke_value_t* safe;
-                if(rocke_epi_lane_to_output(b, atom, grid->lane, 0, &row_off, &col_off) != 0)
-                    return;
+                rocke_mfma_atom_lane_to_output(b, atom, grid->lane, 0, &row_off, &col_off);
                 m_val = rocke_b_add(b, atom_m_off, row_off);
                 n_val = rocke_b_add(b, atom_n_off, col_off);
                 ok = rocke_direct_epilogue_bounds_check(
@@ -369,8 +300,7 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                     rocke_value_t* off_elems;
                     rocke_value_t* off_bytes;
                     rocke_value_t* safe;
-                    if(rocke_epi_lane_to_output(b, atom, grid->lane, i, &row_off, &col_off) != 0)
-                        return;
+                    rocke_mfma_atom_lane_to_output(b, atom, grid->lane, i, &row_off, &col_off);
                     m_val = rocke_b_add(b, atom_m_off, row_off);
                     n_val = rocke_b_add(b, atom_n_off, col_off);
                     ok = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bounds_m, bounds_n, 1);
@@ -623,10 +553,8 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
                     }
                     else
                     {
-                        if(rocke_epi_lane_to_output(
-                               b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
-                           != 0)
-                            return;
+                        rocke_mfma_atom_lane_to_output(
+                            b, atom, grid->lane, i, &row_in_atom, &col_in_atom);
                     }
                     ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
                     ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
@@ -697,15 +625,18 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
         if(_fp32_out)
         {
+            /* Python: b.smem_load_vN(c_smem, row, col, dtype=F32, n=...) -- the
+             * generic vector load, not smem_load_vN_f32 (whose result name
+             * differs), so the f32 tile reads mirror it. */
             if(sv == 1)
             {
-                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, 1);
+                rocke_value_t* vf32 = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_f32(), 1);
                 rocke_b_buffer_store_f32(
                     b, d_rsrc, safe, rocke_b_const_i32(b, 0), rocke_b_vec_extract(b, vf32, 0));
             }
             else
             {
-                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, sv);
+                rocke_value_t* vf32 = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_f32(), sv);
                 rocke_b_buffer_store_vN_f32(b, d_rsrc, safe, rocke_b_const_i32(b, 0), vf32, sv);
             }
         }
@@ -894,10 +825,8 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                     }
                     else
                     {
-                        if(rocke_epi_lane_to_output(
-                               b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
-                           != 0)
-                            return;
+                        rocke_mfma_atom_lane_to_output(
+                            b, atom, grid->lane, i, &row_in_atom, &col_in_atom);
                     }
                     ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
                     ld_n = rocke_b_add(b, tile_n_base, col_in_atom);

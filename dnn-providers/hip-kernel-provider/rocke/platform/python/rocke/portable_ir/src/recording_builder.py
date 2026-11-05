@@ -15,7 +15,8 @@ IR). Rolling builds on top of it.
 Interception points (the IRBuilder internals this depends on):
   - ``param``                  -> records a param instruction
   - ``_emit(op)``              -> the single choke point every op flows through
-  - ``push_region``/``pop_region`` -> tracks region nesting for scf.for/scf.if
+  - ``push_region``/``pop_region`` -> tracks region nesting for scf.for/scf.if/
+                                      scf.if_else
 
 Because recording rides ``_emit``/region management rather than the public
 op-builder methods, **new ops are captured automatically** (no per-op code). If
@@ -84,6 +85,23 @@ def _result_fields(op: Op) -> Dict[str, Any]:
     }
 
 
+# The refusal for an scf.if_else that yields values. Its results' types live
+# only on the op (an scf.for's come from its iter inits), and the recipe's
+# scf_if_else carries none, so a recorded one would replay with its results
+# unbound. The C recipe VM (recipe_vm.cpp) and the IR JSON importer
+# (ir_import_json.cpp) refuse one with the same text.
+IF_ELSE_RESULTS_UNSUPPORTED = (
+    "portable IR does not support an scf.if_else with results; "
+    "lower the kernel directly"
+)
+
+
+def refuse_if_else_results(op: Op) -> None:
+    """Refuse recording the ``scf.if_else`` ``op`` when it yields values."""
+    if op.results:
+        raise NotImplementedError(IF_ELSE_RESULTS_UNSUPPORTED)
+
+
 def shallow_instr(op: Op) -> Tuple[Dict[str, Any], List[List]]:
     """Build the recipe instruction for `op` with EMPTY region bodies, returning
     (instr, [body_list_per_region]). The body lists are filled by the recorder
@@ -120,15 +138,31 @@ def shallow_instr(op: Op) -> Tuple[Dict[str, Any], List[List]]:
             instr["else"] = else_body
             bodies.append(else_body)
         return instr, bodies
+    if op.name == "scf.if_else":
+        # Converging if/else: always exactly two regions (then, else) that join
+        # at one block. A distinct recipe op rather than scf_if + "else": an
+        # engine that predates it must refuse the recipe, not silently drop the
+        # else arm (older VMs ignore unknown keys on scf_if).
+        refuse_if_else_results(op)
+        t_body: List = []
+        e_body: List = []
+        instr = {
+            "op": "scf_if_else",
+            "cond": _reg(op.operands[0]),
+            "then": t_body,
+            "else": e_body,
+        }
+        return instr, [t_body, e_body]
     if op.name == "cf.return":
         return {"op": "ret"}, []
-    # Generic op. Region-bearing ops other than scf.* are not representable yet;
+    # Generic op. Other region-bearing ops are not representable yet;
     # raising here makes a new region-bearing op a loud test failure (the intended
     # "alert developers" behavior) rather than a silent capture gap.
     if op.regions:
         raise NotImplementedError(
             f"RecordingIRBuilder: region-bearing op {op.name!r} is not supported "
-            f"(only scf.for / scf.if). Extend shallow_instr() to record it."
+            f"(only scf.for / scf.if / scf.if_else). Extend shallow_instr() to "
+            f"record it."
         )
     instr: Dict[str, Any] = {
         "op": "emit",
@@ -151,6 +185,9 @@ def _conv_ops(ops: List[Op]) -> List[Dict[str, Any]]:
             instr["then"] = _conv_ops(op.regions[0].ops)
             if len(op.regions) > 1:
                 instr["else"] = _conv_ops(op.regions[1].ops)
+        elif op.name == "scf.if_else":
+            instr["then"] = _conv_ops(op.regions[0].ops)
+            instr["else"] = _conv_ops(op.regions[1].ops)
         out.append(instr)
     return out
 

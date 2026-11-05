@@ -75,6 +75,9 @@ namespace TensileLite
             const std::string LDC = "ldc";
             const std::string LDD = "ldd";
 
+            const std::string World          = "world";
+            const std::string FusedA2AExtent = "fused-a2a-extent";
+
             const std::string TotalFlops   = "total-flops";
             const std::string ProblemSizes = "problem-sizes";
 

@@ -29,6 +29,7 @@ The things that can quietly break the lane:
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -47,6 +48,7 @@ PLATFORM = Path(__file__).resolve().parents[2]
 LOWER_LLVM = PLATFORM / "python" / "rocke" / "core" / "lower_llvm.py"
 CPP_CORE = PLATFORM / "cpp" / "core" / "lower_llvm" / "core.cpp"
 CHECK_GATE = PLATFORM / "tools" / "check_arch_domain.py"
+_RUN_ALL_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 
 # Three tests below read the *sources* -- the Python emitter, the C++ core, the
 # gate script -- which `install(DIRECTORY tests/)` does not ship. Skip those
@@ -72,6 +74,27 @@ def _committed_flavors() -> list[str]:
 def test_at_least_one_column_is_committed() -> None:
     """Without this, every test below would pass vacuously."""
     assert _committed_flavors(), "no committed arch-domain column to test against"
+
+
+def test_every_lane_has_a_column_or_an_alias() -> None:
+    """A lane with neither would silently run without the qualification gate."""
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    assert [flavor for flavor in LLVM_FLAVORS if arch_domain.load(flavor) is None] == []
+
+
+def test_a_column_alias_borrows_its_emission_alias_and_retires() -> None:
+    """An alias follows profile sharing and disappears when its own column lands."""
+    from rocke.core.llvm_profile import LLVM_EMISSION_ALIASES
+
+    committed = set(arch_domain.committed_flavors())
+    for lane, source in arch_domain.COLUMN_ALIASES.items():
+        assert LLVM_EMISSION_ALIASES.get(lane) == source, lane
+        assert source in committed, lane
+        assert lane not in committed, f"{lane} has its own column; drop the alias"
+        table = arch_domain.load(lane)
+        assert table is arch_domain.load(source)
+        assert table.flavor == source
 
 
 def test_only_arch_absent_is_negative() -> None:
@@ -154,6 +177,47 @@ def test_a_malformed_column_is_rejected_not_emptied() -> None:
     ):
         with pytest.raises(ValueError):
             arch_domain.ArchDomain("llvm22", doc)
+
+
+def _column_with_processors(processors: object) -> dict:
+    return {"schema": arch_domain.SCHEMA, "keys": {}, "processors": processors}
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{"accepted": "false"}, {"accepted": 0}, {"accepted": None}, {}, True],
+    ids=["string", "integer", "null", "no_answer", "not_an_object"],
+)
+def test_a_processor_answer_that_is_not_a_boolean_is_rejected(entry) -> None:
+    """``{"accepted": "false"}`` must not read as acceptance: the column is
+    refused when it is read, so no compile routing or generated C++ table can
+    act on it."""
+    with pytest.raises(ValueError) as error:
+        arch_domain.ArchDomain("llvm22", _column_with_processors({"gfx1154": entry}))
+    assert str(error.value) == (
+        f"arch-domain column for llvm22 records processor 'gfx1154' as {entry!r}; "
+        "expected an object whose `accepted` is true or false. Regenerate it with "
+        "tools/gen_arch_domain.py."
+    )
+
+
+def test_a_processors_field_that_is_not_an_object_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"has a `processors` list, not a JSON object"):
+        arch_domain.ArchDomain("llvm22", _column_with_processors(["gfx1154"]))
+
+
+def test_a_recorded_processor_answer_is_returned_as_recorded() -> None:
+    """A recorded answer is that boolean; a processor with no entry is None."""
+    table = arch_domain.ArchDomain(
+        "llvm22",
+        _column_with_processors(
+            {"gfx1154": {"accepted": False}, "gfx11-generic": {"accepted": True}}
+        ),
+    )
+    assert table.accepts_processor("gfx1154") is False
+    assert table.accepts_processor("gfx11-generic") is True
+    assert table.accepts_processor("gfx1100") is None
+    assert table.processors() == ("gfx1154", "gfx11-generic")
 
 
 def test_every_committed_column_declares_the_schema_it_is() -> None:
@@ -495,8 +559,8 @@ def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
     and every one of them is a measured negative on that arch.
 
     Found from the committed tables rather than named, so the test keeps
-    meaning something when the data moves. At llvm23 the pair is
-    ``mfma.scale.f32.16x16x128.f8f6f4`` / ``mfma.f32.16x16x128.fp8.hero``.
+    meaning something when the data moves. No committed table has an aliased
+    declare today, so the tests that need one skip until one does.
     """
     from rocke.core.lower_llvm import _decls_for_flavor
 
@@ -762,8 +826,13 @@ def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -
 
 @_needs_sources
 def test_the_corpus_gate_is_green() -> None:
-    """Delegates to the gate rather than re-deriving its rules, so the tool and
-    the test cannot disagree about what the lane is allowed to say."""
+    """Delegate unless this runner invocation already proved the full corpus.
+
+    Standalone and installed pytest do not receive the private completion marker,
+    so they continue to own the same fail-closed corpus check.
+    """
+    if os.environ.get(_RUN_ALL_COMPLETE_ENV) == "1":
+        pytest.skip("run_all.py already completed the full arch-domain gate")
     tool = PLATFORM / "tools" / "check_arch_domain.py"
     proc = subprocess.run([sys.executable, str(tool)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -803,6 +872,27 @@ def _lower_dpp8(flavor: str) -> str:
     return _lower_kernel_to_llvm_python(
         _dpp8_kernel(), arch=_DPP8_ARCH, llvm_flavor=flavor
     )
+
+
+def test_a_borrowing_lane_refuses_at_its_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A borrowed column keeps Python and C++ diagnostics on its source lane."""
+    if not arch_domain.COLUMN_ALIASES:
+        pytest.skip("every qualified lane has its own committed column")
+    monkeypatch.setenv(arch_domain.MODE_ENV, "error")
+    tested: list[str] = []
+    for lane, source in arch_domain.COLUMN_ALIASES.items():
+        table = arch_domain.load(source)
+        assert table is not None
+        cell = table.lookup(_DPP8_KEY, _DPP8_ARCH)
+        if cell is None or not arch_domain.is_negative(cell.status):
+            continue
+        with pytest.raises(ArchDomainError) as refused:
+            _lower_dpp8(lane)
+        assert refused.value.flavor == source, lane
+        tested.append(lane)
+    assert tested, "no borrowing lane had the negative test cell"
 
 
 def _waive(monkeypatch: pytest.MonkeyPatch, *cells: tuple[str, str, str]) -> None:

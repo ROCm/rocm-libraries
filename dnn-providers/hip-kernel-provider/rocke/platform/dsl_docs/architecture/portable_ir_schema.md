@@ -158,10 +158,12 @@ induction variables and spec-derived integers), and IR-value registers holding
 | `static_if` | `pred: <intexpr>`, `then`, `else?` | compile-time branch |
 | `scf_for` | `iv`, `lo`, `hi`, `step`, `iter`, `results`, `body` | runtime loop |
 | `scf_if` | `cond`, `then` | runtime branch |
+| `scf_if_else` | `cond`, `then`, `else` | runtime if/else converging at one join block (`scf.if_else`); recipe ABI level 3 |
 | `ret` | — | `rocke_b_ret` |
 
 `static_for` and `static_if` are the compile-time layer: they run in the VM and
-leave no trace in the emitted IR. `scf_for` and `scf_if` emit real control flow.
+leave no trace in the emitted IR. `scf_for`, `scf_if` and `scf_if_else` emit real
+control flow.
 
 **Integer expressions.** Anywhere a size or constant appears:
 

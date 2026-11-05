@@ -31,6 +31,7 @@
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 
@@ -241,6 +242,17 @@ public:
         std::lock_guard<std::mutex> lock(Instance().m_mutex);
         Instance().m_pool.clear();
         Instance().m_pool_managed.clear();
+    }
+
+    // Bytes held by idle buffers, i.e. what ReleaseCached would free.
+    static size_t CachedBytes()
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        size_t                      bytes = 0;
+        for(const auto* pool : {&Instance().m_pool, &Instance().m_pool_managed})
+            for(const M& m : *pool)
+                bytes += m.capacity();
+        return bytes;
     }
 
 private:
@@ -466,10 +478,10 @@ public:
         , m_bytes((s + m_pad * 2) * realDataTypeSize(dtype))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // Use a nonzero pattern throughout the guard so zero stores are detected.
         if(!m_init_guard_type)
         {
-            hipblaslt_init_nan(m_guard_type, MEM_MAX_GUARD_PAD);
+            std::fill_n(m_guard_type, sizeof(m_guard_type), static_cast<char>(0xa5));
             m_init_guard_type = true;
         }
     }

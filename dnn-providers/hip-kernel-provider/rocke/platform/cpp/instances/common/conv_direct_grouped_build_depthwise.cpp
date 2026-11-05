@@ -80,7 +80,9 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
     ctx->BLOCK_CH = rocke_direct_depthwise_block_ch(spec);
     ctx->c_stride_dw = ctx->p.stride > 0 ? ctx->p.stride : 1;
     ctx->Ho = (ctx->p.H + 2 * ctx->p.PAD - ctx->p.KH) / ctx->c_stride_dw + 1;
-    ctx->Wo = (ctx->p.W + 2 * ctx->p.PAD - ctx->p.KW) / ctx->c_stride_dw + 1;
+    ctx->Wo
+        = (ctx->p.W + 2 * rocke_direct_conv_problem_pad_w(&ctx->p) - ctx->p.KW) / ctx->c_stride_dw
+          + 1;
     ctx->n_iters = ctx->p.H + ctx->p.KH - 1;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
@@ -154,7 +156,7 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
 void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* b_desc = naive("B", [total_k, KH, KW, 1], coord_names=(k,r,s,c)) */
     {
