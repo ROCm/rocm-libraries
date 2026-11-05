@@ -260,6 +260,21 @@ Row viewRow(const std::string& view)
     return row;
 }
 
+// The one view of a built case as "<view> of <owner> + <bytes>", or "" when it has none.
+std::string viewOf(const BuiltCase& built)
+{
+    if(built.views.size() > 1)
+    {
+        throw std::runtime_error("more than one view");
+    }
+    if(built.views.empty())
+    {
+        return "";
+    }
+    const auto& view = built.views.front();
+    return view.tensor + " of " + view.owner + " + " + std::to_string(view.byteOffset);
+}
+
 std::vector<int64_t> scaled(std::vector<int64_t> tokens, int64_t stride)
 {
     for(auto& token : tokens)
@@ -711,7 +726,7 @@ TEST(TestCaseGraph, LengthAndOffsetAxesAreRealised)
     {
         EXPECT_TRUE(sdpa_case_flow::isRealisedContentAxis(axis)) << axis;
     }
-    EXPECT_FALSE(sdpa_case_flow::isRealisedContentAxis("tensor_overlap"));
+    EXPECT_TRUE(sdpa_case_flow::isRealisedContentAxis("tensor_overlap"));
 }
 
 TEST(TestCaseGraph, ClassValuesRejectAnUnknownOffsetLayout)
@@ -739,7 +754,8 @@ TEST(TestCaseGraph, ViewOfKReadsThroughKStrides)
     EXPECT_EQ(stridesOf(built, "v"), (std::vector<int64_t>{8 * 64 * 192, 64 * 192, 192, 1}));
     EXPECT_EQ(stridesOf(built, "v"), stridesOf(built, "k"));
     EXPECT_NE(built.realised.find("v_view_of=k"), std::string::npos) << built.realised;
-    EXPECT_EQ(built.realised.find("view_exceeds_owner"), std::string::npos) << built.realised;
+    EXPECT_EQ(viewOf(built), "v of k + 0");
+    EXPECT_TRUE(built.notRealised.empty());
 }
 
 TEST(TestCaseGraph, ViewOfQReadsThroughQStrides)
@@ -753,9 +769,11 @@ TEST(TestCaseGraph, ViewOfQReadsThroughQStrides)
     EXPECT_EQ(stridesOf(built, "k"), (std::vector<int64_t>{64 * 8 * 128, 128, 8 * 128, 1}));
     EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
     EXPECT_NE(built.realised.find("k_view_of=q"), std::string::npos) << built.realised;
+    EXPECT_EQ(viewOf(built), "k of q + 0");
+    EXPECT_TRUE(built.notRealised.empty());
 }
 
-TEST(TestCaseGraph, ViewLargerThanItsOwnerIsMarked)
+TEST(TestCaseGraph, ViewLargerThanItsOwnerKeepsItsOwnBuffer)
 {
     auto row = viewRow("k");
     row["dim_order_q"] = "bshd";
@@ -763,7 +781,138 @@ TEST(TestCaseGraph, ViewLargerThanItsOwnerIsMarked)
     z.dv = 192;
     const auto built = build(row, z);
     EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
-    EXPECT_NE(built.realised.find("k_view_exceeds_owner"), std::string::npos) << built.realised;
+    EXPECT_EQ(viewOf(built), "");
+    EXPECT_EQ(built.notRealised,
+              std::vector<std::string>{"tensor_overlap=inputs_overlap(view-does-not-fit)"});
+}
+
+TEST(TestCaseGraph, ViewWithEqualHeadDimsSharesItsOwnersMemory)
+{
+    const auto built = build(viewRow("v"), sizes(2, 64, 64));
+    EXPECT_EQ(viewOf(built), "v of k + 0");
+    EXPECT_EQ(stridesOf(built, "v"), stridesOf(built, "k"));
+    EXPECT_TRUE(built.notRealised.empty());
+}
+
+TEST(TestCaseGraph, ViewReadsThroughItsOwnersPaddedStrides)
+{
+    auto row = viewRow("v");
+    row["strides_k"] = "padded";
+    const auto built = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(viewOf(built), "v of k + 0");
+    EXPECT_EQ(stridesOf(built, "v"), (std::vector<int64_t>{8 * 64 * 144, 64 * 144, 144, 1}));
+    EXPECT_EQ(stridesOf(built, "v"), stridesOf(built, "k"));
+}
+
+TEST(TestCaseGraph, ViewOfQWithShorterKeysSharesQsMemory)
+{
+    auto z = sizes(2, 64, 32);
+    z.dv = 192;
+    const auto built = build(viewRow("k"), z);
+    EXPECT_EQ(viewOf(built), "k of q + 0");
+    EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
+}
+
+TEST(TestCaseGraph, ViewWithMoreHeadsThanItsOwnerKeepsItsOwnBuffer)
+{
+    auto z = sizes(2, 64, 64);
+    z.hk = 2;
+    z.hv = 4;
+    const auto built = build(viewRow("v"), z);
+    EXPECT_EQ(viewOf(built), "");
+    EXPECT_EQ(built.notRealised,
+              std::vector<std::string>{"tensor_overlap=inputs_overlap(view-does-not-fit)"});
+}
+
+TEST(TestCaseGraph, ViewOfAnotherDataTypeKeepsItsOwnBuffer)
+{
+    auto row = viewRow("v");
+    row["dtype_v_vs_q"] = "differs";
+    const auto built = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(viewOf(built), "");
+    EXPECT_EQ(built.notRealised,
+              std::vector<std::string>{"tensor_overlap=inputs_overlap(view-dtype-differs)"});
+}
+
+TEST(TestCaseGraph, ViewWithItsOwnLayoutKeepsItsOwnBuffer)
+{
+    // A packed V has K's strides here, but its layout values are its own.
+    for(const char* strides : {"packed", "padded"})
+    {
+        auto row = baseRow();
+        row["tensor_overlap"] = "inputs_overlap";
+        row["strides_v"] = strides;
+        const auto built = build(row, sizes(2, 64, 64));
+        EXPECT_EQ(viewOf(built), "") << strides;
+        EXPECT_EQ(
+            built.notRealised,
+            std::vector<std::string>{"tensor_overlap=inputs_overlap(view-layout-not-inherited)"})
+            << strides;
+    }
+}
+
+TEST(TestCaseGraph, RaggedViewKeepsItsOwnBuffer)
+{
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
+    row["tensor_overlap"] = "inputs_overlap";
+    row["strides_v"] = "inherited";
+    row["dim_order_v"] = "inherited";
+    const auto built = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(viewOf(built), "");
+    EXPECT_EQ(built.notRealised, std::vector<std::string>{"tensor_overlap=inputs_overlap(ragged)"});
+}
+
+TEST(TestCaseGraph, PagedViewKeepsItsOwnBuffer)
+{
+    auto row = pagedRow("dense");
+    row["tensor_overlap"] = "inputs_overlap";
+    row["strides_v"] = "inherited";
+    row["dim_order_v"] = "inherited";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(viewOf(built), "");
+    EXPECT_EQ(built.notRealised, std::vector<std::string>{"tensor_overlap=inputs_overlap(paged)"});
+}
+
+TEST(TestCaseGraph, ViewWithAnotherAlignmentKeepsItsOwnBuffer)
+{
+    auto row = viewRow("v");
+    row["alignment_v"] = "element_aligned";
+    const auto built = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(viewOf(built), "");
+    EXPECT_EQ(built.notRealised,
+              std::vector<std::string>{"tensor_overlap=inputs_overlap(view-alignment-differs)"});
+    EXPECT_EQ(built.startOffsets.count("v"), 1u);
+}
+
+TEST(TestCaseGraph, ViewMovesWithItsShiftedOwner)
+{
+    auto row = viewRow("v");
+    row["alignment_k"] = "element_aligned";
+    row["alignment_v"] = "element_aligned";
+    const auto built = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(viewOf(built), "v of k + 0");
+    EXPECT_EQ(built.startOffsets, (std::map<std::string, int64_t>{{"k", 2}}));
+}
+
+TEST(TestCaseGraph, OutputOverlapsKeepSeparateBuffers)
+{
+    for(const char* overlap : {"output_overlaps_input", "outputs_overlap"})
+    {
+        auto row = baseRow();
+        row["tensor_overlap"] = overlap;
+        const auto built = build(row, sizes(2, 64, 64));
+        EXPECT_EQ(viewOf(built), "") << overlap;
+        EXPECT_EQ(built.notRealised,
+                  std::vector<std::string>{std::string("tensor_overlap=") + overlap
+                                           + "(output-overlap)"});
+    }
+}
+
+TEST(TestCaseGraph, SeparateBuffersHaveNoView)
+{
+    const auto built = build(baseRow(), sizes(2, 64, 64));
+    EXPECT_TRUE(built.views.empty());
+    EXPECT_TRUE(built.notRealised.empty());
 }
 
 TEST(TestCaseGraph, OnlyKAndVCanBeViews)
@@ -1386,7 +1535,7 @@ TEST(TestCaseGraph, RaggedViewLargerThanItsOwnerThrows)
         return fits;
     }()));
 
-    // More V heads than K heads stay inside V's own buffer.
+    // More V heads than K heads reach past K's buffer.
     auto vView = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
     vView["tensor_overlap"] = "inputs_overlap";
     vView["strides_v"] = "inherited";
@@ -1394,7 +1543,27 @@ TEST(TestCaseGraph, RaggedViewLargerThanItsOwnerThrows)
     auto moreHeads = sizes(2, 64, 64);
     moreHeads.hk = 2;
     moreHeads.hv = 4;
+    EXPECT_THROW(build(vView, moreHeads), CaseRealisationError);
+    moreHeads.hv = 2;
     EXPECT_NO_THROW(build(vView, moreHeads));
+}
+
+TEST(TestCaseGraph, RaggedViewOfTokenMajorOwnerComparesFootprints)
+{
+    // A dense S,B,H,D Q has a sequence stride of B x H x D, so a ragged K that inherits it spans
+    // B x S_kv token slots at that stride: it fits only when B x S_kv <= S_q.
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
+    row["tensor_overlap"] = "inputs_overlap";
+    row["strides_k"] = "inherited";
+    row["dim_order_k"] = "inherited";
+    row["dim_order_q"] = "other_permutation";
+    auto z = sizes(2, 64, 64);
+    z.dv = 192;
+    EXPECT_THROW(build(row, z), CaseRealisationError);
+    z.skv = 32;
+    EXPECT_NO_THROW(build(row, z));
+    z.skv = 33;
+    EXPECT_THROW(build(row, z), CaseRealisationError);
 }
 
 TEST(TestCaseGraph, RaggedPagedKeyKeepsThePagePoolLayout)

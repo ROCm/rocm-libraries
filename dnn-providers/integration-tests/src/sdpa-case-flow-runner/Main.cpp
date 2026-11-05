@@ -19,6 +19,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -47,6 +48,7 @@
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -67,11 +69,14 @@
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/RngDumpHandoff.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace
 {
@@ -1240,6 +1245,7 @@ struct Comparison
     bool refAgree = false;
     std::vector<std::string> refFlags;
     std::vector<std::pair<std::string, ElementStats>> elements;
+    std::vector<std::string> liveRowsUnapplied;
 
     std::string json() const
     {
@@ -1284,6 +1290,7 @@ struct Comparison
             line.raw("elements", elementJson.done());
         }
         line.boolean("pass", pass)
+            .raw("live_rows_unapplied", jsonStringArray(liveRowsUnapplied))
             .raw("mismatched", jsonStringArray(mismatched))
             .raw("reports", jsonStringArray(reports))
             .num("t_compare_first_us", tFirstUs)
@@ -1371,14 +1378,67 @@ std::map<int64_t, RaggedBinding> raggedOutputBindings(const fbd::Graph& graph,
     return bindings;
 }
 
+// The SDPA forward row statistics (Stats, logit_max, score_sum_exp) that are dense while the
+// graph gives per-sequence query lengths: through the seq_len_q tensor, or the ragged Q. Neither
+// reference defines their rows past a sequence's live length, so a comparison skips those rows.
+std::vector<it::OutputLiveRows>
+    rowStatisticLiveRows(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                         const std::map<int64_t, TensorPtr>& attrs,
+                         const std::vector<int64_t>& outputUids)
+{
+    std::vector<it::OutputLiveRows> rows;
+    for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
+    {
+        const auto* sdpa = wrapper.getNode(i).attributes_as_SdpaAttributes();
+        if(sdpa == nullptr)
+        {
+            continue;
+        }
+        const bool raggedQ = attrs.count(sdpa->q_tensor_uid()) != 0
+                             && attrs.at(sdpa->q_tensor_uid())->get_ragged_offset() != nullptr;
+        if(!sdpa->seq_len_q_tensor_uid().has_value() && !raggedQ)
+        {
+            continue;
+        }
+        for(const auto& uid :
+            {sdpa->stats_tensor_uid(), sdpa->max_tensor_uid(), sdpa->sum_exp_tensor_uid()})
+        {
+            if(!uid.has_value()
+               || std::find(outputUids.begin(), outputUids.end(), *uid) == outputUids.end()
+               || attrs.at(*uid)->get_ragged_offset() != nullptr
+               || attrs.at(*uid)->get_dim().size()
+                      <= static_cast<size_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS))
+            {
+                continue;
+            }
+            it::OutputLiveRows entry;
+            entry.uid = *uid;
+            if(sdpa->seq_len_q_tensor_uid().has_value())
+            {
+                entry.axis = hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS;
+                entry.lengthsUid = *sdpa->seq_len_q_tensor_uid();
+            }
+            else
+            {
+                entry.likeUid = sdpa->q_tensor_uid();
+            }
+            rows.push_back(entry);
+        }
+    }
+    return rows;
+}
+
 // The matching-infinities validator has no device implementation, so stats outputs are
 // compared on the host whatever `site` is. A ragged output is compared through a ragged view on
-// the host: rows past each sequence's live tokens are not compared, as in the bundle harness.
+// the host: rows past each sequence's live tokens are not compared, as in the bundle harness. So
+// is each output of `liveRows` that the harness can resolve against the run's tensors; the others
+// are compared whole and named in `live_rows_unapplied`.
 Comparison compareBundles(const std::string& against,
                           const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                           const std::vector<int64_t>& outputUids,
                           const std::map<int64_t, TensorPtr>& attrs,
                           const std::map<int64_t, RaggedBinding>& ragged,
+                          const std::vector<it::OutputLiveRows>& liveRows,
                           it::bundle::OutputTensors& actualDense,
                           Bundle& expected,
                           it::ValidationSite site,
@@ -1397,7 +1457,11 @@ Comparison compareBundles(const std::string& against,
         {
             statsLabels.insert(it::bundle::tensorLabel(uid, attrs.at(uid)->get_name()));
         }
-        if(statsUids.count(uid) != 0 || ragged.count(uid) != 0)
+        const bool liveRowOutput
+            = std::any_of(liveRows.begin(), liveRows.end(), [uid](const auto& entry) {
+                  return entry.uid == uid;
+              });
+        if(statsUids.count(uid) != 0 || ragged.count(uid) != 0 || liveRowOutput)
         {
             hostOutputs.push_back(uid);
         }
@@ -1451,6 +1515,60 @@ Comparison compareBundles(const std::string& against,
                 *expected.tensors.at(uid), type, offsets, binding.multiplier, lengths);
             actual[uid] = sdpa_case_flow::raggedView(
                 *actualDense.at(uid), type, offsets, binding.multiplier, lengths);
+        }
+        std::vector<std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> raggedInputs;
+        const auto runTensor = [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor* {
+            const auto found = expected.tensors.find(uid);
+            if(found == expected.tensors.end())
+            {
+                return nullptr;
+            }
+            const auto& attr = attrs.at(uid);
+            const auto offset = attr->get_ragged_offset();
+            if(offset == nullptr)
+            {
+                return found->second.get();
+            }
+            raggedInputs.push_back(sdpa_case_flow::raggedView(
+                *found->second,
+                hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
+                expected.tensors.at(offset->get_uid()),
+                attr->get_ragged_offset_multiplier(),
+                nullptr));
+            return raggedInputs.back().get();
+        };
+        for(const auto& entry : liveRows)
+        {
+            if(std::find(outputUids.begin(), outputUids.end(), entry.uid) == outputUids.end())
+            {
+                continue;
+            }
+            const auto type = hipdnn_test_sdk::utilities::frontendToSdkDataType(
+                attrs.at(entry.uid)->get_data_type());
+            try
+            {
+                const auto resolved = it::bundle::resolveLiveRows({entry}, wrapper, runTensor);
+                const auto& rows = resolved.at(entry.uid);
+                if(std::all_of(rows.lengths.begin(), rows.lengths.end(), [](int64_t length) {
+                       return length == 0;
+                   }))
+                {
+                    throw std::invalid_argument("every live length is 0");
+                }
+                std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> expectedView
+                    = it::bundle::detail::makeLiveRowView(
+                        *expected.tensors.at(entry.uid), type, rows);
+                std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> actualView
+                    = it::bundle::detail::makeLiveRowView(*actualDense.at(entry.uid), type, rows);
+                expectedViews[entry.uid] = std::move(expectedView);
+                actual[entry.uid] = std::move(actualView);
+            }
+            catch(const std::exception& e)
+            {
+                result.liveRowsUnapplied.push_back(
+                    it::bundle::tensorLabel(entry.uid, attrs.at(entry.uid)->get_name()) + ": "
+                    + e.what());
+            }
         }
 
         auto start = Clock::now();
@@ -1602,6 +1720,95 @@ std::map<int64_t, int64_t> startOffsetsByUid(const sdpa_case_flow::BuiltCase& bu
     return byUid;
 }
 
+// The variant pack of a bundle from the harness builder: the bundle's outputs are the tensors
+// of `outputUids`, and every other tensor is an input.
+it::VariantPack
+    variantPackOf(Bundle& bundle,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                  const std::vector<int64_t>& outputUids,
+                  bool useDevice,
+                  const std::vector<it::TensorAlias>& aliases)
+{
+    it::bundle::TensorMap inputs;
+    it::bundle::OutputTensors outputs;
+    const std::set<int64_t> outputSet(outputUids.begin(), outputUids.end());
+    for(const auto& [uid, tensor] : bundle.tensors)
+    {
+        if(outputSet.count(uid) != 0)
+        {
+            outputs.emplace(uid, tensor);
+        }
+        else
+        {
+            inputs.emplace(uid, tensor);
+        }
+    }
+    return it::bundle::detail::buildVariantPack(
+        inputs, outputs, wrapper.getTensorMap(), outputUids, useDevice, aliases);
+}
+
+// Points each view at its owner's entry plus the byte offset, after the owner's entry moved.
+void pointViewsAtOwners(it::VariantPack& variantPack, const std::vector<it::TensorAlias>& aliases)
+{
+    for(const auto& alias : aliases)
+    {
+        variantPack.at(alias.uid)
+            = static_cast<std::byte*>(variantPack.at(alias.ofUid)) + alias.byteOffset;
+    }
+}
+
+// The input of the graph with this name. Throws std::runtime_error when there is not exactly one.
+int64_t inputUidNamed(const std::string& name,
+                      const std::map<int64_t, TensorPtr>& attrs,
+                      const std::set<int64_t>& outputs)
+{
+    std::vector<int64_t> uids;
+    for(const auto& [uid, attr] : attrs)
+    {
+        if(attr->get_name() == name && outputs.count(uid) == 0)
+        {
+            uids.push_back(uid);
+        }
+    }
+    if(uids.size() != 1)
+    {
+        throw std::runtime_error("the view or owner '" + name + "' matches "
+                                 + std::to_string(uids.size())
+                                 + " input tensors of the graph, not 1");
+    }
+    return uids.front();
+}
+
+// The built case's views as harness aliases, by graph tensor uid.
+std::vector<it::TensorAlias> aliasesOf(const sdpa_case_flow::BuiltCase& built,
+                                       const std::map<int64_t, TensorPtr>& attrs,
+                                       const std::set<int64_t>& outputs)
+{
+    std::vector<it::TensorAlias> aliases;
+    for(const auto& view : built.views)
+    {
+        aliases.push_back({inputUidNamed(view.tensor, attrs, outputs),
+                           inputUidNamed(view.owner, attrs, outputs),
+                           view.byteOffset});
+    }
+    return aliases;
+}
+
+std::string tensorViewsJson(const sdpa_case_flow::BuiltCase& built)
+{
+    std::string text = "[";
+    for(size_t i = 0; i < built.views.size(); ++i)
+    {
+        const auto& view = built.views[i];
+        JsonLine one;
+        one.str("tensor", view.tensor)
+            .str("of", view.owner)
+            .integer("byte_offset", view.byteOffset);
+        text += (i == 0 ? "" : ",") + one.done();
+    }
+    return text + "]";
+}
+
 // A copy of `source` that shares its input tensors and owns fresh, sentinel-filled outputs.
 Bundle withFreshOutputs(Bundle& source,
                         const std::map<int64_t, TensorPtr>& attrs,
@@ -1678,7 +1885,6 @@ std::string runCase(size_t index,
             unrealised.push_back(axis + "=" + value);
         }
     }
-    line.raw("unrealised_contents", jsonStringArray(unrealised));
 
     const auto finish
         = [&](const std::string& outcome, const std::string& stage, const std::string& message) {
@@ -1701,10 +1907,14 @@ std::string runCase(size_t index,
     }
     catch(const std::exception& e)
     {
-        line.num("t_build_graph_us", microsSince(stageStart));
+        line.raw("unrealised_contents", jsonStringArray(unrealised))
+            .num("t_build_graph_us", microsSince(stageStart));
         return finish("error", "realise", e.what());
     }
-    line.str("realised", built.realised);
+    unrealised.insert(unrealised.end(), built.notRealised.begin(), built.notRealised.end());
+    line.raw("unrealised_contents", jsonStringArray(unrealised))
+        .str("realised", built.realised)
+        .raw("tensor_views", tensorViewsJson(built));
     {
         JsonLine starts;
         for(const auto& [name, offset] : built.startOffsets)
@@ -1793,18 +2003,40 @@ std::string runCase(size_t index,
         const auto& attrs = graphTensors.attrs;
         const std::vector<int64_t> outputUids(graphTensors.outputs.begin(),
                                               graphTensors.outputs.end());
+        std::vector<it::TensorAlias> aliases;
+        try
+        {
+            aliases = aliasesOf(built, attrs, graphTensors.outputs);
+            it::checkTensorAliases(
+                aliases, wrapper.getTensorMap(), outputUids, it::fillDerivesInputs(*fbGraph));
+        }
+        catch(const std::exception& e)
+        {
+            return finish("error", "fill", std::string("aliases: ") + e.what());
+        }
+        std::set<int64_t> viewUids;
+        for(const auto& alias : aliases)
+        {
+            viewUids.insert(alias.uid);
+        }
         Bundle engineBundle;
         for(const auto& [uid, attr] : attrs)
         {
-            engineBundle.addTensor(
-                *attr, hipdnn_test_sdk::utilities::createTensorFromAttribute(*attr, true));
+            if(viewUids.count(uid) == 0)
+            {
+                engineBundle.addTensor(
+                    *attr, hipdnn_test_sdk::utilities::createTensorFromAttribute(*attr, true));
+            }
         }
         engineBundle.outputTensorIds.insert(outputUids.begin(), outputUids.end());
 
         double tensorMb = 0.0;
         for(const auto& [uid, attr] : attrs)
         {
-            tensorMb += tensorBytes(*attr) / (1024.0 * 1024.0);
+            if(viewUids.count(uid) == 0)
+            {
+                tensorMb += tensorBytes(*attr) / (1024.0 * 1024.0);
+            }
         }
         line.num("tensor_mb", tensorMb);
         if(tensorMb > ctx.opts.maxTensorMb)
@@ -1828,8 +2060,8 @@ std::string runCase(size_t index,
             {
                 contentNotes.push_back(placed.name + ":" + recipeNote(recipes.fill(placed.uid)));
             }
-            const auto fill
-                = it::fillInputs(*fbGraph, engineBundle.tensors, leafInputs, recipes, nullptr);
+            const auto fill = it::fillInputs(
+                *fbGraph, engineBundle.tensors, leafInputs, recipes, nullptr, aliases);
             if(!fill.filled)
             {
                 line.num("t_fill_us", microsSince(stageStart))
@@ -1862,9 +2094,11 @@ std::string runCase(size_t index,
                 }
                 else
                 {
-                    auto variantPack = engineBundle.toDeviceVariantPack();
+                    auto variantPack
+                        = variantPackOf(engineBundle, wrapper, outputUids, true, aliases);
                     const ShiftedStarts shifted(
                         engineBundle.tensors, startOffsetsByUid(built, attrs), variantPack);
+                    pointViewsAtOwners(variantPack, aliases);
                     syncDevice();
                     stageStart = Clock::now();
                     const auto executed = graph.execute(ctx.handle, variantPack, workspace->get());
@@ -1968,6 +2202,7 @@ std::string runCase(size_t index,
         };
         const auto comparedUids = it::bundle::comparedOutputUids(outputUids, rngDump);
         const auto raggedOutputs = raggedOutputBindings(*fbGraph, attrs, graphTensors.outputs);
+        const auto liveRows = rowStatisticLiveRows(wrapper, attrs, outputUids);
 
         // A reference that refuses a ragged layout (std::invalid_argument) cannot check the case;
         // that is not a reference error. The message stays in the record.
@@ -1989,11 +2224,12 @@ std::string runCase(size_t index,
                 else
                 {
                     handOffRngDump(gpuBundle);
-                    auto variantPack = gpuBundle.toDeviceVariantPack();
+                    auto variantPack = variantPackOf(gpuBundle, wrapper, outputUids, true, aliases);
                     // The GPU reference reads and writes at the shifted data starts too, so the
                     // reference comparison checks the shifted copies.
                     const ShiftedStarts shifted(
                         gpuBundle.tensors, startOffsetsByUid(built, attrs), variantPack);
+                    pointViewsAtOwners(variantPack, aliases);
                     syncDevice();
                     stageStart = Clock::now();
                     ctx.gpuRef.execute(blob.data(), blob.size(), variantPack);
@@ -2040,7 +2276,8 @@ std::string runCase(size_t index,
                 else
                 {
                     handOffRngDump(cpuBundle);
-                    auto variantPack = cpuBundle.toHostVariantPack();
+                    auto variantPack
+                        = variantPackOf(cpuBundle, wrapper, outputUids, false, aliases);
                     stageStart = Clock::now();
                     ctx.cpuRef.execute(blob.data(), blob.size(), variantPack);
                     line.num("t_cpu_ref_us", microsSince(stageStart));
@@ -2078,6 +2315,7 @@ std::string runCase(size_t index,
                                            comparedUids,
                                            attrs,
                                            raggedOutputs,
+                                           liveRows,
                                            engineBundle.tensors,
                                            reference,
                                            site)
@@ -2103,6 +2341,7 @@ std::string runCase(size_t index,
                                           comparedUids,
                                           attrs,
                                           raggedOutputs,
+                                          liveRows,
                                           gpuBundle.tensors,
                                           cpuBundle,
                                           it::ValidationSite::HOST,
@@ -2161,6 +2400,43 @@ bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& co
         return reals != nullptr;
     }
     return false;
+}
+
+// True when every length that the contents of `lengthsName` give a batch of `dims` lies in 0 to
+// the extent of the sequence axis and at least one is above 0: with every length 0 a live-row
+// comparison compares no element and fails. Lengths that the case does not write are not checked
+// here.
+bool liveLengthsUsable(const sdpa_case_flow::BuiltCase& built,
+                       const std::string& lengthsName,
+                       const std::vector<int64_t>& dims)
+{
+    const auto found = built.contents.find(lengthsName);
+    if(found == built.contents.end())
+    {
+        return false;
+    }
+    const auto* lengths = std::get_if<std::vector<int64_t>>(&found->second.values);
+    if(lengths == nullptr || lengths->empty())
+    {
+        return false;
+    }
+    const auto extent = dims.at(static_cast<size_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS));
+    bool anyLive = false;
+    for(int64_t b = 0; b < dims.at(0); ++b)
+    {
+        const auto index = static_cast<size_t>(b);
+        if(!found->second.repeat && index >= lengths->size())
+        {
+            return false;
+        }
+        const int64_t length = (*lengths)[index % lengths->size()];
+        if(length < 0 || length > extent)
+        {
+            return false;
+        }
+        anyLive = anyLive || length > 0;
+    }
+    return anyLive;
 }
 
 struct ExportResult
@@ -2243,14 +2519,14 @@ ExportResult prepareCase(const CaseInput& input,
             }
             return fail("content-not-expressible", message);
         }
-        if(!built.startOffsets.empty())
+        if(!built.notRealised.empty())
         {
-            std::string message = "data starts past an aligned allocation start:";
-            for(const auto& [name, offset] : built.startOffsets)
+            std::string message = "tensors that a bundle keeps in separate buffers:";
+            for(const auto& item : built.notRealised)
             {
-                message += " " + name + " +" + std::to_string(offset) + " bytes";
+                message += " " + item;
             }
-            return fail("start-offset-not-expressible", message);
+            return fail("content-not-expressible", message);
         }
 
         result.stage = "validate";
@@ -2306,9 +2582,88 @@ ExportResult prepareCase(const CaseInput& input,
                                 + ") is not a tensor of that name in the graph JSON");
             }
         }
+        const auto jsonUidNamed = [&](const std::string& name) {
+            std::vector<int64_t> uids;
+            for(const auto& [uid, jsonName] : jsonNames)
+            {
+                if(jsonName == name)
+                {
+                    uids.push_back(uid);
+                }
+            }
+            if(uids.size() != 1)
+            {
+                throw std::runtime_error("'" + name + "' names " + std::to_string(uids.size())
+                                         + " tensors of the graph JSON, not 1");
+            }
+            return uids.front();
+        };
+        const auto aliases = aliasesOf(built, graphTensors.attrs, graphTensors.outputs);
+        for(const auto& alias : aliases)
+        {
+            if(jsonUidNamed(graphTensors.attrs.at(alias.uid)->get_name()) != alias.uid
+               || jsonUidNamed(graphTensors.attrs.at(alias.ofUid)->get_name()) != alias.ofUid)
+            {
+                return fail("export-error",
+                            "alias view " + std::to_string(alias.uid) + " of owner "
+                                + std::to_string(alias.ofUid)
+                                + " does not match the uids of the graph JSON");
+            }
+        }
+        auto startOffsets = nlohmann::json::array();
+        for(const auto& [name, offset] : built.startOffsets)
+        {
+            startOffsets.push_back({{"uid", jsonUidNamed(name)}, {"start_offset", offset}});
+        }
+        auto liveRows = nlohmann::json::array();
+        {
+            auto [blob, binaryError] = graph.to_binary();
+            if(!binaryError.is_good() || blob.empty())
+            {
+                return fail("export-error",
+                            "graph does not serialise: " + binaryError.get_message());
+            }
+            const auto wrapper
+                = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                    blob.data(), blob.size());
+            // Serialising assigns a uid to each output the frontend created without one, so the
+            // tensors are collected again to match the serialised graph.
+            const auto serialisedTensors = collectGraphTensors(graph);
+            const std::vector<int64_t> outputUids(serialisedTensors.outputs.begin(),
+                                                  serialisedTensors.outputs.end());
+            for(const auto& entry :
+                rowStatisticLiveRows(wrapper, serialisedTensors.attrs, outputUids))
+            {
+                const auto jsonUid = [&](int64_t uid) {
+                    return jsonUidNamed(serialisedTensors.attrs.at(uid)->get_name());
+                };
+                if(entry.lengthsUid.has_value()
+                   && !liveLengthsUsable(built,
+                                         serialisedTensors.attrs.at(*entry.lengthsUid)->get_name(),
+                                         serialisedTensors.attrs.at(entry.uid)->get_dim()))
+                {
+                    continue;
+                }
+                nlohmann::json json = {{"uid", jsonUid(entry.uid)}};
+                if(entry.lengthsUid.has_value())
+                {
+                    json["axis"] = *entry.axis;
+                    json["lengths"] = jsonUid(*entry.lengthsUid);
+                }
+                else
+                {
+                    json["like"] = jsonUid(*entry.likeUid);
+                }
+                liveRows.push_back(std::move(json));
+            }
+        }
 
         nlohmann::json meta;
         meta["format_version"] = it::requiredFormatVersion(recipes);
+        if(!aliases.empty() || !startOffsets.empty() || !liveRows.empty())
+        {
+            meta["format_version"] = std::max(meta["format_version"].get<int>(), 2);
+        }
         meta["generator"] = EXPORT_GENERATOR;
         meta["generator_version"] = SDPA_CASE_FLOW_RUNNER_SOURCE_HASH;
         meta["reference_source"] = EXPORT_REFERENCE_SOURCE;
@@ -2317,6 +2672,18 @@ ExportResult prepareCase(const CaseInput& input,
         meta["csv_case_id"] = extra("case_id");
         meta["generated_from_sha256"] = opts.sourceSha256;
         meta["inputs"] = recipes.toJson();
+        if(!aliases.empty())
+        {
+            meta["aliases"] = it::toJson(aliases);
+        }
+        if(!startOffsets.empty())
+        {
+            meta["start_offsets"] = std::move(startOffsets);
+        }
+        if(!liveRows.empty())
+        {
+            meta["live_rows"] = std::move(liveRows);
+        }
 
         for(const auto& content : placed)
         {
@@ -2399,6 +2766,48 @@ nlohmann::json graphByTensorName(const nlohmann::json& graph)
     return renamed;
 }
 
+// The metadata with the tensor uids of `aliases`, `start_offsets` and `live_rows` replaced by
+// tensor names, so that two builds of one row compare equal when the frontend numbers the outputs
+// differently.
+nlohmann::json metaByTensorName(const PreparedCase& prepared)
+{
+    std::map<int64_t, std::string> names;
+    for(const auto& tensor : prepared.graph.value("tensors", nlohmann::json::array()))
+    {
+        if(tensor.contains("uid") && tensor["uid"].is_number_integer())
+        {
+            names[tensor["uid"].get<int64_t>()] = tensor.value("name", std::string());
+        }
+    }
+    auto meta = prepared.meta;
+    for(const auto& [section, keys] : std::vector<std::pair<std::string, std::vector<std::string>>>{
+            {"aliases", {"uid", "of"}},
+            {"start_offsets", {"uid"}},
+            {"live_rows", {"uid", "lengths", "like"}}})
+    {
+        if(!meta.contains(section))
+        {
+            continue;
+        }
+        for(auto& entry : meta[section])
+        {
+            for(const auto& key : keys)
+            {
+                if(!entry.contains(key))
+                {
+                    continue;
+                }
+                const auto found = names.find(entry.at(key).get<int64_t>());
+                if(found != names.end())
+                {
+                    entry[key] = found->second;
+                }
+            }
+        }
+    }
+    return meta;
+}
+
 bool writeCase(const std::string& exportDir,
                const std::string& caseId,
                const PreparedCase& prepared)
@@ -2443,10 +2852,10 @@ ExportResult exportCase(const CaseInput& input,
         const std::string caseKey = input.extra.at("case_key");
         // Compare the serialised text: a NaN value is not equal to itself as a JSON number.
         const auto firstGraph = graphByTensorName(prepared.front().graph).dump();
-        const auto firstMeta = prepared.front().meta.dump();
+        const auto firstMeta = metaByTensorName(prepared.front()).dump();
         const bool perArch
             = std::any_of(prepared.begin() + 1, prepared.end(), [&](const PreparedCase& other) {
-                  return other.meta.dump() != firstMeta
+                  return metaByTensorName(other).dump() != firstMeta
                          || graphByTensorName(other.graph).dump() != firstGraph;
               });
 

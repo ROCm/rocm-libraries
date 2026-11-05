@@ -2681,6 +2681,42 @@ def test_grouped_import_keeps_per_input_seeds():
         print("  PASS: grouped_import_keeps_per_input_seeds")
 
 
+def test_grouped_import_keeps_aliases_start_offsets_and_live_rows():
+    """A grouped import that renumbers UIDs keeps each alias, start offset, live-row entry and
+    view seed."""
+    from bundle_utils import aliases_by_name, canonical_uid_map_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        assert uid_map[0] != 0 and uid_map[1] != 1, uid_map
+        sidecar = {
+            "format_version": 2,
+            "seed": 1234,
+            "inputs": {"0": {"seed": 101}, "1": {"seed": 202}, "2": {"seed": 303}},
+            "aliases": [{"uid": 1, "of": 0, "byte_offset": 0}],
+            "start_offsets": [{"uid": 0, "start_offset": 4}],
+            "live_rows": [{"uid": 2, "axis": 1, "lengths": 1}],
+        }
+        _, meta, template, _ = _import_grouped_capture(tmp, graph, sidecar)
+        assert meta["aliases"] == [
+            {"uid": uid_map[1], "of": uid_map[0], "byte_offset": 0}
+        ], meta["aliases"]
+        assert meta["start_offsets"] == [{"uid": uid_map[0], "start_offset": 4}], meta[
+            "start_offsets"
+        ]
+        assert meta["live_rows"] == [
+            {"uid": uid_map[2], "axis": 1, "lengths": uid_map[1]}
+        ], meta["live_rows"]
+        assert aliases_by_name(meta, template) == aliases_by_name(sidecar, graph), meta
+        assert aliases_by_name(meta, template) == [
+            {"view": "dy", "of": "x", "byte_offset": 0}
+        ], meta
+        assert inputs_by_name(meta, template)["dy"] == {"seed": 202}, meta["inputs"]
+        print("  PASS: grouped_import_keeps_aliases_start_offsets_and_live_rows")
+
+
 def test_grouped_topology():
     """--topology names the folder and refuses a mismatch."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -3647,6 +3683,36 @@ def test_superset_index_of_a_sweep_with_only_absent_cases():
         print("  PASS: superset_index_of_a_sweep_with_only_absent_cases")
 
 
+def test_superset_import_keeps_aliases_by_name():
+    """A superset join keeps a case's aliases, inputs and seeds attached to the same tensors."""
+    from bundle_utils import aliases_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        full = _optional_graph()
+        assert _import(tmp, "full", full, bundle_dir, *_SUPERSET_FLAGS).returncode == 0
+        part = _optional_graph(sink=False, seq=8)
+        uid = {t["name"]: t["uid"] for t in part["tensors"]}
+        sidecar = _optional_sidecar(part, 500)
+        sidecar["format_version"] = 2
+        sidecar["aliases"] = [{"uid": uid["v"], "of": uid["k"], "byte_offset": 0}]
+        r = _import_optional(tmp, bundle_dir, "part", part, sidecar, *_SUPERSET_FLAGS)
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        case = next(c for c in sweep["cases"] if c.get("absent_tensors"))
+        _assert_absent_case_loads(sweep, template, case)
+        assert aliases_by_name(case["metadata"], template) == aliases_by_name(
+            sidecar, part
+        ), case["metadata"]
+        assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+            sidecar, part
+        ), case["metadata"]
+        print("  PASS: superset_import_keeps_aliases_by_name")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -3692,6 +3758,7 @@ def main() -> int:
         test_grouped_topology,
         test_grouped_import_keeps_values_inputs,
         test_grouped_import_keeps_per_input_seeds,
+        test_grouped_import_keeps_aliases_start_offsets_and_live_rows,
         test_grouped_runs_are_deterministic,
         test_grouped_attribute_keys_prefixed_per_node,
         test_grouped_engine_api_version_per_case,
@@ -3711,6 +3778,7 @@ def main() -> int:
         test_absent_case_problems_mirror_the_loader,
         test_import_refuses_metadata_uid_moves,
         test_superset_index_of_a_sweep_with_only_absent_cases,
+        test_superset_import_keeps_aliases_by_name,
     ]
 
     for t in tests:

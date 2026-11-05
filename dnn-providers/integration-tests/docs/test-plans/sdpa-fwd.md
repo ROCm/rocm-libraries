@@ -246,7 +246,11 @@ is a view into another input's buffer: V inside K, or K inside Q when V's head
 size is larger. The view reads through its owner's strides, so its layout
 values (`strides_*`, `dim_order_*`) are `inherited`. Two rules keep this true:
 `D-INPUTS-OVERLAP-VIEW-DTYPE` (the view has its owner's format) and
-`D-INPUTS-OVERLAP-VIEW-LAYOUT` (only the view is `inherited`).
+`D-INPUTS-OVERLAP-VIEW-LAYOUT` (only the view is `inherited`). The graph builder
+gives the view no buffer of its own when the batch is padded, K and V are not
+paged, and every dimension of the view fits inside its owner's; a bundle then
+records the view in its metadata `aliases`. Otherwise the view keeps a buffer of
+its own and the runner lists the overlap in `unrealised_contents`.
 
 **Numeric domains.** `numeric_domains` gives, for each size axis, the smallest
 and largest size the frontend takes, the range of each class, and boundary
@@ -513,7 +517,7 @@ needs them cannot be a bundle yet. It stays in the generated CSV, and the
 selection step (`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for
 the reasons below.
 
-The first five reasons say that a bundle cannot express the row. The last two
+The first four reasons say that a bundle cannot express the row. The last two
 are extra exclusions: the row could be a bundle, but the selection step leaves it
 out. The Rows column counts every row that has the reason. A row can have several
 reasons, so the counts overlap and do not add up to the number of excluded rows.
@@ -521,18 +525,22 @@ reasons, so the counts overlap and do not add up to the number of excluded rows.
 | Reason | Why the row is not a bundle | Rows |
 |---|---|---|
 | `ragged_offsets` | Ragged offsets are tensor contents. | 3,769 |
-| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 1,314 |
+| `tensor_overlap` | An output written over an input, or inputs that share memory on a row with paged K and V, need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`); a view that does not fit inside its owner leaves through the export outcomes. | 234 |
 | `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 391 |
 | `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 190 |
-| `start_offset_not_expressible` | An `alignment_*` value puts a tensor's data start past an aligned allocation start (`element_aligned`, `sub_element`). A bundle records only the declared alignment, not the start offset, so its case would test less than its row says. The exporter refuses these rows too (outcome `start-offset-not-expressible`). | 3,688 |
-| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,126 (734 otherwise expressible) |
+| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,126 (870 otherwise expressible) |
 | `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 82 (10 otherwise expressible) |
 
 These are the rows that the selection step chooses from the current
-`levels.csv`, which has 22,977 rows. 14,389 rows become bundles and 8,588 rows
-are excluded. Of the excluded rows, 7,844 have at least one of the first five
-reasons. The other 744 could be bundles but have an extra reason: 734 have only
-a zero stride and 10 have only dropout without `rng_dump`. The bundle set in
+`levels.csv`, which has 22,977 rows. 17,969 rows become bundles and 5,008 rows
+are excluded. Of the excluded rows, 4,128 have at least one of the first four
+reasons. The other 880 could be bundles but have an extra reason: 870 have only
+a zero stride and 10 have only dropout without `rng_dump`. A data start past an
+aligned allocation start (`element_aligned`, `sub_element`) is a bundle
+content: the case's metadata `start_offsets` gives the offset of each such
+tensor. When the case has per-sequence query lengths in a `seq_len_q` tensor,
+the metadata `live_rows` marks the dense Stats, logit-max and sum-of-exponents
+outputs, so that a comparison skips their rows past each sequence's length. The bundle set in
 the tree is regenerated from this selection later.
 
 The selection step never changes the model or the generated rows. It only
@@ -540,11 +548,11 @@ filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,610 | 1,039 | 87 | 250 | 35.6 / 27.6 |
-| standard | 9,434 | 6,100 | 243 | 1,455 | 324.6 / 242.1 |
-| comprehensive | 4,543 | 2,829 | 196 | 664 | 1,051.0 / 748.2 |
-| full | 7,390 | 4,421 | 256 | 962 | 2,036.7 / 1,458.4 |
-| total | 22,977 | 14,389 | 782 | | |
+| quick | 1,610 | 1,352 | 90 | 384 | 47.1 / 36.4 |
+| standard | 9,434 | 7,467 | 258 | 1,949 | 402.9 / 300.2 |
+| comprehensive | 4,543 | 3,510 | 211 | 879 | 1,296.4 / 922.8 |
+| full | 7,390 | 5,640 | 273 | 1,463 | 2,593.1 / 1,855.4 |
+| total | 22,977 | 17,969 | 832 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -762,9 +770,8 @@ these defects need no skip.
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
   change.
-- 8,588 rows are not bundles. 7,844 of them need contents or settings a bundle
-  cannot express (§ 9.1), mostly ragged offsets, data starts past an aligned
-  allocation start, and tensors that share memory. The other 744 have a zero
+- 5,008 rows are not bundles. 4,128 of them need contents or settings a bundle
+  cannot express (§ 9.1), mostly ragged offsets. The other 880 have a zero
   stride or random dropout without `rng_dump`. They are rows of the generated
   CSV, but no bundle holds them.
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment

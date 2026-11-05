@@ -164,12 +164,28 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
     from bundle_utils import (
         ABSENT_TENSORS_KEY,
         absent_case_problems,
+        aliases_by_name,
         canon,
         expand_case,
         inputs_by_name,
+        name_by_uid,
         remap_graph,
         uid_map_onto,
     )  # noqa: E402
+
+    def uids_by_name(meta, graph, section):
+        """Entries of a uid-carrying metadata section with every uid named, sorted."""
+        names = name_by_uid(graph)
+        return sorted(
+            json.dumps(
+                {
+                    k: names.get(v, v) if k in ("uid", "lengths", "like") else v
+                    for k, v in e.items()
+                },
+                sort_keys=True,
+            )
+            for e in meta.get(section, [])
+        )
 
     problems = []
     expected = defaultdict(dict)
@@ -244,6 +260,18 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
                 problems.append(
                     f"{sweep_path}:{c['id']} inputs differ from its exported metadata"
                 )
+            placed_meta = c.get("metadata", {})
+            if aliases_by_name(placed_meta, expanded) != aliases_by_name(meta, graph):
+                problems.append(
+                    f"{sweep_path}:{c['id']} aliases differ from its exported metadata"
+                )
+            for section in ("start_offsets", "live_rows"):
+                if uids_by_name(placed_meta, expanded, section) != uids_by_name(
+                    meta, graph, section
+                ):
+                    problems.append(
+                        f"{sweep_path}:{c['id']} {section} differ from its exported metadata"
+                    )
     return problems
 
 

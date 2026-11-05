@@ -219,6 +219,15 @@ struct Contents
     bool repeat = true;
 };
 
+// An input with no buffer of its own: it reads its owner's memory from `byteOffset` bytes past
+// the owner's data start, through its own dims and strides.
+struct TensorView
+{
+    std::string tensor;
+    std::string owner;
+    int64_t byteOffset = 0;
+};
+
 struct BuiltCase
 {
     std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
@@ -229,6 +238,11 @@ struct BuiltCase
     // Bytes between an aligned allocation start and the data start, keyed by the graph tensor's
     // name. Only tensors with a non-zero offset are listed.
     std::map<std::string, int64_t> startOffsets;
+    // Inputs that share their owner's memory, keyed by graph tensor names. A view has no start
+    // offset of its own: it moves with its owner.
+    std::vector<TensorView> views;
+    // Overlaps the case keeps as separate buffers, as `<axis>=<value>(<reason>)`.
+    std::vector<std::string> notRealised;
 };
 
 // The axis ids of the maintained forward SDPA model, in its column order.
