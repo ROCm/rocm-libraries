@@ -407,8 +407,11 @@ regeneration drops it (and the regeneration gate's byte compare fails):
 Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
 `gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
 is the generator's native UHD (so that role also needs `heuristic: native`). Values are
-non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
-per slot. Without `engine.heuristics` every output is unchanged.
+what promote writes: for `sort_kernel_catalog` and `predict_engine` a non-empty list of
+distinct UUIDs (one model per ranking metric); for `predict_applicable_kernels` a single
+UUID, which is how the runtime reads that role (a list there makes it drop the engine). A
+slotted engine refuses the key: its rankers are per slot. Without `engine.heuristics` every
+output is unchanged.
 
 ## Output
 

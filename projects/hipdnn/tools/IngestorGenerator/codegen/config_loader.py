@@ -743,6 +743,10 @@ HEURISTIC_ROLES = (
     "predict_applicable_kernels",
 )
 
+#: Roles an arch key binds one UHD under, as a bare id: a candidate generator has no
+#: metric to key a list on (RFC 0019 §3.1). The scoring roles bind a list, one per metric.
+SINGLE_ID_ROLES = ("predict_applicable_kernels",)
+
 #: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
 #: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
 _ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
@@ -800,6 +804,16 @@ def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
                     f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
                     f"name (e.g. gfx942) or 'default'."
                 )
+            if role in SINGLE_ID_ROLES:
+                # The runtime reads this role with requireId (DescriptorLoader.hpp) and drops
+                # the whole engine on a list; uhd_gen promote writes the bare id.
+                if not isinstance(ids, str) or not _UUID.fullmatch(ids):
+                    raise ConfigError(
+                        f"{key} must be one UHD id, not {ids!r}: {role} binds a single "
+                        f"model per arch, as the runtime reads it and promote writes it."
+                    )
+                bound[arch] = ids
+                continue
             ids = _require_sequence(ids, key, "UHD ids")
             if not ids:
                 raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")

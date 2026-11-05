@@ -3108,12 +3108,30 @@ class TestEngineHeuristics:
             ),
             ({"predict_engine": {}}, r"heuristics\.predict_engine is empty"),
             ({"predict_engine": [MODEL]}, "predict_engine"),
+            (
+                {"predict_applicable_kernels": {"gfx942": [MODEL]}},
+                r"predict_applicable_kernels\.gfx942 must be one UHD id",
+            ),
+            (
+                {"predict_applicable_kernels": {"gfx942": "not-a-uuid"}},
+                r"predict_applicable_kernels\.gfx942 must be one UHD id",
+            ),
             ([MODEL], "engine.heuristics"),
         ],
     )
     def test_refusals_name_the_key(self, tmp_path, configs_dir, heuristics, match):
         with pytest.raises(ConfigError, match=match):
             self._load(tmp_path, configs_dir, heuristics)
+
+    def test_predict_applicable_kernels_binds_one_id(self, tmp_path, configs_dir):
+        config = self._load(
+            tmp_path,
+            configs_dir,
+            {"predict_applicable_kernels": {"gfx942": self.MODEL}},
+        )
+        assert config.engine.heuristics == {
+            "predict_applicable_kernels": {"gfx942": self.MODEL}
+        }
 
     def test_arch_entries_need_the_native_default(self, tmp_path, configs_dir):
         with pytest.raises(ConfigError, match="engine.heuristic is 'none'"):
