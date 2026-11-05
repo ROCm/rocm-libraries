@@ -104,7 +104,10 @@ _STATS_LAYOUT = None
 
 
 def stats_layouts():
-    """case_key -> (dims, strides) of the Stats tensor, read from the SdpaFwdPlan bundles."""
+    """case_key -> (dims, strides) of the Stats tensor, read from the SdpaFwdPlan bundles.
+
+    A case whose absent_tensors names the Stats tensor has no entry.
+    """
     global _STATS_LAYOUT
     if _STATS_LAYOUT is None:
         _STATS_LAYOUT = {}
@@ -119,7 +122,16 @@ def stats_layouts():
                 continue
             sweep = json.loads((tpl.parent / "sweep.json").read_text())
             for case in sweep["cases"]:
-                t = next(t for t in case["values"]["tensors"] if t["uid"] == uid)
+                if uid in case.get("absent_tensors", ()):
+                    continue
+                t = next(
+                    (t for t in case["values"]["tensors"] if t["uid"] == uid), None
+                )
+                if t is None:
+                    raise ValueError(
+                        f"{tpl.parent / 'sweep.json'}: case {case.get('id')!r} has no"
+                        f" values for Stats tensor {uid} and does not list it absent"
+                    )
                 _STATS_LAYOUT[case["metadata"]["case_key"]] = (t["dims"], t["strides"])
     return _STATS_LAYOUT
 
