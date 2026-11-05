@@ -1,14 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Dispatcher contract for paged K/V (``layout="paged"``) on the dense candidates."""
+"""Dispatcher contract for paged K/V (``layout="paged"``) on the dense candidates (host
+only)."""
 
 import dataclasses
-import math
 from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from rocke.dispatch.core import opt_in_probe
 
 from ..._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor
 from dispatch.attention import (
@@ -46,10 +47,8 @@ def _request(arch, **overrides):
 
 
 def _pinned(req, spec_id):
-    candidate = next(
-        c for c in attention_execution_candidates() if c.spec_id == spec_id
-    )
-    return dataclasses.replace(req, algorithm=candidate.algorithm, spec_id=spec_id)
+    candidates = {c.spec_id: c for c in attention_execution_candidates()}
+    return opt_in_probe(req, candidates[spec_id])
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -168,9 +167,10 @@ def test_layout_is_matched_like_the_capability(arch, spec_id):
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
-def test_non_positive_kv_block_size_is_refused(arch, spec_id):
+@pytest.mark.parametrize("block_size", [0, 16.9, "16"])
+def test_malformed_kv_block_size_is_refused(arch, spec_id, block_size):
     with pytest.raises(ValueError, match="kv_block_size"):
-        dispatch_attention(_pinned(_request(arch, kv_block_size=0), spec_id))
+        dispatch_attention(_pinned(_request(arch, kv_block_size=block_size), spec_id))
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -238,60 +238,20 @@ def test_launch_refuses_unknown_keywords(arch, spec_id):
             launch(**kw)
 
 
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_bind_refuses_unknown_keywords(arch, spec_id):
+    """The unified binding's softmax_scale is refused, not run with 1/sqrt(d)."""
+    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
+    with pytest.raises(TypeError, match="softmax_scale"):
+        result.bind_torch(
+            {"q": None, "k": cache, "v": cache, "out": None}, softmax_scale=0.5
+        )
+
+
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))
 def test_contiguous_dense_spec_ignores_the_block_count(arch):
     spec_id = _PAGED_SPEC_IDS[arch][0]
     tuning = dispatch_attention(_pinned(_request(arch, layout="auto"), spec_id)).spec
     assert not tuning.kernel_spec.paged
     assert tuning.with_num_kv_blocks(512) is tuning
-
-
-@pytest.mark.gpu
-@pytest.mark.parametrize("arch,spec_id", _CASES)
-def test_paged_dispatch_matches_the_reference_on_gpu(arch, spec_id):
-    """A paged request served end to end through dispatch: permuted pages in a 2x
-    cache whose unused pages are NaN, against the fp32 sliding-window reference."""
-    torch = pytest.importorskip("torch")
-    if not torch.cuda.is_available():
-        pytest.skip("no GPU")
-    if torch.cuda.get_device_properties(0).gcnArchName.split(":")[0] != arch:
-        pytest.skip(f"needs {arch}")
-    window = 1024
-    torch.manual_seed(0)
-    q = torch.randn(1, _SQ, _HQ, _D, device="cuda", dtype=torch.float16)
-    k = torch.randn(1, _SQ, _HKV, _D, device="cuda", dtype=torch.float16)
-    v = torch.randn(1, _SQ, _HKV, _D, device="cuda", dtype=torch.float16)
-    npages = _SQ // _BS
-    phys = torch.randperm(2 * npages, device="cuda")[:npages]
-    k_cache = torch.full(
-        (2 * npages, _BS, _HKV, _D), float("nan"), device="cuda", dtype=torch.float16
-    )
-    v_cache = torch.full_like(k_cache, float("nan"))
-    k_cache[phys] = k[0].view(npages, _BS, _HKV, _D)
-    v_cache[phys] = v[0].view(npages, _BS, _HKV, _D)
-    out = torch.empty_like(q)
-    tensors = {
-        "q": q,
-        "k": k_cache,
-        "v": v_cache,
-        "out": out,
-        "block_tables": phys.to(torch.int32).view(1, npages).contiguous(),
-        "kv_lens": torch.tensor([_SQ], device="cuda", dtype=torch.int32),
-    }
-    result = dispatch_attention(_pinned(_request(arch, sliding_window=window), spec_id))
-    result.bind_torch(tensors).launch()
-    torch.cuda.synchronize()
-
-    rep = _HQ // _HKV
-    qi = torch.arange(_SQ, device="cuda").view(-1, 1)
-    ki = torch.arange(_SQ, device="cuda").view(1, -1)
-    keep = (ki <= qi) & (ki > qi - window)
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        q.float().transpose(1, 2),
-        k.float().transpose(1, 2).repeat_interleave(rep, 1),
-        v.float().transpose(1, 2).repeat_interleave(rep, 1),
-        attn_mask=keep,
-        scale=1.0 / math.sqrt(_D),
-    ).transpose(1, 2)
-    assert torch.isfinite(out).all()
-    assert (out.float() - ref).abs().max().item() < 2e-2

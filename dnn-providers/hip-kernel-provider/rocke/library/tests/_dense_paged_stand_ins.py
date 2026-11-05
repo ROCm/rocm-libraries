@@ -66,12 +66,19 @@ class CacheStandIn:
     """A paged K or V cache: only its shape, dtype, layout and device are read."""
 
     def __init__(
-        self, shape, *, contiguous=True, device="cuda:0", dtype="torch.float16"
+        self,
+        shape,
+        *,
+        contiguous=True,
+        device="cuda:0",
+        dtype="torch.float16",
+        is_cuda=True,
     ):
         self.shape = tuple(shape)
         self.dtype = dtype
         self._contiguous = contiguous
         self.device = device
+        self.is_cuda = is_cuda
 
     def is_contiguous(self):
         return self._contiguous

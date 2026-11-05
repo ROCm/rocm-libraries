@@ -199,8 +199,8 @@ See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md
 
 | File | GPU test functions/methods | Installed selection |
 |---|---:|---|
-| [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) | 7 | Selected by library CTest file list |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) | 7 | Selected by library CTest file list |
+| [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) | 8 | Selected by library CTest file list |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) | 8 | Selected by library CTest file list |
 | [test_attn_bf16_d128_ring.py](../library/tests/test_attn_bf16_d128_ring.py) | 1 | Selected by library CTest file list |
 | [test_extended_parity_attention.py](../library/tests/test_extended_parity_attention.py) | 1 | Selected by library CTest file list |
 | [test_gdn_decode_gfx950_numeric.py](../library/tests/test_gdn_decode_gfx950_numeric.py) | 13 | Selected by library CTest file list |
@@ -212,9 +212,8 @@ See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) | 8 | Selected by library CTest file list |
 | [test_kda_gdn_gfx950_numeric.py](../library/tests/test_kda_gdn_gfx950_numeric.py) | 2 | Selected by library CTest file list |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) | 3 | selected: required SDPA GPU |
-| [dispatch/attention/test_dense_paged_dispatch.py](../library/tests/dispatch/attention/test_dense_paged_dispatch.py) | 1 | Selected by library CTest `tests/dispatch/attention` directory |
 
-The inventory includes 13 files and 66 GPU-related test functions/methods,
+The inventory includes 13 files and 70 GPU-related test functions/methods,
 including separately identified harness controls. These are declaration counts,
 not executed GPU-kernel counts. All filenames below are relative to
 `library/tests/`. Function names identify the source declarations to inspect.
@@ -371,9 +370,9 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: TestDensePagedNumeric.test_paged_cross_length_matches_dense | gfx950 | fp16 | 1 | 2048 | 512 | 16 | 4 | 128 | paged K/V, page size 16; top-left causal; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: TestDensePagedNumeric.test_paged_cross_length_matches_dense | gfx950 | fp16 | 1 | 1088 | 1088 | 16 | 4 | 128 | paged K/V, page size 16; plain causal, ragged query tail; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: TestDensePagedNumeric.test_paged_cross_length_matches_dense | gfx950 | fp16 | 1 | 1024 | 512 | 16 | 4 | 128 | paged K/V, page size 16; top-left causal; window=128; empty rows; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
-| [test_dense_paged_dispatch.py](../library/tests/dispatch/attention/test_dense_paged_dispatch.py) :: test_paged_dispatch_matches_the_reference_on_gpu | gfx942 | fp16 | 1 | 2048 | 2048 | 16 | 4 | 128 | paged K/V through dispatch (`gfx942_dense`), page size 16; causal; window=1024; permuted pages, NaN unused pages | Missing |
-| [test_dense_paged_dispatch.py](../library/tests/dispatch/attention/test_dense_paged_dispatch.py) :: test_paged_dispatch_matches_the_reference_on_gpu | gfx950 | fp16 | 1 | 2048 | 2048 | 16 | 4 | 128 | paged K/V through dispatch (`gfx950_dense_grid`), page size 16; causal; window=1024; permuted pages, NaN unused pages | Missing |
-| [test_dense_paged_dispatch.py](../library/tests/dispatch/attention/test_dense_paged_dispatch.py) :: test_paged_dispatch_matches_the_reference_on_gpu | gfx950 | fp16 | 1 | 2048 | 2048 | 16 | 4 | 128 | paged K/V through dispatch (`gfx950_dense_qbminor`), page size 16; causal; window=1024; permuted pages, NaN unused pages | Missing |
+| [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: TestDensePagedNumeric.test_dispatched_paged | gfx942 | fp16 | 1 | 2048 | 2048 | 16 | 4 | 128 | paged K/V through dispatch (`gfx942_dense`), page size 16; causal; window=1024; permuted pages, NaN unused pages | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: TestDensePagedNumeric.test_dispatched_paged | gfx950 | fp16 | 1 | 2048 | 2048 | 16 | 4 | 128 | paged K/V through dispatch (`gfx950_dense_grid`), page size 16; causal; window=1024; permuted pages, NaN unused pages | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: TestDensePagedNumeric.test_dispatched_paged | gfx950 | fp16 | 1 | 2048 | 2048 | 16 | 4 | 128 | paged K/V through dispatch (`gfx950_dense_qbminor`), page size 16; causal; window=1024; permuted pages, NaN unused pages | Missing |
 | [test_attn_bf16_d128_ring.py](../library/tests/test_attn_bf16_d128_ring.py) :: test_d128_numeric_vs_fp32_oracle_at_magnitude | gfx942 | bf16 | 1 | 512 | 512 | 32 | 8 | 128 | paged/unified causal; unit-variance input; ring regression | Missing |
 | [test_attn_bf16_d128_ring.py](../library/tests/test_attn_bf16_d128_ring.py) :: test_d128_numeric_vs_fp32_oracle_at_magnitude | gfx942 | bf16 | 1 | 1024 | 1024 | 32 | 8 | 128 | paged/unified causal; unit-variance input; ring regression | Missing |
 | [test_attn_bf16_d128_ring.py](../library/tests/test_attn_bf16_d128_ring.py) :: test_d128_numeric_vs_fp32_oracle_at_magnitude | gfx942 | bf16 | 1 | 4096 | 4096 | 32 | 8 | 128 | paged/unified causal; unit-variance input; ring regression | Missing |

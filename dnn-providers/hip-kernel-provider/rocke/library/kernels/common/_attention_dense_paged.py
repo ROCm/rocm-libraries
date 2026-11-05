@@ -102,14 +102,14 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
 
     Always (metadata only), as the unified binding checks its paged inputs:
     ``block_tables`` [batch, >= pages] and ``kv_lens`` [batch] are int32 tensors with
-    unit inner stride on the K/V device, and the K/V caches are contiguous with the
-    spec's shape. The kernel bakes the cache layout and takes the buffer bound from
-    the spec (:func:`paged_cache_bytes`), so a strided view or a smaller cache would
-    be read at the wrong addresses or past the allocation. With ``validate_paged``
-    the table contents are checked too (device->host copies; pass False on the hot
-    path): every block id the kernel dereferences must be in ``[0, num_kv_blocks)``,
-    and ``kv_lens[i]`` must equal ``seqlen_kv``, since the kernel visits all
-    ``seqlen_kv`` keys.
+    unit inner stride on the K/V device, and the K/V caches are contiguous GPU tensors
+    on one device with the spec's shape. The kernel bakes the cache layout and takes
+    the buffer bound from the spec (:func:`paged_cache_bytes`), so a strided view or
+    a smaller cache would be read at the wrong addresses or past the allocation. With
+    ``validate_paged`` the table contents are checked too (device->host copies; pass
+    False on the hot path): every block id the kernel dereferences must be in
+    ``[0, num_kv_blocks)``, and ``kv_lens[i]`` must equal ``seqlen_kv``, since the
+    kernel visits all ``seqlen_kv`` keys.
     """
     if spec.paged and (block_tables is None or kv_lens is None):
         raise ValueError("paged=True requires block_tables and kv_lens")
@@ -156,6 +156,11 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
         if not t.is_contiguous():
             raise ValueError(
                 f"paged {name} cache must be contiguous: the kernel bakes its layout"
+            )
+        if not t.is_cuda or str(t.device) != str(k.device):
+            raise ValueError(
+                f"paged {name} cache must be a GPU tensor on the K device {k.device}, "
+                f"got {t.device}"
             )
         want_dtype = _TORCH_CACHE_DTYPES[spec.dtype]
         if str(t.dtype) != want_dtype:

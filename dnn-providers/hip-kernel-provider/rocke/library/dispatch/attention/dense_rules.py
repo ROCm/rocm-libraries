@@ -15,6 +15,7 @@ import math
 from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
 from itertools import product
+from operator import index
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
 from rocke.dispatch.tuning import WavesPerEuSpace
@@ -252,7 +253,12 @@ def dense_paged_fields(req) -> dict:
     """
     if req.layout.strip().lower() != "paged":
         return {}
-    block_size = int(req.kv_block_size)
+    try:
+        block_size = index(req.kv_block_size)
+    except TypeError:
+        raise ValueError(
+            f"kv_block_size must be an integer, got {req.kv_block_size!r}"
+        ) from None
     if block_size <= 0:
         raise ValueError(f"kv_block_size must be positive, got {block_size}")
     pages_per_seq = -(-int(req.seqlen_k) // block_size)

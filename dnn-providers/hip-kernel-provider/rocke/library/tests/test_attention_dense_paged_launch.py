@@ -151,8 +151,9 @@ class TestDensePagedLaunch(unittest.TestCase):
 
     def test_dense_paged_launcher_rejects_malformed_block_metadata(self):
         """Inputs the kernel cannot read as laid out -- block_tables / kv_lens that are
-        not [batch, >= pages] / [batch] int32 arrays on the K/V device, or a strided
-        K/V cache -- are rejected from metadata alone, even with validate_paged=False.
+        not [batch, >= pages] / [batch] int32 arrays on the K/V device, a strided K/V
+        cache or a V cache off K's device -- are rejected from metadata alone, even
+        with validate_paged=False.
         Host-only: tensor stand-ins, the check raises before compile."""
         from types import SimpleNamespace
 
@@ -222,6 +223,25 @@ class TestDensePagedLaunch(unittest.TestCase):
                             scale=1.0,
                             block_tables=block_tables,
                             kv_lens=kv_lens,
+                            validate_paged=False,
+                        )
+            for v in (
+                CacheStandIn((128, 16, 4, 128), device="cpu", is_cuda=False),
+                CacheStandIn((128, 16, 4, 128), device="cuda:1"),
+            ):
+                with self.subTest(arch=arch, v_device=v.device):
+                    with self.assertRaisesRegex(
+                        ValueError, "paged v cache must be a GPU tensor on the K device"
+                    ):
+                        ad.run_attention_dense_torch(
+                            spec=spec,
+                            q=q,
+                            k=cache,
+                            v=v,
+                            out=q,
+                            scale=1.0,
+                            block_tables=i32(table),
+                            kv_lens=i32(lens),
                             validate_paged=False,
                         )
 

@@ -2055,6 +2055,26 @@ class TestDenseLseNumericGfx942:
                     _DENSE_LAUNCHER_CACHE[key] = entry
 
 
+def _paged_cache(k, v, block_size):
+    """Scatter one sequence's K/V into pages at permuted ids of a cache twice the
+    needed size whose unused pages are NaN, so a wrong page or in-page row reads a
+    NaN page or the wrong keys rather than a near miss."""
+    import torch
+
+    _, sk, hkv, d = k.shape
+    npages = sk // block_size
+    phys = torch.randperm(2 * npages, device=k.device)[:npages]
+    k_cache = torch.full(
+        (2 * npages, block_size, hkv, d), float("nan"), device=k.device, dtype=k.dtype
+    )
+    v_cache = torch.full_like(k_cache, float("nan"))
+    k_cache[phys] = k[0].view(npages, block_size, hkv, d)
+    v_cache[phys] = v[0].view(npages, block_size, hkv, d)
+    block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+    kv_lens = torch.tensor([sk], device=k.device, dtype=torch.int32)
+    return k_cache, v_cache, block_tables, kv_lens
+
+
 class TestDensePagedNumeric:
     """Paged K/V (block_tables indirection) on the default grid."""
 
@@ -2089,6 +2109,62 @@ class TestDensePagedNumeric:
         """Top-left causal with ``seqlen_q != seqlen_kv``."""
         self._check_paged("fp16", 16, sq, sk, 0, 128)
 
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_dispatched_paged(self):
+        """Request -> dispatch -> bind -> launch, with the block count taken from the
+        cache at bind."""
+        import torch
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_execution_candidates,
+            dispatch_attention,
+        )
+
+        sq, hq, hkv, d, window = 2048, 16, 4, 128, 1024
+        spec_id = "gfx942_dense"
+        candidate = next(
+            c for c in attention_execution_candidates() if c.spec_id == spec_id
+        )
+        result = dispatch_attention(
+            AttentionRequest(
+                batch=1,
+                nhead_q=hq,
+                nhead_k=hkv,
+                seqlen_q=sq,
+                seqlen_k=sq,
+                hdim_q=d,
+                hdim_v=d,
+                arch="gfx942",
+                mask_type=1,
+                dtype="fp16",
+                sliding_window=window,
+                layout="paged",
+                kv_block_size=16,
+                algorithm=candidate.algorithm,
+                spec_id=spec_id,
+            )
+        )
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.float16)
+        k = torch.randn(1, sq, hkv, d, device="cuda", dtype=torch.float16)
+        v = torch.randn_like(k)
+        k_cache, v_cache, block_tables, kv_lens = _paged_cache(k, v, 16)
+        out = torch.empty_like(q)
+        tensors = {"q": q, "k": k_cache, "v": v_cache, "out": out}
+        result.bind_torch(
+            {**tensors, "block_tables": block_tables, "kv_lens": kv_lens}
+        ).launch()
+        torch.cuda.synchronize()
+
+        assert torch.isfinite(out).all()
+        scale = 1.0 / math.sqrt(d)
+        qi = torch.arange(sq, device="cuda").view(-1, 1)
+        ki = torch.arange(sq, device="cuda").view(1, -1)
+        keep = (ki <= qi) & (ki > qi - window)
+        ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
+        assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
+
     @staticmethod
     def _check_paged(dtype, block_size, sq, sk, window, d):
         hq, hkv, B = 16, 4, 1
@@ -2100,17 +2176,8 @@ class TestDensePagedNumeric:
         k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
         v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
 
-        npages = sk // block_size
-        num_kv_blocks = 2 * npages
-        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
-        k_cache = torch.full(
-            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
-        )
-        v_cache = torch.full_like(k_cache, float("nan"))
-        k_cache[phys] = k[0].view(npages, block_size, hkv, d)
-        v_cache[phys] = v[0].view(npages, block_size, hkv, d)
-        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
-        kv_lens = torch.tensor([sk], device="cuda", dtype=torch.int32)
+        k_cache, v_cache, block_tables, kv_lens = _paged_cache(k, v, block_size)
+        num_kv_blocks = k_cache.shape[0]
 
         # The shipped paged spec (its tile can differ from the contiguous one's),
         # and its contiguous twin on the same tile and V path.

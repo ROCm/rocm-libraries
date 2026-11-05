@@ -290,9 +290,19 @@ _DENSE_OPTIONAL_INPUTS = {
 }
 
 
-_DENSE_LAUNCH_OPTIONS = frozenset({"scale", "stream"}).union(
-    *_DENSE_OPTIONAL_INPUTS.values()
-)
+_DENSE_SCALAR_OPTIONS = frozenset({"scale", "stream"})
+_DENSE_LAUNCH_OPTIONS = _DENSE_SCALAR_OPTIONS.union(*_DENSE_OPTIONAL_INPUTS.values())
+_DENSE_BIND_OPTIONS = _DENSE_SCALAR_OPTIONS | {"unsafe_skip_paged_value_validation"}
+
+
+def _refuse_unknown_keywords(where: str, got: Mapping[str, Any], allowed) -> None:
+    # Refused, not ignored: an option of another call or binding, or a misspelled
+    # keyword, would otherwise be dropped silently.
+    if unknown := got.keys() - allowed:
+        raise TypeError(
+            f"dense attention {where} got unexpected keyword(s) "
+            f"{', '.join(sorted(unknown))}; it takes {', '.join(sorted(allowed))}"
+        )
 
 
 def _dense_runner(arch: str):
@@ -318,6 +328,7 @@ def bind_dense_attention_torch(
     unified binding; the structural checks stay. Only for callers that guarantee
     ``kv_lens[i] == seqlen_kv`` and in-range block ids: the kernel trusts both.
     """
+    _refuse_unknown_keywords("bind_torch()", kwargs, _DENSE_BIND_OPTIONS)
     run = _dense_runner(str(getattr(request, "arch", "")))
     if tuning_spec.kernel_spec.paged:
         tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
@@ -334,15 +345,7 @@ def bind_dense_attention_torch(
         )
 
     def launch(**_kw):
-        # Refused, not ignored: a bind-time option or a misspelled keyword would
-        # otherwise be dropped silently.
-        if unknown := _kw.keys() - _DENSE_LAUNCH_OPTIONS:
-            raise TypeError(
-                "dense attention launch() got unexpected keyword(s) "
-                + ", ".join(sorted(unknown))
-                + "; it takes "
-                + ", ".join(sorted(_DENSE_LAUNCH_OPTIONS))
-            )
+        _refuse_unknown_keywords("launch()", _kw, _DENSE_LAUNCH_OPTIONS)
         call = {
             "spec": spec,
             "q": tensors["q"],
