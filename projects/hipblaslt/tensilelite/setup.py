@@ -34,6 +34,7 @@ setup(
         "joblib>=1.4.0",
         "filelock",
         "numpy",
+        "pandas",
     ],
     cmdclass={"build_py": CleanBuildPy},
 )

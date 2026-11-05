@@ -4,3 +4,4 @@ msgpack>=1.0
 joblib>=1.4.0
 filelock
 numpy
+pandas
