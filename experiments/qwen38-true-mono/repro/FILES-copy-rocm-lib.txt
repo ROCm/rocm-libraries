@@ -1,0 +1,37 @@
+# copy-rocm-lib (users/vanantha/rocke-monokernels): files for the reproduction.
+# The stack's rocKE code is COMMITTED (4478c174a13 = the measured tree minus the 4 files of patch 03).
+## patch 03 (measured tree vs 4478c174a13; later commits on the branch already contain other versions of these files)
+M dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/ccl/wire.py
+M dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/moe_lb2.py
+M dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/tune/catalog.py
+M dnn-providers/hip-kernel-provider/rocke/library/tests/test_qwen38_tune.py
+## this reproduction package (new, untracked)
+A experiments/qwen38-true-mono/repro/FILES-ATOM.txt
+A experiments/qwen38-true-mono/repro/FILES-copy-rocm-lib.txt
+A experiments/qwen38-true-mono/repro/REPRO.md
+A experiments/qwen38-true-mono/repro/knobs/c2s0b.env
+A experiments/qwen38-true-mono/repro/knobs/c2s3b.env
+A experiments/qwen38-true-mono/repro/knobs/c2s3b_n8_64k.env
+A experiments/qwen38-true-mono/repro/knobs/hybrid.env
+A experiments/qwen38-true-mono/repro/manifests/atom-truemono-c2-f.manifest
+A experiments/qwen38-true-mono/repro/manifests/hb-atom-c2-f.manifest
+A experiments/qwen38-true-mono/repro/manifests/rocke-qk-c2-f.manifest
+A experiments/qwen38-true-mono/repro/manifests/rocke-tmbase.manifest
+A experiments/qwen38-true-mono/repro/patches/01-atom-hybrid-rocke-on-352229d6.patch
+A experiments/qwen38-true-mono/repro/patches/02-atom-truemono-c2-on-01.patch
+A experiments/qwen38-true-mono/repro/patches/03-rocke-c2f-on-4478c174a13.patch
+A experiments/qwen38-true-mono/repro/patches/pending/atom-truemono-worktree-after-c2f.patch
+A experiments/qwen38-true-mono/repro/patches/pending/copy-rocm-lib-worktree-vs-HEAD.patch
+A experiments/qwen38-true-mono/repro/repro.sh
+A experiments/qwen38-true-mono/repro/tools/mkpatch.py
+A experiments/qwen38-true-mono/repro/tools/pack_stage.py
+A experiments/qwen38-true-mono/repro/tools/tree_diff.py
+A experiments/qwen38-true-mono/repro/tools/tree_vs_manifest.py
+## other uncommitted changes in the working tree right now (not part of the stack; patches/pending/)
+M dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/head_lb.py
+M dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/ple_lb.py
+M dnn-providers/hip-kernel-provider/rocke/library/tests/test_qwen38_lb_l2f.py
+M experiments/qwen38-true-mono/quick/README.md
+M experiments/qwen38-true-mono/w11/WP17.md
+A experiments/qwen38-true-mono/large-batch/WP-L0c-route.md
+A experiments/qwen38-true-mono/large-batch/WP-L2f.md

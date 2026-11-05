@@ -117,3 +117,87 @@ def test_ple_refusals():
         P.WalkKnobs(kind="papply", threads=256).check()
     with pytest.raises(ValueError):
         P.WalkKnobs(kind="embed", mutant="gate").check()
+
+
+def test_pproj_plan_every_rows():
+    for rows in range(1, 129):
+        kn = P.pproj_plan(rows)
+        assert kn.tiles * 16 >= rows and kn.k == P.HID
+
+
+def test_papply_upc2_lowers():
+    k = P.WalkKnobs(kind="papply", threads=640, upc=2)
+    t = _ll(P.build_papply_kernel(k))
+    assert P.kname(k) in t
+    with pytest.raises(ValueError):
+        P.WalkKnobs(kind="papply", threads=320, upc=2).check()
+
+
+def test_prologue_lowers():
+    k = P.WalkKnobs(kind="prologue", threads=320)
+    t = _ll(P.build_prologue_kernel(k))
+    assert P.kname(k) in t
+    assert len(P.prologue_params()) == len(P.pgather_params()) + 2
+
+
+def test_papply_plan_every_rows():
+    for rows in range(1, 129):
+        k = P.papply_knobs(rows)
+        assert k.threads == 320 * k.upc
+
+
+# ------------------------------------------------------------------ fix round: W4A16 head, A's slay / stats levers
+
+
+@pytest.mark.parametrize("tp,rows", [(1, 5), (1, 16), (1, 64), (2, 8), (2, 128)])
+def test_head_w4a16_and_w16_lower(tp, rows):
+    hk = H.plan_w4a16(tp, rows)
+    assert hk.w4a16 and hk.e1.w == "bf16" and not hk.e1.sop
+    t = _ll(H.build_head_kernel(hk))
+    n_cvt = t.count("call <2 x bfloat> @llvm.amdgcn.cvt.scalef32.pk.bf16.fp4")
+    assert n_cvt == 16 * hk.e1.mt * hk.e1.kc  # 4 dwords x 4 bytes per weight tile and chunk
+    assert "w4a16" in H.head_kernel_name(hk) and "_w16" not in H.head_kernel_name(hk)
+    hw = H.plan_w4a16(tp, rows, w16=True)
+    tw = _ll(H.build_head_kernel(hw))
+    assert "cvt.scalef32.pk.bf16.fp4" not in tw and "_w16" in H.head_kernel_name(hw)
+    # the bf16 head's MFMAs (4 K pieces per weight tile, token tile and chunk) on decoded fragments
+    mf = "call <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf16"
+    assert t.count(mf) == 4 * hk.e1.mt * hk.e1.tbt * hk.e1.kc
+    assert tw.count(mf) == 4 * hw.e1.mt * hw.e1.tbt * hw.e1.kc
+    assert H.head_kernel_name(H.plan(tp, rows)) not in (H.head_kernel_name(hk), H.head_kernel_name(hw))
+
+
+def test_head_w4a16_mutants_and_refusals():
+    hk = H.plan_w4a16(1, 16)
+    for m in ("w4scale", "tie", "pad"):
+        _ll(H.build_head_kernel(replace(hk, mutant=m)))
+    _ll(H.build_head_kernel(replace(hk, e1=replace(hk.e1, mutant="kskip"), lout=True)))
+    with pytest.raises(ValueError):
+        replace(H.plan(1, 16), mutant="w4scale").check()  # w4scale needs w4a16
+    with pytest.raises(ValueError):
+        replace(H.plan(1, 16), w4a16=True).check()  # e1.w must be bf16 (X)
+    with pytest.raises(ValueError):
+        replace(hk, e1=replace(hk.e1, xsrc="global")).check()
+
+
+@pytest.mark.parametrize("upc", [1, 2])
+@pytest.mark.parametrize("slay", ["reg", "lds", "ldsl"])
+@pytest.mark.parametrize("stats", ["atom", "fused"])
+def test_papply_slay_stats_lower(upc, slay, stats):
+    k = P.WalkKnobs(kind="papply", threads=320 * upc, upc=upc, slay=slay, stats=stats)
+    t = _ll(P.build_papply_kernel(k))
+    assert P.kname(k) in t
+    for m in P.A_MUTANTS[1:]:
+        _ll(P.build_papply_kernel(replace(k, mutant=m)))
+
+
+def test_papply_lever_refusals_and_names():
+    with pytest.raises(ValueError):
+        P.WalkKnobs(kind="embed", slay="lds").check()
+    with pytest.raises(ValueError):
+        P.WalkKnobs(kind="pgather", threads=192, stats="fused").check()
+    with pytest.raises(ValueError):
+        P.WalkKnobs(kind="papply", threads=320, slay="x").check()
+    assert P.kname(P.WalkKnobs(kind="papply", threads=320)) == "q38lbp_papply_t320"
+    assert P.kname(P.WalkKnobs(kind="papply", threads=320, slay="lds", stats="fused")) == \
+        "q38lbp_papply_t320_slaylds_statsfused"

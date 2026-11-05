@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0xf68c7156b775bfa6;
+pub const DESCRIPTION_DIGEST: u64 = 0x34c7063d6af21b20;
 
 // ----- operand codes -----
 
@@ -492,7 +492,7 @@ impl EncVop3pMai {
 // ----- per-opcode facts -----
 
 /// The opcodes with a gfx950 row, in description order (the `VCmp` family excluded).
-pub const ALL: [Opc; 328] = [
+pub const ALL: [Opc; 329] = [
     Opc::SMovB32, Opc::SMovB64, Opc::SNotB32, Opc::SNotB64, Opc::SAndSaveexecB64, Opc::SAddU32,
     Opc::SSubU32, Opc::SAddI32, Opc::SSubI32, Opc::SAddcU32, Opc::SSubbU32, Opc::SLshlB32,
     Opc::SLshlB64, Opc::SLshrB32, Opc::SLshrB64, Opc::SAshrI32, Opc::SAshrI64, Opc::SLshl1AddU32,
@@ -544,10 +544,10 @@ pub const ALL: [Opc; 328] = [
     Opc::Gfx9(Gfx9Op::SMemrealtime), Opc::Gfx9(Gfx9Op::GAtomicAddX2), Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4), Opc::Gfx9(Gfx9Op::KeepAlive), Opc::Gfx9(Gfx9Op::VAddU32Dpp),
     Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32), Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMaximum3F32), Opc::Gfx9(Gfx9Op::VBitop3B32), Opc::Gfx9(Gfx9Op::VBfiB32),
     Opc::Gfx9(Gfx9Op::SBufLoadB32), Opc::Gfx9(Gfx9Op::SDcacheInv), Opc::Gfx9(Gfx9Op::VMovB32DppOld), Opc::Gfx9(Gfx9Op::VMaxU32DppOld), Opc::Gfx9(Gfx9Op::VCvtF64F32), Opc::Gfx9(Gfx9Op::VCvtF32F64),
-    Opc::Gfx9(Gfx9Op::VRsqF64), Opc::Gfx9(Gfx9Op::VBcntU32B32), Opc::Gfx9(Gfx9Op::SFf1I32B32), Opc::Gfx9(Gfx9Op::SMemtime), Opc::Gfx9(Gfx9Op::DsOrB32Raw), Opc::Gfx9(Gfx9Op::DsWriteB32Raw),
-    Opc::Gfx9(Gfx9Op::DsReadB32Raw), Opc::Gfx9(Gfx9Op::DsLoad2addrB32), Opc::Gfx9(Gfx9Op::VAddF32Dpp), Opc::Gfx9(Gfx9Op::VMulF32Dpp), Opc::Gfx9(Gfx9Op::VMaxF32Dpp), Opc::Gfx9(Gfx9Op::VMaxU32Dpp),
-    Opc::Gfx9(Gfx9Op::WaitRelease), Opc::Gfx9(Gfx9Op::VMaxI32Dpp), Opc::Gfx9(Gfx9Op::VMinI32Dpp), Opc::Gfx9(Gfx9Op::VMinU32Dpp), Opc::Gfx9(Gfx9Op::VMin3I32), Opc::Gfx9(Gfx9Op::VMin3U32),
-    Opc::Gfx9(Gfx9Op::VMax3I32), Opc::Gfx9(Gfx9Op::VMax3U32), Opc::Gfx9(Gfx9Op::VMed3U32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32),
+    Opc::Gfx9(Gfx9Op::VRsqF64), Opc::Gfx9(Gfx9Op::VSqrtF32), Opc::Gfx9(Gfx9Op::VBcntU32B32), Opc::Gfx9(Gfx9Op::SFf1I32B32), Opc::Gfx9(Gfx9Op::SMemtime), Opc::Gfx9(Gfx9Op::DsOrB32Raw),
+    Opc::Gfx9(Gfx9Op::DsWriteB32Raw), Opc::Gfx9(Gfx9Op::DsReadB32Raw), Opc::Gfx9(Gfx9Op::DsLoad2addrB32), Opc::Gfx9(Gfx9Op::VAddF32Dpp), Opc::Gfx9(Gfx9Op::VMulF32Dpp), Opc::Gfx9(Gfx9Op::VMaxF32Dpp),
+    Opc::Gfx9(Gfx9Op::VMaxU32Dpp), Opc::Gfx9(Gfx9Op::WaitRelease), Opc::Gfx9(Gfx9Op::VMaxI32Dpp), Opc::Gfx9(Gfx9Op::VMinI32Dpp), Opc::Gfx9(Gfx9Op::VMinU32Dpp), Opc::Gfx9(Gfx9Op::VMin3I32),
+    Opc::Gfx9(Gfx9Op::VMin3U32), Opc::Gfx9(Gfx9Op::VMax3I32), Opc::Gfx9(Gfx9Op::VMax3U32), Opc::Gfx9(Gfx9Op::VMed3U32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32),
 ];
 
 /// gfx950 mnemonic of an opcode.
@@ -849,6 +849,7 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some("v_cvt_f64_f32"),
         Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some("v_cvt_f32_f64"),
         Opc::Gfx9(Gfx9Op::VRsqF64) => Some("v_rsq_f64"),
+        Opc::Gfx9(Gfx9Op::VSqrtF32) => Some("v_sqrt_f32"),
         Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some("v_bcnt_u32_b32"),
         Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some("s_ff1_i32_b32"),
         Opc::Gfx9(Gfx9Op::SMemtime) => Some("s_memtime"),
@@ -955,7 +956,7 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::Gfx9(Gfx9Op::VMin3U32) | Opc::Gfx9(Gfx9Op::VMax3I32) | Opc::Gfx9(Gfx9Op::VMax3U32)
         | Opc::Gfx9(Gfx9Op::VMed3U32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Unit::Valu,
         Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64
-        | Opc::Gfx9(Gfx9Op::VRsqF64) => Unit::Trans,
+        | Opc::Gfx9(Gfx9Op::VRsqF64) | Opc::Gfx9(Gfx9Op::VSqrtF32) => Unit::Trans,
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsStoreB32
         | Opc::DsStore2addrB32 | Opc::DsStoreB16 | Opc::DsSwizzleB32 | Opc::DsLoadB32 | Opc::DsLoadU16
         | Opc::DsStoreB64 | Opc::DsLoadB64 | Opc::DsStoreB16D16Hi | Opc::DsLoadU16D16 | Opc::DsLoadU16D16Hi
@@ -1148,7 +1149,7 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::Gfx9(Gfx9Op::VMin3U32) | Opc::Gfx9(Gfx9Op::VMax3I32) | Opc::Gfx9(Gfx9Op::VMax3U32)
         | Opc::Gfx9(Gfx9Op::VMed3U32) | Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Lat::Valu,
         Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64
-        | Opc::Gfx9(Gfx9Op::VRsqF64) => Lat::Trans,
+        | Opc::Gfx9(Gfx9Op::VRsqF64) | Opc::Gfx9(Gfx9Op::VSqrtF32) => Lat::Trans,
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsStoreB32
         | Opc::DsStore2addrB32 | Opc::DsStoreB16 | Opc::DsSwizzleB32 | Opc::DsLoadB32 | Opc::DsLoadU16
         | Opc::DsStoreB64 | Opc::DsLoadB64 | Opc::DsStoreB16D16Hi | Opc::DsLoadU16D16 | Opc::DsLoadU16D16Hi
@@ -1275,7 +1276,7 @@ pub struct Info {
 
 /// `Info` of each opcode in `ALL` order, then the compare family's fields that do not
 /// depend on its code.
-static INFO: [Info; 329] = [
+static INFO: [Info; 330] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x001, vop3: 0x001, flags: 0x00000, fmt: Fmt::Sop1, form: Form::B64, table: true },
     Info { code: 0x004, vop3: 0x004, flags: 0x00001, fmt: Fmt::Sop1, form: Form::Plain, table: true },
@@ -1583,6 +1584,7 @@ static INFO: [Info; 329] = [
     Info { code: 0x010, vop3: 0x150, flags: 0x00010, fmt: Fmt::Vop1, form: Form::Plain, table: true },
     Info { code: 0x00f, vop3: 0x14f, flags: 0x02010, fmt: Fmt::Vop1, form: Form::F64, table: true },
     Info { code: 0x026, vop3: 0x166, flags: 0x02410, fmt: Fmt::Vop1, form: Form::F64, table: true },
+    Info { code: 0x027, vop3: 0x167, flags: 0x00410, fmt: Fmt::Vop1, form: Form::Plain, table: true },
     Info { code: 0x28b, vop3: 0x28b, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
     Info { code: 0x010, vop3: 0x010, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x024, vop3: 0x024, flags: 0x40100, fmt: Fmt::Smem, form: Form::Nobase, table: true },
@@ -1918,28 +1920,29 @@ fn index(op: Opc) -> Option<usize> {
         Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some(304),
         Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some(305),
         Opc::Gfx9(Gfx9Op::VRsqF64) => Some(306),
-        Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some(307),
-        Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some(308),
-        Opc::Gfx9(Gfx9Op::SMemtime) => Some(309),
-        Opc::Gfx9(Gfx9Op::DsOrB32Raw) => Some(310),
-        Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some(311),
-        Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some(312),
-        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some(313),
-        Opc::Gfx9(Gfx9Op::VAddF32Dpp) => Some(314),
-        Opc::Gfx9(Gfx9Op::VMulF32Dpp) => Some(315),
-        Opc::Gfx9(Gfx9Op::VMaxF32Dpp) => Some(316),
-        Opc::Gfx9(Gfx9Op::VMaxU32Dpp) => Some(317),
-        Opc::Gfx9(Gfx9Op::WaitRelease) => Some(318),
-        Opc::Gfx9(Gfx9Op::VMaxI32Dpp) => Some(319),
-        Opc::Gfx9(Gfx9Op::VMinI32Dpp) => Some(320),
-        Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some(321),
-        Opc::Gfx9(Gfx9Op::VMin3I32) => Some(322),
-        Opc::Gfx9(Gfx9Op::VMin3U32) => Some(323),
-        Opc::Gfx9(Gfx9Op::VMax3I32) => Some(324),
-        Opc::Gfx9(Gfx9Op::VMax3U32) => Some(325),
-        Opc::Gfx9(Gfx9Op::VMed3U32) => Some(326),
-        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some(327),
-        Opc::VCmp(_) => Some(328),
+        Opc::Gfx9(Gfx9Op::VSqrtF32) => Some(307),
+        Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some(308),
+        Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some(309),
+        Opc::Gfx9(Gfx9Op::SMemtime) => Some(310),
+        Opc::Gfx9(Gfx9Op::DsOrB32Raw) => Some(311),
+        Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some(312),
+        Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some(313),
+        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some(314),
+        Opc::Gfx9(Gfx9Op::VAddF32Dpp) => Some(315),
+        Opc::Gfx9(Gfx9Op::VMulF32Dpp) => Some(316),
+        Opc::Gfx9(Gfx9Op::VMaxF32Dpp) => Some(317),
+        Opc::Gfx9(Gfx9Op::VMaxU32Dpp) => Some(318),
+        Opc::Gfx9(Gfx9Op::WaitRelease) => Some(319),
+        Opc::Gfx9(Gfx9Op::VMaxI32Dpp) => Some(320),
+        Opc::Gfx9(Gfx9Op::VMinI32Dpp) => Some(321),
+        Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some(322),
+        Opc::Gfx9(Gfx9Op::VMin3I32) => Some(323),
+        Opc::Gfx9(Gfx9Op::VMin3U32) => Some(324),
+        Opc::Gfx9(Gfx9Op::VMax3I32) => Some(325),
+        Opc::Gfx9(Gfx9Op::VMax3U32) => Some(326),
+        Opc::Gfx9(Gfx9Op::VMed3U32) => Some(327),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some(328),
+        Opc::VCmp(_) => Some(329),
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -2107,6 +2110,8 @@ pub enum Gfx9Op {
     VCvtF32F64,
     /// v_rsq_f64
     VRsqF64,
+    /// v_sqrt_f32
+    VSqrtF32,
     /// v_bcnt_u32_b32
     VBcntU32B32,
     /// s_ff1_i32_b32
@@ -2153,7 +2158,7 @@ pub enum Gfx9Op {
 
 impl Gfx9Op {
     /// Every one of them, in description order.
-    pub const ALL: [Gfx9Op; 93] = [
+    pub const ALL: [Gfx9Op; 94] = [
         Gfx9Op::VPkFmaF32, Gfx9Op::VPkMulF32, Gfx9Op::VPkAddF32, Gfx9Op::VPkMovB32, Gfx9Op::VMovB64,
         Gfx9Op::VLshlAddU64, Gfx9Op::VCvtPkF16F32, Gfx9Op::VCvtPkBf16F32, Gfx9Op::VPermlane16SwapB32, Gfx9Op::VPermlane32SwapB32,
         Gfx9Op::BufferInv, Gfx9Op::BufferWbl2, Gfx9Op::VAccvgprReadB32, Gfx9Op::VAccvgprWriteB32, Gfx9Op::VAccvgprMovB32,
@@ -2168,11 +2173,11 @@ impl Gfx9Op {
         Gfx9Op::GAtomicAddX2Rtn, Gfx9Op::VCvtScalef32PkBf16Fp4, Gfx9Op::KeepAlive, Gfx9Op::VAddU32Dpp, Gfx9Op::VCvtScalef32PkFp8F32,
         Gfx9Op::VCvtScalef32PkBf8F32, Gfx9Op::VMfmaScale16x16x128F8f6f4, Gfx9Op::VMaximum3F32, Gfx9Op::VBitop3B32, Gfx9Op::VBfiB32,
         Gfx9Op::SBufLoadB32, Gfx9Op::SDcacheInv, Gfx9Op::VMovB32DppOld, Gfx9Op::VMaxU32DppOld, Gfx9Op::VCvtF64F32,
-        Gfx9Op::VCvtF32F64, Gfx9Op::VRsqF64, Gfx9Op::VBcntU32B32, Gfx9Op::SFf1I32B32, Gfx9Op::SMemtime,
-        Gfx9Op::DsOrB32Raw, Gfx9Op::DsWriteB32Raw, Gfx9Op::DsReadB32Raw, Gfx9Op::DsLoad2addrB32, Gfx9Op::VAddF32Dpp,
-        Gfx9Op::VMulF32Dpp, Gfx9Op::VMaxF32Dpp, Gfx9Op::VMaxU32Dpp, Gfx9Op::WaitRelease, Gfx9Op::VMaxI32Dpp,
-        Gfx9Op::VMinI32Dpp, Gfx9Op::VMinU32Dpp, Gfx9Op::VMin3I32, Gfx9Op::VMin3U32, Gfx9Op::VMax3I32,
-        Gfx9Op::VMax3U32, Gfx9Op::VMed3U32, Gfx9Op::VCvtScalef32PkFp4F32,
+        Gfx9Op::VCvtF32F64, Gfx9Op::VRsqF64, Gfx9Op::VSqrtF32, Gfx9Op::VBcntU32B32, Gfx9Op::SFf1I32B32,
+        Gfx9Op::SMemtime, Gfx9Op::DsOrB32Raw, Gfx9Op::DsWriteB32Raw, Gfx9Op::DsReadB32Raw, Gfx9Op::DsLoad2addrB32,
+        Gfx9Op::VAddF32Dpp, Gfx9Op::VMulF32Dpp, Gfx9Op::VMaxF32Dpp, Gfx9Op::VMaxU32Dpp, Gfx9Op::WaitRelease,
+        Gfx9Op::VMaxI32Dpp, Gfx9Op::VMinI32Dpp, Gfx9Op::VMinU32Dpp, Gfx9Op::VMin3I32, Gfx9Op::VMin3U32,
+        Gfx9Op::VMax3I32, Gfx9Op::VMax3U32, Gfx9Op::VMed3U32, Gfx9Op::VCvtScalef32PkFp4F32,
     ];
 
     /// The shared flags (`Opc::flags`).
@@ -2251,6 +2256,7 @@ impl Gfx9Op {
             Gfx9Op::VCvtF64F32 => 0x00010,
             Gfx9Op::VCvtF32F64 => 0x02010,
             Gfx9Op::VRsqF64 => 0x02410,
+            Gfx9Op::VSqrtF32 => 0x00410,
             Gfx9Op::VBcntU32B32 => 0x00010,
             Gfx9Op::SFf1I32B32 => 0x00000,
             Gfx9Op::SMemtime => 0x40100,
@@ -2350,6 +2356,7 @@ impl Gfx9Op {
             Gfx9Op::VCvtF64F32 => "v_cvt_f64_f32",
             Gfx9Op::VCvtF32F64 => "v_cvt_f32_f64",
             Gfx9Op::VRsqF64 => "v_rsq_f64",
+            Gfx9Op::VSqrtF32 => "v_sqrt_f32",
             Gfx9Op::VBcntU32B32 => "v_bcnt_u32_b32",
             Gfx9Op::SFf1I32B32 => "s_ff1_i32_b32",
             Gfx9Op::SMemtime => "s_memtime",
@@ -3331,7 +3338,7 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         | Opc::Gfx9(Gfx9Op::VCvtF32Bf8) => Some(&SIG_20),
         Opc::VReadfirstlaneB32 => Some(&SIG_21),
         Opc::VCvtU32F32 | Opc::VCvtI32F32 | Opc::VCvtF16F32 | Opc::VTruncF32 | Opc::VExpF32 | Opc::VLogF32
-        | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRndneF32 => Some(&SIG_22),
+        | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRndneF32 | Opc::Gfx9(Gfx9Op::VSqrtF32) => Some(&SIG_22),
         Opc::VCvtF32F16 => Some(&SIG_23),
         Opc::VMovB32Dpp => Some(&SIG_24),
         Opc::VRcpF64 | Opc::Gfx9(Gfx9Op::VRsqF64) => Some(&SIG_25),

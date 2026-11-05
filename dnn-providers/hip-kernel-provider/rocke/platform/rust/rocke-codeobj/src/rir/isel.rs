@@ -1109,6 +1109,16 @@ impl<'a> Isel<'a> {
                     "oge" => 0x16,
                     "one" => 0x15,
                     "une" => 0x1d,
+                    // W15 PORT K2-moe: the unordered / ordered predicates (VOPC f32 codes 0x17-0x1e; a NaN test
+                    // `fcmp uno x, x` is v_cmp_u_f32, as LLVM selects it). A refusal here was a direct-compiler
+                    // defect: ATOM's NaN-propagating max / min (stage_moe nan=prop) uses `uno`.
+                    "ord" => 0x17,
+                    "uno" => 0x18,
+                    "ult" => 0x19,
+                    "ueq" => 0x1a,
+                    "ule" => 0x1b,
+                    "ugt" => 0x1c,
+                    "uge" => 0x1e,
                     other => return Err(unsupported(format!("fcmp predicate {other}"))),
                 };
                 let a = self.w(op.operands[0])?;
@@ -1922,6 +1932,7 @@ impl<'a> Isel<'a> {
                 self.set(res.unwrap(), Val::W(r(dst)));
             }
             WaveAny | WaveAll => self.vote_op(op)?,
+            WaveBallot => self.ballot_op(op)?,
             LaneId => {
                 let dst = self.vgpr(1);
                 self.valu(Opc::VMbcntLoU32B32, [r(dst)], [Opnd::Imm(u32::MAX), Opnd::Imm(0)], 0);
@@ -2210,6 +2221,7 @@ impl<'a> Isel<'a> {
                 self.valu(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VCvtF32F64), [r(dst)], [x], 0);
                 self.set(res.unwrap(), Val::W(r(dst)));
             }
+            Sqrt if *self.k.ty(op.results[0]) == Type::Scalar(Scalar::F32) => self.sqrt32_op(op)?,
             Sqrt => self.sqrt64_op(op)?,
             GlobalStoreCp => {
                 let data = match self.get(op.operands[0])? {
@@ -2439,6 +2451,41 @@ impl<'a> Isel<'a> {
         let (lo, hi) = self.d(operands[0])?;
         let pair = self.pair_v(lo, hi);
         Ok(([r(pair)].into(), 0))
+    }
+
+    /// `math.sqrt` of an f32 on gfx950, as LLVM expands it with IEEE denormals (`lowerFSQRTF32`, the
+    /// correctly rounded form): an input below 2^-96 scaled up by 2^32, s = v_sqrt_f32, s's two neighbours
+    /// tested by fma(-s', s, x) (s - 1 ulp if that is <= 0, s + 1 ulp if it is > 0), scaled back by 2^-16,
+    /// and the (scaled) input itself for +-0 and +inf. W15 PORT K2-moe: V4.1 route's sqrtsoftplus.
+    fn sqrt32_op(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        if self.t.target != crate::target::Target::Gfx950 {
+            return Err(unsupported("math.sqrt of an f32 off gfx950"));
+        }
+        let x = self.w(op.operands[0])?;
+        let x = self.to_v(x);
+        let small = self.mreg();
+        self.valu(Opc::VCmp(0x14), [r(small)], [Opnd::Imm(0x0f80_0000), x], 0); // 2^-96 > x (olt)
+        let scaled = self.v_bin(Opc::VMulF32, Opnd::Imm(0x4f80_0000), x);
+        let sx = self.v3(Opc::VCndmaskB32, x, scaled, r(small), 0);
+        let s = self.v1(Opc::Gfx9(Gfx9Op::VSqrtF32), sx);
+        let down = self.v_bin(Opc::VAddNcU32, Opnd::Imm(u32::MAX), s);
+        let vp = self.v3(Opc::VFmaF32, down, s, sx, M_NEG0);
+        let le0 = self.mreg();
+        self.valu(Opc::VCmp(0x16), [r(le0)], [Opnd::Imm(0), vp], 0); // 0 >= vp (ole)
+        let s1 = self.v3(Opc::VCndmaskB32, s, down, r(le0), 0);
+        let up = self.v_bin(Opc::VAddNcU32, Opnd::Imm(1), s);
+        let vs = self.v3(Opc::VFmaF32, up, s, sx, M_NEG0);
+        let gt0 = self.mreg();
+        self.valu(Opc::VCmp(0x11), [r(gt0)], [Opnd::Imm(0), vs], 0); // 0 < vs (ogt)
+        let s2 = self.v3(Opc::VCndmaskB32, s1, up, r(gt0), 0);
+        let sd = self.v_bin(Opc::VMulF32, Opnd::Imm(0x3780_0000), s2);
+        let s3 = self.v3(Opc::VCndmaskB32, s2, sd, r(small), 0);
+        let keep = self.mreg();
+        self.valu(Opc::VCmp(VCMP_CLASS_F32), [r(keep)], [sx, Opnd::Imm(0x260)], 0); // +-0, +inf
+        let out = self.v3(Opc::VCndmaskB32, s3, sx, r(keep), 0);
+        self.set(op.results[0], Val::W(out));
+        Ok(())
     }
 
     /// `math.sqrt` of an f64, as LLVM expands it (`lowerFSQRTF64`): scale an
@@ -2915,7 +2962,36 @@ impl<'a> Isel<'a> {
     /// the wave has `p != 0`; all of them must be active for `wave_all`, as
     /// in the LLVM lowering (ballot == full wave mask).
     fn vote_op(&mut self, op: &Op) -> Result<(), CompileError> {
-        let p = op.operands[0];
+        let lanes = self.vote_lanes(op.operands[0])?;
+        let (test, against) = if op.kind == OpKind::WaveAny {
+            (Opc::SCmpLgU32, Opnd::Imm(0))
+        } else {
+            (Opc::SCmpEqU32, Opnd::Imm(u32::MAX))
+        };
+        self.salu(self.lm(test), [], [lanes, against]);
+        let dst = self.sreg(1);
+        self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(1), Opnd::Imm(0)]);
+        self.set(op.results[0], Val::W(r(dst)));
+        Ok(())
+    }
+
+    /// `tile.wave_ballot(p)`: the lanes with `p != 0` as an i64 mask (inactive lanes 0), as
+    /// `llvm.amdgcn.ballot.i64` selects it; a wave32 target's high half is 0.
+    fn ballot_op(&mut self, op: &Op) -> Result<(), CompileError> {
+        let lanes = self.vote_lanes(op.operands[0])?;
+        let dst = self.sreg(2);
+        if self.t.lane_mask_dwords == 2 {
+            self.salu(self.lm(Opc::SMovB32), [r(dst)], [lanes]);
+        } else {
+            self.salu(Opc::SMovB32, [r(sub(dst, 0, 1))], [lanes]);
+            self.salu(Opc::SMovB32, [r(sub(dst, 1, 1))], [Opnd::Imm(0)]);
+        }
+        self.set(op.results[0], Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))));
+        Ok(())
+    }
+
+    /// The lane mask of `p != 0` over the active lanes (a vote's or a ballot's operand).
+    fn vote_lanes(&mut self, p: ValueId) -> Result<Opnd, CompileError> {
         let lanes = if let Some(&(c, t, f)) = self.vote_sel.get(&p) {
             // p = select(c, t, f): the lanes where p != 0 are c's or its complement's.
             match (t, f) {
@@ -2939,16 +3015,7 @@ impl<'a> Isel<'a> {
             self.valu(Opc::VCmp(0x4d), [r(m)], [Opnd::Imm(0), x], 0);
             r(m)
         };
-        let (test, against) = if op.kind == OpKind::WaveAny {
-            (Opc::SCmpLgU32, Opnd::Imm(0))
-        } else {
-            (Opc::SCmpEqU32, Opnd::Imm(u32::MAX))
-        };
-        self.salu(self.lm(test), [], [lanes, against]);
-        let dst = self.sreg(1);
-        self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(1), Opnd::Imm(0)]);
-        self.set(op.results[0], Val::W(r(dst)));
-        Ok(())
+        Ok(lanes)
     }
 
     /// Legalized `memref.global_atomic_add` of an i32 or f32: the returning
@@ -5767,14 +5834,14 @@ fn find_trunc_products(cx: &ChainCx, region: &Region, found: &mut FxHashMap<Valu
     }
 }
 
-/// `tile.wave_any` / `tile.wave_all` of a single-use `select(c, k1, k2)` of
+/// `tile.wave_any` / `tile.wave_all` / `tile.wave_ballot` of a single-use `select(c, k1, k2)` of
 /// constants: the vote reads c's lane mask and the select is never emitted.
 fn find_vote_selects(cx: &ChainCx, region: &Region, votes: &mut FxHashMap<ValueId, (ValueId, bool, bool)>, skip: &mut FxHashSet<ValueId>) {
     for op in &region.ops {
         for inner in &op.regions {
             find_vote_selects(cx, inner, votes, skip);
         }
-        if !matches!(op.kind, OpKind::WaveAny | OpKind::WaveAll) {
+        if !matches!(op.kind, OpKind::WaveAny | OpKind::WaveAll | OpKind::WaveBallot) {
             continue;
         }
         let p = op.operands[0];
@@ -6152,6 +6219,63 @@ mod tests {
         assert_eq!(class[0].uses[1], Opnd::Imm(0x1f8));
         // %gty has a second use, so y's test keeps its two compares.
         assert_eq!((count(&insts, Opc::VCmp(0x14)), count(&insts, Opc::VCmp(0x11))), (1, 1));
+    }
+
+    #[test]
+    fn unordered_fcmp_predicates_select_vopc_codes() {
+        // W15 PORT K2-moe: every LLVM unordered / ordered predicate maps to its gfx9 VOPC f32 compare.
+        let params = "    %X : ptr<f32,global>\n    %Y : ptr<i32,global>\n";
+        let preds = [("ord", 0x17u8), ("uno", 0x18), ("ult", 0x19), ("ueq", 0x1a), ("ule", 0x1b), ("ugt", 0x1c), ("uge", 0x1e)];
+        for (pred, code) in preds {
+            let body = [
+                "    %x : f32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"f32\" }".to_string(),
+                "    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }".to_string(),
+                "    %t2 : i32 = arith.add ( %tid, %c64 )".to_string(),
+                "    %y : f32 = memref.global_load_typed ( %X, %t2 ) { align = i:4, elem_type = s:\"f32\" }".to_string(),
+                format!("    %m : i1 = arith.fcmp ( %x, %y ) {{ pred = s:\"{pred}\" }}"),
+                "    %one : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }".to_string(),
+                "    %zero : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }".to_string(),
+                "    %r : i32 = arith.select ( %m, %one, %zero )".to_string(),
+                "    memref.global_store_typed ( %Y, %tid, %r ) { align = i:4, elem_type = s:\"i32\" }".to_string(),
+            ]
+            .join("\n")
+                + "\n";
+            let insts = insts(&kernel(params, &body));
+            assert_eq!(count(&insts, Opc::VCmp(code)), 1, "{pred}");
+        }
+    }
+
+    #[test]
+    fn wave_ballot_is_one_compare_into_an_sgpr_pair() {
+        // W15 PORT K2-moe: ballot(select(x == y, 1, 0)) reads the compare's lane mask (no select, no second
+        // compare), copies it to an SGPR pair, and its low half is stored.
+        let params = "    %X : ptr<f32,global>\n    %Y : ptr<i32,global>\n";
+        let body = [
+            "    %x : f32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"f32\" }",
+            "    %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }",
+            "    %t2 : i32 = arith.add ( %tid, %c64 )",
+            "    %y : f32 = memref.global_load_typed ( %X, %t2 ) { align = i:4, elem_type = s:\"f32\" }",
+            "    %m : i1 = arith.fcmp ( %x, %y ) { pred = s:\"oeq\" }",
+            "    %one : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }",
+            "    %zero : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }",
+            "    %p : i32 = arith.select ( %m, %one, %zero )",
+            "    %b : i64 = tile.wave_ballot ( %p )",
+            "    %lo : i32 = arith.trunc ( %b )",
+            "    memref.global_store_typed ( %Y, %tid, %lo ) { align = i:4, elem_type = s:\"i32\" }",
+        ]
+        .join("\n")
+            + "\n";
+        // wave32 (the default target): the mask's one half and a zero high half
+        let w32 = insts(&kernel(params, &body));
+        let ops: Vec<String> = w32.iter().map(|i| format!("{:?}", i.op)).collect();
+        assert_eq!(count(&w32, Opc::VCmp(0x12)), 1, "one v_cmp_eq_f32: {ops:?}");
+        assert_eq!(w32.iter().filter(|i| matches!(i.op, Opc::VCmp(_))).count(), 1, "no second compare: {ops:?}");
+        // gfx950 (wave64): a 64-bit lane mask in an SGPR pair
+        let c = super::super::compile_for(&kernel(params, &body), crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let w64: Vec<MInst> = c.func.blocks.into_iter().flat_map(|b| b.insts).collect();
+        let ops: Vec<String> = w64.iter().map(|i| format!("{:?}", i.op)).collect();
+        assert_eq!(w64.iter().filter(|i| matches!(i.op, Opc::VCmp(_))).count(), 1, "gfx950: one compare: {ops:?}");
+        assert!(count(&w64, Opc::SMovB64) + count(&w64, Opc::SAndB64) >= 1, "gfx950: the mask in an SGPR pair: {ops:?}");
     }
 }
 

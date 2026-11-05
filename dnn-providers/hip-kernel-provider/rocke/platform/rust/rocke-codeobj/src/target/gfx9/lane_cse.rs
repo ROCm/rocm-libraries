@@ -34,6 +34,7 @@ fn exchanges(kind: OpKind) -> bool {
             | OpKind::ReadLane
             | OpKind::WaveAny
             | OpKind::WaveAll
+            | OpKind::WaveBallot
     )
 }
 

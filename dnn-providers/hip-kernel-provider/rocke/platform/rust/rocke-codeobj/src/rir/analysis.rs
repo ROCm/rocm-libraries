@@ -335,7 +335,7 @@ fn uniform_rule<'a>(kernel: &Kernel, op: &'a Op, written: bool) -> Rule<'a> {
         OpKind::SmemAddrOf => Rule::Always(true),
         OpKind::SmemPtrAdd => Rule::Inputs(&op.operands),
         // Wave votes: one value for the whole wave.
-        OpKind::WaveAny | OpKind::WaveAll => Rule::Always(true),
+        OpKind::WaveAny | OpKind::WaveAll | OpKind::WaveBallot => Rule::Always(true),
         OpKind::ReadLane => Rule::Always(true),
         // Scalar reads of hardware state (`s_getreg_b32`, `s_memrealtime`).
         OpKind::SGetreg | OpKind::MemRealtime | OpKind::MemTime => Rule::Always(true),

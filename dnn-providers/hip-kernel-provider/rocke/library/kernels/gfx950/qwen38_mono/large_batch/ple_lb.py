@@ -39,6 +39,17 @@ remainder not made non-negative), ``hash`` (the trigram heads use the bigram), `
 conv term dropped), ``tap`` (taps at -8 / -5 / -2: dilation off by one), ``state`` (the state not shifted: caught on the
 second step), ``stream`` (every stream uses stream 0's key).
 
+A's fix-round levers (default off; WP-L2f.md "Fix round"):
+
+* ``slay`` (state access): ``reg`` (default: each thread loads / stores its 8 channels' 9 entries, 144 contiguous bytes,
+  so one wave instruction touches 64 lines 144 bytes apart), ``lds`` (the unit's 46,080-byte state block moves in
+  coalesced 16-byte pieces, 1 KiB per wave instruction, through an LDS staging buffer, both directions), ``ldsl`` (the
+  loads only; the stores stay per thread). Same values, same order: bitwise equal to ``reg``.
+* ``stats``: ``atom`` (default: ATOM's rounding points; four group reductions: key norm, query norm, score, gated norm)
+  or ``fused`` (FlyTape's ``ple_stats`` form: one group reduction of (sum k^2, sum h^2, sum k(1+wk) h(1+wq), sum v^2);
+  the score from the unrounded product sum, the gated norm as ``gate^2 sum v^2``): tolerance class (the roundings of
+  ``kn``, ``qn``, their product and the gated value before the sums are skipped).
+
 Python engine only; names ``q38lbp_*``; nothing served imports it. Measurements: ``experiments/qwen38-true-mono/
 large-batch/WP-L2f.md``.
 """
@@ -48,7 +59,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, fields
 
-from rocke.core.ir import CPOL_SC1, F32, I32, I64, IRBuilder, KernelDef, PtrType, Value, VectorType
+from rocke.core.ir import CPOL_SC1, F32, I8, I32, I64, IRBuilder, KernelDef, PtrType, Value, VectorType
 from rocke.helpers import device_ops as D
 from rocke.helpers import mx_quant as MQ
 
@@ -67,6 +78,10 @@ __all__ = [
     "build_pgather_kernel",
     "build_papply_kernel",
     "build_prologue_kernel",
+    "pproj_plan",
+    "papply_knobs",
+    "PAPPLY_PLANS",
+    "PPROJ_PLANS",
     "prologue_params",
     "P_MUTANTS",
     "embed_params",
@@ -148,7 +163,10 @@ class WalkKnobs:
     occ1: bool = True  # one CTA per CU (LDS pad)
     nt: bool = False  # nt loads of single-use streams (table / Y)
     hz: bool = True
+    upc: int = 1  # papply: (token, stream) units a CTA runs at once (groups of 320 threads; threads = 320 upc)
     acq: bool = False  # acquire (buffer_inv sc1) after every walk barrier (consumers that read with plain loads)
+    slay: str = "reg"  # papply state access: "reg" (per thread) | "lds" (coalesced via LDS, both ways) | "ldsl" (loads)
+    stats: str = "atom"  # papply: "atom" (ATOM's rounding points, 4 reductions) | "fused" (one reduction, tolerance)
     mutant: str = "none"
     tag: str = ""
 
@@ -158,9 +176,15 @@ class WalkKnobs:
         allowed = {"embed": E_MUTANTS, "pgather": G_MUTANTS, "papply": A_MUTANTS, "prologue": P_MUTANTS}[self.kind]
         if self.mutant not in allowed:
             raise ValueError(f"{self.kind} mutant in {allowed}")
-        want = {"embed": (256, 512), "pgather": (192, 256), "papply": (320,), "prologue": (320,)}[self.kind]
+        want = {"embed": (256, 512), "pgather": (192, 256), "papply": (320, 640), "prologue": (320,)}[self.kind]
         if self.threads not in want:
             raise ValueError(f"{self.kind}: threads in {want}")
+        if self.upc not in (1, 2) or (self.upc > 1 and self.kind != "papply") or                 (self.kind == "papply" and self.threads != 320 * self.upc):
+            raise ValueError("upc 1 | 2 (papply only, threads = 320 upc)")
+        if self.slay not in ("reg", "lds", "ldsl") or (self.slay != "reg" and self.kind != "papply"):
+            raise ValueError("slay reg | lds | ldsl (papply only)")
+        if self.stats not in ("atom", "fused") or (self.stats != "atom" and self.kind != "papply"):
+            raise ValueError("stats atom | fused (papply only)")
 
     def suffix(self) -> str:
         parts = []
@@ -226,7 +250,8 @@ class _Walk:
         self.tid = b.thread_id_x()
         self.lane = b.lane_id()
         self.wave = D.wave_id(b)
-        if k.occ1:
+        if k.occ1 and not (k.kind == "papply" and k.slay != "reg" and k.upc == 2):
+            # (papply with the LDS state staging at upc 2: its 92,160-byte buffer alone is above half a CU)
             self.lds0 = PS.pad_lds(b, name_hint="l2fpad")
 
     def gbar(self, bnd: Value) -> None:
@@ -469,27 +494,55 @@ def build_papply_kernel(k: WalkKnobs) -> KernelDef:
     b = w.b
     TPB = w.i["tpb"]
     YS = w.i["ystride"]
-    NWV = k.threads // 64  # 5 waves
-    red = b.smem_alloc(F32, [4, NWV], name_hint="pared")
+    NWV = 5  # waves of a unit group (320 threads)
+    red = b.smem_alloc(F32, [k.upc, 4, NWV], name_hint="pared")
+    SBLK = HID * HIST * 2  # one unit's state block (bytes)
+    sbuf = b.smem_alloc(I8, [k.upc, SBLK], name_hint="past") if k.slay != "reg" else None
     eps = b.bitcast(_c(b, EPS_BITS), F32)
     inv_n = _f(b, 1.0 / HID)
     sq = _f(b, math.sqrt(HID))
     aux = E1M.CPOL_NT if k.nt else 0
 
-    def wsum(vals, slot):
-        """Sum over the CTA (f32): in-lane order, then a butterfly, then the waves in order."""
+    def wsum(vals, slot, grp=None):
+        """Sum over a unit group (f32): in-lane order, then a butterfly, then the group's waves in order."""
         acc = vals[0]
         for v in vals[1:]:
             acc = b.fadd(acc, v)
         for m in (1, 2, 4, 8, 16, 32):
             acc = b.fadd(acc, b.warp_shuffle_xor(acc, m))
+        g = _c(b, 0) if grp is None else grp
+        wig = w.wave if grp is None else b.sub(w.wave, b.mul(g, _c(b, NWV)))
         with b.scf_if(b.cmp_eq(w.lane, _c(b, 0))):
-            b.smem_store_vN(red, [_c(b, slot), w.wave], acc, 1)
+            b.smem_store_vN(red, [g, _c(b, slot), wig], acc, 1)
         b.sync_lds_only()
-        tot = b.vec_extract(b.smem_load_vN_f32(red, _c(b, slot), _c(b, 0), n=1), 0)
+        tot = b.vec_extract(b.smem_load_vN_f32(red, g, _c(b, slot), _c(b, 0), n=1), 0)
         for wv in range(1, NWV):
-            tot = b.fadd(tot, b.vec_extract(b.smem_load_vN_f32(red, _c(b, slot), _c(b, wv), n=1), 0))
+            tot = b.fadd(tot, b.vec_extract(b.smem_load_vN_f32(red, g, _c(b, slot), _c(b, wv), n=1), 0))
         return tot
+
+    def wsum4(vals4, grp=None):
+        """Four group sums at once (slots 0..3, one LDS barrier)."""
+        accs = []
+        for vals in vals4:
+            acc = vals[0]
+            for v in vals[1:]:
+                acc = b.fadd(acc, v)
+            for m in (1, 2, 4, 8, 16, 32):
+                acc = b.fadd(acc, b.warp_shuffle_xor(acc, m))
+            accs.append(acc)
+        g = _c(b, 0) if grp is None else grp
+        wig = w.wave if grp is None else b.sub(w.wave, b.mul(g, _c(b, NWV)))
+        with b.scf_if(b.cmp_eq(w.lane, _c(b, 0))):
+            for slot, acc in enumerate(accs):
+                b.smem_store_vN(red, [g, _c(b, slot), wig], acc, 1)
+        b.sync_lds_only()
+        out = []
+        for slot in range(4):
+            tot = b.vec_extract(b.smem_load_vN_f32(red, g, _c(b, slot), _c(b, 0), n=1), 0)
+            for wv in range(1, NWV):
+                tot = b.fadd(tot, b.vec_extract(b.smem_load_vN_f32(red, g, _c(b, slot), _c(b, wv), n=1), 0))
+            out.append(tot)
+        return out
 
     def body(layer):
         lay = E1M._i64(b, layer)
@@ -506,75 +559,135 @@ def build_papply_kernel(k: WalkKnobs) -> KernelDef:
         wc_rs = w.rs("wc", _c(b, HCW * 2))
         cw_rs = w.rs("cw", _c(b, HCW * KTAPS * 2))
         nunit = b.mul(w.rows, _c(b, NS))
-        for it in range(-(-128 * NS // GRID)):
-            u = b.add(w.cta, _c(b, it * GRID))
-            with b.scf_if(b.cmp_lt(u, nunit)):
-                tok = E1M._udiv(b, u, NS)
-                s = E1M._umod(b, u, NS)
-                j0 = b.mul(w.tid, _c(b, 8))  # this thread's 8 channels of the stream
-                ch = b.add(b.mul(s, _c(b, HID)), j0)  # global channel (0..10239)
-                ks = _c(b, 0) if k.mutant == "stream" else s
-                ychan = b.add(b.mul(ks, _c(b, HID)), j0)
-                # issue every load of the unit
-                ky = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), ychan), _c(b, 2)), _c(b, 0), dwords=4, aux=aux)
-                vy = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), b.add(_c(b, HCW), j0)), _c(b, 2)), _c(b, 0), dwords=4,
-                                      aux=aux)
-                hoff = b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, NS)), s), _c(b, HID)), j0), _c(b, 2))
-                hv = b.buffer_load_cp(r_rs, hoff, _c(b, 0), dwords=4)
-                wkv = b.buffer_load_cp(wk_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
-                wqv = b.buffer_load_cp(wq_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
-                wcv = b.buffer_load_cp(wc_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
-                cwl = [b.buffer_load_cp(cw_rs, b.add(b.mul(ch, _c(b, KTAPS * 2)), _c(b, 16 * i)), _c(b, 0), dwords=4)
-                       for i in range(4)]
-                soff = b.mul(b.add(b.mul(tok, _c(b, HCW)), ch), _c(b, HIST * 2))
+
+        def unit(u, valid, grp, ltid):
+            """One (token, stream) unit on the 320 threads ``ltid`` of group ``grp``; ``valid`` (upc > 1) masks the
+            stores of a group without a unit (every group runs the barriers)."""
+            msk = (lambda o: o) if valid is None else (lambda o: b.select(valid, o, _c(b, OOB)))  # noqa: E731
+
+            def gsum(vals, slot):
+                return wsum(vals, slot, grp)
+
+            tok = E1M._udiv(b, u, NS)
+            s = E1M._umod(b, u, NS)
+            j0 = b.mul(ltid, _c(b, 8))  # this thread's 8 channels of the stream
+            ch = b.add(b.mul(s, _c(b, HID)), j0)  # global channel (0..10239)
+            ks = _c(b, 0) if k.mutant == "stream" else s
+            ychan = b.add(b.mul(ks, _c(b, HID)), j0)
+            # issue every load of the unit
+            ky = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), ychan), _c(b, 2)), _c(b, 0), dwords=4, aux=aux)
+            vy = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), b.add(_c(b, HCW), j0)), _c(b, 2)), _c(b, 0), dwords=4,
+                                  aux=aux)
+            hoff = b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, NS)), s), _c(b, HID)), j0), _c(b, 2))
+            hv = b.buffer_load_cp(r_rs, hoff, _c(b, 0), dwords=4)
+            wkv = b.buffer_load_cp(wk_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
+            wqv = b.buffer_load_cp(wq_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
+            wcv = b.buffer_load_cp(wc_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
+            cwl = [b.buffer_load_cp(cw_rs, b.add(b.mul(ch, _c(b, KTAPS * 2)), _c(b, 16 * i)), _c(b, 0), dwords=4)
+                   for i in range(4)]
+            soff = b.mul(b.add(b.mul(tok, _c(b, HCW)), ch), _c(b, HIST * 2))
+            if k.slay == "reg":
                 stl = [b.buffer_load_cp(st_rs, b.add(soff, _c(b, 16 * i)), _c(b, 0), dwords=4) for i in range(HIST)]
-                kv, vv, h = _unpack8(b, ky), _unpack8(b, vy), _unpack8(b, hv)
-                wk_, wq_, wc_ = _unpack8(b, wkv), _unpack8(b, wqv), _unpack8(b, wcv)
-                cwv = [x for v4 in cwl for x in _unpack8(b, v4)]  # [8 channels][4 taps]
+            else:  # coalesced: piece q = ltid + 320 i of the unit's block (1 KiB per wave instruction)
+                ubase = b.mul(b.add(b.mul(tok, _c(b, HCW)), b.mul(s, _c(b, HID))), _c(b, HIST * 2))  # the unit's block
+                gi = _c(b, 0) if grp is None else grp
+                stc = [b.buffer_load_cp(st_rs, b.add(ubase, b.mul(b.add(ltid, _c(b, 320 * i)), _c(b, 16))), _c(b, 0),
+                                        dwords=4) for i in range(HIST)]
+            kv, vv, h = _unpack8(b, ky), _unpack8(b, vy), _unpack8(b, hv)
+            wk_, wq_, wc_ = _unpack8(b, wkv), _unpack8(b, wqv), _unpack8(b, wcv)
+            cwv = [x for v4 in cwl for x in _unpack8(b, v4)]  # [8 channels][4 taps]
+            if k.slay == "reg":
                 stv = [x for v4 in stl for x in _unpack8(b, v4)]  # [8 channels][9]
+            if k.stats == "fused":
+                one = _f(b, 1.0)
+                # one reduction of (sum k^2, sum h^2, sum k(1+wk) h(1+wq), sum v^2) (FlyTape's ple_stats form)
+                kw_ = [b.fmul(kv[e], kv_w(b, wk_[e], one, k)) for e in range(8)]
+                qw_ = [b.fmul(h[e], b.fadd(wq_[e], one)) for e in range(8)]
+                ssk, ssq, cross, ssv = wsum4([[b.fmul(x, x) for x in kv], [b.fmul(x, x) for x in h],
+                                              [b.fmul(kw_[e], qw_[e]) for e in range(8)], [b.fmul(x, x) for x in vv]], grp)
+                nk = b.rsqrt(b.fadd(b.fmul(ssk, inv_n), eps))
+                nq = b.rsqrt(b.fadd(b.fmul(ssq, inv_n), eps))
+                score = _bf(b, b.fmul(b.fmul(cross, nk), nq))
+            else:
                 # key / query Gemma norms
-                ssk = wsum([b.fmul(x, x) for x in kv], 0)
-                ssq = wsum([b.fmul(x, x) for x in h], 1)
+                ssk = gsum([b.fmul(x, x) for x in kv], 0)
+                ssq = gsum([b.fmul(x, x) for x in h], 1)
                 nk = b.rsqrt(b.fadd(b.fmul(ssk, inv_n), eps))
                 nq = b.rsqrt(b.fadd(b.fmul(ssq, inv_n), eps))
                 one = _f(b, 1.0)
                 kn = [_bf(b, b.fmul(b.fmul(kv[e], nk), kv_w(b, wk_[e], one, k))) for e in range(8)]
                 qn = [_bf(b, b.fmul(b.fmul(h[e], nq), b.fadd(wq_[e], one))) for e in range(8)]
                 prod = [_bf(b, b.fmul(kn[e], qn[e])) for e in range(8)]
-                score = _bf(b, wsum(prod, 2))
-                score = _bf(b, b.fdiv(score, sq))
-                mag = _bf(b, b.fmax(b.fabs(score), _f(b, 1e-6)))
-                root = _bf(b, b.sqrt(mag))
-                sign = b.select(b.fcmp("ogt", score, _f(b, 0.0)), one,
-                                b.select(b.fcmp("olt", score, _f(b, 0.0)), _f(b, -1.0), _f(b, 0.0)))
-                z = b.fmul(sign, root)
-                gate = _bf(b, b.fdiv(one, b.fadd(one, b.exp(b.fneg(z)))))
-                if k.mutant == "gate":
-                    gate = one
-                gated = [_bf(b, b.fmul(gate, vv[e])) for e in range(8)]
-                ssg = wsum([b.fmul(x, x) for x in gated], 3)
+                score = _bf(b, gsum(prod, 2))
+            score = _bf(b, b.fdiv(score, sq))
+            mag = _bf(b, b.fmax(b.fabs(score), _f(b, 1e-6)))
+            root = _bf(b, b.sqrt(mag))
+            sign = b.select(b.fcmp("ogt", score, _f(b, 0.0)), one,
+                            b.select(b.fcmp("olt", score, _f(b, 0.0)), _f(b, -1.0), _f(b, 0.0)))
+            z = b.fmul(sign, root)
+            gate = _bf(b, b.fdiv(one, b.fadd(one, b.exp(b.fneg(z)))))
+            if k.mutant == "gate":
+                gate = one
+            gated = [_bf(b, b.fmul(gate, vv[e])) for e in range(8)]
+            if k.stats == "fused":
+                ng = b.rsqrt(b.fadd(b.fmul(b.fmul(b.fmul(gate, gate), ssv), inv_n), eps))
+            else:
+                ssg = gsum([b.fmul(x, x) for x in gated], 3)
                 ng = b.rsqrt(b.fadd(b.fmul(ssg, inv_n), eps))
-                nrm = [_bf(b, b.fmul(b.fmul(gated[e], ng), b.fadd(wc_[e], one))) for e in range(8)]
-                taps = (0, 3, 6) if k.mutant != "tap" else (1, 4, 7)
-                outs, plev, nst = [], [], []
-                for e in range(8):
-                    sv = stv[9 * e : 9 * e + 9]
-                    cwe = cwv[4 * e : 4 * e + 4]
-                    xs_ = [sv[taps[0]], sv[taps[1]], sv[taps[2]], nrm[e]]
-                    val = _f(b, 0.0)
-                    for t_ in range(KTAPS):
-                        val = b.fadd(val, b.fmul(xs_[t_], cwe[t_]))
-                    val = _bf(b, val)
-                    sil = _bf(b, b.fmul(val, b.fdiv(one, b.fadd(one, b.exp(b.fneg(val))))))
-                    pv = gated[e] if k.mutant == "conv" else _bf(b, b.fadd(gated[e], sil))
-                    plev.append(pv)
-                    outs.append(_bf(b, b.fadd(h[e], pv)))
-                    nst += (sv if k.mutant == "state" else (sv[1:] + [nrm[e]]))
-                b.buffer_store_cp(_pack8(b, outs), ro_rs, hoff, _c(b, 0))
-                b.buffer_store_cp(_pack8(b, plev), pl_rs, hoff, _c(b, 0))
+            nrm = [_bf(b, b.fmul(b.fmul(gated[e], ng), b.fadd(wc_[e], one))) for e in range(8)]
+            if k.slay != "reg":
+                # the coalesced pieces -> LDS (here: their latency hides behind the reductions), then this thread's
+                # 144 bytes (its 8 channels x 9 entries) back, in the per-thread layout
                 for i in range(HIST):
-                    b.buffer_store_cp(_pack8(b, nst[8 * i : 8 * i + 8]), st_rs, b.add(soff, _c(b, 16 * i)), _c(b, 0))
-                b.sync_lds_only()  # the next unit's reductions reuse ``red``
+                    b.smem_store_vN(sbuf, [gi, b.mul(b.add(ltid, _c(b, 320 * i)), _c(b, 16))],
+                                    b.vec_bitcast(stc[i], VectorType(I8, 16)), 16)
+                b.sync_lds_only()
+                stl = [b.vec_bitcast(b.smem_load_vN(sbuf, gi, b.add(b.mul(ltid, _c(b, HIST * 16)), _c(b, 16 * i)),
+                                                    dtype=I8, n=16), VectorType(I32, 4)) for i in range(HIST)]
+                stv = [x for v4 in stl for x in _unpack8(b, v4)]  # [8 channels][9]
+            taps = (0, 3, 6) if k.mutant != "tap" else (1, 4, 7)
+            outs, plev, nst = [], [], []
+            for e in range(8):
+                sv = stv[9 * e : 9 * e + 9]
+                cwe = cwv[4 * e : 4 * e + 4]
+                xs_ = [sv[taps[0]], sv[taps[1]], sv[taps[2]], nrm[e]]
+                val = _f(b, 0.0)
+                for t_ in range(KTAPS):
+                    val = b.fadd(val, b.fmul(xs_[t_], cwe[t_]))
+                val = _bf(b, val)
+                sil = _bf(b, b.fmul(val, b.fdiv(one, b.fadd(one, b.exp(b.fneg(val))))))
+                pv = gated[e] if k.mutant == "conv" else _bf(b, b.fadd(gated[e], sil))
+                plev.append(pv)
+                outs.append(_bf(b, b.fadd(h[e], pv)))
+                nst += (sv if k.mutant == "state" else (sv[1:] + [nrm[e]]))
+            b.buffer_store_cp(_pack8(b, outs), ro_rs, msk(hoff), _c(b, 0))
+            b.buffer_store_cp(_pack8(b, plev), pl_rs, msk(hoff), _c(b, 0))
+            if k.slay == "lds":
+                for i in range(HIST):
+                    b.smem_store_vN(sbuf, [gi, b.add(b.mul(ltid, _c(b, HIST * 16)), _c(b, 16 * i))],
+                                    b.vec_bitcast(_pack8(b, nst[8 * i : 8 * i + 8]), VectorType(I8, 16)), 16)
+                b.sync_lds_only()
+                for i in range(HIST):
+                    q = b.add(ltid, _c(b, 320 * i))
+                    v = b.vec_bitcast(b.smem_load_vN(sbuf, gi, b.mul(q, _c(b, 16)), dtype=I8, n=16), VectorType(I32, 4))
+                    b.buffer_store_cp(v, st_rs, msk(b.add(ubase, b.mul(q, _c(b, 16)))), _c(b, 0))
+            else:
+                for i in range(HIST):
+                    b.buffer_store_cp(_pack8(b, nst[8 * i : 8 * i + 8]), st_rs, msk(b.add(soff, _c(b, 16 * i))), _c(b, 0))
+            b.sync_lds_only()  # the next unit's reductions reuse ``red`` (and ``sbuf``)
+
+        if k.upc == 1:
+            for it in range(-(-128 * NS // GRID)):
+                u = b.add(w.cta, _c(b, it * GRID))
+                with b.scf_if(b.cmp_lt(u, nunit)):
+                    unit(u, None, None, w.tid)
+        else:
+            grp = b.readfirstlane(E1M._udiv(b, w.wave, 5))
+            ltid = b.sub(w.tid, b.mul(grp, _c(b, 320)))
+            for it in range(-(-128 * NS // (GRID * k.upc))):
+                u = b.add(w.cta, b.mul(b.add(_c(b, it * k.upc), grp), _c(b, GRID)))
+                valid = b.cmp_lt(u, nunit)
+                unit(b.select(valid, u, _c(b, 0)), valid, grp, ltid)
 
     return _finish(w.walk(body), k)
 
@@ -582,3 +695,51 @@ def build_papply_kernel(k: WalkKnobs) -> KernelDef:
 def kv_w(b, w_e, one, k):
     """The key norm's (1 + w) (mutant ``knorm``: w alone)."""
     return w_e if k.mutant == "knorm" else b.fadd(w_e, one)
+
+
+# ------------------------------------------------------------------ measured plan table of the projection P
+
+# row bucket (e1_plans.row_key) -> E1 overrides on WP-L2a's qsa_in TP1 pick (13952 x 2560, the nearest planned shape to
+# P's 12800 x 2560). Only changes that WON on both rocke nodes are entered (ledger: WP-L2f.md).
+PPROJ_PLANS: dict = {
+    8: {"sb": False},  # round 2: 0.974 (n01-09) / 0.964 (n07-17)
+    32: {"wcp": "nt"},  # round 2: 0.971 / 0.991
+    64: {"wcp": "default"},  # round 2 (n01-09) 0.982 / round 3 (n07-17, same base) 0.968
+}
+
+
+def pproj_plan(rows: int):
+    """The E1 build of P (12800 x 2560) for ``rows`` live tokens."""
+    from dataclasses import replace as _rep
+
+    from . import e1_plans as EP
+
+    kn = EP.plan("qsa_in", 1, rows)
+    ov = PPROJ_PLANS.get(EP.row_key(rows), {})
+    if ov:
+        kn = _rep(kn, **ov)
+    kn.check()
+    return kn
+
+
+# row bucket -> WalkKnobs overrides of A (papply); only both-node WINs (ledger: WP-L2f.md)
+PAPPLY_PLANS: dict = {
+    # fix round (cache-cold phase metric, base = the round-4 table; n01-09 job v2a3 / n07-17 job v1b): the coalesced
+    # state through LDS (slay=lds) WON on both nodes at 32 (0.934 / 0.934), 64 (0.896 / 0.910) and, with upc 2, at 128
+    # (0.857 / 0.868 against upc 2 alone)
+    32: {"slay": "lds"},
+    64: {"slay": "lds"},
+    128: {"threads": 640, "upc": 2, "slay": "lds"},  # upc 2: rounds 2-4 0.925 / 0.920 / 0.921 (n07-17), 0.919 (n01-09)
+}
+
+
+def papply_knobs(rows: int, **kw) -> WalkKnobs:
+    """The A build for ``rows`` live tokens (the measured overrides of its row bucket)."""
+    from . import e1_plans as EP
+
+    ov = dict(PAPPLY_PLANS.get(EP.row_key(rows), {}))
+    ov.update(kw)
+    k = WalkKnobs(kind="papply", **({"threads": 320} | ov))
+    k.check()
+    return k
+

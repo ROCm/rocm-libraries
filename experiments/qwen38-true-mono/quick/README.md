@@ -829,3 +829,88 @@ device-resident round loop and W11's N1 (HC chain restructure) / N2 (out-proj K-
 stacked on c2s3b when verified; FINAL-STACK.md is frozen only after those.
 
 Integration log: W11 N2 (out-proj K-split into B3) is REJECTED on base c2s3b (in situ every N2 arm loses 2-7 %; w11/WP17.md, arms `arms.d/w17.sh`): not stacked.
+
+### 7. Steady-state steps without H2D copies (`ATOM_Q38_RB_DEVMETA_ADV=3`, + `_TRIM2`) on base c2s3b
+
+The kernel trace of c2s3b's boundary (job rb-kt2) shows, after the last draft head and before the next graph's first
+kernel, ~0.017 of the round spent in the step preparation: 5 H2D copies, a packed scatter, the deferred-ids kernel,
+a fill, the shift kernel, kv_indices, and the copy <-> kernel transition gaps (~0.002 each). `_TRIM2` keeps the spec
+masks on repeated shapes. `_ADV=3` skips EVERY upload of a steady-state device-path step whose bytes the device can
+supply: the accept-dependent set (shift kernel, as `_ADV=1`), the input ids (the deferred-ids kernel rewrites them),
+and every member whose staged bytes equal its last upload's (sampling parameters, cu_seqlens_q, decode_src, spec
+indices, block tables, GDN slots, QSA token map). The latter are restored from a device snapshot taken after their
+last real upload, by one batched restore kernel (token-input group: at once, because the deferred-ids kernel reads it
+inside the preparation; the rest: one launch before the shift kernel). An `atom/utils/h2d.py` hook (`RB_HOOK`, None
+unless set) does the skipping.
+
+Gates (jobs rb-gate11 / rb-gate12 / rb-gate13, n07-17, checks every 8th step through whole transition runs):
+`_TRIM2` 173 / 173 OK, mutant (a wrong skipped mask) 16 / 16 DIFF; `_ADV=3` 173 / 173 OK (171 advanced), K=1 28 / 28,
+K=2 18 / 18, tail check + 5,400 deep checks equal, transitions clean; must-fail "skip the restores" caught 61 DIFF.
+Without the restores CONC 2 gsm8k fell to 1 / 4 (the drafts rewrite cu_seqlens_q / the QSA token map between steps),
+while the first 16 consecutive checks still passed. The coverage has to span the transitions.
+
+End to end, base c2s3b (jobs rb-e2e5-n07 / rb-e2e5-n01, 4 passes; rnd_med / hybrid, twins c2s3b / c2s3b_b):
+
+| arm | n07-17 | n01-09 |
+|---|---|---|
+| c2s3b / c2s3b_b | 0.890 / 0.889 | 0.889 / 0.890 |
+| c2s3b_n8_64k (N8 64K) | 0.886 | 0.884 |
+| c2s3b_t2 (`_TRIM2`) | 0.887 | 0.887 |
+| c2s3b_t2_n8_64k | 0.885 | 0.884 |
+
+ADV=2 (restricted) is rejected on base c2s3b (rb-gate10: QSA token map DIFF at CONC 2).
+
+Fix round for `_ADV=3` (jobs rb-kt3 / rb-gate14 / rb-kt4): the first build still captured (D2D) the accept-dependent
+members on every steady step: the boundary got one kernel MORE (13 vs 12, busy 1.07x), and its rb-e2e6 arms are void.
+Fixed (members already suppressed for the shift kernel are neither uploaded nor captured), re-gated (rb-gate14:
+168 / 168 OK, 166 advanced; K=1 28 / 28; tail + 5,400 deep checks equal; the "no restores" mutant 87 DIFF), and
+re-traced (rb-kt4, n07-17): the boundary is now 9 kernels and 0.0231 of the round busy (c2s3b: 12, 0.0273). The round
+idle is unchanged at ~0.0069: the four ~5 us transitions (graph start, P9 verify -> next op, last draft head -> first
+restore, the H2D copy before the P9 verify) remain. A `HIP_FORCE_DEV_KERNARG=0` screen (rb-kt3) was worse (busy +10 us
+at the boundary): rejected on base c2s3b.
+
+### 8. Final state on base c2s3b (2026-11-03, wrap-up: the Qwen stack is frozen)
+
+End to end, fixed `_ADV=3` (jobs rb-e2e7-n07 / rb-e2e7-n01, 4 passes; rnd_med / hybrid, twins c2s3b / c2s3b_b):
+n07-17 c2s3b 0.888 / 0.891, c2s3b_a3 0.887 / 0.886 (twin), c2s3b_n8_64k 0.884, c2s3b_a3_n8_64k 0.883. tok/s per request
+(median): c2s3b 1.134 / 1.131 of the hybrid, a3 1.128 / 1.130, a3_n8_64k 1.128: **NEUTRAL** (the round moves
+0.3-0.6 %, inside the acceptance noise of the token rate; the coordinator's read of rb-e2e6/7: a3 977.0 vs c2s3b 981.8
+on n07-17, 977.0 vs 977.2 on n01-09).
+
+`_EVT` (one compute-stream event barrier per step instead of three: the token / status copies behind the drafts' stream
+sync; no staging-reuse event when the step uploads nothing). Gate rb-gate15: check mode 169 / 169 OK and 0
+received-token DIFF (the host's copies compared with the device tensors), tail + deep checks equal, K=1 28 / 28. **But
+the must-fail mutant (copies without the stream ordering) was NOT caught**: 0 received-token DIFF, so the check cannot
+show that the ordering matters. GATE FAIL. `_EVT` is unproven and must not be used; no e2e was run.
+
+Verdict, every knob default-off and kept: **rejected on base c2s3b**: `_TRIM2`, `_ADV=3`, `_ADV=3` + N8 64K; `_EVT`
+failed its gate (the mutant was not caught); `_ADV=2` FAILED its gate; `HIP_FORCE_DEV_KERNARG=0` worse. With RB devmeta (`_TRIM` +
+`_ADV=1`, part of c2s3b) the GPU is 99.3 % busy in the round and no host decision is on its critical path. The
+remaining ~0.7 % idle is four ~5 us stream transitions per round (graph start / end, the event records). The rest
+(~0.02) is per-step preparation GPU work. Removing all of it would need the whole round in one launch (WP12 `loop` /
+a persistent round kernel); the levers here took ~0.3-0.5 % of it, which does not show in tok/s at this noise. The
+gap to 1000 tok/s (c2s3b ~970-985) is in-round GPU time: the target pass 0.85, the verify tail 0.04, the drafts 0.08-0.10.
+
+### FROZEN (2026-11-03, user decision): the final arms and their numbers on both nodes
+
+Definition, files, stages and shas: `../FINAL-STACK.md`. K=3 = `c2s3b`, K=0 = `c2s0b` (W11's N1 "na" at K=0 is pending:
+its only T4 run is at K=3 and never serves delta r1). Absolute tok/s: private `quick/FINAL.md`.
+
+| (2 jobs x 4 rotated passes per node; same-job hybrid + twin) | n01-09 | n07-17 |
+|---|---|---|
+| K=3 `c2s3b` / hybrid, ms per verify round (median over requests) | 0.888 | 0.887 |
+| K=3 `c2s3b` / hybrid, tok/s per request (median over requests) | 1.135 | 1.121 |
+| K=0 `c2s0b` / hybrid, tok/s per request | 1.135 | 1.139 |
+
+Rejected on base c2s3b (default-off knobs, numbers pooled over both nodes unless noted; DESIGN 9.1 rule):
+
+| lever | round / base | tok/s / base | verdict |
+|---|---|---|---|
+| device-advanced round ADV=3 + TRIM2 (rb lane; rb-e2e6-n01, rb-e2e7-n07) | 1.000 (4/8) | 0.999 | NEUTRAL |
+| TRIM2 (rb-e2e5-n01 / n07) | 0.997 (7/8) | 1.011 | NEUTRAL |
+| N8 64K draft vocab (6 jobs, 23 pairs) | 0.996 (21/23, inside the twins' band) | 1.005 | NEUTRAL |
+| TRIM2 + N8 64K (rb-e2e5, 8 pairs) | 0.994 (8/8, at the band edge) | 1.009 | not adopted (no confirmation before the freeze) |
+| N1 "na" / "ks" at K=3 (W11; w11-e3k3-n07, w11-e4k3-n01) | 0.999 / 0.997 | 1.012 / 1.004 | NEUTRAL |
+| N1 "na" at K=0 (w11-e3k0-n01, n01-09 only) | per token 0.966 | 1.035 (4/4) | pending (one node; T4 passes at K=3 (w11-t4k3) but no K=0 T4, which would serve delta r1) |
+| N2 out-proj K-split into B3 (W11 WP17; qk-w17-e1-n01 / n07) | 1.012 (0/8) | 0.991 | LOSS |
+| schedule re-climb with the rocKE stages in place (c2u3 / c2u0) | K=3 1.002, K=0 per token 0.995 | 0.999 / 1.003 | NEUTRAL |

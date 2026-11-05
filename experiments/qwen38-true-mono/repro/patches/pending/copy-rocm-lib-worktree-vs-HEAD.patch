@@ -1,0 +1,1063 @@
+diff --git a/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/head_lb.py b/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/head_lb.py
+index c3c70aa0b8a..2cbcc4dbca5 100644
+--- a/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/head_lb.py
++++ b/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/head_lb.py
+@@ -416,7 +416,14 @@ def build_head_kernel(hk: HeadKnobs) -> KernelDef:
+ # (tp, row bucket of e1_plans.row_key) -> HeadKnobs overrides on WP-L2a's head pick ("e1": E1 fields). Only changes that
+ # WON on both rocke nodes (DESIGN 9.1 win rule, same-job controls) are entered; the ledger is WP-L2f.md.
+ HEAD_PLANS: dict = {
+-    (2, 5): {"e1": {"waves": 8}},  # round 1: 0.923 (n07-17) / 0.930 (n01-09) of the WP-L2a pick + argmax
++    # round 1 (base: WP-L2a pick + argmax): waves=8 at TP2 r5, 0.923 (n07-17) / 0.930 (n01-09)
++    # round 2 (base: round 1): amrg=cta pairs, WIN on both nodes (n01-09 / n07-17)
++    (1, 5): {"e1": {"map": "xcd"}, "amrg": "cta"},  # 0.966 / 0.970
++    (1, 16): {"e1": {"xa": 2}, "amrg": "cta"},  # round 2 (n01-09) 0.934 / round 3 (n07-17, same base) 0.939
++    (1, 128): {"e1": {"wcp": "nt"}, "amrg": "cta"},  # 0.934 / 0.944
++    (2, 5): {"e1": {"waves": 8, "xu": True}, "amrg": "cta"},  # 0.945 / 0.943
++    (2, 16): {"e1": {"bpre": 1}, "amrg": "cta"},  # 0.960 / 0.961
++    (2, 128): {"e1": {"map": "xcd"}, "amrg": "cta"},  # round 4: 0.962 (n01-09) / 0.968 (n07-17)
+ }
+ 
+ 
+diff --git a/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/ple_lb.py b/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/ple_lb.py
+index 3a9d86e550d..881c75d37a3 100644
+--- a/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/ple_lb.py
++++ b/dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/ple_lb.py
+@@ -67,6 +67,10 @@ __all__ = [
+     "build_pgather_kernel",
+     "build_papply_kernel",
+     "build_prologue_kernel",
++    "pproj_plan",
++    "papply_knobs",
++    "PAPPLY_PLANS",
++    "PPROJ_PLANS",
+     "prologue_params",
+     "P_MUTANTS",
+     "embed_params",
+@@ -148,6 +152,7 @@ class WalkKnobs:
+     occ1: bool = True  # one CTA per CU (LDS pad)
+     nt: bool = False  # nt loads of single-use streams (table / Y)
+     hz: bool = True
++    upc: int = 1  # papply: (token, stream) units a CTA runs at once (groups of 320 threads; threads = 320 upc)
+     acq: bool = False  # acquire (buffer_inv sc1) after every walk barrier (consumers that read with plain loads)
+     mutant: str = "none"
+     tag: str = ""
+@@ -158,9 +163,11 @@ class WalkKnobs:
+         allowed = {"embed": E_MUTANTS, "pgather": G_MUTANTS, "papply": A_MUTANTS, "prologue": P_MUTANTS}[self.kind]
+         if self.mutant not in allowed:
+             raise ValueError(f"{self.kind} mutant in {allowed}")
+-        want = {"embed": (256, 512), "pgather": (192, 256), "papply": (320,), "prologue": (320,)}[self.kind]
++        want = {"embed": (256, 512), "pgather": (192, 256), "papply": (320, 640), "prologue": (320,)}[self.kind]
+         if self.threads not in want:
+             raise ValueError(f"{self.kind}: threads in {want}")
++        if self.upc not in (1, 2) or (self.upc > 1 and self.kind != "papply") or                 (self.kind == "papply" and self.threads != 320 * self.upc):
++            raise ValueError("upc 1 | 2 (papply only, threads = 320 upc)")
+ 
+     def suffix(self) -> str:
+         parts = []
+@@ -469,26 +476,28 @@ def build_papply_kernel(k: WalkKnobs) -> KernelDef:
+     b = w.b
+     TPB = w.i["tpb"]
+     YS = w.i["ystride"]
+-    NWV = k.threads // 64  # 5 waves
+-    red = b.smem_alloc(F32, [4, NWV], name_hint="pared")
++    NWV = 5  # waves of a unit group (320 threads)
++    red = b.smem_alloc(F32, [k.upc, 4, NWV], name_hint="pared")
+     eps = b.bitcast(_c(b, EPS_BITS), F32)
+     inv_n = _f(b, 1.0 / HID)
+     sq = _f(b, math.sqrt(HID))
+     aux = E1M.CPOL_NT if k.nt else 0
+ 
+-    def wsum(vals, slot):
+-        """Sum over the CTA (f32): in-lane order, then a butterfly, then the waves in order."""
++    def wsum(vals, slot, grp=None):
++        """Sum over a unit group (f32): in-lane order, then a butterfly, then the group's waves in order."""
+         acc = vals[0]
+         for v in vals[1:]:
+             acc = b.fadd(acc, v)
+         for m in (1, 2, 4, 8, 16, 32):
+             acc = b.fadd(acc, b.warp_shuffle_xor(acc, m))
++        g = _c(b, 0) if grp is None else grp
++        wig = w.wave if grp is None else b.sub(w.wave, b.mul(g, _c(b, NWV)))
+         with b.scf_if(b.cmp_eq(w.lane, _c(b, 0))):
+-            b.smem_store_vN(red, [_c(b, slot), w.wave], acc, 1)
++            b.smem_store_vN(red, [g, _c(b, slot), wig], acc, 1)
+         b.sync_lds_only()
+-        tot = b.vec_extract(b.smem_load_vN_f32(red, _c(b, slot), _c(b, 0), n=1), 0)
++        tot = b.vec_extract(b.smem_load_vN_f32(red, g, _c(b, slot), _c(b, 0), n=1), 0)
+         for wv in range(1, NWV):
+-            tot = b.fadd(tot, b.vec_extract(b.smem_load_vN_f32(red, _c(b, slot), _c(b, wv), n=1), 0))
++            tot = b.fadd(tot, b.vec_extract(b.smem_load_vN_f32(red, g, _c(b, slot), _c(b, wv), n=1), 0))
+         return tot
+ 
+     def body(layer):
+@@ -506,75 +515,94 @@ def build_papply_kernel(k: WalkKnobs) -> KernelDef:
+         wc_rs = w.rs("wc", _c(b, HCW * 2))
+         cw_rs = w.rs("cw", _c(b, HCW * KTAPS * 2))
+         nunit = b.mul(w.rows, _c(b, NS))
+-        for it in range(-(-128 * NS // GRID)):
+-            u = b.add(w.cta, _c(b, it * GRID))
+-            with b.scf_if(b.cmp_lt(u, nunit)):
+-                tok = E1M._udiv(b, u, NS)
+-                s = E1M._umod(b, u, NS)
+-                j0 = b.mul(w.tid, _c(b, 8))  # this thread's 8 channels of the stream
+-                ch = b.add(b.mul(s, _c(b, HID)), j0)  # global channel (0..10239)
+-                ks = _c(b, 0) if k.mutant == "stream" else s
+-                ychan = b.add(b.mul(ks, _c(b, HID)), j0)
+-                # issue every load of the unit
+-                ky = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), ychan), _c(b, 2)), _c(b, 0), dwords=4, aux=aux)
+-                vy = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), b.add(_c(b, HCW), j0)), _c(b, 2)), _c(b, 0), dwords=4,
+-                                      aux=aux)
+-                hoff = b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, NS)), s), _c(b, HID)), j0), _c(b, 2))
+-                hv = b.buffer_load_cp(r_rs, hoff, _c(b, 0), dwords=4)
+-                wkv = b.buffer_load_cp(wk_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
+-                wqv = b.buffer_load_cp(wq_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
+-                wcv = b.buffer_load_cp(wc_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
+-                cwl = [b.buffer_load_cp(cw_rs, b.add(b.mul(ch, _c(b, KTAPS * 2)), _c(b, 16 * i)), _c(b, 0), dwords=4)
+-                       for i in range(4)]
+-                soff = b.mul(b.add(b.mul(tok, _c(b, HCW)), ch), _c(b, HIST * 2))
+-                stl = [b.buffer_load_cp(st_rs, b.add(soff, _c(b, 16 * i)), _c(b, 0), dwords=4) for i in range(HIST)]
+-                kv, vv, h = _unpack8(b, ky), _unpack8(b, vy), _unpack8(b, hv)
+-                wk_, wq_, wc_ = _unpack8(b, wkv), _unpack8(b, wqv), _unpack8(b, wcv)
+-                cwv = [x for v4 in cwl for x in _unpack8(b, v4)]  # [8 channels][4 taps]
+-                stv = [x for v4 in stl for x in _unpack8(b, v4)]  # [8 channels][9]
+-                # key / query Gemma norms
+-                ssk = wsum([b.fmul(x, x) for x in kv], 0)
+-                ssq = wsum([b.fmul(x, x) for x in h], 1)
+-                nk = b.rsqrt(b.fadd(b.fmul(ssk, inv_n), eps))
+-                nq = b.rsqrt(b.fadd(b.fmul(ssq, inv_n), eps))
+-                one = _f(b, 1.0)
+-                kn = [_bf(b, b.fmul(b.fmul(kv[e], nk), kv_w(b, wk_[e], one, k))) for e in range(8)]
+-                qn = [_bf(b, b.fmul(b.fmul(h[e], nq), b.fadd(wq_[e], one))) for e in range(8)]
+-                prod = [_bf(b, b.fmul(kn[e], qn[e])) for e in range(8)]
+-                score = _bf(b, wsum(prod, 2))
+-                score = _bf(b, b.fdiv(score, sq))
+-                mag = _bf(b, b.fmax(b.fabs(score), _f(b, 1e-6)))
+-                root = _bf(b, b.sqrt(mag))
+-                sign = b.select(b.fcmp("ogt", score, _f(b, 0.0)), one,
+-                                b.select(b.fcmp("olt", score, _f(b, 0.0)), _f(b, -1.0), _f(b, 0.0)))
+-                z = b.fmul(sign, root)
+-                gate = _bf(b, b.fdiv(one, b.fadd(one, b.exp(b.fneg(z)))))
+-                if k.mutant == "gate":
+-                    gate = one
+-                gated = [_bf(b, b.fmul(gate, vv[e])) for e in range(8)]
+-                ssg = wsum([b.fmul(x, x) for x in gated], 3)
+-                ng = b.rsqrt(b.fadd(b.fmul(ssg, inv_n), eps))
+-                nrm = [_bf(b, b.fmul(b.fmul(gated[e], ng), b.fadd(wc_[e], one))) for e in range(8)]
+-                taps = (0, 3, 6) if k.mutant != "tap" else (1, 4, 7)
+-                outs, plev, nst = [], [], []
+-                for e in range(8):
+-                    sv = stv[9 * e : 9 * e + 9]
+-                    cwe = cwv[4 * e : 4 * e + 4]
+-                    xs_ = [sv[taps[0]], sv[taps[1]], sv[taps[2]], nrm[e]]
+-                    val = _f(b, 0.0)
+-                    for t_ in range(KTAPS):
+-                        val = b.fadd(val, b.fmul(xs_[t_], cwe[t_]))
+-                    val = _bf(b, val)
+-                    sil = _bf(b, b.fmul(val, b.fdiv(one, b.fadd(one, b.exp(b.fneg(val))))))
+-                    pv = gated[e] if k.mutant == "conv" else _bf(b, b.fadd(gated[e], sil))
+-                    plev.append(pv)
+-                    outs.append(_bf(b, b.fadd(h[e], pv)))
+-                    nst += (sv if k.mutant == "state" else (sv[1:] + [nrm[e]]))
+-                b.buffer_store_cp(_pack8(b, outs), ro_rs, hoff, _c(b, 0))
+-                b.buffer_store_cp(_pack8(b, plev), pl_rs, hoff, _c(b, 0))
+-                for i in range(HIST):
+-                    b.buffer_store_cp(_pack8(b, nst[8 * i : 8 * i + 8]), st_rs, b.add(soff, _c(b, 16 * i)), _c(b, 0))
+-                b.sync_lds_only()  # the next unit's reductions reuse ``red``
++
++        def unit(u, valid, grp, ltid):
++            """One (token, stream) unit on the 320 threads ``ltid`` of group ``grp``; ``valid`` (upc > 1) masks the
++            stores of a group without a unit (every group runs the barriers)."""
++            msk = (lambda o: o) if valid is None else (lambda o: b.select(valid, o, _c(b, OOB)))  # noqa: E731
++
++            def gsum(vals, slot):
++                return wsum(vals, slot, grp)
++
++            tok = E1M._udiv(b, u, NS)
++            s = E1M._umod(b, u, NS)
++            j0 = b.mul(ltid, _c(b, 8))  # this thread's 8 channels of the stream
++            ch = b.add(b.mul(s, _c(b, HID)), j0)  # global channel (0..10239)
++            ks = _c(b, 0) if k.mutant == "stream" else s
++            ychan = b.add(b.mul(ks, _c(b, HID)), j0)
++            # issue every load of the unit
++            ky = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), ychan), _c(b, 2)), _c(b, 0), dwords=4, aux=aux)
++            vy = b.buffer_load_cp(y_rs, b.mul(b.add(b.mul(tok, YS), b.add(_c(b, HCW), j0)), _c(b, 2)), _c(b, 0), dwords=4,
++                                  aux=aux)
++            hoff = b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, NS)), s), _c(b, HID)), j0), _c(b, 2))
++            hv = b.buffer_load_cp(r_rs, hoff, _c(b, 0), dwords=4)
++            wkv = b.buffer_load_cp(wk_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
++            wqv = b.buffer_load_cp(wq_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
++            wcv = b.buffer_load_cp(wc_rs, b.mul(ch, _c(b, 2)), _c(b, 0), dwords=4)
++            cwl = [b.buffer_load_cp(cw_rs, b.add(b.mul(ch, _c(b, KTAPS * 2)), _c(b, 16 * i)), _c(b, 0), dwords=4)
++                   for i in range(4)]
++            soff = b.mul(b.add(b.mul(tok, _c(b, HCW)), ch), _c(b, HIST * 2))
++            stl = [b.buffer_load_cp(st_rs, b.add(soff, _c(b, 16 * i)), _c(b, 0), dwords=4) for i in range(HIST)]
++            kv, vv, h = _unpack8(b, ky), _unpack8(b, vy), _unpack8(b, hv)
++            wk_, wq_, wc_ = _unpack8(b, wkv), _unpack8(b, wqv), _unpack8(b, wcv)
++            cwv = [x for v4 in cwl for x in _unpack8(b, v4)]  # [8 channels][4 taps]
++            stv = [x for v4 in stl for x in _unpack8(b, v4)]  # [8 channels][9]
++            # key / query Gemma norms
++            ssk = gsum([b.fmul(x, x) for x in kv], 0)
++            ssq = gsum([b.fmul(x, x) for x in h], 1)
++            nk = b.rsqrt(b.fadd(b.fmul(ssk, inv_n), eps))
++            nq = b.rsqrt(b.fadd(b.fmul(ssq, inv_n), eps))
++            one = _f(b, 1.0)
++            kn = [_bf(b, b.fmul(b.fmul(kv[e], nk), kv_w(b, wk_[e], one, k))) for e in range(8)]
++            qn = [_bf(b, b.fmul(b.fmul(h[e], nq), b.fadd(wq_[e], one))) for e in range(8)]
++            prod = [_bf(b, b.fmul(kn[e], qn[e])) for e in range(8)]
++            score = _bf(b, gsum(prod, 2))
++            score = _bf(b, b.fdiv(score, sq))
++            mag = _bf(b, b.fmax(b.fabs(score), _f(b, 1e-6)))
++            root = _bf(b, b.sqrt(mag))
++            sign = b.select(b.fcmp("ogt", score, _f(b, 0.0)), one,
++                            b.select(b.fcmp("olt", score, _f(b, 0.0)), _f(b, -1.0), _f(b, 0.0)))
++            z = b.fmul(sign, root)
++            gate = _bf(b, b.fdiv(one, b.fadd(one, b.exp(b.fneg(z)))))
++            if k.mutant == "gate":
++                gate = one
++            gated = [_bf(b, b.fmul(gate, vv[e])) for e in range(8)]
++            ssg = gsum([b.fmul(x, x) for x in gated], 3)
++            ng = b.rsqrt(b.fadd(b.fmul(ssg, inv_n), eps))
++            nrm = [_bf(b, b.fmul(b.fmul(gated[e], ng), b.fadd(wc_[e], one))) for e in range(8)]
++            taps = (0, 3, 6) if k.mutant != "tap" else (1, 4, 7)
++            outs, plev, nst = [], [], []
++            for e in range(8):
++                sv = stv[9 * e : 9 * e + 9]
++                cwe = cwv[4 * e : 4 * e + 4]
++                xs_ = [sv[taps[0]], sv[taps[1]], sv[taps[2]], nrm[e]]
++                val = _f(b, 0.0)
++                for t_ in range(KTAPS):
++                    val = b.fadd(val, b.fmul(xs_[t_], cwe[t_]))
++                val = _bf(b, val)
++                sil = _bf(b, b.fmul(val, b.fdiv(one, b.fadd(one, b.exp(b.fneg(val))))))
++                pv = gated[e] if k.mutant == "conv" else _bf(b, b.fadd(gated[e], sil))
++                plev.append(pv)
++                outs.append(_bf(b, b.fadd(h[e], pv)))
++                nst += (sv if k.mutant == "state" else (sv[1:] + [nrm[e]]))
++            b.buffer_store_cp(_pack8(b, outs), ro_rs, msk(hoff), _c(b, 0))
++            b.buffer_store_cp(_pack8(b, plev), pl_rs, msk(hoff), _c(b, 0))
++            for i in range(HIST):
++                b.buffer_store_cp(_pack8(b, nst[8 * i : 8 * i + 8]), st_rs, msk(b.add(soff, _c(b, 16 * i))), _c(b, 0))
++            b.sync_lds_only()  # the next unit's reductions reuse ``red``
++
++        if k.upc == 1:
++            for it in range(-(-128 * NS // GRID)):
++                u = b.add(w.cta, _c(b, it * GRID))
++                with b.scf_if(b.cmp_lt(u, nunit)):
++                    unit(u, None, None, w.tid)
++        else:
++            grp = b.readfirstlane(E1M._udiv(b, w.wave, 5))
++            ltid = b.sub(w.tid, b.mul(grp, _c(b, 320)))
++            for it in range(-(-128 * NS // (GRID * k.upc))):
++                u = b.add(w.cta, b.mul(b.add(_c(b, it * k.upc), grp), _c(b, GRID)))
++                valid = b.cmp_lt(u, nunit)
++                unit(b.select(valid, u, _c(b, 0)), valid, grp, ltid)
+ 
+     return _finish(w.walk(body), k)
+ 
+@@ -582,3 +610,46 @@ def build_papply_kernel(k: WalkKnobs) -> KernelDef:
+ def kv_w(b, w_e, one, k):
+     """The key norm's (1 + w) (mutant ``knorm``: w alone)."""
+     return w_e if k.mutant == "knorm" else b.fadd(w_e, one)
++
++
++# ------------------------------------------------------------------ measured plan table of the projection P
++
++# row bucket (e1_plans.row_key) -> E1 overrides on WP-L2a's qsa_in TP1 pick (13952 x 2560, the nearest planned shape to
++# P's 12800 x 2560). Only changes that WON on both rocke nodes are entered (ledger: WP-L2f.md).
++PPROJ_PLANS: dict = {
++    8: {"sb": False},  # round 2: 0.974 (n01-09) / 0.964 (n07-17)
++    32: {"wcp": "nt"},  # round 2: 0.971 / 0.991
++    64: {"wcp": "default"},  # round 2 (n01-09) 0.982 / round 3 (n07-17, same base) 0.968
++}
++
++
++def pproj_plan(rows: int):
++    """The E1 build of P (12800 x 2560) for ``rows`` live tokens."""
++    from dataclasses import replace as _rep
++
++    from . import e1_plans as EP
++
++    kn = EP.plan("qsa_in", 1, rows)
++    ov = PPROJ_PLANS.get(EP.row_key(rows), {})
++    if ov:
++        kn = _rep(kn, **ov)
++    kn.check()
++    return kn
++
++
++# row bucket -> WalkKnobs overrides of A (papply); only both-node WINs (ledger: WP-L2f.md)
++PAPPLY_PLANS: dict = {
++    128: {"threads": 640, "upc": 2},  # rounds 2-4: 0.925 / 0.920 / 0.921 (n07-17), round 4 0.919 (n01-09)
++}
++
++
++def papply_knobs(rows: int, **kw) -> WalkKnobs:
++    """The A build for ``rows`` live tokens (the measured overrides of its row bucket)."""
++    from . import e1_plans as EP
++
++    ov = dict(PAPPLY_PLANS.get(EP.row_key(rows), {}))
++    ov.update(kw)
++    k = WalkKnobs(kind="papply", **({"threads": 320} | ov))
++    k.check()
++    return k
++
+diff --git a/dnn-providers/hip-kernel-provider/rocke/library/tests/test_qwen38_lb_l2f.py b/dnn-providers/hip-kernel-provider/rocke/library/tests/test_qwen38_lb_l2f.py
+index eb6db5342d7..364d1d63c94 100644
+--- a/dnn-providers/hip-kernel-provider/rocke/library/tests/test_qwen38_lb_l2f.py
++++ b/dnn-providers/hip-kernel-provider/rocke/library/tests/test_qwen38_lb_l2f.py
+@@ -117,3 +117,30 @@ def test_ple_refusals():
+         P.WalkKnobs(kind="papply", threads=256).check()
+     with pytest.raises(ValueError):
+         P.WalkKnobs(kind="embed", mutant="gate").check()
++
++
++def test_pproj_plan_every_rows():
++    for rows in range(1, 129):
++        kn = P.pproj_plan(rows)
++        assert kn.tiles * 16 >= rows and kn.k == P.HID
++
++
++def test_papply_upc2_lowers():
++    k = P.WalkKnobs(kind="papply", threads=640, upc=2)
++    t = _ll(P.build_papply_kernel(k))
++    assert P.kname(k) in t
++    with pytest.raises(ValueError):
++        P.WalkKnobs(kind="papply", threads=320, upc=2).check()
++
++
++def test_prologue_lowers():
++    k = P.WalkKnobs(kind="prologue", threads=320)
++    t = _ll(P.build_prologue_kernel(k))
++    assert P.kname(k) in t
++    assert len(P.prologue_params()) == len(P.pgather_params()) + 2
++
++
++def test_papply_plan_every_rows():
++    for rows in range(1, 129):
++        k = P.papply_knobs(rows)
++        assert k.threads == 320 * k.upc
+diff --git a/experiments/qwen38-true-mono/quick/README.md b/experiments/qwen38-true-mono/quick/README.md
+index b7363b8f902..f7eddf42b15 100644
+--- a/experiments/qwen38-true-mono/quick/README.md
++++ b/experiments/qwen38-true-mono/quick/README.md
+@@ -829,3 +829,33 @@ device-resident round loop and W11's N1 (HC chain restructure) / N2 (out-proj K-
+ stacked on c2s3b when verified; FINAL-STACK.md is frozen only after those.
+ 
+ Integration log: W11 N2 (out-proj K-split into B3) is REJECTED on base c2s3b (in situ every N2 arm loses 2-7 %; w11/WP17.md, arms `arms.d/w17.sh`): not stacked.
++
++### 7. Steady-state steps without H2D copies (`ATOM_Q38_RB_DEVMETA_ADV=3`, + `_TRIM2`) on base c2s3b
++
++The kernel trace of c2s3b's boundary (job rb-kt2) shows, after the last draft head and before the next graph's first
++kernel, ~0.017 of the round spent in the step preparation: 5 H2D copies, a packed scatter, the deferred-ids kernel,
++a fill, the shift kernel, kv_indices, and the copy <-> kernel transition gaps (~0.002 each). `_TRIM2` keeps the spec
++masks on repeated shapes. `_ADV=3` skips EVERY upload of a steady-state device-path step whose bytes the device can
++supply: the accept-dependent set (shift kernel, as `_ADV=1`), the input ids (the deferred-ids kernel rewrites them),
++and every member whose staged bytes equal its last upload's (sampling parameters, cu_seqlens_q, decode_src, spec
++indices, block tables, GDN slots, QSA token map). The latter are restored from a device snapshot taken after their
++last real upload, by one batched restore kernel (token-input group: at once, because the deferred-ids kernel reads it
++inside the preparation; the rest: one launch before the shift kernel). An `atom/utils/h2d.py` hook (`RB_HOOK`, None
++unless set) does the skipping.
++
++Gates (jobs rb-gate11 / rb-gate12 / rb-gate13, n07-17, checks every 8th step through whole transition runs):
++`_TRIM2` 173 / 173 OK, mutant (a wrong skipped mask) 16 / 16 DIFF; `_ADV=3` 173 / 173 OK (171 advanced), K=1 28 / 28,
++K=2 18 / 18, tail check + 5,400 deep checks equal, transitions clean; must-fail "skip the restores" caught 61 DIFF.
++Without the restores CONC 2 gsm8k fell to 1 / 4 (the drafts rewrite cu_seqlens_q / the QSA token map between steps),
++while the first 16 consecutive checks still passed. The coverage has to span the transitions.
++
++End to end, base c2s3b (jobs rb-e2e5-n07 / rb-e2e5-n01, 4 passes; rnd_med / hybrid, twins c2s3b / c2s3b_b):
++
++| arm | n07-17 | n01-09 |
++|---|---|---|
++| c2s3b / c2s3b_b | 0.890 / 0.889 | 0.889 / 0.890 |
++| c2s3b_n8_64k (N8 64K) | 0.886 | 0.884 |
++| c2s3b_t2 (`_TRIM2`) | 0.887 | 0.887 |
++| c2s3b_t2_n8_64k | 0.885 | 0.884 |
++
++ADV=2 (restricted) is rejected on base c2s3b (rb-gate10: QSA token map DIFF at CONC 2).
+diff --git a/experiments/qwen38-true-mono/w11/WP17.md b/experiments/qwen38-true-mono/w11/WP17.md
+index 93b496b53da..9b084439a8c 100644
+--- a/experiments/qwen38-true-mono/w11/WP17.md
++++ b/experiments/qwen38-true-mono/w11/WP17.md
+@@ -222,3 +222,59 @@ B3 CTAs makes it lose today.
+ | 68250875 `w17-c1s1`, 68250962 `w17-c1s2` | n07-17 bus 117 / n01-09 bus 5 | C1 streaming twin, 6 cells / batched polls |
+ | 68251019 `w17-n2c` | n07-17, bus 101 | the verdict job: served picks, check + time 4 cells, check-only 7 cells |
+ | 68251094 `qk-w17-e1-n07`, 68251023 `qk-w17-e1-n01` | n07-17 / n01-09 | end to end |
++
++## Verification (independent verifier, workflow W11, 2026-11-02)
++
++**Verdict: CONFIRMED (the rejection stands).** N2 on base c2s3b is a loss in situ on both nodes and end to end on both
++nodes; its numerics gate and must-fail mutants really ran; existing builds are untouched. Ratios only (absolutes in the
++private file).
++
++Re-run (the cheapest decisive check): job 68251940 `w11-vWP17-a`, n01-09 GPU bus 21 (health check ok), the same
++stages as the verdict job (`h-qk-w11a`, `rocke-qk-w11a`, `atom-truemono-w11a`, `w17-h6`; overlay `n2.py` sha
++32b855a84e5d986b = the local file), the served WP2b picks env (`WP2B_KNOBS_JSON=picks_all.json WP2B_JSON_ONLY=1`;
++the C1 / B3 knob sets in the log equal `w17-n2c`'s), a NEW seed (7, the builder used 0), the two r4s cells the K=3
++CONC 1 server actually runs, check + time, 24 rounds:
++
++| cell | controls band | N2 (epi) | N2 copy 2 | issue=loader (best) | order=chain | numerics | mutants fail T0 |
++|---|---|---|---|---|---|---|---|
++| delta r4s | 0.997-1.005 | 1.042 LOSS | 1.040 LOSS | **1.028** [1.024-1.031] LOSS | 1.042 LOSS | PASS (w equal to base 8 / 8, pack equal, tags ok, deterministic) | 4 / 4 |
++| delta_ple r4s | 0.995-1.003 | 1.033 LOSS | 1.032 LOSS | **1.031** [1.027-1.033] LOSS | 1.034 LOSS | PASS (n2 w equal 8 / 8; chain 1 value differs) | 4 / 4 |
++
++0 of 24 rounds below 1 in every arm. This is the served-picks in-situ verdict on the second node (the builder's
++served-picks in-situ job ran on n07-17 only; its n01-09 in-situ job used the slower parity base), and it agrees in
++sign and size (delta r4s loader 1.026 there, 1.028 here; delta_ple r4s a little worse here).
++
++Checked against the record (no refutation found):
++- Accuracy gates: `w17-n2c` `n2.log` / `n2_check2.log` hold 11 CHECK records (4 timed + 7 check-only cells), each with
++  T0 over 8 inputs, `pack_equal`, `tags_ok`, `n2_deterministic`, and `fails_t0: true` for all four mutants (`drop`,
++  `dup`, `kit`, `ascale`) in every cell; `W11_N2 PASS` both runs. T2 / T4 were not run; that is acceptable for a
++  REJECTED lever (they gate deployment; WP2c precedent) and must run before any future default (section 6 says so).
++- In-situ timing discipline (DESIGN 9.1): 24 shuffled rounds, three controls (second graph, two no-op recompiles) with
++  bands inside 0.996-1.004, pre/post equality of every timed N2 build to the checked one. Served base confirmed: the
++  in-situ `SCHED` string and B3 / C1 knob sets equal the served `k3_*_c2s3b.builds.txt` lines.
++- End to end: both jobs read on the cluster (`qk-w17-e1-n07` bus 149, `qk-w17-e1-n01` bus 21; not the bad e5 bus),
++  4 passes each with rotated arm order, `LOG CHECK FAILURES: none`, rc 0, `w17_gen n2 issue=loader replaced 14`.
++  Recomputed from `abs.json`: per-pass rnd_med w17n3 / c2s3b n07-17 1.012, 1.012, 1.014, 1.014; n01-09 1.012, 1.012,
++  1.003, 1.009 (exactly the table); A-vs-A hybrid_b / hybrid 0.998-1.003 and w17n3_b / w17n3 0.999-1.003. gsm8k
++  correct 28-31 / 32 for every arm on both nodes.
++- Byte identity: `stage_b3.py` mtime 2026-10-29 (before WP17); `n2.py`, the test file and `arms.d/w17.sh` are new;
++  `arms.d/c2.sh` mtime predates WP17. `n2.py` does not monkeypatch `stage_b3`: it execs a patched copy of
++  `_B3.emit` into a private namespace bound to a subclass. Local CPU tests: 35 / 35 pass (with ATOM-truemono, rocKE
++  platform/python and library on PYTHONPATH). Beyond the tests (which use `TUNED_SPECS_NUMA`), I lowered the N2-off
++  path at the SERVED B3 knob sets (delta / delta_ple r4s, r1 body + pre, r2s, r3s): 10 / 10 IR-identical to
++  `stage_b3`.
++
++Caveats (none changes the verdict):
++1. Overstatement: the summary bullet and section 2 item 3 say every arm is timed as two separately compiled copies;
++   only the default arm has a second compile (`n2_rc`); `issue=loader`, `issue=entry` and `order=chain` are single
++   compiles. Their losses (2.3-7 %) are 5-15x the control band, so a second compile cannot flip them.
++2. N2 is rejected on the B3 side only. The Q7 (qsa) side was not built; its exclusion is an analytic dominance
++   argument (section 8), not a measurement. Because the qsa layers are separate cells, a qsa-only N2 is not covered by
++   this rejection in principle; the argument (4x the per-CTA GEMV on 48 CTAs, the same producer-tail mechanism) is
++   sound, but it stays unmeasured.
++3. The stamped timelines (section 5) and the C1-streaming twin timings (section 6) are on the slower default-WP2b base,
++   not the served picks; both are disclosed. The twin's served-picks loss is inferred, not measured.
++4. The local copy of `results/qk-w17-e1-n07/q/` is partial (a few per-pass json files missing); the cluster copy is
++   complete (41 per-arm json files on each node) and `abs.json` carries all 4 passes x 5 arms.
++5. The CPU tests need PYTHONPATH set as above; without ATOM-truemono on the path, 18 fail and 17 skip (an environment
++   requirement, not a code defect).
+diff --git a/experiments/qwen38-true-mono/large-batch/WP-L0c-route.md b/experiments/qwen38-true-mono/large-batch/WP-L0c-route.md
+new file mode 100644
+index 00000000000..8985649aedc
+--- /dev/null
++++ b/experiments/qwen38-true-mono/large-batch/WP-L0c-route.md
+@@ -0,0 +1,338 @@
++# WP-L0c-route: real-checkpoint routing at large batch (W10)
++
++WP-L0c's remainder (`../DESIGN-LB.md` 12 / 15.6, `W7-STATUS.md` 2 and 4): capture the served router's expert choices from
++the real Qwen3.8-Flash-Next MXFP4 checkpoint on the rocke partition, measure U per layer and the correlation across rows,
++re-time the WP-L2d MoE (`moe_lb2`, B5 and the per-cell dispatcher picks, read-only use) under those routes, and re-issue
++the per-cell K0 budget (DESIGN-LB 15.7) under real routing. Ratios, shares and counts only; absolute times are in
++`hackathon-prep/private-perf/qwen38-true-mono/large-batch/WP-L0c-route.md`. Below 1 is faster. Measured 2026-11-02 on
++MI355X (both rocke nodes).
++
++## 0. Summary
++
++1. **Real routing is strongly correlated.** Over 212,736 captured decode router calls (K0, steady state: the first 16
++   decode steps dropped), the unique routed experts per layer and step are U / U_rand = 0.81-0.90 at 8 rows,
++   0.67-0.85 at 16, 0.61-0.77 at 32, 0.56-0.71 at 64 and 0.57-0.73 at 128 rows (U_rand = 512 (1 - (1 - 10/512)^R), the
++   random routing every LB and FlyTape figure so far used). Random-token prompts (the benchmark_serving cells the bars
++   are measured on) and gsm8k are the most skewed, the mixed chat text (gsm8k / MATH / MBPP / MT-Bench) the least. Two rows share
++   0.5-1.2 of their 10 experts (random: 0.195); the busiest expert of a step-layer takes 91-127 of 128 rows at worst (30-56 on average); a row keeps
++   3.1-3.8 of its 10 experts from one step to the next. At K=3 (MTP, 4 rows per request) U / U_rand is 0.52-0.64 at
++   32-128 rows. Middle and late layers are the most skewed (layers 15 / 16 / 31 / 32 at 0.41-0.45 of U_rand, rand1k r128).
++2. **The capture is ATOM's own routing.** The stored ids / weights are the output of ATOM's `FusedMoE.select_experts`
++   in its native path (`ATOM_MONO_ENABLE=0`, TP1, eager), hooked from outside ATOM (no edit). Gate: against an independent
++   f32 top-10 of the captured logits, 0 non-tie differences in 56.2 M (K0) and 5.25 M (K3) rows; 1.6 % / 3.4 % of rows
++   differ only by exact bf16 ties at the 10th place. Both must-fail capture mutants (ids + 1, rows rolled) were caught.
++3. **The MoE under real routing** (B5 and the dispatcher picks, strict venv-built code objects, three jobs on both nodes,
++   real and random routing paired in one shuffled loop with two random draws as the control): the cell's best arm under
++   real routes / the dispatcher pick under random routes (rho) is
++   - 0.93-0.99 at r8 (next to the random-draw band 0.96-1.03: not claimed),
++   - 0.78-0.93 at r16, 0.74-0.90 at r32, 0.65-0.82 at r64, 0.68-0.82 at r128 (TP1) / 0.79-0.93 (TP2), every captured case
++     a WIN against its own random reference (204 of 204 per job at r16+, three jobs),
++   - with random-token or gsm8k prompts the lowest and the text mix the highest in every cell. K=3 routes at the same rows give
++     0.62-0.83.
++   Against FlyTape's experts + combine (same job, FlyTape traced before and after, random weights): 0.51-0.82 under real
++   routes, 0.74-0.89 under random routes in the same jobs.
++4. **The random-routing picks do not all transfer.** Under real routes the dispatcher's pick falls back to B5 or
++   behind it at TP1 r16 (`t116b`: 0.99-1.19x B5 over the captured cases, three jobs; 0.91-0.94 on random routes) and
++   TP2 r128 (`t2128a`: 0.99-1.10x; 0.91-0.96 random); `t232b` reaches 1.11x at TP2 r32 where `t232a` holds; `c132`
++   reaches 1.015x on one case. Phase stamps show why: hot experts concentrate the work on a few CTAs (`t116b`: the median
++   CTA's expert phase drops to 0.004 of the span while the max stays at 0.91; B5's deal spreads it). The other picks
++   hold (0.81-0.97 of B5 on captured routes).
++5. **Budget (DESIGN-LB 15.7) re-issued under real routing** (derived from the measured rho, no composed layer yet):
++   the K0 LB / FlyTape step central is 0.70 (TP2 B8), 0.65-0.69 (B16), 0.68-0.71 (B32), 0.63-0.67 (B64),
++   0.73-0.77 (B128); TP1 0.72-0.73 (B8), 0.68-0.74 (B16), 0.64-0.66 (B32), 0.63-0.69 (B64), 0.61-0.66 (B128 vs ATOM K3,
++   derived as in 15.3). The B16-B128 cells gain 0.03-0.14 on W7's random-routing central, the B8 cells 0.01-0.03 (inside
++   the routing-draw noise). TP1 B8 / B16, W7's thin cells, move from high-end margins 0.04 / 0.05 to 0.06-0.07 / 0.08-0.15.
++   - FlyTape stays at its random-routing step (its bench has random weights); its own gain from real routing is not
++     measurable. The bar's ATOM DP2 K3 arm is served with real weights, so against ATOM the real-routing figure is the
++     matched one.
++   - PLAN 20's TP2 B128 target (10,000+ tok/s total) needs LB / FT <= 0.774 of FlyTape TP2's step. W7's random-routing
++     central (0.81) did not meet it; the real-routing central (0.73-0.77, range 0.66-0.84) does for random-token and
++     gsm8k prompts and is at the line for the text mix. Derived, not measured: WP-L5's full TP2 pass measures it.
++
++## 1. What was built (harness only; no rocKE or ATOM file changed)
++
++`hackathon-prep/qwen38/truemono-lb/wp-l0c-route/`:
++
++| file | what |
++|---|---|
++| `site/sitecustomize.py` | capture hook: a `sys.meta_path` finder patches `Qwen4ExpSparseMoeBlock.forward` (a forward hook on `gate`: step context, shared-gate logit, an independent f32 top-10) and `FusedMoE.select_experts` (the STORED ids / weights) right after ATOM's modules execute; tie-aware gate on the GPU; mutants `RTCAP_MUTANT=shift / row` |
++| `capture.py`, `cap_job.sh` | ATOM offline engine, native path, TP1, `--enforce-eager --level 0`; closed batches of exactly CONC prompts x 256 greedy decode tokens (ignore_eos), workloads `rand1k` / `rand8k` (uniform random token ids, ISL 1024 / 8192), `gsm8k`, `mix` (gsm8k / MATH-500 / MBPP / MT-Bench turn 1, chat template); K0 and K3 (MTP) engines |
++| `analyze.py` | U per layer per step, U / U_rand, pair overlap, 16-token items, max tokens per expert, top-16 share, temporal overlap, 4-step union; the gate verdict; sampled routes for the bench (8 steady steps x 48 layers per run) |
++| `rt_bench.py`, `bench_job.sh` | the timing / numerics driver over WP-L2d's frozen harness (`pl4b_bench` / `pl4_ref`, unchanged): per cell the cases rnd1 / rnd2 (random, two seeds) and `<workload>:a` / `:b` (captured routes: bench layers from capture layers 0, 6, .., 42 of sampled step 2 / layers 3, 9, .., 45 of step 6), injected as router logits whose torch top-10 and softmax reproduce the captured ids and weights; injection gate + must-fail mutant (`RT_INJ_MUTANT=1`); WP-L2d's numerics and mutants per case; one shuffled loop over every (case, arm) graph; `RT_SAVE` / `RT_LOAD` + `RT_STRICT` prebuilt code objects; `--stamps`, `--route-div` (K3 routes) |
++| `summarize.py`, `ft_compare.py`, `budget.py` | tables: ratios per case, same-job FlyTape e+c, the re-issued budget |
++
++Stages (frozen copies, read-only): `w10-rt-lb2-rocke` / `w10-rt-lb2-h` = WP-L2d's `lb2-rocke` / `lb2-h` of 2026-11-02
++(`moe_lb2.py` sha256 `155601151a23f699`, `moe_lb.py` `febf48f145d6a6c8`, `pl4b_bench.py` `56b85a1de410bbec`,
++`pl4_ref.py` `612122f896083924`); `atom-rkrepro` (`qwen4_exp.py` `f00493e937a65d83`, `moe.py` `4d391c060b5405d2`, identical
++to `dev/ATOM`'s); `w10-rt-routes` (k0 `routes.npz` `5dbd80387f1697a0`); `w10-rt-hsaco` (164 venv-built code objects,
++tar `d0c8b318a9b71e64`). Harness at the timed runs: `rt_bench.py` `4a189666c3be0a0b`, `bench_job.sh` `ad899952546554fa`;
++capture `sitecustomize.py` `c5281ca5f618b73e`, `capture.py` `a9a81cd200ab6e96`, `analyze.py` `48304981adb5423d` (re-analysis).
++
++## 2. Jobs
++
++| job | what | node, GPU bus | gates |
++|---|---|---|---|
++| 68251612 `w10-rt-cap2` | capture: 3 short gate runs (plain, `shift`, `row`), K0 (rand1k / gsm8k / mix at CONC 8-128, rand8k at 16 / 64), K3 (rand1k / mix at CONC 8-32) | n01-09, 95 | capture gate PASS (K0, K3, plain); both mutants CAUGHT |
++| 68251769 `w10-rt-an2` | steady-state re-analysis (first 16 K0 / 4 K3 steps dropped) | n01-09 (CPU work) | - |
++| 68251768 `w10-rt-sv1` | injection mutant; 10 cells (TP1 / TP2, r8-r128, fp8) x 8 cases, numerics + mutants + 16 rounds, venv COMGR, every code object saved | n01-09, 95 | injection mutant CAUGHT at every case; numerics: section 5.1 |
++| 68251823 `w10-rt-ld-n01`, 68251824 `w10-rt-ld-n07` | the same on the saved objects (container, strict: 164 / 164 LOAD, 0 compiled), 24 rounds, FlyTape TP1 B8-64 / TP2 B8-128 traced before and after | n01-09 e5 (+95 FlyTape); n07-17 75 (+15) | as above |
++| 68251972 `w10-rt-sv2` | stamps (TP1 r16, TP2 r64 / r128; B5 + pick); K3 routes at r32-r128 (16 rounds, numerics + mutants) | n01-09 | injection PASS; numerics PASS |
++
++Timing discipline (DESIGN 9.1): every ratio is same-process, shuffled over all (case, arm) graphs per round, two metrics
++(`gs` 8-layer walk, `launch` one launch per layer); controls: second graph `lb2b`, recompiled `lb2rc` and the second
++random draw `rnd2`; win rule per case against the rnd2 / rnd1 band; three jobs on two nodes. SCLK sampled from sysfs
++every 0.5 s: at most 3 samples per bench window below 0.97 of the 2400 MHz busy median (n07-17: one inside the TP1
++r128 rounds). **Deviation:** 2-4 other jobs of ours ran on the node during each timed window (DESIGN 8.1 allows one;
++`sacct` audit), plus CI jobs; the cross-node / cross-job agreement of rho (section 5) is the evidence that it did not
++move the paired ratios.
++
++## 3. Routing statistics (K0, steady state; random routing = 1 for the ratios, 0.195 for overlaps)
++
++| workload | rows | U / U_rand (p10..p90) | per-layer range | 16-token items / random | max tokens on one expert (mean, max) | pair overlap | temporal overlap |
++|---|---|---|---|---|---|---|---|
++| rand1k | 8 | 0.838 (0.70..0.96) | 0.64..0.98 | 0.834 | 3.7, 8 | 0.90 | 3.69 |
++| rand1k | 16 | 0.669 (0.53..0.81) | 0.43..0.87 | 0.668 | 7.7, 16 | 1.20 | 3.73 |
++| rand1k | 32 | 0.614 (0.50..0.73) | 0.43..0.81 | 0.615 | 12.9, 31 | 1.01 | 3.72 |
++| rand1k | 64 | 0.559 (0.44..0.68) | 0.38..0.78 | 0.569 | 25.8, 58 | 1.08 | 3.84 |
++| rand1k | 128 | 0.569 (0.45..0.69) | 0.41..0.79 | 0.604 | 49.8, 113 | 1.04 | 3.76 |
++| gsm8k | 8 | 0.813 | 0.68..0.93 | 0.809 | 4.4, 8 | 1.09 | 3.09 |
++| gsm8k | 16 | 0.750 | 0.58..0.89 | 0.749 | 7.5, 16 | 0.94 | 3.20 |
++| gsm8k | 32 | 0.659 | 0.49..0.82 | 0.661 | 13.9, 32 | 0.95 | 3.25 |
++| gsm8k | 64 | 0.602 | 0.44..0.76 | 0.611 | 27.4, 64 | 0.97 | 3.18 |
++| gsm8k | 128 | 0.605 | 0.44..0.76 | 0.638 | 55.5, 127 | 0.99 | 3.23 |
++| mix | 8 | 0.903 | 0.86..0.96 | 0.898 | 3.1, 8 | 0.55 | 3.48 |
++| mix | 16 | 0.848 | 0.78..0.93 | 0.846 | 4.8, 12 | 0.52 | 3.32 |
++| mix | 32 | 0.768 | 0.66..0.88 | 0.767 | 8.7, 25 | 0.56 | 3.35 |
++| mix | 64 | 0.714 | 0.60..0.85 | 0.715 | 16.2, 45 | 0.57 | 3.38 |
++| mix | 128 | 0.732 | 0.63..0.84 | 0.746 | 30.6, 91 | 0.55 | 3.38 |
++| rand8k | 16 / 64 | 0.698 / 0.569 | 0.47..0.90 / 0.38..0.78 | 0.697 / 0.578 | 7.2 / 25.1 | 1.07 / 1.03 | 3.79 / 3.84 |
++
++- K=3 (verify rows = 4 per request, steady): rand1k 0.550 / 0.527 / 0.521 and mix 0.629 / 0.637 / 0.644 of U_rand at
++  32 / 64 / 128 rows; the union over 4 consecutive K0 steps of a closed batch is 0.45-0.84 of U_rand(4R).
++- Including the first decode steps (the chat template's shared first tokens) lowers U further at small rows (gsm8k r8:
++  0.78 over all steps, 0.51 over 32 steps).
++- The skewed layers repeat across workloads (per-layer U ratio correlation rand1k vs mix 0.62): layers 15, 16, 31, 32,
++  39 are the most skewed for random-token prompts, 31 and 43-47 for text; layer 0 is the least skewed everywhere.
++- The capture is at TP1; the router is replicated, so TP2 routes the same tokens to the same experts (up to bf16 ties).
++
++## 4. Bytes floors with the measured U (`large_batch/bytes_model.py`, `step_bytes(..., u=U)`, checkpoint precision, p128)
++
++| rows | MoE bytes, real / random (rand1k / gsm8k / mix) | step bytes, real / random, TP1 | TP2 |
++|---|---|---|---|
++| 8 | 0.84 / 0.82 / 0.90 | 0.89 / 0.87 / 0.93 | 0.89 / 0.88 / 0.94 |
++| 16 | 0.67 / 0.75 / 0.85 | 0.76 / 0.82 / 0.89 | 0.76 / 0.82 / 0.89 |
++| 32 | 0.62 / 0.66 / 0.77 | 0.71 / 0.74 / 0.83 | 0.71 / 0.75 / 0.83 |
++| 64 | 0.56 / 0.60 / 0.71 | 0.68 / 0.71 / 0.79 | 0.68 / 0.71 / 0.79 |
++| 128 | 0.57 / 0.61 / 0.73 | 0.72 / 0.75 / 0.83 | 0.72 / 0.75 / 0.83 |
++
++The streamed floor of a TP2 B128 step falls to 0.72-0.83 of the random-routing floor of DESIGN-LB section 3.
++
++## 5. The MoE re-timed
++
++### 5.1 Numerics (every timed code object, random data, MI355X)
++
++- Injection gate: the bench's host routes equal the captured ids (as sets per row) and weights (max error 5e-8) in every
++  (cell, case) of every job; the must-fail mutant (one captured id moved) failed the gate in every case.
++- WP-L2d's suite per case (T0 against float64, slot-order determinism over 3 launches, hdump / dirty-h / stale-read twins,
++  2-layer walk, null build; must-fail mutants on rnd1 and the first captured case of every cell): PASS in 79 of 80
++  (cell, case) checks in `sv1` and `ld-n07` and 78 of 80 in `ld-n01`; the exceptions, both reported, neither a kernel
++  defect:
++  - **TP2 r64 `mix:a`, every build, every job:** the E2E rule (kernel max error <= the bf16-per-slot oracle's max error)
++    is exceeded, k/o 1.21-1.24, while the element-level bounds of the hdump twin pass (h codes 0 / 225,280 off their
++    quantization neighbours, scale codes 0 / 7,040, N1b 1.2e-5 against 2^-11) and the host fold of the kernel's partials
++    equals y bit for bit. The case has hot experts and peaked weights; the max-error heuristic is routing-sensitive.
++  - **`flow0` (listed as the deterministic must-fail combine mutant) escaped once:** TP2 r8 `rand1k:a` in `w10-rt-ld-n01`
++    (1 launch); caught in all other 59 runs across the three jobs, `flowrel` caught in all 60. At 8 rows with real
++    routes the combine can find its partials complete without waiting; `flow0` is not deterministic there.
++- The K3-routes job (`sv2`): every check PASS.
++
++### 5.2 rho: the cell's best arm under real routes / the pick under random routes
++
++Geometric mean of cases a and b, random reference = geometric mean of rnd1 and rnd2; median (min..max) over the three
++jobs (sv1 venv n01-09, ld-n01, ld-n07 container strict), `launch` metric (`gs` within 0.03 of it).
++
++| TP | rows | pick | random-draw control rnd2 / rnd1 | rand1k | gsm8k | mix |
++|---|---|---|---|---|---|---|
++| 1 | 8 | `t18b` | 0.960..1.027 | 0.936 (0.935..0.941) | 0.933 (0.928..0.938) | 0.955 (0.952..0.960) |
++| 1 | 16 | `t116b` -> B5 | 0.974..1.025 | 0.779 (0.776..0.784) | 0.837 (0.830..0.843) | 0.915 (0.896..0.929) |
++| 1 | 32 | `c132` | 0.989..1.002 | 0.768 (0.742..0.769) | 0.775 (0.764..0.785) | 0.837 (0.816..0.838) |
++| 1 | 64 | `c164` | 1.002..1.007 | 0.656 (0.648..0.656) | 0.681 (0.678..0.683) | 0.798 (0.787..0.800) |
++| 1 | 128 | `c164` | 1.004..1.009 | 0.702 (0.698..0.715) | 0.682 (0.681..0.713) | 0.806 (0.802..0.820) |
++| 2 | 8 | `b28` | 0.979..0.988 | 0.958 (0.952..0.959) | 0.965 (0.956..0.985) | 0.963 (0.963..0.964) |
++| 2 | 16 | `k216` | 0.958..0.993 | 0.801 (0.799..0.814) | 0.863 (0.854..0.879) | 0.897 (0.897..0.908) |
++| 2 | 32 | `t232a` / `t232b` | 0.985..0.993 | 0.777 (0.770..0.791) | 0.828 (0.807..0.852) | 0.874 (0.857..0.900) |
++| 2 | 64 | `b264` | 1.008..1.060 | 0.686 (0.668..0.702) | 0.708 (0.706..0.733) | 0.803 (0.799..0.818) |
++| 2 | 128 | `t2128a` -> B5 | 0.962..1.043 | 0.816 (0.788..0.831) | 0.791 (0.790..0.829) | 0.889 (0.870..0.927) |
++
++- Every captured case at r16 and above is a WIN against its own random reference under the win rule (rnd2 / rnd1 band),
++  same arm, every job. At r8 the gain (0.93-0.97) sits next to the random-draw band and is not claimed.
++- The routing draw matters even for random routing (rnd2 / rnd1 up to 0.95-1.06): single-draw random-routing figures
++  (W7 and before) carry about +-0.05 from the draw alone.
++- **K=3 routes** (sv2, venv, n01-09; rows = 4 x CONC): rho 0.744 / 0.618 / 0.679 (TP1 r32 / r64 / r128, rand1k), 0.777 /
++  0.736 / 0.751 (mix); TP2 0.787 / 0.671 / 0.772 (rand1k), 0.824 / 0.768 / 0.833 (mix). Close to K0 at the same rows.
++- Against the bytes-floor streamer of the same routed union, B5 is 1.27-1.32x (TP1 r32-r128) / 1.44-1.48x (TP2 r32-r128)
++  under random routes and 1.39-1.96x under real routes (gs metric, `sv1`): the kernel loses efficiency on skewed routes,
++  so there is more than the bytes in it (section 6).
++
++### 5.3 Against FlyTape's experts + combine (same job, random weights; best arm, median (min..max) over cases a / b, both
++nodes and both FlyTape brackets)
++
++| cell | random routes (rnd1, rnd2) | rand1k | gsm8k | mix |
++|---|---|---|---|---|
++| TP1 r8 | 0.81-0.85 | 0.77 (0.76-0.79) | 0.77 (0.76-0.78) | 0.79 (0.76-0.82) |
++| TP1 r16 | 0.86-0.89 | 0.68 (0.66-0.71) | 0.74 (0.72-0.75) | 0.80 (0.77-0.81) |
++| TP1 r32 | 0.82-0.85 | 0.63 (0.60-0.67) | 0.64 (0.64-0.65) | 0.69 (0.67-0.71) |
++| TP1 r64 | 0.82-0.84 | 0.54 (0.51-0.57) | 0.56 (0.55-0.57) | 0.66 (0.64-0.68) |
++| TP2 r8 | 0.74-0.77 | 0.72 (0.70-0.74) | 0.73 (0.72-0.74) | 0.73 (0.71-0.75) |
++| TP2 r16 | 0.79-0.81 | 0.64 (0.63-0.66) | 0.69 (0.67-0.70) | 0.72 (0.70-0.74) |
++| TP2 r32 | 0.85-0.87 | 0.67 (0.66-0.70) | 0.71 (0.69-0.74) | 0.76 (0.72-0.79) |
++| TP2 r64 | 0.76-0.82 | 0.54 (0.52-0.55) | 0.56 (0.55-0.58) | 0.63 (0.61-0.68) |
++| TP2 r128 | 0.77-0.83 | 0.65 (0.61-0.69) | 0.65 (0.63-0.66) | 0.72 (0.70-0.74) |
++
++The random-routing column is 0.03-0.08 below P-L4b 7.6 in most cells (venv-built objects here, container-built there;
++FlyTape's own time moves up to 12 % between jobs). The real-routing columns compare our real-routes MoE with FlyTape's
++random-routes MoE: a statement about the serving workload, not a matched kernel comparison.
++
++## 6. Why some picks lose under real routes (stamps, `sv2`, venv; stamped builds can allocate registers differently)
++
++| cell | arm | case | span / same arm on rnd1 | per-CTA expert phase, median / max (of the span) |
++|---|---|---|---|---|
++| TP1 r16 | B5 | rnd1 / rand1k:b / mix:b | 1 / 0.709 / 0.804 | 0.868 / 0.943; 0.632 / 0.907; 0.652 / 0.917 |
++| TP1 r16 | `t116b` | rnd1 / rand1k:b / mix:b | 1 / 0.908 / 0.944 | 0.842 / 0.909; 0.004 / 0.907; 0.004 / 0.907 |
++| TP2 r128 | B5 | rnd1 / rand1k:b | 1 / 0.724 | 0.854 / 0.939; 0.759 / 0.916 |
++| TP2 r128 | `t2128a` | rnd1 / rand1k:b | 1 / 0.884 | 0.886 / 0.937; 0.554 / 0.936 |
++| TP2 r64 | B5 / `b264` | rnd1 / rand1k:b | 1 / 0.749; 1 / 0.719 | 0.834 / 0.943, 0.767 / 0.913; 0.847 / 0.937, 0.799 / 0.906 |
++
++`t116b` deals whole wave-owned experts (`gu=wt`): with fewer, hotter experts most CTAs get no expert work and a few
++carry the hot ones (median 0.004, max 0.91). Under `t2128a` (`dt=5`) the median CTA's expert phase ends at 0.55 of the
++span on the most skewed case while the last CTA runs to 0.94. B5's round-robin deal with split last-round pieces spreads the hot experts better. The span is set
++by the CTA with the hot expert in every skewed case: a hot expert of 50-127 tokens is 4-8 passes of 16 tokens that one
++CTA streams while its weights are read once; splitting such an expert over CTAs by passes is the missing lever.
++
++## 7. Budget (DESIGN-LB 15.7) under real routing
++
++Method: 15.7's LB / FT step per cell, with the MoE term scaled by the measured rho. The W7 MoE term is the pick's e+c
++x f (f = 1.03-1.17 for the in-kernel top-k); the top-k part does not depend on the routing, so the term scales by
++(rho + f - 1) / f: LB/FT(real) = LB/FT(W7) x (1 - s (1 - (rho + f - 1) / f)), s = 15.7's MoE share of the LB step.
++Central: W7 central, median rho, f = 1.10; range: W7 low with min rho and f = 1.03 .. W7 high with max rho and f = 1.17.
++`budget.py` over the three jobs; `launch` metric.
++
++| TP | B | bar (1k / 8k) | W7 K0 central (range), random routing | real routing: rand1k | gsm8k | mix |
++|---|---|---|---|---|---|---|
++| 2 | 8 | 0.917 / 0.890 | 0.71 (0.65-0.78) | 0.70 (0.63-0.77) | 0.70 (0.64-0.77) | 0.70 (0.64-0.77) |
++| 2 | 16 | 0.974 / 0.962 | 0.72 (0.66-0.79) | **0.65** (0.59-0.73) | 0.67 (0.61-0.75) | 0.69 (0.63-0.76) |
++| 2 | 32 | 1.000 / 1.000 | 0.76 (0.69-0.83) | **0.68** (0.61-0.75) | 0.70 (0.62-0.77) | 0.71 (0.64-0.79) |
++| 2 | 64 | 0.993 / 0.997 | 0.74 (0.67-0.80) | **0.63** (0.56-0.70) | 0.64 (0.57-0.71) | 0.67 (0.60-0.74) |
++| 2 | 128 | 1.000 / 1.000 | 0.81 (0.74-0.87) | **0.74** (0.66-0.80) | 0.73 (0.66-0.80) | 0.77 (0.69-0.84) |
++| 1 | 8 | 0.912 / 0.852 | 0.75 (0.68-0.81) | 0.72 (0.65-0.78) | 0.72 (0.65-0.78) | 0.73 (0.66-0.79) |
++| 1 | 16 | 0.914 / 0.923 | 0.78 (0.71-0.86) | **0.68** (0.61-0.76) | 0.70 (0.63-0.79) | 0.74 (0.66-0.83) |
++| 1 | 32 | 0.955 / 0.951 | 0.73 (0.65-0.81) | **0.64** (0.55-0.71) | 0.64 (0.56-0.72) | 0.66 (0.58-0.74) |
++| 1 | 64 | 0.987 / 0.979 | 0.77 (0.68-0.85) | **0.63** (0.54-0.70) | 0.64 (0.55-0.71) | 0.69 (0.60-0.76) |
++| 1 | 128 | ATOM K3 | 0.74 (0.66-0.82) vs ATOM K3 | **0.62** (0.55-0.70) | 0.61 (0.54-0.70) | 0.66 (0.59-0.75) |
++
++- rand1k is the bars' own workload (benchmark_serving random prompts): bold. Every range is under its bar, the B8 cells
++  move by only 0.01-0.03 (the routing gain at 8 rows is within the random-draw band).
++- The MoE share of the LB step falls from W7's 0.50-0.65 to about 0.42-0.63 (0.42-0.48 at TP2 B16-B128 rand1k, 0.63 at
++  TP1 B8): the GDN family and the TP2 exchange now carry more of the step.
++- **TP2 B128 and PLAN 20 (10,000+ tok/s on 2 GPUs):** that target is LB / FT <= 0.774 of FlyTape TP2's step. Random
++  routing (W7) put the central at 0.81; real routing puts it at 0.73-0.77 (range 0.66-0.84). With `combine=fused_next`
++  (0.917-0.96 of the MoE chain) the central drops by about another 0.02-0.03. Still a derived number: WP-L5's measured
++  TP2 pass is the claim, and it should be timed on captured routes (this package's stage) as well as random ones.
++- Not in this budget: a composed layer; the TP2 sync tail; real routing's effect on FlyTape (unmeasurable with its
++  random-weight bench); per-layer routing variation inside a step (the bench walks 8 of the 48 layers per case: 16 of 48
++  per cell over cases a and b).
++
++## 8. What this changes for the other packages
++
++1. **WP-L2d / the MoE agent (read-only here):** the dispatcher must be tuned on real routes. The TP1 r16 and TP2 r128
++   picks lose 3-15 % to B5 on every captured case; a re-tune (`lb2_tune` over `rt_bench`'s cases, the routes stage
++   `w10-rt-routes` with both K0 and K3 routes) and a hot-expert split (passes of one expert over several CTAs; DESIGN-LB
++   6.2's union-aware placement) are the levers. In these jobs the best arm is 0.51-0.82 of FlyTape's random-routes e+c
++   under real routes in every cell (under the 0.85 target everywhere) and 0.74-0.89 under random routes (TP1 r16 and
++   TP2 r32 above 0.85). `flow0` is not a deterministic must-fail mutant at r8 on real routes (section 5.1).
++2. **WP-L3 / WP-L4 / WP-L5:** time composed layers and the TP2 pass on captured routes next to random ones; the GDN chain
++   and the exchanges are now a larger share of the step.
++3. **WP-L9 (MTP, TP1):** K=3 verify rows are correlated within a request (temporal overlap 3.1-3.8 of 10 per step);
++   rho at the K3 rows is 0.62-0.83, so MTP's MoE cost per token is lower than random-routing estimates.
++4. **DESIGN-LB section 3 note and `bytes_model.py`:** measured U per workload is now available (section 3 table and
++   `analysis.json` per run); floors with real U in section 4.
++
++## 9. Not done / open
++
++- WaveScope: no kernel was changed, so there is no before / after; phase stamps (section 6) were used for the
++  attribution instead. An ATT capture of B5 vs `t2128a` on `rand1k:b` would pin the idle CTAs' stall classes.
++- DESIGN 8.1: 2-4 of our jobs beside every timed window (section 2).
++- fp4 (W4A4) cells were not re-timed (fp8 / W4A8 only, the checkpoint precision).
++- Greedy decoding only; sampled decoding may spread routes further.
++- FlyTape under real routing (would need its bench on the real checkpoint).
++
++## 10. Reproduce
++
++```
++H=hackathon-prep/qwen38/truemono-lb/wp-l0c-route
++# capture (container, 1 GPU; ~30 min)
++q38_job.sh --tag <t> --mode container --stage atom-rkrepro --stage <harness stage> --env RT_H=<harness stage> \
++  --env RT_STEPS=mut,k0,k3 --env 'RT_RUNS_K0=rand1k:8,16,32,64,128;gsm8k:8,16,32,64,128;mix:8,16,32,64,128;rand8k:16,64' \
++  --env 'RT_RUNS_K3=rand1k:8,16,32;mix:8,16,32' -- 'bash /job/stages/<harness stage>/cap_job.sh'
++# routes stage: tar k0/routes.npz k3/routes.npz from the results dir into q38/stages/w10-rt-routes.tar (+ .sha256)
++# timing: venv save (RT_STEPS=injmut,save), then container strict load with FlyTape brackets (RT_STEPS=load);
++#   RT_ARGS = $H/logs/rtargs1.txt / rtargs2.txt; K3 routes: RT_STEPS=plain2 RT_RFILE2=k3/routes.npz (rtargs_k3.txt)
++python $H/budget.py <rt_bench.json ...> --launch
++```
++
++## Verification (independent, W10, 2026-11-02)
++
++**Verdict: confirmed, with the caveats below.** I tried to refute the package and could not. Every table matches the raw
++data. An independent re-time on route samples the builder never timed reproduces rho, the budget and the two pick losses.
++This is still not a measured 10,000+ tok/s. The TP2 B128 figure stays a derived budget until WP-L5 measures it.
++
++What I checked (harness `hackathon-prep/qwen38/truemono-lb/vwp-l0c-route/`, raw data in the private-perf
++`WP-L0c-route-raw/verify-n01/`):
++
++1. **Raw data to report.** `budget.py --launch` over the three timed `rt_bench.json` files reproduces section 5.2's rho
++   and section 7's table to every printed digit. The steady-state analysis output (`an2`) matches section 3. The capture
++   job log (68251612) shows the K0 and K3 gates PASS (0 non-tie rows), `shift` / `row` CAUGHT, and every decode record
++   sourced from ATOM's `select_experts`. Both strict container ledgers show 164 / 164 LOAD with sha256 values equal to
++   the venv SAVE ledger. The harness hashes in the job logs (`rt_bench.py` `4a189666` for sv1 and the ld jobs, `c3741294`
++   for sv2) match section 1. The pick specs are byte-equal to P-L4b's `f10` / `f14` arms. W7's constants in `budget.py`
++   equal DESIGN-LB 15.7. 0.774 is 7,742 / 10,000.
++2. **Selection bias in "best arm".** rho takes, per round, the minimum of B5 and the pick. Using a fixed arm chosen by
++   its median instead gives the same rho to 3 decimals in every cell and job. The arms are separated by much more than
++   the control noise (lb2b / lb2 sd 0.003-0.012).
++3. **Are the timed route samples representative?** For each case I compared its U / U_rand with the steady-state
++   population mean over the same 8 capture layers. The difference is -0.05 to +0.11. On average the timed samples are
++   slightly less skewed than the population, so rho is if anything slightly pessimistic.
++4. **Re-timing on new routes (job 68252199, n01-09, bus 95, venv).** All 61 code objects were loaded strict from
++   `w10-rt-hsaco`, with 0 compiled. The route samples are new: sampled steps 1 / 4 instead of 2 / 6, and layer offsets
++   1 / 4 instead of 0 / 3, so none of these layers were in the builder's timing. Seed 4242 gives new weights and new
++   random draws. There were 24 shuffled rounds over TP1 r16, TP2 r64 and TP2 r128, using the frozen `rt_bench.py`
++   unchanged through a wrapper.
++   - Gates: injection PASS 18 / 18; WP-L2d numerics PASS 24 / 24, including TP2 r64 `mix` on the new sample (consistent
++     with the builder's reading that the `mix:a` max-error exceedance is sample-specific); every required mutant caught,
++     `flow0` included; every captured case a WIN against its random reference (both metrics). SCLK: busy median 2400 MHz,
++     4 of 157 busy samples below 0.97 of it.
++   - rho (launch; rand1k / gsm8k / mix): TP1 r16 0.767 / 0.829 / 0.880 (report 0.779 / 0.837 / 0.915); TP2 r64
++     0.648 / 0.706 / 0.813 (report 0.686 / 0.708 / 0.803); TP2 r128 0.752 / 0.823 / 0.871 (report 0.816 / 0.791 / 0.889).
++   - Re-derived K0 central: TP2 B128 0.71 / 0.74 / 0.76 (report 0.74 / 0.73 / 0.77); TP2 B64 0.62 / 0.64 / 0.68; TP1 B16
++     0.67 / 0.70 / 0.72. The `gs` metric gives TP2 B128 0.72 / 0.75 / 0.77.
++   - Pick transfer, reproduced:
++     - `t116b` / B5 is 1.05-1.18 on all 6 captured cases (LOSS) and 0.92-0.93 on random routes.
++     - `t2128a` / B5 is 1.03-1.10 on all 6 (LOSS) and 0.96 on random routes.
++     - `b264` holds on all 6 (0.94-0.95, WIN).
++5. **The 10k line without re-dispatch.** Section 7 uses the cell's best arm, which at TP2 r128 is B5, not the current
++   dispatcher pick. With the shipped pick `t2128a` under real routes (median over the three jobs), the TP2 B128 central
++   becomes about 0.76 (rand1k), 0.76 (gsm8k) and 0.775 (mix). So the "meets 0.774 for random-token prompts, at the line for
++   the text mix" conclusion holds either way. Re-dispatching TP2 r128 and TP1 r16 to B5 is still worth 0.01-0.02 of the
++   step.
++
++Caveats (none refutes the package):
++- **Not measured.** PLAN decision 20 asks for a measured 10,000+ tok/s. The real-routing budget only says the target is
++  reachable on paper: central 0.71-0.77 against a 0.774 line, with a range of 0.65-0.84 that straddles it.
++- **Numerics.** The builder's two exceptions stand as reported. On TP2 r64 `mix:a`, the kernel's mean error is 0.41x the
++  oracle's while its max is 1.21x. `flow0` escaped once, at r8. Neither reproduced on the new samples. Both are
++  exceptions to the written rule, accepted on evidence, not passes of it.
++- **DESIGN 8.1.** My run shared n01-09 with 2 of our jobs and 4 others (the same deviation as the builder's). n07-17 was
++  `down*` during my window, so the re-time is single-node. The builder's three jobs cover both nodes, and my ratios fall
++  inside or next to their spread.
++- **Limited coverage.** K3 rho (section 5.2) comes from one venv job on one node. fp4 cells were not re-timed, and only
++  greedy decoding was captured.
+diff --git a/experiments/qwen38-true-mono/large-batch/WP-L2f.md b/experiments/qwen38-true-mono/large-batch/WP-L2f.md
+new file mode 100644
+index 00000000000..7f61280176f
+--- /dev/null
++++ b/experiments/qwen38-true-mono/large-batch/WP-L2f.md
+@@ -0,0 +1,273 @@
++# WP-L2f: the large-batch head with the fused argmax (TP1 and vocab-parallel TP2), the PLE, the final mix and the embedding prologue, rows 5-128, gfx950
++
++W10, 2026-11-02. `../DESIGN-LB.md` 4.2 (pass end, PLE layer), 6 (E10 / E11 / E12), 7.1 (head and PLE sharding), 15.6 /
++15.7; `W7-STATUS.md` section 4 (entry conditions); `WP-L2a.md` (the E1 GEMM core the head and the PLE projection run on);
++`WP-L2b.md` (the HC chain the final mix is one instance of). Ratios only here. Absolute times, job logs, WaveScope
++output and raw JSON: `hackathon-prep/private-perf/qwen38-true-mono/large-batch/WP-L2f.md` and `.../wp-l2f-raw/`. Harness:
++`hackathon-prep/qwen38/truemono-lb/wp-l2f/`. Below 1 is faster.
++
++## Gate and verdict
++
++**Gate: met on both rocke nodes.** Every family runs on MI355X with ATOM's numerics, passes its numerics suite with every
++applicable must-fail mutant caught, and beats FlyTape's matching phases in the same job (FlyTape traced before and after
++the LB timing; the LB arms load venv-built code objects strictly in the container). Final builds, one container bracket
++per rocke node (`ct5a` n01-09, `ct5b` n07-17), ranges over the cells and over each job's FlyTape before / after traces:
++
++| family (FlyTape phases) | TP1 (rows 5-64) | TP2 (rows 5-128) |
++|---|---|---|
++| **head + argmax** (`lm_head` + `sample_reduce` + `select_token`) | **0.23-0.28** | **0.23-0.33** |
++| **final mix** (`final_mix_*`; one HC chain instance of WP-L2b) | **0.82-0.93** | **0.66-0.84** (FlyTape's combine includes its exchange wait) |
++| **embed + PLE** (every FlyTape `embed` and `ple_*` phase; TP2 incl. `embed_sync` / `ple_reduce` / `ple_copy`) | **0.51-0.58** | **0.44-0.54** |
++
++Rows 5 read FlyTape's B8 (it has no B5 configuration); FlyTape has no TP1 B128. Per cell: section 4.
++
++- **Numerics** (15 jobs, both nodes): 4,118 per-arm head checks (the fused argmax's ids equal the argmax of the build's own
++  logits twin bit for bit, both walks, determinism) with 0 failures; 516 logits checks against float64 (worst 0.06 of
++  E1's bound) and 0 flips against ATOM's argmax of the float64 logits; 846 planted cases (ties inside a lane, across
++  units, across ranks; an all-negative token where a padding row must not win; the winner in the last-arriving CTA) all
++  correct; 1,381 of 1,384 applicable head mutant runs caught (the 3 misses: E1's `kskip` checked on planted one-hot data
++  in round 1, which never reads the skipped K chunk; checked on random data since, caught every time); PLE / embed /
++  prologue: 3,120 arm checks, 0 failures, 1,770 of 1,776 mutant runs caught (the 6: `mod` in round 1, an equivalent mutant
++  at decode, section 2); the composed PLE chain G -> P -> A on device 65 of 66 (the miss: a relative tolerance near
++  cancellation in round 2, replaced by an operand-scaled one; section 2). WP-L2b's chain (the final mix) passed its own
++  numerics suite in both final brackets (9 of 9 cells each).
++- **Climb** (4 rounds + a confirming round 5, both nodes, PLAN 13 / 15): every E1 lever on each cell's head pick, solo
++  and paired with the merge form, on the PLE projection and on A; losers kept as arms; each round re-tests every lever on
++  the new base. 7 head changes, 3 projection changes and A's `upc=2` at r128 WON on both nodes on the same base and are in
++  the plan tables (`head_lb.HEAD_PLANS`, `ple_lb.PPROJ_PLANS`, `ple_lb.PAPPLY_PLANS`); section 5 is the ledger.
++- **WaveScope before / after** (Markham MI350X, TP1 r16 / r128, the fused head against WP-L2a's logits-only head of the
++  same plan): the fused argmax removes the logits store stall (13.6 % of the logits-only head's stall at r128) and its
++  epilogue adds about 3 % (two LDS barriers); total stall 0.83 (r128) / 0.91 (r16) of the logits-only head's.
++- **Budget** (DESIGN-LB 15.7's "head" and "other" rows, now measured): at TP2 B128 these families are 0.017 of FlyTape's
++  traced step; LB's versions take 0.007-0.008 of it (head 0.0033, final mix 0.0015-0.0018, embed + PLE 0.0023-0.0025),
++  inside the 0.006-0.009 W7 assumed (head 0.26-0.36 of 0.009, "other" 0.8-1.2 of 0.005). At TP1 B8: 0.035 -> 0.011.
++
++## 1. What was built
++
++| piece | file |
++|---|---|
++| E10 head: `HeadKnobs` (`e1` plan, `tp`, `akey` bf16 / f32, `lout`, `amrg` unit / cta, `xdelay`, mutants), `build_head_kernel`, `head_params`, `arena_bytes`, host key twins, the measured `HEAD_PLANS` + `plan(tp, rows)` | `dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/qwen38_mono/large_batch/head_lb.py` |
++| E11 PLE + E12 prologue: `WalkKnobs` (`kind` embed / pgather / prologue / papply, `threads`, `occ1`, `nt`, `upc`, `acq`, mutants), `build_embed_kernel`, `build_pgather_kernel`, `build_prologue_kernel`, `build_papply_kernel`, the measured `PPROJ_PLANS` + `pproj_plan(rows)` (P on E1) and `PAPPLY_PLANS` + `papply_knobs(rows)` | `.../large_batch/ple_lb.py` |
++| CPU tests (32): E1 lowers to the same IR before and after head builds; markers of every head build (MFMAs, the umax / swap atomics, the TP2 push); every knob and mutant lowers; refusals; `plan` / `pproj_plan` valid for TP x rows 1..128; host key ordering; every embed / gather / prologue / apply build and mutant lowers | `.../rocke/library/tests/test_qwen38_lb_l2f.py` |
++| bench: head (TP1 one process, TP2 torchrun + IPC arena), PLE / embed / prologue / projection / composed chain, strict prebuilt loading, code-object save, two-node verdicts, FlyTape-family reports, numerics census, static ISA counts, WaveScope launcher, job / submit / sync scripts | `hackathon-prep/qwen38/truemono-lb/wp-l2f/`: `l2f_head.py`, `l2f_ple.py`, `l2f_report.py`, `l2f_final.py`, `two_node.py`, `num_census.py`, `isa_stats.py`, `att_head.py`, `att_job.sh`, `job.sh`, `sub.sh`, `sub_ct.sh`, `sync.sh`, `dep/` (WP-L2a's `l2a_bench.py`, `isa_gate.py`, P-L4's `asm_hazard.py`, copied) |
++| alola facts | `.claude/skills/alola-cluster/SKILL.md`, rule 242 |
++
++No existing file changed: `e1.py`, `e1_plans.py`, `hc_lb.py`, the CCL (`ccl/wire.py`) and `persist/` are imported. Python
++engine only; kernel names `q38lbhd_*` / `q38lbp_*`; nothing served imports the new modules. CPU tests: 32 pass (laptop,
++lowering only).
++
++E11 / E12 were gated in W7 on W5's small-batch WP2e / WP2f emitters, which have not been published. The PLE and the
++prologue here are built from ATOM's model code directly (`qwen4_exp.py`, `model_ops/qwen4_exp/ple_layer.py`,
++`ops/ple.py`, `hyperconnection.py`, `triton_gemma_rmsnorm.py`), with ATOM's rounding points; the small-batch emitters can
++take the same semantics.
++
++### 1.1 E10: the head with the fused argmax
++
++The GEMM is WP-L2a's E1 (subclassed; only the epilogue changes) over the rank's vocabulary rows (TP1 248,320; TP2
++124,160, rank r owns global rows [r M, (r + 1) M)).
++
++- **Unit argmax.** Each lane folds its 4 mt rows of every token tile in increasing row order with ATOM's key: the
++  signed-order key of the bf16-rounded logit, -0 = +0, the lowest row on a tie (`mx_decode_gemv`'s rule; `akey=f32` is
++  FlyTape's f32 compare, a tolerance lever, a TIE in time everywhere). Rows past M (row-group padding) never win. The 4
++  lane groups of a token fold by xor-16 / 32 shuffles (larger key, then lower row), the waves through LDS (same rule,
++  order-free).
++- **Cross-unit merge.** One 64-bit `global_atomic_umax_x2` per (unit, token) of `(key ^ 0x80000000) << 32 | ~row`: the
++  unsigned maximum is "larger key, then lower row", ATOM's `tie="low"`, independent of arrival order (deterministic).
++  The unit then arrives on its token block's counter; the last of the arrivals reads and clears the word with one
++  returning `global_atomic_swap_x2` (zero at rest) and writes `(global id, key)`. `amrg=cta` first folds a CTA's units of
++  the layer in LDS and issues one atomic per CTA and token (the counter then counts CTAs): fewer atomics on the hot token
++  words (at TP2 r5 the per-unit form put 970 units x 5 tokens on 5 words).
++- **TP2 merge** (the CCL argmax merge of DESIGN-CCL WP-C2, fused): the last arriver pushes the rank's `(key, global id)`
++  of each token, tagged, into both ranks' IPC arenas (`ccl.wire.push_v4`, sc0 sc1), polls both ranks' pairs in its own
++  arena (`ccl.wire.poll_pairs`, a 2 s deadline, an abort word, a timeout counted in the launch's error word) and merges
++  in rank order (larger key, then the lower global id), so both ranks write the same token. Slots
++  `[layer][launch parity][src rank][token]`; tag = epoch L + layer + 1 from the arena's epoch word, advanced by the
++  launch's last CTA (graph-replay safe, no host reset). A rank needs its peer's pair of launch e + 1 before it can finish
++  e + 1, so it is at most one launch ahead per slot parity: two parities suffice for both walks.
++- Against WP-L2a's logits-only E1 head of the same plan (the "before", container jobs on both nodes): the fused head is
++  0.85-1.04 of it at TP1 (faster from r16 on: it does not store the logits) and 0.92-1.12 at TP2, where it also does the
++  in-kernel exchange (1.10-1.12 at r5). `lout` (the logits as well, for logprobs / sampling) costs 1.03-1.29 of the fused head.
++- **Not built:** the logprobs / non-greedy sampling pieces (`DESIGN.md` WP8: LSE / top-K' merges).
++
++### 1.2 E11: the PLE (ATOM semantics), and the E12 prologue and final mix
++
++ATOM's PLE on layer 1: `out = gated + silu(conv(norm_conv(gated)))`, `gated = sigmoid(signed_sqrt(<norm_key(key_proj(emb)),
++norm_query(h)> / sqrt(H))) value_proj(emb)` per HC stream, `emb` = 16 hashed n-gram rows (E4M3, one global scale) of the
++token and its 2-token context, a dilated (3) causal depthwise conv of kernel 4 over a 9-token state per channel.
++
++- **G** (`pgather`, FlyTape `ple_gather`): per token the 16 head ids (ATOM `compute_ngram_ids` at decode: int64
++  wraparound products, xor, EOS cuts the n-gram, torch's non-negative remainder by the head's prime size, plus the head
++  offset), the gather of 16 x 160 E4M3 bytes from the 47.7 GiB table in VRAM (replicated per rank: ATOM's `ngram=device`;
++  no TP exchange, FlyTape pays `ple_reduce` / `ple_copy`), `bf16(bf16(e4m3) bf16(scale))` (ATOM `fp8_embedding_lookup`),
++  its MXFP8 (the `mx_quant` rule: what ATOM's W4A8 linear quantizes) written in E1's op_sel activation layout, and the
++  request's new context.
++- **P**: key_proj and value_proj as ONE E1 GEMM (12,800 x 2,560, MXFP4 x MXFP8) reading G's output directly; plan table
++  `pproj_plan` (WP-L2a's `qsa_in` TP1 picks, the nearest planned shape, plus measured overrides).
++- **A** (`papply`, FlyTape `ple_stats` + `ple_apply`): one unit per (token, stream), 320 threads x 8 channels: the Gemma
++  norms of key and residual, the gate with ATOM's bf16 rounding points (product, sum, scale, max, sqrt, sigmoid), the gated
++  value, its Gemma norm, the conv (f32 products and sums in tap order, no FMA: ATOM's `enable_fp_fusion=False`), bf16
++  before the SiLU, `ple = bf16(gated + silu)`, the residual `bf16(r' + ple)` and the state shift in ATOM's
++  `[slots, channels, 9]` layout. The f32 sums are in this kernel's order (Triton's tree differs): tolerance class.
++  `upc=2` runs two units per CTA at once (640 threads).
++- **E** (`embed`): `r[token][stream] = embed_tokens[id]` for the 4 streams (ATOM's `repeat`); the bf16 table replicated
++  per rank (ATOM's vocab-parallel lookup adds one nonzero row to zeros: the same bits, no exchange; FlyTape pays
++  `embed_sync`).
++- **E + G fused** (`prologue`, the default form): both depend on the token ids only, so one phase does both (one unit per
++  token); it costs what G alone costs. P depends only on G: the pass can run G and P before the PLE layer, off its
++  critical path (WP-L3 / L4 scheduling).
++- **E12 final mix** is one instance of WP-L2b's HC chain (C combine + norm, D down GEMM, U up GEMM + mix) with the final
++  mixer's weights, timed by WP-L2b's own bench and prebuilt objects inside this lane's container jobs (same-job FlyTape
++  ratio). The final mixer has no injection: dropping C's 4 gate dots for it is a lever not built (`hc_lb.py` is WP-L2b's
++  file). Its MXFP8 output (U's `xq_pass`, E1's op_sel X layout) is what the head reads.
++
++Mutants (must fail): head `tie` (in-lane >=), `pad` (padding rows not masked), `ulo` (the packed low word is the row: a
++cross-unit tie goes high), `early` (the merge one arrival early while CTA 0 starts every unit late), `xpeer` (the peer's
++pair ignored), `xorder` (equal keys take rank 1's id), `xstale` (the poll accepts any non-zero tag and rank 1 pushes late:
++the previous launch's pair is read; the deterministic stale-read twin), the `cta` merge's `tie` / `ulo` / `early`, and E1's
++`kskip`; embed `row`, `s3`; gather `eos`, `mod`, `hash`, `scale`, `ctx`; prologue `row`, `s3`, `eos`, `hash`, `scale`, `ctx`;
++apply `gate`, `knorm`, `conv`, `tap`, `state`, `stream` (also on the `upc=2` form); projection `kskip`.
++
++## 2. Numerics (MI355X, both nodes)
++
++Every timed code object is checked in the same process before its timing, on random data at the cell's shape, both walks
++(grid-synced and free):
++
++| check | result |
++|---|---|
++| head: ids of every arm = the argmax of its own `lout` twin's bf16 logits (ATOM's key and tie rule), both TP | bitwise, every arm, every cell, every job |
++| head: `lout` logits vs float64 (E1's bound 2^-11 of sum |x w|) | worst 0.06 of the bound |
++| head: ATOM's argmax of the float64 logits (bf16-rounded, merged over ranks) vs the kernel | 0 flips |
++| head: TP2 ids identical on both ranks and = the rank-order merge of the two ranks' own argmaxes | every cell |
++| head planted cases (lane-quad tie, cross-unit tie, cross-rank tie, all-negative token, the winner in CTA 0's last unit) | 551 / 551 |
++| embed, gather, prologue: bitwise against ATOM's rules emulated on the host (ids, E4M3 gather, bf16 scale, MXFP8 codes and op_sel scales, the new context, the 4 stream copies) | bitwise, every arm, 8 layers, every rows value |
++| projection P vs float64 | worst 0.04 of E1's bound |
++| apply A vs the float32 reference with ATOM's rounding points (f64 sums) | r'' bitwise; ple / state worst 0.6-0.9 bf16 ulp |
++| composed G -> P -> A on device (G's MXFP8 read by P, P's Y read by A with its row stride) | P worst 0.03 of the bound; A worst 1.9 ulp of the operands' scale |
++
++- **Tolerance class:** A (its f32 sums differ from Triton's tree; a 1-ulp change of the bf16 score moves the gate by one
++  bf16 ulp). In round 2 the composed chain at rows 64 failed a relative check at one element where `ple` = -258 cancels
++  `r'` = 0.53: 1.5 bf16 ulps of 256. The check measures the error in ulps of the operands' scale since
++  (|r'| + |gated| + |silu|); every A mutant lands 10^5 ulps or more away.
++- **Equivalent mutant:** `mod` (the sign fix of the hash remainder). ATOM bounds the multipliers by (2^63 - 1) / vocab, so
++  every product of a token id stays below 2^63 and their xor is never negative at decode: the fix never fires. Marked not
++  applicable from round 2 on; the fix stays in the kernel (ATOM keeps it too).
++- **Not applicable:** `pad` where the plan has no padding rows (M a multiple of the rows per unit: every TP1 plan and the
++  TP2 plans with 256-row units); caught in every TP2 cell with 512-row units (r8, r32, r64).
++
++## 3. Method
++
++- Cells: TP1 and TP2 x rows 5, 8, 16, 32, 64, 128 (the head at TP2 on 2 ranks with the in-kernel merge; PLE / embed /
++  prologue are per-rank work, identical at TP1 and TP2: replicated tables).
++- Metrics (WP-L2a's): `phase` = one launch walks L instances (head L 4 / 7 at TP1 / TP2, 4x the MALL of weights; PLE /
++  embed L 8; P L >= 4x the MALL) with W5's striped grid barrier between instances, per instance (the verdict metric);
++  `stream` = the same walk without the barrier. TP2 rounds take the slower rank's time.
++- Timing: 16 shuffled rounds, every arm with a second-graph and a recompiled control; DESIGN 9.1's win rule per job; a
++  change is accepted only when it WINs on both rocke nodes on the same base (`two_node.py`); losers stay as arms (PLAN
++  13 / 15); every round re-tests every lever on the new base.
++- FlyTape bracket: container jobs with FlyTape's traced TP2 B8-B128 and TP1 B8-B64 (mxfp4, prompt 128) before and after
++  the LB timing; the LB arms load the venv-built code objects strictly (alola rule 219); WP-L2b's bench runs in the same
++  job for the final mix (its stages `w10-l2b-rk21` / `-h23` / `-hs23`, read only).
++- Neighbours: the venv jobs log `squeue -w` of the node (1-4 of our jobs and 1-3 foreign jobs next to every run); the
++  container jobs cannot (no Slurm client inside); all comparisons are in-process paired arms.
++- Jobs (MI355X): venv `d1`, `s2a`, `r2a`, `r4a`, `r5a` (n01-09), `s1b2`, `r2b`, `r3b`, `r4b`, `r5b` (n07-17); container
++  brackets `ct1b` (n07-17, round-1 builds), `ct2a` (n01-09, round 2), `ct4b` (n07-17, round 4), and the final pair `ct5a`
++  (n01-09) / `ct5b` (n07-17) on the round-5 objects of `r5b`. `ct2b` was requeued when n07-17 went `down*` at 21:44 UTC
++  (the node rebooted and lost its seeded `/tmp`; W11 reseeded it) and was cancelled; `r3a` / `ct4a` were cancelled while
++  queued, superseded by `r4a` / `ct5a`. WaveScope: Markham MI350X `w10l2f-att1`.
++
++## 4. Against FlyTape, per family and cell (same job, phase metric)
++
++Ranges over the final brackets `ct5a` (n01-09) and `ct5b` (n07-17) and each job's FlyTape before / after traces
++(FlyTape's own spread: up to 1.08 on its head, up to 1.12-1.20 on its small `embed` / `ple_gather` phases). head =
++fused-argmax head (TP2 with the merge); final = one HC chain instance; prologue = E + G vs `embed` + `ple_gather`; P vs
++`ple_proj`; A vs `ple_stats` + `ple_apply`; e+PLE = prologue + P + A vs every FlyTape embed and PLE phase incl. its TP
++exchanges.
++
++| cell | head | final | prologue (E+G) | P | A | e+PLE |
++|---|---|---|---|---|---|---|
++| 1:5 | 0.23 | - | 0.76-0.77 | 0.33 | 0.80-0.88 | 0.51-0.53 |
++| 1:8 | 0.24 | 0.87-0.90 | 0.77-0.80 | 0.33-0.35 | 0.83-0.92 | 0.53-0.56 |
++| 1:16 | 0.23 | 0.90-0.91 | 0.69-0.80 | 0.36-0.37 | 0.84-0.93 | 0.53-0.57 |
++| 1:32 | 0.24-0.25 | 0.82-0.84 | 0.67-0.80 | 0.36-0.37 | 0.87-0.88 | 0.53-0.55 |
++| 1:64 | 0.28 | 0.91-0.93 | 0.70-0.84 | 0.37-0.38 | 0.92-0.98 | 0.56-0.58 |
++| 2:5 | 0.24 | - | 0.65-0.69 | 0.37-0.38 | 0.86-0.90 | 0.51-0.52 |
++| 2:8 | 0.24-0.25 | 0.66-0.72 | 0.67-0.71 | 0.38-0.40 | 0.90-0.93 | 0.52-0.54 |
++| 2:16 | 0.23 | 0.72-0.74 | 0.59-0.62 | 0.41-0.43 | 0.91-0.93 | 0.52-0.53 |
++| 2:32 | 0.25 | 0.67-0.71 | 0.48-0.50 | 0.45 | 0.90-0.94 | 0.51-0.52 |
++| 2:64 | 0.26-0.28 | 0.71-0.76 | 0.38 | 0.45-0.46 | 0.97-1.00 | 0.51-0.52 |
++| 2:128 | 0.33 | 0.72-0.84 | 0.23-0.30 | 0.34-0.35 | 1.07-1.10 | 0.44-0.47 |
++
++The earlier brackets agree: `ct2a` (n01-09, round-2 tables) and `ct4b` (n07-17, round 4) gave head 0.23-0.35, final mix
++0.66-0.93 and e+PLE 0.47-0.58 over the same cells; A at TP2 B128 was 1.14-1.18 before `upc=2`.
++
++Reading:
++- **The head is 0.23-0.33 of FlyTape's head + sample + select** in every cell, on both nodes. At small rows it streams the
++  weights near the copy rate; at r128 it is MFMA-bound (the f8f6f4 rate), 0.33 at TP2. Its static ISA (venv COMGR,
++  `wp-l2f-raw/isa_head.json`): no spill, 184-444 VGPRs, the epilogue adds 350-1,950 instructions over the logits-only
++  head, all VALU / LDS outside the K loop.
++- **The final mix is 0.66-0.93.** At TP2 FlyTape's combine includes its exchange wait and LB's chain has none before
++  WP-L5 (WP-L2b's caveat): read the TP2 column as LB's upper-bound advantage; the TP1 column (0.82-0.93) is like for like.
++- **The prologue fuses two tiny phases.** E alone (1.19-1.41 at TP1, 0.27-0.82 at TP2) and G alone (1.10-1.26 at TP1,
++  0.58-1.53 at TP2) are each about a grid barrier long and lose to FlyTape's tiny `embed` / `ple_gather` at small rows;
++  E + G in one phase costs what G costs alone, 0.23-0.84 of FlyTape's two phases.
++- **A at TP2 B128 is 1.07-1.10**, the one family member still slower than FlyTape (1.14-1.18 before `upc=2`, two units
++  per CTA at once). Its 9-entry state shift moves 92 KB per (token, stream) unit (a ring buffer would cut that: section
++  7). Everywhere else A is 0.80-1.00; the PLE family as a whole is 0.44-0.58 because P and the prologue are far ahead.
++- **P is 0.33-0.46**: E1 on the WP-L2a `qsa_in` picks with the measured overrides; FlyTape's `ple_proj` runs its bf16 dense plan.
++- The `ct1b` bracket (n07-17, round-1 builds with the per-barrier `buffer_inv sc1` that round 2 removed from A / E / G)
++  gave the same head (0.23-0.34) and final mix (0.66-0.92) ranges; its PLE columns are the pre-fix builds (section 5).
++
++## 5. What moved the numbers (ledger; base X = the build each verdict was measured on)
++
++| change | base | n01-09 | n07-17 | verdict |
++|---|---|---|---|---|
++| no `buffer_inv sc1` after the walk barrier (`acq` default off; consumers in a pass read in-launch data with sc1 loads) | round-1 E / G / A | `acq` arm 1.33-3.09x | `acq` arm 1.33-3.11x | accepted (`acq` stays as a knob) |
++| `waves=8` at TP2 r5 | WP-L2a pick + argmax | 0.930 | 0.923 | accepted (round 1) |
++| `amrg=cta` + `map=xcd` at TP1 r5 | round 1 | 0.966 | 0.970 | accepted (round 2) |
++| `amrg=cta` + `wcp=nt` at TP1 r128 | round 1 | 0.934 | 0.944 | accepted (round 2) |
++| `amrg=cta` + `xu` at TP2 r5 | round 1 | 0.945 | 0.943 | accepted (round 2) |
++| `amrg=cta` + `bpre=1` at TP2 r16 | round 1 | 0.960 | 0.961 | accepted (round 2) |
++| `amrg=cta` + `xa=2` at TP1 r16 | round 1 (= round 2 for this cell) | 0.934 (round 2) | 0.939 (round 3) | accepted (round 3) |
++| P `sb=False` at r8; `wcp=nt` at r32; `wcp=default` at r64 | WP-L2a qsa_in pick | 0.974; 0.971; 0.982 | 0.964; 0.991; 0.968 | accepted (rounds 2-3) |
++| A `upc=2` (two units per CTA) at r128 | round 2 | 0.919 (round 4) | 0.925, 0.920, 0.921 (rounds 2-4) | accepted (round 4; `ple_lb.PAPPLY_PLANS`) |
++| `amrg=cta` + `map=xcd` at TP2 r128 | round 1 | 0.962 (round 4) | 0.968 (round 4) | accepted (round 4) |
++| `amrg=cta` + `bpre=1` at TP2 r128 | round 1 | 0.967 | 0.972 | WIN on both, behind `map=xcd`; kept as an arm |
++| `amrg=cta` alone at TP2 r128 | round 1 | 0.967 WIN (round 2), 0.973 TIE (round 4) | 0.972 / 0.976 TIE, 0.965 WIN | not accepted; kept as an arm |
++| `amrg=cta` + `waves=4` at TP2 r32 | round 1 | 0.979 / 0.973 TIE (rounds 2, 4) | 0.960, 0.965 WIN (rounds 3, 4) | not accepted (TIE on n01-09); kept as an arm |
++| `amrg=cta` + `waves=4` at TP1 r32 | round 1 | 0.956, 0.952 WIN (rounds 2, 4) | 0.962, 0.955 TIE (rounds 3, 4) | not accepted (TIE on n07-17); kept as an arm |
++| `amrg=cta` elsewhere | each round's pick | 0.95-1.01 | 0.96-1.01 | TIE: kept as arms |
++| `akey=f32` (FlyTape's compare) | each pick | 0.98-1.00 TIE | 0.98-1.01 TIE | kept off (ATOM's bf16 key is the product) |
++| E1 levers on the head (`mt=2`, `tb=2` / `4`, `wcp=default`, `sb`, `xu=False`, `bpre=0`) | each round's pick | 1.02-2.2 LOSS | 1.02-2.2 LOSS | kept as arms |
++| `embed` 512 threads; `pgather` 256 threads; `nt` / no occupancy pad on E / G / A | round 1-4 bases | TIE-LOSS 1.0-1.65 | TIE-LOSS | kept as arms |
++
++## 6. WaveScope and the reverse step
++
++- WaveScope (`w10l2f-att1`, MI350X, CU 1, 4-head walks): head TP1 r16 / r128 against the logits-only E1 head of the same
++  plan. r128: logits-only stall 59.0 % (vmem_store 13.6 %: the 63 MB logits store), fused 41.7 % (no store stall; s_barrier
++  19.7 % incl. the epilogue's two LDS barriers 3.1 %); total stall 0.83 of the logits-only head's. r16: 0.91, dominated by
++  the weight loads (`s_waitcnt vmcnt` + vmem_load 60-75 % of stall), as WP-L2a found for E1.
++- Reverse (PLAN 16), FlyTape's tape ISA (`logs/q38/rv-ft1`, TP1 B16 / B64 builds): its `lm_head` carries 90-104 AGPR
++  copies (`v_accvgpr` moves of a 253-VGPR tape-wide budget) and `select_token` 290 s_nop cycles; its head is three
++  phases with two grid syncs (`lm_head`, `sample_reduce`, `select_token`); LB's is one phase with the merge in the
++  epilogue (no grid sync between GEMM and argmax).
++- Static counts of the PLE / embed stages (instructions without end padding; FlyTape's from the same tape split, LB's from
++  the venv-built objects, `wp-l2f-raw/isa_ple.json`): FlyTape `embed` 182-197 instructions, `ple_gather` 386-393,
++  `ple_stats` + `ple_apply` 1,732-1,774, every phase at the tape's 249-254 VGPR budget with 0-22 SGPR spill lanes
++  (`v_writelane`) each; LB `embed` 240 (16 VGPRs), `pgather` 782 (62 VGPRs; the 16 heads' int64 hashes and the MXFP8
++  pack are per thread), `prologue` 815 (85), `papply` 2,084 (158 VGPRs: two unrolled units) / 1,198 with `upc=2`
++  (144), no spill, no scratch. The structural difference is the phase count, not the code: FlyTape runs gather, proj,
++  stats, (reduce), apply, (copy) as 4-6 grid-synced phases; LB runs the prologue, P and A (3).
++
++## 7. Open items
++
++- Round 5 (both nodes, on the final tables) found no further change that WON on both nodes: the climb over these lever
++  sets has converged; the one-node WINs it found (TP1 r8 `depth=2/3` + `amrg=cta`, TP1 r32 `waves=4` + `amrg=cta`) stay as
++  arms for the next round on a new base (PLAN 15).
++- Logprobs / non-greedy sampling pieces of the head (`DESIGN.md` WP8) not built; the final mixer without the injection
++  dots (an hc_lb knob) not built.
++- Integration (WP-L3 / L4 / L5): the PLE needs C's combine and C's norm split around A in the PLE layer (hc_lb fuses
++  them); G and P can be scheduled before the PLE layer; the head reads the final mix's MXFP8 output directly.
++- A conv state ring buffer (one entry written per step instead of the 9-entry shift) would cut A's traffic by about 40 %;
++  it changes ATOM's `[slots, channels, 9]` state contract (prefill writes it), so it is a WP-L5 serving item.
++- No served path runs these kernels yet, so no quick end-to-end number (PLAN 14): the pass (WP-L4 / L5) is where the
++  head, the prologue and the PLE land.

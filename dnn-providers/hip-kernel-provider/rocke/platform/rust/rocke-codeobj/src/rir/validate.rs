@@ -798,6 +798,13 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            // i32 predicate in, the i64 lane mask out (llvm.amdgcn.ballot.i64 of p != 0).
+            WaveBallot => {
+                arity(1, 1)?;
+                if *types[0] != i32t || *res.expect("one result") != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+            }
             VecSum => {
                 arity(1, 1)?;
                 match types[0] {
@@ -1175,7 +1182,8 @@ impl Checker<'_> {
             }
             Sqrt => {
                 let t = same(1)?;
-                if *t != Type::Scalar(Scalar::F64) {
+                // f32 selects on gfx950 only (isel refuses it elsewhere)
+                if !matches!(*t, Type::Scalar(Scalar::F64 | Scalar::F32)) {
                     return Err(if float(t) { unsupported(format!("math.sqrt of {t:?}")) } else { mismatch() });
                 }
             }

@@ -1796,6 +1796,7 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::DsBpermute
                 | OpKind::WaveAny
                 | OpKind::WaveAll
+                | OpKind::WaveBallot
                 | OpKind::DsReadTr16
                 | OpKind::DsReadTr8
                 | OpKind::LdsReadTr

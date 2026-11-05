@@ -1,0 +1,417 @@
+diff --git a/atom/model_engine/model_runner.py b/atom/model_engine/model_runner.py
+index 59c45141d39f2f6abf14acf5196ad9940e358373..17849a1629457a5778a1ebb9828de1d46748bc09 100644
+--- a/atom/model_engine/model_runner.py
++++ b/atom/model_engine/model_runner.py
+@@ -3708,10 +3708,20 @@ class ModelRunner:
+         advance = self._rb_advance(batch)
+         if advance:
+             _h2d.RB_SUPPRESS = _RB.suppress_set(self)
++        hook = _RB.pub_hook(self) if _RB.ADV_LEVEL >= 3 else None
++        if hook is not None:
++            # ADV=3: skip the uploads the device restores / rewrites (steady state), capture the rest
++            hook.active, hook.steady = True, advance
++            _h2d.RB_HOOK = hook
+         try:
+             out = self.prepare_model(batch)
+         finally:
+             _h2d.RB_SUPPRESS = None
++            _h2d.RB_HOOK = None
++            if hook is not None:
++                hook.active = False
++        if hook is not None:
++            hook.flush()
+         _RB.apply(self, batch, get_forward_context().attn_metadata, advance=advance)
+         self._rb_state_ok = True
+         self._rb_last_ids = list(batch.req_ids)
+diff --git a/atom/model_ops/attentions/gdn_attn.py b/atom/model_ops/attentions/gdn_attn.py
+index 85c6e6fba60653134bd6fb37803e74786e6a869d..9de031e107e536680e1a1d3b67b9ee151c59d32e 100644
+--- a/atom/model_ops/attentions/gdn_attn.py
++++ b/atom/model_ops/attentions/gdn_attn.py
+@@ -44,6 +44,7 @@ logger = logging.getLogger("atom")
+ # same values (gated bitwise by ATOM_Q38_RB_DEVMETA=check against this builder's full path)
+ _RB_TRIM = __import__("os").environ.get("ATOM_Q38_RB_DEVMETA_TRIM") == "1"
+ _RB_TRIM_MUT = __import__("os").environ.get("ATOM_Q38_RB_DEVMETA_MUT") == "trim"
++_RB_TRIM2 = _RB_TRIM and __import__("os").environ.get("ATOM_Q38_RB_DEVMETA_TRIM2") == "1"
+ 
+ # The linear-attention state pool's row space -- one slot per recurrent layer,
+ # whether GDN calls it that or K3 calls it KDA. Shared so a hybrid that binds
+@@ -1282,7 +1283,17 @@ class GDNStateMixin(PoolRowsMixin):
+             spec_token_indx = self.spec_token_indx[:spec_token_size]
+             non_spec_token_indx = self.non_spec_token_indx[:0]
+             spec_sequence_masks = self.spec_sequence_masks[:num_reqs]
+-            spec_sequence_masks.fill_(True)
++            # ATOM_Q38_RB_DEVMETA_TRIM2=1 (with TRIM): a device-path step repeating the last one's shape keeps the
++            # masks it set
++            if not (
++                _RB_TRIM2
++                and getattr(self.model_runner.tokenID_processor, "rb_zero", False)
++                and getattr(self, "_rb_trim_key", None)
++                == (batch.total_seqs_num_decode, int(batch.num_spec_step))
++            ):
++                spec_sequence_masks.fill_(True)
++            elif __import__("os").environ.get("ATOM_Q38_RB_DEVMETA_MUT") == "trim2":
++                spec_sequence_masks.fill_(False)  # must-fail mutant (gates): a skipped mask that is wrong
+             spec_state_indices_tensor = self.spec_state_indices_tensor.copy_to_gpu(
+                 num_reqs
+             )
+diff --git a/atom/models/qwen4_exp_mono/draft_runner.py b/atom/models/qwen4_exp_mono/draft_runner.py
+index 3e9c7bb581c4ede451d5448ae88ab6145f5dd5ae..03cd189ac591189cb0b92a0e10a0651bc449c853 100644
+--- a/atom/models/qwen4_exp_mono/draft_runner.py
++++ b/atom/models/qwen4_exp_mono/draft_runner.py
+@@ -204,6 +204,10 @@ class Qwen4MonoDraftRunner:
+             self.wide_scratch = torch.zeros(
+                 size // 4, dtype=torch.int32, device=self.device
+             )
++            # ``ATOM_Q38_NUMA_WIDE`` only: calibrate the wide scratch's NUMA area
++            from .kernels import numa as _numa
++
++            _numa.prepare_wide(self.wide_scratch)
+         return self.wide_scratch
+ 
+     def forward(self, input_ids: torch.Tensor, hidden_states: torch.Tensor):
+diff --git a/atom/models/qwen4_exp_mono/kernels/extern_stages.py b/atom/models/qwen4_exp_mono/kernels/extern_stages.py
+index ac18a2834c2e19220dd10ecf6899b9fca82bfa43..4291dd1c44815dfb739d26e2c2efe7ca298521da 100644
+--- a/atom/models/qwen4_exp_mono/kernels/extern_stages.py
++++ b/atom/models/qwen4_exp_mono/kernels/extern_stages.py
+@@ -282,6 +282,16 @@ def _check_numa(side, meta) -> None:
+     mb = meta.get("mailboxes", "plain")
+     if mb not in ("plain", "numa1"):
+         raise ValueError(f"{side}: mailboxes {mb!r}, expected 'plain' or 'numa1'")
++    whdr = meta.get("numa_wide_hdr")
++    if whdr is not None:  # the wide scratch's own NUMA area (``numa.prepare_wide``, ATOM_Q38_NUMA_WIDE)
++        from atom.models.qwen4_exp_mono.kernels import numa
++
++        if whdr != numa.wide_header_offset():
++            raise ValueError(
++                f"{side}: built for the wide NUMA header at {whdr}, this ATOM's is at {numa.wide_header_offset()}"
++            )
++        if not numa.wide_wanted():
++            raise ValueError(f"{side}: the function uses the wide scratch's NUMA area: needs {numa.ENV_WIDE}=1")
+     hdr = meta.get("numa_hdr")
+     if hdr is None:
+         if mb == "numa1":
+diff --git a/atom/models/qwen4_exp_mono/kernels/numa.py b/atom/models/qwen4_exp_mono/kernels/numa.py
+index d4e62bfae2b6bbc7dec026ebe81d04f2635cf564..579cc73f3ddea85f3fe4c946683174ba0892d757 100644
+--- a/atom/models/qwen4_exp_mono/kernels/numa.py
++++ b/atom/models/qwen4_exp_mono/kernels/numa.py
+@@ -273,7 +273,7 @@ PP_BATCH = 64  # blocks per launch
+ PP_ITERS = 48  # round trips per block
+ 
+ 
+-def calibrate(scratch, iters=PP_ITERS):
++def calibrate(scratch, iters=PP_ITERS, hdr_off=None, area_len=None):
+     """Measure the home IOD of every 8 KiB block of the area of ``scratch`` (a
+     torch int32 tensor of at least :func:`scratch_bytes_needed` bytes): a
+     ping-pong of tagged sc1 stores / polls between two CTAs on one XCD
+@@ -286,10 +286,13 @@ def calibrate(scratch, iters=PP_ITERS):
+ 
+     import torch
+ 
+-    assert scratch.numel() * 4 >= scratch_bytes_needed(), "scratch too small for numa"
+-    nb = area_bytes() // CHUNK
++    # ``hdr_off`` / ``area_len``: another area (the wide scratch's, :func:`prepare_wide`); default this module's
++    hdr_off = header_offset() if hdr_off is None else hdr_off
++    area_len = area_bytes() if area_len is None else area_len
++    assert scratch.numel() * 4 >= hdr_off + 256 + PAGE + area_len, "scratch too small for numa"
++    nb = area_len // CHUNK
+     assert nb <= PP_SLOTS
+-    base = area_base(scratch.data_ptr())
++    base = (scratch.data_ptr() + hdr_off + 256 + PAGE - 1) & ~(PAGE - 1)
+     base_w = (base - scratch.data_ptr()) // 4
+     out = torch.zeros(PP_SLOTS + 2, dtype=torch.int32, device=scratch.device)
+     launch = _pingpong_launcher()
+@@ -315,14 +318,14 @@ def calibrate(scratch, iters=PP_ITERS):
+             t[first : first + n] = o[first : first + n].to(torch.int64) & 0xFFFFFFFF
+             xccs[pair] = (int(o[PP_SLOTS]), int(o[PP_SLOTS + 1]))
+         rtt[pair] = t
+-    scratch[base_w : base_w + area_bytes() // 4].zero_()
++    scratch[base_w : base_w + area_len // 4].zero_()
+     iod_of = {p: (xccs[p][0] >> 2) & 1 for p in (0, 4)}
+     home = []
+     for j in range(nb):
+         a, b = int(rtt[0][j]), int(rtt[4][j])
+         near = 0 if a <= b else 4
+         home.append(iod_of[near])
+-    pages = -(-area_bytes() // PAGE)
++    pages = -(-area_len // PAGE)
+     assert pages <= 32, pages
+     mask, agree = 0, 0
+     per_page = PAGE // CHUNK
+@@ -333,7 +336,7 @@ def calibrate(scratch, iters=PP_ITERS):
+         f = 1 if 2 * sum(fs) > len(fs) else 0
+         mask |= f << p
+         agree += sum(1 for v in fs if v == f)
+-    hdr = header_offset() // 4
++    hdr = hdr_off // 4
+     scratch[hdr] = mask
+     scratch[hdr + 1] = MAGIC
+     torch.cuda.synchronize()
+@@ -402,3 +405,60 @@ def prepare(scratch):
+         flush=True,
+     )
+     return mask, agree, info
++
++
++# ------------------------------------------------------------- wide builds
++# ``ATOM_Q38_NUMA_WIDE=1`` (off by default): the wide scratch (``draft_runner._wide_scratch``, rows up to
++# ``layout_wide.WIDE_ROWS``) gets a NUMA area of its own for extern stage functions that keep private copies
++# there (rocKE ``stages2.moe_wide`` knob ``numa``: the MoE's gate_up -> down exchange and ys, both copies
++# stored, the IOD-local one polled). The FlyDSL stages never use it; the plain mailboxes stay where they are.
++# Unlike the narrow area this one does not mirror the whole mailbox part (16 rows of it exceed the header's
++# 32-page mask): the function maps its own regions into ``WIDE_LOGICAL`` logical bytes, byte x of which sits
++# at :func:`phys` (x) (copy 0) and + 8192 (copy 1). Header (word 0: the page mask, word 1: MAGIC) at
++# :func:`wide_header_offset`, past every region a wide scratch can have; the area at the next 2 MiB boundary
++# past header + 256. A sidecar ``"numa_wide_hdr": <offset>`` (``extern_stages``) must match it.
++ENV_WIDE = "ATOM_Q38_NUMA_WIDE"
++WIDE_LOGICAL = 8 << 20
++
++
++def wide_wanted():
++    """Whether ``ATOM_Q38_NUMA_WIDE`` asks for the wide scratch's NUMA area."""
++    import os
++
++    return os.environ.get(ENV_WIDE, "0").strip() not in ("", "0")
++
++
++def wide_header_offset():
++    """Scratch offset of the wide area's header: past the wide mailbox part and every measurement
++    region (stamps, blame + its side copies, spin), whether or not those are on; 256-aligned."""
++    from atom.models.qwen4_exp_mono.kernels import sched
++    from atom.models.qwen4_exp_mono.kernels.layout import mailbox_bytes
++    from atom.models.qwen4_exp_mono.kernels.layout_wide import WIDE_ROWS
++
++    x = sched.side_delta() + mailbox_bytes(WIDE_ROWS)
++    return -(-x // 256) * 256
++
++
++def wide_area_bytes():
++    return 2 * WIDE_LOGICAL
++
++
++def wide_scratch_bytes_needed():
++    return wide_header_offset() + 256 + PAGE + wide_area_bytes()
++
++
++def prepare_wide(scratch):
++    """Runner / rig hook: calibrate the wide scratch's NUMA area when ``ATOM_Q38_NUMA_WIDE`` is on (else
++    nothing). Returns the calibration or None."""
++    if not wide_wanted():
++        return None
++    import sys
++
++    mask, agree, info = calibrate(scratch, hdr_off=wide_header_offset(), area_len=wide_area_bytes())
++    print(
++        f"[{ENV_WIDE}] wide scratch calibrated: page mask {mask:#x}, bit-13 rule agreement {agree:.4f}, "
++        f"remote/local round trip {info['remote_over_local_rtt']:.2f}",
++        file=sys.stderr,
++        flush=True,
++    )
++    return mask, agree, info
+diff --git a/atom/models/qwen4_exp_mono/kernels/sched.py b/atom/models/qwen4_exp_mono/kernels/sched.py
+index 49b3d6f86d693968c0c3db73d92a3b0da9f23cae..9b29b195f9c93f16ec10ed39df5c20cad21d996f 100644
+--- a/atom/models/qwen4_exp_mono/kernels/sched.py
++++ b/atom/models/qwen4_exp_mono/kernels/sched.py
+@@ -471,6 +471,11 @@ def scratch_extra(rows=None):
+     from atom.models.qwen4_exp_mono.kernels import numa
+     from atom.models.qwen4_exp_mono.kernels.layout import MAX_ROWS
+ 
++    if rows is not None and rows > MAX_ROWS and numa.wide_wanted():
++        # ``ATOM_Q38_NUMA_WIDE``: the wide scratch's own NUMA area (``numa.wide_header_offset``), past everything
++        from atom.models.qwen4_exp_mono.kernels.layout import mailbox_bytes
++
++        return numa.wide_scratch_bytes_needed() - mailbox_bytes(rows)
+     if (rows is None or rows <= MAX_ROWS) and numa.wanted():
+         return numa.scratch_bytes_needed() - _stamp_base()
+     if (rows is None or rows <= MAX_ROWS) and numa.wanted("dyn"):
+diff --git a/atom/models/qwen4_exp_mono/truemono/rb_devmeta.py b/atom/models/qwen4_exp_mono/truemono/rb_devmeta.py
+index 6bf8314d0b6311150133b5c1da3d28db72598d59..edf76d07a39c62409c8a864301a58a8f3de9b5e2 100644
+--- a/atom/models/qwen4_exp_mono/truemono/rb_devmeta.py
++++ b/atom/models/qwen4_exp_mono/truemono/rb_devmeta.py
+@@ -46,7 +46,10 @@ MUT = os.getenv(ENV + "_MUT", "")
+ # ATOM_Q38_RB_DEVMETA_ADV=1: on a steady-state step (the previous step was a device-path step with the same requests in
+ # the same order and width) skip the uploads of the accept-dependent buffers (``suppress_set``) and advance them on the
+ # device from round t's true length (``_state``): length + q - r. Needs the fused path.
+-ADV = os.getenv(ENV + "_ADV", "0") == "1"
++# ATOM_Q38_RB_DEVMETA_ADV=2: also the QSA token -> request map and the GDN spec state slots (constant in a steady state).
++# A first version also skipped the token-input group and failed its gate (rb-gate9); this one is NOT gated yet.
++ADV_LEVEL = int(os.getenv(ENV + "_ADV", "0") or 0)
++ADV = ADV_LEVEL >= 1
+ # ATOM_Q38_RB_DEVMETA_FUSE=1 (default): the compressed QSA slots in the shift kernel, and kv_indices re-derived only
+ # when a request's kv offset can move (bs > 1; at bs 1 the r = 0 superset already holds every read entry); 0: the
+ # shift kernel plus ATOM's own kv_indices / qsa_compressed_slots launches (v1)
+@@ -214,6 +217,13 @@ def suppress_set(runner) -> frozenset:
+     else:
+         names.append("positions")
+     bufs = [var[n] for n in names] + [runner.attn_metadata_builder._num_accepted]
++    if ADV_LEVEL == 2:
++        # NOT the token-input group: job rb-gate9 (checks spread over the whole run) found cu_seqlens_q / input_ids
++        # differing on advanced steps (87 DIFF, CONC 2 gsm8k 0 / 4), so it is uploaded as before
++        bufs.append(var["qsa_token_to_req"])
++        spec = getattr(runner.attn_metadata_builder, "spec_state_indices_tensor", None)
++        if spec is not None and hasattr(spec, "gpu"):
++            bufs.append(spec)
+     return frozenset(id(b) for b in bufs)
+ 
+ 
+@@ -355,3 +365,111 @@ def compare(a: dict, b: dict, kv_end: int) -> list:
+         if not torch.equal(x, y):
+             diff.append(name)
+     return diff
++
++
++# ---- ATOM_Q38_RB_DEVMETA_ADV=3: steady-state steps without H2D copies ----
++# Every upload of a steady-state device-path step is skipped when the device can supply its bytes: the members the
++# device rewrites anyway (input ids: the deferred-ids kernel; the accept-dependent set: the shift kernel, as ADV=1) and
++# the members whose staged bytes equal the last upload's (constant in a steady state: sampling parameters,
++# cu_seqlens_q, decode_src, spec indices, block tables, GDN slots, the QSA token map). The latter are restored from a
++# device snapshot taken right after their last real upload, because drafts may have rewritten the device copy in
++# between (cu_seqlens_q, the QSA token map at CONC 2: job rb-gate10). Restores of the token-input group run at once
++# (the deferred-ids kernel reads them inside the preparation); the others are batched into one launch in apply().
++
++
++@triton.jit
++def _restore_kernel(table, BLOCK: tl.constexpr):
++    e = tl.program_id(0)
++    src = tl.load(table + 3 * e).to(tl.pointer_type(tl.uint8))
++    dst = tl.load(table + 3 * e + 1).to(tl.pointer_type(tl.uint8))
++    n = tl.load(table + 3 * e + 2)
++    for off in range(0, n, BLOCK):
++        o = off + tl.arange(0, BLOCK)
++        tl.store(dst + o, tl.load(src + o, mask=o < n), mask=o < n)
++
++
++class PubHook:
++    def __init__(self, runner):
++        self.runner = runner
++        self.active = False  # inside a device-path step's preparation
++        self.steady = False  # ... of a steady-state step (skip / restore); otherwise capture only
++        self.cache = {}  # id(binding) -> (host bytes, device snapshot, nbytes)
++        self.deferred = []
++        self.tables = {}
++        self.skipped = 0
++        self.uploaded = 0
++        var = runner.forward_vars
++        self.rewritten = {id(var["input_ids"])}
++        self.immediate_groups = {"token_inputs", "input_ids", "early", "sampling", "spec_decode"}
++
++    @staticmethod
++    def _bytes(t, count):
++        return t[:count].reshape(-1).view(torch.uint8)
++
++    def filter(self, group, counts):
++        if not self.active:
++            return counts, _noop
++        out, captures, restores = list(counts), [], []
++        for i, (m, c) in enumerate(zip(group.members, counts)):
++            if not c:
++                continue
++            hb = self._bytes(m._source_view, c)
++            db = self._bytes(m._destination_view, c)
++            key = id(m)
++            if self.steady:
++                if id(m.buffer) in self.rewritten:
++                    out[i] = None
++                    self.skipped += 1
++                    continue
++                ent = self.cache.get(key)
++                if ent is not None and ent[2] == hb.numel() and torch.equal(ent[0][: hb.numel()], hb):
++                    out[i] = None
++                    restores.append((ent[1].data_ptr(), db.data_ptr(), hb.numel()))
++                    self.skipped += 1
++                    continue
++            captures.append((key, hb, db))
++            self.uploaded += 1
++
++        def post():
++            for key, hb, db in captures:
++                ent = self.cache.get(key)
++                if ent is None or ent[1].numel() < hb.numel():
++                    snap = torch.empty(max(hb.numel(), 64), dtype=torch.uint8, device=db.device)
++                else:
++                    snap = ent[1]
++                snap[: hb.numel()].copy_(db)  # after the upload, stream-ordered
++                self.cache[key] = (hb.clone(), snap, hb.numel())
++            if restores:
++                if group.name in self.immediate_groups:
++                    self.launch(restores)
++                else:
++                    self.deferred += restores
++
++        return out, post
++
++    def launch(self, entries):
++        if not entries or MUT == "adv3":  # must-fail mutant (gates): skip the restores
++            return
++        key = tuple(entries)
++        t = self.tables.get(key)
++        if t is None:
++            t = torch.tensor([x for e in entries for x in e], dtype=torch.int64).to(self.runner.device)
++            if len(self.tables) > 64:
++                self.tables.clear()
++            self.tables[key] = t
++        _restore_kernel[(len(entries),)](t, BLOCK=1024)
++
++    def flush(self):
++        d, self.deferred = self.deferred, []
++        self.launch(d)
++
++
++def _noop():
++    return None
++
++
++def pub_hook(runner):
++    h = getattr(runner, "_rb_pub_hook", None)
++    if h is None:
++        h = runner._rb_pub_hook = PubHook(runner)
++    return h
+diff --git a/atom/utils/h2d.py b/atom/utils/h2d.py
+index 6a36844ac6fbbc0e3727d0ebd65d039c42dbf16a..5062cace9f9c5f5f9e5eccea1ba24a4476b54382 100644
+--- a/atom/utils/h2d.py
++++ b/atom/utils/h2d.py
+@@ -18,6 +18,9 @@ import torch
+ # ATOM_Q38_RB_DEVMETA_ADV (Qwen3.8 true mono, truemono/rb_devmeta.py) only: ids of the CpuGpuBuffers whose upload a
+ # steady-state device-path step skips (the device advances them); None otherwise
+ RB_SUPPRESS = None
++# ATOM_Q38_RB_DEVMETA_ADV=3 only: an object with filter(group, counts) -> (counts, post) that skips uploads whose bytes
++# the device restores / rewrites (truemono/rb_devmeta.py PubHook); None otherwise
++RB_HOOK = None
+ 
+ 
+ class PublicationError(RuntimeError):
+@@ -431,6 +434,14 @@ class PublicationGroup:
+         return self.transport
+ 
+     def publish(self, counts, *, republish_reasons=None):
++        if RB_HOOK is None:
++            return self._publish(counts, republish_reasons=republish_reasons)
++        counts, post = RB_HOOK.filter(self, counts)
++        out = self._publish(counts, republish_reasons=republish_reasons)
++        post()
++        return out
++
++    def _publish(self, counts, *, republish_reasons=None):
+         self.owner._check_active()
+         backend = self._backend
+         if RB_SUPPRESS is not None:
+diff --git a/tests/test_qwen4_exp_mono_rb_devmeta.py b/tests/test_qwen4_exp_mono_rb_devmeta.py
+index a0fa237c6ca66052c8f0e43ec1bb804edc4a1db9..3cdbc7ab841768b6cdcd23d2163f7ec7930d5f9c 100644
+--- a/tests/test_qwen4_exp_mono_rb_devmeta.py
++++ b/tests/test_qwen4_exp_mono_rb_devmeta.py
+@@ -167,3 +167,16 @@ def test_advance(seed, mut):
+         assert ok
+     elif r.any():
+         assert not ok, "mutant adv not caught"
++
++
++def test_restore_kernel():
++    """ADV=3's batched device restore: every entry's bytes copied, nothing past them touched."""
++    src = [torch.randint(0, 255, (n,), dtype=torch.uint8, device="cuda") for n in (7, 1500, 3000)]
++    dst = [torch.zeros(n + 64, dtype=torch.uint8, device="cuda") for n in (7, 1500, 3000)]
++    table = torch.tensor([x for s_, d_ in zip(src, dst) for x in (s_.data_ptr(), d_.data_ptr(), s_.numel())],
++                         dtype=torch.int64, device="cuda")
++    rb._restore_kernel[(len(src),)](table, BLOCK=1024)
++    torch.cuda.synchronize()
++    for s_, d_ in zip(src, dst):
++        assert torch.equal(d_[: s_.numel()], s_)
++        assert int(d_[s_.numel():].sum()) == 0

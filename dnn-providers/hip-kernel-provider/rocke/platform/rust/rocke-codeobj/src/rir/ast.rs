@@ -355,6 +355,7 @@ pub enum OpKind {
     DsBpermute,
     WaveAny,
     WaveAll,
+    WaveBallot,
     LaneId,
     // atomics, fences, buffer stores, barriers
     GlobalAtomicAdd,
@@ -673,6 +674,7 @@ impl OpKind {
             "tile.ds_bpermute" => OpKind::DsBpermute,
             "tile.wave_any" => OpKind::WaveAny,
             "tile.wave_all" => OpKind::WaveAll,
+            "tile.wave_ballot" => OpKind::WaveBallot,
             "tile.lane_id" => OpKind::LaneId,
             "memref.global_atomic_add" => OpKind::GlobalAtomicAdd,
             // `(ptr<f16>, index, vec<f16x2>)`: an atomic add of both halves at an f16 element index.
@@ -784,6 +786,7 @@ impl OpKind {
                 | OpKind::DsBpermute
                 | OpKind::WaveAny
                 | OpKind::WaveAll
+                | OpKind::WaveBallot
                 | OpKind::GlobalAtomicAdd
                 | OpKind::GAtomicAdd
                 | OpKind::Fence
@@ -846,6 +849,7 @@ impl OpKind {
                     | OpKind::DsBpermute
                     | OpKind::WaveAny
                     | OpKind::WaveAll
+                    | OpKind::WaveBallot
                     | OpKind::DsReadTr16
                     | OpKind::DsReadTr8
                     | OpKind::LdsReadTr

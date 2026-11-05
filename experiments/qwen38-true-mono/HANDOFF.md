@@ -101,3 +101,10 @@ absolute numbers in `hackathon-prep/private-perf/qwen38-true-mono/`.
   resident round loop on c2s3b). W11 (run wf_bd1683cd-58c): P3x -> WP15 (N1 HC chain), WP17 (N2 out_proj K-split),
   e2e on c2s3b. c2 agent: confirmations, then stacks verified pieces, freezes FINAL-STACK.md last.
   Best now: K=3 c2s3b ~985 (n07-17) / ~970 (n01-09), K=0 ~492. W10 (TP2 10k) running.
+- 2026-11-03: FROZEN (user decision): `FINAL-STACK.md` = K=3 `c2s3b` / K=0 `c2s0b` (consolidated push 2, quick/README.md
+  "Consolidated stack 2"); N1 at K=0 pending, every other last-mile lever rejected on base c2s3b (default-off knobs).
+- 2026-11-03: Qwen FROZEN (FINAL-STACK.md; repro/). User moved to DeepSeek-V4.1-Flash (experiments/dsv41-mono, W12 run
+  wf_74484644-c2e). W10 (TP2 large batch, measured 10k target) STOPPED unfinished by user decision: stage pieces
+  WP-L2b/e/f + routing verified (large-batch/WP-L2*.md, WP-L0c-route.md); WP-L3 layers, WP-L4 pass, WP-L5 TP2 e2e
+  never ran. Resume from the W10 script (run wf_505460aa-fed) if large batch is picked up again. N1 at K=0 pending
+  a K=0 accuracy run.

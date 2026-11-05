@@ -665,6 +665,8 @@ inst   VMaxU32DppOld     v_max_u32                 VOP2    0xf    opc=gfx9 flags
 inst   VCvtF64F32        v_cvt_f64_f32             VOP1    0x10   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vs1 m=neg imp=use:exec unit=VALU lat=valu
 inst   VCvtF32F64        v_cvt_f32_f64             VOP1    0xf    opc=gfx9 flags=VALU|64BIT_SRC d=vdst:v1 u=src0:vs2 m=neg imp=use:exec unit=VALU lat=valu form=f64
 inst   VRsqF64           v_rsq_f64                 VOP1    0x26   opc=gfx9 flags=VALU|TRANS|64BIT_SRC d=vdst:v2 u=src0:vs2 m=neg imp=use:exec unit=TRANS lat=trans form=f64
+# W15 PORT K2-moe: v_sqrt_f32 for `math.sqrt` of an f32 (LLVM's correctly rounded expansion; V4.1 route's sqrtsoftplus).
+inst   VSqrtF32          v_sqrt_f32                VOP1    0x27   opc=gfx9 flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg imp=use:exec unit=TRANS lat=trans
 inst   VBcntU32B32       v_bcnt_u32_b32            VOP3    0x28b  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 imp=use:exec unit=VALU lat=valu
 inst   SFf1I32B32        s_ff1_i32_b32             SOP1    0x10   opc=gfx9 flags=0 d=sdst:s1 u=ssrc0:ss1 unit=SALU lat=salu
 inst   SMemtime          s_memtime                 SMEM    0x24   opc=gfx9 flags=SMEM|FENCE d=sdata:s2 unit=SMEM lat=smem form=nobase
