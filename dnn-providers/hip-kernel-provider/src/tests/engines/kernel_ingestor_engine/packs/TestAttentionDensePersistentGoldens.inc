@@ -792,7 +792,7 @@ inline constexpr std::array<SignatureGolden, 14> SIGNATURE_GOLDENS{{
     {"persistent/hq_minor_swz", true, "q_ptr k_ptr v_ptr o_ptr scale batch seqlen_q seqlen_kv num_query_heads num_kv_heads nqb_magic nqb_shift num_query_heads_magic num_query_heads_shift gqa_magic gqa_shift lse_ptr"},
 }};
 
-inline constexpr std::array<GridGolden, 1540> GRID_GOLDENS{{
+inline constexpr std::array<GridGolden, 1547> GRID_GOLDENS{{
     {"qb_minor", 1, 256, 512, 8, 8, 256, false, 0, true, 1, 8, 1, 0, {0, 0, 0, 0, 0, 0}},
     {"bt_hkv_minor", 1, 256, 512, 8, 8, 256, false, 0, true, 1, 8, 1, 0, {0, 0, 0, 0, 0, 0}},
     {"hq_minor_swz", 1, 256, 512, 8, 8, 256, false, 0, true, 8, 1, 1, 0, {0, 0, 0, 0, 0, 0}},
@@ -2312,6 +2312,13 @@ inline constexpr std::array<GridGolden, 1540> GRID_GOLDENS{{
     {"persistent/hkv_major", 1, 256, 256, 32768, 1, 256, true, 0, true, 304, 1, 1, 6, {1, 0, 1, 15, 1, 0}},
     {"persistent/bt_hkv_minor", 1, 256, 256, 32768, 1, 256, true, 0, false, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0}},
     {"persistent/hq_minor_swz", 1, 256, 256, 32768, 1, 256, true, 0, false, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0}},
+    {"qb_minor", 1, 256, 256, 32760, 1, 256, true, 0, true, 1, 32760, 1, 0, {0, 0, 0, 0, 0, 0}},
+    {"bt_hkv_minor", 1, 256, 256, 32760, 1, 256, true, 0, true, 1, 32760, 1, 0, {0, 0, 0, 0, 0, 0}},
+    {"hq_minor_swz", 1, 256, 256, 32760, 1, 256, true, 0, true, 8, 4095, 1, 0, {0, 0, 0, 0, 0, 0}},
+    {"persistent/qb_major", 1, 256, 256, 32760, 1, 256, true, 0, true, 304, 1, 1, 6, {1, 0, 1048833, 15, 1048833, 15}},
+    {"persistent/hkv_major", 1, 256, 256, 32760, 1, 256, true, 0, true, 304, 1, 1, 6, {1, 0, 1048833, 15, 1, 0}},
+    {"persistent/bt_hkv_minor", 1, 256, 256, 32760, 1, 256, true, 0, true, 304, 1, 1, 4, {1, 0, 1048833, 15, 0, 0}},
+    {"persistent/hq_minor_swz", 1, 256, 256, 32760, 1, 256, true, 0, false, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0}},
     {"qb_minor", 1, 256, 256, 16384, 1, 256, true, 0, true, 1, 16384, 1, 0, {0, 0, 0, 0, 0, 0}},
     {"bt_hkv_minor", 1, 256, 256, 16384, 1, 256, true, 0, true, 1, 16384, 1, 0, {0, 0, 0, 0, 0, 0}},
     {"hq_minor_swz", 1, 256, 256, 16384, 1, 256, true, 0, true, 8, 2048, 1, 0, {0, 0, 0, 0, 0, 0}},

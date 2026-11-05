@@ -136,6 +136,8 @@ def grid_rows():
     # The dividend bounds: bt_hkv_minor's gqa * Hq at extreme GQA, and the work count.
     for shape in (
         (1, 256, 256, 32768, 1, 256, True, 0),
+        # gqa * Hq = 32760^2 is in (2^29, 2^30), so only a 2^30 bound admits it.
+        (1, 256, 256, 32760, 1, 256, True, 0),
         (1, 256, 256, 16384, 1, 256, True, 0),
         (4096, 32768, 32768, 64, 64, 256, True, 0),
         (2048, 32768, 32768, 64, 64, 256, False, 0),
