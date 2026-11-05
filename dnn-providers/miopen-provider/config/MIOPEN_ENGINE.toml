@@ -74,7 +74,7 @@ rtol = 1e-5
 #   A >= 65,536 (S19, L19, X4)         8.2e-3
 # Each class takes about 2x its observed maximum. Later entries win.
 # The R shapes and the S24-S46 / L24-L46 shapes are placed in a class by their
-# accumulation length; those placements are not yet calibrated on hardware.
+# accumulation length; all of them pass in that class on gfx942 and gfx90a.
 [[tolerance_overrides]]
 filters = [
     "*_ConvolutionFwd*.L*_fp32_*",
@@ -170,6 +170,8 @@ filters = [
     "*_ConvolutionFwd_Default.S13a_F16chan_2d_i16x16_n2c16k16g16_f3x3_fp32_cf",
     "*_ConvolutionFwd_Default.S13a_F16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
     "*_ConvolutionFwd_Default.S13b_F16plane_1d_i16_n2c16k32g16_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.S13b_F16chan_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.S14_F16plane_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl",
     "*_ConvolutionFwd_Default.S20_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
     "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
     "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",

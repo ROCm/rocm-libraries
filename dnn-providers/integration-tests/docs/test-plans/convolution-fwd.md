@@ -552,8 +552,22 @@ gfx942 runs with the engine TOML's skips; every gfx90a failure is a probe. On bo
 architectures the `act` topology executed only ReLU, ReLU6, clamp, sigmoid and
 tanh; `bias_act` executed only in fp32; `scale_bias_act`, `bias_add_relu` and
 `act_add` never executed; and F13, F19 and F35 never executed. gfx90a declined
-every fused graph. The R set, S24–S46 and H15–H18 are not in these runs, and the
-S cases ran at N 1; the current set still needs a run on each architecture.
+every fused graph.
+
+**The current set.** All 4,206 cases, serial, at this plan's tip, with the
+MIOpen plugin:
+
+| Architecture | OK | Skipped | Failed | Crashed | Wall time |
+|---|---|---|---|---|---|
+| gfx942 (MI325X) | 2,537 | 1,667 | 2 | 0 | 10.5 min |
+| gfx90a (MI250) | 1,930 | 2,184 | 89 | 3 | 16 min |
+
+No claim case fails on either architecture; every failure is a probe. The two
+gfx942 failures are non-packed-stride 3D cases (S13b, S14) that are wrong on
+both architectures, the defect behind the existing non-packed-stride skips; they
+joined that skip list. The new fp32 shapes passed inside the tolerance class
+their accumulation length gives them. Claims are harvested from these runs:
+2,086 on gfx942 and 1,501 on gfx90a.
 
 ---
 
