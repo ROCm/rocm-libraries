@@ -160,13 +160,12 @@ struct CDNA5ReadyQueueTestPeer {
     static constexpr uint8_t kBlocked = CDNA5ReadyQueue::kBlockedSlot;
 };
 
-PassContext makeQueueCtx(int depth, int cover) {
+PassContext makeQueueCtx(int cover) {
     PassContext ctx;
     GemmTileConfig config;
     config.arch = {12, 5, 0};
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
-    pfc.dagFeatures.wmmaQueueDepth = depth;
     pfc.dagFeatures.wmmaQueueCoverCycles = cover;
     ctx.setPassFeatureConfig(pfc);
     return ctx;
@@ -337,7 +336,7 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxDrainInBurst) {
 TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
     using Peer = CDNA5ReadyQueueTestPeer;
     for (int on = 0; on < 2; ++on) {
-        PassContext ctx = on ? makeQueueCtx(8, 16) : makeQueueCtx(1, 0);
+        PassContext ctx = on ? makeQueueCtx(16) : makeQueueCtx(0);
         struct Case {
             Peer::TimeKind kind;
             int cycles;
@@ -369,26 +368,23 @@ TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
 // for an 8-cycle one. An explicit cover is the same for both and 0 turns the queue model off.
 TEST_F(CDNA5ReadyQueueTest, AutomaticRefillLineFollowsTheNextWmmaLatency) {
     using Peer = CDNA5ReadyQueueTestPeer;
-    PassContext autoCtx = makeQueueCtx(8, -1);
+    PassContext autoCtx = makeQueueCtx(-1);
     CDNA5ReadyQueue autoQueue(autoCtx);
     EXPECT_EQ(Peer::cover(autoQueue, 4), 28);
     EXPECT_EQ(Peer::cover(autoQueue, 8), 56);
 
-    PassContext explicitCtx = makeQueueCtx(8, 40);
+    PassContext explicitCtx = makeQueueCtx(40);
     CDNA5ReadyQueue explicitQueue(explicitCtx);
     EXPECT_EQ(Peer::cover(explicitQueue, 4), 40);
     EXPECT_EQ(Peer::cover(explicitQueue, 8), 40);
 
-    PassContext offCtx = makeQueueCtx(8, 0);
+    PassContext offCtx = makeQueueCtx(0);
     CDNA5ReadyQueue offQueue(offCtx);
     EXPECT_EQ(Peer::cover(offQueue, 8), 0);
-    PassContext depthOneCtx = makeQueueCtx(1, -1);
-    CDNA5ReadyQueue depthOneQueue(depthOneCtx);
-    EXPECT_EQ(Peer::cover(depthOneQueue, 8), 0);
 }
 
 TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
-    PassContext ctx = makeQueueCtx(8, 16);
+    PassContext ctx = makeQueueCtx(16);
     CDNA5ReadyQueue queue(ctx);
     // A WMMA reading v[0:7] ends 40 cycles into the window; the region ends at position 10.
     CDNA5ReadyQueueTestPeer::srcs(queue).push_back({StinkyRegister("v", 0, 8)});
@@ -410,7 +406,7 @@ TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
     EXPECT_FALSE(CDNA5ReadyQueueTestPeer::overlaps(queue, &overwrite)) << "read by now";
 
     // With the queue model off nothing is carried (the original per-region reset).
-    PassContext off = makeQueueCtx(1, 0);
+    PassContext off = makeQueueCtx(0);
     CDNA5ReadyQueue plain(off);
     CDNA5ReadyQueueTestPeer::srcs(plain).push_back({StinkyRegister("v", 0, 8)});
     CDNA5ReadyQueueTestPeer::ends(plain).push_back(40);
@@ -426,7 +422,7 @@ TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
 TEST_F(CDNA5ReadyQueueTest, ForcedWmmaChargesItsSourceStallWhenTheQueueModelIsOn) {
     int elapsed[2] = {0, 0};
     for (int on = 0; on < 2; ++on) {
-        PassContext ctx = on ? makeQueueCtx(8, 16) : makeQueueCtx(1, 0);
+        PassContext ctx = on ? makeQueueCtx(16) : makeQueueCtx(0);
         CDNA5ReadyQueue queue(ctx);
         Function f{"forced_wmma"};
         BasicBlock* b = f.createBasicBlock("entry");
