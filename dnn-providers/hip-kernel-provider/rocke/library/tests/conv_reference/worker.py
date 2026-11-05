@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from reference_common.worker import WorkerOperation, main, run_case
+from reference_common.worker import (
+    WorkerOperation,
+    main,
+    run_case,
+    source_variant,
+)
 
 from .architectures import get_adapter, get_architecture
 from .contract import Case
@@ -38,12 +43,13 @@ _OPERATION = WorkerOperation(
 def run(request: dict, output: Path) -> None:
     """Execute a single declared case, poisoning every output before each run.
 
-    Source mode runs the requested variant's adapter. Replay reads only the
-    processor's name, so it never imports an adapter.
+    Source mode runs the adapter of the variant that the request names, never
+    a default. Replay reads only the processor's name, so it never imports an
+    adapter.
     """
     architecture = request["architecture"]
     target = (
-        get_adapter(architecture, request.get("variant"))
+        get_adapter(architecture, source_variant(request))
         if request["mode"] == "source"
         else get_architecture(architecture)
     )

@@ -1878,6 +1878,7 @@ def test_reference_worker_requires_the_physical_processor(
     )
     request = {
         "architecture": architecture,
+        "variant": "stub",
         "platform_root": str(Path(rocke.__file__).resolve().parent),
         "mode": mode,
         "repetitions": 1,
@@ -1896,8 +1897,9 @@ def test_reference_worker_imports_an_adapter_only_in_source_mode(
 ):
     """Replay reads only the processor's name, so it never imports an adapter.
 
-    Source mode runs the requested variant's adapter, and rejects a variant
-    that is not enrolled before running anything.
+    Source mode runs the requested variant's adapter. It rejects a variant that
+    is not enrolled, missing, or not a name before running anything, even
+    where the processor has only one variant.
     """
     from importlib import import_module
 
@@ -1918,6 +1920,10 @@ def test_reference_worker_imports_an_adapter_only_in_source_mode(
     assert targets == [registry.get_architecture(architecture)]
     with pytest.raises(ValueError, match="reference variant is not enrolled"):
         worker.run(dict(request, mode="source"), tmp_path)
+    with pytest.raises(KeyError, match="variant"):
+        worker.run({"architecture": architecture, "mode": "source"}, tmp_path)
+    with pytest.raises(ValueError, match="names no reference variant: None"):
+        worker.run(dict(request, mode="source", variant=None), tmp_path)
     worker.run(dict(request, mode="source", variant=variant), tmp_path)
     assert targets[1:] == [registry.get_adapter(architecture, variant)]
 
