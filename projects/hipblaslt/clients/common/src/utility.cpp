@@ -41,6 +41,7 @@
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
+#include <string>
 
 #include "client/include/Utility.hpp"
 
@@ -308,7 +309,9 @@ hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
         const auto status
             = hipblasLtSetUniformSummationOrder(m_handle, arg.uniform_summation_order);
         if(status != HIPBLAS_STATUS_SUCCESS)
-            throw std::runtime_error(hipblas_status_to_string(status));
+            throw std::runtime_error("uniform_summation_order="
+                                     + std::to_string(arg.uniform_summation_order) + ": "
+                                     + hipblas_status_to_string(status));
     }
 
     if(arg.tensile_solution_selection_method >= 0)

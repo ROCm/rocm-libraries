@@ -6,6 +6,7 @@
 #include "utility.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 
@@ -48,3 +49,19 @@ INSTANTIATE_TEST_SUITE_P(
         };
         return "Arg" + name(argument) + "Cli" + name(cli);
     }));
+
+TEST(ClientUniformSummationOrderError, smoke_InvalidRequestNamesSettingAndValue)
+{
+    Arguments arg;
+    arg.init();
+    arg.uniform_summation_order = 2;
+    try
+    {
+        hipblaslt_local_handle handle{arg};
+        FAIL() << "An invalid uniform_summation_order request was accepted";
+    }
+    catch(const std::runtime_error& error)
+    {
+        EXPECT_STREQ(error.what(), "uniform_summation_order=2: HIPBLAS_STATUS_INVALID_VALUE");
+    }
+}
