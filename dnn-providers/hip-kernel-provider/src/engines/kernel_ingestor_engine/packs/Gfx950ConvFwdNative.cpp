@@ -106,6 +106,8 @@ struct ConvLaunch
     ConvKernargs kernargs;
     std::optional<conv::LaunchGeometry> reduce = std::nullopt;
     int64_t workspaceBytes = 0;
+    // `= {}` keeps the two-field aggregate inits clear of -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     std::vector<BatchChunkLaunch> batchChunks = {};
 };
 
@@ -426,8 +428,8 @@ std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
     // malformed. A scalar store then serves every graph's K / groups.
     const bool cshuffle = metadataEquals(kernel, "epilogue", std::string("cshuffle"));
     if(!cshuffle
-       && !(metadataEquals(kernel, "epilogue", std::string("default"))
-            && (build.k / build.groups) % 2 != 0))
+       && (!metadataEquals(kernel, "epilogue", std::string("default"))
+           || (build.k / build.groups) % 2 == 0))
     {
         return std::nullopt;
     }

@@ -667,6 +667,7 @@ std::vector<bool> keepLargestBlocks(const MatchContext& /*context*/,
     ++calls.calls;
     calls.seen.clear();
     calls.boundToken = tryGetBoundInt(bound, "test.bound_token");
+    calls.seen.reserve(candidates.size());
     int64_t largest = 0;
     for(const auto* kernel : candidates)
     {
@@ -674,6 +675,7 @@ std::vector<bool> keepLargestBlocks(const MatchContext& /*context*/,
         largest = std::max(largest, calls.seen.back());
     }
     std::vector<bool> keep;
+    keep.reserve(calls.seen.size());
     for(const auto blockSize : calls.seen)
     {
         keep.push_back(blockSize == largest);
