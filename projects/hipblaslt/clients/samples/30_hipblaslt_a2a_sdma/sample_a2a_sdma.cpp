@@ -582,7 +582,7 @@ namespace
                 {
                     const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(int(j));
                     owned.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
-                        srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, dstNode)));
+                        srcNode, TensileLite::Client::sdmaSelectCheckedEngine(srcNode, dstNode)));
                     const HsaQueueResource& q  = owned.back()->queueResource();
                     ctx.ranks[slot].queues[j]  = {owned.back()->ringBase(),
                                                   (void*)q.Queue_read_ptr_aql,

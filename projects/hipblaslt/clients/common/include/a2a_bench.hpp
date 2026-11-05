@@ -247,7 +247,7 @@ namespace hipblaslt_bench
             {
                 const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(j);
                 res.ownedQueues.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
-                    srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, dstNode)));
+                    srcNode, TensileLite::Client::sdmaSelectCheckedEngine(srcNode, dstNode)));
                 const HsaQueueResource& q = res.ownedQueues.back()->queueResource();
                 res.queues[j] = {res.ownedQueues.back()->ringBase(),
                                  (void*)q.Queue_read_ptr_aql,
