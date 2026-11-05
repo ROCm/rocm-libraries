@@ -11,7 +11,8 @@
  * two engines would read different values. The builder refuses such a name with
  * the Python engine's text; loops side by side may share names. Serialized IR
  * can name values that way past the builder, and the parser refuses it with the
- * same text; IR built past the builder can too, and the verifier reports it with
+ * same text (and a loop value whose type attr is not a type name with a text of
+ * its own); IR built past the builder can too, and the verifier reports it with
  * the same text. tests/core/test_unrolled_for_nested_regions.py covers the
  * Python builder, parser and verifier.
  */
@@ -169,10 +170,31 @@ void accepts_new_names_and_loops_side_by_side()
           std::string("distinct and side-by-side names refused: ") + rocke_ir_builder_error(&k.b));
 }
 
+/* The inner loop's induction-variable attrs, as kernel_text_naming serializes
+ * them. */
+const std::string inner_iv_attrs = R"(iv = s:"%j", iv_type = s:"i32")";
+
+/* `text` with its one occurrence of `old` replaced by `replacement`. */
+std::string replaced_once(std::string text, const std::string& old, const std::string& replacement)
+{
+    const size_t at = text.find(old);
+    check(at != std::string::npos && text.find(old, at + 1) == std::string::npos,
+          "expected one '" + old + "' in the serialized IR");
+    if(at != std::string::npos)
+    {
+        text.replace(at, old.size(), replacement);
+    }
+    return text;
+}
+
 /* The serialized IR of a rolled loop "k0" over "acc" whose body holds a rolled
  * loop "j" over "s", with every occurrence of the name `inner_name` (a value of
- * the inner loop) renamed to `reused`. */
-std::string kernel_text_naming(const std::string& inner_name, const std::string& reused)
+ * the inner loop) renamed to `reused`. With `inner_iv_type_not_a_name`, the
+ * inner loop's iv_type attr becomes an integer, so the parser never binds its
+ * induction variable. */
+std::string kernel_text_naming(const std::string& inner_name,
+                               const std::string& reused,
+                               bool inner_iv_type_not_a_name = false)
 {
     Kernel k("parse_reuse");
     rocke_for_t outer = k.loop("k0", "acc");
@@ -188,15 +210,21 @@ std::string kernel_text_naming(const std::string& inner_name, const std::string&
     char* serialized = NULL;
     check(rocke_ir_serialize(rocke_ir_builder_kernel(&k.b), &serialized) == ROCKE_OK,
           "serializing the parse_reuse kernel failed");
-    const std::string text = serialized ? serialized : "";
+    std::string text = serialized ? serialized : "";
     free(serialized);
+    if(inner_iv_type_not_a_name)
+    {
+        text = replaced_once(text, inner_iv_attrs, R"(iv = s:"%j", iv_type = i:0)");
+    }
     /* Whole names only: "%s" must not match the start of a longer name. */
     return std::regex_replace(text, std::regex(inner_name + R"((?![-a-zA-Z$._0-9]))"), reused);
 }
 
-void parser_refuses_a_reused_loop_name(const std::string& reused, const std::string& inner_name)
+void parser_refuses_a_reused_loop_name(const std::string& reused,
+                                       const std::string& inner_name,
+                                       bool inner_iv_type_not_a_name = false)
 {
-    const std::string text = kernel_text_naming(inner_name, reused);
+    const std::string text = kernel_text_naming(inner_name, reused, inner_iv_type_not_a_name);
     Kernel parsed("parsed");
     rocke_kernel_def_t* kernel = NULL;
     const rocke_status_t status = rocke_ir_parse(text.c_str(), &parsed.b, &kernel);
@@ -211,6 +239,41 @@ void parser_refuses_reused_loop_names()
     parser_refuses_a_reused_loop_name("%k0", "%j"); /* the outer induction variable */
     parser_refuses_a_reused_loop_name("%acc", "%s"); /* the outer carried value */
     parser_refuses_a_reused_loop_name("%j", "%s"); /* a value of the same loop */
+    /* An induction variable whose iv_type is not a type name is never bound,
+     * but its name is the loop's all the same: unrefused, the inner body's
+     * reads of it would read the outer induction variable. */
+    parser_refuses_a_reused_loop_name("%k0", "%j", /*inner_iv_type_not_a_name=*/true);
+}
+
+/* A parser binds a loop's induction variable or carried value with the type
+ * its attr names. When the attr is not a type name the value cannot be bound,
+ * and the body's reads of its name would read whatever other value holds that
+ * name, so the parser refuses it. */
+void parser_refuses_a_loop_value_without_a_type_name(const std::string& typed_attrs,
+                                                     const std::string& untyped_attrs,
+                                                     const std::string& untyped)
+{
+    const std::string text
+        = replaced_once(kernel_text_naming("%s", "%s"), typed_attrs, untyped_attrs);
+    Kernel parsed("parsed");
+    rocke_kernel_def_t* kernel = NULL;
+    const rocke_status_t status = rocke_ir_parse(text.c_str(), &parsed.b, &kernel);
+    const std::string error = status == ROCKE_OK ? "" : rocke_ir_builder_error(&parsed.b);
+    check(status == ROCKE_ERR_VALUE
+              && error
+                     == "scf.for: the loop value '" + untyped
+                            + "' has no type name; its iv_type attr or iter_args entry must "
+                              "name its type",
+          "parsing " + untyped + " with no type name: status " + std::to_string(status) + ", '"
+              + error + "'");
+}
+
+void parser_refuses_loop_values_without_a_type_name()
+{
+    parser_refuses_a_loop_value_without_a_type_name(
+        inner_iv_attrs, R"(iv = s:"%j", iv_type = i:0)", "%j");
+    parser_refuses_a_loop_value_without_a_type_name(
+        R"({ name = s:"%s", type = s:"i32" })", R"({ name = s:"%s", type = i:0 })", "%s");
 }
 
 void parser_accepts_the_names_the_builder_gave()
@@ -327,6 +390,7 @@ int main()
     refuses_one_loop_naming_two_values_alike();
     accepts_new_names_and_loops_side_by_side();
     parser_refuses_reused_loop_names();
+    parser_refuses_loop_values_without_a_type_name();
     parser_accepts_the_names_the_builder_gave();
     verifier_reports_reused_loop_names();
     verifier_counts_an_induction_variable_whose_type_is_not_named();

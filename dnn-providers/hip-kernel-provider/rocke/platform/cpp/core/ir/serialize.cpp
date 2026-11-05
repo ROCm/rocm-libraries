@@ -1521,32 +1521,82 @@ static int count_top(const char* s, size_t n, char sep)
 
 static rocke_region_t* parse_region(rocke_ir_builder_t* b, line_reader_t* lr, val_table_t* vt);
 
-/* Mirrors Python _bind_block_value: bind `v`, a block value (iv or iter-arg)
- * of the scf.for being parsed, under its name. Refuses the name, as the builder
- * does (rocke_i_reused_loop_name_message), when it is bound to a block value
- * already: one of an enclosing loop, whose body this loop is in, or an earlier
- * one of this loop. Rebinding it would make the inner body's reads of the
- * name read this value, and retiring this loop's values would unbind the
- * outer one. A refusal raises a ValueError (rocke_i_set_err). */
-static void bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
+/* Mirrors Python _is_loop_block_value: true when `value` is an induction
+ * variable or carried value of an scf.for (bound to the loop, not one of its
+ * results). */
+static bool is_loop_block_value(const rocke_value_t* value)
 {
-    const rocke_value_t* bound = vt_get(vt, v->name);
-    if(bound && bound->op && bound->op->opcode == ROCKE_OP_SCF_FOR)
+    if(!value || !value->op || value->op->opcode != ROCKE_OP_SCF_FOR)
     {
-        bool is_result = false;
-        for(int i = 0; i < bound->op->num_results && !is_result; ++i)
+        return false;
+    }
+    for(int i = 0; i < value->op->num_results; ++i)
+    {
+        if(value->op->results[i] == value)
         {
-            is_result = bound->op->results[i] == bound;
-        }
-        if(!is_result)
-        {
-            char msg[ROCKE_ERR_MSG_CAP];
-            rocke_i_set_err(b,
-                            ROCKE_ERR_VALUE,
-                            "%s",
-                            rocke_i_reused_loop_name_message(v->name, msg, sizeof msg));
+            return false;
         }
     }
+    return true;
+}
+
+/* Mirrors Python _refuse_reused_loop_names: refuse the names the scf.for `loop`
+ * gives its values (rocke_i_scf_for_value_names) when one is taken
+ * (rocke_i_first_reused_loop_name): bound in `vt` to a block value of a loop
+ * whose body `loop` is in, or repeating an earlier name of `loop`. Every name is
+ * checked, also one whose type attr is not a type name (refuse_untyped_loop_value
+ * refuses it next), so a reused name always gets this refusal. A refusal raises
+ * a ValueError (rocke_i_set_err). */
+static void refuse_reused_loop_names(rocke_ir_builder_t* b, const rocke_op_t* loop, val_table_t* vt)
+{
+    const int count = rocke_i_scf_for_value_names(loop, NULL);
+    if(count == 0)
+    {
+        return;
+    }
+    const char** names
+        = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * 2 * (size_t)count);
+    if(!names)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "scf.for loop names: OOM");
+        return;
+    }
+    const char** taken = names + count;
+    rocke_i_scf_for_value_names(loop, names);
+    size_t n_taken = 0;
+    for(int i = 0; i < count; ++i)
+    {
+        if(is_loop_block_value(vt_get(vt, names[i])))
+        {
+            taken[n_taken++] = names[i];
+        }
+    }
+    const char* reused = rocke_i_first_reused_loop_name(taken, n_taken, names, (size_t)count);
+    if(reused)
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
+    }
+}
+
+/* Mirrors Python _loop_value_type's refusal: an induction variable or carried
+ * value named `name` whose type attr is not a type name could not be bound,
+ * and the body's reads of `name` would read whatever other value holds that
+ * name, or none. Raises a ValueError (rocke_i_set_err) with
+ * _untyped_loop_value_message's text. */
+static void refuse_untyped_loop_value(rocke_ir_builder_t* b, const char* name)
+{
+    rocke_i_set_err(b,
+                    ROCKE_ERR_VALUE,
+                    "scf.for: the loop value '%s' has no type name; its iv_type attr or "
+                    "iter_args entry must name its type",
+                    name);
+}
+
+/* Bind `v`, a block value of the scf.for being parsed, under its name. */
+static void bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
+{
     if(vt_put(vt, v->name, v) != 0)
     {
         rocke_i_set_err(b, ROCKE_ERR_OOM, "value table OOM");
@@ -1565,6 +1615,11 @@ static void register_block_values(
     {
         return;
     }
+    refuse_reused_loop_names(b, op, vt);
+    if(!rocke_i_live(b))
+    {
+        return;
+    }
     /* Capacity = the induction var (at most 1) + every iter-arg; an scf.for can
      * carry dozens, so size to the actual count rather than a fixed cap. */
     const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
@@ -1579,7 +1634,12 @@ static void register_block_values(
 
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     const char* iv_type = rocke_attr_get_str(&op->attrs, "iv_type");
-    if(iv && iv_type)
+    if(iv && !iv_type)
+    {
+        refuse_untyped_loop_value(b, iv);
+        return;
+    }
+    if(iv)
     {
         const rocke_type_t* t = parse_type(b, iv_type, strlen(iv_type));
         if(t)
@@ -1600,7 +1660,12 @@ static void register_block_values(
             const rocke_attr_map_t* entry = ia->u.list.items[i];
             const char* nm = rocke_attr_get_str(entry, "name");
             const char* ty = rocke_attr_get_str(entry, "type");
-            if(nm && ty)
+            if(nm && !ty)
+            {
+                refuse_untyped_loop_value(b, nm);
+                return;
+            }
+            if(nm)
             {
                 const rocke_type_t* t = parse_type(b, ty, strlen(ty));
                 if(t)

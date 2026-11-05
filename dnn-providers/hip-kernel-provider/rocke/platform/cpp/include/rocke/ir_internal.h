@@ -305,12 +305,20 @@ const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t
  * scf.for gives its induction variable and carried values, in that order) that
  * is already taken, or NULL when all are free. `taken` are the names of the
  * loops it is nested in; a name is also taken when it repeats an earlier one of
- * `names`. The builder and the verifier both apply this rule and refuse with
- * rocke_i_reused_loop_name_message. */
+ * `names`. The builder, the IR parser and the verifier all apply this rule and
+ * refuse with rocke_i_reused_loop_name_message. */
 const char* rocke_i_first_reused_loop_name(const char* const* taken,
                                            size_t n_taken,
                                            const char* const* names,
                                            size_t n_names);
+
+/* Mirrors ir._scf_for_value_names: the names the scf.for `loop` gives its
+ * induction variable and carried values, in that order -- the "iv" attr when it
+ * is a string, then the "name" of each "iter_args" entry that has one -- stored
+ * into `out` when it is non-NULL; returns how many there are. A name is listed
+ * whether or not its type is recorded. The builder, the IR parser and the
+ * verifier collect a loop's names with it. */
+int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out);
 
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in

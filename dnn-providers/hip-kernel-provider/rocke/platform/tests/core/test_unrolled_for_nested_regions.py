@@ -409,16 +409,13 @@ def test_reuse_is_refused_when_an_op_follows_a_loop_handle(followed):
     assert str(refused.value) == _reuse_message("%" + taken)
 
 
-@pytest.mark.parametrize(
-    "reused, inner_name",
-    [("%k", "%j"), ("%acc", "%s"), ("%j", "%s")],
-    ids=["outer_induction_variable", "outer_carried_value", "same_loop"],
-)
-def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
-    """Serialized IR can name a value of a nested loop like a value of the loop
-    it is in, or two values of one loop alike, past the builder. Both parsers
-    refuse it with the builder's message rather than bind the inner body's
-    reads of that name to one of the values and unbind the other."""
+# The inner loop's induction-variable attrs, as _nested_loops_text serializes them.
+_INNER_IV_ATTRS = 'iv = s:"%j", iv_type = s:"i32"'
+
+
+def _nested_loops_text():
+    """The serialized IR of an unrolled loop ``k`` over ``acc`` whose body
+    holds a rolled loop ``j`` over ``s``, and the name of the lane id."""
     b, _, z, lane = _kernel("parse_reuse")
     outer = _unrolled(b, lane)
     with outer as (_, (acc,)):
@@ -428,14 +425,83 @@ def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
         b.scf_yield(inner.results[0])
     b.global_store(z, lane, outer.results[0])
     b.ret()
-    text = re.sub(re.escape(inner_name) + r"\b", reused, serialize(b.kernel))
+    return serialize(b.kernel), lane.name
+
+
+def _edit_once(text, old, new):
+    """``text`` with its one occurrence of ``old`` replaced by ``new``."""
+    assert text.count(old) == 1, f"expected one {old!r} in the serialized IR"
+    return text.replace(old, new)
+
+
+def _assert_both_parsers_refuse(text, message):
+    """Both parsers refuse ``text`` with ``message``: the Python parser with a
+    ValueError, the C++ one (through the binding, when built) with a
+    RuntimeError ending in it."""
     with pytest.raises(ValueError) as refused:
         parse(text)
-    assert str(refused.value) == _reuse_message(reused)
+    assert str(refused.value) == message
     engine = pytest.importorskip("rocke_engine")
     with pytest.raises(RuntimeError) as native:
         engine.lower_serialized_ir(text, arch="gfx942", flavor="llvm22")
-    assert str(native.value).endswith(": " + _reuse_message(reused)), str(native.value)
+    assert str(native.value).endswith(": " + message), str(native.value)
+
+
+@pytest.mark.parametrize(
+    "reused, inner_name, inner_iv_type",
+    [
+        ("%k", "%j", 's:"i32"'),
+        ("%acc", "%s", 's:"i32"'),
+        ("%j", "%s", 's:"i32"'),
+        ("%k", "%j", "i:0"),
+    ],
+    ids=[
+        "outer_induction_variable",
+        "outer_carried_value",
+        "same_loop",
+        "outer_induction_variable_by_one_whose_type_is_not_named",
+    ],
+)
+def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name, inner_iv_type):
+    """Serialized IR can name a value of a nested loop like a value of the loop
+    it is in, or two values of one loop alike, past the builder. Both parsers
+    refuse it with the builder's message rather than bind the inner body's
+    reads of that name to one of the values and unbind the other. An induction
+    variable whose ``iv_type`` is not a type name is never bound, but its name
+    is the loop's all the same: unrefused, the inner body's reads of it would
+    read the outer induction variable."""
+    text, _ = _nested_loops_text()
+    text = _edit_once(text, _INNER_IV_ATTRS, f'iv = s:"%j", iv_type = {inner_iv_type}')
+    text = re.sub(re.escape(inner_name) + r"\b", reused, text)
+    _assert_both_parsers_refuse(text, _reuse_message(reused))
+
+
+@pytest.mark.parametrize(
+    "value_kind",
+    ["induction_variable", "carried_value"],
+)
+def test_both_parsers_refuse_a_loop_value_without_a_type_name(value_kind):
+    """A parser binds a loop's induction variable or carried value with the
+    type its attr names. When the attr is not a type name, the value cannot be
+    bound, and the body's reads of its name would read whatever other value
+    holds that name: here the inner induction variable takes the name of the
+    lane id, which no loop value holds, so the reused-name rule passes it.
+    Both parsers refuse it instead, with one message."""
+    text, lane_name = _nested_loops_text()
+    if value_kind == "induction_variable":
+        text = _edit_once(text, _INNER_IV_ATTRS, 'iv = s:"%j", iv_type = i:0')
+        text = re.sub(r"%j\b", lane_name, text)
+        untyped = lane_name
+    else:
+        text = _edit_once(
+            text, '{ name = s:"%s", type = s:"i32" }', '{ name = s:"%s", type = i:0 }'
+        )
+        untyped = "%s"
+    _assert_both_parsers_refuse(
+        text,
+        f"scf.for: the loop value '{untyped}' has no type name; its iv_type attr "
+        "or iter_args entry must name its type",
+    )
 
 
 def _nested_loops_renaming(renames, iv_type_attr=None):

@@ -2275,40 +2275,11 @@ static const rocke_op_t* flow_loop_with_body(const rocke_region_t* region,
     return NULL;
 }
 
-/* The names of the induction variable and carried values of the scf.for
- * `loop`, in that order, stored into `out` when it is non-NULL; returns how
- * many there are. */
-static int flow_loop_value_names(const rocke_op_t* loop, const char** out)
-{
-    int count = 0;
-    const char* iv = rocke_attr_get_str(&loop->attrs, "iv");
-    if(iv)
-    {
-        if(out)
-            out[count] = iv;
-        ++count;
-    }
-    const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
-    if(!meta || meta->kind != ROCKE_ATTR_LIST)
-        return count;
-    for(int i = 0; i < meta->u.list.count; ++i)
-    {
-        const char* carried
-            = meta->u.list.items[i] ? rocke_attr_get_str(meta->u.list.items[i], "name") : NULL;
-        if(!carried)
-            continue;
-        if(out)
-            out[count] = carried;
-        ++count;
-    }
-    return count;
-}
-
 /* Python IRBuilder._enclosing_loop_value_names: the names of the induction
  * variables and carried values of every scf.for the builder is emitting inside,
  * at any depth, as an arena array of *out_count names: each region on the stack
- * that is a loop's body (flow_loop_with_body) makes that loop's values visible
- * from here. */
+ * that is a loop's body (flow_loop_with_body) makes that loop's values
+ * (rocke_i_scf_for_value_names) visible from here. */
 static const char** flow_enclosing_loop_value_names(rocke_ir_builder_t* b, size_t* out_count)
 {
     size_t count = 0;
@@ -2316,7 +2287,7 @@ static const char** flow_enclosing_loop_value_names(rocke_ir_builder_t* b, size_
     {
         const rocke_op_t* owner = flow_loop_with_body(b->region_stack[d - 1], b->region_stack[d]);
         if(owner)
-            count += (size_t)flow_loop_value_names(owner, NULL);
+            count += (size_t)rocke_i_scf_for_value_names(owner, NULL);
     }
     const char** names
         = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * (count ? count : 1));
@@ -2329,7 +2300,7 @@ static const char** flow_enclosing_loop_value_names(rocke_ir_builder_t* b, size_
     {
         const rocke_op_t* owner = flow_loop_with_body(b->region_stack[d - 1], b->region_stack[d]);
         if(owner)
-            filled += (size_t)flow_loop_value_names(owner, names + filled);
+            filled += (size_t)rocke_i_scf_for_value_names(owner, names + filled);
     }
     *out_count = filled;
     return names;

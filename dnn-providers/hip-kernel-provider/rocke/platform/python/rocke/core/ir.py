@@ -817,8 +817,8 @@ def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str |
     ``names`` are the names an ``scf.for`` gives its induction variable and
     carried values, in that order; ``taken`` are those of the loops it is
     nested in. A name is taken when it is in ``taken`` or repeats an earlier
-    one of ``names``. The builder and the verifier both apply this rule and
-    refuse with :func:`_reused_loop_name_message`.
+    one of ``names``. The builder, the IR parser and the verifier all apply
+    this rule and refuse with :func:`_reused_loop_name_message`.
     """
     seen = set(taken)
     for name in names:
@@ -826,6 +826,26 @@ def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str |
             return name
         seen.add(name)
     return None
+
+
+def _scf_for_value_names(loop: Op) -> list[str]:
+    """The names the ``scf.for`` ``loop`` gives its induction variable and
+    carried values, in that order: the ``iv`` attr when it is a string, then the
+    ``name`` of each ``iter_args`` entry that has one.
+
+    A name is listed whether or not its type is recorded. The builder, the IR
+    parser and the verifier collect a loop's names with it.
+    """
+    names: list[str] = []
+    iv_name = loop.attrs.get("iv")
+    if isinstance(iv_name, str):
+        names.append(iv_name)
+    iter_args = loop.attrs.get("iter_args")
+    if isinstance(iter_args, list):
+        for entry in iter_args:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                names.append(entry["name"])
+    return names
 
 
 def _loop_with_body(region: Region, body: Region) -> Op | None:
@@ -6371,14 +6391,13 @@ class IRBuilder:
         """The names of the induction variables and carried values of every
         ``scf.for`` the builder is emitting inside, at any depth: each region
         on the stack that is a loop's body (see :func:`_loop_with_body`) makes
-        that loop's values visible from here.
+        that loop's values (see :func:`_scf_for_value_names`) visible from here.
         """
         names: list[str] = []
         for outer, inner in zip(self._region_stack, self._region_stack[1:]):
             loop = _loop_with_body(outer, inner)
             if loop is not None:
-                names.append(loop.attrs["iv"])
-                names.extend(meta["name"] for meta in loop.attrs.get("iter_args", []))
+                names.extend(_scf_for_value_names(loop))
         return names
 
     def _current_region_is_loop_body(self) -> bool:

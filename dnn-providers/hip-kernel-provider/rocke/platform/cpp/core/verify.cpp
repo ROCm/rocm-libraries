@@ -161,13 +161,18 @@ static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
     v->scope_count++;
 }
 
-/* Push `name`, an induction variable or carried value of the scf.for being
- * entered, onto v->loop_names. */
-static void loop_name_push(verifier_t* v, const char* name)
+/* Push the names of the scf.for `loop` being entered (its induction variable
+ * and carried values, rocke_i_scf_for_value_names) onto v->loop_names. */
+static void loop_names_push(verifier_t* v, const rocke_op_t* loop)
 {
-    if(v->loop_name_count >= v->loop_name_cap)
+    const int count = rocke_i_scf_for_value_names(loop, NULL);
+    if(v->loop_name_count + count > v->loop_name_cap)
     {
-        int nc = v->loop_name_cap ? v->loop_name_cap * 2 : 16;
+        int nc = v->loop_name_cap ? v->loop_name_cap : 16;
+        while(nc < v->loop_name_count + count)
+        {
+            nc *= 2;
+        }
         const char** grown = (const char**)realloc(v->loop_names, (size_t)nc * sizeof(*grown));
         if(!grown)
         {
@@ -177,7 +182,7 @@ static void loop_name_push(verifier_t* v, const char* name)
         v->loop_names = grown;
         v->loop_name_cap = nc;
     }
-    v->loop_names[v->loop_name_count++] = name;
+    v->loop_name_count += rocke_i_scf_for_value_names(loop, v->loop_names + v->loop_name_count);
 }
 
 /* legal pointer address spaces */
@@ -827,8 +832,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
     }
 
-    /* body scope: snapshot + iv + iter-arg block values; the same names are
-     * this loop's, pushed onto v->loop_names above the enclosing loops' */
+    /* body scope: snapshot + iv + iter-arg block values */
     int saved = v->scope_count;
     const int enclosing_loop_names = v->loop_name_count;
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
@@ -847,7 +851,6 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             t = lower; /* compound / unknown: use the loop bound type */
         }
         scope_put(v, iv, t);
-        loop_name_push(v, iv);
     }
     if(have_iter_meta && iter_meta_count > 0)
     {
@@ -858,12 +861,13 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             if(nm)
             {
                 scope_put(v, nm, op->operands[3 + i]->type);
-                loop_name_push(v, nm);
             }
         }
     }
 
-    /* Hand-built IR can reuse a loop name the builder and parsers refuse. */
+    /* Hand-built IR can reuse a loop name the builder and parsers refuse. This
+     * loop's names go onto v->loop_names above the enclosing loops'. */
+    loop_names_push(v, op);
     if(!v->db.oom)
     {
         const char* reused

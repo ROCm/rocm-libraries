@@ -49,6 +49,7 @@ from .ir import (
     _first_reused_loop_name,
     _reused_loop_name_message,
     _scf_for_carried_descriptor_error,
+    _scf_for_value_names,
     KernelDef,
     Op,
     Region,
@@ -551,11 +552,6 @@ class _Verifier:
         iv_name = op.attrs.get("iv")
         iv_type = op.attrs.get("iv_type")
         body_block_values: List[Value] = []
-        # This loop's names, as the C++ verifier collects them: the iv when it
-        # is named, and each carried value named in its iter_args entry.
-        loop_names: list[str] = []
-        if isinstance(iv_name, str):
-            loop_names.append(iv_name)
         if isinstance(iv_name, str) and isinstance(iv_type, str):
             iv_val = Value(
                 name=iv_name,
@@ -568,9 +564,8 @@ class _Verifier:
                     bv = Value(name=entry["name"], type=init.type)
                     body_scope[entry["name"]] = bv
                     body_block_values.append(bv)
-                    if isinstance(entry["name"], str):
-                        loop_names.append(entry["name"])
         # Hand-built IR can reuse a loop name the builder and parsers refuse.
+        loop_names = _scf_for_value_names(op)
         reused = _first_reused_loop_name(self._enclosing_loop_names, loop_names)
         if reused is not None:
             self.err(_reused_loop_name_message(reused), op)
