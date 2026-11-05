@@ -586,6 +586,12 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # Singular master switch for the DPP store-coalesce fold on the MXF4->bf16 subtile
+    # store. When True, EVERY store path (fused PLSIN arm, plain non-fused arm, interior
+    # peel) emits the DPP-blended coalesced store unconditionally -- no runtime M,N size
+    # gate. When False, no path folds. Only takes effect on structurally-eligible kernels
+    # (gfx950 MXF4->bf16 TN subtile, MI16, MIWaveTile[0] >= 4); a no-op elsewhere.
+    "DPPStoreFold": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

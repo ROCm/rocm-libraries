@@ -181,6 +181,7 @@ def getRequiredParametersMin() -> set:
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
+        'DPPStoreFold',
         'ClusterDim',
         'ClusterAIDMapping',
     })

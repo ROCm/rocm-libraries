@@ -18400,27 +18400,11 @@ class KernelWriterAssembly(KernelWriter):
                                      comment="numValid16NBlocks = clamped >> 4"))
     self.sgprPool.checkIn(tmpN)
 
-    # DPP store-coalesce size gate: precompute once (here, alongside the guards)
-    # whether the problem is large enough for the coalesce to win, so the plain-path coalesce
-    # dispatch in GlobalWriteBatch branches on ONE SGPR rather than comparing M,N per store.
-    # sizeOk is 1 iff (M > thr and N > thr), else 0.  Only for coalesce-active kernels; left None
-    # otherwise, in which case GlobalWriteBatch leaves the coalesce unconditional.  The SGPR is
-    # freed at batch teardown next to subtileTotalMOffsetSgpr.
-    if getattr(self.states, "subtileCoalesceActive", False):
-      COALESCE_MIN_DIM = 4096
-      sizeOk = self.sgprPool.checkOut(1, "subtileCoalesceSizeOk", preventOverflow=False)
-      edgeModule.addComment0("coalesce size gate: sizeOk = 1 iff (SizeI > %d and SizeJ > %d)" % (COALESCE_MIN_DIM, COALESCE_MIN_DIM))
-      edgeModule.add(SCmpLtU32(src0=hex(COALESCE_MIN_DIM), src1=sgpr("SizeI"),
-                               comment="SizeI(M) > %d ?" % COALESCE_MIN_DIM))
-      edgeModule.add(SCSelectB32(dst=sgpr(sizeOk), src0=1, src1=0,
-                                 comment="sizeOk = (M>thr) ? 1 : 0"))
-      edgeModule.add(SCmpLtU32(src0=hex(COALESCE_MIN_DIM), src1=self.sizeRef(kernel["ProblemType"]["Index1"]),
-                               comment="SizeJ(N) > %d ?" % COALESCE_MIN_DIM))
-      edgeModule.add(SCSelectB32(dst=sgpr(sizeOk), src0=sgpr(sizeOk), src1=0,
-                                 comment="sizeOk &&= (N>thr)"))
-      self.states.subtileCoalesceSizeOkSgpr = sizeOk
-    else:
-      self.states.subtileCoalesceSizeOkSgpr = None
+    # DPP store-coalesce: no runtime size gate. DPPStoreFold is the singular decider
+    # (see isSubtileCoalesce), so when the fold is active it fires on EVERY store path
+    # unconditionally. Leaving subtileCoalesceSizeOkSgpr = None makes the plain-arm and
+    # interior-peel dispatch in GlobalWriteBatch take their unconditional-coalesce branch.
+    self.states.subtileCoalesceSizeOkSgpr = None
 
     self.states.subtileMBlockSize = mBlockSize
 
@@ -19240,35 +19224,36 @@ class KernelWriterAssembly(KernelWriter):
         # coalesce's operand lend (see _selectPlsinFusedStorePolicy), so the high-water
         # does not grow.
         #
-        # Gate: MIWaveTile[0]==8 is the ONLY config the coalesce's row/half-line geometry is
-        # validated for.  Admit only that -- dropping the earlier `miwt[0]>=4` reg-fit escape,
-        # which shipped an UNPROVEN codegen path to 4/6-high tiles -- and only when the cvt block
-        # actually fits (footprint derived from the layout, not a bare literal).
-        # The coalesce is compiled into every eligible subtile kernel; at dispatch time a runtime
-        # branch on M,N > 4096 (in GlobalWriteBatch) selects the coalesce or non-coalesce store path.
-        COALESCE_MIWT_PROVEN = 8
+        # Gate: the DPPStoreFold solution parameter is the SINGULAR decider for the fold.
+        # When set, EVERY store path (fused PLSIN arm, plain non-fused arm, interior peel)
+        # coalesces unconditionally -- there is no runtime M,N size gate (the old plain-path
+        # gate is disabled; see _emitSubtileGuards). The fold still requires its structural
+        # preconditions (gfx950 MXF4->bf16 TN subtile, MI16) and a floor of MIWaveTile[0] >= 4:
+        # the coalesce joins two M-adjacent pairs (4 M-blocks) into one store, so MIWT[0] < 4
+        # has no pair-of-pairs to coalesce. NOTE: only MIWT[0]==8 is correctness-verified; other
+        # heights (4/6) emit the as-yet-unproven row/half-line geometry -- gate on --verify.
+        COALESCE_MIWT_FLOOR = 4
         miwt = kernel.get("MIWaveTile", [0, 0])
         maxVgpr = self.states.regCaps["MaxVgpr"]
         coalesceCvtTotal = base + 2   # shared staging window (base) + coalesceVoff + coalesceBlend
         coalesceFits = (self.vgprPool.size() + coalesceCvtTotal) <= maxVgpr
         # _COALESCE_MEASURE_OFF: measurement switch to force the coalesce off everywhere (no-coalesce
-        # baseline build).  The coalesce is always COMPILE-TIME allocated for eligible kernels; the
-        # coalesce-vs-plain choice on the plain store is a RUNTIME size gate (subtileCoalesceSizeOkSgpr,
-        # computed in _emitSubtileGuards, consumed in GlobalWriteBatch), not a second store build.
-        # Match the firing conditions in GlobalWriteBatch.plsinStorePermlane16Active exactly, so the
-        # cvt-VGPR reservation (and the _emitSubtileGuards size predicate) only lands when the coalesce
-        # can actually fire: gfx950, MXF4->bf16 TN subtile, MI16, MT256x256 (MIWT8).  Without these the
-        # reservation would waste 2 VGPRs + a few SALU on non-gfx950 / non-MXF4 MIWT8 subtile kernels
-        # (e.g. gfx1250) where the coalesce never fires.  MT320x256 (MIWT10) is already excluded by the
-        # miwt[0]==8 check, so plsinStorePermlane16Active's weaveGroups special case is moot here.
-        isSubtileCoalesce = bool(kernel.get("UseSubtileImpl")
+        # baseline build), independent of DPPStoreFold.
+        # DPPStoreFold is the singular decider: when set (and the structural preconditions below
+        # hold) the fold is COMPILE-TIME allocated and fires UNCONDITIONALLY on every store path
+        # -- there is no runtime size gate. The structural preconditions are hard correctness
+        # bounds: gfx950, MXF4->bf16 TN subtile, MI16, and MIWaveTile[0] >= 4 (need 2 M-adjacent
+        # pairs to coalesce). Only MIWT[0]==8 is correctness-verified; 4/6 are experimental.
+        isSubtileCoalesce = bool(kernel.get("DPPStoreFold")
+                             and kernel.get("UseSubtileImpl")
                              and isMxf4SubtilePath(kernel)
                              and tuple(kernel.get("ISA", ())) == (9, 5, 0)
                              and kernel.get("MatrixInstM") == 16
-                             and len(miwt) >= 2 and miwt[0] == COALESCE_MIWT_PROVEN
+                             and len(miwt) >= 2 and miwt[0] >= COALESCE_MIWT_FLOOR
                              and coalesceFits
                              and not _COALESCE_MEASURE_OFF)
-        # Published for _emitSubtileGuards (plain-path size-gate predicate is computed only when active).
+        # Published so the operand-lend policy (_selectPlsinFusedStorePolicy) couples the lend
+        # to the fold, and so GlobalWriteBatch knows the fold is live on this kernel.
         self.states.subtileCoalesceActive = isSubtileCoalesce
         coalesceVoff = coalesceBlend = -1
         if isSubtileCoalesce:

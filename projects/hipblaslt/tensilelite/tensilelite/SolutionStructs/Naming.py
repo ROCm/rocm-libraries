@@ -302,6 +302,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # DPPStoreFold=False is the arrangement every shipped kernel already has, so naming it
+    # would rename all of them. Only the opt-in (DPPSF1) carries the token.
+    if state.get("DPPStoreFold", False):
+      requiredParametersTemp.add("DPPStoreFold")
+    else:
+      requiredParametersTemp.discard("DPPStoreFold")
+
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
     # would rename every kernel that does not opt in. Any other value changes
     # the colouring (and mode 3 changes which kernels are accepted), so it

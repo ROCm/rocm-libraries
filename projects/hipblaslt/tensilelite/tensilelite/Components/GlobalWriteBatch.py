@@ -2668,20 +2668,14 @@ class GlobalWriteBatchWriter:
                 aAddr = self.ss.elementAddr[prevSba0Idx]
                 aS0   = self.ss.elementSumIdx[prevSba0Idx]
                 aS1   = self.ss.elementSumIdx[prevSba1Idx]
-                # On the FUSED (PLSIN) full-tile arm the coalesce is unconditional (always profitable).
-                # On the guarded PLAIN arm it is size-gated: the coalesce wins on large store-bound
-                # shapes and can lose on small ones, so a precomputed M,N>threshold predicate
-                # (subtileCoalesceSizeOkSgpr, one compare per batch in _emitSubtileGuards) routes small
-                # problems to the uncoalesced fallback.  One shared predicate, a cheap branch per site.
+                # DPPStoreFold is the singular decider: the coalesce is emitted unconditionally on
+                # every arm -- no profitability/size gate. The ONLY runtime branch here is the
+                # partial-M edge guard below, a CORRECTNESS guard: the coalesce's cross-lane DPP
+                # needs full EXEC (all 4 M-blocks in-bounds). Partial-M edge tiles take the
+                # uncoalesced fallback; full tiles (the common case) fall straight through to DPP.
                 if guardMSgpr is not None and not self._fusedFullTileNoGuards():
                   afterL = Label(self.parentWriter.labels.getNameInc("subtile_after_coalesce"), f"after coalesce tt0={tt0}")
                   fbL    = Label(self.parentWriter.labels.getNameInc("subtile_coalesce_fallback"), f"coalesce fallback tt0={tt0}")
-                  _sizeOkSgpr = getattr(self.parentWriter.states, "subtileCoalesceSizeOkSgpr", None)
-                  if _sizeOkSgpr is not None:
-                    storeCodeModule.add(SCmpEQU32(src0=sgpr(_sizeOkSgpr), src1=0,
-                                                  comment="coalesce size gate: M,N below threshold?"))
-                    storeCodeModule.add(SCBranchSCC1(labelName=fbL.getLabelName(),
-                                                     comment="too small -> uncoalesced fallback"))
                   storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
                                                  comment=f"coalesce: all 4 M-blocks valid? (MGuard > {tt0})"))
                   storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment="not all valid -> uncoalesced fallback"))
@@ -4320,24 +4314,9 @@ class GlobalWriteBatchWriter:
             coalesceMod = self._emit16bitSubtilePairedStoreCoalesce(aAddr, aS0, aS1, prefixOffset,
                       sumIdx0, sumIdx1, partnerAddrCalc, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
                       forceSlc=forceSlc)
-            _sizeOkSgpr = getattr(self.parentWriter.states, "subtileCoalesceSizeOkSgpr", None)
-            if _sizeOkSgpr is not None:
-              # Plain-path size gate: coalesce only when M,N exceed the threshold; else
-              # store the two pairs un-coalesced.  canCoalesceInterior implies permlane16, so
-              # issuePaired emits directly (no software pipeline) -- both arms are mutually-exclusive
-              # at runtime and read the same (un-clobbered) ValuC slots.
-              afterL = Label(self.parentWriter.labels.getNameInc("subtile_interior_after_coalesce"), f"interior after coalesce tt0={tt0}")
-              smallL = Label(self.parentWriter.labels.getNameInc("subtile_interior_coalesce_small"), f"interior coalesce small tt0={tt0}")
-              mod.add(SCmpEQU32(src0=sgpr(_sizeOkSgpr), src1=0, comment="coalesce size gate: M,N below threshold?"))
-              mod.add(SCBranchSCC1(labelName=smallL.getLabelName(), comment="too small -> un-coalesced paired stores"))
-              mod.add(coalesceMod)
-              mod.add(SBranch(labelName=afterL.getLabelName(), comment="coalesced -> skip un-coalesced"))
-              mod.add(smallL)
-              issuePaired(aAddr, aS0, aS1, lowBlockM, blockIdxN)                  # deferred (prev) pair
-              issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1, blockIdxN)  # this pair
-              mod.add(afterL)
-            else:
-              mod.add(coalesceMod)
+            # DPPStoreFold singular decider: the interior peel is guard-free (every block provably
+            # valid), so it coalesces UNCONDITIONALLY -- no size gate, no branch over the DPP store.
+            mod.add(coalesceMod)
             continue
           issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1, blockIdxN)
         else:
