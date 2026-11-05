@@ -55,9 +55,9 @@ namespace rocsparse
     // fill mode (see build_csr_from_csc), so the lookup key must be mapped the same
     // way. This lets callers gate the analysis per (operation, fill_mode) instead
     // of using the descriptor-wide mat->analysed flag.
-    inline bool cscsv_is_analyzed(rocsparse_csrsv_info        info,
-                                  rocsparse_operation         trans,
-                                  rocsparse_const_spmat_descr A)
+    inline bool cscsv_transposed_is_analyzed(rocsparse_csrsv_info        info,
+                                             rocsparse_operation         trans,
+                                             rocsparse_const_spmat_descr A)
     {
         _rocsparse_mat_descr   descr_csr;
         _rocsparse_spmat_descr mat_csr;
@@ -66,10 +66,10 @@ namespace rocsparse
         return info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode) != nullptr;
     }
 
-    inline rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,
-                                                       rocsparse_operation         trans,
-                                                       rocsparse_const_spmat_descr A,
-                                                       size_t*                     buffer_size)
+    inline rocsparse_status cscsv_transposed_analysis_buffer_size(rocsparse_handle    handle,
+                                                                  rocsparse_operation trans,
+                                                                  rocsparse_const_spmat_descr A,
+                                                                  size_t* buffer_size)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -82,12 +82,12 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    inline rocsparse_status cscsv_solve_buffer_size(rocsparse_handle            handle,
-                                                    rocsparse_operation         trans,
-                                                    rocsparse_const_spmat_descr A,
-                                                    rocsparse_const_dnvec_descr x,
-                                                    rocsparse_const_dnvec_descr y,
-                                                    size_t*                     buffer_size)
+    inline rocsparse_status cscsv_transposed_solve_buffer_size(rocsparse_handle            handle,
+                                                               rocsparse_operation         trans,
+                                                               rocsparse_const_spmat_descr A,
+                                                               rocsparse_const_dnvec_descr x,
+                                                               rocsparse_const_dnvec_descr y,
+                                                               size_t* buffer_size)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -111,13 +111,13 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    inline rocsparse_status cscsv_analysis(rocsparse_handle            handle,
-                                           rocsparse_operation         trans,
-                                           rocsparse_const_spmat_descr A,
-                                           rocsparse_analysis_policy   analysis_policy,
-                                           rocsparse_solve_policy      solve_policy,
-                                           rocsparse_csrsv_info*       p_csrsv_info,
-                                           void*                       temp_buffer)
+    inline rocsparse_status cscsv_transposed_analysis(rocsparse_handle            handle,
+                                                      rocsparse_operation         trans,
+                                                      rocsparse_const_spmat_descr A,
+                                                      rocsparse_analysis_policy   analysis_policy,
+                                                      rocsparse_solve_policy      solve_policy,
+                                                      rocsparse_csrsv_info*       p_csrsv_info,
+                                                      void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -136,17 +136,17 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    inline rocsparse_status cscsv_solve(rocsparse_handle            handle,
-                                        rocsparse_operation         trans,
-                                        rocsparse_datatype          alpha_datatype,
-                                        const void*                 alpha,
-                                        int64_t                     alpha_stride,
-                                        rocsparse_const_spmat_descr A,
-                                        rocsparse_const_dnvec_descr x,
-                                        rocsparse_dnvec_descr       y,
-                                        rocsparse_solve_policy      policy,
-                                        rocsparse_csrsv_info        csrsv_info,
-                                        void*                       temp_buffer)
+    inline rocsparse_status cscsv_transposed_solve(rocsparse_handle            handle,
+                                                   rocsparse_operation         trans,
+                                                   rocsparse_datatype          alpha_datatype,
+                                                   const void*                 alpha,
+                                                   int64_t                     alpha_stride,
+                                                   rocsparse_const_spmat_descr A,
+                                                   rocsparse_const_dnvec_descr x,
+                                                   rocsparse_dnvec_descr       y,
+                                                   rocsparse_solve_policy      policy,
+                                                   rocsparse_csrsv_info        csrsv_info,
+                                                   void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -176,35 +176,57 @@ namespace rocsparse
 
 namespace rocsparse
 {
-    // CSC triangular solve without transpose, on the columns of the matrix.
-    size_t cscsv_column_analysis_buffer_size();
+    // CSC triangular solve. Without transpose, the system is solved on the columns of the matrix;
+    // the other operations use the transposed CSR solve above.
+    rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,
+                                                rocsparse_operation         trans,
+                                                rocsparse_const_spmat_descr A,
+                                                size_t*                     buffer_size);
 
-    size_t cscsv_column_solve_buffer_size(rocsparse_const_spmat_descr A, int64_t batch_count);
+    bool cscsv_is_analyzed(rocsparse_cscsv_info        info,
+                           rocsparse_operation         trans,
+                           rocsparse_const_spmat_descr A);
 
-    rocsparse_status cscsv_column_analysis(rocsparse_handle            handle,
-                                           rocsparse_const_spmat_descr A,
-                                           rocsparse_cscsv_info        info,
-                                           void*                       temp_buffer);
+    rocsparse_status cscsv_solve_buffer_size(rocsparse_handle            handle,
+                                             rocsparse_operation         trans,
+                                             rocsparse_const_spmat_descr A,
+                                             rocsparse_const_dnvec_descr x,
+                                             rocsparse_const_dnvec_descr y,
+                                             size_t*                     buffer_size);
 
-    rocsparse_status cscsv_column_solve(rocsparse_handle            handle,
-                                        rocsparse_datatype          alpha_datatype,
-                                        const void*                 alpha,
-                                        rocsparse_const_spmat_descr A,
-                                        rocsparse_const_dnvec_descr x,
-                                        rocsparse_dnvec_descr       y,
-                                        rocsparse_cscsv_info        info,
-                                        void*                       temp_buffer);
+    rocsparse_status cscsv_analysis(rocsparse_handle            handle,
+                                    rocsparse_operation         trans,
+                                    rocsparse_const_spmat_descr A,
+                                    rocsparse_analysis_policy   analysis_policy,
+                                    rocsparse_solve_policy      solve_policy,
+                                    rocsparse_cscsv_info        info,
+                                    size_t                      buffer_size_in_bytes,
+                                    void*                       buffer);
 
-    rocsparse_status cscsv_column_diagonal_solve(rocsparse_handle            handle,
-                                                 rocsparse_diagonal_modifier modifier,
-                                                 const void*                 alpha,
-                                                 rocsparse_const_spmat_descr A,
-                                                 rocsparse_const_dnvec_descr x,
-                                                 rocsparse_dnvec_descr       y,
-                                                 rocsparse_cscsv_info        info);
+    rocsparse_status cscsv_solve(rocsparse_handle            handle,
+                                 rocsparse_operation         trans,
+                                 rocsparse_datatype          alpha_datatype,
+                                 const void*                 alpha,
+                                 int64_t                     alpha_stride,
+                                 rocsparse_const_spmat_descr A,
+                                 rocsparse_const_dnvec_descr x,
+                                 rocsparse_dnvec_descr       y,
+                                 rocsparse_solve_policy      solve_policy,
+                                 rocsparse_cscsv_info        info,
+                                 size_t                      buffer_size_in_bytes,
+                                 void*                       buffer);
 
-    rocsparse_status cscsv_column_zero_pivot(rocsparse_handle     handle,
-                                             rocsparse_cscsv_info info,
-                                             rocsparse_indextype  indextype,
-                                             void*                position);
+    rocsparse_status cscsv_diagonal_solve(rocsparse_handle            handle,
+                                          rocsparse_operation         trans,
+                                          rocsparse_diagonal_modifier modifier,
+                                          const void*                 alpha,
+                                          rocsparse_const_spmat_descr A,
+                                          rocsparse_const_dnvec_descr x,
+                                          rocsparse_dnvec_descr       y,
+                                          rocsparse_cscsv_info        info);
+
+    rocsparse_status cscsv_zero_pivot(rocsparse_handle     handle,
+                                      rocsparse_cscsv_info info,
+                                      rocsparse_indextype  indextype,
+                                      void*                position);
 }

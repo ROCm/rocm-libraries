@@ -26,28 +26,28 @@
 
 #include "rocsparse_common.hpp"
 
-// Column solve of A * y = alpha * x with A triangular in CSC: once y_c is known, column c
+// CSC solve of A * y = alpha * x with A triangular in CSC: once y_c is known, column c
 // pushes a_rc * y_c into sum[r] and decrements rem[r]; unknown r is ready when rem[r] is zero.
 namespace rocsparse
 {
-    template <uint32_t L, typename T>
+    template <uint32_t NUM_LANES, typename T>
     __device__ __forceinline__ T cscsv_group_broadcast(T v)
     {
-        return __shfl(v, 0, L);
+        return __shfl(v, 0, NUM_LANES);
     }
 
-    template <uint32_t L>
+    template <uint32_t NUM_LANES>
     __device__ __forceinline__ int cscsv_group_any(int v)
     {
-        for(uint32_t o = L / 2; o > 0; o >>= 1)
+        for(uint32_t o = NUM_LANES / 2; o > 0; o >>= 1)
         {
-            v |= __shfl_xor(v, o, L);
+            v |= __shfl_xor(v, o, NUM_LANES);
         }
         return v;
     }
 
-    // One group of L lanes per column: diagonal entry, dependency counts, longest column.
-    template <uint32_t BLOCKSIZE, uint32_t L, typename I, typename J>
+    // One group of NUM_LANES lanes per column: diagonal entry, dependency counts, longest column.
+    template <uint32_t BLOCKSIZE, uint32_t NUM_LANES, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void cscsv_analysis_kernel(J m,
                                const I* __restrict__ csc_col_ptr,
@@ -60,11 +60,11 @@ namespace rocsparse
                                rocsparse_diag_type  diag_type,
                                rocsparse_fill_mode  fill_mode)
     {
-        const uint32_t lid = hipThreadIdx_x & (L - 1);
-        const uint32_t wid = hipThreadIdx_x / L;
-        const J        col = hipBlockIdx_x * (BLOCKSIZE / L) + wid;
+        const uint32_t lid = hipThreadIdx_x & (NUM_LANES - 1);
+        const uint32_t wid = hipThreadIdx_x / NUM_LANES;
+        const J        col = hipBlockIdx_x * (BLOCKSIZE / NUM_LANES) + wid;
 
-        __shared__ I shared_nnz[BLOCKSIZE / L];
+        __shared__ I shared_nnz[BLOCKSIZE / NUM_LANES];
 
         I nnz = 0;
         if(col < m)
@@ -74,7 +74,7 @@ namespace rocsparse
             nnz               = col_end - col_begin;
 
             int has_diag = 0;
-            for(I k = col_begin + lid; k < col_end; k += L)
+            for(I k = col_begin + lid; k < col_end; k += NUM_LANES)
             {
                 const J row = csc_row_ind[k] - idx_base;
                 if(row == col)
@@ -88,7 +88,7 @@ namespace rocsparse
                 }
             }
 
-            has_diag = rocsparse::cscsv_group_any<L>(has_diag);
+            has_diag = rocsparse::cscsv_group_any<NUM_LANES>(has_diag);
             if(lid == 0 && !has_diag && diag_type == rocsparse_diag_type_non_unit)
             {
                 rocsparse::atomic_min(zero_pivot, col + idx_base);
@@ -102,7 +102,7 @@ namespace rocsparse
         }
         __syncthreads();
 
-        rocsparse::blockreduce_max<BLOCKSIZE / L>(hipThreadIdx_x, shared_nnz);
+        rocsparse::blockreduce_max<BLOCKSIZE / NUM_LANES>(hipThreadIdx_x, shared_nnz);
 
         if(hipThreadIdx_x == 0)
         {
@@ -110,6 +110,8 @@ namespace rocsparse
         }
     }
 
+    // Resets the number of unresolved dependencies of every unknown, for each batch instance,
+    // from the counts of the analysis. The solve decrements these counters.
     template <uint32_t BLOCKSIZE, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void cscsv_init_kernel(J       m,
@@ -125,9 +127,9 @@ namespace rocsparse
         }
     }
 
-    // One group of L lanes per unknown, in elimination order. Blocks take an atomic ticket
+    // One group of NUM_LANES lanes per unknown, in elimination order. Blocks take an atomic ticket
     // instead of hipBlockIdx_x, so a group only waits on groups that are already running.
-    template <uint32_t BLOCKSIZE, uint32_t L, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t NUM_LANES, typename I, typename J, typename T>
     ROCSPARSE_DEVICE_ILF void cscsv_solve_device(J m,
                                                  T alpha,
                                                  const I* __restrict__ csc_col_ptr,
@@ -153,9 +155,9 @@ namespace rocsparse
         }
         __syncthreads();
 
-        const uint32_t lid = hipThreadIdx_x & (L - 1);
-        const uint32_t wid = hipThreadIdx_x / L;
-        const int64_t  w   = static_cast<int64_t>(block_id) * (BLOCKSIZE / L) + wid;
+        const uint32_t lid = hipThreadIdx_x & (NUM_LANES - 1);
+        const uint32_t wid = hipThreadIdx_x / NUM_LANES;
+        const int64_t  w   = static_cast<int64_t>(block_id) * (BLOCKSIZE / NUM_LANES) + wid;
 
         if(w >= m)
         {
@@ -201,7 +203,7 @@ namespace rocsparse
             J r = (lid == 0)
                       ? rocsparse::atomic_load(&rem[col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
                       : static_cast<J>(0);
-            r   = rocsparse::cscsv_group_broadcast<L>(r);
+            r   = rocsparse::cscsv_group_broadcast<NUM_LANES>(r);
 
             if(r == 0)
             {
@@ -224,7 +226,7 @@ namespace rocsparse
                 {
                     rocsparse::atomic_add(&sum[row0], val0 * yc);
                 }
-                for(I k = k0 + L; k < col_end; k += L)
+                for(I k = k0 + NUM_LANES; k < col_end; k += NUM_LANES)
                 {
                     const J row = csc_row_ind[k] - idx_base;
                     if(lower ? (row > col) : (row < col))
@@ -241,7 +243,7 @@ namespace rocsparse
                     __scoped_atomic_fetch_sub(
                         &rem[row0], static_cast<J>(1), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
                 }
-                for(I k = k0 + L; k < col_end; k += L)
+                for(I k = k0 + NUM_LANES; k < col_end; k += NUM_LANES)
                 {
                     const J row = csc_row_ind[k] - idx_base;
                     if(lower ? (row > col) : (row < col))
