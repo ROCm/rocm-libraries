@@ -38,22 +38,20 @@ static int test_rejects_incompatible_contract()
                                      "map_width",
                                      "map_wave",
                                      "missing_atom",
-                                     "op_id",
                                      "family",
                                      "m",
                                      "n",
                                      "k",
                                      "wave",
                                      "both_width_short",
-                                     "both_capacity",
-                                     "both_wrong_map"})
+                                     "both_capacity"})
             {
                 bool descriptor
                     = !std::strcmp(field, "dtype") || !std::strcmp(field, "width_short")
                       || !std::strcmp(field, "width_long") || !std::strcmp(field, "missing_map")
                       || !std::strcmp(field, "no_fn") || !std::strcmp(field, "wrong_map")
                       || !std::strcmp(field, "map_width") || !std::strcmp(field, "map_wave");
-                if(descriptor != (role >= 0))
+                if(descriptor != (role >= 0) || (!std::strcmp(field, "wrong_map") && role < 2))
                     continue;
                 std::vector<rocke_mma_op_t> ops(target->mma.ops,
                                                 target->mma.ops + target->mma.num_ops);
@@ -62,7 +60,6 @@ static int test_rejects_incompatible_contract()
                     &catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, nullptr);
                 CHECK(selected);
                 auto& atom = ops[selected - ops.data()];
-                auto src_map = *atom.srcs[2].layout;
                 auto dst_map = *atom.dst.layout;
                 rocke_layout_map_t map = role < 0    ? dst_map
                                          : role == 3 ? dst_map
@@ -107,8 +104,6 @@ static int test_rejects_incompatible_contract()
                 }
                 else if(!std::strcmp(field, "missing_atom"))
                     catalog.num_ops = 0;
-                else if(!std::strcmp(field, "op_id"))
-                    atom.op_id = "wrong";
                 else if(!std::strcmp(field, "family"))
                     atom.family = "wrong";
                 else if(!std::strcmp(field, "m"))
@@ -119,12 +114,6 @@ static int test_rejects_incompatible_contract()
                     atom.k = 8;
                 else if(!std::strcmp(field, "wave"))
                     atom.wave_size = 32;
-                else if(!std::strcmp(field, "both_wrong_map"))
-                {
-                    src_map.fn = dst_map.fn = atom.srcs[0].layout->fn;
-                    atom.srcs[2].layout = &src_map;
-                    atom.dst.layout = &dst_map;
-                }
                 else
                     atom.srcs[2].frag_len = atom.dst.frag_len
                         = !std::strcmp(field, "both_capacity") ? 5 : atom.dst.frag_len - 1;
@@ -143,9 +132,17 @@ static int test_rejects_incompatible_contract()
                 CHECK(correct);
                 ++rejected;
             }
-    CHECK(rejected == 84);
+    CHECK(rejected == 76);
     std::printf("F64 contract rejections: %d\n", rejected);
     return 0;
+}
+
+static rocke_lane_coord_fn original_coord;
+
+static void forward_coord(
+    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** row, rocke_value_t** col)
+{
+    original_coord(b, lane, slot, row, col);
 }
 
 static int test_valid_copied_contracts()
@@ -153,44 +150,54 @@ static int test_valid_copied_contracts()
     const auto* target = rocke_arch_target_from_gfx("gfx942");
     for(int m : {16, 4})
         for(int k : {4, 8, 64})
-        {
-            std::vector<rocke_mma_op_t> ops(target->mma.ops, target->mma.ops + target->mma.num_ops);
-            rocke_mma_catalog_t catalog = {ops.data(), static_cast<int>(ops.size())};
-            const auto* selected = rocke_mma_catalog_op_for_shape(
-                &catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, nullptr);
-            CHECK(selected);
-            auto& atom = ops[selected - ops.data()];
-            rocke_layout_map_t maps[] = {
-                *atom.srcs[0].layout, *atom.srcs[1].layout, *atom.srcs[2].layout, *atom.dst.layout};
-            for(int role = 0; role < 3; ++role)
-                atom.srcs[role].layout = &maps[role];
-            atom.dst.layout = &maps[3];
-            rocke_ir_builder_t public_builder, copied_builder;
-            auto* expected = rocke_build_f64_mma_probe(&public_builder, m, k);
-            auto* copied = ckc::build_f64_mma_probe(&copied_builder, m, k, &catalog);
-            CHECK(expected && copied);
-            char *public_ir = nullptr, *copied_ir = nullptr;
-            CHECK(rocke_ir_serialize(expected, &public_ir) == ROCKE_OK);
-            CHECK(rocke_ir_serialize(copied, &copied_ir) == ROCKE_OK);
-            CHECK(!std::strcmp(public_ir, copied_ir));
-            for(auto flavor : {ROCKE_LLVM_FLAVOR_LLVM20,
-                               ROCKE_LLVM_FLAVOR_LLVM22,
-                               ROCKE_LLVM_FLAVOR_LLVM23,
-                               ROCKE_LLVM_FLAVOR_LLVM24})
+            for(bool forwarded : {false, true})
             {
-                char *public_ll = nullptr, *copied_ll = nullptr;
-                CHECK(rocke_lower_kernel_to_llvm(expected, flavor, "gfx942", &public_ll)
-                      == ROCKE_OK);
-                CHECK(rocke_lower_kernel_to_llvm(copied, flavor, "gfx942", &copied_ll) == ROCKE_OK);
-                CHECK(!std::strcmp(public_ll, copied_ll));
-                std::free(public_ll);
-                std::free(copied_ll);
+                std::vector<rocke_mma_op_t> ops(target->mma.ops,
+                                                target->mma.ops + target->mma.num_ops);
+                rocke_mma_catalog_t catalog = {ops.data(), static_cast<int>(ops.size())};
+                const auto* selected = rocke_mma_catalog_op_for_shape(
+                    &catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, nullptr);
+                CHECK(selected);
+                auto& atom = ops[selected - ops.data()];
+                rocke_layout_map_t maps[] = {*atom.srcs[0].layout,
+                                             *atom.srcs[1].layout,
+                                             *atom.srcs[2].layout,
+                                             *atom.dst.layout};
+                for(int role = 0; role < 3; ++role)
+                    atom.srcs[role].layout = &maps[role];
+                atom.dst.layout = &maps[3];
+                if(forwarded)
+                {
+                    original_coord = maps[2].fn;
+                    maps[2].fn = maps[3].fn = forward_coord;
+                }
+                rocke_ir_builder_t public_builder, copied_builder;
+                auto* expected = rocke_build_f64_mma_probe(&public_builder, m, k);
+                auto* copied = ckc::build_f64_mma_probe(&copied_builder, m, k, &catalog);
+                CHECK(expected && copied);
+                char *public_ir = nullptr, *copied_ir = nullptr;
+                CHECK(rocke_ir_serialize(expected, &public_ir) == ROCKE_OK);
+                CHECK(rocke_ir_serialize(copied, &copied_ir) == ROCKE_OK);
+                CHECK(!std::strcmp(public_ir, copied_ir));
+                for(auto flavor : {ROCKE_LLVM_FLAVOR_LLVM20,
+                                   ROCKE_LLVM_FLAVOR_LLVM22,
+                                   ROCKE_LLVM_FLAVOR_LLVM23,
+                                   ROCKE_LLVM_FLAVOR_LLVM24})
+                {
+                    char *public_ll = nullptr, *copied_ll = nullptr;
+                    CHECK(rocke_lower_kernel_to_llvm(expected, flavor, "gfx942", &public_ll)
+                          == ROCKE_OK);
+                    CHECK(rocke_lower_kernel_to_llvm(copied, flavor, "gfx942", &copied_ll)
+                          == ROCKE_OK);
+                    CHECK(!std::strcmp(public_ll, copied_ll));
+                    std::free(public_ll);
+                    std::free(copied_ll);
+                }
+                std::free(public_ir);
+                std::free(copied_ir);
+                rocke_ir_builder_free(&public_builder);
+                rocke_ir_builder_free(&copied_builder);
             }
-            std::free(public_ir);
-            std::free(copied_ir);
-            rocke_ir_builder_free(&public_builder);
-            rocke_ir_builder_free(&copied_builder);
-        }
     return 0;
 }
 

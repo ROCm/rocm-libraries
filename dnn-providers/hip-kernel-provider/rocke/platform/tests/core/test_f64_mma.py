@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from rocke.instances.gfx942 import f64_mma_probe as probe
-from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import ArchTarget, MmaCatalog, known_arches
 from rocke.core.ir import F32, F64, IRBuilder, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -168,11 +168,11 @@ _CONTRACT_CASES = [
         "map_wave",
         "map_float",
     )
+    if field != "wrong_map" or role in (2, 3)
 ] + [
     pytest.param(-1, field, id=field)
     for field in (
         "missing_atom",
-        "op_id",
         "family",
         "m",
         "n",
@@ -182,7 +182,6 @@ _CONTRACT_CASES = [
         "wave_float",
         "both_width_short",
         "both_capacity",
-        "both_wrong_map",
     )
 ]
 
@@ -224,23 +223,14 @@ def test_probe_rejects_incompatible_contract_before_emission(m, role, field):
             srcs[role] = desc
         atom = replace(atom, srcs=tuple(srcs), dst=dst)
     elif field.startswith("both_"):
-        if field == "both_wrong_map":
-
-            def wrong(b, lane, slot):
-                return lane, slot
-
-            srcs[2] = replace(srcs[2], layout=replace(srcs[2].layout, fn=wrong))
-            dst = replace(dst, layout=replace(dst.layout, fn=wrong))
-        else:
-            width = 5 if field == "both_capacity" else dst.frag_len - 1
-            srcs[2] = replace(srcs[2], frag_len=width)
-            dst = replace(dst, frag_len=width)
+        width = 5 if field == "both_capacity" else dst.frag_len - 1
+        srcs[2] = replace(srcs[2], frag_len=width)
+        dst = replace(dst, frag_len=width)
         atom = replace(atom, srcs=tuple(srcs), dst=dst)
     elif field == "missing_atom":
         atom = None
     else:
         updates = {
-            "op_id": {"op_id": "wrong"},
             "family": {"family": "wrong"},
             "m": {"m": m + 1},
             "n": {"n": m + 1},
@@ -250,9 +240,15 @@ def test_probe_rejects_incompatible_contract_before_emission(m, role, field):
             "wave_float": {"wave_size": 64.0},
         }
         atom = replace(atom, **updates[field])
-    catalog = ArchTarget.from_gfx("gfx942").mma
+    target = ArchTarget.from_gfx("gfx942")
+    # Both shape and ID lookup see this catalog; leave the real query intact.
+    catalog = MmaCatalog(
+        [atom if op.op_id == _ATOMS[m][0] else op for op in target.mma.ops]
+        if atom is not None
+        else [op for op in target.mma.ops if op.op_id != _ATOMS[m][0]]
+    )
     with (
-        patch.object(type(catalog), "op_for_shape", return_value=atom),
+        patch.object(ArchTarget, "from_gfx", return_value=replace(target, mma=catalog)),
         patch.object(probe, "IRBuilder", wraps=IRBuilder) as builder,
     ):
         with pytest.raises(ValueError) as error:
@@ -264,15 +260,34 @@ def test_probe_rejects_incompatible_contract_before_emission(m, role, field):
 
 
 @pytest.mark.parametrize("m", [16, 4])
-def test_probe_accepts_copied_contract(m):
+@pytest.mark.parametrize("forwarded", [False, True], ids=["copied", "shared-forwarder"])
+def test_probe_accepts_copied_contract(m, forwarded):
     atom = _f64_atom(m)
     copied = replace(
         atom,
         srcs=tuple(replace(src, layout=replace(src.layout)) for src in atom.srcs),
         dst=replace(atom.dst, layout=replace(atom.dst.layout)),
     )
+    if forwarded:
+        original = atom.srcs[2].layout.fn
+
+        def forward(b, lane, slot):
+            return original(b, lane, slot)
+
+        srcs = list(copied.srcs)
+        srcs[2] = replace(srcs[2], layout=replace(srcs[2].layout, fn=forward))
+        copied = replace(
+            copied,
+            srcs=tuple(srcs),
+            dst=replace(copied.dst, layout=replace(copied.dst.layout, fn=forward)),
+        )
     spec = F64MmaProbeSpec(m)
     expected = serialize(build_f64_mma_probe(spec))
-    catalog = ArchTarget.from_gfx("gfx942").mma
-    with patch.object(type(catalog), "op_for_shape", return_value=copied):
+    target = ArchTarget.from_gfx("gfx942")
+    catalog = MmaCatalog(
+        [copied if op.op_id == atom.op_id else op for op in target.mma.ops]
+    )
+    with patch.object(
+        ArchTarget, "from_gfx", return_value=replace(target, mma=catalog)
+    ):
         assert serialize(build_f64_mma_probe(spec)) == expected

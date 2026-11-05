@@ -3,7 +3,9 @@
 """One wave computes ``D = A @ B + C`` with a gfx942 f64 MFMA atom.
 
 Each K step of 4 issues one MFMA, and operands are placed with the catalog lane
-maps, so the probe checks the A/B and C/D layouts as well as the instruction.
+maps. Reusing C's indices for D and feeding D back as C requires matching widths
+and a shared src2/dst mapping implementation; instruction types remain validated
+by the lowerers.
 
 * ``m=16`` (``mfma_f64_16x16x4_f64``): ``A`` is row-major ``16 x k``, ``B`` is
   row-major ``k x 16``, and ``C``/``D`` are row-major ``16 x 16``.
@@ -51,44 +53,42 @@ def build_f64_mma_probe(spec: F64MmaProbeSpec) -> KernelDef:
         n=spec.m,
         k=4,
     )
-    # Reused output indices require the actual instruction maps, not just equal widths.
-    expected_id = "mfma_f64_16x16x4_f64" if spec.m == 16 else "mfma_f64_4x4x4_f64"
-    registered = target.mma.by_op_id(expected_id)
+    slab_rows, cols = _B_SLAB[spec.m]
 
-    def matches(desc, expected):
+    def usable(desc):
         layout = desc.layout
         return (
-            desc.dtype == expected.dtype
+            desc.dtype == "fp64"
             and type(desc.frag_len) is int
-            and desc.frag_len == expected.frag_len
+            and desc.frag_len > 0
             and layout is not None
             and type(layout.frag_len) is int
-            and layout.frag_len == expected.layout.frag_len
+            and layout.frag_len == desc.frag_len
             and type(layout.wave_size) is int
-            and layout.wave_size == expected.layout.wave_size
+            and layout.wave_size == 64
             and callable(layout.fn)
-            and layout.fn is expected.layout.fn
         )
 
+    # One wave covers the declared C/D footprint (four blocks for m=4).
+    output_rows = max(spec.m, 64 // spec.m)
     if (
         atom is None
-        or registered is None
-        or atom.op_id != registered.op_id
-        or atom.family != registered.family
-        or atom.shape != registered.shape
+        or atom.family != "mma"
+        or atom.shape != (spec.m, spec.m, 4)
         or any(type(size) is not int for size in (*atom.shape, atom.wave_size))
-        or atom.wave_size != registered.wave_size
-        or any(
-            not matches(desc, expected)
-            for desc, expected in zip(
-                (*atom.srcs, atom.dst), (*registered.srcs, registered.dst)
-            )
-        )
+        or atom.wave_size != 64
+        or any(not usable(desc) for desc in (*atom.srcs, atom.dst))
+        or any(src.frag_len != 1 for src in atom.srcs[:2])
+        or atom.srcs[2].frag_len != output_rows * cols // 64
+        or atom.dst.frag_len != atom.srcs[2].frag_len
+        # Reuse and feedback require one shared mapping implementation. Copies
+        # and shared forwarding callbacks work; arbitrary callback equivalence
+        # is not inferred from catalog membership or matching widths.
+        or atom.dst.layout.fn is not atom.srcs[2].layout.fn
     ):
         raise ValueError(
             "F64 probe requires the fixed gfx942 instruction and layout contract"
         )
-    slab_rows, cols = _B_SLAB[spec.m]
     b = IRBuilder(spec.name)
     a = b.param("A", PtrType(F64, "global"), align=8)
     bb = b.param("B", PtrType(F64, "global"), align=8)

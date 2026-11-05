@@ -40,28 +40,26 @@ rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
             catalog = &target->mma;
         const rocke_mma_op_t* atom
             = rocke_mma_catalog_op_for_shape(catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
-        char expected_id[64];
-        snprintf(expected_id, sizeof(expected_id), "mfma_f64_%dx%dx4_f64", m, m);
-        const auto* registered = rocke_mma_catalog_by_op_id(&target->mma, expected_id);
-        auto matches = [](const auto& desc, const auto& expected) {
+        auto usable = [](const auto& desc) {
             const auto* map = desc.layout;
-            const auto* expected_map = expected.layout;
-            return desc.dtype && !strcmp(desc.dtype, expected.dtype)
-                   && desc.frag_len == expected.frag_len && map && expected_map && map->fn
-                   && map->fn == expected_map->fn && map->frag_len == expected_map->frag_len
-                   && map->wave_size == expected_map->wave_size;
+            return desc.dtype && !strcmp(desc.dtype, "fp64") && desc.frag_len > 0 && map && map->fn
+                   && map->frag_len == desc.frag_len && map->wave_size == 64;
         };
-        bool valid = atom && registered && atom->op_id && !strcmp(atom->op_id, registered->op_id)
-                     && atom->family && !strcmp(atom->family, registered->family)
-                     && atom->m == registered->m && atom->n == registered->n
-                     && atom->k == registered->k && atom->wave_size == registered->wave_size;
-        // Reused output indices require the fixed instruction maps, not just equal widths.
+        bool valid = atom && atom->wave_size == 64;
         if(valid)
         {
             for(int role = 0; role < 3; ++role)
-                valid = valid && matches(atom->srcs[role], registered->srcs[role]);
-            valid = valid && matches(atom->dst, registered->dst) && atom->srcs[2].frag_len > 0
-                    && atom->srcs[2].frag_len <= 4;
+                valid = valid && usable(atom->srcs[role]);
+            /* One wave covers the declared C/D footprint (four blocks for m=4). */
+            int output_rows = m > 64 / m ? m : 64 / m;
+            valid = valid && usable(atom->dst) && atom->srcs[0].frag_len == 1
+                    && atom->srcs[1].frag_len == 1
+                    && atom->srcs[2].frag_len == output_rows * cols / 64
+                    && atom->srcs[2].frag_len <= 4
+                    && atom->dst.frag_len == atom->srcs[2].frag_len
+                    /* Shared mapping identity supports copies and shared forwarders;
+                     * it does not infer arbitrary callback equivalence. */
+                    && atom->dst.layout->fn == atom->srcs[2].layout->fn;
         }
         if(!valid)
             return (rocke_kernel_def_t*)rocke_i_set_err(
