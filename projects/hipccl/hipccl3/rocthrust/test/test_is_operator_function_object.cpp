@@ -45,10 +45,10 @@ TYPED_TEST(IsOperatorFunctionObjectTest, test_is_operator_less_function_object)
 
   using T = typename TestFixture::input_type;
 
-  static_assert(thrust::is_operator_less_function_object<thrust::less<T>>::value);
-  static_assert(!thrust::is_operator_less_function_object<thrust::greater<T>>::value);
-  static_assert(!thrust::is_operator_less_function_object<thrust::less_equal<T>>::value);
-  static_assert(!thrust::is_operator_less_function_object<thrust::greater_equal<T>>::value);
+  static_assert(thrust::is_operator_less_function_object<_THRUST_STD::less<T>>::value);
+  static_assert(!thrust::is_operator_less_function_object<_THRUST_STD::greater<T>>::value);
+  static_assert(!thrust::is_operator_less_function_object<_THRUST_STD::less_equal<T>>::value);
+  static_assert(!thrust::is_operator_less_function_object<_THRUST_STD::less_equal<T>>::value);
   static_assert(thrust::is_operator_less_function_object<std::less<T>>::value);
   static_assert(!thrust::is_operator_less_function_object<std::greater<T>>::value);
   static_assert(!thrust::is_operator_less_function_object<std::less_equal<T>>::value);
@@ -62,10 +62,10 @@ TYPED_TEST(IsOperatorFunctionObjectTest, test_is_operator_greater_function_objec
 
   using T = typename TestFixture::input_type;
 
-  static_assert(!thrust::is_operator_greater_function_object<thrust::less<T>>::value);
-  static_assert(thrust::is_operator_greater_function_object<thrust::greater<T>>::value);
-  static_assert(!thrust::is_operator_greater_function_object<thrust::less_equal<T>>::value);
-  static_assert(!thrust::is_operator_greater_function_object<thrust::greater_equal<T>>::value);
+  static_assert(!thrust::is_operator_greater_function_object<_THRUST_STD::less<T>>::value);
+  static_assert(thrust::is_operator_greater_function_object<_THRUST_STD::greater<T>>::value);
+  static_assert(!thrust::is_operator_greater_function_object<_THRUST_STD::less_equal<T>>::value);
+  static_assert(!thrust::is_operator_greater_function_object<_THRUST_STD::less_equal<T>>::value);
   static_assert(!thrust::is_operator_greater_function_object<std::less<T>>::value);
   static_assert(thrust::is_operator_greater_function_object<std::greater<T>>::value);
   static_assert(!thrust::is_operator_greater_function_object<std::less_equal<T>>::value);
@@ -79,10 +79,10 @@ TYPED_TEST(IsOperatorFunctionObjectTest, test_is_operator_less_or_greater_functi
 
   using T = typename TestFixture::input_type;
 
-  static_assert(thrust::is_operator_less_or_greater_function_object<thrust::less<T>>::value);
-  static_assert(thrust::is_operator_less_or_greater_function_object<thrust::greater<T>>::value);
-  static_assert(!thrust::is_operator_less_or_greater_function_object<thrust::less_equal<T>>::value);
-  static_assert(!thrust::is_operator_less_or_greater_function_object<thrust::greater_equal<T>>::value);
+  static_assert(thrust::is_operator_less_or_greater_function_object<_THRUST_STD::less<T>>::value);
+  static_assert(thrust::is_operator_less_or_greater_function_object<_THRUST_STD::greater<T>>::value);
+  static_assert(!thrust::is_operator_less_or_greater_function_object<_THRUST_STD::less_equal<T>>::value);
+  static_assert(!thrust::is_operator_less_or_greater_function_object<_THRUST_STD::less_equal<T>>::value);
   static_assert(thrust::is_operator_less_or_greater_function_object<std::less<T>>::value);
   static_assert(thrust::is_operator_less_or_greater_function_object<std::greater<T>>::value);
   static_assert(!thrust::is_operator_less_or_greater_function_object<std::less_equal<T>>::value);
@@ -96,10 +96,10 @@ TYPED_TEST(IsOperatorFunctionObjectTest, test_is_operator_plus_function_object)
 
   using T = typename TestFixture::input_type;
 
-  static_assert(thrust::is_operator_plus_function_object<thrust::plus<T>>::value);
-  static_assert(!thrust::is_operator_plus_function_object<thrust::minus<T>>::value);
-  static_assert(!thrust::is_operator_plus_function_object<thrust::less<T>>::value);
-  static_assert(!thrust::is_operator_plus_function_object<thrust::greater<T>>::value);
+  static_assert(thrust::is_operator_plus_function_object<_THRUST_STD::plus<T>>::value);
+  static_assert(!thrust::is_operator_plus_function_object<_THRUST_STD::minus<T>>::value);
+  static_assert(!thrust::is_operator_plus_function_object<_THRUST_STD::less<T>>::value);
+  static_assert(!thrust::is_operator_plus_function_object<_THRUST_STD::greater<T>>::value);
   static_assert(thrust::is_operator_plus_function_object<std::plus<T>>::value);
   static_assert(!thrust::is_operator_plus_function_object<std::minus<T>>::value);
   static_assert(!thrust::is_operator_plus_function_object<std::less<T>>::value);

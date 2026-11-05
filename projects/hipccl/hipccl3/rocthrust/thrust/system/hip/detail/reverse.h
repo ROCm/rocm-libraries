@@ -80,9 +80,9 @@ void THRUST_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first
   using difference_type = thrust::detail::it_difference_t<ItemsIt>;
 
   // find the midpoint of [first,last)
-  difference_type N = thrust::distance(first, last);
+  difference_type N = _THRUST_STD::distance(first, last);
   ItemsIt mid(first);
-  thrust::advance(mid, N / 2);
+  _THRUST_STD::advance(mid, N / 2);
 
   hip_rocprim::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
 }

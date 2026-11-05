@@ -31,51 +31,18 @@
 #endif // no system header
 #include <thrust/iterator/iterator_traits.h>
 
+#include _THRUST_STD_INCLUDE(iterator)
+
 THRUST_NAMESPACE_BEGIN
 
-/*! \addtogroup iterators
- *  \{
- */
+//! deprecated [since 10.1]
 
-/*! \p distance finds the distance between \p first and \p last, i.e. the
- *  number of times that \p first must be incremented until it is equal to
- *  \p last.
- *
- *  \param first The beginning of an input range of interest.
- *  \param last The end of an input range of interest.
- *  \return The distance between the beginning and end of the input range.
- *
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a>.
- *
- *  \pre If \c InputIterator meets the requirements of random access iterator, \p last shall be reachable from \p first
- * or \p first shall be reachable from \p last; otherwise, \p last shall be reachable from \p first.
- *
- *  The following code snippet demonstrates how to use \p distance to compute
- *  the distance to one iterator from another.
- *
- *  \code
- *  #include <thrust/distance.h>
- *  #include <thrust/device_vector.h>
- *  ...
- *  thrust::device_vector<int> vec(13);
- *  thrust::device_vector<int>::iterator iter1 = vec.begin();
- *  thrust::device_vector<int>::iterator iter2 = iter1 + 7;
- *
- *  int d = thrust::distance(iter1, iter2);
- *
- *  // d is 7
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/iterator/distance
- */
-template <typename InputIterator>
-inline THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
-distance(InputIterator first, InputIterator last);
-
-/*! \} // end iterators
- */
+template <class InputIter>
+CCCL_DEPRECATED_BECAUSE("Use cuda::std::distance instead")
+[[nodiscard]] _CCCL_API constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
+  distance(InputIter first, InputIter last)
+{
+  return _THRUST_STD::distance(first, last);
+}
 
 THRUST_NAMESPACE_END
-
-#include <thrust/detail/distance.inl>

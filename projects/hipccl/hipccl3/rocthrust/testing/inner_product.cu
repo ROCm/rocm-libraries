@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -83,7 +83,8 @@ void TestInnerProductWithOperator()
 
   // compute (v1 - v2) and perform a multiplies reduction
   T init   = 3;
-  T result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), init, thrust::multiplies<T>(), thrust::minus<T>());
+  T result = thrust::inner_product(
+    v1.begin(), v1.end(), v2.begin(), init, _THRUST_STD::multiplies<T>(), _THRUST_STD::minus<T>());
   ASSERT_EQUAL(result, 90);
 }
 DECLARE_VECTOR_UNITTEST(TestInnerProductWithOperator);
@@ -129,14 +130,14 @@ void TestInnerProductWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
   *has_executed                         = false;
 
   only_set_when_both_expected fn = {(1ll << magnitude) - 1, thrust::raw_pointer_cast(has_executed)};
 
-  ASSERT_EQUAL(thrust::inner_product(thrust::device, begin, end, begin, 0ll, thrust::plus<long long>(), fn),
+  ASSERT_EQUAL(thrust::inner_product(thrust::device, begin, end, begin, 0ll, _THRUST_STD::plus<long long>(), fn),
                (1ll << magnitude));
 
   bool has_executed_h = *has_executed;
@@ -163,7 +164,8 @@ void TestInnerProductPlaceholders()
   thrust::device_vector<float> v1(100, 1.f);
   thrust::device_vector<float> v2(100, 1.f);
 
-  auto result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), 0.0f, thrust::plus<float>{}, _1 * _2 + 1.0f);
+  auto result =
+    thrust::inner_product(v1.begin(), v1.end(), v2.begin(), 0.0f, _THRUST_STD::plus<float>{}, _1 * _2 + 1.0f);
 
   ASSERT_ALMOST_EQUAL(result, 200.f);
 }

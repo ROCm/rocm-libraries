@@ -27,11 +27,14 @@
 #  include _THRUST_STD_INCLUDE(__memory/addressof.h)
 #endif
 
-#include <new>
 #include <utility>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
+
+#include <new>
+
+#include <nv/target>
 
 THRUST_NAMESPACE_BEGIN
 

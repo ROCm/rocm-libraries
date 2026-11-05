@@ -48,10 +48,8 @@ THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub
 {
-
 namespace __uninitialized_copy
 {
-
 template <class InputIt, class OutputIt>
 struct functor
 {
@@ -60,12 +58,6 @@ struct functor
 
   using InputType  = thrust::detail::it_value_t<InputIt>;
   using OutputType = thrust::detail::it_value_t<OutputIt>;
-
-  THRUST_FUNCTION
-  functor(InputIt input_, OutputIt output_)
-      : input(input_)
-      , output(output_)
-  {}
 
   template <class Size>
   void THRUST_DEVICE_FUNCTION operator()(Size idx)
@@ -80,18 +72,14 @@ struct functor
     ::new (static_cast<void*>(&out)) OutputType(in);
 #  endif
   }
-}; // struct functor
-
+};
 } // namespace __uninitialized_copy
 
 template <class Derived, class InputIt, class Size, class OutputIt>
 OutputIt _CCCL_HOST_DEVICE
 uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size count, OutputIt result)
 {
-  using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
-
-  cuda_cub::parallel_for(policy, functor_t(first, result), count);
-
+  cuda_cub::parallel_for(policy, __uninitialized_copy::functor<InputIt, OutputIt>{first, result}, count);
   return result + count;
 }
 
@@ -99,7 +87,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt _CCCL_HOST_DEVICE
 uninitialized_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  return cuda_cub::uninitialized_copy_n(policy, first, thrust::distance(first, last), result);
+  return cuda_cub::uninitialized_copy_n(policy, first, _THRUST_STD::distance(first, last), result);
 }
 
 } // namespace cuda_cub

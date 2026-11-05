@@ -37,7 +37,7 @@
 #include <thrust/mr/polymorphic_adaptor.h>
 #include <thrust/mr/validator.h>
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
@@ -105,7 +105,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE size_type max_size() const
   {
-    return (std::numeric_limits<size_type>::max)() / sizeof(T);
+    return (_THRUST_STD::numeric_limits<size_type>::max)() / sizeof(T);
   }
 
   /*! Constructor.
@@ -127,7 +127,7 @@ public:
    *  \param n number of elements to allocate
    *  \return a pointer to the newly allocated storage.
    */
-  THRUST_NODISCARD THRUST_HOST pointer allocate(size_type n)
+  [[nodiscard]] THRUST_HOST pointer allocate(size_type n)
   {
     return static_cast<pointer>(mem_res->do_allocate(n * sizeof(T), alignof(T)));
   }

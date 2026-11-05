@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
@@ -97,8 +96,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
       get_random_data<int>(100, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
     thrust::device_vector<int> output(input.size(), 0);
 
-    simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
-                thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+    simple_copy(thrust::make_transform_iterator(input.begin(), _THRUST_STD::identity{}),
+                thrust::make_transform_iterator(input.end(), _THRUST_STD::identity{}),
                 output.begin());
 
     ASSERT_EQ(input, output);
@@ -112,8 +111,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIteratorInputConversion)
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
-              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+  simple_copy(thrust::make_transform_iterator(input.begin(), _THRUST_STD::identity{}),
+              thrust::make_transform_iterator(input.end(), _THRUST_STD::identity{}),
               output.begin());
 
   ASSERT_EQ(input == output, true);
@@ -126,8 +125,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIteratorOutputConversion)
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
-              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+  simple_copy(thrust::make_transform_iterator(input.begin(), _THRUST_STD::identity{}),
+              thrust::make_transform_iterator(input.end(), _THRUST_STD::identity{}),
               output.begin());
 
   ASSERT_EQ(input == output, true);
@@ -157,8 +156,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
 
   thrust::device_vector<int> output(5);
 
-  simple_copy(thrust::make_transform_iterator(first, thrust::negate<int>()),
-              thrust::make_transform_iterator(last, thrust::negate<int>()),
+  simple_copy(thrust::make_transform_iterator(first, _THRUST_STD::negate<int>()),
+              thrust::make_transform_iterator(last, _THRUST_STD::negate<int>()),
               output.begin());
 
   thrust::device_vector<int> ref{-1, -2, -3, -4, -5};

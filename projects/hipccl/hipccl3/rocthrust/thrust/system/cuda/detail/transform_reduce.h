@@ -55,7 +55,8 @@
 #  include <thrust/system/cuda/detail/par_to_seq.h>
 #  include <thrust/system/cuda/detail/util.h>
 
-#  include <cstdint>
+#  include <cuda/std/cstdint>
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
@@ -130,7 +131,7 @@ T _CCCL_HOST_DEVICE transform_reduce(
   execution_policy<Derived>& policy, InputIt first, InputIt last, TransformOp transform_op, T init, ReduceOp reduce_op)
 {
   using size_type           = thrust::detail::it_difference_t<InputIt>;
-  const size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  const size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
 
   THRUST_CDP_DISPATCH(
     (init = thrust::cuda_cub::detail::transform_reduce_n_impl(policy, first, num_items, transform_op, init, reduce_op);),

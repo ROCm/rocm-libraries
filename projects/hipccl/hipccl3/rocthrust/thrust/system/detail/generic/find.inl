@@ -93,7 +93,7 @@ find_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Inpu
     return last;
   }
 
-  const difference_type n = thrust::distance(first, last);
+  const difference_type n = _THRUST_STD::distance(first, last);
 
   // this implementation breaks up the sequence into separate intervals
   // in an attempt to early-out as soon as a value is found
@@ -139,7 +139,7 @@ template <typename DerivedPolicy, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE InputIterator
 find_if_not(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, Predicate pred)
 {
-  return thrust::find_if(exec, first, last, thrust::not_fn(pred));
+  return thrust::find_if(exec, first, last, _THRUST_STD::not_fn(pred));
 } // end find()
 
 } // end namespace generic

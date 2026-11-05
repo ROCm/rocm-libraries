@@ -16,7 +16,6 @@
  */
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -42,7 +41,7 @@
 // ensure that we properly support thrust::reverse_iterator from _THRUST_STD
 void TestTransformInputOutputIteratorTraits()
 {
-  using input_func  = thrust::negate<int>;
+  using input_func  = _THRUST_STD::negate<int>;
   using output_func = thrust::square<int>;
   using base_it     = thrust::host_vector<int>::iterator;
 
@@ -58,7 +57,7 @@ void TestTransformInputOutputIteratorTraits()
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
@@ -76,7 +75,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformInputOutputIterator()
 {
   using T = typename Vector::value_type;
 
-  using InputFunction  = thrust::negate<T>;
+  using InputFunction  = _THRUST_STD::negate<T>;
   using OutputFunction = thrust::square<T>;
   using Iterator       = typename Vector::iterator;
 
@@ -112,7 +111,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMakeTransformInputOutputIterator()
 {
   using T = typename Vector::value_type;
 
-  using InputFunction  = thrust::negate<T>;
+  using InputFunction  = _THRUST_STD::negate<T>;
   using OutputFunction = thrust::square<T>;
 
   Vector input(4);
@@ -155,14 +154,14 @@ struct TestTransformInputOutputIteratorScan
 
     // run on host (uses forward iterator negate)
     thrust::inclusive_scan(
-      thrust::make_transform_input_output_iterator(h_data.begin(), thrust::negate<T>(), ::internal::identity{}),
-      thrust::make_transform_input_output_iterator(h_data.end(), thrust::negate<T>(), ::internal::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.end(), _THRUST_STD::negate<T>(), _THRUST_STD::identity{}),
       h_result.begin());
     // run on device (uses reverse iterator negate)
     thrust::inclusive_scan(
       d_data.begin(),
       d_data.end(),
-      thrust::make_transform_input_output_iterator(d_result.begin(), thrust::square<T>(), thrust::negate<T>()));
+      thrust::make_transform_input_output_iterator(d_result.begin(), thrust::square<T>(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQUAL(h_result, d_result);
   }

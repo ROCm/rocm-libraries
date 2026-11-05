@@ -56,12 +56,11 @@
 #  include <thrust/system/cuda/detail/par_to_seq.h>
 #  include <thrust/system/cuda/detail/util.h>
 
-#  include <cstdint>
+#  include <cuda/std/cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
-// forward declare generic reduce
-// to circumvent circular dependency
+// Forward declare generic reduce circumvent circular dependency.
 template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
 T _CCCL_HOST_DEVICE
 reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
@@ -70,6 +69,15 @@ reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
        T init,
        BinaryFunction binary_op);
 
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
+void _CCCL_HOST_DEVICE reduce_into(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator output,
+  T init,
+  BinaryFunction binary_op);
+
 namespace cuda_cub
 {
 
@@ -77,10 +85,10 @@ namespace __reduce
 {
 
 template <bool>
-struct is_true : thrust::detail::false_type
+struct is_true : _THRUST_STD::false_type
 {};
 template <>
-struct is_true<true> : thrust::detail::true_type
+struct is_true<true> : _THRUST_STD::true_type
 {};
 
 template <int _BLOCK_THREADS,
@@ -241,7 +249,7 @@ struct ReduceAgent
     // (specialized for types we can vectorize)
     //
     template <class Iterator>
-    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator d_in, thrust::detail::true_type /* can_vectorize */)
+    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator d_in, _THRUST_STD::true_type /* can_vectorize */)
     {
       return (size_t(d_in) & (sizeof(Vector) - 1)) == 0;
     }
@@ -250,7 +258,7 @@ struct ReduceAgent
     // (specialized for types we cannot vectorize)
     //
     template <class Iterator>
-    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator, thrust::detail::false_type /* can_vectorize */)
+    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator, _THRUST_STD::false_type /* can_vectorize */)
     {
       return false;
     }
@@ -266,8 +274,8 @@ struct ReduceAgent
       T& thread_aggregate,
       Size block_offset,
       int /*valid_items*/,
-      thrust::detail::true_type /* is_full_tile */,
-      thrust::detail::false_type /* can_vectorize */)
+      _THRUST_STD::true_type /* is_full_tile */,
+      _THRUST_STD::false_type /* can_vectorize */)
     {
       T items[ITEMS_PER_THREAD];
 
@@ -286,8 +294,8 @@ struct ReduceAgent
       T& thread_aggregate,
       Size block_offset,
       int /*valid_items*/,
-      thrust::detail::true_type /* is_full_tile */,
-      thrust::detail::true_type /* can_vectorize */)
+      _THRUST_STD::true_type /* is_full_tile */,
+      _THRUST_STD::true_type /* can_vectorize */)
     {
       // Alias items as an array of VectorT and load it in striped fashion
       enum
@@ -318,11 +326,7 @@ struct ReduceAgent
     //
     template <int IS_FIRST_TILE, class CAN_VECTORIZE>
     THRUST_DEVICE_FUNCTION void consume_tile(
-      T& thread_aggregate,
-      Size block_offset,
-      int valid_items,
-      thrust::detail::false_type /* is_full_tile */,
-      CAN_VECTORIZE)
+      T& thread_aggregate, Size block_offset, int valid_items, _THRUST_STD::false_type /* is_full_tile */, CAN_VECTORIZE)
     {
       // Partial tile
       int thread_offset = threadIdx.x;
@@ -358,18 +362,18 @@ struct ReduceAgent
       {
         // First tile isn't full (not all threads have valid items)
         int valid_items = block_end - block_offset;
-        consume_tile<true>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+        consume_tile<true>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
         return BlockReduce(storage.reduce).Reduce(thread_aggregate, reduction_op, valid_items);
       }
 
       // At least one full block
-      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
       block_offset += ITEMS_PER_TILE;
 
       // Consume subsequent full tiles of input
       while (block_offset + ITEMS_PER_TILE <= block_end)
       {
-        consume_tile<false>(thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+        consume_tile<false>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
         block_offset += ITEMS_PER_TILE;
       }
 
@@ -377,7 +381,7 @@ struct ReduceAgent
       if (block_offset < block_end)
       {
         int valid_items = block_end - block_offset;
-        consume_tile<false>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+        consume_tile<false>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
       }
 
       // Compute block-wide reduction (all threads have valid items)
@@ -436,12 +440,12 @@ struct ReduceAgent
       {
         // First tile isn't full (not all threads have valid items)
         int valid_items = num_items - block_offset;
-        consume_tile<true>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+        consume_tile<true>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
         return BlockReduce(storage.reduce).Reduce(thread_aggregate, reduction_op, valid_items);
       }
 
       // Consume first full tile of input
-      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
 
       if (num_items > even_share_base)
       {
@@ -459,8 +463,7 @@ struct ReduceAgent
         // Consume more full tiles
         while (block_offset + ITEMS_PER_TILE <= num_items)
         {
-          consume_tile<false>(
-            thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+          consume_tile<false>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
 
           __syncthreads();
 
@@ -480,7 +483,7 @@ struct ReduceAgent
         if (block_offset < num_items)
         {
           int valid_items = num_items - block_offset;
-          consume_tile<false>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+          consume_tile<false>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
         }
       }
 
@@ -594,186 +597,6 @@ struct DrainAgent
     grid_queue.FillAndResetDrain(num_items);
   }
 }; // struct DrainAgent;
-
-template <class InputIt, class OutputIt, class Size, class ReductionOp, class T>
-cudaError_t THRUST_RUNTIME_FUNCTION doit_step(
-  void* d_temp_storage,
-  size_t& temp_storage_bytes,
-  InputIt input_it,
-  Size num_items,
-  T init,
-  ReductionOp reduction_op,
-  OutputIt output_it,
-  cudaStream_t stream)
-{
-  using core::detail::AgentLauncher;
-  using core::detail::AgentPlan;
-  using core::detail::cuda_optional;
-  using core::detail::get_agent_plan;
-
-  using UnsignedSize = typename detail::make_unsigned_special<Size>::type;
-
-  if (num_items == 0)
-  {
-    return cudaErrorNotSupported;
-  }
-
-  using reduce_agent = AgentLauncher<ReduceAgent<InputIt, OutputIt, T, Size, ReductionOp>>;
-
-  typename reduce_agent::Plan reduce_plan = reduce_agent::get_plan(stream);
-
-  cudaError_t status = cudaSuccess;
-
-  if (num_items <= reduce_plan.items_per_tile)
-  {
-    size_t vshmem_size = core::detail::vshmem_size(reduce_plan.shared_memory_size, 1);
-
-    // small, single tile size
-    if (d_temp_storage == nullptr)
-    {
-      temp_storage_bytes = ::cuda::std::max<size_t>(1, vshmem_size);
-      return status;
-    }
-    char* vshmem_ptr = vshmem_size > 0 ? (char*) d_temp_storage : nullptr;
-
-    reduce_agent ra(reduce_plan, num_items, stream, vshmem_ptr, "reduce_agent: single_tile only");
-    ra.launch(input_it, output_it, num_items, reduction_op, init);
-    _CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
-  }
-  else
-  {
-    // regular size
-    cuda_optional<int> sm_count = core::detail::get_sm_count();
-    _CUDA_CUB_RET_IF_FAIL(sm_count.status());
-
-    // reduction will not use more cta counts than requested
-    cuda_optional<int> max_blocks_per_sm = reduce_agent::template get_max_blocks_per_sm<
-      InputIt,
-      OutputIt,
-      Size,
-      cub::GridEvenShare<Size>,
-      cub::GridQueue<UnsignedSize>,
-      ReductionOp>(reduce_plan);
-    _CUDA_CUB_RET_IF_FAIL(max_blocks_per_sm.status());
-
-    int reduce_device_occupancy = (int) max_blocks_per_sm * sm_count;
-
-    int sm_oversubscription = 5;
-    int max_blocks          = reduce_device_occupancy * sm_oversubscription;
-
-    cub::GridEvenShare<Size> even_share;
-    even_share.DispatchInit(static_cast<int>(num_items), max_blocks, reduce_plan.items_per_tile);
-
-    // we will launch at most "max_blocks" blocks in a grid
-    // so preallocate virtual shared memory storage for this if required
-    //
-    size_t vshmem_size = core::detail::vshmem_size(reduce_plan.shared_memory_size, max_blocks);
-
-    // Temporary storage allocation requirements
-    void* allocations[3]       = {nullptr, nullptr, nullptr};
-    size_t allocation_sizes[3] = {
-      max_blocks * sizeof(T), // bytes needed for privatized block reductions
-      cub::GridQueue<UnsignedSize>::AllocationSize(), // bytes needed for grid queue descriptor0
-      vshmem_size // size of virtualized shared memory storage
-    };
-    status = cub::detail::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
-    _CUDA_CUB_RET_IF_FAIL(status);
-    if (d_temp_storage == nullptr)
-    {
-      return status;
-    }
-
-    T* d_block_reductions = (T*) allocations[0];
-    cub::GridQueue<UnsignedSize> queue(allocations[1]);
-    char* vshmem_ptr = vshmem_size > 0 ? (char*) allocations[2] : nullptr;
-
-    // Get grid size for device_reduce_sweep_kernel
-    int reduce_grid_size = 0;
-    if (reduce_plan.grid_mapping == cub::GRID_MAPPING_RAKE)
-    {
-      // Work is distributed evenly
-      reduce_grid_size = even_share.grid_size;
-    }
-    else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
-    {
-      // Work is distributed dynamically
-      size_t num_tiles = ::cuda::ceil_div(num_items, reduce_plan.items_per_tile);
-
-      // if not enough to fill the device with threadblocks
-      // then fill the device with threadblocks
-      reduce_grid_size = static_cast<int>((::cuda::std::min)(num_tiles, static_cast<size_t>(reduce_device_occupancy)));
-
-      using drain_agent    = AgentLauncher<DrainAgent<Size>>;
-      AgentPlan drain_plan = drain_agent::get_plan();
-      drain_plan.grid_size = 1;
-      drain_agent da(drain_plan, stream, "__reduce::drain_agent");
-      da.launch(queue, num_items);
-      _CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
-    }
-    else
-    {
-      _CUDA_CUB_RET_IF_FAIL(cudaErrorNotSupported);
-    }
-
-    reduce_plan.grid_size = reduce_grid_size;
-    reduce_agent ra(reduce_plan, stream, vshmem_ptr, "reduce_agent: regular size reduce");
-    ra.launch(input_it, d_block_reductions, num_items, even_share, queue, reduction_op);
-    _CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
-
-    using reduce_agent_single = AgentLauncher<ReduceAgent<T*, OutputIt, T, Size, ReductionOp>>;
-
-    reduce_plan.grid_size = 1;
-    reduce_agent_single ra1(reduce_plan, stream, vshmem_ptr, "reduce_agent: single tile reduce");
-
-    ra1.launch(d_block_reductions, output_it, reduce_grid_size, reduction_op, init);
-    _CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
-  }
-
-  return status;
-} // func doit_step
-
-template <typename Derived, typename InputIt, typename Size, typename T, typename BinaryOp>
-THRUST_RUNTIME_FUNCTION T
-reduce(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
-{
-  if (num_items == 0)
-  {
-    return init;
-  }
-
-  size_t temp_storage_bytes = 0;
-  cudaStream_t stream       = cuda_cub::stream(policy);
-
-  cudaError_t status;
-  status = doit_step(nullptr, temp_storage_bytes, first, num_items, init, binary_op, static_cast<T*>(nullptr), stream);
-  cuda_cub::throw_on_error(status, "reduce failed on 1st step");
-
-  size_t allocation_sizes[2] = {sizeof(T*), temp_storage_bytes};
-  void* allocations[2]       = {nullptr, nullptr};
-
-  size_t storage_size = 0;
-  status              = core::detail::alias_storage(nullptr, storage_size, allocations, allocation_sizes);
-  cuda_cub::throw_on_error(status, "reduce failed on 1st alias_storage");
-
-  // Allocate temporary storage.
-  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
-  void* ptr = static_cast<void*>(tmp.data().get());
-
-  status = core::detail::alias_storage(ptr, storage_size, allocations, allocation_sizes);
-  cuda_cub::throw_on_error(status, "reduce failed on 2nd alias_storage");
-
-  T* d_result = thrust::detail::aligned_reinterpret_cast<T*>(allocations[0]);
-
-  status = doit_step(allocations[1], temp_storage_bytes, first, num_items, init, binary_op, d_result, stream);
-  cuda_cub::throw_on_error(status, "reduce failed on 2nd step");
-
-  status = cuda_cub::synchronize(policy);
-  cuda_cub::throw_on_error(status, "reduce failed to synchronize");
-
-  T result = cuda_cub::get_value(policy, d_result);
-
-  return result;
-}
 } // namespace __reduce
 
 namespace detail
@@ -858,7 +681,7 @@ _CCCL_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, Inp
 {
   using size_type = thrust::detail::it_difference_t<InputIt>;
   // FIXME: Check for RA iterator.
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
   return cuda_cub::reduce_n(policy, first, num_items, init, binary_op);
 }
 

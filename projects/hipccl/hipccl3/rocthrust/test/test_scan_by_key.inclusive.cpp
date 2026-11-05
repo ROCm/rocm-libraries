@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -52,12 +52,12 @@ TYPED_TEST(ScanByKeyInclusiveVectorTests, TestInclusiveScanByKeySimple)
   ASSERT_EQ(output, ref);
 
   thrust::inclusive_scan_by_key(
-    keys.begin(), keys.end(), vals.begin(), output.begin(), thrust::equal_to<T>(), thrust::multiplies<T>());
+    keys.begin(), keys.end(), vals.begin(), output.begin(), _THRUST_STD::equal_to<T>(), _THRUST_STD::multiplies<T>());
 
   ref = {1, 2, 6, 24, 5, 6, 42};
   ASSERT_EQ(output, ref);
 
-  thrust::inclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), thrust::equal_to<T>());
+  thrust::inclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), _THRUST_STD::equal_to<T>());
 
   ref = {1, 2, 5, 9, 5, 6, 13};
   ASSERT_EQ(output, ref);
@@ -127,7 +127,7 @@ TYPED_TEST(ScanByKeyInclusiveVectorTests, TestScanByKeyHeadFlags)
   Vector output(7, 0);
 
   thrust::inclusive_scan_by_key(
-    keys.begin(), keys.end(), vals.begin(), output.begin(), head_flag_predicate(), thrust::plus<T>());
+    keys.begin(), keys.end(), vals.begin(), output.begin(), head_flag_predicate(), _THRUST_STD::plus<T>());
 
   Vector ref{1, 2, 5, 9, 5, 6, 13};
   ASSERT_EQ(output, ref);
@@ -145,7 +145,7 @@ TYPED_TEST(ScanByKeyInclusiveVectorTests, TestInclusiveScanByKeyTransformIterato
   Vector output(7, 0);
 
   thrust::inclusive_scan_by_key(
-    keys.begin(), keys.end(), thrust::make_transform_iterator(vals.begin(), thrust::negate<T>()), output.begin());
+    keys.begin(), keys.end(), thrust::make_transform_iterator(vals.begin(), _THRUST_STD::negate<T>()), output.begin());
 
   Vector ref{-1, -2, -5, -9, -5, -6, -13};
   ASSERT_EQ(output, ref);
@@ -339,9 +339,9 @@ TYPED_TEST(ScanByKeyInclusiveVariablesTests, TestScanByKeyDiscardOutput)
 
     // These are no-ops, but they should compile.
     thrust::inclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out);
-    thrust::inclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, thrust::equal_to<T>{});
+    thrust::inclusive_scan_by_key(d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, _THRUST_STD::equal_to<T>{});
     thrust::inclusive_scan_by_key(
-      d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, thrust::equal_to<T>{}, thrust::multiplies<T>{});
+      d_keys.cbegin(), d_keys.cend(), d_vals.cbegin(), out, _THRUST_STD::equal_to<T>{}, _THRUST_STD::multiplies<T>{});
   }
 }
 

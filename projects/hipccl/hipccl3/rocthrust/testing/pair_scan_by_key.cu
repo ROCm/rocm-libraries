@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -67,11 +67,11 @@ struct TestPairScanByKey
 
     // scan on the host
     thrust::exclusive_scan_by_key(
-      h_keys.begin(), h_keys.end(), h_pairs.begin(), h_pairs.begin(), init, thrust::equal_to<T>(), add_pairs());
+      h_keys.begin(), h_keys.end(), h_pairs.begin(), h_pairs.begin(), init, _THRUST_STD::equal_to<T>(), add_pairs());
 
     // scan on the device
     thrust::exclusive_scan_by_key(
-      d_keys.begin(), d_keys.end(), d_pairs.begin(), d_pairs.begin(), init, thrust::equal_to<T>(), add_pairs());
+      d_keys.begin(), d_keys.end(), d_pairs.begin(), d_pairs.begin(), init, _THRUST_STD::equal_to<T>(), add_pairs());
 
     ASSERT_EQUAL_QUIET(h_pairs, d_pairs);
   }

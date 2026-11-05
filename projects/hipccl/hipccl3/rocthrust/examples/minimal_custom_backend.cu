@@ -29,8 +29,6 @@
 #  include <functional>
 #endif
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
-
 // This example demonstrates how to build a minimal custom
 // Thrust backend by intercepting for_each's dispatch.
 
@@ -77,7 +75,7 @@ int main()
   // cause our version of for_each to be invoked when we pass an instance of my_system as the first parameter.
   // Even though we did not define a special version of transform, Thrust dispatches the version it knows
   // for thrust::device_execution_policy, which my_system inherits.
-  thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), ::internal::identity{});
+  thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), _THRUST_STD::identity{});
 
   // Invocations without my_system are handled normally.
   // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;

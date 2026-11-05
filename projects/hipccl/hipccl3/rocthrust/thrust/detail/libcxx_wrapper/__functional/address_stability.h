@@ -59,7 +59,7 @@ struct proclaims_copyable_arguments<detail::callable_permitting_copied_arguments
 {};
 
 template <typename F>
-THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr auto
+[[nodiscard]] inline THRUST_HOST_DEVICE constexpr auto
 proclaim_copyable_arguments(F&& f) -> detail::callable_permitting_copied_arguments<::internal::decay_t<F>>
 {
   return {::std::forward<F>(f)};

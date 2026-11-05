@@ -54,7 +54,7 @@ struct has_effectful_member_construct2 : has_member_construct2<Allocator, T, Arg
 
 // std::allocator::construct's only effect is to invoke placement new
 template <typename U, typename T, typename Arg1>
-struct has_effectful_member_construct2<std::allocator<U>, T, Arg1> : thrust::detail::false_type
+struct has_effectful_member_construct2<std::allocator<U>, T, Arg1> : _THRUST_STD::false_type
 {};
 
 template <typename Allocator, typename Arg1>

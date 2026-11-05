@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,7 +55,7 @@ int main(void)
   float init = 0;
 
   // binary operations
-  thrust::maximum<float> binary_op1;
+  _THRUST_LIBCXX::maximum<float> binary_op1;
   abs_diff<float> binary_op2;
 
   float max_abs_diff = thrust::inner_product(d_a.begin(), d_a.end(), d_b.begin(), init, binary_op1, binary_op2);
