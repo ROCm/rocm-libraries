@@ -59,6 +59,7 @@ pre-commit run --hook-stage pre-push --from-ref origin/develop --to-ref HEAD
 
 | Setting | Where |
 |---|---|
+| which files are checked | no paths: every tracked `.py` under rocke (`git ls-files`), no list to maintain; pyright also skips hidden directories and `node_modules` |
 | pyright rules and import roots | `rocke/pyrightconfig.json` |
 | radon report thresholds, vulture confidence | top of `rocke/tools/advisory_checks.py` |
 | Suggested tool versions | Optional installation command above |
@@ -239,11 +240,11 @@ so the comment does not hide other errors on that line.
 vulture: 5 finding(s)
 ```
 
-**How it decides:** vulture reads all of rocke (library, platform, tools,
-cmake) and reports a definition whose *name* appears nowhere else. It then
-prints only the files you asked about. Test files are scanned, so a helper used
-only by a test is not reported, but findings *in* tests are not shown: fixtures
-and `test_*` functions look unused by design.
+**How it decides:** vulture reads all the Python tracked by git under rocke, plus
+any new file you name, and reports a definition whose *name* appears nowhere
+else. It then prints only the files you asked about. Test files are scanned, so
+a helper used only by a test is not reported, but findings *in* tests are not
+shown: fixtures and `test_*` functions look unused by design.
 
 **Confidence:** 100% means certain (unreachable code, an `if False:` branch).
 60% covers unused functions, methods, classes, attributes and variables, which

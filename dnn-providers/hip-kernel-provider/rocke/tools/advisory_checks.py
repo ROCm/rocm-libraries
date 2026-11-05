@@ -2,8 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# advisory_checks.py -- NON-BLOCKING static analysis for ALL rocke Python
-# (library, platform, tools, cmake):
+# advisory_checks.py -- NON-BLOCKING static analysis for ALL rocke Python:
 #   pyright  -- type checking
 #   radon    -- software metrics (cyclomatic complexity, maintainability index,
 #               Halstead, raw line counts)
@@ -15,7 +14,9 @@
 # environment without installing tools. pyright settings live in
 # rocke/pyrightconfig.json; the radon and vulture settings are below.
 #
-# Paths outside rocke are ignored; no paths = all of rocke.
+# Paths outside rocke are ignored; no paths = every tracked rocke .py file, as
+# listed by `git ls-files` (git, not this script, knows what is source and what
+# is an artifact).
 #
 # What the reports mean and what to act on: rocke/docs/static-analysis.md.
 #
@@ -41,20 +42,13 @@ from typing import Any
 
 ROCKE = Path(__file__).resolve().parents[1]  # tools -> rocke
 GUIDE = ROCKE / "docs" / "static-analysis.md"
-# Python trees under rocke; anything else (docs, style, ...) holds no code.
-TREES = ("library", "platform", "tools", "cmake")
-# Untracked artifact dirs, mirroring rocke/.gitignore.
-SKIP_DIRS = {
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    "_deps",
-    "kernel_cache",
-    "build",
-    "_build",
-    "scratch",
-    "logs",
-}
+
+# Variables that tell git which repository to use. Git exports GIT_DIR to a hook
+# that runs from a linked worktree; with it set and no GIT_WORK_TREE, git takes
+# the cwd as the top of the work tree, so `git ls-files` run from rocke/ lists the
+# whole repository with repo-root-relative paths. Dropping them makes git find the
+# repository from the cwd, as it does in any other shell.
+_GIT_REPO_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
 TOOLS = ("pyright", "radon", "vulture")
 
@@ -73,33 +67,30 @@ def _show(p: Path) -> str:
     return os.path.relpath(p, Path.cwd())
 
 
-def _skip_dir(part: str) -> bool:
-    return (
-        part in SKIP_DIRS
-        or part.endswith(".egg-info")
-        or part.startswith((".venv", "venv"))
-    )
-
-
-def _skipped(p: Path) -> bool:
-    # Directory parts only: a FILE called venv_probe.py is code, not a virtualenv.
-    return any(_skip_dir(part) for part in p.relative_to(ROCKE).parts[:-1])
-
-
 def _all_files() -> list[Path]:
-    # is_file() drops dangling symlinks such as Emacs's `.#<name>.py` lock files:
-    # vulture exits on a path that does not exist, and radon cannot read one.
-    files = []
-    for tree in TREES:
-        for root, dirs, names in os.walk(ROCKE / tree):
-            dirs[:] = [d for d in dirs if not _skip_dir(d)]
-            files.extend(
-                p
-                for name in names
-                if name.endswith(".py")
-                if (p := Path(root) / name).is_file()
-            )
-    return sorted(files)
+    """Every tracked rocke ``.py`` file that exists on disk.
+
+    This is the one list of what counts as rocke source: git already knows which
+    files are source and which are artifacts (venvs, build trees, caches are
+    ignored or untracked), so neither this script nor pyrightconfig.json keeps a
+    list of directories to cover or to skip.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_REPO_ENV}
+    proc = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.py"], cwd=ROCKE, env=env, capture_output=True
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.decode(errors="replace").strip() or "no error output"
+        raise RuntimeError(
+            f"git ls-files failed (exit {proc.returncode}) in {ROCKE}: {detail}"
+        )
+    names = (os.fsdecode(name) for name in proc.stdout.split(b"\0") if name)
+    # is_file() drops what git lists but the disk lacks (a dangling symlink, a file
+    # deleted but not yet staged, a path outside a sparse checkout): vulture exits
+    # on a path that does not exist, and radon cannot read one.
+    # A set: `git ls-files` lists a path once per index stage, so a file with a
+    # merge conflict comes back up to three times.
+    return sorted({p for name in names if (p := ROCKE / name).is_file()})
 
 
 def _rocke_files(paths: list[str]) -> list[Path]:
@@ -108,24 +99,38 @@ def _rocke_files(paths: list[str]) -> list[Path]:
     files = []
     for raw in paths:
         p = Path(raw).resolve()
-        if (
-            p.suffix == ".py"
-            and p.is_file()
-            and p.is_relative_to(ROCKE)
-            and not _skipped(p)
-        ):
+        if p.suffix == ".py" and p.is_file() and p.is_relative_to(ROCKE):
             files.append(p)
     return files
 
 
 def run_pyright(files: list[Path], whole: bool) -> None:
-    cmd = [sys.executable, "-m", "pyright", "--project", str(ROCKE), "--outputjson"]
-    if not whole:
-        # rocke-relative: shorter than the repo-relative names pre-commit sized
-        # this batch for. Absolute names overflow Windows' 32,767-character
-        # command line on a full batch (e.g. --all-files).
-        cmd += [str(f.relative_to(ROCKE)) for f in files]
-    proc = subprocess.run(cmd, cwd=ROCKE, capture_output=True, text=True)
+    # The file names go on stdin, not the command line: all of rocke is ~1,650
+    # names (~86,000 characters), past Windows' 32,767-character command-line
+    # limit. They are rocke-relative (the cwd), one per line. A list on stdin
+    # replaces the config's `include`, so pyrightconfig.json holds none; pyright
+    # splits the list on any whitespace, so a file name with a space would break it,
+    # and its built-in excludes (hidden directories, node_modules) still apply.
+    names = "\n".join(str(f.relative_to(ROCKE)) for f in files)
+    cmd = [
+        sys.executable,
+        "-m",
+        "pyright",
+        "--project",
+        str(ROCKE),
+        "--outputjson",
+        "-",
+    ]
+    # UTF-8 both ways: Node reads the names and writes the JSON as UTF-8, while
+    # text=True would use the locale's code page (cp1252 on Windows).
+    proc = subprocess.run(
+        cmd,
+        cwd=ROCKE,
+        input=names,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     try:
         report = json.loads(proc.stdout)
     except json.JSONDecodeError:  # pyright failed before analysing; show why
@@ -156,9 +161,12 @@ def run_vulture(files: list[Path], whole: bool) -> None:
     # from library code (or a helper used only by tests) is not reported as
     # dead; then report just the requested files. Tests count as uses but are
     # not reported on: pytest fixtures and test_* functions look unused by design.
-    scanned = _all_files()
+    # A requested file git does not track yet (a new file) is scanned too, or its
+    # report would be empty without saying so.
+    scanned = sorted({*_all_files(), *files})
     # In-process, not `python -m vulture <every file>`: that command line is
-    # ~62,000 characters, past Windows' 32,767 limit, so the scan could never start.
+    # ~86,000 characters even with rocke-relative names (1,649 files), past
+    # Windows' 32,767 limit, so the scan could never start.
     vulture = Vulture()
     vulture.scavenge(scanned)
     reported = {
@@ -262,7 +270,23 @@ def run_radon(files: list[Path], whole: bool) -> None:
         _print_hot(hot)
 
 
+# main() calls every runner as (files, whole). Only run_vulture needs `whole`;
+# run_pyright and run_radon accept it and ignore it.
 RUNNERS = {"pyright": run_pyright, "radon": run_radon, "vulture": run_vulture}
+
+
+def _tolerate_unencodable_output() -> None:
+    """Keep print() from raising on a character the output encoding lacks.
+
+    pre-commit pipes this script's output, so on Windows it is encoded strictly
+    with the ANSI code page. A message that names a path (git's "dubious
+    ownership" refusal, an OSError) can hold a character outside it, and the
+    UnicodeEncodeError would escape the handler in main() and fail the push.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:  # absent when the stream is not a TextIOWrapper
+            reconfigure(errors="replace")
 
 
 def main() -> int:
@@ -274,17 +298,19 @@ def main() -> int:
         "paths", nargs="*", help="files to report on (default: all of rocke)"
     )
     args = ap.parse_args()
+    _tolerate_unencodable_output()
 
     whole = not args.paths
-    files = _rocke_files(args.paths)
-    if not files:
-        return 0
-    print(
-        f"[advisory, non-blocking] {args.tool} on {len(files)} file(s)"
-        f" -- how to read this report: {_show(GUIDE)}",
-        flush=True,
-    )
     try:
+        # Inside the guard: listing all of rocke runs git, which can fail too.
+        files = _rocke_files(args.paths)
+        if not files:
+            return 0
+        print(
+            f"[advisory, non-blocking] {args.tool} on {len(files)} file(s)"
+            f" -- how to read this report: {_show(GUIDE)}",
+            flush=True,
+        )
         RUNNERS[args.tool](files, whole)
     except ImportError as e:
         print(f"{args.tool}: not installed for {sys.executable} ({e}); skipped")
