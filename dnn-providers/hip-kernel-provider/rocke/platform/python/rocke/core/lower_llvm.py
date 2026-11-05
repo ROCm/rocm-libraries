@@ -1285,38 +1285,13 @@ def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
     return iv, carried
 
 
-def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
-    """Validate each serialized loop metadata entry and render the real carry
-    types."""
-    # _scf_for_error has checked that num_iter, the init operands, the
-    # metadata list and the results agree.
-    iter_inits = op.operands[3:]
-    iter_meta = op.attrs.get("iter_args", [])
+def _scf_iter_llvm_types(op: Op) -> list[str]:
+    """Render the LLVM type of each value the ``scf.for`` ``op`` carries.
 
-    llvm_types: List[str] = []
-    for index, (meta, init, result) in enumerate(
-        zip(iter_meta, iter_inits, op.results)
-    ):
-        if not isinstance(meta, dict):
-            raise ValueError(f"scf.for iter_arg {index} metadata must be a map")
-        name = meta.get("name")
-        type_name = meta.get("type")
-        if not isinstance(name, str) or not name:
-            raise ValueError(f"scf.for iter_arg {index} metadata has no name")
-        if not isinstance(type_name, str):
-            raise ValueError(f"scf.for iter_arg {name} metadata has no type")
-        if type_name != init.type.name:
-            raise ValueError(
-                f"scf.for iter_arg {name} metadata type {type_name!r} "
-                f"does not match init type {init.type.name!r}"
-            )
-        if result.type != init.type:
-            raise ValueError(
-                f"scf.for result type {result.type.name!r} does not match "
-                f"iter_arg {name} type {init.type.name!r}"
-            )
-        llvm_types.append(_llvm_loop_carried_type(init.type))
-    return llvm_types
+    ``_scf_for_error`` has checked that the counts of carried values agree and
+    that the ``iter_args`` metadata describes them.
+    """
+    return [_llvm_loop_carried_type(init.type) for init in op.operands[3:]]
 
 
 def _param_llvm_type(p: Param) -> str:
@@ -7104,9 +7079,8 @@ class _Lowerer:
         """Lower scf.for to LLVM IR.
 
         Checks for 'unroll' hint and constant bounds to decide between
-        unrolled (straight-line) or normal (loop) lowering. Both refuse a
-        loop that carries a buffer descriptor or nests a yield its body does
-        not take.
+        unrolled (straight-line) or normal (loop) lowering. Both first refuse
+        a loop the loop rule (:func:`_scf_for_error`) refuses.
         """
         error = _scf_for_error(op)
         if error is not None:
@@ -7163,7 +7137,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
+        iter_llvm_types = _scf_iter_llvm_types(op)
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -7269,7 +7243,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
+        iter_llvm_types = _scf_iter_llvm_types(op)
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)

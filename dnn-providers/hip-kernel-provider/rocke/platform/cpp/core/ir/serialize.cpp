@@ -1584,14 +1584,12 @@ static void refuse_reused_loop_names(rocke_ir_builder_t* b, const rocke_op_t* lo
  * value named `name` whose type attr is not a type name could not be bound,
  * and the body's reads of `name` would read whatever other value holds that
  * name, or none. Raises a ValueError (rocke_i_set_err) with
- * _untyped_loop_value_message's text. */
+ * rocke_i_untyped_loop_value_message's text. */
 static void refuse_untyped_loop_value(rocke_ir_builder_t* b, const char* name)
 {
-    rocke_i_set_err(b,
-                    ROCKE_ERR_VALUE,
-                    "scf.for: the loop value '%s' has no type name; its iv_type attr or "
-                    "iter_args entry must name its type",
-                    name);
+    char msg[ROCKE_ERR_MSG_CAP];
+    rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "%s", rocke_i_untyped_loop_value_message(name, msg, sizeof msg));
 }
 
 /* Bind `v`, a block value of the scf.for being parsed, under its name. */

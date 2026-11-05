@@ -2941,7 +2941,8 @@ static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, 
     int64_t count = 0;
     rocke_attr_get_int(&op->attrs, "num_iter_args", &count);
     const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
-    if(metadata && metadata->kind != ROCKE_ATTR_LIST)
+    /* The parser stores a bare map as a list of count -1 (serialize.cpp). */
+    if(metadata && (metadata->kind != ROCKE_ATTR_LIST || metadata->u.list.count < 0))
     {
         snprintf(buf, cap, "scf.for iter_args metadata must be a list");
         return buf;
@@ -2965,6 +2966,62 @@ static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, 
                      (long long)count,
                      entry.actual,
                      entry.what);
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_scf_for_metadata_entry_error: the refusal for the scf.for
+ * `op`, whose carried-value counts agree (scf_for_carried_count_error), when an
+ * iter_args metadata entry does not describe its carried value, written into
+ * `buf`, or NULL when every entry does. Entry i is a map whose "name" is a
+ * non-empty string and whose "type" names the type of init operand i (operand
+ * 3 + i); result i has that type too. Every value, built or parsed, has a
+ * named type, as scf_for_yield_error also relies on. */
+static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
+    const int count = metadata ? metadata->u.list.count : 0;
+    for(int i = 0; i < count; i++)
+    {
+        const rocke_attr_map_t* entry = metadata->u.list.items[i];
+        if(!entry)
+        {
+            snprintf(buf, cap, "scf.for iter_arg %d metadata must be a map", i);
+            return buf;
+        }
+        const char* name = rocke_attr_get_str(entry, "name");
+        if(!name || !*name)
+        {
+            snprintf(buf, cap, "scf.for iter_arg %d metadata has no name", i);
+            return buf;
+        }
+        const char* type_name = rocke_attr_get_str(entry, "type");
+        if(!type_name)
+        {
+            return rocke_i_untyped_loop_value_message(name, buf, cap);
+        }
+        const rocke_type_t* init_type = op->operands[3 + i]->type;
+        if(strcmp(type_name, init_type->name) != 0)
+        {
+            snprintf(buf,
+                     cap,
+                     "scf.for iter_arg %s metadata type '%s' does not match init type '%s'",
+                     name,
+                     type_name,
+                     init_type->name);
+            return buf;
+        }
+        const rocke_type_t* result_type = op->results[i]->type;
+        if(!rocke_type_eq(result_type, init_type))
+        {
+            snprintf(buf,
+                     cap,
+                     "scf.for result type '%s' does not match iter_arg %s type '%s'",
+                     result_type->name,
+                     name,
+                     init_type->name);
             return buf;
         }
     }
@@ -3035,6 +3092,8 @@ static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t c
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     if(scf_for_carried_count_error(op, buf, cap))
+        return buf;
+    if(scf_for_metadata_entry_error(op, buf, cap))
         return buf;
     if(rocke_i_scf_for_carried_descriptor_error(op, buf, cap))
         return buf;

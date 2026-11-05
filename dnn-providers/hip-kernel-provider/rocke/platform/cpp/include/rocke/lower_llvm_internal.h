@@ -773,6 +773,8 @@ void rocke_ll_emit_wave_ballot(rocke_lower_t* L,
  * dispatcher (_op_scf_for) picks between them; both live in the flow bucket but
  * are declared here because the unrolled path mutates Value names which the
  * shared operand renderer must see -- keep them visible for the flow handlers.
+ * Both read the loop's iter_args metadata unchecked: call them only on a loop
+ * the loop rule (rocke_i_scf_for_error) accepts, as _op_scf_for does.
  */
 void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op);
 void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op);

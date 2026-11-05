@@ -347,13 +347,15 @@ const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops
 
 /* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
  * is sound (Python core/ir.py::_scf_for_error, same text): its num_iter_args,
- * init operands, iter_args metadata list and results agree in count; it
- * carries no buffer descriptor (rocke_i_scf_for_carried_descriptor_error); its
- * body yields only at its end, one value per init operand, of that operand's
- * type, and ends in that yield whenever the loop carries any value; and it
- * takes only the yields directly in its body, so the body nests none in a
- * region that takes no yields (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand /
- * region counts. The verifier and both lowerings use it. */
+ * init operands, iter_args metadata list and results agree in count; each
+ * metadata entry names its carried value and that value's type, which its
+ * result shares; it carries no buffer descriptor
+ * (rocke_i_scf_for_carried_descriptor_error); its body yields only at its end,
+ * one value per init operand, of that operand's type, and ends in that yield
+ * whenever the loop carries any value; and it takes only the yields directly
+ * in its body, so the body nests none in a region that takes no yields
+ * (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand / region counts. The
+ * verifier and both lowerings use it. */
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
@@ -396,6 +398,13 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
  * value by its name, so a reused name is ambiguous inside the inner body. The
  * builder, the IR parser and the verifier use it. */
 const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
+
+/* Mirrors ir._untyped_loop_value_message: writes into `buf` the refusal for an
+ * scf.for induction variable or carried value named `name` whose type attr (the
+ * loop's "iv_type" attr or its iter_args entry's "type") is not a type name,
+ * and returns `buf`. The IR parser and the loop rule (rocke_i_scf_for_error)
+ * use it, so a loop gets one text whichever of the two meets it first. */
+const char* rocke_i_untyped_loop_value_message(const char* name, char* buf, size_t cap);
 
 /* Mirrors ir._first_reused_loop_name: the first of `names` (the names an
  * scf.for gives its induction variable and carried values, in that order) that

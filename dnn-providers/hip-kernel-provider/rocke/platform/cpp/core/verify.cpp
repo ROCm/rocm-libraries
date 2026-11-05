@@ -752,21 +752,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         iter_meta_count = 0;
     }
 
-    /* result types must match init types */
-    {
-        int lim = op->num_results < num_iter_inits ? op->num_results : num_iter_inits;
-        for(int i = 0; i < lim; ++i)
-        {
-            const rocke_type_t* res = op->results[i]->type;
-            const rocke_type_t* init = op->operands[3 + i]->type;
-            if(!rocke_type_eq(res, init))
-            {
-                v_errf(v, op, "scf.for: result type %s != iter init type %s", tn(res), tn(init));
-            }
-        }
-    }
-    /* The counts of carried values and the body's yields: one rule for the
-     * verifier and every lowering. */
+    /* The carried values (their counts, metadata and result types) and the
+     * body's yields: one rule for the verifier and every lowering. */
     {
         char loop_error[ROCKE_ERR_MSG_CAP];
         if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
@@ -796,7 +783,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         int lim = iter_meta_count < num_iter_inits ? iter_meta_count : num_iter_inits;
         for(int i = 0; i < lim; ++i)
         {
-            const char* nm = rocke_attr_get_str(iter_meta->u.list.items[i], "name");
+            const rocke_attr_map_t* entry = iter_meta->u.list.items[i];
+            const char* nm = entry ? rocke_attr_get_str(entry, "name") : NULL;
             if(nm)
             {
                 scope_put(v, nm, op->operands[3 + i]->type);

@@ -1050,6 +1050,21 @@ def _reused_loop_name_message(name: str) -> str:
     )
 
 
+def _untyped_loop_value_message(name: str) -> str:
+    """The refusal for an ``scf.for`` induction variable or carried value named
+    ``name`` whose type attr (its loop's ``iv_type`` attr or its ``iter_args``
+    entry's ``type``) is not a type name.
+
+    The IR parser refuses such a value before it binds it, and the loop rule
+    (:func:`_scf_for_metadata_entry_error`) refuses such a carried value in IR
+    that reaches the verifier or a lowering without passing the parser.
+    """
+    return (
+        f"scf.for: the loop value '{name}' has no type name; its iv_type attr or "
+        "iter_args entry must name its type"
+    )
+
+
 def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str | None:
     """The first of ``names`` that is already taken, or None when all are free.
 
@@ -1444,6 +1459,41 @@ def _scf_for_carried_count_error(op: Op) -> str | None:
     return None
 
 
+def _scf_for_metadata_entry_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when an ``iter_args`` metadata
+    entry does not describe its carried value, or None when every entry does.
+
+    The counts of carried values agree (:func:`_scf_for_carried_count_error`).
+    Entry ``i`` is a map whose ``name`` is a non-empty string and whose
+    ``type`` names the type of init operand ``i``; result ``i`` has that type
+    too. An entry with no type name gets the IR parser's refusal
+    (:func:`_untyped_loop_value_message`), so a loop gets one text whichever
+    of the two meets it first.
+    """
+    for index, (entry, init, result) in enumerate(
+        zip(op.attrs.get("iter_args", []), op.operands[3:], op.results)
+    ):
+        if not isinstance(entry, dict):
+            return f"scf.for iter_arg {index} metadata must be a map"
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            return f"scf.for iter_arg {index} metadata has no name"
+        type_name = entry.get("type")
+        if not isinstance(type_name, str):
+            return _untyped_loop_value_message(name)
+        if type_name != init.type.name:
+            return (
+                f"scf.for iter_arg {name} metadata type '{type_name}' "
+                f"does not match init type '{init.type.name}'"
+            )
+        if result.type != init.type:
+            return (
+                f"scf.for result type '{result.type.name}' does not match "
+                f"iter_arg {name} type '{init.type.name}'"
+            )
+    return None
+
+
 def _scf_for_yield_error(op: Op) -> str | None:
     """The refusal for the ``scf.yield`` ops directly in the body of the
     ``scf.for`` ``op``, whose carried-value counts agree
@@ -1486,7 +1536,8 @@ def _scf_for_error(op: Op) -> str | None:
     """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
 
     A loop's counts of carried values agree
-    (:func:`_scf_for_carried_count_error`); it cannot carry a buffer
+    (:func:`_scf_for_carried_count_error`) and its ``iter_args`` metadata
+    describes them (:func:`_scf_for_metadata_entry_error`); it cannot carry a buffer
     descriptor (:func:`_scf_for_carried_descriptor_error`); its body yields
     once, at its end, the values it carries (:func:`_scf_for_yield_error`); and
     it takes only the yields directly in its body, so its body nests none in a
@@ -1497,6 +1548,9 @@ def _scf_for_error(op: Op) -> str | None:
     engines (``rocke_i_scf_for_error``).
     """
     error = _scf_for_carried_count_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_metadata_entry_error(op)
     if error is not None:
         return error
     error = _scf_for_carried_descriptor_error(op)
