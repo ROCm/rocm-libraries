@@ -49,11 +49,14 @@ agree.
 
 - Trained on 810 SDPA graphs over the 21 multi-variant cells (D64/D128 cells shipping two or three tile geometries), each kernel timed on MI355X
   (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the `hipdnn-uhd` skill).
-- Validated on 97 held-out graphs: held-out geomean regret 1.0010 vs native 1.0178; no graph more than 5% slower than native (worst 1.002x); top-1 97.9% vs 84.5%. Stage V on MI355X (`validate_l2.py`, `decide.py
-  l2 --baseline native`): the runtime reads each model, no winner record decides, and the
-  regret gate passes.
-- The engine config records the bound ids and the fingerprint of the catalog they were trained
-  on (`engine.trained_rankers`). `tests/test_trained_rankers.py` in the IngestorGenerator fails
+- Validated on 352 held-out graphs (never trained on): geomean regret 1.0028 (tflops) / 1.0032
+  (time) vs native 1.0186; top-1 97.2% / 94.9% vs 82.4%; faster than native by more than 2% on
+  52–53 graphs. One graph is more than 5% slower than native (1.18x, a 0.18 ms graph). A retrain
+  on 3,330 graphs scored the same, so these models stay. Stage V on MI355X (`validate_l2.py`,
+  `decide.py l2 --baseline native`): the runtime reads each model, no winner record decides,
+  and the regret gate passes.
+- The engine config binds the ids (`engine.heuristics`) and records the fingerprint of the
+  catalog they were trained on (`engine.trained_catalog_sha256`). `tests/test_trained_rankers.py` in the IngestorGenerator fails
   when the shipped KDP no longer matches: any kernel added, removed, renamed or changed needs a
   retrain (the skill's `generate.md`), then the new ids and
   `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.

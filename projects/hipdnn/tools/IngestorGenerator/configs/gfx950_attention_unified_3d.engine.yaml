@@ -38,8 +38,8 @@ engine:
   heuristics:
     sort_kernel_catalog:
       gfx950:
-      - ef672871-d8a0-4edf-b187-88103ffcb614
-      - f33233b9-1441-4161-8e42-c03c2f234c50
+      - 80b57cd6-ce8f-41cd-9a8e-18e0b1862304
+      - a6acccb8-8263-41f3-98c0-ad7e29918422
   trained_catalog_sha256:
     gfx950: d71b979709a67946fcf89700ece637aecc85fafcefe09c360cc38a7776ce420a
 kmd_fields:

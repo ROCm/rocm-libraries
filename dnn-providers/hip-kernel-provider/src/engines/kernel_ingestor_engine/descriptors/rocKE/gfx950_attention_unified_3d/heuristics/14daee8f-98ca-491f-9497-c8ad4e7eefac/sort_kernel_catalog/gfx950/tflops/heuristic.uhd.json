@@ -1,9 +1,11 @@
 {
   "version": "1.0",
-  "id": "ef672871-d8a0-4edf-b187-88103ffcb614",
+  "id": "80b57cd6-ce8f-41cd-9a8e-18e0b1862304",
   "name": "Generated UHD (tflops)",
   "adapter": "tree_data",
   "features_signature": [
+    "$device.memory_clock_rate",
+    "$device.peak_memory_bandwidth",
     "$kernel.num_segments",
     "$graph.arithmetic_intensity",
     "$graph.flops",
@@ -51,7 +53,7 @@
     "$graph.tensors[3].strides[0]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:9e204eed458fe48d",
+  "features_hash": "sha256:96b614da07c2a8b8",
   "trained_against": {
     "ued": {
       "id": "14daee8f-98ca-491f-9497-c8ad4e7eefac",
@@ -77,6 +79,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "561cc70c7078845d6db35e721de6c375f8502e33368305673dc9cd03085867dc"
+    "hash": "35095f85556a5edcca57c7d15edf3c0d29bd5a7751285bbffd1c4f63d034e344"
   }
 }

@@ -45,13 +45,16 @@ git, `model.bin` in DVC (`model.bin.dvc`). Only the cells that ship more than on
 a model a choice; elsewhere a graph matches one kernel and the model and the native scorer
 agree.
 
-- Trained on 250 SDPA graphs over the 5 multi-variant cells (bf16 bottom-right causal D128 cells shipping 16, 32 and/or 64 segments), each kernel timed on MI355X
+- Trained on 994 SDPA graphs over the 5 multi-variant cells (bf16 bottom-right causal D128 cells shipping 16, 32 and/or 64 segments), each kernel timed on MI355X
   (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the `hipdnn-uhd` skill).
-- Validated on 25 held-out graphs: held-out geomean regret 1.0015 (tflops) / 1.0007 (time) vs native 1.0771; no graph more than 5% slower than native; top-1 92% / 96% vs 64%. Stage V on MI355X (`validate_l2.py`, `decide.py
+- Validated on 100 held-out graphs (never trained on): geomean regret 1.0029 (tflops) / 1.0015
+  (time) vs native 1.0962; top-1 96% / 97% vs 73%; native's worst case of 2.47x drops to
+  1.23x / 1.07x. One graph per model is more than 5% slower than native (1.23x and 1.07x, on
+  12 µs and 58 µs graphs). Stage V on MI355X (`validate_l2.py`, `decide.py
   l2 --baseline native`): the runtime reads each model, no winner record decides, and the
   regret gate passes.
-- The engine config records the bound ids and the fingerprint of the catalog they were trained
-  on (`engine.trained_rankers`). `tests/test_trained_rankers.py` in the IngestorGenerator fails
+- The engine config binds the ids (`engine.heuristics`) and records the fingerprint of the
+  catalog they were trained on (`engine.trained_catalog_sha256`). `tests/test_trained_rankers.py` in the IngestorGenerator fails
   when the shipped KDP no longer matches: any kernel added, removed, renamed or changed needs a
   retrain (the skill's `generate.md`), then the new ids and
   `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.
