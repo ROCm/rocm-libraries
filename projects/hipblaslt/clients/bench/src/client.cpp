@@ -950,9 +950,9 @@ try
         return 1;
     }
 
-    if(const auto err
-       = hipblaslt_cotenant::validate_options(hipblaslt_bench_options::cotenant_cus(),
-                                              hipblaslt_bench_options::cotenant_max_occupancy());
+    if(const auto err = hipblaslt_cotenant::validate_options(
+           hipblaslt_bench_options::cotenant_cus(),
+           hipblaslt_bench_options::cotenant_max_occupancy());
        !err.empty())
     {
         hipblaslt_cerr << err << std::endl;
@@ -996,10 +996,9 @@ try
     }
 
     {
-        const int32_t resolved
-            = parseModeFlag(hipblaslt_bench_options::uniform_summation_order_str(),
-                            false,
-                            "uniform_summation_order must be one of off|0, on|1.");
+        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::uniform_summation_order_str(),
+                                               false,
+                                               "uniform_summation_order must be one of off|0, on|1.");
         if(resolved == -2)
             return 1;
         hipblaslt_bench_options::uniform_summation_order() = resolved;
@@ -1168,18 +1167,12 @@ try
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
 
-    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0]
-       && arg.batch_mode == 0)
-        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M "
-                                    "when bias source is A and batch_mode is 0.");
-    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride < arg.N[0]
-       && arg.batch_mode == 0)
-        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= N "
-                                    "when bias source is B and batch_mode is 0.");
-    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > arg.M[0]
-       && arg.batch_mode == 0)
-        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M "
-                                    "when bias source is D and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride < arg.N[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= N when bias source is B and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is D and batch_mode is 0.");
 
     if(!(aux_type == "" || aux_type == "default" || arg.use_e))
         hipblaslt_cerr << "warning: --use_e not set but --aux_type is provided" << std::endl;
@@ -1244,49 +1237,44 @@ try
     arg.scaleC = scaleCFormat;
     arg.scaleD = scaleDFormat;
     if(arg.batch_mode < 0 || arg.batch_mode > 1)
-        throw std::invalid_argument("Invalid value for --batch_mode "
-                                    + std::to_string(arg.batch_mode));
+        throw std::invalid_argument("Invalid value for --batch_mode " + std::to_string(arg.batch_mode));
     /** Introduced this check to stay consistent with cublaslt behavior as documented at
      *  https://docs.nvidia.com/cuda/cublas/#narrow-precision-data-types-usage under the 
      *  Notes Section.
      */
-    if(arg.batch_mode == 1
-       && (arg.scaleA == hipblaslt_scaling_format::Vector
-           || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0
-           || arg.scaleA == hipblaslt_scaling_format::Block_16_UE8M0
-           || arg.scaleA == hipblaslt_scaling_format::Block_32_UE4M3
-           || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
-           || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
-           || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
-           || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT))
-        throw std::invalid_argument(
-            "Only Tensorwide scaling is supported when batch_mode is "
-            "HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
-    if(arg.batch_mode == 1
-       && (arg.scaleB == hipblaslt_scaling_format::Vector
-           || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
-           || arg.scaleB == hipblaslt_scaling_format::Block_16_UE8M0
-           || arg.scaleB == hipblaslt_scaling_format::Block_32_UE4M3
-           || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
-           || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
-           || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
-           || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT))
-        throw std::invalid_argument(
-            "Only Tensorwide scaling is supported when batch_mode is "
-            "HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
+    if(arg.batch_mode == 1 && (arg.scaleA == hipblaslt_scaling_format::Vector
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+        throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
+    if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+        throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4
     if(isBlockScaling(arg.scaleA))
     {
-        if(arg.a_type != HIP_R_8F_E4M3 && arg.a_type != HIP_R_8F_E5M2 && arg.a_type != HIP_R_4F_E2M1
-           && arg.a_type != HIP_R_6F_E2M3 && arg.a_type != HIP_R_6F_E3M2)
+        if(arg.a_type != HIP_R_8F_E4M3 && arg.a_type != HIP_R_8F_E5M2
+           && arg.a_type != HIP_R_4F_E2M1 && arg.a_type != HIP_R_6F_E2M3
+           && arg.a_type != HIP_R_6F_E3M2)
             throw std::invalid_argument("Invalid a_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.a_type));
     }
     if(isBlockScaling(arg.scaleB))
     {
-        if(arg.b_type != HIP_R_8F_E4M3 && arg.b_type != HIP_R_8F_E5M2 && arg.b_type != HIP_R_4F_E2M1
-           && arg.b_type != HIP_R_6F_E2M3 && arg.b_type != HIP_R_6F_E3M2)
+        if(arg.b_type != HIP_R_8F_E4M3 && arg.b_type != HIP_R_8F_E5M2
+           && arg.b_type != HIP_R_4F_E2M1 && arg.b_type != HIP_R_6F_E2M3
+           && arg.b_type != HIP_R_6F_E3M2)
             throw std::invalid_argument("Invalid b_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.b_type));
     }
@@ -1390,11 +1378,6 @@ try
     return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
 catch(const std::exception& exp)
-{
-    hipblaslt_cerr << exp.what() << std::endl;
-    return -1;
-}
-catch(const std::runtime_error& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;

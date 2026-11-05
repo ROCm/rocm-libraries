@@ -483,6 +483,11 @@ namespace hipblaslt::hostnumerics
                     throw std::runtime_error(
                         "hipBLASLt NaN initialization requires an ordinary floating type.");
                 return nanRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
+            case hipblaslt_initialization::maf2_0:
+            case hipblaslt_initialization::maf2_0_unit_scale:
+            case hipblaslt_initialization::maf1_0:
+                throw std::runtime_error(
+                    "MAF initialization fills tensors directly and has no generation recipe.");
             }
             throw std::runtime_error("Unsupported hipBLASLt host matrix initialization mode.");
         }
@@ -698,6 +703,11 @@ namespace hipblaslt::hostnumerics
         case hipblaslt_initialization::norm_dist_one_special:
             throw std::runtime_error(
                 "Requested hipBLASLt initialization requires matrix role and layout information.");
+        case hipblaslt_initialization::maf2_0:
+        case hipblaslt_initialization::maf2_0_unit_scale:
+        case hipblaslt_initialization::maf1_0:
+            throw std::runtime_error(
+                "MAF initialization fills tensors directly and has no generation recipe.");
         }
         throw std::runtime_error("Unsupported hipBLASLt tensor initialization mode.");
     }
@@ -765,16 +775,13 @@ namespace hipblaslt::hostnumerics
                                         : TrigonometricComponent::Sine);
     }
 
-    void initializeMatrix(Tensor                         destination,
-                          MatrixRole                     role,
-                          hipblaslt_initialization       initialization,
-                          uint64_t                       seed,
-                          bool                           forceNaN,
-                          std::optional<OneSpecialValue> oneSpecialValue,
-                          bool                           positiveOnly,
-                          IntegerExactOptions            integerExact,
-                          size_t                         batchIndex)
+    void initializeMatrix(Tensor                             destination,
+                          MatrixRole                         role,
+                          hipblaslt_initialization           initialization,
+                          uint64_t                           seed,
+                          const MatrixInitializationOptions& options)
     {
+        const auto& [forceNaN, oneSpecialValue, positiveOnly, integerExact, batchIndex] = options;
         validateInitialization(role, initialization, oneSpecialValue, positiveOnly);
         if(integerExact.pattern != IntegerExactPattern::Standard
            && initialization != hipblaslt_initialization::integer_exact)
