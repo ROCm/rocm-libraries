@@ -143,9 +143,90 @@ class KernelIdentity:
     # Left out of the hash while False, like ws_replicas, so identities that
     # predate the field keep their hash and their cache entries.
     prefetch_addr: bool = False
-    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
-    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    # The register-prefetch K loop. wgrad: WgradConvSpec.prefetch_regs
+    # (1: one LDS tile, 2: two, 3: two tiles ahead); fwd: the bool
+    # ImplicitGemmConvSpec.prefetch_regs, recorded as 1. Left out of the hash
+    # at 0, like prefetch_addr.
+    prefetch_regs: int = 0
+    # wgrad only (WgradConvSpec.lds_kpack): K steps packed per LDS store on
+    # the M-outer transpose-on-store. Left out of the hash at 1.
+    lds_kpack: int = 1
+    # wgrad (WgradConvSpec.xcd_remap: whole-grid remap), fwd
+    # (ImplicitGemmConvSpec.xcd_remap: XCD-contiguous tile order) and dgrad
+    # (DgradConvSpec.xcd_remap: the XCD tile order for ungrouped launches
+    # too): the XCD count, 0 = launch order / the target default. Left out
+    # of the hash at 0.
+    xcd_remap: int = 0
+    # wgrad only (WgradConvSpec.sep_addr): separable (1) / carried (2)
+    # operand addressing. Left out of the hash at 0.
+    sep_addr: int = 0
+    # wgrad only (WgradConvSpec.pfr_sched): issue schedule of the prefetch
+    # loop's reads (1 early, N>1 interleave). Left out of the hash at 0.
+    pfr_sched: int = 0
+    # wgrad only (WgradConvSpec.lds_bswz): pad-free XOR-swizzled B tile.
+    # Left out of the hash at 0.
+    lds_bswz: int = 0
+    # wgrad only (WgradConvSpec.kp_line): line-major decode of the k-packed
+    # reads. Left out of the hash at 0.
+    kp_line: int = 0
+    # wgrad only (WgradConvSpec.xwin): X-window reuse over the x taps; the
+    # value is the baked filter width. Left out of the hash at 0.
+    xwin: int = 0
+    # wgrad only (WgradConvSpec.xwin_rows): filter rows per xwin B tile.
+    # Left out of the hash at 1.
+    xwin_rows: int = 1
+    # wgrad only (WgradConvSpec.xwin_groups / xwin_pp): xwin sub-tiles per
+    # workgroup (stacked along split-K z) and the block ping-pong K loop.
+    # Left out of the hash at 1 / 0.
+    xwin_groups: int = 1
+    xwin_pp: int = 0
+    # wgrad only (WgradConvSpec.xwin_mrow): output rows per xwin K tile.
+    # Left out of the hash at 1.
+    xwin_mrow: int = 1
+    # wgrad only (WgradConvSpec.xwin_gn): groups over consecutive flat tiles.
+    # Left out of the hash at 0.
+    xwin_gn: int = 0
+    # wgrad only (WgradConvSpec.ws_fuse): the two-stage reduction done in the
+    # Stage 1 epilogue (per-tile counters, no clear, no Stage 2). Left out of
+    # the hash at 0.
+    ws_fuse: int = 0
+    # wgrad only (WgradConvSpec.ws_store): plain-store per-slice scratch slabs. Left out of the hash at 0.
+    ws_store: int = 0
+    # wgrad only (WgradConvSpec.ws_tree): commutative pairwise reduction tree. Left out of the hash at 0.
+    ws_tree: int = 0
+    # wgrad only (WgradConvSpec.xwin_kband): banded K order. Left out of the hash at 0.
+    xwin_kband: int = 0
+    # wgrad only (WgradConvSpec.plain_pp): plain-loop block ping-pong. Left out of the hash at 0.
+    plain_pp: int = 0
+    # wgrad only (WgradConvSpec.xwin_bq): X window staged in quads. Left out of the hash at 0.
+    xwin_bq: int = 0
+    # wgrad only (WgradConvSpec.xwin_aq): leader-only dY stores. Left out of the hash at 0.
+    xwin_aq: int = 0
+    # wgrad only (WgradConvSpec.xwin_pps): ping-pong schedule variant. Left out of the hash at 0.
+    xwin_pps: int = 0
+    # wgrad only (WgradConvSpec.xwin_rot): plane-rotated slice order. Left out of the hash at 0.
+    xwin_rot: int = 0
+    # wgrad only (WgradConvSpec.xwin_kord): row-fastest K order. Left out of the hash at 0.
+    xwin_kord: int = 0
+    # wgrad only (WgradConvSpec.ws_lc): lane-contiguous two-stage atomics. Left out of the hash at 0.
+    ws_lc: int = 0
+    # wgrad only (WgradConvSpec.ws_gred): pairwise group reduction before the atomics. Left out of the hash at 0.
+    ws_gred: int = 0
+    # dgrad (DgradConvSpec.uniform_k_decode) and fwd
+    # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
+    # K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
+    # fwd only (ImplicitGemmConvSpec.reg_prefetch): the register-prefetch
+    # K loop, 1 = one LDS buffer, 2 = two. Left out of the hash at 0.
+    reg_prefetch: int = 0
+    # fwd (ImplicitGemmConvSpec.lds_xor) and dgrad x-halo
+    # (DgradConvSpec.lds_xor): XOR-swizzled, unpadded A/B LDS tiles. Left out
+    # of the hash while False.
+    lds_xor: bool = False
+    # fwd only (ImplicitGemmConvSpec.a_direct). Left out of the hash while False.
+    a_direct: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_tap_fast). Left out of the hash while False.
+    uk_tap_fast: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
@@ -154,6 +235,158 @@ class KernelIdentity:
     # Serves only problems whose kpg is a multiple of tile_k (see
     # identity_supports_problem). Left out of the hash while False.
     tap_outer_k: bool = False
+    # dgrad only (DgradConvSpec.tapk_prefetch): the software-pipelined form of
+    # the tap-outer K loop (1: register prefetch, 2: LDS ping-pong). Serves
+    # the same problems as its tap_outer_k binary. Left out of the hash at 0.
+    tapk_prefetch: int = 0
+    # dgrad only (DgradConvSpec.tapk_xhalo): dY reuse across the x taps of the
+    # tap-outer K loop. Bakes the filter width (filter_w) and serves pW == 0
+    # only (see identity_supports_problem). Left out of the hash while False.
+    tapk_xhalo: bool = False
+    # dgrad only (DgradConvSpec.b_kpack): k values per B LDS write. Left out
+    # of the hash at 0.
+    b_kpack: int = 0
+    # dgrad only (DgradConvSpec.tapk_ilv / xhalo_exact / cshuffle_m_chunks):
+    # x-halo loop load interleave, exact halo rows, and the C staging slabs
+    # of the cshuffle epilogue. Left out of the hash at 0 / False / 1.
+    tapk_ilv: int = 0
+    xhalo_exact: bool = False
+    cshuffle_m_chunks: int = 1
+    # dgrad only (DgradConvSpec.tapk_lds_ahead): LDS fragment reads that many
+    # MFMA steps ahead in the x-halo loop. Left out of the hash at 0.
+    tapk_lds_ahead: int = 0
+    # dgrad only (DgradConvSpec.tapk_lds_barrier). Left out of the hash at False.
+    tapk_lds_barrier: bool = False
+    # dgrad only (DgradConvSpec.tapk_setprio). Left out of the hash at 0.
+    tapk_setprio: int = 0
+    # dgrad only (DgradConvSpec.xh_b_wide). Left out of the hash at False.
+    xh_b_wide: bool = False
+    # dgrad only (DgradConvSpec.xh_b_kpad). Left out of the hash at 0.
+    xh_b_kpad: int = 0
+    # dgrad only (DgradConvSpec.tapk_pingpong). Left out of the hash at 0.
+    tapk_pingpong: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_sched). Left out of the hash at 0.
+    tapk_pp_sched: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_epi). Left out of the hash at 0.
+    tapk_pp_epi: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_persist). Left out of the hash at 0.
+    tapk_pp_persist: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_xhalo). Left out of the hash at 0.
+    tapk_pp_xhalo: int = 0
+    # dgrad only (DgradConvSpec.tapk_ztrim). Left out of the hash at 0.
+    tapk_ztrim: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_bslab). Left out of the hash at 0.
+    tapk_pp_bslab: int = 0
+    # dgrad only (DgradConvSpec.xh_a_k4 / xh_order / xh_defer). Left out of
+    # the hash at False / 0 / 0.
+    xh_a_k4: bool = False
+    xh_order: int = 0
+    xh_defer: int = 0
+    # dgrad only (DgradConvSpec.xh_fast_a). Left out of the hash at 0.
+    xh_fast_a: int = 0
+    # dgrad only (DgradConvSpec.xh_epi). Left out of the hash at 0.
+    xh_epi: int = 0
+    # dgrad only (DgradConvSpec.xh_persist). Left out of the hash at 0.
+    xh_persist: int = 0
+    # fwd only (ImplicitGemmConvSpec.split_addr_k_decode): the per-tile
+    # reduction decode of the 3-D split-addressing path. Serves only problems
+    # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
+    # out of the hash while False.
+    split_addr_k_decode: bool = False
+    # fwd split-K binaries only (ImplicitGemmConvSpec.split_tail): split only
+    # the tiles past the ``full_tiles`` kernarg. Left out of the hash at False.
+    split_tail: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_nopad): binaries without the per-tap
+    # bounds checks serve unpadded problems only. Left out of the hash at False.
+    uk_nopad: bool = False
+    # fwd only (ImplicitGemmConvSpec.defer_mfma_per_write). Out of the hash at 0.
+    defer_mfma_per_write: int = 0
+    # fwd only (ImplicitGemmConvSpec.lds_ahead / defer_mfma /
+    # vmem_interleave): K-loop instruction scheduling of the reg_prefetch /
+    # prefetch_regs loops. Left out of the hash at False / 0.
+    lds_ahead: bool = False
+    defer_mfma: int = 0
+    vmem_interleave: int = 0
+    # fwd only (ImplicitGemmConvSpec.lds_kpack_read). Left out of the hash
+    # while False.
+    lds_kpack_read: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_chunk_group). Left out of the hash at 0.
+    uk_chunk_group: int = 0
+    # fwd only (ImplicitGemmConvSpec.rpf_lds_barrier). Left out of the hash while False.
+    rpf_lds_barrier: bool = False
+    # fwd only (ImplicitGemmConvSpec.rpf_fetch_late). Left out of the hash while False.
+    rpf_fetch_late: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_xhalo). Left out of the hash at 0.
+    uk_xhalo: int = 0
+    # fwd only (ImplicitGemmConvSpec.xh_dpp). Left out of the hash while False.
+    xh_dpp: bool = False
+    # fwd only (ImplicitGemmConvSpec.rpf_setprio). Left out of the hash at 0.
+    rpf_setprio: int = 0
+    # fwd only (ImplicitGemmConvSpec.rpf_pingpong). Left out of the hash at 0.
+    rpf_pingpong: int = 0
+    # fwd only (ImplicitGemmConvSpec.pp_pre_mfma). Left out of the hash at 0.
+    pp_pre_mfma: int = 0
+    # fwd only (ImplicitGemmConvSpec.pp_b_double). Left out of the hash while False.
+    pp_b_double: bool = False
+    # fwd only (ImplicitGemmConvSpec.lds_xor_rowkey). Left out of the hash while False.
+    lds_xor_rowkey: bool = False
+    # fwd only (ImplicitGemmConvSpec.xh_wait_smem). Left out of the hash while False.
+    xh_wait_smem: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_atomic_agent). Left out of the hash while False.
+    split_atomic_agent: bool = False
+    # fwd (ImplicitGemmConvSpec) and dgrad (DgradConvSpec) split_atomic_pairs.
+    # Left out of the hash while False.
+    split_atomic_pairs: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_xcd_remap). Left out of the hash at 0.
+    split_xcd_remap: int = 0
+    # fwd only (ImplicitGemmConvSpec.split_atomic_fast). Left out of the hash while False.
+    split_atomic_fast: bool = False
+    # fwd only (ImplicitGemmConvSpec.epi_store_fast). Left out of the hash while False.
+    epi_store_fast: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_zero_first). Left out of the hash while False.
+    split_zero_first: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_streamk). Left out of the hash while False.
+    split_streamk: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_flag_store). Left out of the hash while False.
+    split_flag_store: bool = False
+    # fwd only (ImplicitGemmConvSpec.xh_subtile). Left out of the hash while False.
+    xh_subtile: bool = False
+    # fwd only (ImplicitGemmConvSpec.pp_fetch_deep). Left out of the hash while False.
+    pp_fetch_deep: bool = False
+    # fwd only (ImplicitGemmConvSpec.pp_split_fetch). Left out of the hash at 0.
+    pp_split_fetch: int = 0
+    # fwd only (ImplicitGemmConvSpec.fb_skip_empty). Left out of the hash while False.
+    fb_skip_empty: bool = False
+    # fwd only (ImplicitGemmConvSpec.pp_end_guard). Left out of the hash while False.
+    pp_end_guard: bool = False
+    # fwd and dgrad (ImplicitGemmConvSpec.epi_lds_barriers, DgradConvSpec.epi_lds_barriers: x-halo and pp_boxes epilogues). Left out of the hash while False.
+    epi_lds_barriers: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_hybrid). Left out of the hash at 0.
+    split_hybrid: int = 0
+    # fwd only (ImplicitGemmConvSpec.sched_strategy). Left out of the hash at 0.
+    sched_strategy: int = 0
+    # fwd only (ImplicitGemmConvSpec.split_tail_compact). Left out of the hash at False.
+    split_tail_compact: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_det). Left out of the hash at 0.
+    split_det: int = 0
+    # fwd only (ImplicitGemmConvSpec.epi_quad_xpose). Left out of the hash at 0.
+    epi_quad_xpose: int = 0
+    # fwd and dgrad (ImplicitGemmConvSpec.no_agpr, DgradConvSpec.no_agpr). Left out of the hash while False.
+    no_agpr: bool = False
+    # fwd and dgrad (ImplicitGemmConvSpec.m_band, DgradConvSpec.m_band). Left out of the hash at 0.
+    m_band: int = 0
+    # fwd and dgrad (ImplicitGemmConvSpec.xh_stride_m, DgradConvSpec.xh_stride_m). Left out of the hash while False.
+    xh_stride_m: bool = False
+    # fwd only (ImplicitGemmConvSpec.fxh_dma). Left out of the hash at 0.
+    fxh_dma: int = 0
+    # fwd only (ImplicitGemmConvSpec.xh_yring). Left out of the hash at 0.
+    xh_yring: int = 0
+    # dgrad only (DgradConvSpec.xh_dlds). Left out of the hash at 0.
+    xh_dlds: int = 0
+    # dgrad only (DgradConvSpec.xh_epi_lin). Left out of the hash while False.
+    xh_epi_lin: bool = False
+    # dgrad only (DgradConvSpec.xh_tap_rsrc). Left out of the hash while False.
+    xh_tap_rsrc: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -195,6 +428,25 @@ class KernelIdentity:
     # sized for this output width, so the binary serves Wo <= halo_max_wo.
     # 0 = not a halo binary. Left out of the hash at 0.
     halo_max_wo: int = 0
+    # Dgrad only (DgradConvSpec.pp_streamk): the persistent stream-K grid of
+    # the ping-pong loop (launch grid (pp_streamk, 1, 1), dX zeroed first).
+    # Left out of the hash at 0.
+    pp_streamk: int = 0
+    # Dgrad only (DgradConvSpec.pp_sk_mode): bit 1 = fix-up reduction in a
+    # workspace behind the record table (no dX zeroing); bit 2 =
+    # slice-major order. Left out of the hash at 0.
+    pp_sk_mode: int = 0
+    # Dgrad only (DgradConvSpec.pp_zskip). Left out of the hash at False.
+    pp_zskip: bool = False
+    # Dgrad only (DgradConvSpec.pp_boxes): H/W border boxes, one sub-GEMM
+    # record each (pp_box_sub_gemms). Left out of the hash at 0.
+    pp_boxes: int = 0
+    # Dgrad only (DgradConvSpec.pp_box_cus). Left out of the hash at 0.
+    pp_box_cus: int = 0
+    # Dgrad only (DgradConvSpec.pp_box_order). Left out of the hash at 0.
+    pp_box_order: int = 0
+    # Dgrad only (DgradConvSpec.pp_box_det). Left out of the hash at 0.
+    pp_box_det: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -250,13 +502,126 @@ class KernelIdentity:
             del fields["ws_replicas"]
         if not fields["prefetch_addr"]:
             del fields["prefetch_addr"]
+        if not fields["prefetch_regs"]:
+            del fields["prefetch_regs"]
+        if fields["lds_kpack"] == 1:
+            del fields["lds_kpack"]
+        if not fields["xcd_remap"]:
+            del fields["xcd_remap"]
+        if not fields["sep_addr"]:
+            del fields["sep_addr"]
+        if not fields["pfr_sched"]:
+            del fields["pfr_sched"]
+        if not fields["lds_bswz"]:
+            del fields["lds_bswz"]
+        if not fields["kp_line"]:
+            del fields["kp_line"]
+        if not fields["xwin"]:
+            del fields["xwin"]
+        if fields["xwin_rows"] == 1:
+            del fields["xwin_rows"]
+        if fields["xwin_groups"] == 1:
+            del fields["xwin_groups"]
+        if not fields["xwin_pp"]:
+            del fields["xwin_pp"]
+        if fields["xwin_mrow"] == 1:
+            del fields["xwin_mrow"]
+        if not fields["xwin_gn"]:
+            del fields["xwin_gn"]
+        if not fields["ws_fuse"]:
+            del fields["ws_fuse"]
+        if not fields["ws_store"]:
+            del fields["ws_store"]
+        if not fields["ws_tree"]:
+            del fields["ws_tree"]
+        if not fields["xwin_kband"]:
+            del fields["xwin_kband"]
+        if not fields["plain_pp"]:
+            del fields["plain_pp"]
+        if not fields["xwin_bq"]:
+            del fields["xwin_bq"]
+        if not fields["xwin_aq"]:
+            del fields["xwin_aq"]
+        if not fields["xwin_pps"]:
+            del fields["xwin_pps"]
+        if not fields["xwin_rot"]:
+            del fields["xwin_rot"]
+        if not fields["xwin_kord"]:
+            del fields["xwin_kord"]
+        if not fields["ws_lc"]:
+            del fields["ws_lc"]
+        if not fields["ws_gred"]:
+            del fields["ws_gred"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
+        if not fields["reg_prefetch"]:
+            del fields["reg_prefetch"]
+        if not fields["lds_xor"]:
+            del fields["lds_xor"]
+        if not fields["a_direct"]:
+            del fields["a_direct"]
+        if not fields["uk_tap_fast"]:
+            del fields["uk_tap_fast"]
         if not fields["patch"]:
             del fields["patch"]
         if not fields["tap_outer_k"]:
             del fields["tap_outer_k"]
-        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
+        if not fields["tapk_prefetch"]:
+            del fields["tapk_prefetch"]
+        if not fields["tapk_xhalo"]:
+            del fields["tapk_xhalo"]
+        if not fields["b_kpack"]:
+            del fields["b_kpack"]
+        if not fields["tapk_ilv"]:
+            del fields["tapk_ilv"]
+        if not fields["xhalo_exact"]:
+            del fields["xhalo_exact"]
+        if fields["cshuffle_m_chunks"] == 1:
+            del fields["cshuffle_m_chunks"]
+        if not fields["tapk_lds_ahead"]:
+            del fields["tapk_lds_ahead"]
+        if not fields["tapk_lds_barrier"]:
+            del fields["tapk_lds_barrier"]
+        if not fields["tapk_setprio"]:
+            del fields["tapk_setprio"]
+        if not fields["xh_b_wide"]:
+            del fields["xh_b_wide"]
+        if not fields["xh_b_kpad"]:
+            del fields["xh_b_kpad"]
+        if not fields["tapk_pingpong"]:
+            del fields["tapk_pingpong"]
+        if not fields["tapk_pp_sched"]:
+            del fields["tapk_pp_sched"]
+        if not fields["tapk_pp_epi"]:
+            del fields["tapk_pp_epi"]
+        if not fields["tapk_pp_persist"]:
+            del fields["tapk_pp_persist"]
+        if not fields["tapk_pp_xhalo"]:
+            del fields["tapk_pp_xhalo"]
+        if not fields["tapk_ztrim"]:
+            del fields["tapk_ztrim"]
+        if not fields["tapk_pp_bslab"]:
+            del fields["tapk_pp_bslab"]
+        for name in ("xh_a_k4", "xh_order", "xh_defer", "xh_fast_a", "xh_epi", "xh_persist"):
+            if not fields[name]:
+                del fields[name]
+        if not fields["split_addr_k_decode"]:
+            del fields["split_addr_k_decode"]
+        for name in (
+            "lds_ahead", "defer_mfma", "vmem_interleave", "split_tail", "uk_nopad",
+            "defer_mfma_per_write",
+            "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier", "rpf_fetch_late",
+            "uk_xhalo", "xh_dpp", "rpf_setprio", "rpf_pingpong", "pp_pre_mfma", "xh_wait_smem", "pp_b_double", "lds_xor_rowkey",
+            "split_atomic_agent", "split_atomic_pairs", "split_xcd_remap",
+            "split_streamk", "split_flag_store", "xh_subtile", "split_atomic_fast",
+            "epi_store_fast", "split_zero_first", "pp_fetch_deep",
+            "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
+            "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc",
+        ):
+            if not fields[name]:
+                del fields[name]
+        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det"):
             if not fields[name]:
                 del fields[name]
         if not fields["split_k_cluster"]:
@@ -332,8 +697,19 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
         compute_tilde,
         enumerate_sub_gemms,
         patch_sub_gemms,
+        pp_box_sub_gemms,
     )
 
+    if getattr(identity, "pp_boxes", 0):
+        return pp_box_sub_gemms(
+            problem,
+            identity.tile_m,
+            identity.tile_n,
+            identity.pp_boxes,
+            tile_k=identity.tile_k,
+            max_split=max(1, identity.split_k),
+            cus=getattr(identity, "pp_box_cus", 0),
+        )
     if identity.patch:
         return patch_sub_gemms(
             problem, identity.tile_m, identity.tile_n, tile_k=identity.tile_k
@@ -568,6 +944,108 @@ def identity_supports_problem(
         if not ok:
             return False, why
 
+    # Atomic split-K fwd (no workspace, ``two_stage`` unset: the MFMA
+    # binary) atomic-adds into D with a packed <2 x dtype> atomic for a
+    # 16-bit D, which pairs adjacent output channels of one group: kpg must
+    # be even (ImplicitGemmConvSpec's fwd_split_k_conflict).
+    if (
+        identity.direction == "fwd"
+        and not identity.is_direct
+        and identity.split_k > 1
+        and not identity.two_stage
+        and identity.dtype_d != "fp32"
+        and hasattr(problem, "kpg")
+        and int(problem.kpg) % 2
+    ):
+        return False, f"fwd split-K with a 16-bit D needs even kpg (kpg={problem.kpg})"
+
+    # The wgrad X-window kernel bakes the filter width and walks one output
+    # row per K tile: stride/dilation 1 along W, whole channel blocks of
+    # tile_n / X, ungrouped.
+    if identity.direction == "wgrad" and identity.xwin:
+        xw = identity.xwin
+        xr = max(1, identity.xwin_rows)
+        cb = max(1, identity.tile_n // (xw * xr))
+        zy = int(getattr(problem, "Z", 1) or 1) * int(getattr(problem, "Y", 1))
+        if zy % xr:
+            return False, f"xwin_rows={xr} must divide the filter rows Z*Y={zy}"
+        if int(getattr(problem, "X", 0)) != xw:
+            return False, f"xwin bakes filter width {xw} (problem X={getattr(problem, 'X', None)})"
+        if int(getattr(problem, "sW", 1)) != 1 or int(getattr(problem, "dW", 1)) != 1:
+            return False, "xwin serves stride-1, dilation-1 W only"
+        if int(getattr(problem, "groups", 1)) != 1:
+            return False, "xwin serves groups == 1 only"
+        if cpg % cb:
+            return False, f"xwin needs cpg % {cb} == 0 (cpg={cpg})"
+        mr = max(1, getattr(identity, "xwin_mrow", 1) or 1)
+        if mr > 1:
+            if int(getattr(problem, "Wo", 0)) * mr != identity.tile_k:
+                return False, f"xwin_mrow={mr} needs Wo == tile_k / {mr} (Wo={getattr(problem, 'Wo', None)})"
+            if int(getattr(problem, "Ho", 0)) % mr:
+                return False, f"xwin_mrow={mr} needs Ho % {mr} == 0"
+        elif int(getattr(problem, "Wo", 0)) % max(1, identity.tile_k):
+            return False, f"xwin needs Wo % tile_k == 0 (Wo={getattr(problem, 'Wo', None)})"
+
+    # uk_nopad drops the per-tap bounds checks: unpadded problems only.
+    if (
+        identity.direction == "fwd"
+        and identity.uk_nopad
+        and any(int(getattr(problem, a, 0) or 0) for a in ("pH", "pW", "pD"))
+    ):
+        return False, "uk_nopad serves unpadded problems only"
+
+    # wgrad epi_quad_xpose: 4 consecutive dW columns per 8-byte store, which
+    # must stay inside one filter tap's channel run.
+    if (
+        identity.direction == "wgrad"
+        and getattr(identity, "epi_quad_xpose", 0)
+        and not identity.is_direct
+        and cpg % 4
+    ):
+        return False, f"wgrad epi_quad_xpose needs cpg % 4 == 0 (cpg={cpg})"
+
+    # wgrad xwin_kband: the banded K decode assumes N == 1 and whole bands.
+    _kb = getattr(identity, "xwin_kband", 0)
+    if identity.direction == "wgrad" and _kb and not identity.is_direct:
+        _ho = int(getattr(problem, "Ho", 0) or 0)
+        if int(getattr(problem, "N", 1) or 1) != 1 or not _ho or _ho % _kb:
+            return False, f"xwin_kband {_kb} needs N == 1 and Ho % {_kb} == 0"
+
+    # m_band (fwd / dgrad): a band at least as wide as the output plane's
+    # tile row is the launch order, i.e. the same binary as without it --
+    # leave it out instead of offering a duplicate candidate.
+    if (
+        identity.m_band
+        and not identity.is_direct
+        and identity.direction in ("fwd", "dgrad")
+        and identity.tile_m
+    ):
+        if identity.direction == "fwd":
+            _plane = int(getattr(problem, "Ho", 0) or 0) * int(getattr(problem, "Wo", 0) or 0)
+        else:
+            _plane = int(getattr(problem, "Hi", 0) or 0) * int(getattr(problem, "Wi", 0) or 0)
+        _R = max(1, (_plane + identity.tile_m // 2) // identity.tile_m)
+        if _plane and _R <= identity.m_band:
+            return False, (
+                f"m_band {identity.m_band} >= the {_R} tiles of an output plane: "
+                "the launch order (same as without m_band)"
+            )
+
+    # The split-addressing per-tile reduction decode has no fallback: a K
+    # tile must lie inside one filter tap, i.e. cpg % tile_k == 0. (The
+    # uniform_k_decode loop keeps the plain loop for the rest.)
+    if (
+        identity.direction == "fwd"
+        and not identity.is_direct
+        and identity.split_addr_k_decode
+        and hasattr(problem, "cpg")
+        and int(problem.cpg) % max(1, identity.tile_k)
+    ):
+        return False, (
+            f"fwd split_addr_k_decode needs cpg % tile_k == 0; cpg={problem.cpg}, "
+            f"tile_k={identity.tile_k}"
+        )
+
     # Baked filter geometry (direct conv), and the stride/dilation older
     # implicit-GEMM dgrad caches recorded per binary (current ones record
     # 0: the tilde kernel takes them at run time). For implicit GEMM 0
@@ -590,6 +1068,15 @@ def identity_supports_problem(
         actual = next((getattr(problem, a) for a in attrs if hasattr(problem, a)), None)
         if actual is not None and int(actual) != baked:
             return False, f"{name}={baked} but problem has {actual}"
+
+    # A baked stride/dilation (the stride-1 dgrad binary) holds along depth
+    # too: on a 3-D problem it only serves sD == stride_h and dD == dilation_h.
+    if identity.is_3d and not identity.is_direct:
+        for name, attr in (("stride_h", "sD"), ("dilation_h", "dD")):
+            baked = getattr(identity, name)
+            actual = getattr(problem, attr, None)
+            if baked and actual is not None and int(actual) != baked:
+                return False, f"{name}={baked} but problem has {attr}={actual}"
 
     # 0 means runtime here, for direct conv too: the non-grouped direct
     # kernel takes its channel counts as kernargs (cpg == 0 is never a
@@ -623,7 +1110,10 @@ def identity_supports_problem(
     # sized at build time for ``max_sub_gemms``; a problem that decomposes
     # into more would be rejected only at launch.
     if identity.direction == "dgrad" and not identity.is_direct:
-        n_sub = len(dgrad_sub_gemms(identity, problem))
+        try:
+            n_sub = len(dgrad_sub_gemms(identity, problem))
+        except ValueError as e:  # pp_boxes: a dX row with no filter tap
+            return False, str(e)
         bound = identity.max_sub_gemms or _DGRAD_DEFAULT_MAX_SUB_GEMMS
         if n_sub > bound:
             return False, (
@@ -653,6 +1143,52 @@ def identity_supports_problem(
                     f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
                     f"tile_k={identity.tile_k}"
                 )
+        # tapk_pingpong 4 keeps one bit per filter tap in a 32-bit row mask.
+        if identity.tapk_pingpong >= 4 and any(
+            int(getattr(problem, a, 1) or 1) > 3 for a in ("Y", "X", "Z")
+        ):
+            return False, "tapk_pingpong 4/5 serves filters of up to 3 per axis"
+        # The x-halo stage holds tap x = 0 of every pixel; a pixel with
+        # wi < x reads zero, which is right only without a W pad. The
+        # filter width it unrolls is baked (filter_w, matched above).
+        if identity.tapk_xhalo and int(getattr(problem, "pW", 0)) != 0:
+            return False, "tapk_xhalo serves pW == 0 only"
+        if identity.tapk_pp_xhalo and int(getattr(problem, "pW", 0)) != 0:
+            return False, "tapk_pp_xhalo serves pW == 0 only"
+        if getattr(identity, "xh_tap_rsrc", False):
+            # xh_tap_rsrc marks an out-of-range dY row with offset bit 30 (in
+            # elements): dY (bounded by the padded input extents) < 2^30.
+            def _e(a, p_):
+                return int(getattr(problem, a, 1) or 1) + 2 * int(getattr(problem, p_, 0) or 0)
+
+            dy_bound = (
+                int(getattr(problem, "N", 1) or 1) * _e("Di", "pD") * _e("Hi", "pH")
+                * _e("Wi", "pW") * int(getattr(problem, "K", 1) or 1)
+            )
+            if dy_bound >= (1 << 30):
+                return False, "xh_tap_rsrc serves dY below 2^30 elements"
+        if getattr(identity, "xh_yring", 0) and identity.direction == "dgrad":
+            # The dgrad y-ring is built for one dX row width (its slots and
+            # loads per y step are baked).
+            if int(getattr(problem, "Wi", 0)) != identity.xh_yring % 1000:
+                return False, "xh_yring (dgrad) serves Wi == its ring width only"
+        if identity.tapk_pp_xhalo >= 2 and int(getattr(problem, "Wi", 0)) < 32:
+            # The gapped halo tile is sized for W rows of >= 32 pixels
+            # (conv_implicit_gemm_dgrad.PP_XHALO_GAP_MIN_WI).
+            return False, "tapk_pp_xhalo 2/3 serves Wi >= 32 only"
+        # x-halo split-K accumulates through a packed-atomic store that
+        # treats dX as one dense (M, C) matrix: ungrouped problems only.
+        if (
+            (identity.tapk_xhalo or identity.tapk_pingpong)
+            and identity.split_k > 1
+            and int(getattr(problem, "groups", 1)) != 1
+        ):
+            return False, "x-halo split-K serves groups == 1 only"
+        # The persistent kernels walk the tiles of one group.
+        if (identity.tapk_pp_persist or identity.xh_persist) and int(
+            getattr(problem, "groups", 1)
+        ) != 1:
+            return False, "tapk_pp_persist serves groups == 1 only"
         # The dY halo loop shifts the linear pixel index by whole output
         # rows, so the output must be the input's size, and its LDS tile
         # is sized for halo_max_wo. The filter (filter_h/w, baked) is
@@ -670,6 +1206,26 @@ def identity_supports_problem(
                     f"dy_halo binary serves Wo <= {identity.halo_max_wo}, "
                     f"problem has Wo={wo}"
                 )
+
+    # Stream-K ping-pong: one dense (M, C) dX (ungrouped), and the
+    # iteration split v * tiles * K-tiles stays in 32 bits.
+    if identity.pp_streamk:
+        if int(getattr(problem, "groups", 1)) != 1:
+            return False, "pp_streamk serves groups == 1 only"
+        _m = int(problem.N) * int(problem.Hi) * int(problem.Wi)
+        if getattr(problem, "is_3d", False):
+            _m *= int(problem.Di)
+        _taps = int(problem.Y) * int(problem.X) * (
+            int(problem.Z) if getattr(problem, "is_3d", False) else 1
+        )
+        _ti = (
+            -(-_m // identity.tile_m)
+            * -(-int(problem.C) // identity.tile_n)
+            * _taps
+            * (int(problem.K) // max(1, identity.tile_k))
+        )
+        if _ti * (identity.pp_streamk + 1) >= 2**31:
+            return False, "pp_streamk iteration space overflows 32 bits"
 
     if not identity.is_direct:
         ok, why = _grid_fits(identity, problem)
@@ -738,8 +1294,25 @@ IDENTITY_CAPABILITY_FIELDS = (
     "async_chunk_b",
     "max_sub_gemms",
     "tap_outer_k",
+    "tapk_xhalo",
+    "tapk_pp_xhalo",
+    "tapk_pp_persist",
+    "xh_persist",
     "dy_halo",
     "halo_max_wo",
+    "pp_streamk",
+    "pp_sk_mode",
+    "pp_boxes",
+    "pp_box_cus",
+    "split_addr_k_decode",
+    "uk_nopad",
+    "xwin",
+    "xwin_rows",
+    "xwin_mrow",
+    "m_band",
+    "xwin_kband",
+    "xh_tap_rsrc",
+    "xh_yring",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

@@ -378,6 +378,41 @@ class CShuffleEpilogue:
     #   barrier 0: MFMAs done; load waves may exit.
     #   barrier 1: load waves exited; safe to overwrite A/B LDS with C writes.
     war_barriers: int = 1
+    # PROTOTYPE (scaffold/dgi): stage the C tile through LDS in ``m_chunks``
+    # row slabs (each warp's mfmas_m split into m_chunks groups) so the
+    # staging buffer is tile_m/m_chunks rows -> less LDS, more occupancy.
+    m_chunks: int = 1
+    # atomic_store's packed 16-bit atomics: LLVM sync scope (None = system,
+    # the default; "agent" = device scope, performed in the L2 on gfx94x).
+    atomic_syncscope: Optional[str] = None
+    # atomic_store (bf16, unchunked): one packed pair per lane per atomic,
+    # consecutive lanes on consecutive pairs of a row, so one atomic
+    # instruction covers 64 x 4 contiguous bytes (2 cache lines) instead of
+    # 64 pairs at a store_vec stride (store_vec/2 times the lines touched).
+    atomic_pair_lanes: bool = False
+    # Every barrier of the epilogue LDS-only (``lgkmcnt(0)`` + ``s_barrier``)
+    # instead of draining the vector memory counter too: the C staging
+    # buffer is ordered by LDS ops alone, and a full drain makes each m-chunk
+    # (and the step after the K loop) wait for the previous chunk's global
+    # stores / atomics and the loop's last prefetch.
+    lds_barriers: bool = False
+    # atomic_pair_lanes: a workgroup whose tile is wholly in bounds (one
+    # uniform branch) skips the per-pair bounds checks and walks its pairs at
+    # a constant row step (one add per atomic instead of the row/column
+    # decode and a branch per pair).
+    atomic_fast_full: bool = False
+    # atomic_pair_lanes with a row_map and wave-uniform rows (tile_n / 2 a
+    # multiple of the wave, at most one atomic iteration per lane): map all
+    # iterations' rows at once (lane e = iteration e) and v_readlane each,
+    # instead of a scalar map (and its wait) per atomic.
+    atomic_row_batch: bool = False
+    # store(): when ``fast_ok`` (an i1 the caller computes: tile in bounds and
+    # D rows ``fast_row_pitch`` elements apart, offset = m * pitch + n +
+    # ``fast_col_base``) holds, the bf16 wide stores walk the tile at a
+    # constant row step instead of decoding every vector's address.
+    fast_ok: Optional[Value] = None
+    fast_row_pitch: Optional[Value] = None
+    fast_col_base: Optional[Value] = None
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
     # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
@@ -393,6 +428,12 @@ class CShuffleEpilogue:
         of a split-role pipeline must mirror the epilogue barrier count exactly.
         """
         return CShuffleEpilogue.compute_barrier_count(self.no_alias, self.war_barriers)
+
+    def _sync(self, b) -> None:
+        if self.lds_barriers:
+            b.sync_lds_only()
+        else:
+            b.sync()
 
     @staticmethod
     def compute_barrier_count(no_alias: bool, war_barriers: int) -> int:
@@ -512,6 +553,12 @@ class CShuffleEpilogue:
         _fp32_out = self.out_dtype == "fp32"
         _bf16_out = self.out_dtype == "bf16"
         _lds_dtype = F32 if _fp32_out else (BF16 if _bf16_out else F16)
+        if self.m_chunks > 1:
+            return self._store_m_chunked(
+                b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=bounds,
+                lds_dtype=_lds_dtype, bf16_out=_bf16_out, fp32_out=_fp32_out,
+                warp_n_off=warp_n_off,
+            )
 
         # ---- step 1: publish accs to LDS at the MMA output layout. ----
         #
@@ -563,7 +610,7 @@ class CShuffleEpilogue:
         # The step-2 C-write->C-read barrier is a genuine RAW and always stays.
         if not self.no_alias:
             for _ in range(self.war_barriers):
-                b.sync()
+                self._sync(b)
 
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
@@ -619,7 +666,7 @@ class CShuffleEpilogue:
                 store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
 
         # ---- step 2: barrier. ----
-        b.sync()
+        self._sync(b)
 
         # ---- step 3: wide global stores from LDS. ----
         threads = grid.block_size
@@ -633,6 +680,51 @@ class CShuffleEpilogue:
                 f"store_vec {sv} does not distribute over tile "
                 f"{grid.tile_m}x{grid.tile_n} and block_size {threads}"
             )
+        vecs_per_thread = (grid.tile_m * grid.tile_n // sv) // threads
+        vpr = grid.tile_n // sv
+        if (
+            self.fast_ok is not None
+            and _bf16_out
+            and sv > 1
+            and threads % vpr == 0
+        ):
+            c_tile_n_div_vec = b.const_i32(vpr)
+            c_elem_bytes = b.const_i32(2)
+            with b.scf_if_else(self.fast_ok) as (fast_ctx, slow_ctx):
+                with fast_ctx:
+                    rpe = threads // vpr
+                    r0 = b.div(grid.tid, c_tile_n_div_vec)
+                    col0 = b.mul(b.mod(grid.tid, c_tile_n_div_vec), b.const_i32(sv))
+                    base = b.add(
+                        b.mul(b.add(grid.block_m_off, r0), self.fast_row_pitch),
+                        b.add(grid.block_n_off, col0),
+                    )
+                    if self.fast_col_base is not None:
+                        base = b.add(base, self.fast_col_base)
+                    base_b = b.mul(base, c_elem_bytes)
+                    step_b = b.mul(self.fast_row_pitch, b.const_i32(2 * rpe))
+                    for e in range(vecs_per_thread):
+                        row = b.add(r0, b.const_i32(e * rpe)) if e else r0
+                        off_b = b.add(base_b, b.mul(step_b, b.const_i32(e))) if e else base_b
+                        vbf = b.smem_load_vN(c_smem, row, col0, dtype=BF16, n=sv)
+                        b.buffer_store_vN_bf16(d_rsrc, off_b, b.const_i32(0), vbf, sv // 2)
+                with slow_ctx:
+                    self._store_vectors(
+                        b, c_smem=c_smem, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=bounds,
+                        fp32_out=_fp32_out, bf16_out=_bf16_out,
+                    )
+            return
+        self._store_vectors(
+            b, c_smem=c_smem, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=bounds,
+            fp32_out=_fp32_out, bf16_out=_bf16_out,
+        )
+
+    def _store_vectors(self, b, *, c_smem, addr_fn, d_rsrc, bounds, fp32_out, bf16_out):
+        """store() step 3: the per-vector decoded, bounds-checked stores."""
+        _fp32_out, _bf16_out = fp32_out, bf16_out
+        grid = self.grid
+        threads = grid.block_size
+        sv = self.store_vec
         vecs_per_thread = (grid.tile_m * grid.tile_n // sv) // threads
         c_threads = b.const_i32(threads)
         c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
@@ -694,6 +786,362 @@ class CShuffleEpilogue:
                     dwords = sv // 2
                     b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), v, dwords)
 
+    def _store_m_chunked(
+        self, b, *, accs, addr_fn, d_rsrc, bounds, lds_dtype, bf16_out, fp32_out, warp_n_off,
+        atomic=None,
+    ) -> None:
+        """PROTOTYPE: :meth:`store` through a tile_m/m_chunks-row LDS slab.
+
+        ``atomic=(dw_ptr, wg_N, col_offset)``: :meth:`atomic_store`'s packed
+        bf16 atomic-adds in place of the buffer stores."""
+        atom = self.atom
+        grid = self.grid
+        if atom is None or (fp32_out and atomic is not None) or not (bf16_out or fp32_out):
+            raise ValueError("m_chunks > 1: MFMA bf16 (or fp32 buffer-store) output only (prototype)")
+        # fp32 output (the f32 partial slabs of a deterministic split-K):
+        # the slab is staged in f32 and stored with 16-byte f32 stores.
+        _st_dt = F32 if fp32_out else BF16
+        mc = self.m_chunks
+        mfmas_m = grid.mfmas_per_warp_m
+        mfmas_n = grid.mfmas_per_warp_n
+        if mfmas_m % mc:
+            raise ValueError(f"m_chunks {mc} does not divide mfmas_per_warp_m {mfmas_m}")
+        cm = mfmas_m // mc
+        am = atom.m
+        rows_c = grid.tile_m // mc
+        threads = grid.block_size
+        sv = self.store_vec
+        if (rows_c * grid.tile_n // sv) % threads or rows_c * grid.tile_n // sv < threads:
+            raise ValueError("m_chunks: slab does not distribute over the block")
+        lds_layout = LdsLayout.cshuffle(tile_m=rows_c, tile_n=grid.tile_n)
+        c_view = make_lds_view(
+            b, dtype=lds_dtype, shape=lds_layout.storage_shape(rows_c),
+            name_hint=self.smem_name_hint, exclusive=self.no_alias,
+        )
+        c_smem = c_view.base
+        c_window = c_view.tile(
+            list(lds_layout.storage_shape(rows_c)), [b.const_i32(0), b.const_i32(0)]
+        )
+        dist = _cshuffle_acc_distribution(atom.c_per_lane)
+        traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
+        warp_m_off_c = b.mul(grid.warp_m_idx, b.const_i32(cm * am))
+        c_threads = b.const_i32(threads)
+        c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
+        c_elem_bytes = b.const_i32(4 if fp32_out else 2)
+        oob_sentinel = b.const_i32((1 << 31) - 1)
+        c_slab = b.const_i32(cm * am)
+        c_wrows = b.const_i32(mfmas_m * am)
+        vecs_per_thread = (rows_c * grid.tile_n // sv) // threads
+        for c in range(mc):
+            if c > 0 or not self.no_alias:
+                for _ in range(self.war_barriers if c == 0 else 1):
+                    self._sync(b)
+            for mi_l in range(cm):
+                mi = c * cm + mi_l
+                for ni in range(mfmas_n):
+                    acc = accs[mi * mfmas_n + ni]
+                    acc_staged = acc if fp32_out else b.vec_trunc_f32_to_bf16(acc)
+                    dt = make_static_distributed_tensor(dist, dtype=_st_dt)
+                    for i in range(atom.c_per_lane):
+                        dt.set([i, 0], b.vec_extract(acc_staged, i))
+                    tile_m_base = b.add(warp_m_off_c, b.const_i32(mi_l * am))
+                    tile_n_base = b.add(warp_n_off, b.const_i32(ni * atom.n))
+
+                    def coord_fn(b_, y_base, k, *, _mb=tile_m_base, _nb=tile_n_base,
+                                 _atom=atom, _lane=grid.lane):
+                        i = int(y_base[0])
+                        r, cc = _atom.lane_to_output(b_, _lane, i)
+                        return [b_.add(_mb, r), b_.add(_nb, cc)]
+
+                    store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
+            self._sync(b)
+            if atomic is not None and self.atomic_pair_lanes:
+                # One bf16 pair per lane, lanes contiguous along N.
+                dw_ptr, wg_N, col_offset = atomic[:3]
+                pl_row_map = atomic[3] if len(atomic) > 3 else None
+                M_bound, N_bound = bounds if bounds is not None else (None, None)
+                c_ppr = b.const_i32(grid.tile_n // 2)
+                n_pairs = rows_c * grid.tile_n // 2
+                if n_pairs % threads:
+                    raise ValueError("m_chunks: pairs do not distribute over the block")
+                scope = ({"syncscope": self.atomic_syncscope}
+                         if self.atomic_syncscope else {})
+                if self.atomic_row_batch:
+                    self._atomic_pairs_batched(
+                        b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, col_offset=col_offset,
+                        row_map=pl_row_map, M_bound=M_bound, N_bound=N_bound,
+                        n_iter=n_pairs // threads, scope=scope,
+                        g_row_fn=lambda b_, row, _c=c: b_.add(
+                            b_.add(
+                                b_.mul(b_.div(row, c_slab), c_wrows),
+                                b_.const_i32(_c * cm * am),
+                            ),
+                            b_.sub(row, b_.mul(b_.div(row, c_slab), c_slab)),
+                        ),
+                    )
+                    continue
+                for e in range(n_pairs // threads):
+                    pidx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
+                    row = b.div(pidx, c_ppr)
+                    col = b.mul(b.mod(pidx, c_ppr), b.const_i32(2))
+                    w = b.div(row, c_slab)
+                    r_in = b.sub(row, b.mul(w, c_slab))
+                    g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
+                    m_val = b.add(grid.block_m_off, g_row)
+                    n_even = b.add(grid.block_n_off, col)
+                    m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
+                    n_ok = (b.cmp_lt(b.add(n_even, b.const_i32(1)), N_bound)
+                            if N_bound is not None else None)
+                    okp = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
+                           else (m_ok if m_ok is not None else n_ok))
+                    c_off = b.add(
+                        b.mul(
+                            pl_row_map(
+                                b,
+                                b.readfirstlane(m_val)
+                                if (grid.tile_n // 2) % grid.wave_size == 0 else m_val,
+                            ) if pl_row_map is not None else m_val,
+                            wg_N,
+                        ),
+                        n_even,
+                    )
+                    if col_offset is not None:
+                        c_off = b.add(c_off, col_offset)
+
+                    def _emit_pl(_row=row, _col=col, _coff=c_off):
+                        vec = b.smem_load_vN(c_smem, _row, _col, dtype=BF16, n=2)
+                        b.global_atomic_add_pk_bf16(dw_ptr, _coff, vec, **scope)
+
+                    if okp is not None:
+                        with b.scf_if(okp):
+                            _emit_pl()
+                    else:
+                        _emit_pl()
+                continue
+            for e in range(vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
+                row = b.div(vec_idx, c_tile_n_div_vec)
+                col_v = b.mod(vec_idx, c_tile_n_div_vec)
+                col = b.mul(col_v, b.const_i32(sv)) if sv > 1 else col_v
+                w = b.div(row, c_slab)
+                r_in = b.sub(row, b.mul(w, c_slab))
+                g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
+                m_val = b.add(grid.block_m_off, g_row)
+                n_val = b.add(grid.block_n_off, col)
+                if atomic is not None:
+                    dw_ptr, wg_N, col_offset = atomic[:3]
+                    row_map = atomic[3] if len(atomic) > 3 else None
+                    M_bound, N_bound = bounds if bounds is not None else (None, None)
+                    m_row = row_map(b, m_val) if row_map is not None else m_val
+                    for pr in range(sv // 2):
+                        n_even = b.add(n_val, b.const_i32(2 * pr))
+                        m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
+                        n_ok = (b.cmp_lt(b.add(n_even, b.const_i32(1)), N_bound)
+                                if N_bound is not None else None)
+                        okp = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
+                               else (m_ok if m_ok is not None else n_ok))
+                        c_off = b.add(b.mul(m_row, wg_N), n_even)
+                        if col_offset is not None:
+                            c_off = b.add(c_off, col_offset)
+
+                        def _emit_pair(_row=row, _c=b.add(col, b.const_i32(2 * pr)),
+                                       _coff=c_off):
+                            v_e = b.vec_extract(
+                                b.smem_load_vN(c_smem, _row, _c, dtype=BF16, n=1), 0)
+                            v_o = b.vec_extract(
+                                b.smem_load_vN(c_smem, _row, b.add(_c, b.const_i32(1)),
+                                               dtype=BF16, n=1), 0)
+                            b.global_atomic_add_pk_bf16(
+                                dw_ptr, _coff, b.vec_pack([v_e, v_o], v_e.type),
+                                **({"syncscope": self.atomic_syncscope}
+                                   if self.atomic_syncscope else {}))
+
+                        if okp is not None:
+                            with b.scf_if(okp):
+                                _emit_pair()
+                        else:
+                            _emit_pair()
+                    continue
+                ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)
+                off_elems, valid = addr_fn(b, m_val, n_val)
+                ok = (
+                    b.land(ok, valid)
+                    if (ok is not None and valid is not None)
+                    else (ok if ok is not None else valid)
+                )
+                off_bytes = b.mul(off_elems, c_elem_bytes)
+                safe = b.select(ok, off_bytes, oob_sentinel) if ok is not None else off_bytes
+                if fp32_out:
+                    vf = b.smem_load_vN(c_smem, row, col, dtype=F32, n=sv)
+                    b.buffer_store_vN_f32(d_rsrc, safe, b.const_i32(0), vf, sv)
+                    continue
+                vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
+                b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), vbf, sv // 2)
+
+    def _atomic_pairs(self, b, *, c_smem, dw_ptr, wg_N, bounds, col_offset,
+                      row_map=None) -> None:
+        """atomic_store step 3 with :attr:`atomic_pair_lanes`: bf16 pairs,
+        lane-contiguous along N (one 4-byte LDS read per pair)."""
+        grid = self.grid
+        threads = grid.block_size
+        pairs_per_row = grid.tile_n // 2
+        total = grid.tile_m * pairs_per_row
+        if grid.tile_n % 2 or total % threads:
+            raise ValueError(
+                f"atomic_pair_lanes: tile {grid.tile_m}x{grid.tile_n} does not "
+                f"distribute over {threads} threads"
+            )
+        c_threads = b.const_i32(threads)
+        c_ppr = b.const_i32(pairs_per_row)
+        M_bound, N_bound = bounds if bounds is not None else (None, None)
+        scope = {"syncscope": self.atomic_syncscope} if self.atomic_syncscope else {}
+        if (self.atomic_fast_full and threads % pairs_per_row == 0 and bounds is not None
+                and row_map is None):
+            full = b.land(
+                b.cmp_le(b.add(grid.block_m_off, b.const_i32(grid.tile_m)), M_bound),
+                b.cmp_le(b.add(grid.block_n_off, b.const_i32(grid.tile_n)), N_bound),
+            )
+            with b.scf_if_else(full) as (full_ctx, edge_ctx):
+                with full_ctx:
+                    rpe = threads // pairs_per_row
+                    r0 = b.div(grid.tid, c_ppr)
+                    col0 = b.mul(b.mod(grid.tid, c_ppr), b.const_i32(2))
+                    base = b.add(
+                        b.mul(b.add(grid.block_m_off, r0), wg_N),
+                        b.add(grid.block_n_off, col0),
+                    )
+                    if col_offset is not None:
+                        base = b.add(base, col_offset)
+                    step = b.mul(wg_N, b.const_i32(rpe))
+                    for e in range(total // threads):
+                        row = b.add(r0, b.const_i32(e * rpe)) if e else r0
+                        off = b.add(base, b.mul(step, b.const_i32(e))) if e else base
+                        vec = b.smem_load_vN(c_smem, row, col0, dtype=BF16, n=2)
+                        b.global_atomic_add_pk_bf16(dw_ptr, off, vec, **scope)
+                with edge_ctx:
+                    self._atomic_pairs_checked(
+                        b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, bounds=bounds,
+                        col_offset=col_offset,
+                    )
+            return
+        self._atomic_pairs_checked(
+            b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, bounds=bounds, col_offset=col_offset,
+            row_map=row_map,
+        )
+
+    def _atomic_pairs_batched(self, b, *, c_smem, dw_ptr, wg_N, col_offset, row_map,
+                              M_bound, N_bound, n_iter, scope, g_row_fn) -> None:
+        """atomic_row_batch: the pair atomics with every LDS read issued first
+        (one VGPR per pair, so the reads overlap instead of each atomic
+        waiting for its own) and, when a row spans whole waves and there is at
+        most one iteration per lane, the rows' map done once (lane e =
+        iteration e) and read back with v_readlane. ``g_row_fn`` maps the
+        staged row to the tile row (m-chunked staging), None = identity."""
+        grid = self.grid
+        threads = grid.block_size
+        pairs_per_row = grid.tile_n // 2
+        c_threads = b.const_i32(threads)
+        c_ppr = b.const_i32(pairs_per_row)
+
+        def coords(e_val):
+            pidx = b.add(b.mul(e_val, c_threads), grid.tid)
+            row = b.div(pidx, c_ppr)
+            col = b.mul(b.mod(pidx, c_ppr), b.const_i32(2))
+            g_row = g_row_fn(b, row) if g_row_fn is not None else row
+            return row, col, b.add(grid.block_m_off, g_row), b.add(grid.block_n_off, col)
+
+        uniform = pairs_per_row % grid.wave_size == 0
+        pre = None
+        if row_map is not None and uniform and n_iter <= grid.wave_size:
+            lane_e = b.smin(b.mod(grid.tid, b.const_i32(grid.wave_size)),
+                            b.const_i32(n_iter - 1))
+            pre = row_map(b, coords(lane_e)[2])
+        items = []
+        for e in range(n_iter):
+            row, col, m_val, n_even = coords(b.const_i32(e))
+            items.append((row, col, m_val, n_even,
+                          b.smem_load_vN(c_smem, row, col, dtype=BF16, n=2)))
+        for e, (row, col, m_val, n_even, vec) in enumerate(items):
+            m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
+            n_ok = (b.cmp_lt(b.add(n_even, b.const_i32(1)), N_bound)
+                    if N_bound is not None else None)
+            ok = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
+                  else (m_ok if m_ok is not None else n_ok))
+            if pre is not None:
+                mapped = b.readlane(pre, b.const_i32(e))
+            elif row_map is not None:
+                mapped = row_map(b, b.readfirstlane(m_val) if uniform else m_val)
+            else:
+                mapped = m_val
+            c_off = b.add(b.mul(mapped, wg_N), n_even)
+            if col_offset is not None:
+                c_off = b.add(c_off, col_offset)
+            if ok is not None:
+                with b.scf_if(ok):
+                    b.global_atomic_add_pk_bf16(dw_ptr, c_off, vec, **scope)
+            else:
+                b.global_atomic_add_pk_bf16(dw_ptr, c_off, vec, **scope)
+
+    def _atomic_pairs_checked(self, b, *, c_smem, dw_ptr, wg_N, bounds, col_offset,
+                              row_map=None) -> None:
+        """:meth:`_atomic_pairs` with a bounds check per pair."""
+        grid = self.grid
+        threads = grid.block_size
+        pairs_per_row = grid.tile_n // 2
+        total = grid.tile_m * pairs_per_row
+        c_threads = b.const_i32(threads)
+        c_ppr = b.const_i32(pairs_per_row)
+        M_bound, N_bound = bounds if bounds is not None else (None, None)
+        scope = {"syncscope": self.atomic_syncscope} if self.atomic_syncscope else {}
+        if self.atomic_row_batch:
+            self._atomic_pairs_batched(
+                b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, col_offset=col_offset,
+                row_map=row_map, M_bound=M_bound, N_bound=N_bound,
+                n_iter=total // threads, scope=scope, g_row_fn=None,
+            )
+            return
+        for e in range(total // threads):
+            pair_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
+            row = b.div(pair_idx, c_ppr)
+            col = b.mul(b.mod(pair_idx, c_ppr), b.const_i32(2))
+            m_val = b.add(grid.block_m_off, row)
+            n_even = b.add(grid.block_n_off, col)
+            m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
+            n_ok = (
+                b.cmp_lt(b.add(n_even, b.const_i32(1)), N_bound)
+                if N_bound is not None
+                else None
+            )
+            ok = (
+                b.land(m_ok, n_ok)
+                if (m_ok is not None and n_ok is not None)
+                else (m_ok if m_ok is not None else n_ok)
+            )
+            # A row spans whole waves when pairs_per_row is a multiple of the
+            # wave: the mapped row is wave-uniform (scalar map / table load).
+            c_off = b.add(
+                b.mul(
+                    row_map(
+                        b,
+                        b.readfirstlane(m_val) if pairs_per_row % grid.wave_size == 0 else m_val,
+                    ) if row_map is not None else m_val,
+                    wg_N,
+                ),
+                n_even,
+            )
+            if col_offset is not None:
+                c_off = b.add(c_off, col_offset)
+
+            def _emit(_row=row, _col=col, _coff=c_off):
+                vec = b.smem_load_vN(c_smem, _row, _col, dtype=BF16, n=2)
+                b.global_atomic_add_pk_bf16(dw_ptr, _coff, vec, **scope)
+
+            if ok is not None:
+                with b.scf_if(ok):
+                    _emit()
+            else:
+                _emit()
+
     def atomic_store(
         self,
         b: IRBuilder,
@@ -702,6 +1150,8 @@ class CShuffleEpilogue:
         dw_ptr: Value,
         wg_N: Value,
         bounds: Optional[Tuple[Value, Value]] = None,
+        col_offset: Optional[Value] = None,
+        row_map=None,
     ) -> None:
         """Split-K variant: cshuffle scatter + barrier, then atomic-adds into dW.
 
@@ -723,6 +1173,11 @@ class CShuffleEpilogue:
         ``dw_ptr``  — pointer to the dW global buffer (not a buffer-resource).
         ``wg_N``    — i32 SSA value: wgrad GEMM-N (row stride of dW in elements).
         ``bounds``  — (M, N) i32 pair for OOB guard; same contract as :meth:`store`.
+        ``col_offset`` — optional i32 added to every destination offset after
+        the bounds check (e.g. a conv group's output-channel slab base when
+        ``wg_N`` is the full row stride). ``None`` emits nothing.
+        ``row_map`` — optional ``(b, m) -> row``: the destination row of tile
+        row ``m`` (rows not contiguous in the output); ``None`` uses ``m``.
 
         The caller must zero-initialise dW before launch (atomic-adds only,
         no unconditional store).
@@ -761,6 +1216,14 @@ class CShuffleEpilogue:
         _fp32_out = self.out_dtype == "fp32"
         _bf16_out = self.out_dtype == "bf16"
         _lds_dtype = F32 if _fp32_out else (BF16 if _bf16_out else F16)
+        if self.m_chunks > 1:
+            return self._store_m_chunked(
+                b, accs=accs, addr_fn=None, d_rsrc=None, bounds=bounds,
+                lds_dtype=_lds_dtype, bf16_out=_bf16_out, fp32_out=_fp32_out,
+                warp_n_off=warp_n_off,
+                atomic=(dw_ptr, wg_N, col_offset)
+                + ((row_map,) if row_map is not None else ()),
+            )
 
         # ---- step 1: scatter accs to LDS (identical to store()). ----
         lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)
@@ -783,7 +1246,7 @@ class CShuffleEpilogue:
 
         if not self.no_alias:
             for _ in range(self.war_barriers):
-                b.sync()
+                self._sync(b)
 
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
@@ -838,9 +1301,15 @@ class CShuffleEpilogue:
                 store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
 
         # ---- step 2: barrier. ----
-        b.sync()
+        self._sync(b)
 
         # ---- step 3: atomic-adds from LDS. ----
+        if self.atomic_pair_lanes and _bf16_out:
+            self._atomic_pairs(
+                b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, bounds=bounds,
+                col_offset=col_offset, row_map=row_map,
+            )
+            return
         # After the shuffle each thread holds sv consecutive N-position elements
         # in one row.  For bf16/fp16: sv is even (enforced by from_grid / cpg%2==0),
         # so we can pair adjacent elements (col, col+1) into a genuine <2 x dtype>
@@ -894,6 +1363,8 @@ class CShuffleEpilogue:
                                 0,
                             )
                             c_off = b.add(b.mul(m_val, wg_N), n_val)
+                            if col_offset is not None:
+                                c_off = b.add(c_off, col_offset)
                             b.global_atomic_add(dw_ptr, c_off, v_f32)
                     else:
                         c_smem_col = b.add(col, b.const_i32(s))
@@ -902,6 +1373,8 @@ class CShuffleEpilogue:
                             0,
                         )
                         c_off = b.add(b.mul(m_val, wg_N), n_val)
+                        if col_offset is not None:
+                            c_off = b.add(c_off, col_offset)
                         b.global_atomic_add(dw_ptr, c_off, v_f32)
             else:
                 # Paired pk_atomic for bf16/fp16: sv/2 pairs per thread.
@@ -921,7 +1394,12 @@ class CShuffleEpilogue:
 
                     smem_col_e = b.add(col, b.const_i32(2 * p))
                     smem_col_o = b.add(col, b.const_i32(2 * p + 1))
-                    c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                    c_off_even = b.add(
+                        b.mul(row_map(b, m_val) if row_map is not None else m_val, wg_N),
+                        n_even,
+                    )
+                    if col_offset is not None:
+                        c_off_even = b.add(c_off_even, col_offset)
 
                     def _emit_pair(
                         _cs=c_smem,
@@ -941,7 +1419,11 @@ class CShuffleEpilogue:
                                 _b.smem_load_vN(_cs, _row, _sco, dtype=BF16, n=1), 0
                             )
                             vec = _b.vec_pack([v_e, v_o], v_e.type)
-                            _b.global_atomic_add_pk_bf16(_dptr, _coff, vec)
+                            _b.global_atomic_add_pk_bf16(
+                                _dptr, _coff, vec,
+                                **({"syncscope": self.atomic_syncscope}
+                                   if self.atomic_syncscope else {}),
+                            )
                         else:
                             v_e = _b.vec_extract(
                                 _b.smem_load_vN_f16(_cs, _row, _sce, n=1), 0

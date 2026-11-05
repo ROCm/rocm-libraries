@@ -865,6 +865,17 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
                 ws_ptr=extras["ws_ptr"],
                 ws_bytes=extras["ws_bytes"],
             )
+        if extras.get("split_k", 1) > 1:
+            return ConvArgs.from_problem(
+                problem, tile_m=tm, tile_n=tn, tile_k=tk
+            ).to_launch_values(
+                *ptrs,
+                *sizes,
+                split_k=extras["split_k"],
+                full_tiles=extras.get("full_tiles"),
+                **({"sk_flags": extras["sk_flags"]} if "sk_flags" in extras else {}),
+                **({"sk_partials": extras["sk_partials"]} if "sk_partials" in extras else {}),
+            )
         return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).to_launch_values(
             *ptrs, *sizes
         )
@@ -877,6 +888,7 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
             split_k=extras.get("split_k", 1),
             ws_ptr=extras.get("ws_ptr"),
             ws_bytes=extras.get("ws_bytes"),
+            **({"sk_flags": extras["sk_flags"]} if "sk_flags" in extras else {}),
         )
     return ConvArgs.from_problem(
         problem, direction="dgrad", tile_m=tm, tile_n=tn

@@ -292,6 +292,12 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--seed", str(args.seed)]
     if args.split_k != -1:
         a += ["--split-k", str(args.split_k)]
+    if args.split_k_degrees is not None:
+        a += ["--split-k-degrees", args.split_k_degrees]
+    if args.two_stage is not None:
+        a += ["--two-stage", args.two_stage]
+    if args.deterministic:
+        a += ["--deterministic", args.deterministic]
     if args.split_k_prune is not None:
         a += ["--split-k-prune", str(args.split_k_prune)]
     if args.streamk == "off" and (
@@ -313,6 +319,21 @@ def _build_implicit_only_args(args) -> list[str]:
     # budget to cap the probe's chunks with.
     if args.fast_rank and args.fast_rank_scratch is not None:
         a += ["--fast-rank-scratch", str(args.fast_rank_scratch)]
+    if args.fast_rank:
+        for flag, val in (
+            ("--fast-rank-recheck", args.fast_rank_recheck),
+            ("--fast-rank-recheck-rounds", args.fast_rank_recheck_rounds),
+            ("--fast-rank-recheck-iters", args.fast_rank_recheck_iters),
+            ("--fast-rank-recheck-window", args.fast_rank_recheck_window),
+            ("--fast-rank-reprobe", args.fast_rank_reprobe),
+            ("--fast-rank-interleave", args.fast_rank_interleave),
+        ):
+            if val is not None:
+                a += [flag, str(val)]
+        if args.fast_rank_reprobe_staged:
+            a += ["--fast-rank-reprobe-staged"]
+    if args.pins is not None:
+        a += ["--pins", args.pins]
     return a
 
 
@@ -651,6 +672,37 @@ def main() -> int:
         help="launches issued before a case's first measured chunk, to bring "
         "the device's clocks up",
     )
+    rank_grp.add_argument(
+        "--fast-rank-recheck",
+        type=int,
+        default=None,
+        dest="fast_rank_recheck",
+        metavar="N",
+        help="implicit-GEMM only, opt-in: re-time the best N finalists in "
+        "interleaved staged rounds and rank by their median",
+    )
+    rank_grp.add_argument("--fast-rank-recheck-rounds", type=int, default=None,
+                          dest="fast_rank_recheck_rounds", metavar="R")
+    rank_grp.add_argument("--fast-rank-recheck-iters", type=int, default=None,
+                          dest="fast_rank_recheck_iters", metavar="K")
+    rank_grp.add_argument("--fast-rank-recheck-window", type=float, default=None,
+                          dest="fast_rank_recheck_window", metavar="F")
+    rank_grp.add_argument("--fast-rank-reprobe", type=int, default=None,
+                          dest="fast_rank_reprobe", metavar="K",
+                          help="implicit-GEMM only, opt-in: re-probe the best K in reverse order (min of two)")
+    rank_grp.add_argument("--fast-rank-reprobe-staged", action="store_true",
+                          dest="fast_rank_reprobe_staged",
+                          help="implicit-GEMM only: the re-probe uses staged samples")
+    rank_grp.add_argument("--fast-rank-interleave", type=int, default=None,
+                          dest="fast_rank_interleave", metavar="R",
+                          help="implicit-GEMM only, opt-in: time the finalists in R interleaved staged rounds")
+    rank_grp.add_argument(
+        "--pins",
+        default=None,
+        metavar="JSON",
+        help="implicit-GEMM only, opt-in: a pins file (derive_conv_pins.py); a "
+        "pinned case runs only its pinned kernel and launch",
+    )
 
     case_results.add_results_arg(parser, merged=True)
     case_results.add_skip_measured_arg(parser)
@@ -695,6 +747,40 @@ def main() -> int:
         help=(
             "wgrad split-K degree forwarded to implicit-GEMM "
             "(-1 = off, 0 = auto-sweep, N>0 = fixed). Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--split-k-degrees",
+        default=None,
+        dest="split_k_degrees",
+        metavar="LIST",
+        help=(
+            "comma-separated wgrad split-K degrees swept by --split-k 0 "
+            "(default: the implicit-GEMM sweep's own list). Forwarded to "
+            "implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--two-stage",
+        default=None,
+        choices=["auto", "always", "never"],
+        dest="two_stage",
+        help=(
+            "wgrad two-stage (f32 workspace) kernels: auto / always / never "
+            "(default: the implicit-GEMM sweep's own, auto). Forwarded to "
+            "implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--deterministic",
+        nargs="?",
+        const="any",
+        default=None,
+        choices=["any", "f32"],
+        help=(
+            "only kernels/launches with a bitwise-deterministic reduction "
+            "(det_classify.py). Forwarded to implicit-GEMM only; direct conv "
+            "is skipped (its wgrad/split paths use atomics)."
         ),
     )
     implicit_grp.add_argument(
@@ -782,6 +868,8 @@ def main() -> int:
         return 2
 
     using_miopen = args.miopen_cmd is not None or args.miopen_file is not None
+    if args.deterministic:
+        args.skip_direct = True
 
     implicit_only = _build_implicit_only_args(args)
 

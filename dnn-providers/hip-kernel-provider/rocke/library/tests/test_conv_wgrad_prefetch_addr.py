@@ -325,6 +325,29 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
         del fields["split_k_cluster"]  # cluster split-K forward, off
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
+        del fields["prefetch_regs"], fields["lds_kpack"], fields["xcd_remap"], fields["sep_addr"], fields["pfr_sched"], fields["lds_bswz"], fields["kp_line"], fields["xwin"], fields["xwin_rows"], fields["xwin_groups"], fields["xwin_pp"], fields["xwin_mrow"], fields["xwin_gn"], fields["ws_fuse"], fields["ws_store"], fields["ws_tree"], fields["xwin_kband"], fields["plain_pp"], fields["xwin_bq"], fields["xwin_aq"], fields["xwin_pps"], fields["xwin_rot"], fields["xwin_kord"], fields["ws_lc"], fields["ws_gred"]  # wgrad knobs, off
+        del fields["tapk_prefetch"], fields["tapk_xhalo"], fields["b_kpack"]  # dgrad knobs, off
+        del fields["reg_prefetch"], fields["lds_xor"]  # fwd K-loop knobs, off
+        del fields["split_addr_k_decode"]
+        del fields["a_direct"], fields["uk_tap_fast"]  # fwd LDS-lean knobs, off
+        for name in ("cshuffle_m_chunks", "tapk_ilv", "tapk_lds_ahead", "tapk_lds_barrier", "tapk_setprio",
+                     "xh_b_kpad", "xh_b_wide", "xhalo_exact", "xh_a_k4", "xh_order", "xh_defer",
+                     "tapk_pingpong", "tapk_pp_sched", "tapk_pp_epi", "tapk_pp_persist", "tapk_pp_xhalo",
+                     "tapk_ztrim", "tapk_pp_bslab", "xh_fast_a", "xh_epi", "xh_persist",
+                     "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus",
+                     "pp_box_order", "pp_box_det"):  # dgrad x-halo and ping-pong knobs, off
+            del fields[name]
+        for name in ("defer_mfma", "defer_mfma_per_write", "lds_ahead", "lds_kpack_read", "rpf_fetch_late",
+                     "rpf_lds_barrier", "rpf_setprio", "split_tail", "uk_chunk_group", "uk_nopad", "uk_xhalo",
+                     "vmem_interleave", "xh_dpp", "rpf_pingpong", "pp_pre_mfma",
+                     "xh_wait_smem", "pp_b_double", "lds_xor_rowkey",
+                     "split_atomic_agent", "split_atomic_pairs", "split_atomic_fast",
+                     "epi_store_fast", "split_xcd_remap", "split_streamk", "split_flag_store",
+                     "split_zero_first", "xh_subtile",
+                     "pp_fetch_deep", "pp_split_fetch", "fb_skip_empty", "pp_end_guard", "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
+                     "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring",
+                     "xh_dlds", "xh_epi_lin", "xh_tap_rsrc"):  # fwd K-loop / x-halo / split-store knobs, off
+            del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

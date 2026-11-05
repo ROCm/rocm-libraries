@@ -446,6 +446,153 @@ split-K kernels. Every
 launch follows the zeroing contract above, and `workspace` launches are timed
 together with their Stage 2 reduce.
 
+### gfx942 K loop: register prefetch, packed transpose-on-store, carried addressing
+
+gfx942 has no LDS transpose read, so `lds_k_outer` (and with it `async_dma`)
+is unavailable and the M-outer tile is stored transposed, one `ds_write_b16`
+per element. Four opt-in `WgradConvSpec` knobs rework that synchronous K
+loop; all default off (byte-identical IR and kernel names), and each is a
+`KernelIdentity` field left out of the hash at its default.
+
+| Knob | Label | What it does |
+|------|-------|--------------|
+| `prefetch_regs` = 1 / 2 / 3 | `pfr1` / `pfr2` / `pfr3` | The loop carries the next K tile's global reads in VGPRs across the back-edge: an iteration writes the carried tile to LDS, issues the reads of the following tile and runs its MFMAs while they are in flight. Barriers are LDS-only (`sync_lds_only`): `b.sync()` waits `vmcnt(0)` and would drain the prefetch. The last tile is peeled so no read is issued past the slice. `2` stacks two LDS tiles (carried buffer index) and drops the trailing barrier. `3` keeps one LDS tile but two K tiles in flight (reads issued two tiles ahead). |
+| `lds_kpack` = 2 / 4 | `kp2` / `kp4` | `CoalescedTileLoader.row_kpack`: each thread loads `lds_kpack` adjacent K columns of its free-axis vector and transposes them in registers (`v_perm`), so the store issues `lds_kpack`-element writes (`ds_write_b32` / `b64`, often merged into `ds_write2_*`) instead of single elements. The lane decode is column-fastest, which spreads a wave's writes over the banks instead of stepping whole row runs (the row stride is a multiple of 16 banks). Applied per operand where the tile gives each thread a multiple of `lds_kpack` chunks. |
+| `sep_addr` = 1 / 2 | `sepa1` / `sepa2` | 1: the X and dY addresses are computed as a k part (`n, do, ho, wo`, shared by a column's chunks) plus a row part (filter tap and channel, loop-invariant). 2: with `prefetch_regs` and `lds_kpack`, each thread owns `lds_kpack` fixed reduction columns, so the k part (decoded position, input base coordinates and both offsets) is carried across the loop and advanced by one K tile with a mixed-radix carry against the uniform decomposition of `tile_k` -- no magic division and no stride multiply left in the loop. An operand whose tile gives a thread too few chunks for the packed store (a 64-row dY tile on 256 threads is one 8-wide chunk) keeps the unpacked store, and the loop falls back to `sep_addr=1` addressing. |
+| `xcd_remap` = N | `xcdN` | Remaps the whole `(n tile, m tile, z)` grid so each of the N XCDs works a contiguous run of the flat order (one K slice's tiles on one die, sharing its L2). A bijection for any grid size. N is the part's XCD count, so the AOT grid builds it only on request (`ROCKE_AOT_WGRAD_XCD=N`). |
+
+`aot_jobs.CACHE_WGRAD_KLOOP_VARIANTS["gfx942"]` builds a
+`prefetch_regs=1, lds_kpack=2, sep_addr=2` twin of every plain M-outer wgrad
+kernel, and `CACHE_WGRAD_KLOOP_UNSPLIT_VARIANTS` a `prefetch_regs=3` one of
+every unsplit kernel (a whole-reduction K loop is long enough for the second
+tile in flight to pay for its registers; split-K slices are not). The two-stage (f32 workspace) kernels take the same loop; they are
+offered by `--run-from-cache` only with `--two-stage always` unless C is odd.
+
+### X-window reuse across the x taps (`xwin`)
+
+The B (X) operand of filter tap `(z, y, x)` at reduction index `k` is the
+input voxel `wo + x` of one output row: the three x taps of one `(z, y)` read
+the same input row shifted by one voxel along the reduction axis. With
+`WgradConvSpec.xwin = X` (the baked filter width) a B tile is one `(z, y)`
+filter row x `Cb = tile_n / X` channels x the X taps, and the K loop stages
+only the window of `tile_k + X - 1` voxels x `Cb` channels per K tile -- about
+X times fewer X reads and LDS stores than the `tile_n x tile_k` tile.
+
+* **Window layout.** `W[c][j]` (transposed, k-packed pairs written as
+  `ds_write_b32`), row stride `S` = the smallest `>= tile_k + X - 1` with
+  `S % 4 == 0` (8-byte aligned fragment reads) and `S / 2 = 2 (mod 4)` dwords (16
+  consecutive channel rows land on 16 distinct even banks: conflict-free 16-lane
+  `ds_read_b64`), plus 8 trash rows for the idle lanes of a partial load pass.
+* **Odd taps.** The shift moves the 4-element MFMA fragment along K by `x`
+  elements, i.e. to a 2-byte-aligned address for odd `x`. A misaligned
+  `ds_read_b64` returns the right data in unaligned mode but is serialised (16x
+  an aligned one with 8 waves); so per (channel, k-group) one aligned
+  `ds_read_b64` (dwords `d0, d1`) plus one `ds_read_b32` (`d2`) feed every tap:
+  even `x` takes `(d[x/2], d[x/2+1])`, odd `x` takes
+  `(alignbyte(d[h+1], d[h], 2), alignbyte(d[h+2], d[h+1], 2))`.
+* **Waves own (tap, channel sub-block) columns.** The two-stage epilogue maps an
+  accumulator column back to `dW` column `r*X*C + x*C + cb*Cb + c`.
+* **Addressing.** A K tile lies inside one output row (`Wo % tile_k == 0`), so
+  its X and dY offsets are a uniform per-tile base (decoded on the scalar unit)
+  plus per-lane constants; no per-chunk magic division in the loop.
+* **Knobs.** `xwin_rows = R` puts R filter rows in a tile (tile_n = R*X*Cb;
+  shares the dY tile over R x more columns, but the 3R-wave blocks lose on
+  barriers); `prefetch_regs` 2 (two LDS buffers) and 3 (two tiles in flight)
+  also apply. Measured on gfx942 the 2-wave `t64x192x32` and 4-wave
+  `t128x192x32` tiles with `waves_per_eu` 2-3 win.
+* **Serves** two-stage split-K, stride-1 / dilation-1 W, filter width X,
+  groups 1, `cpg % Cb == 0`, `Wo % tile_k == 0`
+  (`kernel_identity.identity_supports_problem`). AOT axis:
+  `ROCKE_AOT_WGRAD_XWIN` and its scope variables (`aot_jobs.py`). Python AOT path
+  only; the C++ engine twin is a follow-up.
+
+### xwin block ping-pong (`xwin_groups`, `xwin_pp`, `xwin_gn`)
+
+The 2-wave 64-row xwin CTA (one GEMM dimension 64) runs at ~3 waves/SIMD and is
+bound by the latency of its per-step chain (loads -> LDS store -> barrier ->
+fragment reads -> MFMAs -> barrier): at 2 waves/SIMD it loses ~12% free-running.
+`xwin_pp` turns 8 waves into a block ping-pong so 2 waves/SIMD alternate
+memory and MFMA phases:
+
+* **Groups.** `xwin_groups = G` packs G independent xwin sub-tiles (G slices of
+  one (M, N) tile, or with `xwin_gn` G consecutive tiles of the flat
+  N-fastest order -- mostly neighbouring filter rows of one K slice, which read
+  the same dY tile together) into one workgroup, each with its own LDS tiles;
+  the launch's z extent is `ks_count / G` (the host requires `G | split_k`).
+  `G = 1` with 8 waves is one tile whose two halves both store their share of
+  the next tile. `xwin_gn = 2` additionally shares the dY tile of one K slice
+  in LDS: two slots (G consecutive tiles span at most two slices), each loaded
+  and stored by its leader group; the other groups' dY reads go to the OOB
+  sentinel (no traffic) and their stores to a trash slot.
+* **Phases** (`xwin_pp = 8`): per K tile `[mem A]` every fragment read of the
+  tile (then the next-next tile's read offsets while they fly), `[compute A]`
+  the first half of the k atoms' MFMAs with the next tile's v_perm packs and
+  global reads interleaved one slice per MFMA (sched_barrier-fenced; each read
+  issued right after the packs that free its registers, so no back-edge copies),
+  `[mem B]` the next tile's LDS stores, `[compute B]` the other half with the
+  scalar decode of the tile three ahead. Each phase ends in `lgkmcnt(0)` +
+  `s_barrier`; the upper half of the groups (or waves 4-7) runs one barrier
+  behind, so the two waves of a SIMD alternate. `s_setprio 1` on the memory
+  phases (they are the longer ones).
+* **LDS rows** are permuted `r ^ ((r >> 2) & 4)` (rows 16-31 of every 32 XOR 4):
+  a fragment read's 16 rows stay one 16-row group, while the transposed stores
+  of rows 8 apart spread over all banks (2-way instead of 4-way).
+* `xwin_pp = 8` is the only value: the number of the placement that won among
+  the measured variants (loads in [mem B], 3 tiles in flight, offsets in
+  [compute B], no hand interleave, ... -- see the round-4 r4-wgrad notes).
+
+`xwin_mrow = n` (K tile = n whole output rows of `Wo = tile_k / n`, one window
+per row) admits the Wo 16 / 8 shapes at `tile_k` 32; measured slower than
+`tile_k` 16 xwin and the plain kernels there, so not in the AOT env.
+
+AOT axes (all opt-in): `ROCKE_AOT_WGRAD_XWIN_PP=8` (ping-pong copies of the
+64-row w1x2, 128-row 4-wave and 256-row w4x2 a16 twins, + `xwin_gn` twins),
+`ROCKE_AOT_WGRAD_XWIN_WSR=1,2` (+`_MIN_M`: `ws_replicas` copies),
+`ROCKE_AOT_WGRAD_XWIN_TK2=16` (+`_MIN_M`, `_WSR`: `tile_k` 16 twins for Wo = 16),
+`ROCKE_AOT_WGRAD_XWIN_MROW` (+`_MIN_M`, `_WSR`).
+
+### Plain-loop block ping-pong (`plain_pp`, tag `wpl<n>`)
+
+The same 8-wave block ping-pong for the plain (non-xwin) register-prefetch loop
+(`prefetch_regs = 1`) of an 8-wave tile with an even k-atom count (t256x256x32
+w4x2 / w2x4 a16 on the small-grid W cells s7/s8/s10): waves 4-7 run one barrier
+behind waves 0-3, per K tile `[mem A]` every fragment read of tile t,
+`[compute A]` the first half of the k atoms, `[mem B]` tile t+1's LDS stores and
+tile t+2's global reads, `[compute B]` the other half.
+
+* `1`: the VALU (kpack v_perm packing, read address/bounds math) sits in the
+  memory phases (the compiler hoists it above the barriers, serialized after the
+  MFMAs) -- -2..-3% only.
+* `2`: the packing of tile t+1 interleaved into compute A (one VALU per MFMA,
+  `sched_group_barrier`), tile t+3's byte offsets (sep_addr incremental state +
+  bounds) into compute B (three per MFMA, carried as loop VGPRs); mem B is LDS
+  writes + buffer_loads from carried offsets only. `3`: the packing in the
+  second half of compute A (0 spills). `4`: `3` without the `s_setprio`
+  phase priorities. 2-4 measured -5..-14% on s7/s8/s10 against the plain record
+  kernels; reads in compute A (TA bursts avoided) and offsets in mem A were slower.
+
+AOT: `ROCKE_AOT_WGRAD_PPP=2,3,4` with `ROCKE_AOT_WGRAD_PPP_MIN_MN=65536` (copies
+of the 8-wave `mem` pfr1 variants with tile_m*tile_n >= 65536),
+`ROCKE_AOT_WGRAD_PPP_WSS=1` (+ `ws_store` twins of the two-stage ones).
+
+### Plain-store scratch (`ws_store`, tag `wss1`)
+
+Two-stage split-K with one slab per slice (`ws_replicas >= split_k`): Stage 1
+writes its partial with plain stores, so the scratch needs no clear and takes no
+atomics; Stage 2 sums the slabs. Wins where the clear dominates (s7 @2/@3: 28-57 MB).
+AOT: `ROCKE_AOT_WGRAD_WSS=<r>` (+ `ROCKE_AOT_WGRAD_WSS_TILE_K=<k>`) on the
+`ws_replicas` 1 xwin twins, `ROCKE_AOT_WGRAD_PPP_WSS` on the plain_pp copies.
+
+### Two-stage scratch slabs
+
+Stage 1 accumulates slice `z` into slab `z % ws_replicas`; a launch at
+`split_k < ws_replicas` touches only `split_k` slabs, so the cached-kernel
+launcher (`benchmark_implicit_gemm_conv._ws_slabs_used`) sizes, zeroes and folds
+`min(ws_replicas, split_k)` of them (ungrouped launches; dW bit-identical). For
+small grids (split 2-12) with large dW (0.4-3.5 M elements) the clear + fold of
+8 slabs was 10-25% of the call; `ws_replicas` 1/2 twins cut it further.
+`ROCKE_WGRAD_WS_ALL_SLABS=1` restores the full clear.
+
 ## Next steps
 
 ### K0-M-K1 LDS layout

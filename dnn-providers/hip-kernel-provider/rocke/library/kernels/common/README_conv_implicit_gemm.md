@@ -213,7 +213,71 @@ absolute `k_out`. With `groups == 1` the group terms vanish (`cpg == C`,
 
 **Why this is faster:** With `Y=X=1`, `sH=sW=1`, `pH=pW=0` the embed transforms reduce to identity (`hi=ho`, `wi=wo`), the filter-unmerge produces `y=x=0` trivially, and the pad guards are always true. The implicit descriptor computes the same values but still emits the full VALU sequence (magic divisions, multiplications, bounds comparisons). Flat arithmetic emits one `mul` and one `add` per operand (plus the group-base `add` when `groups > 1`) — zero dead instructions.
 
+### 3-D x-halo input reuse and K-loop knobs (uniform_k_decode + reg_prefetch=1 + lds_xor)
+
+Opt-in identity fields (all default off; AOT env axes in `aot_jobs._fwd_sched_k_loops`, scoped with
+`ROCKE_AOT_FWD_R2_SCOPE` / `ROCKE_AOT_FWD_R2_XCD`):
+
+| Field (tag) | Env axis | What it does |
+|---|---|---|
+| `uk_xhalo=n` (`uxh<n>`) | `ROCKE_AOT_FWD_XHALO=4,8` | For stride-1, pad-0, X=3 3-D convs a tile of consecutive output pixels in one (n, d) plane reads one contiguous input range at tap (z, y, 0). The loop runs over (chunk, z, y), stages that range (tile_m + n pixels) once with the three x taps' W tiles side by side, and runs three MFMA phases at row shift x: a third of the A loads, A LDS writes and barriers. Each workgroup checks the conditions (pad, stride, X, packed strides, span) from its kernargs and otherwise runs the plain uniform_k_decode loop. |
+| `lds_kpack_read` (`kprd`) | `ROCKE_AOT_FWD_KPRD=1` | MFMA k order permuted so a lane's two kk steps are contiguous: one `ds_read_b128` per fragment pair; the lds_xor key moves to the 128-byte span (conflict-free 16-byte phases). |
+| `uk_chunk_group=n` (`cg<n>`) | `ROCKE_AOT_FWD_CG=2` | With `uk_tap_fast`, n channel chunks advance fastest (one 128-B line at tile_k 32), then the tap, then the next group. |
+| `rpf_lds_barrier` (`lbar`) | `ROCKE_AOT_FWD_LBAR=1` | rpf1 barriers drain LDS only (no `vmcnt(0)`). |
+| `rpf_fetch_late` (`flate`) | `ROCKE_AOT_FWD_FLATE=1` | Next tile's loads behind the first LDS reads (measured neutral). |
+| `xh_dpp` (`xdpp`) | `ROCKE_AOT_FWD_XDPP=1` | x-halo: taps 1, 2 shift the previous tap's A fragments through the lanes (DPP) instead of re-reading LDS (measured neutral). |
+| `rpf_setprio=n` (`prio<n>`) | `ROCKE_AOT_FWD_PRIO=1` | `s_setprio n` over the load issue and the MFMA phase. |
+| `defer_mfma` on the x-halo loop | `ROCKE_AOT_FWD_SCHED=..d1..,..d2..` | The last tap's last kk MFMAs (or all of them) run after an LDS-only barrier, interleaved with the next tile's LDS writes. |
+| `waves_per_eu` | `ROCKE_AOT_FWD_WPE=n` | Occupancy target clones of the rpf1 lxor loops (name tag `wpe<n>`). |
+
+MI300A (ScaFFold 3-D shapes, staged per-call ms): s1 3.13 -> 2.20, s2 6.96 -> 4.24, s3 3.01 -> 2.06,
+s4 1.35 -> 1.00, s9 0.69 -> 0.51 with `t256x64x32 w4x1 mem cshuffle xcd6 lxor kprd uxh(4|8)` (+ tapf/cg2 for C >= 128,
+lah, dfr1/2, prio1).
+
+### K-loop scheduling, split-K and tail split for small-spatial 3-D convs
+
+Opt-in identity fields (default off, byte-identical defaults; AOT env axes in `aot_jobs`, scoped with
+`ROCKE_AOT_FWD_R2_SCOPE`):
+
+| Field (tag) | Env axis | What it does |
+|---|---|---|
+| `lds_ahead` (`lah`) | `ROCKE_AOT_FWD_SCHED=a1..` | LDS fragment reads one kk step ahead of the MFMAs. |
+| `defer_mfma=n` (`dfr<n>`) | `ROCKE_AOT_FWD_SCHED=..d1..` | The last n kk MFMAs run after the LDS-only barrier, 1 ds_write : 2 MFMA with the next tile's store (rpf1). |
+| `vmem_interleave=n` (`vmi<n>`) | `ROCKE_AOT_FWD_SCHED=..v2/v4` | Next tile's buffer_loads spread one per n MFMAs (rpf1/rpf2/pfr loops). |
+| `rpf_setprio=n` | `ROCKE_AOT_FWD_SCHED=..p1` | as above, token form. |
+| `uk_nopad` (`nopad`) | `ROCKE_AOT_FWD_NOPAD=1` | Unpadded (halo-form) problems: no per-row, per-tap bounds checks in the uniform_k_decode loop (VALU/iter 40 -> 16); serves pad=0 problems only. |
+| `split_k=2` on uniform_k_decode | `ROCKE_AOT_FWD_UKD_SPLIT=1` | Split-K binary of the ukd loops: each slice starts its tap state mid-reduction. |
+| `split_tail` (`spt`) | `ROCKE_AOT_FWD_SPLIT_TAIL=1` | `full_tiles` kernarg: the first tiles in launch order run whole (plain store), only the last partial wave is split and atomic-added (xcd_remap permutes the full tiles only, so the host zeroes just the tail rows). |
+
+The benchmark sweeps fwd split degrees that fill whole waves (`floor(n*CUs/tiles)`,
+`conv_split_k.fwd_wave_filling_split_ks`) and, for `split_tail` binaries, `full = T - T % (n*CUs)` at degrees 2/3/4/6
+(labelled `@split_k=<S>/full<F>`).
+
+MI300A (staged per-call ms, same-session A/B against the round-1 record kernels): s5 1.50 -> 1.05,
+s6 0.75 -> 0.49, s7 0.46 -> 0.29, s8 0.87 -> 0.63, s10 0.27 -> 0.17 with
+`t128x128x64 w2x2 a32 xcd6 lxor nopad lah dfr3/dfr4 vmi2/4 kprd` (k-packed reads with the 128-B XOR key remove every
+LDS bank conflict, which is what lets the deeper defer pay), split_tail @2/full912 (s5, s6), @4-6/full228 (s7, s8),
+ukd split-K @7 (s10). `defer_mfma_per_write` (`dpw<n>`, `ROCKE_AOT_FWD_DPW`) measured neutral.
+
 ---
+
+### 8-wave block ping-pong K loop (`rpf_pingpong`, uniform_k_decode + reg_prefetch=1)
+
+Triton's BlockPingpong form for 8-wave tiles (two waves per SIMD). The high half of the waves runs one extra
+`s_barrier` before the loop and the low half one after it, so the two waves of a SIMD run half an iteration apart.
+Every K tile is four barrier-separated phases: [mem A] all LDS fragment reads of the tile, [compute A] half of the
+MFMAs, [mem B] the LDS store of the next tile, [compute B] the other half -- one wave's memory phase runs under its
+SIMD partner's MFMAs. Modes: `pp1` (fragment reads retired before the barrier, loads of the next tile in [mem A]),
+`pp4` (global reads of tile t+2 issued in [mem B] after the store of t+1, loop-carried registers), `pp5` (those reads
+spread over the [compute B] MFMAs, one per `vmem_interleave` MFMAs); `pp2`/`pp3` are experiments that rely on in-order
+LDS across waves. `pp_pre_mfma` (`ppm<n>`) hoists MFMAs above the opening barriers, `pp_b_double` (`ppbd`) keeps B in
+two buffers. With the 16x16x16 atom on t256x128x64 w4x2 this beats the a32 lah/dfr winners on gfx942 FWD 3-D convs
+with 128-1024 channels; [mem A] (16 KB of fragments per wave per 1024 MFMA cycles) is LDS-read bound.
+AOT axis: `ROCKE_AOT_FWD_PP=p<mode>[m<pre>][s<prio>][v<vmi>][w<wpe>],...` on `ROCKE_AOT_FWD_PP_SCOPE` geometries.
+The same loop shape exists for the x-halo loop (`uk_xhalo` + `rpf_pingpong` 4/5, measured at parity). Related:
+`cshuffle_m_chunks` (`mch<n>`, C tile staged in row slabs, also for the split-K atomic store) and, on the x-halo
+loop, `xh_wait_smem` (`xws`: retire pending scalar loads before the loop so its LDS waits are partial) and
+`vmem_interleave` (AOT `ROCKE_AOT_FWD_XWS=1|only`, `ROCKE_AOT_FWD_XH_VMI=2,4`).
 
 ## Next steps
 

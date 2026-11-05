@@ -682,3 +682,14 @@ def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
     free = resolve_conv_split_k("wgrad", p, **{**kw, "reduction": "auto"})
     assert (free.split_k, free.two_stage) == (1, False)
+def test_fwd_wave_filling_split_ks():
+    from kernels.common.conv_split_k import fwd_wave_filling_split_ks
+
+    # MI300A, 228 CUs. s10 fwd on 256x128 tiles: 32 tiles -> 7 (224 WGs).
+    assert fwd_wave_filling_split_ks(32, 228)[0] == 7
+    # s8 fwd on 128x256 tiles: 128 tiles -> 3, 5, 7, 8, 10, 12, 14.
+    assert fwd_wave_filling_split_ks(128, 228) == (3, 5, 7, 8, 10, 12, 14)
+    # A grid already over a wave offers nothing for n = 1.
+    assert fwd_wave_filling_split_ks(512, 228) == (2, 3)
+    assert fwd_wave_filling_split_ks(0, 228) == ()
+    assert fwd_wave_filling_split_ks(32, 0) == ()
