@@ -361,6 +361,22 @@ def test_batch_split_counts_fp32_storage_bytes(dtype):
     assert max(chunks_full) * max(in_img, out_img) <= _OOB_BASE
 
 
+@pytest.mark.parametrize("dtype", ["fp32", "tf32"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+def test_jit_batch_split_counts_fp32_storage_bytes(dtype, direction):
+    """The JIT sweep's batch split keeps every activation under 2 GiB in the
+    storage type: fp32 / tf32 split where the same fp16 batch does not."""
+    bdc = pytest.importorskip("benchmarks.common.benchmark_direct_conv")
+
+    # 3 fp16 images of 512x512x1024 (1.5 GiB) fit one launch; fp32 does not.
+    shape = dict(N=3, H=512, W=512, groups=1, cpg=1024, kpg=1024)
+    assert bdc._batch_chunks(DirectConvProblem(**shape, dtype="fp16"), direction) == [3]
+    full = DirectConvProblem(**shape, dtype=dtype)
+    chunks = bdc._batch_chunks(full, direction)
+    assert sum(chunks) == 3 and len(chunks) > 1
+    assert max(chunks) * max(dks._image_bytes(full)) < bdc._TENSOR_LIMIT
+
+
 # ---------------------------------------------------------------------------
 # Narrow (zero-padded) TF32 atoms
 # ---------------------------------------------------------------------------

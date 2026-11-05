@@ -99,6 +99,37 @@ def ieee_fp32():
             cudnn.allow_tf32 = old
 
 
+# A TF32 kernel's error, peak-relative, against :func:`tf32_reference_inputs`:
+# gfx950's BF16x3 emulation is about fp32 accurate, and 1e-4 fails a single
+# bf16 pass or a dropped cross term. gfx942's native XF32 is judged on masked
+# inputs, which leaves only accumulation error, held to 1e-3.
+TF32_REFERENCE_TOL = {"emulated": 1e-4, "native": 1e-3}
+
+
+def _tf32_native(arch: str) -> bool:
+    from kernels.conv.direct_aot_jobs import tf32_is_emulated
+
+    return not tf32_is_emulated(arch)
+
+
+def tf32_reference_inputs(t: torch.Tensor, arch: str, dtype: str = "tf32"):
+    """``t`` as the MMA on ``arch`` consumes it for a ``dtype`` problem.
+
+    A native XF32 MFMA (gfx942) reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); the BF16x3 emulation (gfx950) and the fp32 atoms use
+    the full payload, so every other case returns ``t`` unchanged. The arch
+    question is the catalog's (``tf32_is_emulated``).
+    """
+    if dtype != "tf32" or not _tf32_native(arch):
+        return t
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
+
+
+def tf32_reference_tol(arch: str) -> float:
+    """The TF32 bound for ``arch`` against :func:`tf32_reference_inputs`."""
+    return TF32_REFERENCE_TOL["native" if _tf32_native(arch) else "emulated"]
+
+
 def _ieee(fn):
     """Decorate a torch reference to run under :func:`ieee_fp32`."""
 

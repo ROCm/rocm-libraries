@@ -30,6 +30,8 @@ from typing import List, Optional, Tuple
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 
 if _HAS_TORCH:
     # Let torch claim the process HIP context before rocke's runtime binds it.
@@ -217,13 +219,13 @@ def _tolerance(dtype: str, arch: str) -> float:
     inputs. The bf16x3 emulation is close to fp32, and the 1e-4 bound fails a
     single bf16 pass or a dropped cross term. gfx942 hardware TF32 ignores the
     low 13 mantissa bits, so its reference is computed from inputs masked the
-    same way (``_tf32_reference_inputs``). That leaves only accumulation error,
+    same way (``conv_reference.tf32_reference_inputs``). That leaves only accumulation error,
     and the fp32 bound applies.
     """
     if dtype == "fp32":
         return 1e-4
     if dtype == "tf32":
-        return 1e-3 if arch == "gfx942" else 1e-4
+        return tf32_reference_tol(arch)
     return _TOL[dtype]
 
 
@@ -236,19 +238,6 @@ def _u8(t):
     import torch  # noqa: F401 — only called when torch is available
 
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _tf32_reference_inputs(t, arch: str):
-    """``t`` as the TF32 MMA on ``arch`` consumes it.
-
-    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
-    (``& 0xFFFFE000``); gfx950's BF16x3 emulation uses the full payload.
-    """
-    if arch != "gfx942":
-        return t
-    import torch
-
-    return (t.view(torch.int32) & -0x2000).view(torch.float32)
 
 
 def _conv_reference_fp64(A, B, problem):
@@ -461,8 +450,8 @@ def _run_one(
         # fp64 on the CPU: an fp32 GPU reference may itself run as TF32.
         if dtype == "tf32":
             ref = _conv_reference_fp64(
-                _tf32_reference_inputs(A_t, arch),
-                _tf32_reference_inputs(B_t, arch),
+                tf32_reference_inputs(A_t, arch),
+                tf32_reference_inputs(B_t, arch),
                 problem,
             )
         else:

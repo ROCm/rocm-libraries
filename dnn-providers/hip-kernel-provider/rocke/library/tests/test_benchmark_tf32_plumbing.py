@@ -494,6 +494,29 @@ def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
     assert _Backends.cudnn.allow_tf32 is True
 
 
+def test_tf32_reference_rules_follow_the_catalog():
+    """One home for the TF32 test rules: native XF32 (gfx942) masks the low 13
+    mantissa bits and gets the 1e-3 bound; the BF16x3 emulation (gfx950) and
+    any non-tf32 dtype see the full payload."""
+    torch = pytest.importorskip("torch")
+    from builders.common.conv_reference import (
+        TF32_REFERENCE_TOL,
+        tf32_reference_inputs,
+        tf32_reference_tol,
+    )
+
+    x = torch.tensor([1.0 + 2**-20, -3.14159], dtype=torch.float32)
+    masked = tf32_reference_inputs(x, "gfx942")
+    assert torch.equal(
+        masked.view(torch.int32) & 0x1FFF, torch.zeros(2, dtype=torch.int32)
+    )
+    assert masked[0].item() == 1.0
+    assert torch.equal(tf32_reference_inputs(x, "gfx950"), x)
+    assert torch.equal(tf32_reference_inputs(x, "gfx942", "fp32"), x)
+    assert tf32_reference_tol("gfx942") == TF32_REFERENCE_TOL["native"] == 1e-3
+    assert tf32_reference_tol("gfx950") == TF32_REFERENCE_TOL["emulated"] == 1e-4
+
+
 def _problem(is_3d=False):
     from kernels.common.conv_implicit_gemm import ConvProblem
 

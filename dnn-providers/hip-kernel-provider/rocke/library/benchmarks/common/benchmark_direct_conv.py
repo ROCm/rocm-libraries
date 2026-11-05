@@ -80,7 +80,7 @@ from kernels.conv.direct_aot_jobs import (
     direct_storage_dtype,
     tf32_narrow_reason,
 )
-from benchmarks.common.direct_kernel_sweep import direct_verify_tol
+from benchmarks.common.direct_kernel_sweep import _image_bytes, direct_verify_tol
 
 # The non-grouped (groups == 1) geometry sweep lives next to the kernel, in
 # ``kernels.common.conv_direct_nongrouped.nongrouped_specs``, because the useful
@@ -446,7 +446,8 @@ def _verify_kernel(
 ) -> "tuple[bool, bool]":
     """Launch once and compare against ``ref_out``: max|out - ref| over
     max|ref| floored at ``ref_floor`` (:func:`conv_fill.ref_floor`), against
-    the problem dtype's bound ``tol`` (:func:`direct_kernel_sweep.direct_verify_tol`)."""
+    the problem dtype's bound ``tol`` (:func:`direct_kernel_sweep.direct_verify_tol`).
+    """
     import torch
 
     from rocke.runtime.launcher import LaunchConfig
@@ -2629,15 +2630,15 @@ _TENSOR_LIMIT = 1 << 31
 
 def _batch_chunks(p, direction: str) -> List[int]:
     """Images per launch: the fewest balanced batch chunks that keep every
-    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad).
+    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad). An
+    image is sized in its storage type: fp32 / tf32 images are twice fp16's.
 
     The chunks need not divide N; they differ by at most one image (N=31 that
     fits 15 images per launch runs as 11 + 10 + 10).
     """
     if direction == "wgrad":
         return [p.N]
-    elem = 2
-    per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
+    per_image = max(_image_bytes(p))
     per_launch = (_TENSOR_LIMIT - 1) // per_image
     if p.N <= per_launch or per_launch < 1:
         return [p.N]

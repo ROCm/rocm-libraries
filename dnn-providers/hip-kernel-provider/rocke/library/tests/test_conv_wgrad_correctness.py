@@ -52,6 +52,8 @@ from typing import List, Tuple
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 
@@ -2787,9 +2789,9 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
 # single BF16 pass misses by more than an order of magnitude
 # (TestConvWgradTf32Bound pins that on the CPU). gfx942: 1e-3 against the
 # truncated-input reference -- a global bound cannot separate truncated TF32
-# from one BF16 pass on raw inputs.
+# from one BF16 pass on raw inputs. Both rules live in conv_reference
+# (tf32_reference_inputs / tf32_reference_tol), shared by every TF32 test.
 
-_TF32_TOL = {"gfx950": 1e-4, "gfx942": 1e-3}
 
 # Per arch, the two TF32 atoms as (warp_tile_mn, warp_tile_k).
 _TF32_ATOMS = {"gfx950": ((32, 16), (16, 32)), "gfx942": ((32, 4), (16, 8))}
@@ -2838,13 +2840,6 @@ def _tf32_spec(problem, atom, **kw):
     )
     base.update(kw)
     return WgradConvSpec(**base)
-
-
-def _tf32_truncate(t):
-    """What gfx942's xf32 MFMA reads of an fp32 value: the low 13 bits dropped."""
-    import torch
-
-    return (t.view(torch.int32) & 0xFFFFE000).view(torch.float32)
 
 
 def _wgrad_reference_nd(X, dY, p):
@@ -2925,10 +2920,9 @@ def _run_tf32(spec, arch: str):
 
     p = spec.problem
     X, dY, dW = _tf32_tensors(p)
-    if arch == "gfx942":
-        ref = _wgrad_reference_nd(_tf32_truncate(X), _tf32_truncate(dY), p)
-    else:
-        ref = _wgrad_reference_nd(X, dY, p)
+    ref = _wgrad_reference_nd(
+        tf32_reference_inputs(X, arch), tf32_reference_inputs(dY, arch), p
+    )
 
     art = compile_kernel(build_implicit_gemm_conv_wgrad(spec, arch=arch), arch=arch)
     streamk = spec.streamk != "off"
@@ -3054,7 +3048,7 @@ class TestConvWgradTf32Bound(unittest.TestCase):
             X.to(torch.bfloat16).float(), dY.to(torch.bfloat16).float(), p
         )
         # More than 10x over the bound: a single BF16 pass cannot pass it.
-        self.assertGreater(_tf32_rel_err(bf16, ref), 10 * _TF32_TOL["gfx950"])
+        self.assertGreater(_tf32_rel_err(bf16, ref), 10 * tf32_reference_tol("gfx950"))
 
 
 @unittest.skipUnless(
@@ -3078,7 +3072,7 @@ class TestConvWgradTf32(unittest.TestCase):
                 missing = int((expected & ~written).sum())
                 self.assertEqual(missing, 0, f"{label}: {missing} dW rows unwritten")
                 rel = _tf32_rel_err(out, ref)
-                tol = _TF32_TOL[GPU_ARCH]
+                tol = tf32_reference_tol(GPU_ARCH)
                 self.assertLess(rel, tol, f"{label}: rel_err={rel:.3e} >= {tol:.0e}")
                 print(f"  PASS  tf32 {label} {atom}  rel_err={rel:.2e}", flush=True)
 

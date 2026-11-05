@@ -46,6 +46,8 @@ _CHILD_PYTHONPATH = os.pathsep.join(
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 
 _MFMA_ARCHES = ("gfx90a", "gfx942", "gfx950")
 _WMMA_ARCHES = ("gfx1151", "gfx1201")
@@ -1923,13 +1925,9 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
                 self._assert_accurate(dtype, split_k)
 
 
-# TF32 on gfx950 is the BF16x3 emulation: it consumes the whole fp32 payload,
-# so its error sits about 1.5 orders of magnitude below the 1e-4 bound, while a
-# dropped cross term or a single bf16 pass lands well above it. gfx942's native
-# XF32 ignores the low 13 mantissa bits of each operand, so its reference is
-# computed from inputs masked the same way (``_tf32_reference_inputs``) and
-# held to 1e-3, as in test_conv_fwd_correctness / test_conv_wgrad_correctness.
-_TF32_TOL = {"gfx950": 1e-4, "gfx942": 1e-3}
+# TF32 is judged against conv_reference.tf32_reference_inputs (gfx942's native
+# XF32 on masked inputs) with conv_reference.tf32_reference_tol, as in
+# test_conv_fwd_correctness / test_conv_wgrad_correctness.
 
 # Per arch, the two TF32 atoms as (warp_tile_m, warp_tile_n, warp_tile_k),
 # 16x16 first.
@@ -1939,21 +1937,8 @@ _TF32_WARP_TILES = {
 }
 
 
-def _tf32_reference_inputs(t, arch: str):
-    """``t`` as the TF32 MMA on ``arch`` consumes it.
-
-    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
-    (``& 0xFFFFE000``); gfx950's BF16x3 emulation uses the full payload.
-    """
-    if arch != "gfx942":
-        return t
-    import torch
-
-    return (t.view(torch.int32) & -0x2000).view(torch.float32)
-
-
 @unittest.skipUnless(
-    ARCH in _TF32_TOL and _HAS_TORCH,
+    ARCH in _TF32_WARP_TILES and _HAS_TORCH,
     "TF32 dgrad correctness needs gfx942 or gfx950 + torch",
 )
 class TestConvDgradTf32(unittest.TestCase):
@@ -2021,8 +2006,8 @@ class TestConvDgradTf32(unittest.TestCase):
         torch.manual_seed(0)
         dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
         W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
-        dY = _tf32_reference_inputs(dY, ARCH)
-        W = _tf32_reference_inputs(W, ARCH)
+        dY = tf32_reference_inputs(dY, ARCH)
+        W = tf32_reference_inputs(W, ARCH)
         # Pin the reference to IEEE fp32: torch 2.10 defaults convolutions to
         # TF32 where the backend has it.
         from builders.common.conv_reference import ieee_fp32
@@ -2039,7 +2024,9 @@ class TestConvDgradTf32(unittest.TestCase):
         self.assertEqual(tuple(got.shape), tuple(ref.shape))
         self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
         rel = (got - ref).abs().max().item() / ref.abs().max().item()
-        self.assertLess(rel, _TF32_TOL[ARCH], f"relative-to-peak error {rel:.3e}")
+        self.assertLess(
+            rel, tf32_reference_tol(ARCH), f"relative-to-peak error {rel:.3e}"
+        )
 
     def test_cases(self):
         for warp_tile, tile_k in zip(_TF32_WARP_TILES[ARCH], (64, 32)):
@@ -2133,8 +2120,8 @@ class TestConvDgradTf32(unittest.TestCase):
                     torch.manual_seed(0)
                     dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
                     W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
-                    dY = _tf32_reference_inputs(dY, ARCH)
-                    W = _tf32_reference_inputs(W, ARCH)
+                    dY = tf32_reference_inputs(dY, ARCH)
+                    W = tf32_reference_inputs(W, ARCH)
                     ref = torch.nn.grad.conv2d_input(
                         (p.N, p.C, p.Hi, p.Wi),
                         W.permute(0, 3, 1, 2).double(),
@@ -2146,7 +2133,9 @@ class TestConvDgradTf32(unittest.TestCase):
                         (got.double().cpu() - ref).abs().max() / ref.abs().max()
                     ).item()
                     self.assertLess(
-                        rel, _TF32_TOL[ARCH], f"relative-to-peak error {rel:.3e}"
+                        rel,
+                        tf32_reference_tol(ARCH),
+                        f"relative-to-peak error {rel:.3e}",
                     )
 
 
