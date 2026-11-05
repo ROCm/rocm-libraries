@@ -18,7 +18,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   converted `alpha` to the input type first, in single-pass and in multi-block reductions, which
   truncated a fractional `alpha` for INT8 input and rounded it for FP16 input when the compute type
   is wider. An integer compute type still truncates a fractional `alpha`. `beta` is still
-  converted to the output type: a fractional `beta` for an INT8 output is truncated to 0.
+  converted to the output type: a fractional `beta` for an INT8 output is truncated (0.5
+  becomes 0).
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first

@@ -608,16 +608,20 @@ std::vector<MultiBlockCase> NanPropagationStandard()
 }
 
 // alpha is converted to the compute type in every reduction, in a single pass or in several
-// blocks: the same data reduced over 512 elements (one pass) and over 2048 elements (blocks) gives
-// the same result. An alpha converted to the input type first would change the one-pass result.
-// One single-pass shape per kernel class (one block per output, 1024 or fewer elements; the limits
-// are 256 for a warp and warpSize for a thread, 64 or 32): 512 elements run on a block, 128 on a
-// warp and 16 on a thread, on both wave sizes.
+// blocks: the same data reduced over 16, 128 or 512 elements (one pass) and over 2048 elements
+// (blocks) gives the same result. An alpha converted to the input type first would change the
+// one-pass result. One single-pass shape per kernel class: with 2 outputs, 16 elements run on a
+// thread (limit warpSize, 64 or 32), 128 on a warp (limit 256) and 512 on a block (limit 1024),
+// on both wave sizes; more than 1024 elements take blocks.
 const Shape singlePass512{"SinglePass512", {2, 512}, {1}};
 const Shape singlePass128{"SinglePass128", {2, 128}, {1}};
 const Shape singlePass16{"SinglePass16", {2, 16}, {1}};
-const std::vector<const Shape*> alphaShapes = {
-    &singlePass512, &singlePass128, &singlePass16, &thread2Partial};
+const std::vector<const Shape*> singlePassShapes = {&singlePass512, &singlePass128, &singlePass16};
+const std::vector<const Shape*> alphaShapes      = [] {
+    auto shapes = singlePassShapes;
+    shapes.push_back(&thread2Partial);
+    return shapes;
+}();
 
 // 1000 * 1.0004 is 1000.4 in FP32 and rounds to 1000.5 in FP16; with alpha rounded to FP16 first
 // (1.0) the result would be 1000
@@ -658,7 +662,7 @@ std::vector<MultiBlockCase> AlphaConversionInt8()
 std::vector<MultiBlockCase> AlphaConversionInt8Indices()
 {
     std::vector<MultiBlockCase> cases;
-    for(const auto* s : {&singlePass512, &singlePass128, &singlePass16})
+    for(const auto* s : singlePassShapes)
     {
         cases.push_back(MakeCase("AlphaInt8MaxIdx",
                                  miopenInt8,
