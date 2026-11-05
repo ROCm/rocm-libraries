@@ -148,6 +148,10 @@ class GeneticAlgorithm:
         self.logger.log_lines(self.__repr__(), logging.INFO)
     
     def update(self, best, pop, old_pop, scores):
+        # Guard against non-finite fitness values (e.g. inf from a zero-time benchmark
+        # measurement) in addition to negative/failed scores, so a single bad sample
+        # can't poison best.F for the rest of the run.
+        scores[~np.isfinite(scores)] = -1.0
         scores[scores < 0] = -1.0
         
         pop.G = scores

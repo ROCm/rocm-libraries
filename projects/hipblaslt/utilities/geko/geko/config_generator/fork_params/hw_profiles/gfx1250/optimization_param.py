@@ -137,7 +137,10 @@ class GFX1250Params(BaseOptimizationParams):
         # MI455X latest reco: pin to 1 (paired with BRotate=1).
         # Separates A/B operand halves into different 64K LDS segments to
         # eliminate read-port conflicts. Codegen rejects incompatible MIs.
-        return self._make_param("LDSSegmentInterleave", [1])
+        # ---
+        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
+        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
+        return self._make_param("LDSSegmentInterleave", [0])
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> Optional[ForkParameter]:
@@ -938,7 +941,10 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
         # MI455X latest reco: pin to 1 (paired with BRotate=1).
-        return self._make_param("LDSSegmentInterleave", [1])
+        # ---
+        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
+        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
+        return self._make_param("LDSSegmentInterleave", [0])
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
