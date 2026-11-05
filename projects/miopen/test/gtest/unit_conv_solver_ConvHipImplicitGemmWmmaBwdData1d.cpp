@@ -30,7 +30,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx110X | Gpu::gfx115X);
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx110X | Gpu::gfx115X |
+                                                              Gpu::gfx120X);
         return p;
     }();
     return params;
@@ -99,10 +100,10 @@ TEST(CPU_UnitTestConvSolverHipImplicitGemmWmmaBwdData1dBounds_NONE,
     EXPECT_TRUE(IsApplicableFor(
         ctx, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenHalf));
 
-    // fp16 / bf16 only, gfx110X / gfx115X only.
+    // fp16 / bf16 only; gfx110X / gfx115X and gfx120X (both WMMA layouts), not gfx103X.
     EXPECT_FALSE(IsApplicableFor(
         ctx, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenFloat));
-    EXPECT_FALSE(IsApplicableFor(
+    EXPECT_TRUE(IsApplicableFor(
         ctx1201, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, bf16));
     EXPECT_FALSE(IsApplicableFor(
         ctx1030, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, bf16));

@@ -33,8 +33,9 @@ constexpr std::size_t kCiTileLarge = 32;
 constexpr std::size_t kCiTileSmall = 16;
 
 // Filter width and stride are bounded by LDS (LdsBytes below), which leaves stride <= 7 and
-// stride x taps per phase <= 20. Compiled for gfx1100 to gfx1103 and gfx1150 to gfx1153, every
-// such filter needs at most 255 VGPRs and no scratch in fp16 and bf16, with either stage size.
+// stride x taps per phase <= 20. Compiled for gfx1100 to gfx1103 and gfx1150 to gfx1153 (gfx11
+// layout) and for gfx1200 and gfx1201 (gfx12 layout), every such filter needs at most 255 VGPRs
+// and no scratch in fp16 and bf16, with either stage size.
 constexpr int kMaxFilterWidth = 64;
 constexpr int kMaxStride      = 8;
 
@@ -42,6 +43,13 @@ constexpr std::size_t kMaxGridYZ = 0xffff;
 constexpr std::size_t kMaxGridX  = 0x7fffffff;
 
 std::size_t RoundUp(std::size_t v, std::size_t m) { return (v + m - 1) / m * m; }
+
+// gfx12 WMMA operand layout (8 elements per lane, no replication) instead of the gfx11 one. Chosen
+// from the device name rather than from the __GFX11__ / __GFX12__ macros in the kernel.
+bool WmmaGfx12Layout(const ExecutionContext& ctx)
+{
+    return StartsWith(ctx.GetStream().GetDeviceName(), "gfx120");
+}
 
 std::size_t TapsPerPhase(const miopen::conv::ProblemDescription& problem)
 {
@@ -101,10 +109,10 @@ bool ConvHipImplicitGemmWmmaBwdData1d::IsApplicable(
     if(!ctx.use_hip_kernels)
         return false;
 
-    // gfx110X / gfx115X WMMA only. gfx12 WMMA takes a different operand layout (8 elements per
-    // lane, no replication) and is not implemented here; gfx101X / gfx103X have no WMMA.
+    // WMMA targets whose operand layout the kernel implements: gfx110X / gfx115X (gfx11 layout)
+    // and gfx120X (gfx12 layout). gfx101X / gfx103X have no WMMA.
     const std::string dev_name = ctx.GetStream().GetDeviceName();
-    if(!StartsWith(dev_name, "gfx110") && !StartsWith(dev_name, "gfx115"))
+    if(!StartsWith(dev_name, "gfx110") && !StartsWith(dev_name, "gfx115") && !WmmaGfx12Layout(ctx))
         return false;
 
     if(!problem.Is2d())
@@ -154,7 +162,7 @@ std::size_t ConvHipImplicitGemmWmmaBwdData1d::GetWorkspaceSize(
 }
 
 ConvSolution
-ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext&,
+ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext& ctx,
                                               const miopen::conv::ProblemDescription& problem) const
 {
     ConvSolution result;
@@ -162,7 +170,8 @@ ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext&,
     const std::string options = " -DCT_DTYPE=" + std::to_string(problem.IsFp16() ? 1 : 2) +
                                 " -DCT_K=" + std::to_string(problem.GetWeightsWidth()) +
                                 " -DCT_S=" + std::to_string(problem.GetKernelStrideW()) +
-                                " -DCT_CI_T=" + std::to_string(CiTile(problem));
+                                " -DCT_CI_T=" + std::to_string(CiTile(problem)) +
+                                " -DCT_WMMA_GFX12=" + std::to_string(WmmaGfx12Layout(ctx) ? 1 : 0);
 
     const std::size_t wt_elems = WeightsWorkspaceElems(problem);
 
