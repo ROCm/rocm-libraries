@@ -794,7 +794,7 @@ Metadata baseMetadata()
                 {"group_merge", int64_t{1}},
                 {"ws_replicas", int64_t{0}},
                 {"lds_k_pad", int64_t{0}},
-                {"split_k", int64_t{-1}}};
+                {"split_k", int64_t{1}}};
     for(const auto field : wgrad::GEMM_TUNING_FIELDS)
     {
         m.fields[std::string(field)] = int64_t{0};
@@ -964,7 +964,7 @@ TEST(TestGfx950ConvWgradGeometry, RefusesMalformedOrOutOfContractMetadata)
 
     refuses(dwMetadata(), "kernel_family", int64_t{2});
     refuses(dwMetadata(), "tile_m", int64_t{64});
-    refuses(dwMetadata(), "split_k", int64_t{1});
+    refuses(dwMetadata(), "split_k", int64_t{-1});
     refuses(dwMetadata(), "filter_w", int64_t{5});
     refuses(dwMetadata(), "dilation_h", int64_t{2});
     refuses(dwMetadata(), "stride_w", int64_t{2});

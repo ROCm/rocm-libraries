@@ -165,7 +165,10 @@ _DIRECT_PLACEHOLDERS = {
     "unroll_k": 0,
     "lds_k_pad": 0,
     "lds_layout": "default",
-    "split_k": -1,
+    # 1, not the dataclass's historical -1 "auto": a direct/helper instance
+    # never reads split_k, and the KDP tool reserves -1 as "descriptor
+    # incomplete", refusing any kernel that ships it.
+    "split_k": 1,
     "two_stage": 0,
     "grouped": 0,
 }
@@ -486,8 +489,9 @@ class Gfx950ConvWgradAotSpec:
     all); an implicit-GEMM instance leaves every trailing field at its KMD
     default.
 
-    ``split_k`` defaults to ``-1`` on the dataclass, but the catalog bakes a
-    concrete value (1, or > 1 recorded as 2): never the degree actually
+    ``split_k`` defaults to ``1`` on the dataclass (the direct/helper
+    placeholder); an implicit-GEMM instance's catalog bakes a concrete value
+    (1, or > 1 recorded as 2): never the degree actually
     launched -- :func:`gfx950_conv_wgrad_aot_split_k` re-resolves the launch
     degree from the real problem, exactly as
     ``dispatch.grouped_convolution._wgrad_split_k`` does -- but it *is* read
@@ -532,7 +536,7 @@ class Gfx950ConvWgradAotSpec:
     group_merge: int = 1
     ws_replicas: int = 0
     prefetch_addr: int = 0
-    split_k: int = -1
+    split_k: int = 1
     two_stage: int = 0
     kernel_family: int = KERNEL_FAMILY_IMPLICIT_GEMM
     direct_variant: str = DIRECT_VARIANT_NONE
@@ -714,17 +718,29 @@ class Gfx950ConvWgradAotSpec:
             **common,
         )
 
+    def implicit_probe_problem(self) -> ConvProblem:
+        """The problem rocKE's AOT cache builds this implicit-GEMM identity
+        against (``kernels.conv.aot_jobs._probe_problem``), not a mirror of
+        it. The emitted IR does not depend on the extents -- only on the
+        capability axes (grouping, group-merge degree), which the probe
+        matches; the catalog's ``split_k`` is a concrete 1 or 2, so nothing is
+        resolved from the probe's shape either."""
+        if self.is_direct:
+            raise ValueError("a direct instance has no implicit-GEMM probe")
+        from kernels.conv.aot_jobs import _probe_problem, job_for_identity
+
+        return _probe_problem("wgrad", job_for_identity(self.to_identity()).caps)
+
     def to_instance_spec(
         self, problem: ConvProblem | None = None
     ) -> _wgrad.WgradConvSpec:
-        """The rocKE builder spec, built on the real ``problem`` (an
-        implicit-GEMM wgrad binary bakes no geometry, so it has no probe of
-        its own the way dgrad's tilde/patch kernels do -- it is validated
-        against whatever problem it is asked to run)."""
+        """The rocKE builder spec, on ``problem`` -- or, unless given, on the
+        AOT probe (:meth:`implicit_probe_problem`), which builds the same
+        binary every real problem the instance serves runs."""
         if self.is_direct:
             raise ValueError("a direct instance has no implicit-GEMM spec")
         if problem is None:
-            raise ValueError("an implicit-GEMM wgrad instance needs a real problem")
+            problem = self.implicit_probe_problem()
         return _wgrad.WgradConvSpec(
             problem=problem,
             name=self.kernel_symbol_prefix(),
@@ -1578,15 +1594,13 @@ def build_gfx950_conv_wgrad_aot(
     spec: Gfx950ConvWgradAotSpec,
     *,
     arch: str = _ARCH,
-    problem: ConvProblem | None = None,
 ) -> KernelDef:
     """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an
     instance.
 
     Dispatches on the family: implicit GEMM through
-    ``build_implicit_gemm_conv_wgrad`` (needs ``problem`` -- a wgrad
-    implicit-GEMM binary bakes no geometry of its own to build against,
-    unlike dgrad's tilde/patch probe), the direct and helper kernels through
+    ``build_implicit_gemm_conv_wgrad`` on the AOT probe
+    (:meth:`Gfx950ConvWgradAotSpec.implicit_probe_problem`), the direct and helper kernels through
     ``kernels.conv.direct_variants.select_direct_kernel_builder`` -- rocKE's
     own dispatch over its algorithms, rather than a per-variant mirror here.
     """
@@ -1609,14 +1623,7 @@ def build_gfx950_conv_wgrad_aot(
             f"(hash {spec.to_identity().stable_hash()}): the catalog and this adapter "
             f"disagree on a field"
         )
-    if problem is None:
-        raise ValueError(
-            "building an implicit-GEMM wgrad instance needs a real problem: it "
-            "bakes no geometry of its own"
-        )
-    return _wgrad.build_implicit_gemm_conv_wgrad(
-        spec.to_instance_spec(problem), arch=arch
-    )
+    return _wgrad.build_implicit_gemm_conv_wgrad(spec.to_instance_spec(), arch=arch)
 
 
 # ---------------------------------------------------------------------------

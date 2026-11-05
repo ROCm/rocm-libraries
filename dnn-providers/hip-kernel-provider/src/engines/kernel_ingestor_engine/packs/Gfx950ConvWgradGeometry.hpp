@@ -813,7 +813,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata)
        || !std::all_of(GEMM_FLAG_FIELDS.begin(), GEMM_FLAG_FIELDS.end(), isZero)
        || !isZero("vector_size_a") || !isZero("vector_size_b") || !isZero("vector_size_c")
        || !equalsInt("group_merge", 1) || !wsReplicas || !isZero("lds_k_pad")
-       || !equalsInt("split_k", -1))
+       || !equalsInt("split_k", 1))
     {
         return std::nullopt;
     }
