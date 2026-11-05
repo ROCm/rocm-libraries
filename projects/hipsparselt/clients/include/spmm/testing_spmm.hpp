@@ -40,7 +40,9 @@
 #include "utility.hpp"
 #include <cstddef>
 #include <hipsparselt/hipsparselt.h>
+#include <memory>
 #include <omp.h>
+#include <type_traits>
 #include <utility>
 
 // Tiles smaller than this are processed serially. This is a floor rather than a
@@ -341,6 +343,8 @@ void testing_spmm(const Arguments& arg)
     hipsparselt_local_handle handle{arg};
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
 
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
@@ -1261,7 +1265,7 @@ void testing_spmm(const Arguments& arg)
                                                                ArgumentLogging::NA_value,
                                                                selected_config_id);
     }
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }
 
 template <typename Ti,
