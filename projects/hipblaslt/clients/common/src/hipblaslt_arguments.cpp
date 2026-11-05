@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "hipblaslt_arguments.hpp"
+#include "hipblaslt_bench_options.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
@@ -33,6 +34,20 @@
 #include <ostream>
 #include <regex>
 #include <utility>
+
+void hipblaslt_bench_options::apply_to(Arguments& arg)
+{
+    if(arg.uniform_summation_order < 0)
+        arg.uniform_summation_order = uniform_summation_order();
+
+    if(verify_strict())
+    {
+        arg.norm_check     = 1;
+        arg.allclose_check = 1;
+        // Let the benchmark collect every failure before choosing its exit code.
+        arg.norm_check_assert = false;
+    }
+}
 
 void Arguments::init()
 {
