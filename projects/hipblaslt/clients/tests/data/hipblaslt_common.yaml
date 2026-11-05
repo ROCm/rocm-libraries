@@ -797,7 +797,6 @@ Defaults:
   algo: 0
   solution_index: -1
   requested_solution_num: 1
-  workspace_size: 0
   initialization: rand_int
   category: nightly
   known_bug_platforms: ''

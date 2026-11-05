@@ -36,5 +36,23 @@ class CharArrayBytesTests(unittest.TestCase):
             gentest.char_array_bytes("gpu_arch_exclude", "x" * 40, self.FIELD)
 
 
+class UnknownTestArgumentTests(unittest.TestCase):
+    def setUp(self):
+        fields = [("name", ctypes.c_char * 64), ("K", ctypes.c_int64)]
+        self.saved = dict(gentest.param)
+        gentest.param["Arguments"] = type("Arguments", (ctypes.Structure,), {"_fields_": fields})
+
+    def tearDown(self):
+        gentest.param.clear()
+        gentest.param.update(self.saved)
+
+    def test_unknown_key_names_the_test_and_key(self):
+        # A YAML flow mapping written "K:1" yields the key "K:1", not K.
+        with self.assertRaises(SystemExit) as ctx:
+            gentest.write_test({"name": "grid_limit", "K:1": None})
+        self.assertIn("grid_limit", str(ctx.exception.code))
+        self.assertIn("K:1", str(ctx.exception.code))
+
+
 if __name__ == "__main__":
     unittest.main()
