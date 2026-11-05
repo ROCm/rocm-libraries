@@ -15,6 +15,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
 * Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.
 * Changed the `hiptensor::hiptensor` CMake target to propagate `hip::host` instead of `hip::device`. Code that links hipTensor is no longer compiled as HIP for every GPU target by default. Projects that compile their own HIP kernels must link `hip::device` themselves.
+* Changed the build to require only the Composable Kernel headers. hipTensor uses the `headers` component of the Composable Kernel package when available, so Composable Kernel can be built with `-DCK_HEADERS_ONLY=ON` without compiling any instance library, and otherwise falls back to the include directories of `device_other_operations`.
 
 ### Optimized
 * Reduced build time by compiling library, test, and sample sources that define no GPU kernels for the host only, and by removing the unused CPU reference implementations from `libhiptensor.so`. They are now built only into the test suite's host reference library.
