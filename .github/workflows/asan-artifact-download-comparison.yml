@@ -1,0 +1,202 @@
+name: ASAN Artifact Download Comparison
+
+# Temporary diagnostic workflow. A push to this isolated branch starts one
+# fixed-payload experiment; this does not join any PR gate or rebuild ROCm.
+on:
+  push:
+    branches: [users/rkayaith/asan-artifact-download-comparison]
+    paths:
+      - .github/workflows/asan-artifact-download-comparison.yml
+      - .github/actions/asan-artifact-fetch/action.yml
+      - .github/scripts/asan_artifact_probe.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: asan-artifact-download-comparison
+  cancel-in-progress: false
+
+env:
+  # Keep writes separate from the source run and all ordinary component artifacts.
+  S3_KEY: ROCm-rocm-libraries/${{ github.run_id }}-linux/asan-artifact-downloads/${{ github.run_attempt }}/gfx950/hipblaslt/13437992957
+  S3_URL: https://therock-ci-artifacts-external.s3.us-east-2.amazonaws.com/ROCm-rocm-libraries/${{ github.run_id }}-linux/asan-artifact-downloads/${{ github.run_attempt }}/gfx950/hipblaslt/13437992957
+
+jobs:
+  seed:
+    name: Verify and stage unchanged ZIP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      reference_sha256: ${{ steps.reference.outputs.reference_sha256 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Initialize experiment
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          root="$HOME/asan-artifact-downloads/$RUN_ID-$RUN_ATTEMPT-seed"
+          python .github/scripts/asan_artifact_probe.py init --root "$root"
+          echo "EXPERIMENT_ROOT=$root" >> "$GITHUB_ENV"
+          curl --version > "$root/results/curl-version.txt"
+          aws --version > "$root/results/aws-version.txt"
+          df -h "$root" > "$root/results/disk.txt"
+      - name: Fetch source ZIP
+        timeout-minutes: 32
+        uses: ./.github/actions/asan-artifact-fetch
+        with:
+          arm: seed
+          source: github
+      - name: Verify source and build reference inventory
+        run: python .github/scripts/asan_artifact_probe.py verify --root "$EXPERIMENT_ROOT" --seed
+      - name: Record reference digest
+        id: reference
+        run: python .github/scripts/asan_artifact_probe.py reference --root "$EXPERIMENT_ROOT" >> "$GITHUB_OUTPUT"
+      - name: Configure experiment upload credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+      - name: Upload unchanged ZIP and reference
+        run: |
+          aws s3 cp "$EXPERIMENT_ROOT/work/seed/payload.zip" "s3://therock-ci-artifacts-external/$S3_KEY/payload.zip" --only-show-errors
+          aws s3 cp "$EXPERIMENT_ROOT/reference.json" "s3://therock-ci-artifacts-external/$S3_KEY/reference.json" --only-show-errors
+      - name: Save setup measurements
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-download-seed-${{ github.run_attempt }}
+          path: ${{ env.EXPERIMENT_ROOT }}/results
+          if-no-files-found: error
+          retention-days: 7
+
+  probe:
+    name: Compare ${{ matrix.order }}
+    needs: seed
+    runs-on: linux-gfx950-1gpu-ccs-ossci-rocm
+    timeout-minutes: 115
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - order: B-A-C
+            first: B
+            first_source: github
+            last: C
+            last_source: s3
+          - order: C-A-B
+            first: C
+            first_source: s3
+            last: B
+            last_source: github
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    defaults:
+      run:
+        shell: bash
+    env:
+      ORDER: ${{ matrix.order }}
+      REFERENCE_SHA256: ${{ needs.seed.outputs.reference_sha256 }}
+      HSA_XNACK: '0'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Initialize experiment
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUNNER_NAME: ${{ runner.name }}
+        run: |
+          root="$HOME/asan-artifact-downloads/$RUN_ID-$RUN_ATTEMPT-$ORDER"
+          python .github/scripts/asan_artifact_probe.py init --root "$root"
+          echo "EXPERIMENT_ROOT=$root" >> "$GITHUB_ENV"
+          curl --version > "$root/results/curl-version.txt"
+          tar --version > "$root/results/tar-version.txt"
+          df -h "$root" > "$root/results/disk.txt"
+          curl --silent --fail --connect-timeout 30 --max-time 60 \
+            "$S3_URL/reference.json" --output "$root/reference.json"
+      - name: First raw transfer
+        continue-on-error: true
+        timeout-minutes: 32
+        uses: ./.github/actions/asan-artifact-fetch
+        with:
+          arm: ${{ matrix.first }}
+          source: ${{ matrix.first_source }}
+      - name: Verify first raw transfer
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          ARM: ${{ matrix.first }}
+        run: python .github/scripts/asan_artifact_probe.py verify --root "$EXPERIMENT_ROOT" --arm "$ARM"
+      - name: Begin action measurement
+        run: python .github/scripts/asan_artifact_probe.py begin --root "$EXPERIMENT_ROOT" --arm A
+      - name: Download with pinned action
+        id: action
+        continue-on-error: true
+        timeout-minutes: 30
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: '13437992957'
+          merge-multiple: true
+          repository: ROCm/rocm-libraries
+          run-id: '42066275459'
+          github-token: ${{ github.token }}
+          path: ${{ env.EXPERIMENT_ROOT }}/work/A/trees
+      - name: Finish action measurement
+        env:
+          FETCH_STATUS: ${{ steps.action.outcome }}
+        run: python .github/scripts/asan_artifact_probe.py finish --root "$EXPERIMENT_ROOT" --arm A --status "$FETCH_STATUS"
+      - name: Verify action output
+        continue-on-error: true
+        timeout-minutes: 5
+        run: python .github/scripts/asan_artifact_probe.py verify --root "$EXPERIMENT_ROOT" --arm A
+      - name: Last raw transfer
+        continue-on-error: true
+        timeout-minutes: 32
+        uses: ./.github/actions/asan-artifact-fetch
+        with:
+          arm: ${{ matrix.last }}
+          source: ${{ matrix.last_source }}
+      - name: Verify last raw transfer
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          ARM: ${{ matrix.last }}
+        run: python .github/scripts/asan_artifact_probe.py verify --root "$EXPERIMENT_ROOT" --arm "$ARM"
+      - name: Summarize all arms
+        if: ${{ always() }}
+        run: python .github/scripts/asan_artifact_probe.py summary --root "$EXPERIMENT_ROOT"
+      - name: Save comparison measurements
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-download-${{ matrix.order }}-${{ github.run_attempt }}
+          path: ${{ env.EXPERIMENT_ROOT }}/results
+          if-no-files-found: error
+          retention-days: 7

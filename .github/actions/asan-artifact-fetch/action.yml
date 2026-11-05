@@ -1,0 +1,52 @@
+name: Fetch fixed ASAN ZIP
+description: Serial full-object HTTP fetch with private request configuration and public timing data
+inputs:
+  arm:
+    required: true
+    description: Measurement name (seed, B, or C)
+  source:
+    required: true
+    description: github or s3
+outputs:
+  outcome:
+    description: Outcome of the complete fetch, including endpoint resolution
+    value: ${{ steps.fetch.outcome }}
+runs:
+  using: composite
+  steps:
+    - name: Begin transfer measurement
+      shell: bash
+      env:
+        ARM: ${{ inputs.arm }}
+      run: python .github/scripts/asan_artifact_probe.py begin --root "$EXPERIMENT_ROOT" --arm "$ARM"
+
+    - name: Resolve endpoint and fetch
+      id: fetch
+      continue-on-error: true
+      shell: bash
+      env:
+        ARM: ${{ inputs.arm }}
+        SOURCE: ${{ inputs.source }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        work="$EXPERIMENT_ROOT/work/$ARM"
+        result="$EXPERIMENT_ROOT/results/$ARM"
+        python .github/scripts/asan_artifact_probe.py request --root "$EXPERIMENT_ROOT" --arm "$ARM" --source "$SOURCE"
+        if [ "$SOURCE" = github ]
+        then
+          curl --silent --http1.1 --connect-timeout 30 --max-time 60 --retry 0 \
+            --config "$work/api.curl" --dump-header "$work/headers" --output /dev/null \
+            --write-out 'http_code=%{http_code}\ntime_total=%{time_total}\n' > "$result/lookup.txt"
+          python .github/scripts/asan_artifact_probe.py redirect --root "$EXPERIMENT_ROOT" --arm "$ARM"
+        fi
+        curl --silent --fail --http1.1 --connect-timeout 30 --max-time 1800 --retry 0 \
+          --config "$work/blob.curl" --output "$work/payload.zip" \
+          --write-out 'http_code=%{http_code}\nsize_download=%{size_download}\nspeed_download=%{speed_download}\ntime_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\n' > "$result/curl.txt"
+
+    - name: Finish transfer measurement
+      if: ${{ always() }}
+      shell: bash
+      env:
+        ARM: ${{ inputs.arm }}
+        FETCH_STATUS: ${{ steps.fetch.outcome }}
+      run: python .github/scripts/asan_artifact_probe.py finish --root "$EXPERIMENT_ROOT" --arm "$ARM" --status "$FETCH_STATUS"
