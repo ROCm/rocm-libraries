@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import hashlib
+import importlib.util
 import logging
 import sys
 import uuid
@@ -89,6 +90,7 @@ from .lgbm_to_flatbuffer import (
 from .model_families import (
     FAMILIES,
     LIGHTGBM,
+    XGBOOST,
     export_family,
     model_summary,
     train_family,
@@ -844,6 +846,11 @@ def _run_train(args: argparse.Namespace) -> int:
             raise ValueError(
                 f"--model-family {args.model_family} fits a single ensemble: "
                 "--group-by-feature and --keep-lgbm are LightGBM only"
+            )
+        if args.model_family == XGBOOST and importlib.util.find_spec("xgboost") is None:
+            raise ValueError(
+                f"--model-family {XGBOOST} needs the optional xgboost package: "
+                'pip install -e ".[xgboost]" in projects/hipdnn/tools/uhd_gen'
             )
         # Settled before data preparation or fitting, never stamped later.
         _resolve_score(args, immediate)

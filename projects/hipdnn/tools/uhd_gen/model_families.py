@@ -212,7 +212,11 @@ def _train_xgb(X, y, folds, num_boost_round, early_stopping_rounds, seed):
         data,
         num_boost_round=num_boost_round,
         folds=folds,
-        early_stopping_rounds=early_stopping_rounds,
+        # XGBoost enables early stopping for any truthy value, so -1 would stop after one
+        # round. LightGBM and HistGradientBoosting treat 0 or less as off.
+        early_stopping_rounds=(
+            early_stopping_rounds if early_stopping_rounds > 0 else None
+        ),
         seed=seed,
     )
     rounds = len(history)

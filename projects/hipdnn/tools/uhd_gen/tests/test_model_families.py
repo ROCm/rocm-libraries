@@ -6,6 +6,7 @@ Every exported tree must route each row to the leaf its source library picks, wi
 same leaf value, using only TreeDataAdapter's comparison (`<` or `<=` on a float64).
 """
 import json
+import sys
 import warnings
 
 import pytest
@@ -29,6 +30,7 @@ from uhd_gen.model_families import (  # noqa: E402
     export_family,
     float32_less_than,
     model_summary,
+    train_family,
     tree_equivalence,
 )
 
@@ -436,4 +438,36 @@ def test_grouped_training_is_lightgbm_only(tmp_path, caplog):
     arguments = _train_arguments(corpus, tmp_path / "model", "unused", "sklearn-hgb")
     assert main([*arguments, "--group-by-feature", "kernel.tile_m"]) == 1
     assert "LightGBM only" in caplog.text
+    assert not (tmp_path / "model").exists()
+
+
+@pytest.mark.parametrize("patience", [0, -1])
+def test_a_non_positive_patience_keeps_every_xgboost_round(patience):
+    """XGBoost turns early stopping on for any truthy value, so -1 must reach it as None."""
+    importorskip_optional("xgboost")
+    X, y = _training_data(rows=300)
+    frame = pd.DataFrame(X, columns=["a", "b", "c", "d"]).assign(target=np.exp(y / 5))
+    model = train_family(
+        "xgboost",
+        frame,
+        ["a", "b", "c", "d"],
+        "target",
+        num_boost_round=30,
+        early_stopping_rounds=patience,
+        feature_matrix=X,
+    )
+    assert model.num_boosted_rounds() == 30
+
+
+def test_a_missing_xgboost_package_is_refused_before_data_preparation(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setitem(sys.modules, "xgboost", None)  # `import xgboost` fails
+    # The input does not exist: data preparation would fail with another message.
+    arguments = _train_arguments(
+        tmp_path / "missing.csv", tmp_path / "model", "unused", "xgboost"
+    )
+    assert main(arguments) == 1
+    assert "optional xgboost package" in caplog.text
+    assert '".[xgboost]"' in caplog.text
     assert not (tmp_path / "model").exists()
