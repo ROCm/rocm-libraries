@@ -89,8 +89,8 @@ GraphFixture graphOf(const Operand& q, const Operand& k)
                                                           0,
                                                           op.passByValue);
     };
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{tensorFor(Q_UID, q),
-                                                                             tensorFor(K_UID, k)};
+    const std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+        tensorFor(Q_UID, q), tensorFor(K_UID, k)};
     const std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     auto name = builder.CreateString("sdpa_graph_read_problem_test");
     auto tensorsVector = builder.CreateVector(tensors);
