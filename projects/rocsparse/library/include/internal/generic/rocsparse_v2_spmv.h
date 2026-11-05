@@ -107,6 +107,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *
 *  <table>
 *  <tr><th>Algorithm                            <th>Deterministic  <th>Notes
+*  <tr><td>rocsparse_spmv_alg_default</td>      <td>No</td>        <td>Non-transposed CSR and transposed or conjugate-transposed CSC use the adaptive algorithm, or the nnz-split algorithm when the adaptive row-block partition is a poor fit for the sparsity pattern, for example when many empty rows are scattered through the matrix. In those cases, half-precision matrices use the adaptive algorithm. Transposed CSR and non-transposed CSC use the rowsplit algorithm.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>This is best suited for matrices with all rows having a similar number of non-zeros. Can outperform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>[Deprecated] The old name for rocsparse_spmv_alg_csr_rowsplit.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
