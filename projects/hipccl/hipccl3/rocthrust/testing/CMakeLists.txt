@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 - 2023 Advanced Micro Devices, Inc.
+# Copyright 2019 - 2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 add_library(testing_common INTERFACE)
