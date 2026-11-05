@@ -31,22 +31,14 @@
 //
 // These helpers were previously file-local (static) functions inside
 //   library/src/level2/rocsparse_csrmv_template_adaptive.cpp
-// They contain no device/kernel code and perform no allocations, so they are
-// lifted here (as inline functions in namespace rocsparse) to make them
-// independently unit-testable without linking the device translation unit.
+// They contain no device/kernel code and perform no allocations. The
+// definitions are in rocsparse_csrmv_adaptive_analysis.cpp, which the host
+// unit test compiles directly so it does not link the device translation unit.
 //
 namespace rocsparse
 {
     // Round down to the largest power of two that is <= x (x > 0).
-    inline uint32_t flp2(uint32_t x)
-    {
-        x |= (x >> 1);
-        x |= (x >> 2);
-        x |= (x >> 4);
-        x |= (x >> 8);
-        x |= (x >> 16);
-        return x - (x >> 1);
-    }
+    uint32_t flp2(uint32_t x);
 
     // Short rows in CSR-Adaptive are batched together into a single row block.
     // If there are a relatively small number of these, then we choose to do
@@ -62,20 +54,16 @@ namespace rocsparse
     //
     // Contract: num_rows must be >= 2 (num_rows - 1 must be non-zero for the
     // count-leading-zeros path); this matches the original static function.
-    inline uint64_t numThreadsForReduction(uint64_t num_rows, uint64_t wg_size = 256)
+    uint64_t numThreadsForReduction(uint64_t num_rows, uint64_t wg_size = 256);
+
+    // block_nnz closes one adaptive row block. This is BLOCK_SIZE in
+    // rocsparse_csrmv_template_adaptive.cpp.
+    // wide_block_rows is 32 workgroups of 256 threads. ComputeRowBlocks skips
+    // an empty prefix or suffix longer than this, and csrmv_partition::is_poor_fit
+    // counts a block spanning more rows than this as wide.
+    struct csrmv_adaptive_constants
     {
-#if defined(__INTEL_COMPILER)
-        return wg_size >> (_bit_scan_reverse(num_rows - 1) + 1);
-#elif(defined(__clang__) && __has_builtin(__builtin_clz)) \
-    || !defined(__clang) && defined(__GNUG__)             \
-           && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 30202)
-        return (wg_size >> (8 * sizeof(int) - __builtin_clz(num_rows - 1)));
-#elif defined(_MSC_VER) && (_MSC_VER >= 1400)
-        uint64_t bit_returned;
-        _BitScanReverse(&bit_returned, (num_rows - 1));
-        return wg_size >> (bit_returned + 1);
-#else
-        return flp2(wg_size / num_rows);
-#endif
-    }
+        static constexpr uint32_t block_nnz       = 1024;
+        static constexpr uint32_t wide_block_rows = 32 * 256;
+    };
 }
