@@ -489,7 +489,12 @@ their prefix sums or paged metadata. Rows load as 16-byte vectors (8-byte for
 FP8 K/V), so data pointers and every outer stride must keep that alignment.
 Paged launches pass the caches' page count as `num_blocks`; the kernels treat a
 `block_table` entry outside `[0, num_blocks)` as a page of zeros (no read
-outside the caches, no host-side value check).
+outside the caches, no host-side value check). The prefill kernel takes a K
+table (`block_table`) and a V table (`block_table_v`) that share one row
+stride; the binding passes its one `block_table` as both. A paged prefill
+spec's `dense_q` / `seqused_q` options come from the request's fields of the
+same names (the `dense_q` / `seqused_q` features; the decode refuses them, so
+such a request always runs the prefill).
 Runtime kwargs are `softmax_scale`, positive `softcap` when selected, and
 explicit FP32 `k_scale`/`v_scale` for FP8 storage. The decode binding takes
 its split count from the shape, the visible key range and the CU count
@@ -520,10 +525,12 @@ partials. Kernel design, ABI and
 generic-target requirements are in the
 [RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
 dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`
-(`rocke-attention-gfx1151/v7`): v7 retires the single-wave forward kernel from
-dispatch, gives the prefill a `batch` argument and a flat 1-D grid, and routes
+(`rocke-attention-gfx1151/v8`): v7 retired the single-wave forward kernel from
+dispatch, gave the prefill a `batch` argument and a flat 1-D grid, and routed
 decode-shaped requests to the split-KV decode with its workspace and merge
-kernel. Callers built against an earlier header must be rebuilt.
+kernel; v8 adds the paged prefill's separate V page table (`block_table_v`)
+after `block_table`, which moves every later paged argument. Callers built
+against an earlier header must be rebuilt.
 
 ### Tuned RDNA WMMA candidates
 

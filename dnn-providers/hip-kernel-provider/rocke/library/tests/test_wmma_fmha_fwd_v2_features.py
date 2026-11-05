@@ -6,9 +6,13 @@ Every case runs one compiled ``kernels/gfx1151/wmma_fmha_fwd_v2`` object
 against a float64 reference over every sequence, head and row, checking O and
 the natural-log LSE. Features: softcap, attention sinks, ALiBi, QQ-bias, OCP
 E4M3FN K/V with runtime scales, ragged (varlen) and paged K/V (per-tile and
-per-row block-table lookups, shuffled pages, NaN-poisoned unused slots), each
-alone and in model combinations (gpt-oss sinks + sliding window at D64 GQA,
-Gemma-2 softcap + sliding window at D256, everything at once).
+per-row block-table lookups, shuffled pages, NaN-poisoned unused slots, one
+table for both caches or separate K and V tables), a
+batch-strided (dense) Q against a paged cache, per-sequence live query counts
+(``seqused_q``: rows past them, and gaps between packed sequences, stay
+untouched), each alone and in model combinations (gpt-oss sinks + sliding
+window at D64 GQA, Gemma-2 softcap + sliding window at D256, everything at
+once).
 
 Reference order (natural domain): scale, softcap, ALiBi ``slope * (k -
 ctx)``, QQ-bias ``qq[q, k - ctx]`` inside its bounds, additive bias, then the
@@ -38,11 +42,14 @@ _GPTOSS = dict(Hq=16, Hkv=2, dq=64, mask="causal", wl=127, wr=0)
 
 # name -> options. Common keys: layout (dense / ragged / paged), B + Sq + Sk
 # (dense) or lens_q + lens_k (packed), Hq, Hkv, Hv, dq, dv, mask, br, wl, wr,
-# flags (c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8 K/V), cap, scale, ps
-# (page size), bias ((kind, (b, h, q, k) full flags)), qq (rows, cols, pad),
-# bn (block_n), unsplit (gfx12 wave_pair=False), ninf ((n, fill): the first n
-# keys' bias / QQ-bias entries become fill, "inf" -> -inf, "finfo" -> the
-# dtype's most negative finite value).
+# flags (c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8 K/V, d dense Q (paged),
+# u seqused_q, t separate K and V block tables (paged)), cap, scale, ps (page
+# size), bias ((kind, (b, h, q, k) full
+# flags)), qq (rows, cols, pad), bn (block_n), unsplit (gfx12 wave_pair=False),
+# ninf ((n, fill): the first n keys' bias / QQ-bias entries become fill, "inf"
+# -> -inf, "finfo" -> the dtype's most negative finite value), gaps (u: rows
+# past each sequence's live count -- packed: before the next sequence; dense
+# Q: up to Sq = max(lens_q + gaps)).
 CASES = {
     "softcap_none_d128": dict(B=2, Sq=77, Sk=150, dq=128, flags="c", cap=5.0, scale=1.0),
     "softcap_large_logits_d64": dict(
@@ -156,6 +163,50 @@ CASES = {
         layout="paged", ps=32, lens_q=(40, 9), lens_k=(70, 100), dq=256, dv=128,
         flags="s", unsplit=True,
     ),
+    # Uniform decode against a paged cache: dense [B, Sq, Hq, D] Q, CUDA-graph
+    # padding rows (no keys) write zeros.
+    "denseq_paged16_decode_gqa": dict(
+        layout="paged", ps=16, lens_q=(1, 1, 1, 1), lens_k=(37, 0, 200, 16),
+        Hq=8, Hkv=2, dq=128, mask="causal", br=1, wr=0, flags="d", dtypes=("fp16",),
+    ),
+    "denseq_paged32_spec_decode_d64": dict(
+        layout="paged", ps=32, lens_q=(3, 3, 3), lens_k=(3, 70, 129), dq=64,
+        mask="causal", br=1, wr=0, flags="d", dtypes=("bf16",),
+    ),
+    "denseq_used_paged16_window": dict(
+        layout="paged", ps=16, lens_q=(1, 3, 0, 2), gaps=(3, 1, 4, 2),
+        lens_k=(40, 90, 0, 33), dq=128, mask="causal", br=1, wl=31, wr=0,
+        flags="du", dtypes=("fp16",),
+    ),
+    "used_paged16_gaps": dict(
+        layout="paged", ps=16, lens_q=(5, 0, 40, 1), gaps=(3, 2, 0, 7),
+        lens_k=(20, 0, 300, 50), Hq=8, Hkv=1, dq=128, mask="causal", br=1,
+        wl=63, wr=0, flags="u", dtypes=("bf16",),
+    ),
+    "used_ragged_gaps_d64": dict(
+        layout="ragged", lens_q=(17, 4), gaps=(5, 0), lens_k=(30, 4), dq=64,
+        flags="u", dtypes=("fp16",),
+    ),
+    "denseq_used_pair_d256": dict(
+        layout="paged", ps=16, lens_q=(2, 1), gaps=(0, 1), lens_k=(70, 5),
+        Hq=4, Hkv=2, dq=256, mask="causal", br=1, wr=0, flags="du", dtypes=("bf16",),
+    ),
+    # Separate K and V block tables (cuDNN's page_table_k / page_table_v): the
+    # V pages sit in another order than the K pages. Per-row lookups (ps 16),
+    # per-tile lookups (ps 64, and ps 32 with sinks and a ragged Q).
+    "split_tables_paged16_rows": dict(
+        layout="paged", ps=16, lens_q=(20, 1, 77), lens_k=(150, 33, 77), dq=128,
+        mask="causal", br=1, wr=0, flags="t", dtypes=("fp16",),
+    ),
+    "split_tables_denseq_used_paged64": dict(
+        layout="paged", ps=64, lens_q=(3, 1, 0), gaps=(0, 2, 3), lens_k=(130, 64, 0),
+        Hq=8, Hkv=2, dq=64, mask="causal", br=1, wr=0, flags="dut", dtypes=("bf16",),
+    ),
+    "split_tables_used_paged32_sinks_window": dict(
+        layout="paged", ps=32, lens_q=(4, 40), gaps=(2, 0), lens_k=(70, 200),
+        Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="sut",
+        dtypes=("fp16",),
+    ),
     # A -inf bias / QQ-bias over a row's first whole key tile: the running max
     # stays -inf through an unmasked tile, which must not produce -inf - -inf.
     # bf16 finfo.min (the torch padding-mask idiom) overflows to -inf in log2.
@@ -262,15 +313,25 @@ class _Dev:
             self.rt.free(ptr)
 
 
+# Every case runs at both Q dtypes unless it names its ``dtypes``. The paged
+# query forms (dense Q, seqused_q, separate tables, ...) change addressing and
+# masking, not the dtype path that the cases above already cover at both, so
+# each of them runs one dtype, the two alternating, to bound CI time.
+_PARAMS = [
+    (case, dtype)
+    for case in sorted(CASES)
+    for dtype in CASES[case].get("dtypes", ("fp16", "bf16"))
+]
+
+
 @pytest.mark.gpu
 @_NEEDS_RDNA
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("case", sorted(CASES))
+@pytest.mark.parametrize(("case", "dtype"), _PARAMS)
 def test_prefill_feature_matches_reference(case, dtype):
     opt = dict(
         layout="dense", Hq=4, Hkv=2, Hv=None, dv=None, mask="none", br=0, wl=-1,
         wr=-1, flags="", cap=None, scale=None, ps=0, bias=None, qq=None, bn=32,
-        unsplit=False, ninf=None,
+        unsplit=False, ninf=None, gaps=None,
     )  # fmt: skip
     opt.update(CASES[case])
     if opt["unsplit"] and _ARCH != "gfx12-generic":
@@ -298,6 +359,10 @@ def test_prefill_feature_matches_reference(case, dtype):
     else:
         lens_q, lens_k = opt["lens_q"], opt["lens_k"]
     B, max_q, max_k = len(lens_q), max(lens_q), max(lens_k)
+    dense_q, used = "d" in flags, "u" in flags
+    spans = [n + g for n, g in zip(lens_q, opt["gaps"] or (0,) * B)]
+    assert used or spans == list(lens_q), "gaps need seqused_q"
+    assert not dense_q or len(set(spans)) == 1, "a dense Q spans Sq rows per sequence"
     scale = opt["scale"] or dq**-0.5
     spec = WmmaFmhaFwdV2Spec(
         dtype=dtype,
@@ -311,6 +376,8 @@ def test_prefill_feature_matches_reference(case, dtype):
         use_qq_bias="q" in flags,
         layout=layout,
         page_block_size=opt["ps"],
+        dense_q=dense_q,
+        seqused_q=used,
         kv_dtype="fp8e4m3" if fp8 else "",
         block_n=opt["bn"],
         wave_pair=False if opt["unsplit"] else None,
@@ -412,17 +479,41 @@ def test_prefill_feature_matches_reference(case, dtype):
                 "lse": (Hq * max_q, 1, max_q),
             }
         else:
-            total_q = sum(lens_q)
-            q_all = np.concatenate(qs)
-            o_like = np.zeros((total_q, Hq, dv), npdt)
-            lse_like = np.zeros((Hq, max(total_q, 1)), np.float32)
-            cu_q = np.concatenate([[0], np.cumsum(lens_q)]).astype(np.int32)
-            values["cu_seqlens_q"] = dev.put(cu_q)
-            strides = {
-                "q": (0, Hq * dq, dq),
-                "o": (0, Hq * dv, dv),
-                "lse": (0, 1, max(total_q, 1)),
-            }
+            # Live query rows, then each sequence's untouched gap rows.
+            q_seqs = [
+                (
+                    np.concatenate([q, rnd(s - len(q), Hq, dq).astype(npdt)])
+                    if s > len(q)
+                    else q
+                )
+                for q, s in zip(qs, spans)
+            ]
+            if used:
+                values["seqused_q"] = dev.put(np.array(lens_q, np.int32))
+            if dense_q:
+                sq = spans[0]
+                values["seqlen_q"] = sq
+                q_all = np.stack(q_seqs)
+                o_like = np.zeros((B, sq, Hq, dv), npdt)
+                lse_like = np.zeros((B, Hq, sq), np.float32)
+                strides = {
+                    "q": (sq * Hq * dq, Hq * dq, dq),
+                    "o": (sq * Hq * dv, Hq * dv, dv),
+                    "lse": (Hq * sq, 1, sq),
+                }
+            else:
+                total_q = sum(spans)
+                values["seqlen_q"] = max(max(spans), 1)
+                q_all = np.concatenate(q_seqs)
+                o_like = np.zeros((total_q, Hq, dv), npdt)
+                lse_like = np.zeros((Hq, max(total_q, 1)), np.float32)
+                cu_q = np.concatenate([[0], np.cumsum(spans)]).astype(np.int32)
+                values["cu_seqlens_q"] = dev.put(cu_q)
+                strides = {
+                    "q": (0, Hq * dq, dq),
+                    "o": (0, Hq * dv, dv),
+                    "lse": (0, 1, max(total_q, 1)),
+                }
             if layout == "ragged":
                 k_all, v_all = np.concatenate(ks_dev), np.concatenate(vs_dev)
                 cu_k = np.concatenate([[0], np.cumsum(lens_k)]).astype(np.int32)
@@ -435,21 +526,29 @@ def test_prefill_feature_matches_reference(case, dtype):
                 max_pages = max(max(pages), 1)
                 n_pages = sum(pages) + 3  # a few never-referenced pages
                 order = rng.permutation(n_pages)
+                split = "t" in flags
+                order_v = rng.permutation(n_pages) if split else order
                 nan = 0x7F if fp8 else np.nan  # NaN-poison every unused slot
                 k_all = np.full((n_pages, ps, Hk, dq), nan, kv_np)
                 v_all = np.full((n_pages, ps, Hv, dv), nan, kv_np)
                 table = np.zeros((B, max_pages + 2), np.int32)  # padded rows
+                table_v = table.copy()
                 nxt = 0
                 for bi, n in enumerate(lens_k):
                     for pg in range(pages[bi]):
-                        phys = order[nxt]
+                        phys, phys_v = order[nxt], order_v[nxt]
                         nxt += 1
                         table[bi, pg] = phys
+                        table_v[bi, pg] = phys_v
                         t0, t1 = pg * ps, min(n, (pg + 1) * ps)
                         k_all[phys, : t1 - t0] = ks_dev[bi][t0:t1]
-                        v_all[phys, : t1 - t0] = vs_dev[bi][t0:t1]
+                        v_all[phys_v, : t1 - t0] = vs_dev[bi][t0:t1]
                 values["seqused_k"] = dev.put(np.array(lens_k, np.int32))
                 values["block_table"] = dev.put(table)
+                # Without "t" one table maps both caches: pass it twice.
+                values["block_table_v"] = (
+                    dev.put(table_v) if split else values["block_table"]
+                )
                 values["block_table_stride"] = table.shape[1]
                 values["stride_k_block"] = ps * Hk * dq
                 values["stride_v_block"] = ps * Hv * dv
@@ -500,7 +599,7 @@ def test_prefill_feature_matches_reference(case, dtype):
         )
         module = rt.load_module(artifact.hsaco)
         grid, block = wmma_fmha_fwd_v2_grid(
-            spec, batch=B, seqlen_q=max(max_q, 1), num_query_heads=Hq
+            spec, batch=B, seqlen_q=max(values["seqlen_q"], 1), num_query_heads=Hq
         )
         rt.launch(
             module.get_function(artifact.kernel_name),
@@ -517,13 +616,21 @@ def test_prefill_feature_matches_reference(case, dtype):
             module.unload()
         dev.free()
 
+    gap_rows = []
     if layout == "dense":
         outs = [out[bi] for bi in range(B)]
         lses = [got_lse[bi] for bi in range(B)]
+    elif dense_q:
+        outs = [out[bi, : lens_q[bi]] for bi in range(B)]
+        lses = [got_lse[bi, :, : lens_q[bi]] for bi in range(B)]
+        gap_rows = [out[bi, lens_q[bi] :] for bi in range(B)]
     else:
-        off = np.concatenate([[0], np.cumsum(lens_q)])
-        outs = [out[off[bi] : off[bi + 1]] for bi in range(B)]
-        lses = [got_lse[:, off[bi] : off[bi + 1]] for bi in range(B)]
+        off = np.concatenate([[0], np.cumsum(spans)])
+        outs = [out[off[bi] : off[bi] + lens_q[bi]] for bi in range(B)]
+        lses = [got_lse[:, off[bi] : off[bi] + lens_q[bi]] for bi in range(B)]
+        gap_rows = [out[off[bi] + lens_q[bi] : off[bi + 1]] for bi in range(B)]
+    for bi, rows in enumerate(gap_rows):
+        assert np.isnan(rows).all(), f"sequence {bi}: a row past seqused_q was written"
     tol = 4e-2 if dtype == "bf16" else 2e-2
     for bi in range(B):
         o, ref = outs[bi], refs[bi]

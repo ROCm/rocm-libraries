@@ -191,6 +191,7 @@ def _run(kind, dtype, ps, bad_key):
             cu_seqlens_q=dev.put(cu_q),
             seqused_k=dev.put(np.array(_LENS_K, np.int32)),
             block_table=dev.put(case["table"]),
+            block_table_v=dev.put(case["table"]),
             block_table_stride=case["table"].shape[1],
             stride_k_block=ps * _HK * _D,
             stride_v_block=ps * _HK * _D,

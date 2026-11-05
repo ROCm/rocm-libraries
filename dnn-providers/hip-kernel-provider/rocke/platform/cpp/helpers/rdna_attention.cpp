@@ -272,7 +272,7 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             const char* name;
             bool need;
             int count;
-            rocke_value_t* vals[5];
+            rocke_value_t* vals[6];
         } groups[] = {
             {"softcap", cfg->softcap, 1, {p->softcap}},
             {"sinks", cfg->sinks, 1, {p->sink_log2}},
@@ -284,8 +284,13 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             {"kv_fp8", cfg->kv_fp8, 2, {p->k_scale, p->v_scale}},
             {"paged",
              paged,
-             5,
-             {p->block_table, p->table_row, p->stride_k_block, p->stride_v_block, p->num_blocks}},
+             6,
+             {p->block_table,
+              p->block_table_v,
+              p->table_row,
+              p->stride_k_block,
+              p->stride_v_block,
+              p->num_blocks}},
             {"dense K/V", !paged, 2, {p->k_bytes, p->v_bytes}},
         };
         std::string missing;
@@ -659,52 +664,58 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         vr->clear();
         if(!row_paged)
         {
-            /* The whole tile sits in one page: one lookup per tile. */
+            /* The whole tile sits in one page of each cache: one lookup per
+             * table and tile. */
             Val blk;
             {
                 Val tl = ci(lps);
                 Val sh = rocke_b_lshr(b, tok0, tl);
                 blk = rocke_b_select(b, valid, sh, c0);
             }
-            Val phys;
+            Val idx = rocke_b_add(b, p->table_row, blk);
+            Val phys_k = rocke_b_global_load_i32(b, p->block_table, idx, 4);
+            Val phys_v = rocke_b_global_load_i32(b, p->block_table_v, idx, 4);
+            Val rem_k;
             {
-                Val idx = rocke_b_add(b, p->table_row, blk);
-                phys = rocke_b_global_load_i32(b, p->block_table, idx, 4);
+                Val in_cache = page_ok(phys_k);
+                rem_k = rocke_b_select(b, in_cache, rem, c0);
             }
+            Val rem_v;
             {
-                Val in_cache = page_ok(phys);
-                rem = rocke_b_select(b, in_cache, rem, c0);
+                Val in_cache = page_ok(phys_v);
+                rem_v = rocke_b_select(b, in_cache, rem, c0);
             }
             Val in_page;
             {
                 Val tm = ci(ps - 1);
                 in_page = rocke_b_land(b, tok0, tm);
             }
-            auto tile_off = [&](Val stride_blk, Val stride_tok) {
+            auto tile_off = [&](Val phys, Val stride_blk, Val stride_tok) {
                 Val m1 = rocke_b_mul(b, phys, stride_blk);
                 Val m2 = rocke_b_mul(b, in_page, stride_tok);
                 Val a = rocke_b_add(b, m1, m2);
                 return kv_byte(a);
             };
-            Val tk = tile_off(p->stride_k_block, p->stride_k);
-            Val tv = tile_off(p->stride_v_block, p->stride_v);
-            auto at_tile = [&](Val o, Val r, Val off) {
-                Val live = rocke_b_cmp_lt(b, r, rem);
+            Val tk = tile_off(phys_k, p->stride_k_block, p->stride_k);
+            Val tv = tile_off(phys_v, p->stride_v_block, p->stride_v);
+            auto at_tile = [&](Val o, Val r, Val off, Val live_rem) {
+                Val live = rocke_b_cmp_lt(b, r, live_rem);
                 Val a = rocke_b_add(b, o, off);
                 return rocke_b_select(b, live, a, oob);
             };
             for(size_t i = 0; i < k_goff.size(); ++i)
-                kr->push_back(load_kv(p->k_rsrc, at_tile(k_goff[i], k_rows[i], tk)));
+                kr->push_back(load_kv(p->k_rsrc, at_tile(k_goff[i], k_rows[i], tk, rem_k)));
             for(size_t u = 0; u < v_goff.size(); ++u)
             {
                 Vals out;
                 for(size_t rr = 0; rr < v_goff[u].size(); ++rr)
-                    out.push_back(load_kv(p->v_rsrc, at_tile(v_goff[u][rr], v_rows[u][rr], tv)));
+                    out.push_back(
+                        load_kv(p->v_rsrc, at_tile(v_goff[u][rr], v_rows[u][rr], tv, rem_v)));
                 vr->push_back(out);
             }
             return;
         }
-        auto at_row = [&](Val o, Val r, Val stride_blk, Val stride_tok) {
+        auto at_row = [&](Val tbl, Val o, Val r, Val stride_blk, Val stride_tok) {
             Val tok = rocke_b_add(b, tok0, r);
             Val ok = rocke_b_cmp_lt(b, r, rem);
             Val blk;
@@ -716,7 +727,7 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             Val phys;
             {
                 Val idx = rocke_b_add(b, p->table_row, blk);
-                phys = rocke_b_global_load_i32(b, p->block_table, idx, 4);
+                phys = rocke_b_global_load_i32(b, tbl, idx, 4);
             }
             {
                 Val in_cache = page_ok(phys);
@@ -736,7 +747,7 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         };
         for(size_t i = 0; i < k_goff.size(); ++i)
         {
-            Val off = at_row(k_goff[i], k_rows[i], p->stride_k_block, p->stride_k);
+            Val off = at_row(p->block_table, k_goff[i], k_rows[i], p->stride_k_block, p->stride_k);
             kr->push_back(load_kv(p->k_rsrc, off));
         }
         for(size_t u = 0; u < v_goff.size(); ++u)
@@ -744,7 +755,8 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             Vals out;
             for(size_t rr = 0; rr < v_goff[u].size(); ++rr)
             {
-                Val off = at_row(v_goff[u][rr], v_rows[u][rr], p->stride_v_block, p->stride_v);
+                Val off = at_row(
+                    p->block_table_v, v_goff[u][rr], v_rows[u][rr], p->stride_v_block, p->stride_v);
                 out.push_back(load_kv(p->v_rsrc, off));
             }
             vr->push_back(out);

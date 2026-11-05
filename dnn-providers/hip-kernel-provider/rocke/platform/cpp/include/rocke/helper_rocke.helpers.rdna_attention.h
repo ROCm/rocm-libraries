@@ -122,7 +122,8 @@ typedef struct rocke_rdna_attn_params
     rocke_value_t* qq_stride;
     rocke_value_t* k_scale;
     rocke_value_t* v_scale;
-    rocke_value_t* block_table;
+    rocke_value_t* block_table; /* K pages */
+    rocke_value_t* block_table_v; /* V pages (row stride shared; may equal block_table) */
     rocke_value_t* table_row;
     rocke_value_t* stride_k_block;
     rocke_value_t* stride_v_block;
