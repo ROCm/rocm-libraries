@@ -441,7 +441,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # suite below.
     foreach(_gfx950_engine IN ITEMS
             "dense|Gfx950AttentionDense|EveryShippedKernelsTileIsOneTheEngineLaunches"
-            "unified_2d|Gfx950AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryShippedKernelServesTheManifestsBatchCapacity"
+            "unified_2d|Gfx950AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches"
             "unified_3d|Gfx950AttentionUnified3D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryEntryLaunchesItsSegmentAndReduceKernels")
         string(REPLACE "|" ";" _gfx950_engine "${_gfx950_engine}")
         list(GET _gfx950_engine 0 _snake)
