@@ -358,11 +358,14 @@ if(ROCKE_INSTALL_TESTS)
     # compiler). The rest of tests/instances/differential needs the C++ build and
     # stays out of the installed tree (see the tests/ install below); these files
     # are the Python-only check: the runner, its batch worker, the golden store
-    # and file, and the CPU-count helper the runner imports from tools/.
+    # and file, and the CPU-count helper the runner imports from tools/. The
+    # HIP source identity gate reuses the runner and worker, and lowers through
+    # the installed rocke_ir_lower_cli (rocke_hip_source_identity below).
     set(_ROCKE_DIFFERENTIAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/differential")
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/run_diff.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/python_batch_worker.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/golden_store.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/test_hip_source_identity.py"
                   "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential)
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/golden/llvm_gfx_all.json"
@@ -620,6 +623,27 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
 
+    # Both engines lower every parity kernel to the same HIP source. The wheel
+    # has no rocke_engine binding, so the C++ lowering runs through the
+    # installed rocke_ir_lower_cli. The whole gate takes about a minute on a
+    # developer host; one family, the per-test item, a few seconds.
+    #
+    # Not registered on Windows: the Windows CI shards run close to their time
+    # limit. The cost is that the MSVC-built engine's HIP output is not compared
+    # with Python's in CI; it matched on every parity kernel on the Windows lanes
+    # when this gate was added, and float formatting, the most host-sensitive
+    # piece, keeps its own rocke_float_format test there. Re-register on Windows
+    # once those shards have room. It stays registered on every other platform.
+    if(TARGET rocke_ir_lower_cli AND NOT WIN32)
+      rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/test_hip_source_identity.py\" -v -rs --timeout=120)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" TIMEOUT 300)\n")
+    elseif(WIN32)
+      message(STATUS "rocKE: rocke_hip_source_identity not registered on Windows (CI shard time; see comment above)")
+    endif()
+
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
       # directory (which contains the installed rocke package) so `import rocke`
@@ -642,6 +666,7 @@ if(ROCKE_INSTALL_TESTS)
       foreach(_rocke_native_parity
               "ROCKE_STORAGE_TEST=rocke_storage"
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
+              "ROCKE_FLOAT_FORMAT_TEST=rocke_float_format"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
               "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
@@ -658,7 +683,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_platform_pytest_environment \"${_ROCKE_PYTEST_ENVIRONMENT}\")\n"
              "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
+             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/test_hip_source_identity.py\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"

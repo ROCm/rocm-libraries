@@ -34,20 +34,21 @@ extern "C" {
 /* --------------------------------------------------------------- arch seam */
 
 /* The HIP path has no separate ISA backend class (it emits __builtin_amdgcn_*
- * directly), so only a handful of ArchTarget hardware facts drive arch-keyed
- * decisions. The full Python ArchTarget / MMA catalog is NOT ported; this is
- * the minimal subset the lowerer reads:
+ * directly). Which MMA atoms a target has comes from its ArchTarget MMA catalog
+ * (rocke_arch_target_from_gfx); this struct holds the few other hardware facts
+ * the lowerer reads:
  *
- *   - waitcnt encoding family: gfx9/gfx10 split-VMCNT vs gfx11 contiguous,
- *   - whether ds_read_*_tr_* exists (gfx950-class only),
- *   - whether WMMA is available (RDNA/gfx11+; never on CDNA/MFMA targets).
+ *   - waitcnt encoding family: gfx9/gfx10 split-VMCNT vs gfx11 contiguous, or
+ *     none where the target has no monolithic s_waitcnt (gfx1250),
+ *   - whether ds_read_*_tr_* exists (gfx950-class only).
  *
  * Resolve one from a gfx string with rocke_hip_arch_from_gfx(); the default is
  * gfx950, which reproduces the byte-identical CDNA baseline. */
 typedef enum rocke_hip_waitcnt_family
 {
     ROCKE_HIP_WAITCNT_GFX9_10 = 0, /* split VMCNT [3:0]+[15:14], lgkm [11:8]     */
-    ROCKE_HIP_WAITCNT_GFX11 /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    ROCKE_HIP_WAITCNT_GFX11, /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    ROCKE_HIP_WAITCNT_NONE /* no monolithic s_waitcnt (split wait counters) */
 } rocke_hip_waitcnt_family_t;
 
 typedef struct rocke_hip_arch
@@ -55,8 +56,6 @@ typedef struct rocke_hip_arch
     const char* gfx; /* canonical gfx string, e.g. "gfx950" */
     rocke_hip_waitcnt_family_t waitcnt_family; /* s_waitcnt immediate layout        */
     bool has_ds_read_tr; /* ds_read_b{64,128}_tr_b16 present   */
-    bool has_wmma; /* RDNA/gfx11+ WMMA instruction        */
-    const char* family; /* "cdna"/"rdna" for diagnostics       */
 } rocke_hip_arch_t;
 
 /* Resolve an arch seam from a gfx name (NULL => gfx950 default). Always returns

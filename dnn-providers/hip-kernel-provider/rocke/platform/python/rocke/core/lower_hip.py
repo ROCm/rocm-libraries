@@ -15,6 +15,7 @@ IR's `KernelDef.params`. Body locals are named after IR SSA values
 
 from __future__ import annotations
 
+import math
 from typing import List, Optional
 
 from .arch.target import integer_mma_op_ids
@@ -358,36 +359,42 @@ def _reject_f64(op: Op, tname: str) -> None:
         raise NotImplementedError(f"{op.name} does not support f64")
 
 
-def _f32_literal(val: float) -> str:
-    """Format a Python float for C++ float literal context.
+def _hip_float_literal(val: float, c_type: str, suffix: str) -> str:
+    """Format a Python float as a C++ literal of type ``c_type``.
 
-    Special-cases ``inf`` / ``-inf`` / ``nan`` because Python's
-    ``repr(float('inf'))`` is ``'inf'`` which would emit ``"inff"``
-    (invalid C++). Instead emit the standard ``<math.h>`` macros.
+    Finite values are ``repr(val)`` (the shortest round-trip form) followed by
+    ``suffix``. ``repr`` spells nan and the infinities ``nan`` / ``inf``, which
+    are not C++, so those become the ``<math.h>`` macros cast to ``c_type``.
     """
-    import math
-
     if math.isnan(val):
-        return "((float)NAN)"
+        return f"(({c_type})NAN)"
     if math.isinf(val):
-        return "((float)-INFINITY)" if val < 0 else "((float)INFINITY)"
-    return f"{val}f"
+        return f"(({c_type})-INFINITY)" if val < 0 else f"(({c_type})INFINITY)"
+    return f"{val!r}{suffix}"
+
+
+def _f32_literal(val: float) -> str:
+    """Format a Python float for C++ float literal context (``f`` suffix)."""
+    return _hip_float_literal(val, "float", "f")
 
 
 def _f64_literal(val: float) -> str:
-    """Format a Python float for C++ double literal context.
+    """Format a Python float for C++ double literal context (no suffix)."""
+    return _hip_float_literal(val, "double", "")
 
-    ``repr`` is the shortest round-trip form, so finite values are exact;
-    ``inf`` / ``-inf`` / ``nan`` use the ``<math.h>`` macros as in
-    :func:`_f32_literal`.
+
+def _inline_asm_string_attr(op: Op, key: str) -> str:
+    """String attr ``key`` of the tile.inline_asm ``op``.
+
+    Raises ``KeyError`` when the op has no such attr and ``TypeError`` when it
+    holds something other than a string.
     """
-    import math
-
-    if math.isnan(val):
-        return "((double)NAN)"
-    if math.isinf(val):
-        return "((double)-INFINITY)" if val < 0 else "((double)INFINITY)"
-    return repr(val)
+    if key not in op.attrs:
+        raise KeyError(f"tile.inline_asm: missing '{key}' attr")
+    value = op.attrs[key]
+    if not isinstance(value, str):
+        raise TypeError(f"HIP inline asm {key} must be a string")
+    return value
 
 
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
@@ -495,8 +502,16 @@ class _Lowerer:
 
         CDNA (gfx9/gfx10) uses the split-VMCNT layout; RDNA gfx11 (gfx1151)
         uses the contiguous layout. Selection keys off the resolved
-        :class:`ArchTarget` ``target_family`` so CDNA output is unchanged.
+        :class:`ArchTarget` ``target_family`` so CDNA output is unchanged. A
+        target whose ISA backend has no monolithic ``s_waitcnt`` (gfx1250) is
+        refused: clang cannot select the builtin there.
         """
+        if not backend_for(self.arch).emits_legacy_s_waitcnt:
+            raise NotImplementedError(
+                f"s_waitcnt is not available on {self.arch.gfx}: the target "
+                "replaced it with split wait counters, which the HIP lowering "
+                "does not emit; lower through the LLVM path"
+            )
         if self.arch.target_family in ("gfx11_rdna", "gfx12_rdna"):
             return _encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt)
         return _encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt)
@@ -771,7 +786,7 @@ class _Lowerer:
         vec = int(op.attrs["vec"])
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem store_vN before smem_alloc was lowered")
+            raise ValueError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "smem_store_vN")
@@ -785,7 +800,7 @@ class _Lowerer:
         indices = op.operands[1:-1]
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem store before smem_alloc was lowered")
+            raise ValueError("smem store before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         self._emit(f"{storage}[{idx_str}] = {_name(value)};")
 
@@ -793,7 +808,7 @@ class _Lowerer:
         smem, row, col = op.operands
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem load before smem_alloc was lowered")
+            raise ValueError("smem load before smem_alloc was lowered")
         nice = _name(op.result)
         self._emit(f"f16x4 {nice};")
         for i in range(4):
@@ -830,6 +845,7 @@ class _Lowerer:
             )
             return
         if op_id in TF32_MMA:
+            self._require_abc_atom(op, op_id)
             error = tf32_mma_target_error(op_id, self.arch)
             if error:
                 raise ValueError(error)
@@ -851,8 +867,11 @@ class _Lowerer:
                 f"through the LLVM path"
             )
         if op_id in _GFX11_INTEGER_WMMA:
+            self._require_abc_atom(op, op_id)
             self._emit_gfx11_integer_wmma(op, op_id)
             return
+        if hasattr(self, f"_op_tile_{op_id}"):
+            self._require_abc_atom(op, op_id)
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -861,6 +880,15 @@ class _Lowerer:
             loc=op.loc,
         )
         self.lower_op(legacy)
+
+    @staticmethod
+    def _require_abc_atom(op: Op, op_id: str) -> None:
+        """Refuse an MMA op lowered from A, B and C unless it has those three
+        operands and one result: the handlers index them, and IR read from its
+        serialized form is not verified. An op_id with no handler is refused
+        as unknown instead, by the dispatch that finds none."""
+        if len(op.operands) != 3 or len(op.results) != 1:
+            raise ValueError(f"tile.mma {op_id} expects 3 operands and 1 result")
 
     def _mma_operand(
         self, op: Op, op_id: str, role: MmaOperandRole, register_type: Type
@@ -1041,6 +1069,8 @@ class _Lowerer:
         op_id = spec.op_id
         fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
+        if len(op.operands) != 5 or len(op.results) != 1:
+            raise ValueError(f"{op_id} expects 5 operands and 1 result")
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
@@ -1229,7 +1259,7 @@ class _Lowerer:
         (smem,) = op.operands
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem_addr_of before smem_alloc was lowered")
+            raise ValueError("smem_addr_of before smem_alloc was lowered")
         self._emit(f"int64_t {_name(op.result)} = (int64_t)(&{storage}[0]);")
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
@@ -1603,13 +1633,13 @@ class _Lowerer:
         sideeffect = op.attrs.get("sideeffect", True)
         if not isinstance(sideeffect, bool):
             raise ValueError("HIP inline asm sideeffect must be a boolean")
-        if not isinstance(op.attrs["constraints"], str):
-            raise TypeError("HIP inline asm constraints must be a string")
+        raw_template = _inline_asm_string_attr(op, "template")
+        constraints = _inline_asm_string_attr(op, "constraints")
         if (
             len(op.results) == 1
             and len(op.operands) == 1
-            and op.attrs["template"] == ""
-            and op.attrs["constraints"] == "=v,0"
+            and raw_template == ""
+            and constraints == "=v,0"
             and not sideeffect
             and "clobber" in op.attrs
         ):
@@ -1619,9 +1649,7 @@ class _Lowerer:
                     "HIP optimization barrier clobber must be an empty string"
                 )
 
-        template = _escape_hip_asm_string(
-            _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
-        )
+        template = _escape_hip_asm_string(_re.sub(r"\$(\d+)", r"%\1", raw_template))
         clob = op.attrs.get("clobber", "memory" if sideeffect else "")
         if not isinstance(clob, str):
             raise ValueError("HIP inline asm clobber must be a string")
@@ -2259,7 +2287,7 @@ class _Lowerer:
         smem, values = op.operands
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem_store_distributed before smem_alloc was lowered")
+            raise ValueError("smem_store_distributed before smem_alloc was lowered")
         from ..core.ir import VectorType
 
         n = values.type.count if isinstance(values.type, VectorType) else 1
@@ -2288,7 +2316,7 @@ class _Lowerer:
         cpp_t = _type_to_hip(val.type)
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("lds_atomic_add before smem_alloc was lowered")
+            raise ValueError("lds_atomic_add before smem_alloc was lowered")
         idx_expr = "][".join(_name(i) for i in indices)
         self._emit(
             f"{cpp_t} {_name(op.result)} = atomicAdd(&{storage}[{idx_expr}], "
@@ -2347,7 +2375,7 @@ class _Lowerer:
         prefix = _vec_prefix(elem_name, "smem_load_vN")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem load_vN before smem_alloc was lowered")
+            raise ValueError("smem load_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
         if byte_count & (byte_count - 1):
@@ -2373,7 +2401,7 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem store_vN_f32 before smem_alloc was lowered")
+            raise ValueError("smem store_vN_f32 before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         self._emit(
             f"*reinterpret_cast<f32x{n}*>(&{storage}[{idx_str}]) = {_name(value)};"
@@ -2385,7 +2413,7 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem load_vN_f32 before smem_alloc was lowered")
+            raise ValueError("smem load_vN_f32 before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         self._emit(
             f"f32x{n} {_name(op.result)} = "
@@ -2434,7 +2462,7 @@ class _Lowerer:
         size_bytes = dwords * 4
         storage = lds_val.op.attrs.get("_storage") if lds_val.op else None
         if storage is None:
-            raise RuntimeError("async_buffer_load_lds before smem_alloc was lowered")
+            raise ValueError("async_buffer_load_lds before smem_alloc was lowered")
         # Same builtin-vs-intrinsic distinction as the addr variant above:
         # call the LLVM intrinsic via the prologue's ``_llvm_amdgcn_*``
         # shim so size=12 / size=16 don't trip clang's builtin validator.
@@ -2606,7 +2634,7 @@ class _Lowerer:
         indices = op.operands[1:]
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("ds_read_tr16_b64 before smem_alloc was lowered")
+            raise ValueError("ds_read_tr16_b64 before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem = op.attrs.get("elem_type", "f16")
         vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")

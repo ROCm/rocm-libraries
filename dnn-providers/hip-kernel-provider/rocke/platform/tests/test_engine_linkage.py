@@ -178,6 +178,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         ),
         "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
+        "ROCKE_FLOAT_FORMAT_TEST": native_artifact("rocke_float_format"),
         "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
         "ROCKE_ARCH_TARGET_TEST_EXE": native_artifact("rocke_arch_target_identity"),

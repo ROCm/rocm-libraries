@@ -191,21 +191,22 @@ void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char*
 
 /* --------------------------------------------------------- literals / encode */
 
-/* Python _f32_literal(val): C++ float-literal text for a double, special-casing
- * nan -> "((float)NAN)", +/-inf -> "((float)+/-INFINITY)", else "<repr>f".
- * NOTE(port): Python emits repr(float) for the finite case; matching that text
- * byte-for-byte is a known port hazard (see notes / unported). Returns an
- * arena-owned string. */
+/* Python _f32_literal(val): C++ float-literal text for a double:
+ * "((float)NAN)", "((float)INFINITY)", "((float)-INFINITY)", else repr(val)
+ * followed by "f". Returns an arena-owned string. */
 const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val);
 
-/* Python _f64_literal(val): C++ double-literal text for a double, special-casing
- * nan / +/-inf like rocke_h_f32_literal. Returns an arena-owned string. */
+/* Python _f64_literal(val): C++ double-literal text for a double, spelled like
+ * rocke_h_f32_literal with "double" and no suffix. Returns an arena-owned
+ * string. */
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
 
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10
  * split-VMCNT layout or the gfx11 contiguous layout off lw->arch. -1 on any
- * counter means "no wait" (encoded as that field's architectural max). */
-int rocke_h_encode_waitcnt(const rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt);
+ * counter means "no wait" (encoded as that field's architectural max). On a
+ * target without the monolithic s_waitcnt (ROCKE_HIP_WAITCNT_NONE) it fails `lw`
+ * with ROCKE_ERR_NOTIMPL and returns 0; check rocke_h_live afterwards. */
+int rocke_h_encode_waitcnt(rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt);
 
 /* The two raw encoders behind rocke_h_encode_waitcnt, exposed for any direct
  * callers / tests (Python _encode_waitcnt_gfx9_10 / _encode_waitcnt_gfx11). */
@@ -216,9 +217,8 @@ int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 
 /* Python _require_wmma_arch: error out if WMMA is requested on a target with no
  * WMMA instruction (CDNA/MFMA). Returns ROCKE_OK if allowed, otherwise throws
- * ROCKE_ERR_NOTIMPL. `op_id` is the atom id for the message.
- * NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id); that
- * catalog is not ported, so this uses lw->arch.has_wmma instead. */
+ * ROCKE_ERR_NOTIMPL. `op_id` is the atom id for the message. Like Python, it
+ * keys off the target's MMA catalog: the atom must be listed for lw->arch.gfx. */
 rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id);
 
 /* Python _require_ds_read_tr: error out if a transpose LDS read is requested on
@@ -235,7 +235,7 @@ rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_
  *
  * rocke_h_smem_set_storage records "<name>_storage" for the smem alloc result;
  * rocke_h_smem_storage looks it up for a consuming op's smem operand. A lookup
- * miss is the Python "smem op before smem_alloc was lowered" RuntimeError case:
+ * miss is the Python "smem op before smem_alloc was lowered" ValueError case:
  * the caller should rocke_h_fail. Returns NULL on miss. */
 void rocke_h_smem_set_storage(rocke_h_lowerer_t* lw,
                               const rocke_value_t* smem_result,

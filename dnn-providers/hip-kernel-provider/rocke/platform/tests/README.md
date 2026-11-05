@@ -65,7 +65,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 
 | Layer | Python (pytest-collected) | C++ / cross-language |
 |---|---|---|
-| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
+| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (built as `rocke_ir_lower_cli`, not a test: the HIP source identity gate's C++ lowerer where the binding is absent) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
 | `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
@@ -158,9 +158,10 @@ Four distinct things run here; don't conflate them:
 3. **GPU / manual numeric lanes** (need a HIP device; skipped/not-collected
    otherwise): `differential/numeric.py`, `instances/test_rocke_numeric.py`.
 4. **Manual C++ demos / tools** (not built or registered by CMake/CTest --
-   compile by hand against `librocke_core.a`): `core/ir_lower_cli.cpp`,
-   `instances/jit_demo.cpp`, `instances/gemm_jit_demo.cpp`, plus the build-only
-   `core/smoke.cpp`.
+   compile by hand against `librocke_core.a`): `instances/jit_demo.cpp`,
+   `instances/gemm_jit_demo.cpp`, plus the build-only `core/smoke.cpp`.
+   `core/ir_lower_cli.cpp` is built (`rocke_ir_lower_cli`) and installed but is
+   not a test itself; the `rocke_hip_source_identity` CTest drives it.
 
 ### Arch-domain reproducibility CTest
 
@@ -311,18 +312,20 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 `run_all.py --build-root <build>` builds all configured targets before pytest,
 then obtains each native parity executable from CTest, as listed in
 `NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`),
-`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`), `rocke_nontemporal_hip`
+`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`), `rocke_float_format`
+(`ROCKE_FLOAT_FORMAT_TEST`), `rocke_nontemporal_hip`
 (`ROCKE_NONTEMPORAL_HIP_TEST`) and `rocke_unsigned_int_ops`
 (`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
-storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
-HIP-source parity and unsigned integer op C API parity tests run automatically.
+storage IR/HIP parity, serialization, C++ builder type-rule parity, float repr
+parity, nontemporal HIP-source parity and unsigned integer op C API parity
+tests run automatically.
 The installed `rocke_pytest` ctest sets `ROCKE_UNSIGNED_INT_OPS_CLI` itself.
 `--config` selects the native test configuration (default `Release`). A build
 or fixture-discovery failure stops the runner instead of silently skipping
 coverage.
 
 An explicit `ROCKE_STORAGE_TEST` / `ROCKE_IR_TYPES_TEST` /
-`ROCKE_NONTEMPORAL_HIP_TEST` / `ROCKE_UNSIGNED_INT_OPS_CLI` overrides discovery
+`ROCKE_FLOAT_FORMAT_TEST` / `ROCKE_NONTEMPORAL_HIP_TEST` / `ROCKE_UNSIGNED_INT_OPS_CLI` overrides discovery
 for that binary and must name an existing executable; it does not skip the
 configured build. With no configured build or explicit override, the runner
 reports that parity as skipped; direct pytest invocations can use the same

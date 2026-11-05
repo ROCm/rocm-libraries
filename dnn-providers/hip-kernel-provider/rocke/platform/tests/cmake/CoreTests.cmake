@@ -128,6 +128,30 @@ if(BUILD_TESTING)
   install(TARGETS rocke_ir_types RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_types)
 
+  # Not a test: lowers serialized IR with the C++ engine, to LLVM IR or (--hip-batch)
+  # HIP source. The HIP source identity gate runs the C++ lowering through it,
+  # via ROCKE_IR_LOWER_CLI, where the rocke_engine binding is not built, as in
+  # the installed test tree. It is installed beside the tests but kept out of
+  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test.
+  add_executable(rocke_ir_lower_cli core/ir_lower_cli.cpp)
+  target_link_libraries(rocke_ir_lower_cli PRIVATE rocke_core)
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
+  set_target_properties(rocke_ir_lower_cli
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_ir_lower_cli
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+
+  add_executable(rocke_float_format core/test_float_format.cpp)
+  target_link_libraries(rocke_float_format PRIVATE rocke_core)
+  add_test(NAME rocke_float_format COMMAND rocke_float_format)
+  set_tests_properties(rocke_float_format PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_float_format)
+  set_target_properties(rocke_float_format
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_float_format
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_float_format)
+
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
   add_test(NAME rocke_dtypes COMMAND rocke_dtypes)
