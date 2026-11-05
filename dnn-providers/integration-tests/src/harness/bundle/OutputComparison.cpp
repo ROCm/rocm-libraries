@@ -249,25 +249,38 @@ std::string formatMismatchReport(int64_t uid,
 
     std::ostringstream report;
     report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
+    // The settings of the validator that failed this tensor, so the diff below counts the
+    // elements that validator rejected by the non-finite rules.
+    hipdnn_test_sdk::utilities::NonFiniteMask nonFiniteMask;
     if(tolerance.matchNonFinite)
     {
-        // The drift profile below is the plain one and lists non-finite elements that did
-        // match; say which rule decided, so a reader does not chase a matched NaN.
+        nonFiniteMask
+            = hipdnn_test_sdk::utilities::NonFiniteMask::matching(tolerance.unwrittenSentinelBits);
+        // The mismatch list is the element rule's: a NaN or Inf that does not match counts, an
+        // element holding the unwritten-output sentinel counts and is labelled, and a matched
+        // NaN or same-signed Inf does not appear. Say which rule decided.
         report << "  Graded with validator match_nonfinite: NaN matches NaN and same-signed Inf "
-                  "matches Inf by position,\n  those positions are excluded from the tolerance, "
-                  "and an element still holding the unwritten-output sentinel fails.\n";
+                  "matches Inf by position,\n  those positions are excluded from the tolerance "
+                  "and from the mismatch count below, and an element still holding the "
+                  "unwritten-output sentinel fails and is counted.\n";
     }
+    const auto matchingInfinities = tolerance.kind == ValidatorKind::ALLCLOSE_MATCHING_INFINITIES
+                                        ? hipdnn_test_sdk::utilities::MatchingInfinities::ACCEPTED
+                                        : hipdnn_test_sdk::utilities::MatchingInfinities::REJECTED;
     if(dataType != DataType::UNSET)
     {
         // Zero tolerances under RMS: the per-element budget is not what was checked, and a
         // full drift profile (max/mean abs diff, worst elements) is the useful diagnostic.
+        // NaN, Inf and unwritten elements the validator rejected are counted either way.
         hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(report,
                                                                    dataType,
                                                                    label,
                                                                    expected,
                                                                    actual,
                                                                    useRms ? 0.0f : tolerance.atol,
-                                                                   useRms ? 0.0f : tolerance.rtol);
+                                                                   useRms ? 0.0f : tolerance.rtol,
+                                                                   nonFiniteMask,
+                                                                   matchingInfinities);
     }
     return report.str();
 }

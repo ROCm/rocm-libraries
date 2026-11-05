@@ -343,3 +343,277 @@ TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatchAgainstDense)
     EXPECT_NE(output.find("ragged layout mismatch"), std::string::npos) << output;
     EXPECT_NE(output.find("implementation dense"), std::string::npos) << output;
 }
+
+// =================================================================================================
+// Non-finite elements
+// =================================================================================================
+
+namespace
+{
+
+constexpr float NAN_VALUE = std::numeric_limits<float>::quiet_NaN();
+constexpr float INF_VALUE = std::numeric_limits<float>::infinity();
+
+template <typename T = float>
+Tensor<T> makeVector(const std::vector<float>& values)
+{
+    Tensor<T> tensor({static_cast<int64_t>(values.size())});
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        tensor.setHostValue(static_cast<T>(values[i]),
+                            std::vector<int64_t>{static_cast<int64_t>(i)});
+    }
+    return tensor;
+}
+
+} // namespace
+
+// The validators fail a NaN, but NaN never compares greater than a threshold, so the diff
+// used to report `Mismatched: 0` for a tensor that failed because of it.
+TEST(TestComputeTensorDiffNonFinite, NaNImplementationAgainstFiniteReferenceIsCounted)
+{
+    auto ref = makeVector({1.0f, 2.0f, 3.0f});
+    auto impl = makeVector({1.0f, NAN_VALUE, 3.0f});
+
+    const auto summary = computeTensorDiff<float>(ref, impl, 1.0f, 1.0f);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.nonFiniteMismatchCount, 1u);
+    ASSERT_EQ(summary.worstMismatches.size(), 1u);
+    EXPECT_EQ(summary.worstMismatches[0].indices, (std::vector<int64_t>{1}));
+    EXPECT_EQ(summary.worstMismatches[0].verdict, ElementVerdict::NON_FINITE_REJECT);
+}
+
+TEST(TestComputeTensorDiffNonFinite, FiniteReferenceAgainstImplementationInfIsCounted)
+{
+    auto ref = makeVector({1.0f, 2.0f});
+    auto impl = makeVector({1.0f, INF_VALUE});
+
+    const auto summary = computeTensorDiff<float>(ref, impl, 1.0f, 1.0f);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.nonFiniteMismatchCount, 1u);
+}
+
+TEST(TestComputeTensorDiffNonFinite, ReferenceInfAgainstImplementationNaNIsCountedWithMaskOn)
+{
+    auto ref = makeVector({1.0f, INF_VALUE});
+    auto impl = makeVector({1.0f, NAN_VALUE});
+
+    const auto summary = computeTensorDiff<float>(
+        ref, impl, 0.0f, 0.0f, 5, NonFiniteMask::matching(), MatchingInfinities::REJECTED);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.nonFiniteMismatchCount, 1u);
+}
+
+TEST(TestComputeTensorDiffNonFinite, OppositeSignInfinitiesAreCountedWithMaskOn)
+{
+    auto ref = makeVector({INF_VALUE});
+    auto impl = makeVector({-INF_VALUE});
+
+    const auto summary
+        = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 5, NonFiniteMask::matching());
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+}
+
+TEST(TestComputeTensorDiffNonFinite, SameSignInfinitiesMatchWithMaskOn)
+{
+    auto ref = makeVector({INF_VALUE, -INF_VALUE, 1.0f});
+    auto impl = makeVector({INF_VALUE, -INF_VALUE, 1.0f});
+
+    const auto summary
+        = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 5, NonFiniteMask::matching());
+
+    EXPECT_EQ(summary.mismatchCount, 0u);
+    EXPECT_TRUE(summary.worstMismatches.empty());
+}
+
+TEST(TestComputeTensorDiffNonFinite, SameSignInfinitiesAreRejectedWithMaskOff)
+{
+    auto ref = makeVector({INF_VALUE, 1.0f});
+    auto impl = makeVector({INF_VALUE, 1.0f});
+
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.nonFiniteMismatchCount, 1u);
+}
+
+TEST(TestComputeTensorDiffNonFinite, SameSignInfinitiesMatchWithMatchingInfinitiesAccepted)
+{
+    auto ref = makeVector({INF_VALUE, -INF_VALUE, 1.0f});
+    auto impl = makeVector({INF_VALUE, -INF_VALUE, 1.0f});
+
+    const auto summary = computeTensorDiff<float>(
+        ref, impl, 0.0f, 0.0f, 5, NonFiniteMask{}, MatchingInfinities::ACCEPTED);
+
+    EXPECT_EQ(summary.mismatchCount, 0u);
+}
+
+TEST(TestComputeTensorDiffNonFinite, MatchingInfinitiesStillRejectsNaN)
+{
+    auto ref = makeVector({NAN_VALUE, INF_VALUE});
+    auto impl = makeVector({NAN_VALUE, INF_VALUE});
+
+    const auto summary = computeTensorDiff<float>(
+        ref, impl, 0.0f, 0.0f, 5, NonFiniteMask{}, MatchingInfinities::ACCEPTED);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    ASSERT_EQ(summary.worstMismatches.size(), 1u);
+    EXPECT_EQ(summary.worstMismatches[0].indices, (std::vector<int64_t>{0}));
+}
+
+TEST(TestComputeTensorDiffNonFinite, MatchedNaNPositionsAreNotCountedWithMaskOn)
+{
+    auto ref = makeVector({NAN_VALUE, 1.0f});
+    auto impl = makeVector({NAN_VALUE, 1.0f});
+
+    const auto summary
+        = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 5, NonFiniteMask::matching());
+
+    EXPECT_EQ(summary.mismatchCount, 0u);
+}
+
+TEST(TestComputeTensorDiffNonFinite, UnwrittenSentinelElementIsCountedAndLabelled)
+{
+    using hipdnn_data_sdk::types::half;
+    const auto sentinel = payloadNanSentinelBits<half>();
+    ASSERT_TRUE(sentinel.has_value());
+
+    // The reference holds NaN there, so without the sentinel rule NaN would match NaN.
+    auto ref = makeVector<half>({1.0f, NAN_VALUE, 2.0f});
+    auto impl = makeVector<half>({1.0f, 0.0f, 2.0f});
+    impl.setHostValue(payloadNanSentinelValue<half>(), std::vector<int64_t>{1});
+
+    const auto summary
+        = computeTensorDiff<half>(ref, impl, 0.0f, 0.0f, 5, NonFiniteMask::matching(sentinel));
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.nonFiniteMismatchCount, 1u);
+    ASSERT_EQ(summary.worstMismatches.size(), 1u);
+    EXPECT_EQ(summary.worstMismatches[0].verdict, ElementVerdict::UNWRITTEN_REJECT);
+
+    std::ostringstream oss;
+    printTensorDiffSummary(oss, "o", summary);
+    EXPECT_NE(oss.str().find("[1]: ref=nan, impl=nan (unwritten-output sentinel)"),
+              std::string::npos)
+        << oss.str();
+}
+
+TEST(TestComputeTensorDiffNonFinite, ComputedNaNIsNotTheUnwrittenSentinel)
+{
+    using hipdnn_data_sdk::types::half;
+    const auto sentinel = payloadNanSentinelBits<half>();
+    ASSERT_TRUE(sentinel.has_value());
+
+    auto ref = makeVector<half>({NAN_VALUE});
+    auto impl = makeVector<half>({NAN_VALUE});
+
+    const auto summary
+        = computeTensorDiff<half>(ref, impl, 0.0f, 0.0f, 5, NonFiniteMask::matching(sentinel));
+
+    EXPECT_EQ(summary.mismatchCount, 0u);
+}
+
+// A finite mismatch with a huge difference used to sort ahead of everything; a NaN entry must
+// come first and survive the cap, however many finite mismatches arrive before it.
+TEST(TestComputeTensorDiffNonFinite, NaNEntriesAreListedAndSortedFirst)
+{
+    std::vector<float> refValues(8, 0.0f);
+    std::vector<float> implValues = {1.0f, 100.0f, 2.0f, 3.0f, 4.0f, NAN_VALUE, 5.0f, INF_VALUE};
+    auto ref = makeVector(refValues);
+    auto impl = makeVector(implValues);
+
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 4);
+
+    EXPECT_EQ(summary.mismatchCount, 8u);
+    EXPECT_EQ(summary.nonFiniteMismatchCount, 2u);
+    ASSERT_EQ(summary.worstMismatches.size(), 4u);
+    EXPECT_EQ(summary.worstMismatches[0].indices, (std::vector<int64_t>{5}));
+    EXPECT_EQ(summary.worstMismatches[0].verdict, ElementVerdict::NON_FINITE_REJECT);
+    EXPECT_EQ(summary.worstMismatches[1].indices, (std::vector<int64_t>{7}));
+    EXPECT_EQ(summary.worstMismatches[1].verdict, ElementVerdict::NON_FINITE_REJECT);
+    EXPECT_FLOAT_EQ(summary.worstMismatches[2].absDiff, 100.0f);
+    EXPECT_FLOAT_EQ(summary.worstMismatches[3].absDiff, 5.0f);
+    EXPECT_EQ(summary.worstMismatches[2].verdict, ElementVerdict::GRADED);
+}
+
+TEST(TestComputeTensorDiffNonFinite, RejectsBeyondTheCapKeepTheLowestIndices)
+{
+    auto ref = makeVector(std::vector<float>(6, 0.0f));
+    auto impl = makeVector({NAN_VALUE, NAN_VALUE, NAN_VALUE, NAN_VALUE, NAN_VALUE, NAN_VALUE});
+
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, 3);
+
+    EXPECT_EQ(summary.mismatchCount, 6u);
+    ASSERT_EQ(summary.worstMismatches.size(), 3u);
+    EXPECT_EQ(summary.worstMismatches[0].indices, (std::vector<int64_t>{0}));
+    EXPECT_EQ(summary.worstMismatches[1].indices, (std::vector<int64_t>{1}));
+    EXPECT_EQ(summary.worstMismatches[2].indices, (std::vector<int64_t>{2}));
+}
+
+TEST(TestComputeTensorDiffNonFinite, DiffStatisticsCoverFiniteDifferencesOnly)
+{
+    auto ref = makeVector({0.0f, 0.0f, 0.0f, 0.0f});
+    auto impl = makeVector({1.0f, NAN_VALUE, INF_VALUE, 3.0f});
+
+    const auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f);
+
+    EXPECT_EQ(summary.mismatchCount, 4u);
+    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 3.0f);
+    EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{3}));
+    EXPECT_FLOAT_EQ(summary.meanAbsDiff, 2.0f);
+}
+
+TEST(TestComputeTensorDiffNonFinite, PrintsNonFiniteValuesAsNanAndInf)
+{
+    auto ref = makeVector({INF_VALUE, -INF_VALUE, 1.0f});
+    auto impl = makeVector({NAN_VALUE, INF_VALUE, -INF_VALUE});
+
+    std::ostringstream oss;
+    printTensorDiff<float>(oss, "t", ref, impl, 0.0f, 0.0f);
+    const std::string output = oss.str();
+
+    EXPECT_NE(output.find("Mismatched:     3 (100.00%)"), std::string::npos) << output;
+    EXPECT_NE(output.find("[0]: ref=inf, impl=nan\n"), std::string::npos) << output;
+    EXPECT_NE(output.find("[1]: ref=-inf, impl=inf\n"), std::string::npos) << output;
+    EXPECT_NE(output.find("[2]: ref=1.000000e+00, impl=-inf\n"), std::string::npos) << output;
+}
+
+TEST(TestComputeTensorDiffNonFinite, ValidateAndReportListsTheNaNTheValidatorRejected)
+{
+    auto ref = makeVector({1.0f, 2.0f});
+    auto impl = makeVector({1.0f, NAN_VALUE});
+    const CpuFpReferenceValidation<float> validator(1.0f, 1.0f);
+
+    std::ostringstream oss;
+    const bool result = validateAndReport<float>(oss, "y", validator, ref, impl, 1.0f, 1.0f);
+
+    EXPECT_FALSE(result);
+    EXPECT_NE(oss.str().find("Mismatched:     1 (50.00%)"), std::string::npos) << oss.str();
+    EXPECT_NE(oss.str().find("[1]: ref=2.000000e+00, impl=nan"), std::string::npos) << oss.str();
+}
+
+// The all-finite rendering is the report operators already read; the new rule must not
+// change it.
+TEST(TestComputeTensorDiffNonFinite, AllFiniteDiffOutputIsUnchanged)
+{
+    auto ref = makeVector({1.0f, 1.0f, 1.0f, 1.0f});
+    auto impl = makeVector({1.0f, 1.5f, 1.0f, 1.25f});
+
+    std::ostringstream oss;
+    printTensorDiff<float>(oss, "t", ref, impl, 0.0f, 0.0f);
+
+    const std::string expected
+        = "  Tensor diff for \"t\":\n"
+          "    Total elements: 4\n"
+          "    Mismatched:     2 (50.00%)\n"
+          "    Max abs diff:   5.000000e-01 at [1]\n"
+          "    Mean abs diff:  3.750000e-01\n"
+          "    Worst mismatches:\n"
+          "      [1]: ref=1.000000e+00, impl=1.500000e+00, diff=5.000000e-01\n"
+          "      [3]: ref=1.000000e+00, impl=1.250000e+00, diff=2.500000e-01\n";
+    EXPECT_EQ(oss.str(), expected);
+}

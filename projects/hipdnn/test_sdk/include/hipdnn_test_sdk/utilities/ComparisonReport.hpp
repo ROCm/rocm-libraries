@@ -53,20 +53,27 @@ inline std::string formatComparisonHeader(const ComparisonContext& ctx,
     return os.str();
 }
 
+/// `nonFiniteMask` and `matchingInfinities` are the settings of the validator whose verdict
+/// this report explains, so the diff lists the NaN, Inf and unwritten-output elements that
+/// validator rejected (see computeTensorDiff). The defaults describe a validator with the mask
+/// off that rejects every NaN and Inf.
 template <typename T>
 void appendComparisonDiff(std::ostream& os,
                           const std::string& tensorLabel,
                           hipdnn_data_sdk::utilities::ITensor& expected,
                           hipdnn_data_sdk::utilities::ITensor& actual,
                           float atol,
-                          float rtol)
+                          float rtol,
+                          NonFiniteMask nonFiniteMask = NonFiniteMask{},
+                          MatchingInfinities matchingInfinities = MatchingInfinities::REJECTED)
 {
     if(expected.raggedIterationInfo() != actual.raggedIterationInfo())
     {
         printRaggedLayoutMismatch(os, tensorLabel, expected, actual);
         return;
     }
-    const auto summary = computeTensorDiff<T>(expected, actual, atol, rtol);
+    const auto summary
+        = computeTensorDiff<T>(expected, actual, atol, rtol, 5, nonFiniteMask, matchingInfinities);
     printTensorDiffSummary(os, tensorLabel, summary);
 }
 
@@ -76,7 +83,10 @@ inline void appendComparisonDiffByDataType(std::ostream& os,
                                            hipdnn_data_sdk::utilities::ITensor& expected,
                                            hipdnn_data_sdk::utilities::ITensor& actual,
                                            float atol,
-                                           float rtol)
+                                           float rtol,
+                                           NonFiniteMask nonFiniteMask = NonFiniteMask{},
+                                           MatchingInfinities matchingInfinities
+                                           = MatchingInfinities::REJECTED)
 {
     using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
     using hipdnn_data_sdk::types::bfloat16;
@@ -85,16 +95,20 @@ inline void appendComparisonDiffByDataType(std::ostream& os,
     switch(dataType)
     {
     case DT::FLOAT:
-        appendComparisonDiff<float>(os, tensorLabel, expected, actual, atol, rtol);
+        appendComparisonDiff<float>(
+            os, tensorLabel, expected, actual, atol, rtol, nonFiniteMask, matchingInfinities);
         return;
     case DT::HALF:
-        appendComparisonDiff<half>(os, tensorLabel, expected, actual, atol, rtol);
+        appendComparisonDiff<half>(
+            os, tensorLabel, expected, actual, atol, rtol, nonFiniteMask, matchingInfinities);
         return;
     case DT::BFLOAT16:
-        appendComparisonDiff<bfloat16>(os, tensorLabel, expected, actual, atol, rtol);
+        appendComparisonDiff<bfloat16>(
+            os, tensorLabel, expected, actual, atol, rtol, nonFiniteMask, matchingInfinities);
         return;
     case DT::DOUBLE:
-        appendComparisonDiff<double>(os, tensorLabel, expected, actual, atol, rtol);
+        appendComparisonDiff<double>(
+            os, tensorLabel, expected, actual, atol, rtol, nonFiniteMask, matchingInfinities);
         return;
     default:
         os << "  (no element-wise diff available for data type: "

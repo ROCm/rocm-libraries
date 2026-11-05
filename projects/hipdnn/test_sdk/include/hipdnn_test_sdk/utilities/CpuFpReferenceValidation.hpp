@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_test_sdk/utilities/ElementRule.hpp>
 #include <hipdnn_test_sdk/utilities/NonFiniteMask.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -14,19 +15,6 @@
 
 namespace hipdnn_test_sdk::utilities
 {
-
-/// Whether a comparison treats same-signed infinities in the reference and the
-/// implementation as equal.
-///
-/// REJECTED is the default: an unexpected infinity is normally a real defect, most often an
-/// output element the operation never wrote. ACCEPTED is for outputs whose correct value is
-/// infinite on both sides, such as an SDPA forward STATS (log-sum-exp) tensor holding -inf
-/// for every fully masked causal row.
-enum class MatchingInfinities
-{
-    REJECTED,
-    ACCEPTED
-};
 
 template <class T>
 class CpuFpReferenceValidation : public IReferenceValidation
@@ -79,8 +67,6 @@ public:
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
-            using hipdnn_data_sdk::types::isinf;
-            using hipdnn_data_sdk::types::signbit;
             if(isRagged && raggedLayout->isOutOfBlock(indices))
             {
                 return result.load(std::memory_order_relaxed);
@@ -99,67 +85,35 @@ public:
                 comparedCount.fetch_add(1, std::memory_order_relaxed);
             }
 
-            const bool refIsInf = isinf(refValue);
-            const bool implIsInf = isinf(implValue);
-
-            if(_nonFiniteMask.enabled())
-            {
-                const auto& sentinelBits = _nonFiniteMask.unwrittenSentinelBits();
-                if(sentinelBits.has_value()
-                   && non_finite_detail::elementBits(implValue) == *sentinelBits)
-                {
-                    HIPDNN_SDK_LOG_ERROR(
-                        "Unwritten-output sentinel detected at indices "
-                        << StreamVec(indices)
-                        << ": the implementation element still holds the pre-execute fill.");
-                    result.store(false, std::memory_order_relaxed);
-                    return result.load(std::memory_order_relaxed);
-                }
-
-                const bool refIsNan = isnan(refValue);
-                const bool implIsNan = isnan(implValue);
-                if(refIsNan || implIsNan)
-                {
-                    if(!(refIsNan && implIsNan))
-                    {
-                        HIPDNN_SDK_LOG_ERROR("NaN against a non-NaN value at indices "
-                                             << StreamVec(indices)
-                                             << ": reference value = " << refValue
-                                             << ", implementation value = " << implValue);
-                        result.store(false, std::memory_order_relaxed);
-                    }
-                    return result.load(std::memory_order_relaxed);
-                }
-                if(refIsInf || implIsInf)
-                {
-                    if(!(refIsInf && implIsInf && signbit(refValue) == signbit(implValue)))
-                    {
-                        HIPDNN_SDK_LOG_ERROR("Inf against a different value at indices "
-                                             << StreamVec(indices)
-                                             << ": reference value = " << refValue
-                                             << ", implementation value = " << implValue);
-                        result.store(false, std::memory_order_relaxed);
-                    }
-                    return result.load(std::memory_order_relaxed);
-                }
-                finiteCount.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            if(_matchingInfinities == MatchingInfinities::ACCEPTED && refIsInf && implIsInf
-               && signbit(refValue) == signbit(implValue))
+            const auto verdict
+                = classifyElement(refValue, implValue, _nonFiniteMask, _matchingInfinities);
+            if(verdict == ElementVerdict::MATCH)
             {
                 return result.load(std::memory_order_relaxed);
             }
-
-            if(isnan(refValue) || refIsInf || isnan(implValue) || implIsInf)
+            if(verdict == ElementVerdict::UNWRITTEN_REJECT)
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "NaN or Inf detected at indices "
+                    "Unwritten-output sentinel detected at indices "
+                    << StreamVec(indices)
+                    << ": the implementation element still holds the pre-execute fill.");
+                result.store(false, std::memory_order_relaxed);
+                return result.load(std::memory_order_relaxed);
+            }
+            if(verdict == ElementVerdict::NON_FINITE_REJECT)
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "NaN or Inf not accepted at indices "
                     << StreamVec(indices) << ": reference value = " << refValue
                     << ", implementation value = " << implValue
                     << ". This may indicate an output element was not written by the operation.");
                 result.store(false, std::memory_order_relaxed);
                 return result.load(std::memory_order_relaxed);
+            }
+
+            if(_nonFiniteMask.enabled())
+            {
+                finiteCount.fetch_add(1, std::memory_order_relaxed);
             }
 
             auto absDiff = fabs(static_cast<float>(implValue) - static_cast<float>(refValue));

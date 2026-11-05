@@ -7,6 +7,9 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <sstream>
@@ -226,4 +229,121 @@ TEST(TestAppendComparisonDiff, RaggedLayoutMismatchIsReported)
 
     EXPECT_NE(output.find("ragged layout mismatch"), std::string::npos) << output;
     EXPECT_EQ(output.find("Total elements:"), std::string::npos) << output;
+}
+
+// =================================================================================================
+// Non-finite elements the validator rejected
+// =================================================================================================
+
+namespace
+{
+
+template <typename T = float>
+Tensor<T> makeValues(const std::vector<float>& values)
+{
+    Tensor<T> tensor({static_cast<int64_t>(values.size())});
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        tensor.setHostValue(static_cast<T>(values[i]),
+                            std::vector<int64_t>{static_cast<int64_t>(i)});
+    }
+    return tensor;
+}
+
+constexpr float QUIET_NAN = std::numeric_limits<float>::quiet_NaN();
+constexpr float POSITIVE_INF = std::numeric_limits<float>::infinity();
+
+} // namespace
+
+// The RMS check fails on a NaN, and the report lists elements with atol = rtol = 0. A NaN used
+// to show as `Mismatched: 0`, which read as a failure with nothing wrong.
+TEST(TestAppendComparisonDiff, RmsNaNFailureShowsNonZeroCount)
+{
+    auto expected = makeValues({1.0f, 2.0f, 3.0f, 4.0f});
+    auto actual = makeValues({1.0f, 2.0f, QUIET_NAN, 4.0f});
+
+    const auto validator = createRmsValidator(DT::FLOAT, 1e-3f);
+    ASSERT_FALSE(validator->allClose(expected, actual));
+
+    std::ostringstream oss;
+    appendComparisonDiffByDataType(oss, DT::FLOAT, "dscale", expected, actual, 0.0f, 0.0f);
+    const std::string output = oss.str();
+
+    EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+1\b)"))) << output;
+    EXPECT_NE(output.find("[2]: ref=3.000000e+00, impl=nan"), std::string::npos) << output;
+}
+
+TEST(TestAppendComparisonDiff, MaskedReportCountsUnwrittenElementsAndSkipsMatchedNonFinite)
+{
+    using hipdnn_data_sdk::types::half;
+    const auto sentinel = payloadNanSentinelBits<half>();
+    ASSERT_TRUE(sentinel.has_value());
+
+    // Position 0: NaN matches NaN. 1: +Inf matches +Inf. 2: unwritten. 3: NaN against finite.
+    auto expected = makeValues<half>({QUIET_NAN, POSITIVE_INF, QUIET_NAN, 1.0f, 2.0f});
+    auto actual = makeValues<half>({QUIET_NAN, POSITIVE_INF, 0.0f, QUIET_NAN, 2.0f});
+    actual.setHostValue(payloadNanSentinelValue<half>(), std::vector<int64_t>{2});
+
+    const auto validator = createAllCloseMatchingNonFiniteValidator(DT::HALF, 0.0f, 0.0f, sentinel);
+    ASSERT_FALSE(validator->allClose(expected, actual));
+
+    std::ostringstream oss;
+    appendComparisonDiffByDataType(oss,
+                                   DT::HALF,
+                                   "o",
+                                   expected,
+                                   actual,
+                                   0.0f,
+                                   0.0f,
+                                   NonFiniteMask::matching(sentinel),
+                                   MatchingInfinities::REJECTED);
+    const std::string output = oss.str();
+
+    EXPECT_TRUE(std::regex_search(output, std::regex(R"(Mismatched:\s+2\b)"))) << output;
+    EXPECT_NE(output.find("[2]: ref=nan, impl=nan (unwritten-output sentinel)"), std::string::npos)
+        << output;
+    EXPECT_NE(output.find("[3]: ref=1.000000e+00, impl=nan"), std::string::npos) << output;
+    EXPECT_EQ(output.find("[0]:"), std::string::npos) << output;
+    EXPECT_EQ(output.find("[1]:"), std::string::npos) << output;
+}
+
+TEST(TestAppendComparisonDiff, MatchingInfinitiesAreNotListedWhenAccepted)
+{
+    auto expected = makeValues({-POSITIVE_INF, 1.0f});
+    auto actual = makeValues({-POSITIVE_INF, 1.0f});
+
+    std::ostringstream rejected;
+    appendComparisonDiff<float>(rejected, "stats", expected, actual, 0.0f, 0.0f);
+    EXPECT_TRUE(std::regex_search(rejected.str(), std::regex(R"(Mismatched:\s+1\b)")))
+        << rejected.str();
+
+    std::ostringstream accepted;
+    appendComparisonDiff<float>(accepted,
+                                "stats",
+                                expected,
+                                actual,
+                                0.0f,
+                                0.0f,
+                                NonFiniteMask{},
+                                MatchingInfinities::ACCEPTED);
+    EXPECT_TRUE(std::regex_search(accepted.str(), std::regex(R"(Mismatched:\s+0\b)")))
+        << accepted.str();
+}
+
+TEST(TestAppendComparisonDiff, AllFiniteReportKeepsItsShape)
+{
+    auto expected = makeValues({1.0f, 1.0f});
+    auto actual = makeValues({1.0f, 3.0f});
+
+    std::ostringstream oss;
+    appendComparisonDiff<float>(oss, "t", expected, actual, 0.0f, 0.0f);
+
+    EXPECT_EQ(oss.str(),
+              "  Tensor diff for \"t\":\n"
+              "    Total elements: 2\n"
+              "    Mismatched:     1 (50.00%)\n"
+              "    Max abs diff:   2.000000e+00 at [1]\n"
+              "    Mean abs diff:  2.000000e+00\n"
+              "    Worst mismatches:\n"
+              "      [1]: ref=1.000000e+00, impl=3.000000e+00, diff=2.000000e+00\n");
 }

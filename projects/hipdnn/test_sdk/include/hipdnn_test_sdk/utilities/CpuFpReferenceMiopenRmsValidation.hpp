@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_test_sdk/utilities/ElementRule.hpp>
 #include <hipdnn_test_sdk/utilities/NonFiniteMask.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -73,8 +74,6 @@ public:
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
-            using hipdnn_data_sdk::types::isinf;
-            using hipdnn_data_sdk::types::signbit;
             if(isRagged && raggedLayout->isOutOfBlock(indices))
             {
                 return;
@@ -93,51 +92,35 @@ public:
                 comparedCount.fetch_add(1, std::memory_order_relaxed);
             }
 
-            if(_nonFiniteMask.enabled())
+            const auto verdict = classifyElement(
+                refValueT, implValueT, _nonFiniteMask, MatchingInfinities::REJECTED);
+            if(verdict == ElementVerdict::MATCH)
             {
-                const auto& sentinelBits = _nonFiniteMask.unwrittenSentinelBits();
-                if(sentinelBits.has_value()
-                   && non_finite_detail::elementBits(implValueT) == *sentinelBits)
-                {
-                    HIPDNN_SDK_LOG_ERROR(
-                        "Unwritten-output sentinel detected at indices "
-                        << StreamVec(indices)
-                        << ": the implementation element still holds the pre-execute fill.");
-                    hasNanOrInf.store(true, std::memory_order_relaxed);
-                    return;
-                }
-
-                const bool refIsNan = isnan(refValueT);
-                const bool implIsNan = isnan(implValueT);
-                const bool refIsInf = isinf(refValueT);
-                const bool implIsInf = isinf(implValueT);
-                if(refIsNan || implIsNan || refIsInf || implIsInf)
-                {
-                    const bool matched
-                        = (refIsNan && implIsNan)
-                          || (refIsInf && implIsInf && signbit(refValueT) == signbit(implValueT));
-                    if(!matched)
-                    {
-                        HIPDNN_SDK_LOG_ERROR(
-                            "Non-finite value without a matching non-finite value at indices "
-                            << StreamVec(indices) << ": reference value = " << refValueT
-                            << ", implementation value = " << implValueT);
-                        hasNanOrInf.store(true, std::memory_order_relaxed);
-                    }
-                    return;
-                }
-                finiteCount.fetch_add(1, std::memory_order_relaxed);
+                return;
             }
-
-            if(isnan(refValueT) || isinf(refValueT) || isnan(implValueT) || isinf(implValueT))
+            if(verdict == ElementVerdict::UNWRITTEN_REJECT)
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "NaN or Inf detected at indices "
+                    "Unwritten-output sentinel detected at indices "
+                    << StreamVec(indices)
+                    << ": the implementation element still holds the pre-execute fill.");
+                hasNanOrInf.store(true, std::memory_order_relaxed);
+                return;
+            }
+            if(verdict == ElementVerdict::NON_FINITE_REJECT)
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "NaN or Inf not accepted at indices "
                     << StreamVec(indices) << ": reference value = " << refValueT
                     << ", implementation value = " << implValueT
                     << ". This may indicate an output element was not written by the operation.");
                 hasNanOrInf.store(true, std::memory_order_relaxed);
                 return;
+            }
+
+            if(_nonFiniteMask.enabled())
+            {
+                finiteCount.fetch_add(1, std::memory_order_relaxed);
             }
 
             auto refValue = static_cast<double>(refValueT);
