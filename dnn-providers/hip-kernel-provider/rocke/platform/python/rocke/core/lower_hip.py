@@ -108,15 +108,16 @@ def _hip_asm_constraint_error(entry: str) -> ValueError:
     )
 
 
-def _parse_hip_asm_constraints(op: Op) -> tuple[list[str], list[str], list[str]]:
-    """Partition the supported LLVM constraint subset without discarding entries.
+def _parse_hip_asm_constraints(
+    op: Op, raw: str
+) -> tuple[list[str], list[str], list[str]]:
+    """Partition ``raw``, ``op``'s constraints string, into the supported LLVM
+    constraint subset without discarding entries.
 
     Outputs precede inputs, which precede clobbers. Read/write outputs and
     alternatives need a separate lowering; do not emit them as uninitialized
     GCC outputs. Numeric ties currently refer to the sole supported output.
-    The caller has checked that the constraints attribute is a string.
     """
-    raw = op.attrs["constraints"]
     parts = [entry.strip(" \t\r\n\v\f") for entry in raw.split(",")]
     if op.results and not any(parts):
         raise ValueError("HIP inline asm requires an output constraint")
@@ -1716,7 +1717,7 @@ class _Lowerer:
         clob = op.attrs.get("clobber", "memory" if sideeffect else "")
         if not isinstance(clob, str):
             raise ValueError("HIP inline asm clobber must be a string")
-        outputs, inputs, clobbers = _parse_hip_asm_constraints(op)
+        outputs, inputs, clobbers = _parse_hip_asm_constraints(op, constraints)
         if clob:
             if clob not in _HIP_ASM_CLOBBERS:
                 raise _hip_asm_constraint_error(clob)
