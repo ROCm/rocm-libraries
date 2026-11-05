@@ -32,7 +32,6 @@
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
 #include "d_vector.hpp"
-#include "hipblaslt_bench_options.hpp"
 #include "utility.hpp"
 #include <atomic>
 #include <chrono>
@@ -303,14 +302,11 @@ static void portable_setenv(const char* name, const char* value)
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
     : hipblaslt_local_handle()
 {
-    // C++ setProblem inherits the handle request without using the bench descriptors.
-    // A per-case value wins over the CLI; leaving both unset keeps the library default.
-    const int32_t uso = arg.uniform_summation_order >= 0
-                            ? arg.uniform_summation_order
-                            : hipblaslt_bench_options::uniform_summation_order();
-    if(uso >= 0)
+    // Both descriptor-taking APIs and C++ setProblem with sizes/strides inherit this request.
+    if(arg.uniform_summation_order >= 0)
     {
-        const auto status = hipblasLtSetUniformSummationOrder(m_handle, uso);
+        const auto status
+            = hipblasLtSetUniformSummationOrder(m_handle, arg.uniform_summation_order);
         if(status != HIPBLAS_STATUS_SUCCESS)
             throw std::runtime_error(hipblas_status_to_string(status));
     }
