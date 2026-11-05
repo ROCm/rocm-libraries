@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend/node/scaled_dot_product_flash_attention.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file SdpaAttributes.hpp
@@ -101,8 +107,8 @@ public:
         Scale_S = 18,
         Scale_O = 19,
         SINK_TOKEN = 20,
-        CU_SEQ_LEN_Q = 21, // Cumulative sequence lengths (B+1), forward only
-        CU_SEQ_LEN_KV = 22,
+        CU_SEQ_LEN_Q = 21, ///< Cumulative Q sequence lengths, INT32 (B+1,1,1,1); forward only
+        CU_SEQ_LEN_KV = 22, ///< Cumulative KV sequence lengths, INT32 (B+1,1,1,1); forward only
     };
     typedef InputNames input_names;
 
@@ -194,11 +200,13 @@ public:
     {
         return getInput(InputNames::SEQ_LEN_KV);
     }
+    /// @brief Cumulative Q sequence lengths tensor, or null if unset.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_cu_seq_len_q() const
     {
         return getInput(InputNames::CU_SEQ_LEN_Q);
     }
+    /// @brief Cumulative KV sequence lengths tensor, or null if unset.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_cu_seq_len_kv() const
     {
@@ -385,31 +393,41 @@ public:
     {
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
     }
-    // Accepts a 1-D (B+1) tensor like cuDNN and promotes it in place to (B+1,1,1,1), so the
-    // backend always gets rank-4. Set dims first: dims set afterwards are not promoted and
-    // fail Rule 6c's rank check.
+    /**
+     * @brief Set the cumulative Q sequence lengths (forward only; cuDNN 9.25+ semantics).
+     *
+     * Exclusive prefix sums of the per-batch Q lengths: INT32, B+1 entries, starting at 0 (for
+     * lengths 4, 3, 8 the tensor holds 0, 4, 7, 15). A 1-D (B+1) tensor is promoted to
+     * (B+1,1,1,1) during graph validation, in either call order. Requires padding_mask(true),
+     * excludes seq_len_q, and the KV side must also carry a length tensor (seq_len_kv or
+     * cu_seq_len_kv). The graph then needs an engine plugin reporting API version 1.6.0 or
+     * newer.
+     * @param value The cumulative Q sequence length tensor.
+     * @return Reference to this object for chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_cu_seq_len_q(const std::shared_ptr<TensorAttributes>& value)
     {
-        promoteIndexTensorTo4d(value);
         return setInput(InputNames::CU_SEQ_LEN_Q, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_cu_seq_len_q(std::shared_ptr<TensorAttributes>&& value)
     {
-        promoteIndexTensorTo4d(value);
         return setInput(InputNames::CU_SEQ_LEN_Q, std::move(value));
     }
+    /**
+     * @brief Set the cumulative KV sequence lengths. Same rules as set_cu_seq_len_q().
+     * @param value The cumulative KV sequence length tensor.
+     * @return Reference to this object for chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_cu_seq_len_kv(const std::shared_ptr<TensorAttributes>& value)
     {
-        promoteIndexTensorTo4d(value);
         return setInput(InputNames::CU_SEQ_LEN_KV, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_cu_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
     {
-        promoteIndexTensorTo4d(value);
         return setInput(InputNames::CU_SEQ_LEN_KV, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -860,21 +878,6 @@ public:
     {
         unfuse_fma_hint = value;
         return *this;
-    }
-
-private:
-    // Promotes a 1-D (n) tensor to (n,1,1,1) in place, as cuDNN's promote_1d_index_tensor_to_4d
-    // does (keeps the leading stride if set). In place so the caller's handle and uid stay valid.
-    static void promoteIndexTensorTo4d(const std::shared_ptr<TensorAttributes>& tensor)
-    {
-        if(!tensor || tensor->get_dim().size() != 1)
-        {
-            return;
-        }
-        const int64_t n = tensor->get_dim()[0];
-        const auto& stride = tensor->get_stride();
-        const int64_t leadingStride = stride.size() == 1 ? stride[0] : 1;
-        tensor->set_dim({n, 1, 1, 1}).set_stride({leadingStride, 1, 1, 1});
     }
 };
 

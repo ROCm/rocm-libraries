@@ -1076,6 +1076,28 @@ TEST(TestEngineFeatures, VariableLengthAttentionIsDataDependent)
     EXPECT_EQ(features(attentionGraph(sdpa)).at("graph.nodes[0].data_dependent"), false);
 }
 
+// Cumulative lengths carry the same information as seq_len_*: a graph carrying either side must
+// not publish a dense count from the padded shapes, even with padding_mask unset (reachable via
+// JSON, flatbuffer or the backend API).
+TEST(TestEngineFeatures, CumulativeSequenceLengthsMakeAttentionDataDependent)
+{
+    using Setter = void (*)(SdpaAttributesT&);
+    const std::vector<std::pair<const char*, Setter>> sides = {
+        {"cu_seq_len_q", [](SdpaAttributesT& op) { op.cu_seq_len_q_tensor_uid = 6; }},
+        {"cu_seq_len_kv", [](SdpaAttributesT& op) { op.cu_seq_len_kv_tensor_uid = 6; }},
+    };
+    for(const auto& [name, set] : sides)
+    {
+        SCOPED_TRACE(name);
+        auto sdpa = attention();
+        set(sdpa);
+        const auto published = features(attentionGraph(sdpa));
+        EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+    }
+}
+
 // Each operand whose contents decide the score count leaves the work unknown: a count from
 // the padded shapes would overstate it.
 TEST(TestEngineFeatures, AttentionWorkIsUnknownWhenOperandContentsDecideIt)
@@ -1228,6 +1250,8 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
     const std::vector<std::pair<const char*, Refusal>> refusals = {
         {"seq_len_q", [](SdpaAttributesT& op) { op.seq_len_q_tensor_uid = 5; }},
         {"seq_len_kv", [](SdpaAttributesT& op) { op.seq_len_kv_tensor_uid = 5; }},
+        {"cu_seq_len_q", [](SdpaAttributesT& op) { op.cu_seq_len_q_tensor_uid = 5; }},
+        {"cu_seq_len_kv", [](SdpaAttributesT& op) { op.cu_seq_len_kv_tensor_uid = 5; }},
         {"page_table_k", [](SdpaAttributesT& op) { op.page_table_k_tensor_uid = 5; }},
         {"page_table_v", [](SdpaAttributesT& op) { op.page_table_v_tensor_uid = 5; }},
         {"block_mask", [](SdpaAttributesT& op) { op.block_mask_tensor_uid = 5; }},

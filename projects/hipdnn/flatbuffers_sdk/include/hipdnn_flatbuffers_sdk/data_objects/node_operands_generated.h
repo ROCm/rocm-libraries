@@ -500,11 +500,11 @@ void visit(const SdpaAttributes& op, V& visitor)
     visitor.scalar(std::string_view("implementation"), static_cast<int64_t>(op.implementation()));
     if(const auto uid = op.cu_seq_len_q_tensor_uid(); uid.has_value())
     {
-        visitor.tensor(std::string_view("cu_seq_len_q"), static_cast<int64_t>(*uid), false);
+        visitor.tensor(std::string_view("cu_seq_len_q"), static_cast<int64_t>(*uid), true);
     }
     if(const auto uid = op.cu_seq_len_kv_tensor_uid(); uid.has_value())
     {
-        visitor.tensor(std::string_view("cu_seq_len_kv"), static_cast<int64_t>(*uid), false);
+        visitor.tensor(std::string_view("cu_seq_len_kv"), static_cast<int64_t>(*uid), true);
     }
 }
 

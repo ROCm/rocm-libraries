@@ -306,12 +306,14 @@ operation:
       attr_suffix: "CU_SEQ_LEN_QDESC"
       required: false
       frontend_getter: "get_cu_seq_len_q()"
+      work_data_dependent: true
 
     - name: "cu_seq_len_kv"
       fbs_field: "cu_seq_len_kv_tensor_uid"
       attr_suffix: "CU_SEQ_LEN_KVDESC"
       required: false
       frontend_getter: "get_cu_seq_len_kv()"
+      work_data_dependent: true
 
     # FP8 input tensors
     - name: "descale_q"

@@ -281,71 +281,11 @@ public:
                 ErrorCode::ATTRIBUTE_NOT_SET,
                 std::string("SdpaBwdNode: padding_mask=true requires seq_len_kv tensor to be set"));
 
-            const auto& sqDims = seqLenQ->get_dim();
-            const auto& skvDims = seqLenKv->get_dim();
             const auto batch = qDims[0];
-
-            HIPDNN_RETURN_IF_NE(sqDims.size(),
-                                static_cast<size_t>(4),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q must be rank-4, got rank="
-                                    + std::to_string(sqDims.size()));
-            HIPDNN_RETURN_IF_NE(sqDims[0],
-                                batch,
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[0] must equal batch ("
-                                    + std::to_string(batch) + "), got "
-                                    + std::to_string(sqDims[0]));
-            HIPDNN_RETURN_IF_NE(sqDims[1],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[1] must be 1, got "
-                                    + std::to_string(sqDims[1]));
-            HIPDNN_RETURN_IF_NE(sqDims[2],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[2] must be 1, got "
-                                    + std::to_string(sqDims[2]));
-            HIPDNN_RETURN_IF_NE(sqDims[3],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[3] must be 1, got "
-                                    + std::to_string(sqDims[3]));
-            HIPDNN_RETURN_IF_TRUE(seqLenQ->get_data_type() != DataType::INT32,
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("SdpaBwdNode: seq_len_q must have INT32 data "
-                                              "type"));
-
-            HIPDNN_RETURN_IF_NE(skvDims.size(),
-                                static_cast<size_t>(4),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv must be rank-4, got rank="
-                                    + std::to_string(skvDims.size()));
-            HIPDNN_RETURN_IF_NE(skvDims[0],
-                                batch,
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[0] must equal batch ("
-                                    + std::to_string(batch) + "), got "
-                                    + std::to_string(skvDims[0]));
-            HIPDNN_RETURN_IF_NE(skvDims[1],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[1] must be 1, got "
-                                    + std::to_string(skvDims[1]));
-            HIPDNN_RETURN_IF_NE(skvDims[2],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[2] must be 1, got "
-                                    + std::to_string(skvDims[2]));
-            HIPDNN_RETURN_IF_NE(skvDims[3],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[3] must be 1, got "
-                                    + std::to_string(skvDims[3]));
-            HIPDNN_RETURN_IF_TRUE(seqLenKv->get_data_type() != DataType::INT32,
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("SdpaBwdNode: seq_len_kv must have INT32 data "
-                                              "type"));
+            HIPDNN_CHECK_ERROR(
+                detail::validateIndexTensor(seqLenQ, "SdpaBwdNode", "seq_len_q", batch, "batch"));
+            HIPDNN_CHECK_ERROR(
+                detail::validateIndexTensor(seqLenKv, "SdpaBwdNode", "seq_len_kv", batch, "batch"));
         }
 
         // Rule 10: attn_scale may be given as a tensor or a baked value, not both

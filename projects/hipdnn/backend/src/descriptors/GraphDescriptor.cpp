@@ -160,12 +160,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
             graph->tensors, [](const auto& tensor) { return tensor.get(); });
 
     const auto& requiredVersion
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(_isOverrideShapeEnabled,
-                                                                  anyRuntimePassByValue,
-                                                                  hasRaggedTensors(),
-                                                                  hasNonDefaultTensorAlignment(),
-                                                                  hasRaggedOffsetMultiplier(),
-                                                                  hasCuSeqLen());
+        = requiredEngineApiVersion(_isOverrideShapeEnabled, anyRuntimePassByValue);
     graph->min_required_engine_api_version
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
             hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
@@ -703,6 +698,18 @@ bool GraphDescriptor::hasRaggedOffsetMultiplier() const
         }
     }
     return false;
+}
+
+const hipdnn_data_sdk::utilities::Version&
+    GraphDescriptor::requiredEngineApiVersion(bool isOverrideShapeEnabled,
+                                              bool isRuntimePassByValue) const
+{
+    return hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
+                                                                   isRuntimePassByValue,
+                                                                   hasRaggedTensors(),
+                                                                   hasNonDefaultTensorAlignment(),
+                                                                   hasRaggedOffsetMultiplier(),
+                                                                   hasCuSeqLen());
 }
 
 bool GraphDescriptor::hasCuSeqLen() const

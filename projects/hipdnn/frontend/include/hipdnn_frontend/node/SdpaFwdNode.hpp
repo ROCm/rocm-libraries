@@ -218,9 +218,12 @@ public:
         //   differ; cuDNN 9.24 required cu on both.
         // - If either side is cumulative: padding_mask is required, both sides need a length
         //   tensor, and each cu tensor is INT32 (B+1,1,1,1) prefix sums starting at 0.
-        // - A 1-D (B+1) tensor is promoted to that shape by SdpaAttributes::set_cu_seq_len_*.
+        // - A 1-D (B+1) tensor is promoted to that shape here, so the setter call order does
+        //   not matter (cuDNN promotes at validation too).
         const auto cuSeqLenQ = attributes.get_cu_seq_len_q();
         const auto cuSeqLenKv = attributes.get_cu_seq_len_kv();
+        detail::promoteIndexTensorTo4d(cuSeqLenQ);
+        detail::promoteIndexTensorTo4d(cuSeqLenKv);
         const auto seqLenQ = attributes.get_seq_len_q();
         const auto seqLenKv = attributes.get_seq_len_kv();
         HIPDNN_RETURN_IF_TRUE(cuSeqLenQ && seqLenQ,
@@ -243,41 +246,15 @@ public:
                 "together (each side via seq_len_* or cu_seq_len_*)");
 
             const auto expectedFirstDim = qDims[0] + 1;
-            const std::array<std::pair<const char*, const std::shared_ptr<TensorAttributes>*>, 2>
-                cuTensors{{{"cu_seq_len_q", &cuSeqLenQ}, {"cu_seq_len_kv", &cuSeqLenKv}}};
-            for(const auto& [cuName, cuTensor] : cuTensors)
+            if(cuSeqLenQ)
             {
-                if(!*cuTensor)
-                {
-                    continue;
-                }
-                const auto& cuDims = (*cuTensor)->get_dim();
-                const std::string prefix = std::string("SdpaFwdNode: ") + cuName;
-                HIPDNN_RETURN_IF_NE(
-                    cuDims.size(),
-                    reqRank,
-                    ErrorCode::INVALID_VALUE,
-                    prefix
-                        + " must be rank-4 (a 1-D tensor is promoted when set, so set its "
-                          "dims before set_"
-                        + cuName + "), got rank=" + std::to_string(cuDims.size()));
-                HIPDNN_RETURN_IF_NE(cuDims[0],
-                                    expectedFirstDim,
-                                    ErrorCode::INVALID_VALUE,
-                                    prefix + " dim[0] must equal batch + 1 ("
-                                        + std::to_string(expectedFirstDim) + "), got "
-                                        + std::to_string(cuDims[0]));
-                for(size_t i = 1; i < reqRank; ++i)
-                {
-                    HIPDNN_RETURN_IF_NE(cuDims[i],
-                                        static_cast<int64_t>(1),
-                                        ErrorCode::INVALID_VALUE,
-                                        prefix + " dim[" + std::to_string(i) + "] must be 1, got "
-                                            + std::to_string(cuDims[i]));
-                }
-                HIPDNN_RETURN_IF_TRUE((*cuTensor)->get_data_type() != DataType::INT32,
-                                      ErrorCode::INVALID_VALUE,
-                                      prefix + " must have INT32 data type");
+                HIPDNN_CHECK_ERROR(detail::validateIndexTensor(
+                    cuSeqLenQ, "SdpaFwdNode", "cu_seq_len_q", expectedFirstDim, "batch + 1"));
+            }
+            if(cuSeqLenKv)
+            {
+                HIPDNN_CHECK_ERROR(detail::validateIndexTensor(
+                    cuSeqLenKv, "SdpaFwdNode", "cu_seq_len_kv", expectedFirstDim, "batch + 1"));
             }
         }
 
