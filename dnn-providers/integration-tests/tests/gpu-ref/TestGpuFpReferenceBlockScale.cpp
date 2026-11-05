@@ -5,7 +5,6 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceBlockScale.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleDequantize.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleQuantize.hpp>
-#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using hipdnn_data_sdk::types::fp4_e2m1;
@@ -124,6 +123,80 @@ TEST(TestGpuFpReferenceBlockScale, QuantizeRejectsNonFiniteInput)
     x.fillWithData(values.data(), values.size() * sizeof(float));
 
     EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, scale, 2, 0), std::runtime_error);
+}
+
+TEST(TestGpuFpReferenceBlockScale, QuantizeNonLastAxisWithPermutedStridesMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> scaleDims{2, 2, 4};
+    Tensor<float> cpuX(dims, {12, 1, 3});
+    Tensor<int8_t> cpuY(dims, {1, 8, 2});
+    Tensor<float> cpuScale(scaleDims, {8, 1, 2});
+    Tensor<float> gpuX(dims, {12, 1, 3});
+    Tensor<int8_t> gpuY(dims, {1, 8, 2});
+    Tensor<float> gpuScale(scaleDims, {8, 1, 2});
+
+    for(int64_t batch = 0; batch < dims[0]; ++batch)
+    {
+        for(int64_t channel = 0; channel < dims[1]; ++channel)
+        {
+            for(int64_t column = 0; column < dims[2]; ++column)
+            {
+                const auto value
+                    = static_cast<float>(batch * 20 + channel * 5 + column - 12);
+                cpuX.setHostValue(value, batch, channel, column);
+                gpuX.setHostValue(value, batch, channel, column);
+            }
+        }
+    }
+
+    CpuFpReferenceBlockScaleQuantize::quantize(cpuX, cpuY, cpuScale, 2, 1);
+    GpuFpReferenceBlockScale::quantize(gpuX, gpuY, gpuScale, 2, 1);
+    gpuY.memory().hostData();
+    gpuScale.memory().hostData();
+
+    for(int64_t batch = 0; batch < dims[0]; ++batch)
+    {
+        for(int64_t channel = 0; channel < dims[1]; ++channel)
+        {
+            for(int64_t column = 0; column < dims[2]; ++column)
+            {
+                EXPECT_EQ(gpuY.getHostValue(batch, channel, column),
+                          cpuY.getHostValue(batch, channel, column));
+            }
+        }
+        for(int64_t block = 0; block < scaleDims[1]; ++block)
+        {
+            for(int64_t column = 0; column < scaleDims[2]; ++column)
+            {
+                EXPECT_EQ(gpuScale.getHostValue(batch, block, column),
+                          cpuScale.getHostValue(batch, block, column));
+            }
+        }
+    }
+}
+
+TEST(TestGpuFpReferenceBlockScale, DequantizeNegativeScaleHasExpectedValue)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> cpuX({1});
+    Tensor<float> cpuScale({1});
+    Tensor<float> cpuY({1});
+    Tensor<float> gpuX({1});
+    Tensor<float> gpuScale({1});
+    Tensor<float> gpuY({1});
+    cpuX.setHostValue(3.0f, 0);
+    cpuScale.setHostValue(2.0f, 0);
+    gpuX.setHostValue(3.0f, 0);
+    gpuScale.setHostValue(2.0f, 0);
+
+    CpuFpReferenceBlockScaleDequantize::dequantize(cpuX, cpuScale, cpuY, {1}, true);
+    GpuFpReferenceBlockScale::dequantize(gpuX, gpuScale, gpuY, {1}, true);
+    gpuY.memory().hostData();
+
+    EXPECT_EQ(gpuY.getHostValue(0), 0.75f);
+    EXPECT_EQ(gpuY.getHostValue(0), cpuY.getHostValue(0));
 }
 
 template <typename QuantizedType>

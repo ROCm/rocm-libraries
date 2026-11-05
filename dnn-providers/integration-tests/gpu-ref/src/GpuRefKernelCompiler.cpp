@@ -62,13 +62,11 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
                                           headersData.data(),
                                           includeNames.data()));
 
-    // Build compile options from defines vector
-    auto compileOptions = compileDefines;
     std::vector<const char*> optPtrs;
-    optPtrs.reserve(compileOptions.size());
-    for(const auto& option : compileOptions)
+    optPtrs.reserve(compileDefines.size());
+    for(const auto& define : compileDefines)
     {
-        optPtrs.push_back(option.c_str());
+        optPtrs.push_back(define.c_str());
     }
 
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
