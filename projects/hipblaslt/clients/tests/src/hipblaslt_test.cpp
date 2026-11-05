@@ -266,6 +266,12 @@ void launch_test_on_threads(std::function<void()> test,
 
 TEST(TestExecution, smoke_RepeatsOnEachWorker)
 {
+    int        deviceCount = 0;
+    const auto status      = hipGetDeviceCount(&deviceCount);
+    if(status == hipErrorNoDevice || (status == hipSuccess && deviceCount == 0))
+        GTEST_SKIP() << "No GPU available";
+    ASSERT_EQ(status, hipSuccess);
+
     for(size_t repeats : {0, 1, 3})
         for(size_t threads : {0, 3})
         {
