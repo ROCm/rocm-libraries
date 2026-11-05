@@ -106,8 +106,12 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertIsNone(validate(_spec(*_BENCH)))
         self.assertIsNone(validate(_spec(cluster_dim=(1, 1, 1), out_dtype="bf16")))
         self.assertIsNone(validate(_spec(half_plr="none", local_prefetch=0)))
-        self.assertEqual(len(list(_valid_geometries())), 87)
-        self.assertEqual(len(list(_valid_geometries("16x16"))), 122)
+        self.assertEqual(len(list(_valid_geometries())), 58)
+        self.assertEqual(len(list(_valid_geometries(lds_segment_interleave=False))), 87)
+        self.assertEqual(len(list(_valid_geometries("16x16"))), 120)
+        self.assertEqual(
+            len(list(_valid_geometries("16x16", lds_segment_interleave=False))), 122
+        )
         self.assertIsNone(validate(_spec(tile_m=128, tile_n=128, tile_k=1024)))
         self.assertIn("LDS", validate(_spec(tile_k=1024)) or "")
         self.assertIsNone(validate(_spec(tile_m=32, mma="16x16")))
@@ -124,10 +128,8 @@ class MxGemmSpecTest(unittest.TestCase):
             "late needs half B": {"half_b_order": "late", "half_plr": "none"},
             "signal range": {"cluster_signal_wmmas": 17},
             "out dtype": {"out_dtype": "fp32"},
-            "pad block": {"a_lds_pad": LdsPad(16, 384)},
-            "pad cut row": {"b_lds_pad": LdsPad(16, 128)},
-            "pad bytes": {"b_scale_lds_pad": LdsPad(12, 256)},
             "prefetch": {"gl2_prefetch_distance": 1},
+            "interleave coarse": {"tile_m": 128, "tile_n": 256, "wave_group": (4, 1)},
         }
         bad_problems = {"short K": (1024, 1024, 256), "K step": (1024, 1024, 2064)}
         bad["K step"] = {}
@@ -144,7 +146,11 @@ class MxGemmSpecTest(unittest.TestCase):
         for a_dtype, b_dtype in _PAIRS_8BIT:
             fields = {"a_dtype": a_dtype, "b_dtype": b_dtype}
             with self.subTest(a_dtype=a_dtype, b_dtype=b_dtype):
-                self.assertEqual(len(list(_valid_geometries("16x16", **fields))), 68)
+                for interleave in (True, False):
+                    geometries = _valid_geometries(
+                        "16x16", lds_segment_interleave=interleave, **fields
+                    )
+                    self.assertEqual(len(list(geometries)), 68)
                 self.assertIsNone(validate(_spec8(tile_m=128, **fields)))
                 self.assertIsNone(validate(_spec8(tile_k=128, tile_m=128, **fields)))
                 wide = _spec8(**fields)
@@ -266,6 +272,7 @@ class MxGemmSpecTest(unittest.TestCase):
                 cluster_dim=(1, 1, 1),
                 half_plr="b" if tn // wg[1] % 32 == 0 else "none",
                 mma=mma,
+                lds_segment_interleave=False,
             )
             tile = (tm, tn, wg, mma)
             with self.subTest(m=m, n=n, out_dtype=out_dtype, tile=tile):
@@ -339,6 +346,53 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertEqual(pads["a_scale"], LdsPad())
         self.assertEqual(_spec(*_BENCH).lds_bytes, 282624)
 
+    def test_lds_layout_matches_the_hipblaslt_solutions(self):
+        """The hipBLASLt solutions whose LDS pads rocKE derives (Tensile A =
+        rocKE B): LdsOffsetA / ldsBaseB with the component stride, LdsOffset
+        MXSA / MXSB, LdsOffsetA_Blk and LdsNumBytes."""
+        mab = {
+            "tile_n": 16,
+            "wave_group": (4, 1),
+            "cluster_dim": (1, 4, 1),
+            "half_plr": "none",
+            "lds_segment_interleave": False,
+        }
+        cases = {
+            # mxf4_tn_maf: LDSSegmentInterleave 1, B kept whole.
+            "maf fp4": (
+                _spec(*_BENCH),
+                ((0, 99584), (33024, 33280), 132608, 137216, 141312, 282624),
+            ),
+            # mxf4_tn_mab / mxf8_tn_mab: baseline.
+            "mab fp4": (
+                _spec(65536, 16, 65536, mma="16x16", **mab),
+                ((0, 2176), (9216, 33280), 4608, 5120, 131072, 206848),
+            ),
+            "mab fp8": (
+                _spec8(65536, 16, 65536, **mab),
+                ((0, 2176), (6656, 33280), 4352, 4608, 131072, 204288),
+            ),
+            # mxf8_tn_medium: LDSSegmentInterleave 1, segment-aligned.
+            "medium fp8": (
+                _spec8(2048, 2048, 65536, tile_m=128, tile_n=128, half_plr="none"),
+                ((0, 65536), (16640, 65536), 98816, 99840, 131072, 231936),
+            ),
+        }
+        for label, (spec, expected) in cases.items():
+            layout = spec.lds_layout
+            with self.subTest(label):
+                self.assertEqual(
+                    (
+                        (layout.b.base, layout.b.stride),
+                        (layout.a.base, layout.a.stride),
+                        layout.b_scale.base,
+                        layout.a_scale.base,
+                        layout.buffer_stride,
+                        layout.lds_bytes,
+                    ),
+                    expected,
+                )
+
     def test_kernel_name_encodes_non_default_tuning(self):
         base = _spec().kernel_name()
         self.assertTrue(base.endswith("_t256x256x512_c4x4"), base)
@@ -349,31 +403,35 @@ class MxGemmSpecTest(unittest.TestCase):
 class MxGemmLayoutTest(unittest.TestCase):
     def test_reads_land_where_tdm_writes(self):
         """Row and scale offsets agree with the TDM's padded writes, every
-        lane read is contiguous, and the regions are disjoint and in bounds."""
-        specs = (
-            list(_valid_geometries())
-            + list(_valid_geometries("16x16"))
-            + list(_valid_geometries("16x16", a_dtype="fp8", b_dtype="fp8"))
-            + list(
-                _valid_geometries(
-                    "16x16",
-                    a_dtype="bf8",
-                    b_dtype="fp8",
-                    local_prefetch=0,
-                    half_plr="none",
+        lane read is contiguous, the regions are disjoint and in bounds, and
+        buffer 1 follows buffer 0 inside the allocation, with segment
+        interleave on and off."""
+        specs = [
+            spec
+            for interleave in (True, False)
+            for spec in (
+                list(_valid_geometries(lds_segment_interleave=interleave))
+                + list(_valid_geometries("16x16", lds_segment_interleave=interleave))
+                + list(
+                    _valid_geometries(
+                        "16x16",
+                        a_dtype="fp8",
+                        b_dtype="fp8",
+                        lds_segment_interleave=interleave,
+                    )
+                )
+                + list(
+                    _valid_geometries(
+                        "16x16",
+                        a_dtype="bf8",
+                        b_dtype="fp8",
+                        local_prefetch=0,
+                        half_plr="none",
+                        lds_segment_interleave=interleave,
+                    )
                 )
             )
-            + [
-                _spec(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
-                _spec(a_lds_pad=LdsPad(32, 2048), b_scale_lds_pad=LdsPad()),
-                _spec(
-                    tile_m=256,
-                    tile_n=128,
-                    wave_group=(1, 4),
-                    a_scale_lds_pad=LdsPad(16, 512),
-                ),
-            ]
-        )
+        ]
         ops = IntOps()
         for spec in specs:
             layout = spec.lds_layout
@@ -429,6 +487,10 @@ class MxGemmLayoutTest(unittest.TestCase):
                     self.assertLess(end, begin)
                 self.assertGreaterEqual(used[0][0], 0)
                 self.assertLess(used[-1][1], layout.buffer_bytes)
+                self.assertLessEqual(layout.buffer_bytes, layout.buffer_stride)
+                self.assertLessEqual(
+                    layout.buffer_stride + layout.buffer_bytes, layout.lds_bytes
+                )
 
     def test_lane_chunks_match_the_scaled_matrix_layout(self):
         """Each lane's K chunk reads (``chunk_offsets`` plus 16 B per lane
@@ -689,6 +751,7 @@ class MxGemmIrTest(unittest.TestCase):
                 "cluster_dim": (1, 4, 1),
                 "half_plr": "none",
                 "mma": mma,
+                "lds_segment_interleave": False,
             }
             spec = _spec(1024, 16, 4096, **fields)
             llvm = _llvm(spec)
@@ -962,7 +1025,13 @@ class MxGemmHostBuildTest(unittest.TestCase):
 
         for spec in (
             _spec(*_BENCH),
-            _spec(tile_m=128, tile_n=256, tile_k=256, wave_group=(4, 1)),
+            _spec(
+                tile_m=128,
+                tile_n=256,
+                tile_k=256,
+                wave_group=(4, 1),
+                lds_segment_interleave=False,
+            ),
             _spec(cluster_dim=(1, 1, 1), half_plr="none", out_dtype="fp16"),
             _spec(1024, 1024, 2048 + 384, tile_m=128, tile_n=128),
             _spec(tile_m=128, tile_n=128, tile_k=128),
@@ -1001,6 +1070,17 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 wave_group=(4, 1),
                 half_plr="none",
                 cluster_dim=(1, 2, 1),
+                lds_segment_interleave=False,
+            ),
+            # Segment-aligned interleave and the baseline layout.
+            _spec8(2048, 2048, 65536, tile_m=128, tile_n=128, half_plr="none"),
+            _spec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=1024,
+                mma="16x16",
+                half_plr="none",
+                lds_segment_interleave=False,
             ),
             # hipBLASLt's MXFP8 MAF and MAB tunings.
             _spec8(*_BENCH, local_prefetch=0, half_plr="none"),
@@ -1039,7 +1119,9 @@ class MxGemmDeviceTest(unittest.TestCase):
             self.skipTest("visible HIP device 0 is not gfx1250")
         for spec in (
             list(_valid_geometries())
+            + list(_valid_geometries(lds_segment_interleave=False))
             + list(_valid_geometries("16x16"))
+            + list(_valid_geometries("16x16", lds_segment_interleave=False))
             + [
                 _spec(
                     1000,

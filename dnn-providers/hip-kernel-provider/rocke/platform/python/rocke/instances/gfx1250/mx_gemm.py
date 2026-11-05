@@ -137,7 +137,10 @@ _DATA_PAD_BYTES = 16
 _BANK_CYCLE_BYTES = 256
 _MXS_BLOCK_BYTES = 256
 _MXS_PAD_BYTES = 16
-_B_SCALE_REGION_ALIGN = 512
+# calcLdsNumBytesAB: LDS regions start on 64 / numRegisters bytes of the
+# operand type, 2048 / bits (512 B for FP4, 256 B for the 8-bit types).
+_LDS_REGION_ALIGN_BITS = 2048
+_LDS_SEGMENT_BYTES = 1 << 16
 # Longest pad block the TDM pad_interval field encodes; A/B blocks above it
 # use TDM iterate mode (one iteration per block).
 _TDM_PAD_PERIOD_MAX = 1024
@@ -203,12 +206,13 @@ class MxGemmSpec:
     """Problem and tuning parameters. M, N and K are compile-time: the loop's
     tile-pair count comes from ``K``.
 
-    ``*_lds_pad`` override the derived padding of one operand (``None``:
-    derived, ``LdsPad()``: none). ``cluster_signal_wmmas`` defaults
+    ``cluster_signal_wmmas`` defaults
     (``None``) to 6, clamped to the tile. Wave 0 alone signals the cluster,
     without draining LDS reads; the cluster wait publishes them.
     ``half_b_order`` places the half-B reads of the next K-step (see
-    :class:`TileCompute`).
+    :class:`TileCompute`). ``lds_segment_interleave`` is TensileLite's
+    LDSSegmentInterleave 1 (on) or 0 (baseline); see
+    :class:`MxGemmLdsLayout`.
     """
 
     name: str
@@ -223,13 +227,10 @@ class MxGemmSpec:
     cluster_dim: tuple[int, int, int] = (4, 4, 1)
     gl2_prefetch_distance: int = 4
     cluster_signal_wmmas: int | None = None
-    a_lds_pad: LdsPad | None = None
-    b_lds_pad: LdsPad | None = None
-    a_scale_lds_pad: LdsPad | None = None
-    b_scale_lds_pad: LdsPad | None = None
     local_prefetch: int = 1
     half_plr: str = "b"
     half_b_order: str = "ahead"
+    lds_segment_interleave: bool = True
     mma: str = "32x16"
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
@@ -426,7 +427,7 @@ class MxGemmSpec:
 
     @property
     def lds_bytes(self) -> int:
-        return 2 * self.lds_layout.buffer_bytes
+        return self.lds_layout.lds_bytes
 
     def kernel_name(self) -> str:
         cx, cy, _ = self.cluster_dim
@@ -443,14 +444,6 @@ class MxGemmSpec:
             parts.append(f"pf{self.gl2_prefetch_distance}")
         if self.cluster_signal_wmmas is not None:
             parts.append(f"cs{self.cluster_signal_wmmas}")
-        for tag, pad in (
-            ("pa", self.a_lds_pad),
-            ("pb", self.b_lds_pad),
-            ("psa", self.a_scale_lds_pad),
-            ("psb", self.b_scale_lds_pad),
-        ):
-            if pad is not None:
-                parts.append(f"{tag}{pad.pad_bytes}x{pad.block_bytes}")
         return kernel_name_join(
             self.name,
             self.dtype_tag,
@@ -459,6 +452,7 @@ class MxGemmSpec:
                 "lp0": self.local_prefetch == 0,
                 "hplrnone": self.half_plr == "none",
                 "hblate": self.half_b_late,
+                "lsi0": not self.lds_segment_interleave,
                 "mma16": self.mma == "16x16",
             },
         )
@@ -500,17 +494,6 @@ def derived_lds_pads(spec: MxGemmSpec) -> dict[str, LdsPad]:
     }
 
 
-def resolved_lds_pads(spec: MxGemmSpec) -> dict[str, LdsPad]:
-    derived = derived_lds_pads(spec)
-    overrides = {
-        "a": spec.a_lds_pad,
-        "b": spec.b_lds_pad,
-        "a_scale": spec.a_scale_lds_pad,
-        "b_scale": spec.b_scale_lds_pad,
-    }
-    return {k: derived[k] if overrides[k] is None else overrides[k] for k in derived}
-
-
 @dataclass(frozen=True)
 class _OperandLayout:
     rows: int
@@ -523,13 +506,20 @@ class _OperandLayout:
 
 @dataclass(frozen=True)
 class MxGemmLdsLayout:
-    """One LDS buffer: ``[B0][A0 A1][B1][B scales][A scales]``.
+    """The two LDS buffers, TensileLite's with its A/B relabeled to rocKE B/A.
+
+    Baseline (``lds_segment_interleave`` off) is ``[B0 B1][B scales]
+    [A scales][A0 A1]``. Segment interleave places the components so the
+    two LDS read ports read different 64 KiB segments (see
+    :func:`_interleave_placement`), with the scales after the data.
 
     Each operand is two TDM components (one per wave pair) of ``rows`` rows;
     component ``c`` starts at ``base + c * stride``. Data pads above 1024 B
     are TDM iterate mode: ``iterate_rows`` rows per iteration, iterations
-    ``iterate_stride`` apart. The offset methods take ints or IR values
-    through ``ops`` so host tests and the builder share the address math.
+    ``iterate_stride`` apart. Buffer 1 starts ``buffer_stride`` after buffer
+    0; ``buffer_bytes`` is where buffer 0's last region ends. The offset
+    methods take ints or IR values through ``ops`` so host tests and the
+    builder share the address math.
     """
 
     row_bytes: int
@@ -539,6 +529,8 @@ class MxGemmLdsLayout:
     a_scale: _OperandLayout
     b_scale: _OperandLayout
     buffer_bytes: int
+    buffer_stride: int
+    lds_bytes: int
 
     def operand(self, name: str) -> _OperandLayout:
         return getattr(self, name)
@@ -590,8 +582,105 @@ def _data_component(rows: int, row_bytes: int, pad: LdsPad) -> tuple[int, int, i
     return size, 0, 0
 
 
-def mx_gemm_lds_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
-    pads = resolved_lds_pads(spec)
+def _scale_region_bytes(rows: int, steps: int, pad: LdsPad) -> int:
+    """calcLdsNumBytesAB for an operand's scales, padded as one tensor."""
+    size = 2 * rows * steps * 4
+    return (
+        size // pad.block_bytes * (pad.block_bytes + pad.pad_bytes) if pad.on else size
+    )
+
+
+@dataclass(frozen=True)
+class _Placement:
+    """Bases and component strides of rocKE A and B and where the scales
+    start. An aligned layout reaches ``span`` (scales included), past the
+    baseline span."""
+
+    a_base: int
+    a_stride: int
+    b_base: int
+    b_stride: int
+    scale_base: int
+    aligned: bool = False
+    span: int = 0
+
+
+def _interleave_placement(
+    spec: MxGemmSpec, comp: dict[str, int], data: dict[str, int], scales: int
+) -> _Placement | str:
+    """TensileLite's segment_interleave.evaluate with LDSSegmentInterleave 1,
+    VectorWidth equal to the wave repeat and no TDMSplit; ``scales`` is the
+    aligned size of both scale regions. A reason if it does not apply.
+
+    2x2: A's components go to different segments, as tight ``[B0][A0][B1]
+    [A1]``, or segment-aligned when ``B0 A0`` fit one segment. With the 32x16
+    atom an A read would cross a component, so A stays whole: ``[B0][A0 A1]
+    [B1]``, aligned when that fits one segment. 4x1 and 1x4: only the
+    operand spanning four waves splits, around the other one.
+    """
+    seg = _LDS_SEGMENT_BYTES
+    lanes = min(spec.atom.m, spec.atom.n)
+    geometry = {
+        "a": (spec.tile_m, spec.warp_m, spec.wave_repeat_m),
+        "b": (spec.tile_n, spec.warp_n, spec.wave_repeat_n),
+    }
+
+    def coarse(name: str) -> bool:
+        tile, waves, repeat = geometry[name]
+        return lanes * repeat >= tile // waves
+
+    def place(first: str, stride: int, second_stride: int, **extra) -> _Placement:
+        second = "a" if first == "b" else "b"
+        fields = {
+            f"{first}_base": 0,
+            f"{first}_stride": stride,
+            f"{second}_base": comp[first],
+            f"{second}_stride": second_stride,
+        }
+        return _Placement(**fields, **extra)
+
+    if spec.warp_m == 1 or spec.warp_n == 1:
+        active = "b" if spec.warp_n > 1 else "a"
+        shared = "a" if active == "b" else "b"
+        if not coarse(active):
+            return f"segment interleave needs {active.upper()}'s wave repeat to cover its wave's rows"
+        if active == "b" and data["b"] <= seg and comp["b"] >= seg:
+            return "segment interleave: the baseline layout already splits B's components across segments"
+        stride = comp[active] + 2 * comp[shared]
+        if stride // seg > (data[active] - 1) // seg:
+            return place(active, stride, comp[shared], scale_base=stride + comp[active])
+        pre = _round_up(stride, seg)
+        span = pre + comp[active]
+        return place(
+            active, pre, comp[shared], scale_base=span, aligned=True, span=span + scales
+        )
+    if not coarse("b"):
+        return "segment interleave needs B's wave repeat to cover its wave's rows"
+    a_cols = spec.atom.m * spec.warp_m * spec.wave_repeat_m
+    a_readable = coarse("a") or (spec.tile_m // 2) % a_cols == 0
+    if not a_readable:
+        stride = comp["b"] + 2 * comp["a"]
+        if stride >= seg:
+            return place("b", stride, comp["a"], scale_base=stride + comp["b"])
+        pre = _round_up(stride, seg)
+        span = pre + comp["b"]
+        return place(
+            "b", pre, comp["a"], scale_base=span, aligned=True, span=span + scales
+        )
+    pair = comp["a"] + comp["b"]
+    if pair < seg:
+        span = seg + pair
+        return place("b", seg, seg, scale_base=span, aligned=True, span=span + scales)
+    return place("b", pair, pair, scale_base=2 * pair)
+
+
+def _pow2_ceil(value: int) -> int:
+    return 1 << (value - 1).bit_length()
+
+
+def _lds_placement(spec: MxGemmSpec) -> tuple[MxGemmLdsLayout | None, str | None]:
+    """The layout, or ``None`` and the reason segment interleave does not apply."""
+    pads = derived_lds_pads(spec)
     row_bytes = spec.tile_k // spec.k_per_byte
     steps = spec.k_steps
     a_rows, b_rows = spec.tile_m // 2, spec.tile_n // 2
@@ -602,30 +691,99 @@ def mx_gemm_lds_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
         size = steps * rows * 4
         return size + (size // pad.block_bytes * pad.pad_bytes if pad.on else 0)
 
+    align = _LDS_REGION_ALIGN_BITS // spec.elem_bits
+    b_scale_region = _round_up(
+        _scale_region_bytes(b_rows, steps, pads["b_scale"]), align
+    )
+    a_scale_region = _round_up(
+        _scale_region_bytes(a_rows, steps, pads["a_scale"]), align
+    )
+    baseline = _Placement(
+        a_base=_round_up(2 * b_comp, align) + b_scale_region + a_scale_region,
+        a_stride=a_comp,
+        b_base=0,
+        b_stride=b_comp,
+        scale_base=_round_up(2 * b_comp, align),
+    )
+    baseline_span = baseline.a_base + 2 * a_comp
+    natural_stride = baseline.a_base + _round_up(2 * a_comp, align)
+    capacity = ArchTarget.from_gfx("gfx1250").lds_capacity_bytes
+    placement = baseline
+    if spec.lds_segment_interleave:
+        placement = _interleave_placement(
+            spec,
+            {"a": a_comp, "b": b_comp},
+            {"a": a_rows * row_bytes, "b": b_rows * row_bytes},
+            b_scale_region + a_scale_region,
+        )
+        if isinstance(placement, str):
+            return None, placement
+    if placement.aligned:
+        buffer_stride = _pow2_ceil(max(natural_stride, placement.span))
+        if 2 * buffer_stride > capacity:
+            return (
+                None,
+                "segment interleave: the aligned layout needs more LDS than fits",
+            )
+        lds_bytes = max(buffer_stride + baseline_span, buffer_stride + placement.span)
+    else:
+        buffer_stride = natural_stride
+        if natural_stride + _pow2_ceil(natural_stride) <= capacity:
+            buffer_stride = _pow2_ceil(natural_stride)
+        lds_bytes = buffer_stride + baseline_span
+    if placement is baseline:
+        b_scale_base = baseline.scale_base
+        a_scale_base = b_scale_base + b_scale_region
+    else:
+        b_scale_base = placement.scale_base
+        a_scale_base = b_scale_base + b_scale_region
     a_scale_comp = scale_component(a_rows, pads["a_scale"])
     b_scale_comp = scale_component(b_rows, pads["b_scale"])
-    a_total = 2 * a_comp
-    b_base, a_base = 0, b_comp
-    b_stride = b_comp + a_total
-    data_end = a_total + 2 * b_comp
-    b_scale_region = 2 * b_scale_comp
-    if pads["b_scale"].on:
-        b_scale_region = _round_up(b_scale_region, _B_SCALE_REGION_ALIGN)
-    b_scale_base = data_end
-    a_scale_base = b_scale_base + b_scale_region
-    return MxGemmLdsLayout(
-        row_bytes=row_bytes,
-        k_steps=steps,
-        a=_OperandLayout(a_rows, a_base, a_comp, pads["a"], a_it, a_it_stride),
-        b=_OperandLayout(b_rows, b_base, b_stride, pads["b"], b_it, b_it_stride),
-        a_scale=_OperandLayout(
-            a_rows, a_scale_base, a_scale_comp, pads["a_scale"], 0, 0
-        ),
-        b_scale=_OperandLayout(
-            b_rows, b_scale_base, b_scale_comp, pads["b_scale"], 0, 0
-        ),
-        buffer_bytes=a_scale_base + 2 * a_scale_comp,
+    ends = (
+        placement.a_base + placement.a_stride + a_comp,
+        placement.b_base + placement.b_stride + b_comp,
+        a_scale_base + 2 * a_scale_comp,
+        b_scale_base + 2 * b_scale_comp,
     )
+    return (
+        MxGemmLdsLayout(
+            row_bytes=row_bytes,
+            k_steps=steps,
+            a=_OperandLayout(
+                a_rows,
+                placement.a_base,
+                placement.a_stride,
+                pads["a"],
+                a_it,
+                a_it_stride,
+            ),
+            b=_OperandLayout(
+                b_rows,
+                placement.b_base,
+                placement.b_stride,
+                pads["b"],
+                b_it,
+                b_it_stride,
+            ),
+            a_scale=_OperandLayout(
+                a_rows, a_scale_base, a_scale_comp, pads["a_scale"], 0, 0
+            ),
+            b_scale=_OperandLayout(
+                b_rows, b_scale_base, b_scale_comp, pads["b_scale"], 0, 0
+            ),
+            buffer_bytes=max(ends),
+            buffer_stride=buffer_stride,
+            lds_bytes=lds_bytes,
+        ),
+        None,
+    )
+
+
+def mx_gemm_lds_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
+    layout, reason = _lds_placement(spec)
+    if layout is None:
+        raise ValueError(reason)
+    return layout
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +881,7 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         and not ArchTarget.from_gfx("gfx1250").memory.has_cluster_launch
     ):
         return "gfx1250 reports no cluster launch support"
-    pads = resolved_lds_pads(spec)
+    pads = derived_lds_pads(spec)
     row_bytes = spec.tile_k // spec.k_per_byte
     for name, rows, chunk, data in (
         ("a", spec.tile_m // 2, 16, True),
@@ -750,8 +908,11 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return (
             f"{accumulators} accumulators per lane exceed {target.limits.vgprs} VGPRs"
         )
-    if spec.lds_bytes > target.lds_capacity_bytes:
-        return f"LDS {spec.lds_bytes} B exceeds {target.lds_capacity_bytes} B"
+    layout, reason = _lds_placement(spec)
+    if reason:
+        return reason
+    if layout.lds_bytes > target.lds_capacity_bytes:
+        return f"LDS {layout.lds_bytes} B exceeds {target.lds_capacity_bytes} B"
     return None
 
 
@@ -816,7 +977,7 @@ class _Kernel:
     shared_addr: Value = None
 
     def buffer_base(self, parity):
-        return self.ops.mul(parity, self.layout.buffer_bytes)
+        return self.ops.mul(parity, self.layout.buffer_stride)
 
     def fence(self) -> None:
         # Keep LLVM from moving LDS reads or WMMAs across the refill; ALU

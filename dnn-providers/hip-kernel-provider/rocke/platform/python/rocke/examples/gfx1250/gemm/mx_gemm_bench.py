@@ -39,7 +39,6 @@ import numpy as np
 from ....examples.common.scaled_gemm_reference import decode_e8m0, pack_fp4_codes
 from ....helpers.compile import compile_kernel
 from ....instances.gfx1250.mx_gemm import (
-    LdsPad,
     MxGemmSpec,
     build_mx_gemm,
     mx_gemm_grid,
@@ -527,16 +526,6 @@ def _pair(text: str) -> tuple[int, int]:
     return x, y
 
 
-def _pad(text: str) -> LdsPad | None:
-    """``derived``, ``none`` or ``<pad bytes>x<block bytes>``."""
-    if text == "derived":
-        return None
-    if text == "none":
-        return LdsPad()
-    pad, block = _pair(text)
-    return LdsPad(pad, block)
-
-
 def _optional_int(text: str) -> int | None:
     return None if text == "derived" else int(text)
 
@@ -562,13 +551,10 @@ _AXES = {
     "local_prefetch": ("local_prefetch", int, "1"),
     "half_plr": ("half_plr", str, "b"),
     "half_b_order": ("half_b_order", str, "ahead"),
+    "lds_segment_interleave": ("lds_segment_interleave", _bool, "1"),
     "mma": ("mma", str, "32x16"),
     "a_dtype": ("a_dtype", str, "fp4"),
     "b_dtype": ("b_dtype", str, "fp4"),
-    "a_lds_pad": ("a_lds_pad", _pad, "derived"),
-    "b_lds_pad": ("b_lds_pad", _pad, "derived"),
-    "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),
-    "b_scale_lds_pad": ("b_scale_lds_pad", _pad, "derived"),
 }
 
 
