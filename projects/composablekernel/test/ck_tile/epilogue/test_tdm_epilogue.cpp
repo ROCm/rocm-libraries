@@ -354,7 +354,25 @@ static_assert(TdmEpilogueStaged<StagedProblem<true>, 2, 2>::GetBarrierCount() ==
 // More buffers than stages: the ring is cut to the stage count.
 static_assert(TdmEpilogueStaged<StagedProblem<true>, 4, 2>::GetSmemSize() == 128 * 64 * 2);
 static_assert(TdmEpilogueStaged<StagedProblem<true>, 4, 2>::GetBarrierCount() == 1 + 1 + 0);
+static_assert(tdm_stage_buffers_for_lds<StagedProblem<true>, 1>(0) == 1);
+static_assert(tdm_stage_buffers_for_lds<StagedProblem<true>, 1>(2 * 32 * 64 * 2) == 2);
+static_assert(tdm_stage_buffers_for_lds<StagedProblem<true>, 1>(128 * 64 * 2) == 4);
+// A budget past the whole tile is cut to the stage count.
+static_assert(tdm_stage_buffers_for_lds<StagedProblem<true>, 1>(1 << 20) == 4);
+
+// Stands in for a GEMM pipeline with the LDS budget of two slabs.
+struct TwoSlabPipeline
+{
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 2 * 32 * 64 * 2; }
+};
+static_assert(
+    TdmEpilogueStagedForPipeline<StagedProblem<true>, 1, TwoSlabPipeline>::GetSmemSize() ==
+    2 * 32 * 64 * 2);
+
 static_assert(is_tdm_epilogue_v<TdmEpilogueStaged<StagedProblem<true>, 1, 2>>);
+static_assert(
+    is_tdm_epilogue_v<TdmEpilogueStagedForPipeline<StagedProblem<true>, 1, TwoSlabPipeline>>);
+static_assert(!is_tdm_epilogue_v<CShuffleEpilogue<StagedProblem<true>>>);
 
 template <typename Tuple>
 class TdmEpilogueStagedTest : public ::testing::Test

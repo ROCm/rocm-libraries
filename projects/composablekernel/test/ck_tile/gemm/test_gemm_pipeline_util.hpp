@@ -257,16 +257,21 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumerCShuffl
 {
 };
 
-template <GemmPipelineType PT, typename Problem, typename Enable = void>
+template <GemmPipelineType PT, typename Problem, typename TdmStageConfig, typename Enable = void>
 struct GemmEpilogueTypeSelector
 {
     using epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
 
-template <GemmPipelineType PT, typename Problem>
-struct GemmEpilogueTypeSelector<PT, Problem, std::enable_if_t<uses_tdm_epilogue(PT)>>
+template <GemmPipelineType PT, typename Problem, typename TdmStageConfig>
+struct GemmEpilogueTypeSelector<PT,
+                                Problem,
+                                TdmStageConfig,
+                                std::enable_if_t<uses_tdm_epilogue(PT)>>
 {
-    using epilogue = ck_tile::TdmEpilogue<Problem>;
+    using epilogue = ck_tile::TdmEpilogueStaged<Problem,
+                                                TdmStageConfig::at(ck_tile::number<0>{}),
+                                                TdmStageConfig::at(ck_tile::number<1>{})>;
 };
 
 template <GemmPipelineType PT, typename Enable = void>
@@ -360,6 +365,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
         Tuple,
         16,
         ck_tile::sequence<PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2, 2, 1>>;
+
+    // TDM pipelines: <MIterPerStage, NumStageBuffers> of TdmEpilogueStaged (default: TdmEpilogue)
+    using TdmStageConfig = ck_tile::tuple_element_or_default_t<Tuple, 17, ck_tile::sequence<0, 2>>;
 
     protected:
     // The kernel type the fixture instantiates for a given pad/preshuffle combination.
@@ -499,7 +507,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              1,                /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType /*BComputeDataType_*/>>::epilogue;
+                                             BComputeDataType /*BComputeDataType_*/>,
+            TdmStageConfig>::epilogue;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
     };
