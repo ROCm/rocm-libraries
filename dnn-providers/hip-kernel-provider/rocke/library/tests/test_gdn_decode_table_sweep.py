@@ -528,6 +528,67 @@ def test_stage2_cleanup_failure_flags_the_row_and_still_closes_the_others(monkey
     assert all("drain failed" in r["reason"] for r in rows)
 
 
+def test_a_failing_drain_marks_the_row_error_in_both_stages_and_never_escapes(
+    monkeypatch,
+):
+    """A drain that raises (a GPU fault) is a cleanup failure: the row is ERROR
+    (retained launch references can run a later shape out of memory), never an
+    exception that loses the shape's rows."""
+    args = sweep.options(bases_only=True, rotate_mb=1024, rounds=2, s2_rounds=3, runs=2)
+    auto, configs = sweep.shape_configs(SHAPE, args)
+    ids = [r.spec.tuning_id for r in configs]
+    driver = _fake(monkeypatch, configs, {ids[0]: [1.0] * 6, ids[1]: [2.0] * 6})
+
+    def boom():
+        raise RuntimeError("drain failed")
+
+    monkeypatch.setattr(driver, "drain", boom)
+    rows = sweep.stage1_shape(SHAPE, auto, configs, [0, 1], args, dict(_META))
+    assert [r["status"] for r in rows] == ["error", "error"]
+    assert all("drain failed" in r["reason"] for r in rows)
+    rows = sweep.stage2_shape(SHAPE, auto, [(0, configs[0])], args, dict(_META))
+    assert [r["status"] for r in rows] == ["error"] and "drain failed" in rows[0][
+        "reason"
+    ]
+
+
+def test_a_failing_release_after_stage_one_marks_every_timed_row_error(monkeypatch):
+    args = sweep.options(bases_only=True, rotate_mb=1024, rounds=2)
+    auto, configs = sweep.shape_configs(SHAPE, args)
+    ids = [r.spec.tuning_id for r in configs]
+    _fake(monkeypatch, configs, {ids[0]: [1.0] * 2, ids[1]: [2.0] * 2})
+
+    def boom(self):
+        raise RuntimeError("release failed")
+
+    monkeypatch.setattr(sweep._ShapeInputs, "release", boom)
+    rows = sweep.stage1_shape(SHAPE, auto, configs, [0, 1], args, dict(_META))
+    assert [r["status"] for r in rows] == ["error", "error"]
+    assert all("release failed" in r["reason"] for r in rows)
+
+
+def test_auto_key_is_the_dispatchers_own_case():
+    """The sweep keys a shape by the dispatcher's ``auto_case``, so a fused rule
+    or a state row that changes there changes here: a request with either fuse
+    flag is fused, f16 state reads the bf16 row."""
+    from dispatch.gdn.gfx950 import auto_case
+
+    assert sweep.Shape("gdn", "plain", "f16", 16, 32, 128, 1).auto_key == (
+        "gdn",
+        False,
+        "bf16",
+    )
+    assert sweep.Shape("kda", "fused", "f32", 32, 32, 128, 1).auto_key == (
+        "kda",
+        True,
+        "f32",
+    )
+    one_flag = sweep.Shape("gdn", "plain", "bf16", 32, 32, 128, 1).request(
+        fuse_conv=True
+    )
+    assert auto_case(one_flag) == ("gdn", True, "bf16")
+
+
 # ---------------------------------------------------------------- files
 def _rows():
     auto, configs = sweep.shape_configs(SHAPE, sweep.options())
@@ -569,6 +630,20 @@ def test_rows_round_trip_through_json_and_refuse_a_foreign_file(tmp_path):
     (tmp_path / "other.json").write_text(json.dumps(rows))
     with pytest.raises(ValueError, match="not a"):
         sweep.load_rows([str(tmp_path / "other.json")])
+
+
+def test_summarize_warns_on_rows_that_cannot_be_ranked_together(capsys):
+    rows = _rows()
+    rows[1]["sha"] = "def"
+    assert sweep.summarize(rows) == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "2 builds" in out
+    rows = _rows()
+    rows[1]["rotate_mb"] = 2048  # still cold, but not the rotation of the others
+    sweep.summarize(rows)
+    assert "mix rotate_mb values" in capsys.readouterr().out
+    sweep.summarize(_rows())
+    assert "WARNING" not in capsys.readouterr().out
 
 
 def test_summarize_prefers_stage_two_and_fails_closed(capsys):
@@ -1166,18 +1241,26 @@ def test_stage2_refuses_stage1_rows_ranked_by_another_build_than_this_run(tmp_pa
     rows = _rows()[:2]
     by_shape, _ = sweep.stage1_shapes(_stage1_args(tmp_path, rows))
     here = dict(_META, llvm_version="unknown", llvm_flavor="unknown", backend="unknown")
-    args = sweep.options()
-    sweep.check_stage1_build(by_shape, dict(here), args)  # the same build
+    sweep.check_stage1_build(by_shape, dict(here))  # the same build
     with pytest.raises(ValueError, match="sha: stage 1 abc, here def"):
-        sweep.check_stage1_build(by_shape, dict(here, sha="def"), args)
+        sweep.check_stage1_build(by_shape, dict(here, sha="def"))
     with pytest.raises(ValueError, match="llvm_version"):
-        sweep.check_stage1_build(by_shape, dict(here, llvm_version="22.0.0"), args)
-    # --source-sha says the code is the same where git cannot tell: the sha is
-    # not compared, the compiler still is.
-    pinned = sweep.options(source_sha="def")
-    sweep.check_stage1_build(by_shape, dict(here, sha="def"), pinned)
+        sweep.check_stage1_build(by_shape, dict(here, llvm_version="22.0.0"))
     with pytest.raises(ValueError, match="backend"):
-        sweep.check_stage1_build(by_shape, dict(here, backend="cpp"), pinned)
+        sweep.check_stage1_build(by_shape, dict(here, backend="cpp"))
+
+
+def test_source_sha_is_the_sha_stage_two_compares_with_stage_one(tmp_path, monkeypatch):
+    """``--source-sha`` supplies the run's sha (``run_meta``): a copied tree
+    that is the stage-1 commit passes, one that is not is refused. It is never
+    a way to skip the comparison."""
+    monkeypatch.setattr(sweep, "_toolchain", lambda: {})
+    by_shape, _ = sweep.stage1_shapes(_stage1_args(tmp_path, _rows()[:2]))  # sha abc
+    same = sweep.run_meta(sweep.options(source_sha="abc"), "gfx950", 1024)
+    sweep.check_stage1_build(by_shape, same)
+    other = sweep.run_meta(sweep.options(source_sha="def"), "gfx950", 1024)
+    with pytest.raises(ValueError, match="sha: stage 1 abc, here def"):
+        sweep.check_stage1_build(by_shape, other)
 
 
 def test_retime_refuses_stage1_rows_of_another_build_and_times_nothing(

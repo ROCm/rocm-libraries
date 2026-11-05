@@ -66,7 +66,6 @@ import sys
 from typing import Callable, Iterable, Sequence
 
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
-from dispatch.gdn.axes import AUTO_STATE_ROW
 from dispatch.gdn.cli_args import (
     check_rotate_mb,
     fastest_first,
@@ -74,11 +73,12 @@ from dispatch.gdn.cli_args import (
     parse_batches,
     usage_error_text,
 )
+from dispatch.gdn.gfx950 import auto_case
+from kernels.gfx950.gdn_decode import STATE_DTYPES
 
 ARCH = "gfx950"
 SCHEMA = "rocke.gdn_decode_table_sweep/1"
 MODES = {"plain": {}, "fused": {"fuse_conv": True, "fuse_out_norm": True}}
-STATE_DTYPES = ("bf16", "f16", "f32")
 GATE_KINDS = ("gdn", "kda")
 DEFAULT_HEADS = "16/32"
 DEFAULT_BATCHES = (1, 8, 16, 32, 64, 128, 256)
@@ -177,8 +177,9 @@ class Shape:
 
     @property
     def auto_key(self) -> tuple:
-        """The ``AUTO_DEFAULTS`` key: (gate kind, fused, state row)."""
-        return (self.gate_kind, self.mode == "fused", AUTO_STATE_ROW[self.state_dtype])
+        """The ``AUTO_DEFAULTS`` key: (gate kind, fused, state row); the
+        dispatcher's own answer for this shape's request."""
+        return auto_case(self.request())
 
     @property
     def case(self) -> str:
@@ -817,6 +818,39 @@ def build_of(row: dict) -> tuple:
     return tuple(str(row.get(name, "unknown")) for name in BUILD_FIELDS)
 
 
+def comparability_problems(rows: Iterable[dict]) -> list:
+    """Why ``rows`` are not timings that can be ranked together, one sentence
+    each (empty when they can): they come from more than one build
+    (:data:`BUILD_FIELDS`; a ``tuning_id`` names a configuration, not the code
+    or compiler that built it), some were not timed in cold memory, or their
+    ``rotate_mb`` differs. The one place these rules live: the report withholds
+    on them, stage 2 refuses stage-1 rows with them, ``--summarize`` warns."""
+    rows = list(rows)
+    problems = []
+    builds = sorted({build_of(r) for r in rows})
+    if len(builds) > 1:
+        problems.append(
+            f"rows come from {len(builds)} builds ({', '.join(BUILD_FIELDS)}): "
+            f"{builds}: a tuning_id does not identify the code or compiler, so "
+            "their times are not one measurement; re-time them at one build"
+        )
+    warm = [r for r in rows if not is_cold(r)]
+    if warm:
+        problems.append(
+            f"{len(warm)} of {len(rows)} rows were not timed in cold memory "
+            f"(rotate_mb {sorted({r['rotate_mb'] for r in warm})} MiB below the "
+            "cold target): such times may come from caches and are not "
+            "comparable with cold ones; re-time with the default --rotate-mb"
+        )
+    rotates = sorted({r["rotate_mb"] for r in rows})
+    if len(rotates) > 1:
+        problems.append(
+            f"rows mix rotate_mb values {rotates}: their times are not "
+            "comparable; re-time them with one"
+        )
+    return problems
+
+
 def summarize(rows: list, out=None, require_auto: bool = True) -> int:
     """Print the best configuration per shape against ``auto``. Returns 1 if
     there are no rows, any row failed the gate, raised or could not be timed,
@@ -827,12 +861,8 @@ def summarize(rows: list, out=None, require_auto: bool = True) -> int:
         print("no rows to summarize", file=out)
         return 1
     exit_code = 0
-    if not all(is_cold(r) for r in rows):
-        print(
-            "WARNING: some rows were not timed in cold memory (--rotate-mb below "
-            "the cold target): debugging only",
-            file=out,
-        )
+    for problem in comparability_problems(rows):
+        print(f"WARNING: {problem}", file=out)
     print(
         f"{'shape':<36} {'stage':>5} {'timed':>5} {'best_us':>9} {'auto_us':>9} "
         f"{'auto/best':>9}  best tuning_id  knobs",
@@ -1007,6 +1037,15 @@ def _print_row(shape: Shape, row: dict) -> None:
     )
 
 
+def _cleanup_error(row: dict, exc: Exception) -> None:
+    """Mark ``row`` ERROR for a failed cleanup (drain, graph close, release),
+    unless it already failed: the first cause stays. A launch reference or
+    value set that stays alive can run a later shape out of memory, so the run
+    must not report it clean (the sweep exits non-zero on an ERROR row)."""
+    if row["status"] != ERROR:
+        _error(row, exc)
+
+
 def stage1_shape(shape: Shape, auto, configs, indices, args, meta) -> list:
     """Gate and time ``configs[i]`` for every ``i`` in ``indices``, each on its
     own: median of ``--rounds`` replays of its cold graph."""
@@ -1034,10 +1073,17 @@ def stage1_shape(shape: Shape, auto, configs, indices, args, meta) -> list:
         except Exception as exc:  # compile / launch failure: recorded, not timed
             _error(row, exc)
         finally:
-            g.drain()
+            try:
+                g.drain()
+            except Exception as exc:
+                _cleanup_error(row, exc)
         rows.append(row)
         _print_row(shape, row)
-    data.release()
+    try:
+        data.release()
+    except Exception as exc:
+        for row in rows:
+            _cleanup_error(row, exc)
     return rows
 
 
@@ -1058,7 +1104,10 @@ def stage2_shape(shape: Shape, auto, picks: list, args, meta) -> list:
         except Exception as exc:
             _error(row, exc)
         finally:
-            _driver().drain()
+            try:
+                _driver().drain()
+            except Exception as exc:
+                _cleanup_error(row, exc)
     for run in range(args.runs):
         graphs = []
         for row, result, launcher in entries:
@@ -1091,13 +1140,12 @@ def stage2_shape(shape: Shape, auto, picks: list, args, meta) -> list:
                 try:
                     cold.close()
                 except Exception as exc:
-                    if row["status"] != ERROR:
-                        _error(row, exc)
+                    _cleanup_error(row, exc)
             try:
                 data.release()
             except Exception as exc:
                 for row, _, _ in entries:
-                    _error(row, exc)
+                    _cleanup_error(row, exc)
         del graphs
     for row, _, _ in entries:
         if row["status"] not in (ERROR, NO_GRAPH):
@@ -1301,41 +1349,24 @@ def stage1_provenance(rows: list) -> None:
     """Refuse stage-1 rows whose provenance stage 2 cannot vouch for. Stage 2
     stamps its own sha, toolchain and rotation on every row it writes, and the
     report scores stage-2 rows only, so it would never see what ranked the
-    shortlist. Refused, by the rules the report withholds on: rows of more than
-    one build (:data:`BUILD_FIELDS`), rows not timed in cold memory, and rows of
-    mixed ``rotate_mb``."""
-    builds = {build_of(r) for r in rows}
-    if len(builds) > 1:
-        raise ValueError(
-            f"the stage-1 rows come from {len(builds)} builds "
-            f"({', '.join(BUILD_FIELDS)}): {sorted(builds)}; re-time them at one build"
-        )
-    warm = [r for r in rows if not is_cold(r)]
-    if warm:
-        raise ValueError(
-            f"{len(warm)} of {len(rows)} stage-1 rows were not timed in cold "
-            "memory (rotate_mb below the cold target): re-time them with the "
-            "default --rotate-mb"
-        )
-    rotates = sorted({r["rotate_mb"] for r in rows})
-    if len(rotates) > 1:
-        raise ValueError(
-            f"the stage-1 rows mix rotate_mb values {rotates}: their times are "
-            "not comparable"
-        )
+    shortlist: refused by the report's own rules
+    (:func:`comparability_problems`)."""
+    problems = comparability_problems(rows)
+    if problems:
+        raise ValueError("the stage-1 rows are not comparable: " + "; ".join(problems))
 
 
-def check_stage1_build(by_shape: dict, meta: dict, args) -> None:
+def check_stage1_build(by_shape: dict, meta: dict) -> None:
     """Refuse to re-time stage-1 rows that another build ranked than this run
     would time them with: a kernel changed since, or another compiler. Those
-    rows are one build (:func:`stage1_provenance`); ``meta`` is this run's.
-    ``--source-sha`` says the code is the same where git cannot tell (a copied
-    tree), so the sha is then not compared."""
+    rows are one build (:func:`stage1_provenance`); ``meta`` is this run's, its
+    ``sha`` the ``--source-sha`` when given (which says what git cannot: a
+    copied tree is that commit), so the stage-1 sha is compared with it."""
     build = next(iter({build_of(r) for rows in by_shape.values() for r in rows}))
     differ = [
         f"{name}: stage 1 {old}, here {new}"
         for name, old, new in zip(BUILD_FIELDS, build, build_of(meta))
-        if old != new and not (name == "sha" and args.source_sha)
+        if old != new
     ]
     if differ:
         raise ValueError(
@@ -1370,7 +1401,7 @@ def retime(args, meta: dict) -> list:
     were made with. Stage-1 rows ranked by another build than ``meta``'s are
     refused (:func:`check_stage1_build`): this load is the one it checks."""
     by_shape, shapes = stage1_shapes(args)
-    check_stage1_build(by_shape, meta, args)
+    check_stage1_build(by_shape, meta)
     walk = stage1_walk(r for rows in by_shape.values() for r in rows)
     meta = dict(meta, **walk)
     args = argparse.Namespace(**{**vars(args), **walk})

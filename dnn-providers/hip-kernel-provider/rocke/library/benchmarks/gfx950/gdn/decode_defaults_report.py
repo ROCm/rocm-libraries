@@ -71,13 +71,11 @@ import sys
 from typing import Iterable
 
 from benchmarks.gfx950.gdn.decode_table_sweep import (
-    BUILD_FIELDS,
     OK,
     WALK_FIELDS,
     Shape,
-    build_of,
     case_name,
-    is_cold,
+    comparability_problems,
     load_rows,
     shape_of,
     walk_flags,
@@ -378,8 +376,8 @@ _TOOLCHAIN = (
 def toolchain_lines(rows: Iterable[dict]) -> list:
     """One ``toolchain: rocm .. llvm .. torch .. backend .. flavor ..`` line
     per distinct set the rows recorded (a row from an older file lacks a field:
-    ``unknown``). Rows that disagree print every set: a mismatch withholds
-    nothing but is never hidden."""
+    ``unknown``). Rows of one build can still differ in the ROCm or torch
+    version: every set is printed, and nothing is withheld for those two."""
     sets = sorted(
         {tuple(str(r.get(key, "unknown")) for _, key in _TOOLCHAIN) for r in rows}
     )
@@ -400,33 +398,10 @@ def report(rows: list, args, out=None) -> int:
     )
     print(f"stage {args.stage}; tie band {args.tie:g}", file=out)
     staged = [r for r in rows if r["stage"] == args.stage]
-    warm = [r for r in staged if not is_cold(r)]
-    rotates = sorted({r["rotate_mb"] for r in staged})
-    if warm:
-        print(
-            f"WITHHELD: {len(warm)} of {len(staged)} stage-{args.stage} rows were "
-            f"not timed in cold memory (rotate_mb {sorted({r['rotate_mb'] for r in warm})} "
-            "MiB below the cold target): such times may come from caches and are "
-            "not comparable with cold ones, so no proposal is made; re-time with "
-            "the default --rotate-mb",
-            file=out,
-        )
-    if len(rotates) > 1:
-        print(
-            f"WITHHELD: the stage-{args.stage} rows mix rotate_mb values {rotates}: "
-            "their times are not comparable; re-time them with one",
-            file=out,
-        )
-    builds = sorted({build_of(r) for r in staged})
-    if len(builds) > 1:
-        print(
-            f"WITHHELD: the stage-{args.stage} rows come from {len(builds)} builds "
-            f"({', '.join(BUILD_FIELDS)}): {builds}: a tuning_id does not identify "
-            "the code or compiler, so their times are not one measurement; "
-            "re-time them at one build",
-            file=out,
-        )
-    if warm or len(rotates) > 1 or len(builds) > 1:
+    problems = comparability_problems(staged)
+    for problem in problems:
+        print(f"WITHHELD: stage-{args.stage} {problem}", file=out)
+    if problems:
         return 1
     shas = sorted({r["sha"] for r in staged})
     devices = sorted({r["device"] for r in rows})

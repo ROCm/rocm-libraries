@@ -97,12 +97,17 @@ def is_fused(req: GdnDecodeRequest) -> bool:
     return req.fuse_conv or req.fuse_out_norm
 
 
-def auto_default(req: GdnDecodeRequest) -> AutoDefault:
-    """The ``AUTO_DEFAULTS`` entry of ``req``'s case: its gate kind, whether it
+def auto_case(req: GdnDecodeRequest) -> Tuple[str, bool, str]:
+    """The ``AUTO_DEFAULTS`` key of ``req``'s case: its gate kind, whether it
     is fused (either flag), and its state width's row (f16 reads the bf16
     row). Never batch, head count or work."""
     row = AUTO_STATE_ROW[normalize_dtype(req.state_dtype)]
-    return AUTO_DEFAULTS[(req.gate_kind, is_fused(req), row)]
+    return (req.gate_kind, is_fused(req), row)
+
+
+def auto_default(req: GdnDecodeRequest) -> AutoDefault:
+    """The ``AUTO_DEFAULTS`` entry of ``req``'s case (:func:`auto_case`)."""
+    return AUTO_DEFAULTS[auto_case(req)]
 
 
 def auto_tile(req: GdnDecodeRequest) -> Tuple[int, int, int]:

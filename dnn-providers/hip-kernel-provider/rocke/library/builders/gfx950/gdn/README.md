@@ -314,7 +314,9 @@ list also has `index` -1. `ROW_KEYS` in `decode_table_sweep.py` lists
 the keys every reader needs. Any row's `spec_id` + `tuning_id` + knobs pin that
 configuration (see [Performance knobs](#performance-knobs)). The run, and
 `--summarize`, exit 1 if any row of any stage is not `ok`; `--summarize` of no
-rows exits 1.
+rows exits 1. `--summarize` warns (exit code unchanged) when its rows come from
+more than one build, are warm or mix `--rotate-mb`: the rules the report
+withholds on, so such rows should not be ranked together.
 A run that times nothing exits 1 when `--offset` / `--limit` leave no
 configuration of any shape. A `--shard` that owns nothing while another shard
 does says so and exits 0: so does `--stage1-json F --shard I/N` with `I` past
@@ -354,7 +356,7 @@ Stage 2 from saved rows takes the sweep level, sample, seed and `--bases-only`
 from stage 1, and refuses (exit 2) stage-1 rows that disagree on the walk, come
 from more than one build (`sha`, `llvm_version`, `llvm_flavor`, `backend`), are
 warm or mix `--rotate-mb`, or were ranked by another build than the run that
-re-times them (`--source-sha` skips only the sha comparison): stage 2 stamps
+re-times them (`--source-sha` is the sha this run is compared by): stage 2 stamps
 its own settings on its rows, so the report could not see it otherwise. The
 header says: the sweep gates disjoint
 slots, one launch, and times in-place slots (the timed in-place launch is not
