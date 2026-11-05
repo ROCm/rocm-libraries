@@ -16,6 +16,10 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+import registry_enumerator  # noqa: E402
+
 _REPO = Path(__file__).resolve().parents[5]
 _PROVIDER = _REPO / "dnn-providers" / "hip-kernel-provider"
 _ROCKE = _PROVIDER / "rocke"
@@ -45,10 +49,8 @@ _GOLDENS = (
 
 
 def _load(generator: Path):
-    for sub in ("library", "platform/python"):
-        path = str(_ROCKE / sub)
-        if path not in sys.path:
-            sys.path.insert(0, path)
+    # The persistent generator imports rocKE at module scope, so bind before exec.
+    registry_enumerator.bind_provider(str(_PROVIDER))
     spec = importlib.util.spec_from_file_location(
         f"_golden_{generator.stem}", generator
     )
