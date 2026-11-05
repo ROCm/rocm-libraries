@@ -34,9 +34,17 @@ auto GetConvTestCases(miopenDataType_t datatype)
         TestCase{{1, 64, 32, 32}, {64, 1, 5, 3}, {2, 1}, {1, 1}, {1, 1}, 64, datatype},
         TestCase{{1, 64, 32, 32}, {64, 1, 3, 3}, {1, 1}, {2, 1}, {1, 1}, 64, datatype},
         TestCase{{1, 64, 32, 32}, {64, 1, 3, 3}, {2, 1}, {1, 1}, {2, 1}, 64, datatype},
-        // Largest register window the solver admits: 7x7 needs 105 of the 128
-        // float slots kMaxWindowRegs allows.
+        // Largest register window the general bound admits: 7x7 needs 105 of the
+        // 128 float slots kMaxWindowRegs allows.
         TestCase{{1, 64, 24, 24}, {64, 1, 7, 7}, {3, 3}, {1, 1}, {1, 1}, 64, datatype},
+        // Undilated filters past kMaxWindowRegs: 9x9 at stride 1, and an
+        // asymmetric 9x8 at the horizontal stride bound of 4.
+        TestCase{{1, 64, 24, 24}, {64, 1, 9, 9}, {4, 4}, {1, 1}, {1, 1}, 64, datatype},
+        TestCase{{1, 64, 29, 45}, {64, 1, 9, 8}, {4, 3}, {2, 4}, {1, 1}, 64, datatype},
+        // 1xK filters on H = 1, the depthwise conv1d layout: K = 31 at dilation 1,
+        // and a dilated width of 31 from K = 16 at dilation 2 and stride 2.
+        TestCase{{1, 64, 1, 1500}, {64, 1, 1, 31}, {0, 15}, {1, 1}, {1, 1}, 64, datatype},
+        TestCase{{2, 64, 1, 777}, {64, 1, 1, 16}, {0, 15}, {1, 2}, {1, 2}, 64, datatype},
         // A single output pixel, over an input narrower than one lane's column
         // span, so every row load takes the bounds-checked path.
         TestCase{{1, 64, 3, 3}, {64, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1}, 64, datatype},

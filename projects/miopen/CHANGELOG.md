@@ -46,6 +46,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   filters up to 7x7 and is selected through Find mode.
 
 ### Changed
+* [Conv] `ConvDirectDepthwiseFwd2D` now also takes undilated filters up to 9x9 (horizontal stride
+  up to 4) and 1xK filters up to a dilated width of 31, such as the k = 31 depthwise conv1d of
+  Conformer blocks. These shapes previously ran on the naive or the grouped CK solver.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
