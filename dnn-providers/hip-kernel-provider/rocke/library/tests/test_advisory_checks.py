@@ -4,16 +4,18 @@
 """CPU-only tests for ``rocke/tools/advisory_checks.py``.
 
 That script is the non-blocking pre-push wrapper around pyright, radon and vulture.
-These tests pin down its contract: it covers ALL rocke Python, it never fails a
-push, its radon report lists nested functions (radon scores them separately from
-their parent), and vulture counts uses across all of rocke but reports only the
-requested non-test files. Tests that run radon or vulture skip when that tool is
-not installed.
+These tests pin down its contract: it covers ALL rocke Python (the tracked files
+that git lists, with no directory list of its own), it never fails a push, its
+radon report lists nested functions (radon scores them separately from their
+parent), and vulture counts uses across all of rocke but reports only the
+requested non-test files. Tests that run pyright, radon or vulture skip when that
+tool is not installed; tests that need git skip without it.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import re
@@ -40,56 +42,182 @@ def adv():
     return mod
 
 
-@pytest.mark.parametrize(
-    ("parts", "skipped"),
-    [
-        (("library", "kernels", "gfx942", "attention_tiled_2d.py"), False),
-        (("platform", "python", "rocke", "core", "ir.py"), False),
-        (("tools", "run_checks.py"), False),
-        # A file whose NAME starts with "venv" is code, not a virtualenv.
-        (("library", "venv_probe.py"), False),
-        (("library", "kernels", "__pycache__", "a.py"), True),
-        (("library", ".pytest_cache", "a.py"), True),
-        (("platform", "python", "rocke.egg-info", "a.py"), True),
-        (("library", "benchmarks", "kernel_cache", "a.py"), True),
-        (("platform", "_deps", "x", "a.py"), True),
-        (("library", ".venv-gfx942", "lib", "a.py"), True),
-        (("library", "venv", "lib", "a.py"), True),
-        (("library", "build", "lib", "a.py"), True),
-        (("platform", "_build", "a.py"), True),
-        (("tools", "scratch", "a.py"), True),
-        (("library", "logs", "a.py"), True),
-    ],
-)
-def test_artifact_dirs_are_skipped(adv, parts, skipped):
-    assert adv._skipped(adv.ROCKE.joinpath(*parts)) is skipped
+@pytest.fixture(autouse=True)
+def _clean_git_env(monkeypatch):
+    """Keep the caller's git setup out of every test.
+
+    A hook, ``git rebase --exec`` or a linked worktree exports GIT_DIR and friends;
+    with them set, even the scratch ``git init`` below would rewrite the caller's real
+    repository. The user's and the system's git config (commit signing, global
+    ignores, hooks) must not matter either.
+    """
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
-def test_whole_run_spans_every_tree(adv):
-    top = {p.relative_to(adv.ROCKE).parts[0] for p in adv._all_files()}
-    assert top == set(adv.TREES)
+@pytest.fixture
+def require_git():
+    if shutil.which("git") is None:
+        pytest.skip("git is not available")
 
 
-def test_whole_run_prunes_artifacts_before_descending(adv, monkeypatch, tmp_path):
+def _git(cwd, *args):
+    proc = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"git {' '.join(args)}: {proc.stderr}"
+
+
+@pytest.fixture
+def git_rocke(adv, require_git, monkeypatch, tmp_path):
+    """An empty git repository standing in for rocke: ``adv.ROCKE`` points at it."""
+    _git(tmp_path, "init", "-q")
     monkeypatch.setattr(adv, "ROCKE", tmp_path)
-    library = tmp_path / "library"
-    library.mkdir()
-    source = library / "venv_probe.py"
-    source.write_text("x = 1\n", encoding="utf-8")
-    for name in (*adv.SKIP_DIRS, ".venv-gfx942", "venv-test", "pkg.egg-info"):
-        nested = library / name / "nested"
-        nested.mkdir(parents=True)
-        (nested / "stale.py").write_text("x = 2\n", encoding="utf-8")
-    scandir = os.scandir
-    visited = []
+    return tmp_path
 
-    def record_scandir(path):
-        visited.append(Path(path))
-        return scandir(path)
 
-    monkeypatch.setattr(os, "scandir", record_scandir)
-    assert adv._all_files() == [source]
-    assert not any(p.is_relative_to(library) and p != library for p in visited)
+def _track(repo, files):
+    """Write ``{relative path: source}`` under ``repo`` and ``git add`` it all."""
+    for rel, source in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    _git(repo, "add", "--force", "-A")  # --force: a global ignore file must not matter
+
+
+def test_whole_run_lists_exactly_the_tracked_python(adv, git_rocke):
+    _track(
+        git_rocke,
+        {
+            "library/kernel.py": "x = 1\n",
+            "platform/python/rocke/ir.py": "x = 1\n",
+            # A new top-level tree needs no registration, and a tracked file under
+            # an artifact-looking name (build/, venv_*) is source: git says so.
+            "newtree/tool.py": "x = 1\n",
+            "library/build/real.py": "x = 1\n",
+            "library/venv_probe.py": "x = 1\n",
+            "library/k\u00e9rnel.py": "x = 1\n",  # git quotes this name without -z
+            "docs/notes.md": "not python\n",
+        },
+    )
+    for artifact in (".venv-gfx942/lib", "__pycache__", "pkg.egg-info"):
+        stale = git_rocke / "library" / artifact / "stale.py"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("x = 2\n", encoding="utf-8")  # on disk, never `git add`ed
+    names = [p.relative_to(git_rocke).as_posix() for p in adv._all_files()]
+    assert names == [
+        "library/build/real.py",
+        "library/kernel.py",
+        "library/k\u00e9rnel.py",
+        "library/venv_probe.py",
+        "newtree/tool.py",
+        "platform/python/rocke/ir.py",
+    ]
+
+
+def test_whole_run_lists_this_checkouts_own_python(adv, require_git):
+    # The real tree, not a scratch repository: the listing finds the wrapper itself.
+    try:
+        files = adv._all_files()
+    except RuntimeError:
+        pytest.skip("rocke is not in a git checkout")
+    assert _SCRIPT in files
+
+
+def test_whole_run_lists_a_conflicted_file_once(adv, tmp_path, monkeypatch):
+    # `git ls-files` prints a path once per index stage: three times for a file with
+    # an unresolved merge conflict. radon would report it three times.
+    (tmp_path / "library").mkdir()
+    (tmp_path / "library" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(adv, "ROCKE", tmp_path)
+    listing = b"library/a.py\0" * 3
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, listing, b""),
+    )
+    assert adv._all_files() == [tmp_path / "library" / "a.py"]
+
+
+def test_whole_run_drops_a_tracked_file_deleted_from_disk(adv, git_rocke):
+    # vulture exits on a path that does not exist, and radon cannot read one.
+    _track(git_rocke, {"library/kept.py": "x = 1\n", "library/gone.py": "x = 2\n"})
+    (git_rocke / "library" / "gone.py").unlink()  # deleted, still in the index
+    assert adv._all_files() == [git_rocke / "library" / "kept.py"]
+
+
+def test_whole_run_drops_a_tracked_dangling_symlink(adv, git_rocke):
+    _track(git_rocke, {"library/kept.py": "x = 1\n"})
+    try:
+        (git_rocke / "library" / "link.py").symlink_to("no-such-file")
+    except OSError:
+        pytest.skip("cannot create symlinks here")
+    _git(git_rocke, "add", "--force", "-A")
+    assert adv._all_files() == [git_rocke / "library" / "kept.py"]
+
+
+def test_file_list_ignores_the_repository_a_linked_worktree_hook_exports(
+    adv, require_git, monkeypatch, tmp_path
+):
+    # A hook run from a linked worktree gets an absolute GIT_DIR (see
+    # _GIT_REPO_ENV in the wrapper): without the wrapper dropping it, the file
+    # list would be the whole repository, not rocke.
+    main = tmp_path / "main"
+    (main / "rocke").mkdir(parents=True)
+    (main / "rocke" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (main / "elsewhere").mkdir()
+    (main / "elsewhere" / "b.py").write_text("x = 2\n", encoding="utf-8")
+    _git(main, "init", "-q")
+    _git(main, "add", "-A")
+    _git(main, "commit", "-q", "--no-verify", "-m", "init")
+    worktree = tmp_path / "worktree"
+    _git(main, "worktree", "add", "-q", "-b", "linked", str(worktree))
+    git_dir = (worktree / ".git").read_text(encoding="utf-8").split("gitdir:")[1]
+    monkeypatch.setenv("GIT_DIR", git_dir.strip())
+    monkeypatch.setattr(adv, "ROCKE", worktree / "rocke")
+    assert adv._all_files() == [worktree / "rocke" / "a.py"]
+
+
+def test_file_list_ignores_an_index_file_a_hook_exports(adv, git_rocke, monkeypatch):
+    # `git commit` exports GIT_INDEX_FILE (a temporary index) to its hooks; an index
+    # other than the repository's would give another file list.
+    _track(git_rocke, {"library/kernel.py": "x = 1\n"})
+    monkeypatch.setenv("GIT_INDEX_FILE", str(git_rocke / "no-such-index"))
+    assert adv._all_files() == [git_rocke / "library" / "kernel.py"]
+
+
+def test_a_failing_git_is_advisory(adv, require_git, monkeypatch, tmp_path, capsys):
+    # Not a repository: the whole-tree file list cannot be built, and that must be
+    # reported, never raised. The ceiling stops git finding a repository above tmp.
+    monkeypatch.setattr(adv, "ROCKE", tmp_path)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "radon"])
+    assert adv.main() == 0
+    out = capsys.readouterr().out
+    assert "radon: crashed (RuntimeError: git ls-files failed" in out
+
+
+def test_an_unencodable_message_cannot_fail_a_push(adv, monkeypatch):
+    # pre-commit pipes the output, so on Windows it is encoded strictly with the
+    # ANSI code page. A message naming a path with a character outside it (here a
+    # Polish letter, absent from cp1252) must still end in exit 0.
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "radon"])
+
+    def broken_listing():
+        raise RuntimeError("git ls-files failed: C:/Users/\u0141ukasz")
+
+    monkeypatch.setattr(adv, "_all_files", broken_listing)
+    assert adv.main() == 0
+    stream.flush()
+    assert b"radon: crashed" in raw.getvalue()
 
 
 def test_requested_files_are_limited_to_python_inside_rocke(adv, tmp_path):
@@ -105,29 +233,10 @@ def test_requested_files_are_limited_to_python_inside_rocke(adv, tmp_path):
     assert adv._rocke_files(requested) == [_SCRIPT]
 
 
-def test_no_tracked_python_lives_outside_the_covered_trees(adv):
-    # A new top-level Python tree would silently escape every advisory check.
-    git = shutil.which("git")
-    if git is None:
-        pytest.skip("git is not available")
-    proc = subprocess.run(
-        [git, "ls-files", "-z", "--", "*.py"],
-        cwd=adv.ROCKE,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        pytest.skip("rocke is not in a git checkout")
-    top = {Path(f).parts[0] for f in proc.stdout.split("\0") if f}
-    assert top <= set(adv.TREES), (
-        f"tracked Python outside {adv.TREES}: add the new tree to TREES in "
-        "tools/advisory_checks.py and to `include` in pyrightconfig.json"
-    )
-
-
 @pytest.fixture
-def pyright_config(adv):
-    config = adv.ROCKE / "pyrightconfig.json"
+def pyright_config():
+    # The real rocke's config, even in a test that points `adv.ROCKE` elsewhere.
+    config = _ROCKE / "pyrightconfig.json"
     if not config.is_file():
         pytest.skip("pyrightconfig.json is not part of this layout")
     # pyright accepts // comments in its config; json does not.
@@ -139,54 +248,54 @@ def pyright_config(adv):
     return json.loads(text)
 
 
-def test_pyright_includes_the_same_trees(adv, pyright_config):
-    assert pyright_config["include"] == list(adv.TREES)
+def test_pyright_config_keeps_no_file_list_of_its_own(pyright_config):
+    # The wrapper gives pyright the files git tracks, and that list replaces
+    # `include`. An `exclude` would still filter it, and could drop tracked source.
+    assert "include" not in pyright_config
+    assert "exclude" not in pyright_config
 
 
-def test_pyright_whole_run_excludes_artifacts_not_source_names(
-    adv, pyright_config, tmp_path, monkeypatch, capsys
+def test_pyright_whole_run_checks_what_git_tracks(
+    adv, git_rocke, pyright_config, capsys
 ):
     pytest.importorskip("pyright")
-    monkeypatch.setattr(adv, "ROCKE", tmp_path)
-    (tmp_path / "pyrightconfig.json").write_text(
+    bad = "source: int = 'bad'\n"
+    _track(
+        git_rocke,
+        {
+            "library/source.py": bad,
+            "library/venv_probe.py": bad,
+            "library/build/real.py": bad,  # tracked, so source despite its directory
+        },
+    )
+    (git_rocke / "pyrightconfig.json").write_text(
         json.dumps(pyright_config), encoding="utf-8"
     )
-    library = tmp_path / "library"
-    library.mkdir()
-    for name in (
-        "node_modules",
-        "__pycache__",
-        ".hidden",
-        ".venv-gfx942",
-        "venv",
-        "venv-test",
-        "build",
-        "_build",
-        "scratch",
-        "logs",
-        "_deps",
-        "pkg.egg-info",
-    ):
-        artifact = library / name
-        artifact.mkdir()
-        (artifact / "stale.py").write_text("stale: int = 'bad'\n", encoding="utf-8")
-    for name in ("source.py", "venv_probe.py"):
-        (library / name).write_text("source: int = 'bad'\n", encoding="utf-8")
-    adv.run_pyright([], whole=True)
+    for artifact in (".venv-gfx942", "venv-test", "node_modules"):
+        stale = git_rocke / "library" / artifact / "stale.py"
+        stale.parent.mkdir()
+        stale.write_text(bad, encoding="utf-8")  # on disk, never `git add`ed
+    adv.run_pyright(adv._all_files(), whole=True)
     out = capsys.readouterr().out
-    assert "source.py:1: error:" in out
-    assert "venv_probe.py:1: error:" in out
-    assert "stale.py" not in out
-    assert "pyright: 2 error(s), 0 warning(s)" in out
+    for name in ("source.py", "venv_probe.py", "real.py"):
+        assert f"{name}:1: error:" in out, out
+    assert "stale.py" not in out, out
+    assert "pyright: 3 error(s), 0 warning(s)" in out, out
 
 
-def test_pyright_gets_names_no_longer_than_pre_commit_passed(adv, monkeypatch):
-    # pre-commit sizes each batch for repo-relative names; absolute names are
-    # longer, so a full Windows batch would overflow its 32,767-character limit.
+def test_pyright_gets_its_file_names_on_stdin(adv, monkeypatch):
+    # All of rocke is ~1,650 names (~86,000 characters) as arguments, past
+    # Windows' 32,767-character command-line limit; on stdin the command line
+    # stays the same length however many files there are.
     seen = {}
 
     def fake_run(cmd, **kwargs):
-        seen.update(cmd=cmd, cwd=kwargs.get("cwd"))
+        seen.update(
+            cmd=cmd,
+            cwd=kwargs.get("cwd"),
+            stdin=kwargs.get("input"),
+            encoding=kwargs.get("encoding"),
+        )
         report = {
             "generalDiagnostics": [],
             "summary": {"errorCount": 0, "warningCount": 0},
@@ -194,9 +303,20 @@ def test_pyright_gets_names_no_longer_than_pre_commit_passed(adv, monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, json.dumps(report), "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    adv.run_pyright([_SCRIPT], whole=False)
-    assert seen["cmd"][-1] == str(Path("tools", "advisory_checks.py"))
+    files = [adv.ROCKE / "library" / f"kernel_{i:04d}.py" for i in range(3000)]
+    adv.run_pyright(files[:1], whole=True)
+    command_for_one_file = seen["cmd"]
+    adv.run_pyright(files, whole=True)
+    assert seen["cmd"] == command_for_one_file  # same command line for any file count
+    assert seen["cmd"][-1] == "-"  # pyright reads its file list from stdin
     assert seen["cwd"] == adv.ROCKE
+    # Node reads the names and writes the JSON as UTF-8; text=True would use the
+    # locale's code page (cp1252 on Windows) and mangle a non-ASCII name.
+    assert seen["encoding"] == "utf-8"
+    # rocke-relative, one per line, in order
+    lines = seen["stdin"].splitlines()
+    assert lines[0] == str(Path("library", "kernel_0000.py"))
+    assert len(lines) == 3000
 
 
 def test_pyright_reports_ranged_and_rangeless_diagnostics(adv, monkeypatch, capsys):
@@ -246,7 +366,9 @@ def test_pyright_non_json_failure_is_advisory(adv, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
-def test_system_hook_with_cold_cache_and_missing_tools(adv, tmp_path, tool):
+def test_system_hook_with_cold_cache_and_missing_tools(
+    adv, require_git, tmp_path, tool
+):
     pytest.importorskip("pre_commit")
     import yaml
 
@@ -341,8 +463,8 @@ def test_nothing_runs_when_no_file_is_in_rocke(adv, monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def mini_rocke(adv, monkeypatch, tmp_path):
-    """Point ``adv.ROCKE`` at a rocke-shaped tree small enough to scan quickly."""
+def mini_rocke(git_rocke):
+    """A rocke-shaped git repository small enough to scan quickly."""
     pytest.importorskip("vulture")
     tree = {
         "platform/helpers.py": (
@@ -360,12 +482,8 @@ def mini_rocke(adv, monkeypatch, tmp_path):
             "def orphan_in_tests():\n    return 4\n"
         ),
     }
-    for rel, source in tree.items():
-        path = tmp_path / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding="utf-8")
-    monkeypatch.setattr(adv, "ROCKE", tmp_path)
-    return tmp_path
+    _track(git_rocke, tree)
+    return git_rocke
 
 
 def test_vulture_counts_uses_across_trees_and_tests(adv, mini_rocke, capsys):
@@ -380,18 +498,26 @@ def test_vulture_counts_uses_across_trees_and_tests(adv, mini_rocke, capsys):
     assert "vulture: 2 finding(s)" in out
 
 
-@pytest.mark.parametrize("directory", ["build", "_build", "scratch", "logs"])
-def test_vulture_artifacts_cannot_hide_unused_code(adv, mini_rocke, capsys, directory):
-    artifact = mini_rocke / "library" / directory / "lib"
-    artifact.mkdir(parents=True)
-    stale = artifact / "stale.py"
+def test_vulture_untracked_files_cannot_hide_unused_code(adv, mini_rocke, capsys):
+    # A stale build copy that calls the orphans would hide them if it were scanned.
+    stale = mini_rocke / "library" / "build" / "lib" / "stale.py"
+    stale.parent.mkdir(parents=True)
     stale.write_text("orphan_in_library()\norphan_in_platform()\n", encoding="utf-8")
-    assert adv._rocke_files([str(stale)]) == []
     adv.run_vulture(adv._all_files(), whole=True)
     out = capsys.readouterr().out
     assert "orphan_in_library" in out
     assert "orphan_in_platform" in out
     assert "vulture: 2 finding(s)" in out
+
+
+def test_vulture_scans_a_requested_file_git_does_not_track_yet(adv, mini_rocke, capsys):
+    # A new file named on the command line is scanned and reported too; left out of
+    # the scan it would print "0 finding(s)" for code that has some.
+    new = mini_rocke / "library" / "new_kernel.py"
+    new.write_text("def orphan_in_new_file():\n    return 5\n", encoding="utf-8")
+    adv.run_vulture(adv._rocke_files([str(new)]), whole=False)
+    out = capsys.readouterr().out
+    assert re.findall(r"unused \w+ '(\w+)'", out) == ["orphan_in_new_file"]
 
 
 def test_vulture_reports_only_the_requested_files(adv, mini_rocke, monkeypatch, capsys):
@@ -409,24 +535,18 @@ def test_vulture_reports_only_the_requested_files(adv, mini_rocke, monkeypatch, 
     assert "vulture: 1 finding(s)" in out
 
 
-def test_vulture_skips_a_dangling_py_symlink(adv, mini_rocke, capsys):
-    # Emacs marks a file with unsaved edits by a dangling `.#<name>` symlink. It
-    # matches *.py, and vulture aborts the whole scan on a path that does not exist.
-    try:
-        (mini_rocke / "library" / ".#kernel.py").symlink_to("no-such-file")
-    except OSError:
-        pytest.skip("cannot create symlinks here")
-    adv.run_vulture(adv._all_files(), whole=True)
-    assert "vulture: 2 finding(s)" in capsys.readouterr().out
+def test_vulture_scan_launches_only_git(adv, mini_rocke, monkeypatch, capsys):
+    # The real tree is ~1,650 files; as arguments to a child process their names
+    # make a command line of over 86,000 characters, past Windows' 32,767 limit.
+    # Only `git ls-files` (a fixed, short command line) may run.
+    popen = subprocess.Popen
 
+    def only_git(cmd, *args, **kwargs):
+        if cmd[0] != "git":
+            raise AssertionError(f"vulture must not be launched as {cmd[0]!r}")
+        return popen(cmd, *args, **kwargs)
 
-def test_vulture_scan_launches_no_child_process(adv, mini_rocke, monkeypatch, capsys):
-    # The real tree is ~1,150 files; as arguments to a child process their names
-    # make a ~62,000-character command line, past Windows' 32,767-character limit.
-    def no_process(*args, **kwargs):
-        raise AssertionError("vulture must not be launched as a child process")
-
-    monkeypatch.setattr(subprocess, "Popen", no_process)
+    monkeypatch.setattr(subprocess, "Popen", only_git)
     adv.run_vulture(adv._all_files(), whole=True)
     # The scan really ran: a launch whose error was swallowed reports nothing.
     assert "vulture: 2 finding(s)" in capsys.readouterr().out

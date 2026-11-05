@@ -1,24 +1,17 @@
-// pyright settings for ALL rocke Python (library, platform, tools, cmake).
+// pyright settings for ALL rocke Python.
 // ADVISORY ONLY: run by tools/advisory_checks.py as a NON-BLOCKING pre-push hook
 // (repo-root .pre-commit-config.yaml). Findings are reported, never enforced.
 // Kept out of a rocke-level pyproject.toml: pytest would adopt that file as its
 // rootdir when tools/run_checks.py runs pytest from rocke/.
+//
+// No `include` or `exclude` here on purpose: the wrapper lists the tracked files
+// with `git ls-files` and gives that list to pyright on stdin, which replaces
+// `include`. A hand-kept `exclude` would also filter that list, and could drop
+// tracked source. A plain `pyright` run from rocke/ uses pyright's own defaults:
+// everything under rocke/ except hidden directories, node_modules and virtualenvs
+// (so untracked build trees are scanned there). Those defaults also drop listed
+// files under a hidden directory or node_modules.
 {
-  "include": ["library", "platform", "tools", "cmake"],
-  "exclude": [
-    "**/node_modules",
-    "**/__pycache__",
-    "**/.*",
-    "**/venv*/*",
-    "**/.pytest_cache",
-    "**/*.egg-info",
-    "**/_deps",
-    "**/kernel_cache",
-    "**/build",
-    "**/_build",
-    "**/scratch",
-    "**/logs"
-  ],
   "pythonVersion": "3.10",
   "typeCheckingMode": "basic",
   // Kernel builders bind names inside spec-flag-gated branches (`if PV_FP8_MFMA:`)
