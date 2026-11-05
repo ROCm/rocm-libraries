@@ -20,6 +20,7 @@ Synopsis::
         [--spaces-dir DIR] [--binary-arg ARG ...]
     run_gauntlet_fuzz.py --binary BIN ... --row FILE        (one explicit sample, see below)
     run_gauntlet_fuzz.py --binary BIN ... --pairwise [--seed S] [--pairwise-repair N]
+        [--pairwise-budget 30m]
         (every row of each space's pairwise covering set, see below)
     run_gauntlet_fuzz.py --pairwise --generate-only [--seed S] [--work-dir DIR] [--filter REGEX]
         (write the covering sets as sweeps; no binary)
@@ -80,7 +81,14 @@ names ``gauntlet-pairwise`` as ``metadata.generator`` and the seed in its notes,
 a ``replay.sh`` that calls ``--row``. After the rows, up to ``--pairwise-repair N`` (default 2)
 rounds build new rows for the tuples that every row drawing them left ``DECLINED`` or
 ``UNEXERCISED``, from the levels that passed in the run, until a round builds none.
-``--time-budget`` still ends the run (its coverage is then marked incomplete).
+``--time-budget`` still ends the run (its coverage is then marked incomplete). ``--pairwise-budget S`` is
+one total wall-clock limit for all pairwise generation of the run (the build of every selected space, then
+the repair rounds; the time spent running rows is not counted), and ``--time-budget`` bounds generation as
+well. The search checks the deadline at every node: at it the build or repair stops, the rows built so far
+run, and every tuple not settled yet is reported ``budget_exceeded`` (not ``unproven``: it counts as not
+covered), with ``generation_complete: false`` in the report and ``pair_coverage`` (``complete`` is false;
+``stopped_because`` ``pairwise-budget``). Without either budget generation is unbounded. Generation
+prints progress to stderr (space, tuples settled of total, rows, seconds) about every 10 s.
 ``<work>/pairwise/<Op>_<Space>.json`` reports the levels, the tuple and row counts, the lower
 bound, the ``illegal`` / ``dead`` / ``unproven`` tuples, the repair rounds and the generator's
 timings; ``summary.json`` gets ``mode: "pairwise"`` and a ``pair_coverage`` entry per space.
@@ -141,6 +149,7 @@ is never taken over (delete it by hand when no driver is running).
 """
 
 import argparse
+import contextlib
 import copy
 import datetime
 import hashlib
@@ -509,6 +518,8 @@ def parse_listing(text):
 PAIRWISE_GENERATOR = "gauntlet-pairwise"
 DEFAULT_PAIRWISE_REPAIR = 2
 MAX_LISTED_TUPLES = 50
+# Seconds between two progress lines of pairwise generation (stderr).
+PAIRWISE_PROGRESS_INTERVAL = pairwise.DEFAULT_PROGRESS_INTERVAL
 
 
 def is_explicit_row(sample):
@@ -681,6 +692,18 @@ class PairwiseSpace:
         self.unreachable = {}  # pair key -> Finding: no row of passing levels covers it
         self.tried = set()  # pair keys of the targets some repair round retried
         self.repair_rows = 0
+        self.repair_budget_exceeded = (
+            []
+        )  # Findings of the repair round the budget ended
+
+    @property
+    def budget_exceeded(self):
+        """The tuples the generation budget left unsettled, in the build and in repair."""
+        return list(self.result.budget_exceeded) + self.repair_budget_exceeded
+
+    @property
+    def generation_complete(self):
+        return self.result.generation_complete and not self.repair_budget_exceeded
 
     def sample_rows(self, rows, args, repair_round=None):
         """The samples of axis-value rows, with the next ids ``pw<k>``. The row records the
@@ -714,12 +737,67 @@ class PairwiseSpace:
         return samples
 
 
-def build_pairwise(args, spaces):
-    """``{space id: PairwiseSpace}`` for the spaces, built from ``args.seed``."""
+class GenerationBudget:
+    """How long pairwise generation may still take: ``--pairwise-budget`` is one total for every
+    build and repair call of the run (the time spent running rows is not counted), and
+    ``--time-budget`` ends generation too, counted from the start of the run (``run_started``,
+    a reading of ``clock``). ``limits()`` is the ``deadline`` and ``clock`` to give the next
+    ``pairwise.build`` / ``repair`` call (no deadline when nothing bounds it); the call runs
+    under ``charging()``."""
+
+    def __init__(self, pairwise_budget, time_budget, run_started, clock=time.monotonic):
+        self.pairwise_budget = pairwise_budget
+        self.time_budget = time_budget
+        self.run_started = run_started
+        self.clock = clock
+        self.spent = 0.0
+
+    def deadline(self):
+        limits = []
+        if self.pairwise_budget:
+            limits.append(self.clock() + max(0.0, self.pairwise_budget - self.spent))
+        if self.time_budget:
+            limits.append(self.run_started + self.time_budget)
+        return min(limits) if limits else None
+
+    def limits(self):
+        return {"deadline": self.deadline(), "clock": self.clock}
+
+    @contextlib.contextmanager
+    def charging(self):
+        """Count the time of the block against ``--pairwise-budget``."""
+        started = self.clock()
+        try:
+            yield
+        finally:
+            self.spent += self.clock() - started
+
+
+def print_progress(record):
+    """A progress record of ``pairwise.build`` / ``repair`` as a line on stderr."""
+    print(
+        f"  pairwise {record['space']} ({record['phase']}): {record['settled']} of"
+        f" {record['total']} tuples settled, {record['rows']} rows, {record['elapsed']:.0f} s",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def build_pairwise(args, spaces, budget):
+    """``{space id: PairwiseSpace}`` for the spaces, built from ``args.seed`` under ``budget`` (a
+    ``GenerationBudget``): a space it ends keeps the rows built and reports the tuples it left
+    unsettled as ``budget_exceeded``; the spaces after it get none."""
     states = {}
     for sp in spaces:
         try:
-            result = pairwise.build(sp, args.seed)
+            with budget.charging():
+                result = pairwise.build(
+                    sp,
+                    args.seed,
+                    **budget.limits(),
+                    progress=print_progress,
+                    progress_interval=PAIRWISE_PROGRESS_INTERVAL,
+                )
         except ValueError as e:
             raise DriverError(f"pairwise: {e}") from None
         states[sp.space_id] = PairwiseSpace(sp, result)
@@ -727,7 +805,12 @@ def build_pairwise(args, spaces):
             f"  pairwise {sp.space_id}: {len(result.rows)} rows (lower bound"
             f" {result.lower_bound}), {result.tuples_total} tuples, {len(result.illegal)}"
             f" illegal, {len(result.dead)} dead, {len(result.unproven)} unproven, built in"
-            f" {result.timings['total_s']:.1f} s",
+            f" {result.timings['total_s']:.1f} s"
+            + (
+                ""
+                if result.generation_complete
+                else f"; the budget ended it: {len(result.budget_exceeded)} tuples unsettled"
+            ),
             flush=True,
         )
     return states
@@ -735,8 +818,9 @@ def build_pairwise(args, spaces):
 
 def write_pairwise_report(work, state, args):
     """``<work>/pairwise/<Op>_<Space>.json``: the levels, the tuple count, the rows, the lower
-    bound, the ``illegal`` / ``dead`` / ``unproven`` tuples with the reason, the repair rounds and
-    the generator's timings."""
+    bound, the ``illegal`` / ``dead`` / ``unproven`` tuples with the reason, the
+    ``budget_exceeded`` tuples (left unsettled when the generation budget ended) with
+    ``generation_complete``, the repair rounds and the generator's timings."""
     r = state.result
     directory = work / "pairwise"
     directory.mkdir(parents=True, exist_ok=True)
@@ -751,6 +835,8 @@ def write_pairwise_report(work, state, args):
         "illegal": [finding_json(f) for f in r.illegal],
         "dead": [finding_json(f) for f in r.dead],
         "unproven": [finding_json(f) for f in r.unproven],
+        "budget_exceeded": [finding_json(f) for f in state.budget_exceeded],
+        "generation_complete": state.generation_complete,
         "repair": {
             "max_rounds": 0 if args.generate_only else args.pairwise_repair,
             "rows": state.repair_rows,
@@ -766,19 +852,26 @@ def write_pairwise_report(work, state, args):
 
 def coverage_summary(sp, levels, flagged, records, liveness=None):
     """``pairwise.pair_coverage`` of ``records`` (``(axis values, outcome)``) in the form
-    ``summary.json`` gives it: ``tuples``, the ``illegal`` / ``dead`` / ``unproven`` counts of
-    ``flagged`` (kind -> tuples), ``drawn``, ``passed``, ``declined_only``, ``never_passed`` and
-    the tuples that could still be passed (``not_passed_total``, and the first
-    ``MAX_LISTED_TUPLES`` as ``not_passed``): every tuple of the universe not passed, less the
-    flagged ones, which no legal row covers."""
+    ``summary.json`` gives it: ``tuples``, the ``illegal`` / ``dead`` / ``unproven`` /
+    ``budget_exceeded`` counts of ``flagged`` (kind -> tuples), ``drawn``, ``passed``,
+    ``declined_only``, ``never_passed`` and the tuples that could still be passed
+    (``not_passed_total``, and the first ``MAX_LISTED_TUPLES`` as ``not_passed``): every tuple of
+    the universe not passed, less the ``illegal`` / ``dead`` / ``unproven`` ones, which no legal
+    row covers or could be shown to. A ``budget_exceeded`` tuple stays among them: nothing
+    settled it."""
     found = pairwise.pair_coverage(sp, records, levels, liveness)
-    skip = {pair_key(p) for pairs in flagged.values() for p in pairs}
+    skip = {
+        pair_key(p)
+        for kind in ("illegal", "dead", "unproven")
+        for p in flagged.get(kind, ())
+    }
     open_ = [p for p in found["not_passed"] if pair_key(p) not in skip]
     return {
         "tuples": found["tuples"],
         "illegal": len(flagged["illegal"]),
         "dead": len(flagged["dead"]),
         "unproven": len(flagged["unproven"]),
+        "budget_exceeded": len(flagged.get("budget_exceeded", ())),
         "drawn": found["drawn"],
         "passed": found["passed"],
         "declined_only": found["declined_only"],
@@ -841,7 +934,8 @@ def generate_only(args, spaces):
         f" --generate-only --seed {args.seed}); work dir {work}",
         flush=True,
     )
-    states = build_pairwise(args, spaces)
+    budget = GenerationBudget(args.pairwise_budget, args.time_budget, time.monotonic())
+    states = build_pairwise(args, spaces, budget)
     for sp in spaces:
         state = states[sp.space_id]
         samples = state.sample_rows(state.result.rows, args)
@@ -852,6 +946,13 @@ def generate_only(args, spaces):
             f"  wrote {len(samples)} rows of {sp.space_id} to {root / sp.operation / sp.name}",
             flush=True,
         )
+        if not state.generation_complete:
+            print(
+                f"  WARNING: the pairwise budget ended generation of {sp.space_id}:"
+                f" {len(state.budget_exceeded)} tuples are unsettled (budget_exceeded in the"
+                " report)",
+                flush=True,
+            )
     print(f"reports: {work / 'pairwise'}", flush=True)
     return 0
 
@@ -933,10 +1034,11 @@ def coverage_of(work_dir, levels_from, first=None, spaces_dir=None):
         ]
         flagged = {
             kind: [f["pair"] for f in report.get(kind, ())]
-            for kind in ("illegal", "dead", "unproven")
+            for kind in ("illegal", "dead", "unproven", "budget_exceeded")
         }
         found[space_id] = {
             **coverage_summary(sp, report["levels"], flagged, records),
+            "generation_complete": report.get("generation_complete", True),
             "samples": len(samples),
             "with_outcome": len(records),
         }
@@ -1241,6 +1343,8 @@ class Fuzz:
         self._coverage_axes = {}
         # space id -> PairwiseSpace, once a pairwise run has built its rows
         self._pairwise = {}
+        # The --pairwise-budget / --time-budget account of pairwise generation (set by ``run``)
+        self._generation_budget = None
         # One entry per graph a catalog run listed (see ``_catalog_batch``), in run order.
         self._catalog_graphs = []
         # Candidate cases whose finished record named another candidate than the forced one, and
@@ -1283,6 +1387,9 @@ class Fuzz:
             d.mkdir(parents=True, exist_ok=True)
         self._bu = load_bundle_utils()
         self._started_at = time.monotonic()
+        self._generation_budget = GenerationBudget(
+            self.args.pairwise_budget, self.args.time_budget, self._started_at
+        )
         self._started_wall = datetime.datetime.now(datetime.timezone.utc)
         previous = self._install_signals()
         self._outcomes_file = open(
@@ -1353,6 +1460,11 @@ class Fuzz:
             )
             if a.time_budget:
                 print(f"  time budget: {a.time_budget:g}s", flush=True)
+            if a.pairwise_budget:
+                print(
+                    f"  pairwise generation budget: {a.pairwise_budget:g}s in total",
+                    flush=True,
+                )
             return
         limit = "unlimited" if not a.samples else str(a.samples)
         print(f"gauntlet fuzz: seed {a.seed} (replay with --seed {a.seed})", flush=True)
@@ -1647,9 +1759,12 @@ class Fuzz:
 
     def _run_pairwise(self):
         """Every row of each space's pairwise covering set, then up to ``--pairwise-repair`` rounds
-        of new rows for the tuples that were only declined or unexercised."""
+        of new rows for the tuples that were only declined or unexercised. Generation (the build
+        and every repair round) is bounded by ``--pairwise-budget`` and ``--time-budget``: once
+        it is cut, the rows built so far run, no further round starts and the run stops with
+        ``pairwise-budget``."""
         a = self.args
-        self._pairwise = build_pairwise(a, self.spaces)
+        self._pairwise = build_pairwise(a, self.spaces, self._generation_budget)
         sources = {}
         for sp in self.spaces:
             state = self._pairwise[sp.space_id]
@@ -1658,12 +1773,20 @@ class Fuzz:
         if not self._loop(sources):
             return
         for round_number in range(1, a.pairwise_repair + 1):
+            if self._generation_cut():
+                break
             sources = self._repair_round(round_number)
             if not sources:
                 break
             if not self._loop(sources):
                 return
-        self.stop_reason = self.stop_reason or "pairwise-complete"
+        self.stop_reason = self.stop_reason or (
+            "pairwise-budget" if self._generation_cut() else "pairwise-complete"
+        )
+
+    def _generation_cut(self):
+        """Did the generation budget end the build or a repair round of some space?"""
+        return any(not s.generation_complete for s in self._pairwise.values())
 
     def _records(self, sp):
         """``(axis values, outcome)`` of every sample of ``sp`` the run recorded, in run order."""
@@ -1688,19 +1811,25 @@ class Fuzz:
             targets = [t for t in found.targets if pair_key(t) not in state.unreachable]
             if not targets:
                 continue
-            repair = pairwise.repair(
-                sp,
-                a.seed,
-                targets,
-                found.allowed,
-                round_number=round_number,
-                stubborn=[t for t in targets if pair_key(t) in state.tried],
-                witness=found.witness,
-                liveness=result.liveness,
-            )
+            budget = self._generation_budget
+            with budget.charging():
+                repair = pairwise.repair(
+                    sp,
+                    a.seed,
+                    targets,
+                    found.allowed,
+                    round_number=round_number,
+                    stubborn=[t for t in targets if pair_key(t) in state.tried],
+                    witness=found.witness,
+                    liveness=result.liveness,
+                    **budget.limits(),
+                    progress=print_progress,
+                    progress_interval=PAIRWISE_PROGRESS_INTERVAL,
+                )
             state.tried.update(pair_key(t) for t in repair.retried)
             for finding in repair.unreachable:
                 state.unreachable[pair_key(finding.pair)] = finding
+            state.repair_budget_exceeded.extend(repair.budget_exceeded)
             first = state.next_row
             rows = state.sample_rows(repair.rows, a, repair_round=round_number)
             state.repair_rows += len(rows)
@@ -1712,6 +1841,7 @@ class Fuzz:
                     "retried": len(repair.retried),
                     "never_passed": len(repair.never_passed),
                     "unreachable": len(repair.unreachable),
+                    "budget_exceeded": len(repair.budget_exceeded),
                     "rows": len(rows),
                     "first_row": first if rows else None,
                     "timings": {k: round(v, 3) for k, v in repair.timings.items()},
@@ -1723,7 +1853,12 @@ class Fuzz:
             print(
                 f"  repair round {round_number} {sp.space_id}: {len(targets)} tuples to retry,"
                 f" {len(repair.never_passed)} never passed, {len(repair.unreachable)}"
-                f" unreachable, {len(rows)} rows",
+                f" unreachable, {len(rows)} rows"
+                + (
+                    ""
+                    if repair.generation_complete
+                    else f"; the budget ended it: {len(repair.budget_exceeded)} tuples unsettled"
+                ),
                 flush=True,
             )
             if rows:
@@ -1744,6 +1879,7 @@ class Fuzz:
                 "illegal": [f.pair for f in r.illegal],
                 "dead": [f.pair for f in r.dead],
                 "unproven": [f.pair for f in r.unproven],
+                "budget_exceeded": [f.pair for f in state.budget_exceeded],
             }
             found[sp.space_id] = {
                 **coverage_summary(
@@ -1751,7 +1887,9 @@ class Fuzz:
                 ),
                 "rows": len(r.rows),
                 "repair_rows": state.repair_rows,
-                "complete": self.stop_reason == "pairwise-complete",
+                "generation_complete": state.generation_complete,
+                "complete": self.stop_reason == "pairwise-complete"
+                and state.generation_complete,
             }
         return found
 
@@ -2802,10 +2940,25 @@ class Fuzz:
         for space_id, cov in summary.get("pair_coverage", {}).items():
             print(
                 f"  pairwise {space_id}: {cov['tuples']} tuples, {cov['illegal']} illegal,"
-                f" {cov['dead']} dead, {cov['unproven']} unproven; drawn {cov['drawn']},"
+                f" {cov['dead']} dead, {cov['unproven']} unproven"
+                + (
+                    f", {cov['budget_exceeded']} budget exceeded"
+                    if cov["budget_exceeded"]
+                    else ""
+                )
+                + f"; drawn {cov['drawn']},"
                 f" passed {cov['passed']}, declined only {cov['declined_only']}, never passed"
                 f" {cov['never_passed']}; {cov['rows']} rows + {cov['repair_rows']} repair"
-                + ("" if cov["complete"] else " (INCOMPLETE: the run stopped early)")
+                + (
+                    ""
+                    if cov["generation_complete"]
+                    else " (INCOMPLETE: the pairwise budget ended generation)"
+                )
+                + (
+                    ""
+                    if cov["complete"] or not cov["generation_complete"]
+                    else " (INCOMPLETE: the run stopped early)"
+                )
             )
         catalog = summary.get("catalog")
         if catalog is not None:
@@ -2970,6 +3123,15 @@ def build_parser():
         f" declined or unexercised, built from levels that passed (default {DEFAULT_PAIRWISE_REPAIR})",
     )
     p.add_argument(
+        "--pairwise-budget",
+        metavar="DURATION",
+        help="with --pairwise: one total wall-clock limit, e.g. 90s, 30m, for all pairwise"
+        " generation of the run (the build of every selected space, then the repair rounds); the"
+        " rows built when it ends run, the tuples it left unsettled are reported as"
+        " budget_exceeded, and the run's coverage is marked incomplete. --time-budget bounds"
+        " generation too. Progress goes to stderr about every 10 s",
+    )
+    p.add_argument(
         "--generate-only",
         action="store_true",
         help="with --pairwise: write the full row set of each space as sweeps under"
@@ -3097,6 +3259,13 @@ def parse_args(argv=None):
         parser.error("--generate-only needs --pairwise")
     if args.pairwise_repair is not None and not args.pairwise:
         parser.error("--pairwise-repair needs --pairwise")
+    if args.pairwise_budget is not None:
+        if not args.pairwise:
+            parser.error("--pairwise-budget needs --pairwise")
+        try:
+            args.pairwise_budget = parse_duration(args.pairwise_budget)
+        except ValueError as e:
+            parser.error(f"--pairwise-budget: {e}")
     if args.pairwise and args.row is not None:
         parser.error(
             "--pairwise runs a generated set of rows and cannot be combined with --row"

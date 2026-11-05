@@ -334,6 +334,9 @@ provenance fields: `generator` is `gauntlet-fuzz` for a drawn sample or a
 <seed>, row <k>, axes {…}` (a repair row says `repair round <r>, row <k>`), so the sweep itself
 records the generator seed that produced it, and the case `id` is `pw<k>`. `seed` is the data
 seed, derived from the space, the pairwise seed and `k`, or the one `--data-seed` gave.
+A pairwise sweep holds the rows built before a [`--pairwise-budget`](running-tests.md#pairwise-runs---pairwise)
+(or `--time-budget`) ended generation: it is then not a covering set. The pairwise report beside it
+says so (`generation_complete: false`) and lists the pairs nothing settled as `budget_exceeded`.
 
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.

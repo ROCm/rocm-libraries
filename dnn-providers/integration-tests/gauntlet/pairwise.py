@@ -29,6 +29,13 @@ search over the axes that can matter for it (the *relevant axes*) decides why:
 * ``dead``: legal rows hold both, but in each of them at least one of the two is inert;
 * ``unproven``: the search hit its cap first, and no later row covered the tuple. A space with
   many axes tied together by constraints can leave some; the tuple is never counted covered.
+* ``budget_exceeded``: not settled at all. A build or repair given a deadline (``deadline``, an
+  absolute reading of ``clock``) ends at it, checked at every node of the search and between
+  tuples, and every tuple still uncovered goes here: it neither has a row nor a proof. These count
+  as not covered (unlike ``unproven`` they are not "decided as far as the search could"), the rows
+  built so far are kept, and ``generation_complete`` is false. ``progress`` is called with a
+  record (space, phase, tuples settled and total, rows, elapsed) at most every
+  ``progress_interval`` seconds, also from inside a long search.
 
 The search that decides this is exact and has three parts (``_Under``, ``_Builder._problem``,
 ``_Builder._solve``).
@@ -96,6 +103,8 @@ BASE_ROW_ATTEMPTS = 20_000
 FALLBACK_COMPLETIONS = 8
 # A range this narrow has its interior candidates listed; wider, one is drawn by rejection.
 INTERIOR_LIST_LIMIT = 4096
+# Seconds between two progress records of a build or repair.
+DEFAULT_PROGRESS_INTERVAL = 10.0
 
 # What rejects a prefix of a search besides a constraint.
 EVALUATION_FAILS = "an expression of the space fails to evaluate"
@@ -124,8 +133,10 @@ class Finding(NamedTuple):
 class Pairwise:
     """The result of ``build``: ``rows`` (axis-value dicts, in generation order), ``levels``
     (axis -> level values), ``tuples_total``, the ``illegal`` / ``dead`` / ``unproven`` findings,
-    ``lower_bound`` (the largest product of two axes' level counts: no row set is smaller),
-    ``timings`` and the ``liveness`` the build used (reusable for ``pair_coverage``)."""
+    the ``budget_exceeded`` findings (tuples left unsettled when the deadline passed) and
+    ``generation_complete`` (false then), ``lower_bound`` (the largest product of two axes' level
+    counts: no row set is smaller), ``timings`` and the ``liveness`` the build used (reusable for
+    ``pair_coverage``)."""
 
     def __init__(self, space, seed, strength):
         self.space_id = space.space_id
@@ -137,6 +148,8 @@ class Pairwise:
         self.illegal = []
         self.dead = []
         self.unproven = []
+        self.budget_exceeded = []
+        self.generation_complete = True
         self.lower_bound = 0
         self.timings = {}
         self.liveness = None
@@ -444,6 +457,10 @@ class _NoRow(Exception):
 
 class _Capped(Exception):
     """A search visited more nodes than its cap."""
+
+
+class _Budget(Exception):
+    """The deadline of a build or repair passed."""
 
 
 class _Unread(Exception):
@@ -769,12 +786,20 @@ class _Builder:
         avoid=None,
         seed_prefix=None,
         witness=None,
+        deadline=None,
+        clock=time.monotonic,
+        progress=None,
+        progress_interval=DEFAULT_PROGRESS_INTERVAL,
+        phase="build",
     ):
         """``allowed`` (axis -> level values) restricts every row to those levels, ``targets``
         (tuples as ``((axisA, valueA), (axisB, valueB))``) makes those the only tuples to cover,
         ``avoid`` lists tuples a row should not hold, ``witness`` is a legal row (axis -> value)
         to fill the axes a pair does not depend on from; ``liveness`` shares the answers of an
         earlier build. These are what ``repair`` sets.
+        ``deadline`` (an absolute reading of ``clock``) ends the build: ``tick`` raises
+        ``_Budget`` at every node of a search and between tuples once it has passed.
+        ``progress(record)`` is called by ``tick`` at most every ``progress_interval`` seconds.
         """
         self.space = space
         self.seed = seed
@@ -782,6 +807,15 @@ class _Builder:
         self.cap = cap
         self.seed_prefix = seed_prefix or f"gauntlet-pairwise:{space.space_id}:{seed}"
         self.witness = witness
+        self.deadline = deadline
+        self.clock = clock
+        self.progress = progress
+        self.progress_interval = progress_interval
+        self.phase = phase
+        self._ticking = deadline is not None or progress is not None
+        self._started = clock()
+        self._reported = self._started
+        self.rows_built = 0
         self.names = list(space.axes)
         self.n = len(self.names)
         self.level_map = {n: levels(space, n, seed) for n in self.names}
@@ -818,6 +852,9 @@ class _Builder:
                 self.pairs.append((x, y))
                 total += self.size[x] * self.size[y]
         self.total = total
+        self.settled_base = 0  # tuples settled by retargets before the current one
+        self.phase_total = total  # tuples the current target set holds
+        self.report_total = total  # the total a progress record gives
         self.uncovered = bytearray(b"\x01") * total
         # slot[x][y] = (offset, step of x's level, step of y's level) for either order.
         self.slot = [[None] * self.n for _ in range(self.n)]
@@ -846,6 +883,30 @@ class _Builder:
         self.uncovered = bytearray(self.total)
         for pair in pairs:
             self.uncovered[self.index_of(pair)] = 1
+        self.phase_total = len(pairs)
+
+    def tick(self):
+        """Between tuples and at every node of a search: ``_Budget`` once the deadline has
+        passed, else a progress record if the interval has."""
+        if not self._ticking:
+            return
+        now = self.clock()
+        if self.deadline is not None and now >= self.deadline:
+            raise _Budget
+        if self.progress is not None and now - self._reported >= self.progress_interval:
+            self._reported = now
+            self.progress(
+                {
+                    "space": self.space.space_id,
+                    "phase": self.phase,
+                    "settled": self.settled_base
+                    + self.phase_total
+                    - self.uncovered.count(1),
+                    "total": self.report_total,
+                    "rows": self.rows_built,
+                    "elapsed": now - self._started,
+                }
+            )
 
     def _level_index(self, pos, value):
         for i, level in enumerate(self.level_map[self.names[pos]]):
@@ -1444,6 +1505,8 @@ class _Builder:
                 return True
             p = min(open_, key=lambda q: (len(dom[q]), -len(touch[q]), q))
             for level in list(dom[p]):
+                if self._ticking:
+                    self.tick()
                 nodes += 1
                 if nodes > self.cap:
                     raise _Capped
@@ -1571,13 +1634,15 @@ class _Builder:
         x, y, lx, ly = start_tuple
         space_id = self.space.space_id
         fixed = {x: lx, y: ly}
-        rows = [
-            self.fill(
-                fixed,
-                random.Random(f"{self.seed_prefix}:{row_number}:{k}"),
+        rows = []
+        for k in range(self.candidates):
+            self.tick()
+            rows.append(
+                self.fill(
+                    fixed,
+                    random.Random(f"{self.seed_prefix}:{row_number}:{k}"),
+                )
             )
-            for k in range(self.candidates)
-        ]
         best = self.choose(rows, (x, y))
         if best is not None:
             return best, None
@@ -1601,16 +1666,34 @@ def build(
     strength=2,
     candidates=DEFAULT_CANDIDATES,
     cap=DEFAULT_EXHAUSTIVE_CAP,
+    deadline=None,
+    clock=time.monotonic,
+    progress=None,
+    progress_interval=DEFAULT_PROGRESS_INTERVAL,
 ):
     """A seeded pairwise covering set of ``space`` (see the module docstring).
 
     ``candidates`` is how many completions each row is chosen from; ``cap`` bounds the
     combinations the exhaustive search enumerates per tuple. Only strength 2 is supported.
-    Deterministic in ``(space, seed, candidates, cap)``."""
+    Deterministic in ``(space, seed, candidates, cap)`` as long as the deadline does not pass.
+
+    ``deadline`` is an absolute reading of ``clock`` (``time.monotonic`` by default): at it the
+    build stops, keeps its rows, and puts every tuple not settled yet in ``budget_exceeded``
+    (``generation_complete`` false). ``progress(record)`` gets ``{"space", "phase", "settled",
+    "total", "rows", "elapsed"}`` at most every ``progress_interval`` seconds."""
     if strength != 2:
         raise ValueError(f"only pairwise (strength 2) is supported, got {strength}")
     started = time.perf_counter()
-    b = _Builder(space, seed, candidates, cap)
+    b = _Builder(
+        space,
+        seed,
+        candidates,
+        cap,
+        deadline=deadline,
+        clock=clock,
+        progress=progress,
+        progress_interval=progress_interval,
+    )
     result = Pairwise(space, seed, strength)
     result.levels = {n: copy.deepcopy(b.level_map[n]) for n in b.names}
     result.tuples_total = b.total
@@ -1621,29 +1704,35 @@ def build(
     kinds = {"illegal": result.illegal, "dead": result.dead}
     fallbacks = 0
     cursor = 0
-    while True:
-        while cursor < b.total and not b.uncovered[cursor]:
-            cursor += 1
-        if cursor == b.total:
-            break
-        x, y, lx, ly = b.decode(cursor)
-        before = b.exhaustive_seconds
-        row, verdict = b.next_row((x, y, lx, ly), len(result.rows))
-        fallbacks += b.exhaustive_seconds > before
-        if row is not None:
-            b.credit(row)
-            result.rows.append(copy.deepcopy(b.values(row)))
-        elif verdict.kind == "unproven":
-            # a row built for a later tuple may still cover it; `credit` then drops it
-            b.unproven_at[x, y, lx, ly] = Finding(
-                b.tuple_of(x, y, lx, ly), verdict.detail
-            )
-            b.uncovered[cursor] = 0
-        else:
-            kinds[verdict.kind].append(
-                Finding(b.tuple_of(x, y, lx, ly), verdict.detail)
-            )
-            b.uncovered[cursor] = 0
+    try:
+        while True:
+            while cursor < b.total and not b.uncovered[cursor]:
+                cursor += 1
+            if cursor == b.total:
+                break
+            b.tick()
+            x, y, lx, ly = b.decode(cursor)
+            before = b.exhaustive_seconds
+            row, verdict = b.next_row((x, y, lx, ly), len(result.rows))
+            fallbacks += b.exhaustive_seconds > before
+            if row is not None:
+                b.credit(row)
+                result.rows.append(copy.deepcopy(b.values(row)))
+                b.rows_built = len(result.rows)
+            elif verdict.kind == "unproven":
+                # a row built for a later tuple may still cover it; `credit` then drops it
+                b.unproven_at[x, y, lx, ly] = Finding(
+                    b.tuple_of(x, y, lx, ly), verdict.detail
+                )
+                b.uncovered[cursor] = 0
+            else:
+                kinds[verdict.kind].append(
+                    Finding(b.tuple_of(x, y, lx, ly), verdict.detail)
+                )
+                b.uncovered[cursor] = 0
+    except _Budget:
+        result.generation_complete = False
+        result.budget_exceeded = _unsettled(b)
     result.unproven = list(b.unproven_at.values())
     result.timings = {
         "total_s": time.perf_counter() - started,
@@ -1652,6 +1741,19 @@ def build(
         "renders": b.liveness.renders,
     }
     return result
+
+
+BUDGET_DETAIL = "the generation budget ended before this tuple was settled"
+
+
+def _unsettled(b):
+    """The tuples a builder still has to cover, as ``budget_exceeded`` findings, in universe
+    order."""
+    return [
+        Finding(b.tuple_of(*b.decode(i)), BUDGET_DETAIL)
+        for i in range(b.total)
+        if b.uncovered[i]
+    ]
 
 
 def _universe(names, level_map):
@@ -1763,7 +1865,9 @@ class Repair:
     """The result of ``repair``: ``rows`` (axis-value dicts), ``retried`` (the targets a row was
     built for), ``never_passed`` (targets not retried because a value of theirs is no level in
     ``allowed``), the ``unreachable`` findings (retried targets no row of the allowed levels
-    covers, all of them when ``allowed`` has no level for some axis) and ``timings``."""
+    covers, all of them when ``allowed`` has no level for some axis), the ``budget_exceeded``
+    findings (retried targets left unsettled when the deadline passed) with
+    ``generation_complete`` (false then) and ``timings``."""
 
     def __init__(self, space, seed, round_number):
         self.space_id = space.space_id
@@ -1773,6 +1877,8 @@ class Repair:
         self.retried = []
         self.never_passed = []
         self.unreachable = []
+        self.budget_exceeded = []
+        self.generation_complete = True
         self.timings = {}
 
 
@@ -1792,6 +1898,10 @@ def repair(
     liveness=None,
     candidates=DEFAULT_CANDIDATES,
     cap=DEFAULT_EXHAUSTIVE_CAP,
+    deadline=None,
+    clock=time.monotonic,
+    progress=None,
+    progress_interval=DEFAULT_PROGRESS_INTERVAL,
 ):
     """Rows that cover ``targets`` (tuples as ``repair_targets`` lists them) using only the levels
     of ``allowed`` (axis -> level values) on every axis: the construction and the liveness
@@ -1805,7 +1915,11 @@ def repair(
     ``seed`` is the pairwise seed of the run whose levels ``targets`` are in; the rows are
     deterministic in ``(space, seed, round_number, targets, stubborn, allowed, witness)``.
     ``witness`` is a legal row of allowed levels (axis -> value) that fills the axes a tuple does
-    not depend on; ``liveness`` shares the answers of the build."""
+    not depend on; ``liveness`` shares the answers of the build.
+
+    ``deadline``, ``clock``, ``progress`` and ``progress_interval`` are those of ``build``: at the
+    deadline the targets not settled yet are ``budget_exceeded`` and the rows so far are kept.
+    """
     started = time.perf_counter()
     result = Repair(space, seed, round_number)
 
@@ -1833,7 +1947,13 @@ def repair(
         avoid=isolated,
         seed_prefix=f"gauntlet-pairwise-repair:{space.space_id}:{seed}:{round_number}",
         witness=witness,
+        deadline=deadline,
+        clock=clock,
+        progress=progress,
+        progress_interval=progress_interval,
+        phase="repair",
     )
+    b.report_total = len(retry)
     barred = [name for p, name in enumerate(b.names) if not b.allowed[p]]
     if (
         barred
@@ -1848,6 +1968,7 @@ def repair(
         if row is not None:
             b.credit(row)
             result.rows.append(copy.deepcopy(b.values(row)))
+            b.rows_built = len(result.rows)
             return
         detail = (
             f"{verdict.kind}: {verdict.detail}"
@@ -1858,15 +1979,27 @@ def repair(
         b.uncovered[cursor] = 0
 
     cursor = 0
-    while True:
-        while cursor < b.total and not b.uncovered[cursor]:
-            cursor += 1
-        if cursor == b.total:
-            break
-        cover(cursor)
-    for pair in isolated:
-        b.retarget([pair])
-        cover(b.index_of(pair))
+    next_isolated = 0
+    try:
+        while True:
+            while cursor < b.total and not b.uncovered[cursor]:
+                cursor += 1
+            if cursor == b.total:
+                break
+            b.tick()
+            cover(cursor)
+        for next_isolated, pair in enumerate(isolated):
+            b.settled_base = len(fresh) + next_isolated
+            b.retarget([pair])
+            b.tick()
+            cover(b.index_of(pair))
+        next_isolated = len(isolated)
+    except _Budget:
+        result.generation_complete = False
+        unsettled = {_pair_key(f.pair): f for f in _unsettled(b)}
+        for pair in isolated[next_isolated:]:
+            unsettled.setdefault(_pair_key(pair), Finding(pair, BUDGET_DETAIL))
+        result.budget_exceeded = list(unsettled.values())
     result.timings = {
         "total_s": time.perf_counter() - started,
         "exhaustive_s": b.exhaustive_seconds,

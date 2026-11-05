@@ -764,6 +764,7 @@ python3 .../run_gauntlet_fuzz.py --coverage-of gauntlet-runs/random \
 |---|---|
 | `--pairwise` | Run every row of each selected space's covering set instead of drawing samples. `--seed` is the generator's seed (random and printed if absent; the same seed gives the same rows); `--data-seed` fixes the data seed of every row. `--samples` and `--row` are usage errors with it (`HIPDNN_FUZZ_SAMPLES` is ignored), and `--time-budget` still ends the run. |
 | `--pairwise-repair N` | After the rows, up to `N` rounds of repair rows (default 2; `0` is off), see below. |
+| `--pairwise-budget S` | With `--pairwise`: **one total** wall-clock limit (`90s`, `30m`, ...) for all pairwise generation of the run: the build of every selected space, then the repair rounds. The time spent running rows is not counted. `--time-budget` bounds generation too. With neither, generation is unbounded, as before. See *Bounded generation* below. |
 | `--generate-only` | With `--pairwise`: write each space's full row set and its report, run no binary. `--binary` and the engine flags are not needed. |
 | `--coverage-of DIR` `--levels-from PATH` `--first N` | Offline coverage of a finished run, see below. |
 
@@ -788,6 +789,7 @@ only if both values are live in it.
 | `illegal` | no legal row holds both values (a constraint forbids the pair) |
 | `dead` | legal rows hold both, but in each of them at least one of the two is inert (the pair can never be met live) |
 | `unproven` | the exhaustive search for a covering row passed its cap before it decided; the pair is never counted as covered |
+| `budget_exceeded` | not settled at all: the generation budget ended before the generator found a row or a proof. The pair counts as not covered (it stays among the pairs that could still be passed), and `generation_complete` is `false` |
 
 with the reason in the report. The search is exact. It reads what each constraint and each part of
 the rendered case *effectively* reads once the pair is fixed (`d3 if ndim == 5 else 1` reads
@@ -804,6 +806,33 @@ re-pinned in the commit that changes a space's axes, derived values or constrain
 `illegal` and `dead` pair of the four SDPA forward spaces (`SdpaFwd/Default`,
 `SdpaFwd/Flash2Region`, `SdpaFwd/Gfx950Dense`, `SdpaFwd/Flash2`) by an independent search, and show
 that every other pair of those spaces is covered.
+
+**Bounded generation (`--pairwise-budget`).** Generation is the build of each space's covering set and the repair rounds. For a space whose
+constraints and case tie many axes together, one exhaustive search can take minutes and a space can
+need thousands of them, so `--pairwise-budget S` (or `--time-budget`) bounds it. The deadline is
+checked at every node of the search, not only between pairs, so the run ends at the budget even in
+the middle of a long search. Then:
+
+- the rows built so far are kept and run (a repair round that is cut keeps its rows too); no further
+  repair round starts;
+- every pair the generator had not settled is reported `budget_exceeded` (not `unproven`: `unproven`
+  keeps its meaning of a capped search, and is excluded from `not_passed`; a `budget_exceeded` pair
+  is not), in the report, with `generation_complete: false`;
+- `pair_coverage` for the space has `generation_complete: false`, `complete: false` and a
+  `budget_exceeded` count, `stopped_because` is `pairwise-budget` (or `time-budget` when that cut
+  it), and the console report says `INCOMPLETE: the pairwise budget ended generation`.
+
+The budget is one total: a space that follows one the budget ended gets none, and the repair rounds
+get what the build left. Generation prints progress to stderr at most every 10 s (the space, `build`
+or `repair`, tuples settled of the total, rows built, seconds), also from inside a long search:
+
+```text
+  pairwise SdpaFwd/Gfx1151Probe (build): 957 of 1168 tuples settled, 555 rows, 10 s
+```
+
+A run with a budget that is large enough builds exactly the rows of a run without one. Pick the
+budget from the progress lines of an unbounded `--generate-only` run, which is the cheap way to see
+how long a space needs.
 
 **Rows.** A row is an explicit row: id `pw<k>` (`k` counts from 0 over the main rows and the repair
 rows of the space), `metadata.generator` `gauntlet-pairwise`, the pairwise seed in `notes`
@@ -827,31 +856,35 @@ row. The repair rows are `pw<k>` after the main rows and run through the same ba
 
 **Report.** `<work-dir>/pairwise/<Op>_<Space>.json`: `levels` (axis to level values),
 `tuples_total`, `rows` (the number of main rows), `lower_bound` (the largest product of two axes'
-level counts: no covering set is smaller), `illegal`, `dead` and `unproven` (each a list of
-`{"pair": [[axisA, valueA], [axisB, valueB]], "detail"}`), `repair` (`max_rounds`, `rows`, one entry
-per round with `targets`, `retried`, `never_passed`, `unreachable`, `rows`, `first_row`, and the
-`never_passed` pairs of the last round) and `timings` of the generator (`total_s`,
-`exhaustive_s`, `exhaustive_searches`, `renders`). It is written when the rows are built and
-again at the end.
+level counts: no covering set is smaller), `illegal`, `dead`, `unproven` and `budget_exceeded`
+(each a list of `{"pair": [[axisA, valueA], [axisB, valueB]], "detail"}`), `generation_complete`
+(`false` when the budget cut the build or a repair round), `repair` (`max_rounds`, `rows`, one entry
+per round with `targets`, `retried`, `never_passed`, `unreachable`, `budget_exceeded`, `rows`,
+`first_row`, and the `never_passed` pairs of the last round) and `timings` of the generator
+(`total_s`, `exhaustive_s`, `exhaustive_searches`, `renders`). It is written when the rows are built
+and again at the end.
 
 **`summary.json`.** A pairwise run has `"mode": "pairwise"` (`"random"` and `"row"` otherwise),
 `seed` (the generator seed), no `samples_per_space`, `"continuous": false`, and
-`stopped_because` `pairwise-complete` when every row and repair round ran (or `time-budget`,
+`stopped_because` `pairwise-complete` when every row and repair round ran (or `pairwise-budget`
+when the generation budget cut the build or a repair round, `time-budget`,
 `interrupted`). `pair_coverage[<space id>]` has:
 
 | Field | Meaning |
 |---|---|
 | `tuples` | every pair of levels |
-| `illegal`, `dead`, `unproven` | the counts above |
+| `illegal`, `dead`, `unproven`, `budget_exceeded` | the counts above |
 | `drawn` | pairs some sample drew: both values are levels and live in its row (a `range` axis holding a value that is no level draws none) |
 | `passed` | drawn by a `PASS` or `UNCLAIMED_PASS` sample |
 | `declined_only` | drawn, and every sample that drew it was `DECLINED` |
 | `never_passed` | drawn and not passed (`declined_only`, and pairs a `WRONG`, `CRASH` or `UNEXERCISED` sample drew) |
-| `not_passed_total`, `not_passed` | the pairs that could still be passed (everything not passed except the `illegal`, `dead` and `unproven` ones), and the first 50 of them as `[[axisA, valueA], [axisB, valueB]]` |
+| `not_passed_total`, `not_passed` | the pairs that could still be passed (everything not passed except the `illegal`, `dead` and `unproven` ones; `budget_exceeded` pairs stay), and the first 50 of them as `[[axisA, valueA], [axisB, valueB]]` |
 | `rows`, `repair_rows` | main rows and repair rows run |
-| `complete` | `false` when the run stopped before every row and repair round ran; the counts are then partial |
+| `generation_complete` | `false` when `--pairwise-budget` or `--time-budget` ended generation: the rows are only the part of the covering set built in time, and `budget_exceeded` pairs were never settled |
+| `complete` | `false` when the run stopped before every row and repair round ran, or `generation_complete` is `false`; the counts are then partial |
 
-For a complete run, `drawn == tuples - illegal - dead - unproven`; `passed / tuples` is the number
+For a complete run, `drawn == tuples - illegal - dead - unproven` (and `budget_exceeded` is 0);
+`passed / tuples` is the number
 to read, with `not_passed` saying what is missing. It is counted from every axis value of every
 row (`range` axes included) and never from a shrink candidate. The console report prints one line
 per space.
@@ -867,7 +900,8 @@ placement, a separate decision).
 prints, as JSON, the pair coverage of the `samples.jsonl` and `outcomes.jsonl` of `WORK_DIR`
 (typically a random run) against the levels, and the `illegal`/`dead`/`unproven` pairs, of
 `PATH`: a pairwise report or a directory of them (`<work-dir>/pairwise`). Per space of a report it
-gives the `pair_coverage` fields above (without `rows`, `repair_rows` and `complete`) and
+gives the `pair_coverage` fields above (without `rows`, `repair_rows` and `complete`), the report's
+`generation_complete`, and
 `samples` and `with_outcome` (the samples counted and those with an outcome record). `--first N`
 counts only the first `N` samples of each space, so a random run of the same size as a pairwise run
 can be compared with it. The same is `run_gauntlet_fuzz.coverage_of(work_dir, levels_from,

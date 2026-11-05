@@ -7144,6 +7144,491 @@ def test_the_offline_coverage_helper_rejects_a_missing_report(run, tmp_path, cap
     assert "--levels-from" in capsys.readouterr().err
 
 
+# --------------------------------------------------------------------------
+# Bounded pairwise generation: a deadline, progress and ``budget_exceeded``
+# --------------------------------------------------------------------------
+
+
+class StepClock:
+    """A clock that moves one unit on every reading, so a deadline is a count of readings: the
+    search reads it once per node, per candidate row and per tuple. No real time is involved.
+    """
+
+    def __init__(self):
+        self.now = 0.0
+        self.reads = 0
+
+    def __call__(self):
+        self.reads += 1
+        self.now += 1.0
+        return self.now
+
+
+# Seven axes of three levels that one constraint reads all of: almost no random completion is
+# legal, so nearly every tuple goes to the exhaustive search.
+SUM_AXES = {f"a{i}": {"values": [0, 1, 2]} for i in range(7)}
+SUM = " + ".join(SUM_AXES)
+SUM_SPACES = {
+    "feasible": f"{SUM} >= 11 and {SUM} <= 12",
+    "impossible": f"{SUM} >= 100",
+}
+
+
+def write_sum_space(tmp_path, kind, file_name="Toy.space.json"):
+    return write_space(
+        tmp_path,
+        file_name=file_name,
+        axes=SUM_AXES,
+        derive={},
+        constraints=[{"rule": SUM_SPACES[kind], "reason": "the sum of every axis"}],
+        case={
+            "values": {name: "${" + name + "}" for name in SUM_AXES},
+            "metadata": {"purpose": "probe"},
+        },
+    )
+
+
+def sum_space(tmp_path, kind):
+    return space_lib.load_space(write_sum_space(tmp_path, kind))
+
+
+def _settled_partition(sp, result):
+    """Every tuple of the levels is covered by a row, proven illegal or dead, reported unproven
+    or reported ``budget_exceeded``, and no tuple is two of those."""
+    parts = {
+        "covered": _covered(sp, result.levels, result.rows),
+        "illegal": _flagged(result, "illegal"),
+        "dead": _flagged(result, "dead"),
+        "unproven": _flagged(result, "unproven"),
+        "budget_exceeded": _flagged(result, "budget_exceeded"),
+    }
+    names = list(parts)
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            assert not parts[a] & parts[b], (a, b)
+    assert set().union(*parts.values()) == _tuple_universe(result.levels)
+    return parts
+
+
+def test_a_deadline_the_search_passes_leaves_the_unsettled_tuples_budget_exceeded(
+    tmp_path,
+):
+    # bug caught: a build with no way to stop (G1: it ran for hours on a space whose constraints
+    # tie every axis together) or one that drops the tuples it did not get to; budget_exceeded is
+    # not unproven, so the tuples still count as not covered
+    sp = sum_space(tmp_path, "feasible")
+    full = pairwise.build(sp, 1)
+    assert full.generation_complete and full.budget_exceeded == []
+    clock, records = StepClock(), []
+    cut = pairwise.build(
+        sp, 1, deadline=3000, clock=clock, progress=records.append, progress_interval=0
+    )
+    assert cut.generation_complete is False and cut.budget_exceeded
+    assert cut.rows and len(cut.rows) < len(full.rows)
+    assert (
+        cut.rows == full.rows[: len(cut.rows)]
+    )  # the rows built so far are the full build's
+    assert cut.unproven == []  # unproven keeps its meaning: a capped search
+    assert (
+        clock.reads <= 3000 + 1
+    )  # the search stopped at the deadline, not a pair later
+    parts = _settled_partition(sp, cut)
+    assert parts["budget_exceeded"] and parts["covered"]
+    assert all(f.detail == pairwise.BUDGET_DETAIL for f in cut.budget_exceeded)
+    # progress came from inside the search: a record per reading, settled counts never go back
+    assert records and {r["space"] for r in records} == {"Toy/Default"}
+    assert {r["phase"] for r in records} == {"build"}
+    assert all(r["total"] == full.tuples_total for r in records)
+    settled = [r["settled"] for r in records]
+    assert settled == sorted(settled) and 0 < settled[-1] < full.tuples_total
+    assert records[-1]["rows"] <= len(cut.rows)
+    assert [r["elapsed"] for r in records] == sorted(r["elapsed"] for r in records)
+
+
+def test_the_deadline_is_checked_at_every_node_of_a_search_not_between_tuples(tmp_path):
+    # bug caught: a deadline read only between tuples: the first tuple of this space needs
+    # thousands of nodes to be refuted, so a build that checked after it would run them all
+    sp = sum_space(tmp_path, "impossible")
+    clock = StepClock()
+    cut = pairwise.build(sp, 1, deadline=60, clock=clock)
+    assert clock.reads == 60  # stopped on the reading that reached the deadline
+    assert cut.rows == [] and cut.illegal == [] and cut.dead == []
+    assert len(cut.budget_exceeded) == cut.tuples_total > 0
+    assert cut.generation_complete is False
+    # unbounded, the same space settles every tuple, and the first search alone is long
+    full_clock = StepClock()
+    full = pairwise.build(sp, 1, deadline=float("inf"), clock=full_clock)
+    assert full.budget_exceeded == [] and len(full.illegal) == full.tuples_total
+    assert full_clock.reads > 20 * 60
+
+
+def test_an_expired_deadline_returns_at_once_with_every_tuple_budget_exceeded(tmp_path):
+    sp = sum_space(tmp_path, "feasible")
+    clock = StepClock()
+    cut = pairwise.build(sp, 1, deadline=0.0, clock=clock)
+    assert clock.reads <= 2  # the builder's start, then the first tuple's check
+    assert cut.rows == [] and cut.generation_complete is False
+    assert len(cut.budget_exceeded) == cut.tuples_total
+    parts = _settled_partition(sp, cut)
+    assert parts["budget_exceeded"] == _tuple_universe(cut.levels)
+
+
+def test_a_build_with_a_deadline_it_never_reaches_is_the_unbounded_build(tmp_path):
+    # bug caught: the deadline plumbing changing the rows or the verdicts when it does not fire
+    sp = sum_space(tmp_path, "feasible")
+    plain = pairwise.build(sp, 1)
+    bounded = pairwise.build(sp, 1, deadline=float("inf"), clock=StepClock())
+    assert bounded.rows == plain.rows and bounded.generation_complete
+    assert _flagged(bounded, "illegal") == _flagged(plain, "illegal")
+    assert _flagged(bounded, "dead") == _flagged(plain, "dead")
+    assert bounded.budget_exceeded == []
+
+
+def test_progress_is_reported_at_most_once_per_interval(tmp_path):
+    sp = sum_space(tmp_path, "feasible")
+    records = []
+    pairwise.build(
+        sp, 1, deadline=3000, clock=StepClock(), progress=records.append,
+        progress_interval=25.0,
+    )  # fmt: skip
+    elapsed = [r["elapsed"] for r in records]
+    assert len(records) >= 100  # one per 25 readings of a 3000-reading build
+    assert all(b - a >= 25.0 for a, b in zip(elapsed, elapsed[1:]))
+    assert set(records[0]) == {"space", "phase", "settled", "total", "rows", "elapsed"}
+    # with no progress callback nothing is reported and nothing breaks
+    assert pairwise.build(sp, 1, deadline=500, clock=StepClock()).budget_exceeded
+
+
+def test_a_repair_honours_the_deadline_and_keeps_its_rows_so_far(tmp_path):
+    # bug caught: a repair round that ignores the budget and runs to its end after the build
+    # has used it up
+    sp = space_lib.load_space(write_space(tmp_path, **PW_TOY))
+    built = pairwise.build(sp, 3)
+    records = _hand_records(built.rows, lambda r: r["mode"] == "q")
+    found = pairwise.repair_targets(sp, records, built.levels, built.liveness)
+
+    def call(**kwargs):
+        return pairwise.repair(
+            sp, 3, found.targets, found.allowed, round_number=1,
+            witness=found.witness, liveness=built.liveness, **kwargs,
+        )  # fmt: skip
+
+    full = call()
+    assert full.generation_complete and full.budget_exceeded == [] and full.rows
+    expired = call(deadline=0.0, clock=StepClock())
+    assert expired.rows == [] and expired.generation_complete is False
+    retried = {_pair_tuple_key(pair) for pair in full.retried}
+    assert {_pair_tuple_key(f.pair) for f in expired.budget_exceeded} == retried
+    # a deadline in between: a prefix of the rows, and every retried target is covered by them,
+    # reported budget_exceeded or reported unreachable
+    partial = None
+    for deadline in range(1, 400):
+        cut = call(deadline=deadline, clock=StepClock(), progress_interval=0.0)
+        assert cut.rows == full.rows[: len(cut.rows)]
+        assert cut.generation_complete == (cut.budget_exceeded == [])
+        covered = _covered(sp, built.levels, cut.rows)
+        listed = {_pair_tuple_key(f.pair) for f in cut.budget_exceeded}
+        unreachable = {_pair_tuple_key(f.pair) for f in cut.unreachable}
+        assert len(listed) == len(cut.budget_exceeded)  # none twice
+        assert not listed & covered
+        assert (listed | unreachable | covered) >= retried
+        if cut.rows and cut.budget_exceeded:
+            partial = cut
+    assert partial is not None, "no deadline stopped the repair part-way"
+    progress = []
+    call(
+        deadline=400, clock=StepClock(), progress=progress.append, progress_interval=0.0
+    )
+    assert progress and {r["phase"] for r in progress} == {"repair"}
+    assert all(r["total"] == len(full.retried) for r in progress)
+
+
+def _pair_tuple_key(pair):
+    (a, va), (b, vb) = pair
+    return _tuple_key(a, va, b, vb)
+
+
+def test_a_repair_with_isolated_targets_reports_the_ones_it_did_not_reach(tmp_path):
+    # bug caught: the targets a repair retries on their own (stubborn ones) vanishing from the
+    # report when the deadline ends the round before their turn
+    sp = space_lib.load_space(write_space(tmp_path, **PW_TOY))
+    built = pairwise.build(sp, 3)
+    allowed = {name: list(levels) for name, levels in built.levels.items()}
+    stubborn = [
+        (("dtype", "half"), ("mode", "p")),
+        (("dtype", "float"), ("mode", "r")),
+        (("a", 3), ("mode", "q")),
+    ]
+    fresh = [(("dtype", "bfloat16"), ("a", 2))]
+    targets = fresh + stubborn
+    full = pairwise.repair(
+        sp, 3, targets, allowed, round_number=2, stubborn=stubborn,
+        liveness=built.liveness,
+    )  # fmt: skip
+    assert full.generation_complete and len(full.rows) >= len(stubborn)
+    clock = StepClock()
+    reads = []
+    pairwise.repair(
+        sp, 3, targets, allowed, round_number=2, stubborn=stubborn,
+        liveness=built.liveness, deadline=float("inf"), clock=clock,
+    )  # fmt: skip
+    seen_cut = False
+    for deadline in range(1, clock.reads + 2):
+        cut = pairwise.repair(
+            sp, 3, targets, allowed, round_number=2, stubborn=stubborn,
+            liveness=built.liveness, deadline=deadline, clock=StepClock(),
+        )  # fmt: skip
+        listed = [_pair_tuple_key(f.pair) for f in cut.budget_exceeded]
+        assert len(listed) == len(set(listed))
+        covered = _covered(sp, built.levels, cut.rows)
+        wanted = {_pair_tuple_key(p) for p in targets}
+        assert wanted <= set(listed) | covered | {
+            _pair_tuple_key(f.pair) for f in cut.unreachable
+        }
+        reads.append(len(cut.rows))
+        seen_cut |= bool(cut.budget_exceeded and cut.rows)
+    assert seen_cut and reads == sorted(reads)
+
+
+def test_the_generation_budget_is_one_total_across_calls_and_bounded_by_the_time_budget():
+    clock = StepClock()
+    budget = fuzz.GenerationBudget(10.0, None, run_started=0.0, clock=clock)
+    assert budget.limits() == {"deadline": 1.0 + 10.0, "clock": clock}  # reading 1
+    with budget.charging():  # reading 2 on entry, 3 on exit: one unit spent
+        pass
+    assert budget.spent == 1.0
+    assert budget.deadline() == 4.0 + (10.0 - 1.0)  # what is left, not another 10 s
+    budget.spent = 25.0
+    assert budget.deadline() == 5.0  # spent past the total: already expired
+    with pytest.raises(RuntimeError):
+        with budget.charging():
+            raise RuntimeError  # a failing call is charged too
+    assert budget.spent > 25.0
+    capped = fuzz.GenerationBudget(100.0, 7.0, run_started=2.0, clock=StepClock())
+    assert (
+        capped.deadline() == 9.0
+    )  # the time budget, from the start of the run, is sooner
+    assert fuzz.GenerationBudget(None, None, 0.0).limits()["deadline"] is None
+    assert fuzz.GenerationBudget(None, 7.0, 2.0).deadline() == 9.0
+
+
+def test_pairwise_budget_parses_a_duration_and_needs_pairwise(capsys):
+    assert fuzz.parse_args(["--binary", "b", "--pairwise"]).pairwise_budget is None
+    a = fuzz.parse_args(["--binary", "b", "--pairwise", "--pairwise-budget", "1m30s"])
+    assert a.pairwise_budget == 90.0
+    for argv, message in (
+        (
+            ["--binary", "b", "--pairwise-budget", "60"],
+            "--pairwise-budget needs --pairwise",
+        ),
+        (
+            ["--binary", "b", "--pairwise", "--pairwise-budget", "soon"],
+            "invalid duration",
+        ),
+    ):
+        with pytest.raises(SystemExit):
+            fuzz.parse_args(argv)
+        assert message in capsys.readouterr().err
+
+
+def _budgeted_spaces(tmp_path, kind="feasible"):
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_sum_space(spaces, kind)
+    return spaces
+
+
+def test_the_driver_ends_pairwise_generation_at_its_budget_and_reports_it(
+    run, tmp_path, monkeypatch, capsys
+):
+    # bug caught: --pairwise-budget not reaching the generator, or a cut build reported as a
+    # complete run (rows built so far must run, the rest must be named)
+    spaces = _budgeted_spaces(tmp_path)
+    clock, passed = StepClock(), []
+    real_build = pairwise.build
+
+    def build(sp, seed, **kwargs):
+        passed.append(kwargs["deadline"])
+        assert kwargs["progress"] is not None and kwargs["deadline"] is not None
+        return real_build(
+            sp,
+            seed,
+            **{**kwargs, "deadline": 3000, "clock": clock, "progress_interval": 0},
+        )
+
+    monkeypatch.setattr(fuzz.pairwise, "build", build)
+    monkeypatch.setattr(fuzz, "PAIRWISE_PROGRESS_INTERVAL", 0)
+    code = _pw_run(run, spaces, "--pairwise-budget", "5m")
+    assert code == 0 and len(passed) == 1
+    summary = run.summary
+    assert summary["stopped_because"] == "pairwise-budget"
+    cov = summary["pair_coverage"]["Toy/Default"]
+    report = _pw_report(run.work)
+    assert report["generation_complete"] is False and report["budget_exceeded"]
+    assert cov["generation_complete"] is False and cov["complete"] is False
+    assert cov["budget_exceeded"] == len(report["budget_exceeded"]) > 0
+    assert (
+        cov["rows"] == report["rows"] == len(run.outcome_list) > 0
+    )  # the rows built ran
+    assert cov["unproven"] == 0 and report["unproven"] == []
+    # budget_exceeded tuples stay among the tuples that could still be passed
+    assert cov["not_passed_total"] >= cov["budget_exceeded"]
+    assert [f["detail"] for f in report["budget_exceeded"]] == [
+        pairwise.BUDGET_DETAIL
+    ] * len(report["budget_exceeded"])
+    out, err = capsys.readouterr()
+    assert "budget ended it" in out and "budget exceeded" in out
+    assert "INCOMPLETE: the pairwise budget ended generation" in out
+    assert "tuples settled" in err and "(build)" in err  # progress went to stderr
+
+
+def test_the_driver_generation_deadline_comes_from_pairwise_budget_and_time_budget(
+    run, tmp_path, monkeypatch
+):
+    spaces = _budgeted_spaces(tmp_path)
+    seen = {}
+    real_build = pairwise.build
+
+    def build(sp, seed, **kwargs):
+        seen["deadline"] = kwargs["deadline"]
+        seen["now"] = time_monotonic()
+        return real_build(sp, seed, **{**kwargs, "deadline": 0.0, "clock": StepClock()})
+
+    time_monotonic = time.monotonic
+    monkeypatch.setattr(fuzz.pairwise, "build", build)
+    _pw_run(run, spaces, "--pairwise-budget", "100s")
+    assert 99 < seen["deadline"] - seen["now"] <= 100
+    _pw_run(run, spaces, "--pairwise-budget", "100s", "--time-budget", "30s")
+    assert (
+        28 < seen["deadline"] - seen["now"] <= 30
+    )  # --time-budget bounds generation too
+    _pw_run(run, spaces, "--time-budget", "30s")
+    assert 28 < seen["deadline"] - seen["now"] <= 30
+    _pw_run(run, spaces)
+    assert seen["deadline"] is None  # neither: generation is unbounded, as before
+
+
+def test_a_run_without_a_budget_reports_its_generation_complete(run, tmp_path):
+    spaces = _pw_spaces(tmp_path)
+    assert _pw_run(run, spaces) == 0
+    cov = run.summary["pair_coverage"]["Toy/Default"]
+    assert cov["generation_complete"] is True and cov["complete"] is True
+    assert cov["budget_exceeded"] == 0
+    report = _pw_report(run.work)
+    assert report["generation_complete"] is True and report["budget_exceeded"] == []
+    assert run.summary["stopped_because"] == "pairwise-complete"
+
+
+def test_a_real_pairwise_budget_ends_a_space_the_build_cannot_finish_in_time(
+    run, tmp_path, capsys
+):
+    # the one test on the wall clock: the build of this space needs ~0.3 s, the budget is 20 ms,
+    # so it ends part-way on any machine; nothing here depends on how far it got
+    spaces = _budgeted_spaces(tmp_path)
+    started = time.monotonic()
+    code = _pw_run(run, spaces, "--pairwise-budget", "0.02s")
+    assert code == 0 and time.monotonic() - started < 30
+    cov = run.summary["pair_coverage"]["Toy/Default"]
+    assert cov["generation_complete"] is False and cov["budget_exceeded"] > 0
+    assert run.summary["stopped_because"] == "pairwise-budget"
+
+
+def test_the_total_budget_spans_every_space_so_the_later_ones_get_what_is_left(
+    run, tmp_path, monkeypatch
+):
+    # bug caught: a budget per space (a run of many spaces then takes many times the budget)
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    for name in ("First", "Second", "Third"):
+        write_sum_space(spaces, "feasible", f"Toy.{name}.space.json")
+
+    class Wall:
+        now = 1000.0
+
+        def __call__(self):
+            return self.now
+
+    wall = Wall()
+
+    class Budget(fuzz.GenerationBudget):
+        def __init__(self, pairwise_budget, time_budget, run_started):
+            super().__init__(pairwise_budget, time_budget, run_started, clock=wall)
+
+    seen = []
+    real_build = pairwise.build
+
+    def build(sp, seed, **kwargs):
+        seen.append((sp.space_id, kwargs["deadline"] - wall.now))
+        wall.now += 40.0  # each space "takes" 40 s of the wall clock
+        return real_build(sp, seed)
+
+    monkeypatch.setattr(fuzz, "GenerationBudget", Budget)
+    monkeypatch.setattr(fuzz.pairwise, "build", build)
+    code = run.run(
+        "--pairwise", "--pairwise-budget", "100s", "--spaces-dir", str(spaces),
+        "--generate-only", "--work-dir", str(run.work), space=None,
+    )  # fmt: skip
+    assert code == 0
+    # what the earlier spaces left of the 100 s, not 100 s for each
+    assert seen == [("Toy/First", 100.0), ("Toy/Second", 60.0), ("Toy/Third", 20.0)]
+
+
+def test_a_repair_round_cut_by_the_budget_stops_the_run_and_is_reported(
+    run, tmp_path, monkeypatch
+):
+    # bug caught: repair rounds that run on after the generation budget ended, or a cut round
+    # reported as complete
+    spaces = _pw_spaces(tmp_path)
+    run.control(match=[_when("declined", ("values.mode", "==", "q"))])
+    real_repair = pairwise.repair
+
+    def repair(sp, seed, targets, allowed, **kwargs):
+        assert kwargs["deadline"] is not None and kwargs["progress"] is not None
+        return real_repair(
+            sp, seed, targets, allowed,
+            **{**kwargs, "deadline": 0.0, "clock": StepClock()},
+        )  # fmt: skip
+
+    monkeypatch.setattr(fuzz.pairwise, "repair", repair)
+    assert (
+        _pw_run(run, spaces, "--pairwise-budget", "5m", "--pairwise-repair", "3") == 0
+    )
+    report = _pw_report(run.work)
+    rounds = report["repair"]["rounds"]
+    assert [r["round"] for r in rounds] == [1]  # no round starts after the cut
+    assert (
+        rounds[0]["budget_exceeded"] == rounds[0]["retried"] > 0
+        and rounds[0]["rows"] == 0
+    )
+    assert len(report["budget_exceeded"]) == rounds[0]["budget_exceeded"]
+    cov = run.summary["pair_coverage"]["Toy/Default"]
+    assert report["generation_complete"] is False
+    assert cov["generation_complete"] is False and cov["complete"] is False
+    assert cov["budget_exceeded"] == rounds[0]["budget_exceeded"]
+    assert run.summary["stopped_because"] == "pairwise-budget"
+
+
+def test_the_offline_coverage_reads_budget_exceeded_from_the_report(
+    run, tmp_path, monkeypatch
+):
+    spaces = _budgeted_spaces(tmp_path)
+    real_build = pairwise.build
+    monkeypatch.setattr(
+        fuzz.pairwise, "build",
+        lambda sp, seed, **kw: real_build(sp, seed, **{**kw, "deadline": 3000, "clock": StepClock()}),
+    )  # fmt: skip
+    assert _pw_run(run, spaces, "--pairwise-budget", "5m") == 0
+    found = fuzz.coverage_of(run.work, run.work / "pairwise", spaces_dir=str(spaces))[
+        "Toy/Default"
+    ]
+    assert found["generation_complete"] is False
+    assert (
+        found["budget_exceeded"]
+        == run.summary["pair_coverage"]["Toy/Default"]["budget_exceeded"]
+        > 0
+    )
+
+
 def _hand_records(rows, declined):
     """A run's records for ``rows``: ``DECLINED`` where ``declined(row)``, else ``PASS``."""
     return [(row, "DECLINED" if declined(row) else "PASS") for row in rows]
