@@ -23,9 +23,10 @@ namespace {
 // Must match MIOpenConvDepthwiseBwd1dHip.cpp.
 constexpr std::size_t kBlockSize = 256;
 
-// The filter is held in registers (scalar registers, being wave-uniform). Compiled for gfx1010,
-// gfx1030, gfx1100, gfx1151 and gfx1201, filter widths up to 64 at strides 1 to 8 need at most
-// 115 VGPRs and no scratch in fp32, fp16 and bf16.
+// The filter is held in registers (scalar registers, being wave-uniform). Compiled for every RDNA
+// target (gfx1010 to gfx1013, gfx1030 to gfx1036, gfx1100 to gfx1103, gfx1150 to gfx1154, gfx1170
+// to gfx1172, gfx1200, gfx1201), filter widths up to 64 at strides 1 to 8 need at most 115 VGPRs
+// and no scratch in fp32, fp16 and bf16.
 constexpr int kMaxFilterWidth = 64;
 constexpr int kMaxStride      = 8;
 
