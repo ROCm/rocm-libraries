@@ -16,7 +16,6 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
-#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 

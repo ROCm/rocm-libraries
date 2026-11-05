@@ -223,6 +223,9 @@ __device__ inline float roundToFp8(float x, int format)
     }
 }
 
+// These codecs intentionally stay self-contained instead of using HIP's MX types. GPU reference
+// kernels are embedded and compiled at runtime without a ROCm header tree, and reference conversion
+// must remain bit-exact across architectures rather than selecting hardware-dependent fast paths.
 __device__ inline float
     compactFloatToFloat(unsigned char bits, int exponentBits, int mantissaBits, int exponentBias)
 {
