@@ -116,7 +116,7 @@ __global__ void log1p_nd_hip_tensor(Rpp16s* srcPtr, uint* srcStrides, uint* srcD
     if (inRoi && (coords[numDims - 1] + 8 <= length[numDims - 1])) {
         for (int i = 0; i < numDims; i++) {
             dstIdx += (coords[i] * dstStrides[i]);
-            srcIdx += (begin[i] + (coords[i] * srcStrides[i]));
+            srcIdx += ((begin[i] + coords[i]) * srcStrides[i]);
         }
         rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
         log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
@@ -136,7 +136,7 @@ __global__ void log1p_nd_hip_tensor(Rpp16s* srcPtr, uint* srcStrides, uint* srcD
             uint coord = (flatIdx / srcStrides[i]) % srcDims[i];
             valid[lane] = (coord < length[i]);
             dstIdxLane[lane] += (coord * dstStrides[i]);
-            srcIdxLane[lane] += (begin[i] + (coord * srcStrides[i]));
+            srcIdxLane[lane] += ((begin[i] + coord) * srcStrides[i]);
         }
         src_f8.f1[lane] = valid[lane] ? static_cast<float>(srcPtr[srcIdxLane[lane]]) : 0.0f;
     }
