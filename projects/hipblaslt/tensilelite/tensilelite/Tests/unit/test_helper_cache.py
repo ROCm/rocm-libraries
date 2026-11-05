@@ -112,6 +112,27 @@ class TestComputeCacheKey:
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(asan=True))
         assert k1 != k2
 
+    def test_compiler_flags_change_key(self, tmp_path):
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
+        kernel_path = _write_test_files(tmp_path)
+        cxx17 = MockCompiler()
+        cxx17.default_args.append("-std=c++17")
+        cxx20 = MockCompiler()
+        cxx20.default_args.append("-std=c++20")
+        k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], cxx17)
+        k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], cxx20)
+        assert k1 != k2
+
+    def test_launcher_and_compiler_path_do_not_change_key(self, tmp_path):
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
+        kernel_path = _write_test_files(tmp_path)
+        direct = MockCompiler()
+        launched = MockCompiler()
+        launched.default_args = ["ccache", "/opt/rocm/bin/amdclang++", "-O3"]
+        k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], direct)
+        k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], launched)
+        assert k1 == k2
+
     def test_static_header_change_changes_key(self, tmp_path):
         from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
         kernel_path = _write_test_files(tmp_path)
