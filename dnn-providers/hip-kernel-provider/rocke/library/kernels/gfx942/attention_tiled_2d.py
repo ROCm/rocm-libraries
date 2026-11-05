@@ -2750,6 +2750,17 @@ def build_unified_attention_2d_tiled(
                 ptrs.append(b.global_ptr_add(src, base))
             return ptrs
 
+        def _kv_head_page_b() -> Value:
+            # The kv head's byte offset within a page.
+            return b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+
+        def _kv_page_off(token: Value, dim: Value, kv_head_b: Value) -> Value:
+            # Byte offset of K/V[token, dim] within its page; shared with cfvst.
+            return b.add(
+                b.add(b.mul(token, kv_stride_tok_b), kv_head_b),
+                b.mul(dim, b.const_i32(KV_BYTES)),
+            )
+
         def _tile_pages(
             src: Value, kv_tile_idx: Value
         ) -> tuple[list[Value], list[Value], Value]:
@@ -2757,8 +2768,7 @@ def build_unified_attention_2d_tiled(
             kv head's byte offset within a page."""
             ptrs = _tile_page_ptrs(src, kv_tile_idx)
             rsrcs = [b.buffer_rsrc(ptr, kv_block_bytes_c) for ptr in ptrs]
-            kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
-            return ptrs, rsrcs, kv_head_b
+            return ptrs, rsrcs, _kv_head_page_b()
 
         def _page_voff(call: int, kv_head_b: Value) -> Value:
             # Byte offset of this lane's halves within the call's page.
@@ -2768,10 +2778,7 @@ def build_unified_attention_2d_tiled(
             )
             token = b.div(half, b.const_i32(HD))
             dim = b.mod(half, b.const_i32(HD))
-            return b.add(
-                b.add(b.mul(token, kv_stride_tok_b), kv_head_b),
-                b.mul(dim, b.const_i32(KV_BYTES)),
-            )
+            return _kv_page_off(token, dim, kv_head_b)
 
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
@@ -3148,15 +3155,12 @@ def build_unified_attention_2d_tiled(
         _dp = b.const_i32(_v_t2_dim_pairs)
         if CFVST_PAGE_I64:
             v_page_ptrs = _tile_page_ptrs(value, kv_tile_idx)
-            v_kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+            v_kv_head_b = _kv_head_page_b()
 
         def _v_page_off(t_row: Value, d: Value) -> Value:
             # Byte offset of V[t_row, d] within its page.
             tok = b.mod(t_row, b.const_i32(BS)) if N_BLOCKS_PER_TILE > 1 else t_row
-            return b.add(
-                b.add(b.mul(tok, kv_stride_tok_b), v_kv_head_b),
-                b.mul(d, b.const_i32(KV_BYTES)),
-            )
+            return _kv_page_off(tok, d, v_kv_head_b)
 
         def _load_token_row_pair(t_row: Value, d0: Value, src: Value) -> Value:
             """Load <2 x f16> = (V[t_row, d0], V[t_row, d0+1]) as i32, bounded.

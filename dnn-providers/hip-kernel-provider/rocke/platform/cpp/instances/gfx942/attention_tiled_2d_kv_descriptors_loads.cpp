@@ -558,9 +558,30 @@ static void rocke__fast_paged_kv_voff_split(rocke_gfx942_attn2d_build_ctx_t* ctx
  * non-fast K/V loaders are i32-only otherwise.
  * ========================================================================== */
 
-static bool rocke__page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx)
+bool rocke_gfx942_attn2d_page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
     return ctx->I64_KV_ADDR && !ctx->FAST_PAGED_KV_DESC;
+}
+
+/* _kv_head_page_b: the kv head's byte offset within a page. */
+rocke_value_t* rocke_gfx942_attn2d_kv_head_page_b(rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    return rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->HD * ctx->KV_BYTES));
+}
+
+/* _kv_page_off: byte offset of K/V[token, dim] within its page; shared with cfvst.
+ * Builder calls follow Python's evaluation order. */
+rocke_value_t* rocke_gfx942_attn2d_kv_page_off(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                               rocke_value_t* token,
+                                               rocke_value_t* dim,
+                                               rocke_value_t* kv_head_b)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* token_b = rocke_b_mul(b, token, ctx->kv_stride_tok_b_v);
+    rocke_value_t* token_head_b = rocke_b_add(b, token_b, kv_head_b);
+    rocke_value_t* dim_b = rocke_b_mul(b, dim, rocke_b_const_i32(b, ctx->KV_BYTES));
+    return rocke_b_add(b, token_head_b, dim_b);
 }
 
 static int rocke__calls_per_page(const rocke_gfx942_attn2d_build_ctx_t* ctx)
@@ -643,7 +664,7 @@ static bool rocke__tile_pages(rocke_gfx942_attn2d_build_ctx_t* ctx,
     rocke_value_t* kv_block_bytes_c = rocke__kv_block_bytes_c(ctx);
     for(int page = 0; page < n_pages; ++page)
         rsrcs[page] = rocke_b_buffer_rsrc(b, ptrs[page], kv_block_bytes_c);
-    *kv_head_b = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->HD * ctx->KV_BYTES));
+    *kv_head_b = rocke_gfx942_attn2d_kv_head_page_b(ctx);
     *out_ptrs = ptrs;
     *out_rsrcs = rsrcs;
     return true;
@@ -660,10 +681,7 @@ static rocke_value_t*
     rocke_value_t* half = rocke_b_add(b, call_half, rocke__lane_half_base(ctx));
     rocke_value_t* token = rocke_b_div(b, half, rocke_b_const_i32(b, ctx->HD));
     rocke_value_t* dim = rocke_b_mod(b, half, rocke_b_const_i32(b, ctx->HD));
-    rocke_value_t* token_b = rocke_b_mul(b, token, ctx->kv_stride_tok_b_v);
-    rocke_value_t* token_head_b = rocke_b_add(b, token_b, kv_head_b);
-    rocke_value_t* dim_b = rocke_b_mul(b, dim, rocke_b_const_i32(b, ctx->KV_BYTES));
-    return rocke_b_add(b, token_head_b, dim_b);
+    return rocke_gfx942_attn2d_kv_page_off(ctx, token, dim, kv_head_b);
 }
 
 /* ==========================================================================
@@ -695,7 +713,7 @@ void rocke_gfx942_attn2d_issue_k_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
     rocke_value_t* fast_block1 = NULL;
     if(ctx->FAST_PAGED_KV_DESC)
         rocke_gfx942_attn2d_fast_paged_kv_blocks(ctx, kv_tile_idx, &fast_block0, &fast_block1);
-    bool page_rsrc = rocke__page_rsrc_i64(ctx);
+    bool page_rsrc = rocke_gfx942_attn2d_page_rsrc_i64(ctx);
     rocke_value_t** page_ptrs = NULL;
     rocke_value_t** page_rsrcs = NULL;
     rocke_value_t* kv_head_b = NULL;
@@ -832,7 +850,7 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
     rocke_value_t* fast_block1 = NULL;
     if(ctx->FAST_PAGED_KV_DESC)
         rocke_gfx942_attn2d_fast_paged_kv_blocks(ctx, kv_tile_idx, &fast_block0, &fast_block1);
-    bool page_rsrc = rocke__page_rsrc_i64(ctx);
+    bool page_rsrc = rocke_gfx942_attn2d_page_rsrc_i64(ctx);
     rocke_value_t** page_ptrs = NULL;
     rocke_value_t** page_rsrcs = NULL;
     rocke_value_t* kv_head_b = NULL;

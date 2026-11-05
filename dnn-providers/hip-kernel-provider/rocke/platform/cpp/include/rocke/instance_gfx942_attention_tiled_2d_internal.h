@@ -490,6 +490,18 @@ rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx
                                                    rocke_value_t* src,
                                                    rocke_value_t* kv_tile_idx);
 
+/* PAGE_RSRC_I64: i64 K/V addressing through per-page pointers. */
+bool rocke_gfx942_attn2d_page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* _kv_head_page_b: the kv head's byte offset within a page. */
+rocke_value_t* rocke_gfx942_attn2d_kv_head_page_b(rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* _kv_page_off: byte offset of K/V[token, dim] within its page. */
+rocke_value_t* rocke_gfx942_attn2d_kv_page_off(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                               rocke_value_t* token,
+                                               rocke_value_t* dim,
+                                               rocke_value_t* kv_head_b);
+
 /* ----- transposed-V store path (cfv / cfvst, lines 2621-2904) ----- */
 void rocke_gfx942_attn2d_issue_v_transposed(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                             rocke_value_t* kv_tile_idx);

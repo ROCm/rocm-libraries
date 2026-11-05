@@ -258,10 +258,7 @@ static rocke_value_t* rocke__cfvst_v_page_off(rocke_gfx942_attn2d_build_ctx_t* c
     rocke_value_t* tok = (ctx->N_BLOCKS_PER_TILE > 1)
                              ? rocke_b_mod(b, t_row, rocke_b_const_i32(b, ctx->BS))
                              : t_row;
-    rocke_value_t* tok_b = rocke_b_mul(b, tok, ctx->kv_stride_tok_b_v);
-    rocke_value_t* tok_head_b = rocke_b_add(b, tok_b, tile->kv_head_b);
-    rocke_value_t* dim_b = rocke_b_mul(b, d, rocke_b_const_i32(b, ctx->KV_BYTES));
-    return rocke_b_add(b, tok_head_b, dim_b);
+    return rocke_gfx942_attn2d_kv_page_off(ctx, tok, d, tile->kv_head_b);
 }
 
 /* _load_token_row_pair(t_row, d0, src) -> i32 = (V[t_row,d0], V[t_row,d0+1]),
@@ -393,7 +390,7 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
 
     /* CFVST_PAGE_I64 = TRANSPOSED_V_STORE and PAGE_RSRC_I64 (TRANSPOSED_V_STORE
      * holds whenever this loader runs). Python raises the same error at build. */
-    tile.page_i64 = ctx->I64_KV_ADDR && !ctx->FAST_PAGED_KV_DESC;
+    tile.page_i64 = rocke_gfx942_attn2d_page_rsrc_i64(ctx);
     if(tile.page_i64
        && !rocke__cfvst_call_pages(ctx, V_T_ITEMS_PER_THREAD, total_blocks, dim_pairs, call_pages))
     {
@@ -421,8 +418,7 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
         tile.page_ptrs = rocke_gfx942_attn2d_tile_page_ptrs(ctx, ctx->value, kv_tile_idx);
         if(tile.page_ptrs == NULL)
             return NULL;
-        tile.kv_head_b
-            = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->HD * ctx->KV_BYTES));
+        tile.kv_head_b = rocke_gfx942_attn2d_kv_head_page_b(ctx);
     }
 
     rocke__cfvst_payload_t* payload
