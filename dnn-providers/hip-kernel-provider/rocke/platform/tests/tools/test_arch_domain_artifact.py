@@ -226,6 +226,33 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                 self.assertGreater(tc.get("probe_timeout_s", 0), 0)
 
 
+class ArchDomainProcessorSupportTest(unittest.TestCase):
+    """Each column says, per target, whether its compiler accepts the name."""
+
+    def test_every_column_records_which_processor_names_its_compiler_accepts(self):
+        for flavor, path in _columns():
+            with self.subTest(flavor=flavor):
+                doc = json.loads(path.read_text())
+                processors = doc.get("processors", {})
+                self.assertEqual(sorted(processors), sorted(doc["toolchain"]["arches"]))
+                for arch, entry in processors.items():
+                    self.assertIsInstance(entry.get("accepted"), bool, arch)
+                    if not entry["accepted"]:
+                        self.assertTrue(entry.get("evidence"), arch)
+
+    def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
+        """The two answers agree: a name the compiler rejects was never probed
+        successfully for any declaration."""
+        for flavor, path in _columns():
+            doc = json.loads(path.read_text())
+            for arch, entry in doc.get("processors", {}).items():
+                if entry["accepted"]:
+                    continue
+                for key, row in doc["keys"].items():
+                    with self.subTest(flavor=flavor, arch=arch, key=key):
+                        self.assertNotEqual(row[arch]["status"], G.STATUS_OK)
+
+
 class AvailableCpusTest(unittest.TestCase):
     """The worker cap must reflect this process's share, not the host's size.
 
@@ -1586,6 +1613,18 @@ except KeyboardInterrupt:
         self.assertEqual(self._survivors(pids), [], "outlived the interrupt")
 
 
+def _staged_generator_tools(cmake: str) -> set[str]:
+    block = re.search(
+        r"install\(\s*FILES((?:\s+\"[^\"]+\")+)\s+"
+        r'DESTINATION "\$\{ROCKE_TEST_INSTALL_DIR\}/tests/arch_domain"\)',
+        cmake,
+    )
+    assert block, "no install() of the arch-domain generator"
+    staged = {Path(f).name for f in re.findall(r'"([^"]+)"', block.group(1))}
+    assert "gen_arch_domain.py" in staged, "gen_arch_domain.py is not staged"
+    return staged
+
+
 class InstalledGeneratorTest(unittest.TestCase):
     """The installed reproduction CTest runs a staged copy of the generator.
 
@@ -1596,14 +1635,7 @@ class InstalledGeneratorTest(unittest.TestCase):
 
     def test_every_helper_a_staged_tool_imports_is_staged_with_it(self):
         cmake = (_ROCKE / "CMakeLists.txt").read_text()
-        block = re.search(
-            r"install\(FILES((?:\s+\"[^\"]+\")+)\s+"
-            r'DESTINATION "\$\{ROCKE_TEST_INSTALL_DIR\}/tests/arch_domain"\)',
-            cmake,
-        )
-        self.assertIsNotNone(block, "no install() of the arch-domain generator")
-        staged = {Path(f).name for f in re.findall(r'"([^"]+)"', block.group(1))}
-        self.assertIn("gen_arch_domain.py", staged)
+        staged = _staged_generator_tools(cmake)
         for name in sorted(staged):
             tree = ast.parse((_ROCKE / "tools" / name).read_text())
             for node in ast.walk(tree):
@@ -1618,6 +1650,32 @@ class InstalledGeneratorTest(unittest.TestCase):
                     if (_ROCKE / "tools" / helper).is_file():
                         with self.subTest(tool=name, helper=helper):
                             self.assertIn(helper, staged)
+
+    def test_staged_tool_inventory_accepts_cmake_formatting(self):
+        files = (
+            ' "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"'
+            '\n "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"'
+            '\n DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")'
+        )
+        for spacing in ("", "\n    "):
+            with self.subTest(spacing=spacing):
+                self.assertEqual(
+                    _staged_generator_tools(f"install({spacing}FILES{files}"),
+                    {"gen_arch_domain.py", "_bounded_run.py"},
+                )
+
+    def test_staged_tool_inventory_requires_generator_and_destination(self):
+        cmake = (
+            'install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"'
+            ' "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"'
+            ' DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")'
+        )
+        for old, new, message in (
+            ("gen_arch_domain.py", "other.py", "gen_arch_domain.py is not staged"),
+            ("/tests/arch_domain", "/tests/other", "no install"),
+        ):
+            with self.subTest(old=old), self.assertRaisesRegex(AssertionError, message):
+                _staged_generator_tools(cmake.replace(old, new))
 
 
 class PartialSweepTest(unittest.TestCase):

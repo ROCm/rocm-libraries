@@ -32,6 +32,8 @@
 #include <unordered_set>
 
 #include <atomic>
+#include <map>
+#include <memory>
 #include <mutex>
 
 #include <tensilelitehost/export.h>
@@ -102,6 +104,24 @@ namespace TensileLite
 
             bool FindCodeObject(std::string const& codeObjectFile);
 
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // A local code object is named by absolute path and kept apart from
+            // the shipped modules: it is loaded at most once per adapter, never
+            // retried through out-of-memory recovery, and unloaded only with
+            // the adapter. Its kernels resolve only against their own module,
+            // so a name shared with a shipped kernel cannot pick the wrong code.
+            static bool isLocalCodeObject(std::string const& codeObjectFile);
+
+            hipError_t loadLocalCodeObject(std::string const& path);
+
+            // Loads `path` first if needed. Returns hipErrorNotFound only when
+            // the module loaded but does not export `name`.
+            hipError_t
+                getLocalKernel(hipFunction_t& rv, std::string const& path, std::string const& name);
+
+            size_t localCodeObjectCount();
+#endif
+
             hipError_t initKernel(std::string const& name);
 
             hipError_t initKernels(std::vector<std::string> const& kernelNames);
@@ -158,6 +178,14 @@ namespace TensileLite
 
             // Record for module reload
             std::string m_lazyLoadArchitecture;
+
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // One mutex per path serializes its load, so two threads cannot
+            // both load it. The maps are guarded by m_access.
+            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_localLoadMutexes;
+            std::unordered_map<std::string, hipModule_t>                 m_localModules;
+            std::map<std::pair<std::string, std::string>, hipFunction_t> m_localKernels;
+#endif
 
             friend std::ostream& operator<<(std::ostream& stream, SolutionAdapter const& adapter);
         };
