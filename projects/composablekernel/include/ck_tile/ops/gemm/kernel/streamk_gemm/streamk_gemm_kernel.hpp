@@ -129,30 +129,29 @@ struct StreamKKernel
 
     /**
      *@brief Stream-K gives every workgroup its own K range, so the TDM pipelines run without
-     *cluster multicast, and the plain-GEMM-only pipelines are not supported.
+     *cluster multicast.
      */
-    static_assert(!UniversalGemmKernel::kIsPlainGemmOnlyPipeline,
-                  "Stream-K GEMM does not support this pipeline (plain GEMM only)");
     static constexpr bool kClusterLaunch =
         BlockGemmShape::kclusterM * BlockGemmShape::kclusterN * BlockGemmShape::kclusterK > 1;
     static_assert(!UniversalGemmKernel::kIsTdmPipeline || !kClusterLaunch,
                   "TDM Stream-K GEMM: cluster launch unsupported (per-workgroup K ranges)");
 
     /**
-     *@brief True for comp_tdm and comp_tdm_v2: the TDM pipelines other than the wavelet
-     *comp_tdm_pc. They can return with their last, clipped TDM prefetch still writing LDS.
-     *CShuffleEpilogue and TdmEpilogue wait for it; StreamKGemm waits for it after a partial tile,
-     *which runs no epilogue. C must be row-major: CShuffleEpilogue supports nothing else, and
-     *TdmEpilogue's column-major store is not validated with these pipelines.
+     *@brief True for comp_tdm, comp_tdm_v2, and comp_tdm_v3: the TDM pipelines other than the
+     *wavelet comp_tdm_pc. V1 and V2 can return with their last, clipped TDM prefetch still writing
+     *LDS (V3 drains before returning). CShuffleEpilogue and TdmEpilogue wait for it; StreamKGemm
+     *waits for it after a partial tile, which runs no epilogue. C must be row-major:
+     *CShuffleEpilogue supports nothing else, and TdmEpilogue's column-major store is not validated
+     *with these pipelines.
      */
     static constexpr bool kIsCompTdmPipeline =
         UniversalGemmKernel::kIsTdmPipeline && !is_wavelet_pipeline<GemmPipeline>;
     static_assert(!kIsCompTdmPipeline || is_tdm_epilogue_v<EpiloguePipeline> ||
                       is_specialization_of<EpiloguePipeline, CShuffleEpilogue>::value,
-                  "Stream-K with comp_tdm or comp_tdm_v2 requires CShuffleEpilogue or "
-                  "TdmEpilogue (they wait for the pipeline's last TDM prefetch).");
+                  "Stream-K with comp_tdm, comp_tdm_v2, or comp_tdm_v3 requires CShuffleEpilogue "
+                  "or TdmEpilogue (they wait for the pipeline's last TDM prefetch).");
     static_assert(!kIsCompTdmPipeline || std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>,
-                  "Stream-K with comp_tdm or comp_tdm_v2 supports row-major C only.");
+                  "Stream-K with comp_tdm, comp_tdm_v2, or comp_tdm_v3 supports row-major C only.");
 
     struct StreamKKernelArgs : ck_tile::UniversalGemmKernelArgs<>
     {
@@ -507,9 +506,9 @@ struct StreamKKernel
                     index_t tile_local_cta_idx = amd_wave_read_first_lane(
                         kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx));
 
-                    index_t stride = amd_wave_read_first_lane(1);
-
-                    for(;; stride <<= 1)
+                    for(index_t stride = amd_wave_read_first_lane(1);
+                        tile_local_cta_idx % (stride << 1) == 0;
+                        stride <<= 1)
                     {
                         const index_t partner_cta_idx = amd_wave_read_first_lane(cta_idx + stride);
                         const index_t partner_start_iter = amd_wave_read_first_lane(
@@ -517,46 +516,30 @@ struct StreamKKernel
                         bool partner_in_tile =
                             amd_wave_read_first_lane(partner_start_iter < tile_iter_end);
 
-                        // If the partner of the workgroup who started the tile is not in this tile,
-                        // then the work for this tile is done and results can be stored in the C
-                        // tensor.
-                        if(tile_started && !partner_in_tile)
+                        if(!partner_in_tile)
                         {
-                            auto c_block_window = UniversalGemmKernel::template MakeCBlockWindows<
-                                TilePartitioner::MemoryOperation>(c_ptr, kargs, i_m, i_n);
-                            EpiloguePipeline{}(
-                                c_block_window, accum_block_tile, ds_block_window, smem_ptr_0);
                             break;
                         }
 
-                        // It's this workgroup's turn to read from partials.
-                        if(tile_local_cta_idx % (stride << 1) == 0)
-                        {
-                            // If this workgroup's partner is in the tile then it can read from
-                            // partials and accumulate results.
-                            if(partner_in_tile)
-                            {
-                                sk_ops.WaitStorePartialDone(kargs, partner_cta_idx);
-                                using BlockType = remove_cvref_t<decltype(c_block_tile)>;
-                                sk_ops.AddBlockTile(
-                                    accum_block_tile,
-                                    sk_ops.template LoadPartial<typename BlockType::DataType>(
-                                        kargs,
-                                        partner_cta_idx,
-                                        c_block_tile.get_tile_distribution()));
-                            }
-                        }
-                        // Otherwise, it's this workgroup's turn to write to partials. All
-                        // workgroups, except the workgroup who starts the tile, will write to
-                        // partials.
-                        else
-                        {
-                            sk_ops.StorePartial(kargs, cta_idx, accum_block_tile);
-                            sk_ops.SignalStorePartialDone(kargs, cta_idx);
-                            // Once the workgroup writes to partials, it has no more work to do for
-                            // this tile.
-                            break;
-                        }
+                        sk_ops.WaitStorePartialDone(kargs, partner_cta_idx);
+                        using BlockType = remove_cvref_t<decltype(c_block_tile)>;
+                        sk_ops.AddBlockTile(
+                            accum_block_tile,
+                            sk_ops.template LoadPartial<typename BlockType::DataType>(
+                                kargs, partner_cta_idx, c_block_tile.get_tile_distribution()));
+                    }
+
+                    if(tile_started)
+                    {
+                        auto c_block_window = UniversalGemmKernel::template MakeCBlockWindows<
+                            TilePartitioner::MemoryOperation>(c_ptr, kargs, i_m, i_n);
+                        EpiloguePipeline{}(
+                            c_block_window, accum_block_tile, ds_block_window, smem_ptr_0);
+                    }
+                    else
+                    {
+                        sk_ops.StorePartial(kargs, cta_idx, accum_block_tile);
+                        sk_ops.SignalStorePartialDone(kargs, cta_idx);
                     }
                 }
             }
