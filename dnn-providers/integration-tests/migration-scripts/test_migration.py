@@ -2681,6 +2681,42 @@ def test_grouped_import_keeps_per_input_seeds():
         print("  PASS: grouped_import_keeps_per_input_seeds")
 
 
+def test_grouped_import_keeps_aliases_start_offsets_and_live_rows():
+    """A grouped import that renumbers UIDs keeps each alias, start offset, live-row entry and
+    view seed."""
+    from bundle_utils import aliases_by_name, canonical_uid_map_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        assert uid_map[0] != 0 and uid_map[1] != 1, uid_map
+        sidecar = {
+            "format_version": 2,
+            "seed": 1234,
+            "inputs": {"0": {"seed": 101}, "1": {"seed": 202}, "2": {"seed": 303}},
+            "aliases": [{"uid": 1, "of": 0, "byte_offset": 0}],
+            "start_offsets": [{"uid": 0, "start_offset": 4}],
+            "live_rows": [{"uid": 2, "axis": 1, "lengths": 1}],
+        }
+        _, meta, template, _ = _import_grouped_capture(tmp, graph, sidecar)
+        assert meta["aliases"] == [
+            {"uid": uid_map[1], "of": uid_map[0], "byte_offset": 0}
+        ], meta["aliases"]
+        assert meta["start_offsets"] == [{"uid": uid_map[0], "start_offset": 4}], meta[
+            "start_offsets"
+        ]
+        assert meta["live_rows"] == [
+            {"uid": uid_map[2], "axis": 1, "lengths": uid_map[1]}
+        ], meta["live_rows"]
+        assert aliases_by_name(meta, template) == aliases_by_name(sidecar, graph), meta
+        assert aliases_by_name(meta, template) == [
+            {"view": "dy", "of": "x", "byte_offset": 0}
+        ], meta
+        assert inputs_by_name(meta, template)["dy"] == {"seed": 202}, meta["inputs"]
+        print("  PASS: grouped_import_keeps_aliases_start_offsets_and_live_rows")
+
+
 def test_grouped_topology():
     """--topology names the folder and refuses a mismatch."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -3242,6 +3278,7 @@ def main() -> int:
         test_grouped_topology,
         test_grouped_import_keeps_values_inputs,
         test_grouped_import_keeps_per_input_seeds,
+        test_grouped_import_keeps_aliases_start_offsets_and_live_rows,
         test_grouped_runs_are_deterministic,
         test_grouped_attribute_keys_prefixed_per_node,
         test_grouped_engine_api_version_per_case,
