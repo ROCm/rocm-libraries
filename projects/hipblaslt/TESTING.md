@@ -663,6 +663,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
+| rocjitsu smoke race checks | No | Component team | Post-build CPU emulation of hipblaslt-bench and TensileLite workloads for gfx942 and gfx950 on hipBLASLt/TensileLite PRs or those labeled `test:hipblaslt`. Failures are advisory and outside the required Multi-Arch summary |
 | rocjitsu GEMM workload runner unit tests (`clients/scripts/rocjitsu`) | Yes, when that directory changes | Component team | `Component CI: hipBLASLt rocjitsu scripts` lane, which rolls up to the required `Component CI Summary`. Stand-in benchmark and emulator, CPU only, seconds per run. The race workload itself runs nightly; see [Nightly Validation](#nightly-validation) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
@@ -962,7 +963,7 @@ manually dispatched runs.
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI` on gfx942/gfx950: quick tests on relevant PRs; standard tests nightly; manually selected test type | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
-| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
+| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Per-PR smoke sidecar for gfx942 and gfx950; nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950). See [Validation Gates and Ownership](#validation-gates-and-ownership) and [Nightly Validation](#nightly-validation) | No |
 | **TSAN** | Host-side data races between threads | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
