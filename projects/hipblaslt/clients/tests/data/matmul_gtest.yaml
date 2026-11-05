@@ -261,7 +261,7 @@ Tests:
   category: nightly
   function:
     matmul: *hpa_half_precision
-  matrix_size: *grid_limit_matrix_size_real
+  matrix_size: *grid_limit_matrix_size_real_even_k
   transA: N
   transB: N
   alpha: 1.0
