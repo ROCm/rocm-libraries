@@ -24,7 +24,7 @@ const char* toString(ListingStatus status)
         return "ok";
     case ListingStatus::NOT_ENUMERABLE:
         return "not_enumerable";
-    case ListingStatus::ERROR:
+    case ListingStatus::LISTING_ERROR:
         return "error";
     default:
         return "unknown";
@@ -72,14 +72,14 @@ CaseListing walkCatalog(IGraphEngineRunner& runner,
 {
     if(listed.loaded == nullptr)
     {
-        return ended(listing, ListingStatus::ERROR, listed.loadError);
+        return ended(listing, ListingStatus::LISTING_ERROR, listed.loadError);
     }
 
     auto session = runner.openGraph(*listed.loaded, engine);
     if(session.buildFailed)
     {
         return ended(
-            listing, ListingStatus::ERROR, "the graph did not load: " + session.buildError);
+            listing, ListingStatus::LISTING_ERROR, "the graph did not load: " + session.buildError);
     }
     if(!session.engines.accepted)
     {
@@ -107,7 +107,7 @@ CaseListing walkCatalog(IGraphEngineRunner& runner,
             // and then refused has broken, not declined.
             const bool unsupported = firstPage && isEnumerationUnsupported(error);
             return ended(listing,
-                         unsupported ? ListingStatus::NOT_ENUMERABLE : ListingStatus::ERROR,
+                         unsupported ? ListingStatus::NOT_ENUMERABLE : ListingStatus::LISTING_ERROR,
                          error.get_message());
         }
 
@@ -118,7 +118,7 @@ CaseListing walkCatalog(IGraphEngineRunner& runner,
         else if(page.totalCount != listing.total)
         {
             return ended(listing,
-                         ListingStatus::ERROR,
+                         ListingStatus::LISTING_ERROR,
                          "the catalog changed while it was being listed (total "
                              + std::to_string(listing.total) + " then "
                              + std::to_string(page.totalCount) + ")");
@@ -130,7 +130,7 @@ CaseListing walkCatalog(IGraphEngineRunner& runner,
             if(!seenIds.insert(candidate.id).second)
             {
                 return ended(listing,
-                             ListingStatus::ERROR,
+                             ListingStatus::LISTING_ERROR,
                              "candidate id \"" + candidate.id + "\" appears twice");
             }
             listing.candidates.push_back({candidate.id, knobsJson(candidate.variant.knobSettings)});
@@ -143,7 +143,7 @@ CaseListing walkCatalog(IGraphEngineRunner& runner,
         if(*page.nextOffset <= static_cast<uint64_t>(offset))
         {
             return ended(listing,
-                         ListingStatus::ERROR,
+                         ListingStatus::LISTING_ERROR,
                          "the catalog page at offset " + std::to_string(offset)
                              + " did not advance");
         }
@@ -153,7 +153,7 @@ CaseListing walkCatalog(IGraphEngineRunner& runner,
     if(listing.candidates.size() != listing.total)
     {
         return ended(listing,
-                     ListingStatus::ERROR,
+                     ListingStatus::LISTING_ERROR,
                      "the engine reported " + std::to_string(listing.total)
                          + " candidates and listed " + std::to_string(listing.candidates.size()));
     }
@@ -184,7 +184,7 @@ CaseListing listCaseCandidates(IGraphEngineRunner& runner,
     }
     catch(const std::exception& e)
     {
-        return ended(listing, ListingStatus::ERROR, e.what());
+        return ended(listing, ListingStatus::LISTING_ERROR, e.what());
     }
 }
 
@@ -218,7 +218,7 @@ size_t writeCandidateListing(std::ostream& out,
     for(const auto& listed : cases)
     {
         const auto listing = listCaseCandidates(runner, listed, engine);
-        if(listing.status == ListingStatus::ERROR)
+        if(listing.status == ListingStatus::LISTING_ERROR)
         {
             ++errors;
         }

@@ -32,7 +32,7 @@ enum class ListingStatus
     OK, ///< the engine enumerated its catalog; every page was read
     NOT_ENUMERABLE, ///< the engine cannot enumerate (or does not take the graph): the catalog is
     ///< one entry, its heuristic pick
-    ERROR, ///< the graph did not load or the enumeration broke; nothing can be said of the catalog
+    LISTING_ERROR, ///< the graph did not load or the enumeration broke; nothing can be said of the catalog
 };
 
 const char* toString(ListingStatus status);
@@ -51,7 +51,7 @@ struct CaseListing
     std::string test; ///< "Suite.Test", the name --gtest_filter selects on
     std::string bundle;
     std::string engine;
-    ListingStatus status = ListingStatus::ERROR;
+    ListingStatus status = ListingStatus::LISTING_ERROR;
     /// The catalog size the engine reported; equal to candidates.size() for an OK listing.
     uint64_t total = 0;
     std::vector<ListedCandidate> candidates;
@@ -86,7 +86,7 @@ CaseListing listCaseCandidates(IGraphEngineRunner& runner,
 std::string listingRecordJson(const CaseListing& listing);
 
 /// Writes one line per case in `cases`, in order, flushed per line, and returns how many of the
-/// listings ended in ERROR.
+/// listings ended in LISTING_ERROR.
 size_t writeCandidateListing(std::ostream& out,
                              IGraphEngineRunner& runner,
                              const std::vector<ListingCase>& cases,

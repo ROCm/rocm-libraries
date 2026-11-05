@@ -213,7 +213,7 @@ TEST_F(TestCandidateListing, ABrokenEnumerationIsAnErrorAndNotADefault)
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_EQ(listing.reason, "Invalid candidate page buffer");
 }
 
@@ -237,7 +237,7 @@ TEST_F(TestCandidateListing, AnEngineThatRefusesALaterPageIsAnErrorWithNoPartial
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_TRUE(listing.candidates.empty());
     EXPECT_EQ(listing.total, 0u);
 }
@@ -260,7 +260,7 @@ TEST_F(TestCandidateListing, ACatalogThatChangesSizeMidWalkIsAnError)
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_NE(listing.reason.find("changed"), std::string::npos) << listing.reason;
 }
 
@@ -280,7 +280,7 @@ TEST_F(TestCandidateListing, AWalkThatDoesNotAdvanceEndsInAnError)
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_NE(listing.reason.find("advance"), std::string::npos) << listing.reason;
 }
 
@@ -303,7 +303,7 @@ TEST_F(TestCandidateListing, AnIdThatRepeatsAcrossPagesIsAnError)
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_NE(listing.reason.find("twice"), std::string::npos) << listing.reason;
 }
 
@@ -324,7 +324,7 @@ TEST_F(TestCandidateListing, AShortCatalogIsAnError)
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
 }
 
 // Bug caught: a graph the engine declines enumerated anyway, or reported as an error: the
@@ -354,7 +354,7 @@ TEST_F(TestCandidateListing, AGraphThatDoesNotLoadIsAnErrorAndIsNotQueried)
 
     const auto listing = listCaseCandidates(_runner, loadedCase(), ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_NE(listing.reason.find("from_binary said no"), std::string::npos) << listing.reason;
 }
 
@@ -368,7 +368,7 @@ TEST_F(TestCandidateListing, ABundleThatFailedToLoadIsListedAsAnError)
 
     const auto listing = listCaseCandidates(_runner, failed, ENGINE);
 
-    EXPECT_EQ(listing.status, ListingStatus::ERROR);
+    EXPECT_EQ(listing.status, ListingStatus::LISTING_ERROR);
     EXPECT_EQ(listing.reason, "Failed to load bundle");
     EXPECT_EQ(listing.test, "Suite.broken");
 }
