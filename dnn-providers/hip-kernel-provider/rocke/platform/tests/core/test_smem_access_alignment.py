@@ -10,9 +10,9 @@ tests build kernels that mix element types and vector widths with several
 buffers live at once (so segments sit at non-zero offsets), lower them, and
 walk the IR: for every addrspace(3) load or store, ``N`` must divide the
 access's byte offset from the pool base, and the pool must be at least
-``N``-aligned. The walk runs on the Python engine's IR, so every check runs
-without the C++ engine; where that engine is built, its IR must be
-byte-identical and its refusals the same.
+``N``-aligned. Each check runs per engine: on the Python engine everywhere,
+and on the C++ engine where its binding is built, whose IR must also be
+byte-identical to the Python engine's and whose refusals must be the same.
 """
 
 from __future__ import annotations
@@ -22,16 +22,13 @@ import re
 import pytest
 from rocke.core.ir import F16, F32, F64, FP8E4M3, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse
-from rocke.core.lower_llvm import (
-    LLVM_FLAVOR_LLVM20,
-    _lower_kernel_to_llvm_python,
-)
+from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
     BACKEND_LANES,
+    ENGINES,
     assert_backend_lane_rejects,
-    assert_both_engines_reject,
-    available_engines,
-    lower_with_both_engines,
+    assert_engine_rejects,
+    lower_with_engine,
 )
 
 _ARCH = "gfx942"
@@ -102,31 +99,6 @@ def _alignment_violations(ll: str) -> list[str]:
                     f"{pool_align})"
                 )
     return bad
-
-
-def _lower(kernel) -> str:
-    """Lower with the Python engine (always available, so every check runs)."""
-    return _lower_kernel_to_llvm_python(
-        kernel, arch=_ARCH, llvm_flavor=LLVM_FLAVOR_LLVM20
-    )
-
-
-def _assert_engines_agree(kernel, python_ir: str) -> None:
-    """Where the C++ engine is built, its IR must equal ``python_ir``."""
-    if "cpp" in available_engines():
-        assert lower_with_both_engines(kernel, _ARCH, LLVM_FLAVOR_LLVM20) == python_ir
-
-
-def _assert_refused(kernel, error_type: type[Exception], message: str) -> None:
-    """The Python engine refuses ``kernel`` with exactly ``error_type`` and
-    ``message``; where the C++ engine is built, it refuses with the same text."""
-    with pytest.raises(error_type) as refusal:
-        _lower(kernel)
-    assert str(refusal.value) == message
-    if "cpp" in available_engines():
-        assert_both_engines_reject(
-            kernel, _ARCH, error_type, message, llvm_flavor=LLVM_FLAVOR_LLVM20
-        )
 
 
 def _f16_then_f32x4():
@@ -222,9 +194,12 @@ def _f16_then_f32x8():
 _KERNELS = [_f16_then_f32x4, _f16_then_f64x2, _several_live_buffers, _f16_then_f32x8]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("build", _KERNELS)
-def test_every_lds_alignment_claim_holds(build):
-    ll = _lower(build())
+def test_every_lds_alignment_claim_holds(engine, build):
+    ll = lower_with_engine(
+        build(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     assert "@smem_pool." in ll
     # The kernels place at least one segment at a non-zero offset, otherwise
     # the check below would only ever see offset 0.
@@ -232,36 +207,39 @@ def test_every_lds_alignment_claim_holds(build):
     assert _alignment_violations(ll) == []
 
 
-@pytest.mark.parametrize("build", _KERNELS)
-def test_both_engines_emit_the_same_ir(build):
-    kernel = build()
-    assert lower_with_both_engines(kernel, _ARCH, LLVM_FLAVOR_LLVM20) == _lower(kernel)
-
-
-def test_vector_access_moves_its_segment_to_the_vector_alignment():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_vector_access_moves_its_segment_to_the_vector_alignment(engine):
     """The f32 segment after a 2-byte f16 buffer lands at 16, not 4."""
-    ll = _lower(_f16_then_f32x4())
+    ll = lower_with_engine(
+        _f16_then_f32x4(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
     assert segs and set(segs) == {"16"}
     assert "store <4 x float>" in ll and "align 16" in ll
 
 
-def test_eight_wide_fp8_load_claims_eight_bytes():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_eight_wide_fp8_load_claims_eight_bytes(engine):
     """An 8 x fp8 load is 8 bytes wide, so it claims 8-byte alignment."""
-    ll = _lower(_several_live_buffers())
+    ll = lower_with_engine(
+        _several_live_buffers(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     assert re.search(
         r"load <8 x i8>, ptr addrspace\(3\) \S+, align 8$", ll, re.MULTILINE
     )
 
 
-def test_access_wider_than_the_pool_claims_the_pool_alignment():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_access_wider_than_the_pool_claims_the_pool_alignment(engine):
     """A 32-byte <8 x float> load or store claims 16 bytes, not 32.
 
     The pool is 16-byte aligned, so no segment can promise more; the claim
     is capped rather than the kernel refused (the attention backward kernel
     with the slices dK / dV sink reads its partials this way).
     """
-    ll = _lower(_f16_then_f32x8())
+    ll = lower_with_engine(
+        _f16_then_f32x8(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     accesses = re.findall(
         r"(load|store) <8 x float>.*ptr addrspace\(3\) \S+, align (\d+)$",
         ll,
@@ -282,30 +260,42 @@ def _with_store_align(align: object):
     return kernel
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("align", [24, 12, 0, -16])
-def test_a_store_alignment_that_is_not_a_power_of_two_is_refused(align):
+def test_a_store_alignment_that_is_not_a_power_of_two_is_refused(engine, align):
     """The pool cap must not turn an invalid claim (24 bytes) into a valid
-    one (16): both engines refuse the store with the same message. (The
-    engine binding reports every lowering failure as RuntimeError; the C API
-    test in test_smem_access_alignment.cpp checks the C++ status is
-    ROCKE_ERR_VALUE.)"""
-    message = (
-        f"tile.smem_store_vN failed - align={align}, expected a positive power of two"
+    one (16): each engine refuses the store with the same message, the C++
+    engine with ROCKE_ERR_VALUE."""
+    assert_engine_rejects(
+        _with_store_align(align),
+        _ARCH,
+        engine=engine,
+        error_type=ValueError,
+        message=(
+            f"tile.smem_store_vN failed - align={align}, "
+            "expected a positive power of two"
+        ),
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
     )
-    _assert_refused(_with_store_align(align), ValueError, message)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     ("align", "kind"), [(True, "bool"), (24.0, "float"), (8.0, "float")]
 )
-def test_a_store_alignment_that_is_not_an_integer_is_refused(align, kind):
-    """A bool or float ``align`` is the wrong kind of value: both engines
-    refuse it with the same message, rather than read it as an integer
-    (``True`` as 1, ``8.0`` as 8) or treat it as missing. Python raises
-    TypeError; the C API test in test_smem_access_alignment.cpp checks the C++
-    status is ROCKE_ERR_TYPE (the engine binding reports it as RuntimeError)."""
-    message = f"tile.smem_store_vN failed - align={kind}, expected an integer"
-    _assert_refused(_with_store_align(align), TypeError, message)
+def test_a_store_alignment_that_is_not_an_integer_is_refused(engine, align, kind):
+    """A bool or float ``align`` is the wrong kind of value: each engine
+    refuses it with the same message, rather than read it as an integer
+    (``True`` as 1, ``8.0`` as 8) or treat it as missing; Python raises
+    TypeError and the C++ engine reports ROCKE_ERR_TYPE."""
+    assert_engine_rejects(
+        _with_store_align(align),
+        _ARCH,
+        engine=engine,
+        error_type=TypeError,
+        message=f"tile.smem_store_vN failed - align={kind}, expected an integer",
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
 
 
 @pytest.mark.parametrize("lane", BACKEND_LANES)
@@ -335,21 +325,21 @@ def test_every_backend_lane_reports_an_invalid_store_alignment(
         lane,
         _with_store_align(align),
         _ARCH,
-        error_type,
-        message,
+        error_type=error_type,
+        message=message,
         llvm_flavor=LLVM_FLAVOR_LLVM20,
     )
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("align", [32, 2**32, 2**62])
-def test_a_valid_store_alignment_wider_than_the_pool_is_still_capped(align):
+def test_a_valid_store_alignment_wider_than_the_pool_is_still_capped(engine, align):
     """Any power of two above the pool alignment is capped to 16, including
     values too wide for a 32-bit integer: the cap must apply before the value
     is narrowed, or 2**32 would wrap to 0 and emit ``align 0``."""
     kernel = _with_store_align(align)
-    ll = _lower(kernel)
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
     assert re.search(r"store <8 x float>.*, align 16$", ll, re.MULTILINE)
-    _assert_engines_agree(kernel, ll)
 
 
 def _load_then_store(vector: str, vec: int) -> str:
@@ -373,6 +363,7 @@ kernel @lds_odd_width {{
 """
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     ("vector", "vec", "llvm_vector", "claim"),
     [
@@ -387,21 +378,21 @@ kernel @lds_odd_width {{
     ],
 )
 def test_a_load_whose_width_is_not_a_power_of_two_claims_its_element_width(
-    vector, vec, llvm_vector, claim
+    engine, vector, vec, llvm_vector, claim
 ):
     """A load whose byte width is not a power of two guarantees only element
     alignment, whatever its element type; both engines emit the same IR."""
     kernel = parse(_load_then_store(vector, vec))
-    ll = _lower(kernel)
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
     assert re.search(
         rf"load {re.escape(llvm_vector)}, ptr addrspace\(3\) \S+, align {claim}$",
         ll,
         re.MULTILINE,
     )
-    _assert_engines_agree(kernel, ll)
 
 
-def test_a_distributed_store_claims_its_element_width():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_distributed_store_claims_its_element_width(engine):
     """smem_store_distributed writes one element at a time, so each store
     claims the stored element's width (4 bytes for f32), not a fixed 2."""
     b = IRBuilder("lds_align_distributed_f32")
@@ -417,16 +408,18 @@ def test_a_distributed_store_claims_its_element_width():
     b.global_store_vN(out, zero, reloaded, 4)
     b.smem_store_f16(half_buf, [zero], h)
     b.ret()
-    ll = _lower(b.kernel)
+    ll = lower_with_engine(
+        b.kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     claims = re.findall(
         r"store float \S+, ptr addrspace\(3\) \S+, align (\d+)$", ll, re.MULTILINE
     )
     assert claims == ["4"] * 4
     assert _alignment_violations(ll) == []
-    _assert_engines_agree(b.kernel, ll)
 
 
-def test_an_eight_byte_element_segment_is_aligned_to_its_width():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_eight_byte_element_segment_is_aligned_to_its_width(engine):
     """A segment of 8-byte elements is 8-byte aligned even when no typed
     access claims it (here it is only address-taken), for i64 as for f64."""
     b = IRBuilder("lds_align_i64_address_taken")
@@ -440,10 +433,11 @@ def test_an_eight_byte_element_segment_is_aligned_to_its_width():
     b.global_store_vN(out, zero, address, 1)
     b.smem_store_f16(half_buf, [zero], h)
     b.ret()
-    ll = _lower(b.kernel)
+    ll = lower_with_engine(
+        b.kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
     assert segs == ["8"]
-    _assert_engines_agree(b.kernel, ll)
 
 
 def _f16_then_one_f32_vector_store(lanes: int):
@@ -464,14 +458,15 @@ def _f16_then_one_f32_vector_store(lanes: int):
     return b.kernel
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(("lanes", "claim"), [(3, 4), (4, 16)])
-def test_a_whole_value_store_claims_the_vector_access_alignment(lanes, claim):
+def test_a_whole_value_store_claims_the_vector_access_alignment(engine, lanes, claim):
     """A whole ``<4 x float>`` stored as one value claims its 16-byte width and
     moves its segment to byte 16; a 12-byte ``<3 x float>`` claims only its
     4-byte element (``align 12`` is not valid LLVM) and its segment stays at
     byte 4. Both engines emit the same IR."""
     kernel = _f16_then_one_f32_vector_store(lanes)
-    ll = _lower(kernel)
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
     assert re.search(
         rf"store <{lanes} x float> \S+, ptr addrspace\(3\) \S+, align {claim}$",
         ll,
@@ -480,4 +475,3 @@ def test_a_whole_value_store_claims_the_vector_access_alignment(lanes, claim):
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
     assert segs == [str(claim)]
     assert _alignment_violations(ll) == []
-    _assert_engines_agree(kernel, ll)
