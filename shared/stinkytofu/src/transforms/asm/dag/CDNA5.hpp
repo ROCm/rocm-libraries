@@ -900,9 +900,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::unique_ptr<WaitAluTracker> waitAlu_;
     // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
     // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
-    // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
-    // is the last pending predecessor of real work, feeds a prefetch's address, or no barrier
-    // wait is ahead.
+    // windows before the next s_barrier_wait, where the wave stalls anyway. When every
+    // consumer of it is gated by a barrier wait at or past the first wait after it became
+    // ready, it is held across that wait instead and issues after it. Not held when it is the
+    // last pending predecessor of real work, feeds a prefetch's address, or no barrier wait is
+    // ahead.
     bool needsWaitAlu(const DAGNode* node) const {
         return waitAlu_ && needsWaitAlu(node, waitAlu_->query(*node->inst));
     }
@@ -918,11 +920,34 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
+        auto ready = readyWmmaCount_.find(node->inst);
+        const int readyAt = ready != readyWmmaCount_.end() ? ready->second : 0;
         for (int w : barrierWaitWindows_) {
+            if (readyAt > w) continue;  // became ready past this wait
+            if (consumersGatedPast(node, w, 2)) return wmmaIssuedCountThisRegion_ <= w;
             if (wmmaIssuedCountThisRegion_ > w) continue;  // already past this wait
             return wmmaIssuedCountThisRegion_ < w - 2;     // hold until its two-window run-up
         }
         return false;
+    }
+    // Whether every DAG successor of `node` waits for a barrier wait planned at or past window
+    // `w`, so holding `node` across the wait at `w` cannot delay any of them. An ALU successor
+    // counts when, through up to `depth` more ALU ops, its own successors all do; one with no
+    // successor in the region delays nothing here.
+    bool consumersGatedPast(const DAGNode* node, int w, int depth) const {
+        if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return false;
+        const auto& succs = regionDag_->graph[node->id];
+        if (succs.empty()) return false;
+        for (unsigned succ : succs) {
+            if (succ >= barrierGateWindow_.size()) return false;
+            if (barrierGateWindow_[succ] >= w) continue;
+            const DAGNode& s = regionDag_->nodes[succ];
+            const bool alu = isVectorALU(*s.inst) || isScalarALU(*s.inst);
+            if (!alu || depth <= 0) return false;
+            if (!regionDag_->graph[succ].empty() && !consumersGatedPast(&s, w, depth - 1))
+                return false;
+        }
+        return true;
     }
     // Whether placing `node` later can drop the s_wait_alu it needs now. A wait no count of
     // WMMAs or FIFO ops hides, such as an EXEC writer's drain, stays wherever it goes. The
@@ -943,6 +968,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     const StinkyInstruction* formWmma_ = nullptr;
     // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
     std::vector<int> barrierWaitWindows_;
+    // Per DAG node: the latest planned window of the barrier waits it descends from, -1 if none.
+    std::vector<int> barrierGateWindow_;
+    // WMMA count when each node entered the ready set (push), for needsWaitAlu.
+    std::unordered_map<const StinkyInstruction*, int> readyWmmaCount_;
     // The region DAG being drained (live inDegree), for unblocksWork().
     const RegionDAG* regionDag_ = nullptr;
     bool unblocksWork(const DAGNode* node, int depth) const {
@@ -2771,6 +2800,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
 // Route ready DAG nodes into priority buckets.
 void CDNA5ReadyQueue::push(DAGNode* node) {
+    readyWmmaCount_[node->inst] = wmmaIssuedCountThisRegion_;
     if (isMatrixInstruction(*node->inst)) {
         wmmaQueue.push(node);
         return;
@@ -2981,6 +3011,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
     }
     wmmaIssuedCountThisRegion_ = 0;
+    readyWmmaCount_.clear();
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
     wmmaQueueFillPending_ = false;
@@ -3688,6 +3719,21 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     for (const auto& [barrier, window] : barrierWmmaThresholds_)
         if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
     std::sort(barrierWaitWindows_.begin(), barrierWaitWindows_.end());
+    barrierGateWindow_.assign(deps.dag.nodes.size(), -1);
+    for (const auto& [barrier, window] : barrierWmmaThresholds_) {
+        if (!isBarrierWait(*barrier)) continue;
+        auto idIt = deps.dag.instToId.find(barrier);
+        if (idIt == deps.dag.instToId.end()) continue;
+        std::vector<unsigned> pending(deps.dag.graph[idIt->second].begin(),
+                                      deps.dag.graph[idIt->second].end());
+        while (!pending.empty()) {
+            const unsigned n = pending.back();
+            pending.pop_back();
+            if (barrierGateWindow_[n] >= window) continue;
+            barrierGateWindow_[n] = window;
+            pending.insert(pending.end(), deps.dag.graph[n].begin(), deps.dag.graph[n].end());
+        }
+    }
     const int lead = blockPrefetchLead_;
     std::unordered_map<const StinkyInstruction*, int> loadPlannedWindow;
     if (!barrierWmmaThresholds_.empty()) {
