@@ -28,7 +28,16 @@ _ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _PROVIDER = _REPO_ROOT / "dnn-providers" / "hip-kernel-provider"
 _LIVE_PACKS_DIR = _PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
-_BUNDLE_CONFIGS = tuple(f"{bundle}.yaml" for bundle in shipped_bundles())
+# Bundles whose live census test is not yet the generator's output (#14242 landed them
+# hand-formatted). Not gated here until regenerated; every other manifest is.
+_CENSUS_NOT_GENERATED = frozenset(
+    {"gfx950_attention_unified_2d", "gfx950_attention_unified_3d"}
+)
+_BUNDLE_CONFIGS = tuple(
+    f"{bundle}.yaml"
+    for bundle in shipped_bundles()
+    if bundle not in _CENSUS_NOT_GENERATED
+)
 _SHIPPED_CONFIGS = tuple(
     sorted(
         (
