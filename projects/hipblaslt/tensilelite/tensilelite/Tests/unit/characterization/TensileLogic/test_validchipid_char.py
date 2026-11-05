@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for the pure helpers of ``TensileLogic.ValidChipId``.
+"""Characterization tests for the pure helpers of ``tensilelite.logic.valid_chip_id``.
 
 The end-to-end ``_validateChipId`` flow is already exercised by the existing
 ``test_ValidChipId.py``; the baseline left two helper details uncovered:

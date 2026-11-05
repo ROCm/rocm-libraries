@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.ValidWorkGroup._validateWorkGroup``.
+"""Characterization tests for ``tensilelite.logic.valid_work_group._validateWorkGroup``.
 
 ``_validateWorkGroup`` is a thin CLI wrapper around
 ``Validators.WorkGroup.validateWorkGroup``: it runs the validator, then

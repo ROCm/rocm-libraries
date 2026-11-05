@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.ParseArguments.parseArguments``.
+"""Characterization tests for ``tensilelite.logic.parse_arguments.parseArguments``.
 
 ``parseArguments`` builds an ``ArgumentParser`` and parses ``sys.argv``. Each
 test sets ``sys.argv`` (via monkeypatch) and snapshots the parsed namespace as

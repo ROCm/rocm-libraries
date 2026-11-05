@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.py L526 (if) and L529 (elif) config-file guards.
+"""Characterization tests for tensilelite/tensilelite.py L526 (if) and L529 (elif) config-file guards.
 
 Branch ID: 01e8ac7f371264a85285039d91ea87c8514acc62
 Source:    tensilelite/tensilelite.py:529 (elif)

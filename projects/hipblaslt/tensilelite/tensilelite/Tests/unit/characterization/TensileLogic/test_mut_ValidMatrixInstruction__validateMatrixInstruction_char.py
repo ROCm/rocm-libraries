@@ -24,7 +24,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``TensileLogic.ValidMatrixInstruction._validateMatrixInstruction``.
+``tensilelite.logic.valid_matrix_instruction._validateMatrixInstruction``.
 
 Companion to ``test_validmatrixinstruction_char.py``. The base suite pins the
 *return value* of the accept/reject paths but does not pin the diagnostic that

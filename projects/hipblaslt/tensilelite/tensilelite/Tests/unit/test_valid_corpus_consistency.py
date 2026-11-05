@@ -485,7 +485,7 @@ def test_sibling_device_names_skips_a_file_that_is_entirely_unparseable(tmp_path
 
 
 def test_sibling_device_names_respects_a_caller_supplied_file_subset(tmp_path, vcc):
-    # This is how Run.py scopes the check to a requested --architecture: the
+    # This is how logic/run.py scopes the check to a requested --architecture: the
     # caller passes only the files it already selected, not a fresh
     # unfiltered walk of logic_root. A divergent pair that both live outside
     # that subset must not be reported.
@@ -577,7 +577,7 @@ def test_check_corpus_invariants_reports_the_sibling_finders_violations(tmp_path
 
 
 def test_check_corpus_invariants_respects_a_caller_supplied_file_subset(tmp_path, vcc):
-    # Mirrors Run.py's usage: only the already --architecture-filtered files
+    # Mirrors logic/run.py's usage: only the already --architecture-filtered files
     # are compared, not a fresh unfiltered walk of logic_root.
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",

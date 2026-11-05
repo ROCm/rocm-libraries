@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.ValidWorkGroupMappingXCC``.
+"""Characterization tests for ``tensilelite.logic.valid_work_group_mapping_xcc``.
 
 ``_validateWorkGroupMappingXCC`` checks that ``WorkGroupMappingXCC`` for a
 solution under a ``*_<N>cu`` directory is ``-1`` or a power-of-two dividing the
