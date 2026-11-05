@@ -5,12 +5,14 @@
 ``memref.global_load_vN`` and ``memref.global_store_vN`` claim their ``align``
 attribute, or, when they carry none, the natural alignment of the access: its
 byte width when that is a power of two, else the element width
-(``core.ir.claimed_align``). The builders always set ``align``, so only
-serialized or hand-written IR reaches the default; these tests feed such IR to
-the LLVM and HIP lowerers. Each case runs per engine: the Python engine
+(``core.ir.claimed_align``). The builders always set ``align``, to the
+caller's value or that same natural alignment, so only serialized or
+hand-written IR reaches the lowerers' default; these tests feed such IR to the
+LLVM and HIP lowerers. Each case runs per engine: the Python engine
 everywhere, the C++ engine where its binding is built, emitting the same text
-or refusing with the same message and status.
-``test_global_access_alignment.cpp`` runs the same cases through the C API.
+or refusing with the same message and status. The builder cases check the
+``align`` the builders record. ``test_global_access_alignment.cpp`` runs the
+same cases through the C API.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from rocke.core.ir import KernelDef
+from rocke.core.ir import F16, F32, F64, I8, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
@@ -148,3 +150,63 @@ def test_an_llvm_vector_load_refuses_an_invalid_align(
         message=f"memref.global_load_vN failed - {refusal}",
         llvm_flavor=LLVM_FLAVOR_LLVM20,
     )
+
+
+@pytest.mark.parametrize(
+    ("elem", "lanes", "claim"),
+    [(F32, 4, 16), (F32, 3, 4), (F16, 6, 2), (F16, 16, 32), (I8, 12, 1)],
+)
+def test_the_global_vector_load_builder_defaults_to_the_natural_alignment(
+    elem, lanes, claim
+):
+    """Without ``align`` the builder records ``vector_access_align``: the byte
+    width when it is a power of two, else the element width. A given power of
+    two is recorded as given."""
+    b = IRBuilder("global_load_default_align")
+    p = b.param("p", PtrType(elem, "global"))
+    c0 = b.const_i32(0)
+    b.global_load_vN(p, c0, elem, lanes)
+    b.global_load_vN(p, c0, elem, lanes, align=8)
+    loads = [op for op in b.kernel.body.ops if op.name == "memref.global_load_vN"]
+    assert [op.attrs["align"] for op in loads] == [claim, 8]
+
+
+@pytest.mark.parametrize(
+    ("elem", "lanes", "claim"), [(F32, 4, 16), (F32, 1, 4), (F64, 2, 16), (I8, 16, 16)]
+)
+def test_the_global_vector_store_builder_defaults_to_the_natural_alignment(
+    elem, lanes, claim
+):
+    """Without ``align`` the store builder records ``vector_access_align``,
+    for a scalar value (``n=1``) as for a vector."""
+    b = IRBuilder("global_store_default_align")
+    p = b.param("p", PtrType(elem, "global"))
+    v = b.param("v", elem if lanes == 1 else VectorType(elem, lanes))
+    b.global_store_vN(p, b.const_i32(0), v, lanes)
+    (store,) = [op for op in b.kernel.body.ops if op.name == "memref.global_store_vN"]
+    assert store.attrs["align"] == claim
+
+
+@pytest.mark.parametrize(
+    ("align", "error_type", "refusal"),
+    [
+        (6, ValueError, "align=6, expected a positive power of two"),
+        (0, ValueError, "align=0, expected a positive power of two"),
+        (True, TypeError, "align=bool, expected an integer"),
+        (8.0, TypeError, "align=float, expected an integer"),
+    ],
+)
+def test_the_global_vector_builders_refuse_an_invalid_align(align, error_type, refusal):
+    """A given ``align`` that is not a positive power of two is refused when
+    the op is built, with the lowering's text, rather than recorded (``True``
+    as 1, ``8.0`` as 8, ``0`` as the default)."""
+    b = IRBuilder("global_vector_bad_align")
+    p = b.param("p", PtrType(F32, "global"))
+    v = b.param("v", VectorType(F32, 4))
+    c0 = b.const_i32(0)
+    with pytest.raises(error_type) as load_refusal:
+        b.global_load_vN(p, c0, F32, 4, align=align)
+    assert str(load_refusal.value) == f"memref.global_load_vN failed - {refusal}"
+    with pytest.raises(error_type) as store_refusal:
+        b.global_store_vN(p, c0, v, 4, align=align)
+    assert str(store_refusal.value) == f"memref.global_store_vN failed - {refusal}"

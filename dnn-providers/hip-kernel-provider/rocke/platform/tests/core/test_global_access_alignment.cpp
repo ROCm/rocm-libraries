@@ -8,12 +8,14 @@
  * attribute (rocke_i_align_attr), or, when they carry none, the natural
  * alignment of the access (rocke_i_vector_access_align): its byte width when
  * that is a power of two, else the element width. The builders always set
- * `align`, so these cases parse serialized IR. They mirror
+ * `align`, to the caller's value or that same natural alignment, so the
+ * lowering cases parse serialized IR. They mirror
  * tests/core/test_global_access_alignment.py and the HIP refusals of
  * tests/core/test_mma_io.py and tests/core/test_tf32.py, whose C++ halves
  * otherwise run only where the pybind engine is built.
  */
 
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_hip.h"
@@ -272,6 +274,105 @@ int test_the_hip_lowering_refuses_an_invalid_align()
     return 0;
 }
 
+/* The int `align` attribute the builder recorded on `op`, or -1 when absent. */
+int64_t recorded_align(const rocke_op_t* op)
+{
+    int64_t align = -1;
+    return rocke_attr_get_int(&op->attrs, "align", &align) ? align : -1;
+}
+
+/* The access the global vector builders record and what they claim with no
+ * `align` (0): its byte width when that is a power of two, else its element
+ * width. */
+struct BuilderCase
+{
+    const rocke_type_t* elem;
+    int lanes;
+    int64_t claim;
+};
+
+/* With `align` 0 or below a global vector load or store records the natural
+ * alignment of the access (rocke_i_vector_access_align), not a width of its
+ * own; a given power of two is recorded as given. */
+int test_the_global_vector_builders_default_to_the_natural_alignment()
+{
+    const BuilderCase loads[] = {{rocke_f32(), 4, 16},
+                                 {rocke_f32(), 3, 4},
+                                 {rocke_f16(), 6, 2},
+                                 {rocke_f16(), 16, 32},
+                                 {rocke_i8(), 12, 1}};
+    for(const BuilderCase& load : loads)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "global_load_default_align") == ROCKE_OK);
+        rocke_value_t* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, load.elem, "global"), NULL);
+        rocke_value_t* c0 = rocke_b_const_i32(&b, 0);
+        rocke_value_t* v = rocke_b_global_load_vN(&b, p, c0, load.elem, load.lanes, 0);
+        CHECK(v != NULL && recorded_align(v->op) == load.claim);
+        rocke_value_t* negative = rocke_b_global_load_vN(&b, p, c0, load.elem, load.lanes, -4);
+        CHECK(negative != NULL && recorded_align(negative->op) == load.claim);
+        rocke_value_t* given = rocke_b_global_load_vN(&b, p, c0, load.elem, load.lanes, 8);
+        CHECK(given != NULL && recorded_align(given->op) == 8);
+        rocke_ir_builder_free(&b);
+    }
+    const BuilderCase stores[]
+        = {{rocke_f32(), 4, 16}, {rocke_f32(), 1, 4}, {rocke_f64(), 2, 16}, {rocke_i8(), 16, 16}};
+    for(const BuilderCase& store : stores)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "global_store_default_align") == ROCKE_OK);
+        const rocke_type_t* value_type
+            = store.lanes == 1 ? store.elem : rocke_vector_type(&b, store.elem, store.lanes);
+        rocke_value_t* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, store.elem, "global"), NULL);
+        rocke_value_t* v = rocke_b_param(&b, "v", value_type, NULL);
+        rocke_b_global_store_vN(&b, p, rocke_b_const_i32(&b, 0), v, store.lanes, 0);
+        CHECK(rocke_ir_builder_status(&b) == ROCKE_OK);
+        const rocke_region_t* body = b.kernel->body;
+        CHECK(recorded_align(body->ops[body->num_ops - 1]) == store.claim);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
+/* A positive `align` that is not a power of two is refused when the op is
+ * built, with the lowering's text and status, instead of being recorded. */
+int test_the_global_vector_builders_refuse_an_invalid_align()
+{
+    const std::string load_refusal
+        = "memref.global_load_vN failed - align=6, expected a positive power of two";
+    const std::string store_refusal
+        = "memref.global_store_vN failed - align=24, expected a positive power of two";
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "global_vector_bad_align") == ROCKE_OK);
+    rocke_value_t* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+    rocke_value_t* v = rocke_b_param(&b, "v", rocke_vector_type(&b, rocke_f32(), 4), NULL);
+    rocke_value_t* c0 = rocke_b_const_i32(&b, 0);
+    const int ops_before = b.kernel->body->num_ops;
+    bool load_refused = false;
+    try
+    {
+        (void)rocke_b_global_load_vN(&b, p, c0, rocke_f32(), 3, 6);
+    }
+    catch(const ckc::Error& error)
+    {
+        load_refused = error.code() == ROCKE_ERR_VALUE && error.message() == load_refusal;
+    }
+    CHECK(load_refused);
+    bool store_refused = false;
+    try
+    {
+        rocke_b_global_store_vN(&b, p, c0, v, 4, 24);
+    }
+    catch(const ckc::Error& error)
+    {
+        store_refused = error.code() == ROCKE_ERR_VALUE && error.message() == store_refusal;
+    }
+    CHECK(store_refused);
+    CHECK(b.kernel->body->num_ops == ops_before);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -280,7 +381,9 @@ int main()
        || test_a_hip_vector_access_without_align_claims_its_natural_alignment()
        || test_a_sub_byte_vector_store_without_align_is_refused()
        || test_an_llvm_vector_load_refuses_an_invalid_align()
-       || test_the_hip_lowering_refuses_an_invalid_align())
+       || test_the_hip_lowering_refuses_an_invalid_align()
+       || test_the_global_vector_builders_default_to_the_natural_alignment()
+       || test_the_global_vector_builders_refuse_an_invalid_align())
     {
         std::fprintf(stderr, "global access alignment contract failed\n");
         return 1;
