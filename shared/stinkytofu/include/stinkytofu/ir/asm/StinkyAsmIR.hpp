@@ -782,6 +782,13 @@ inline bool isMatrixInstruction(const StinkyInstruction& inst) {
     return isMFMA(inst) || isSMFMA(inst) || isWMMA(inst) || isSWMMA(inst) || isMXWMMA(inst);
 }
 
+// VOP3PX2 / VOP3PX3 (v_wmma_scale*, v_wmma_scale16*) are software-only encodings of a
+// back-to-back VOP3P pair (LD_SCALE + WMMA).
+inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
+    auto mc = inst.getHwInstDesc()->microcode;
+    return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
+}
+
 inline bool isHasSideEffect(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_HasSideEffect);
 }

@@ -136,6 +136,14 @@ struct HWModel {
         int vmVsrcBridge;
     };
 
+    /// Matrix pipe WMMA issue queue.
+    struct Matrix {
+        /// WMMAs the pipe buffers.
+        int wmmaQueueDepth;
+        /// The same for the v_wmma_scale* pairs (a WMMA with an LD_SCALE sub-issue).
+        int scaleWmmaQueueDepth;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
@@ -143,6 +151,7 @@ struct HWModel {
     DelayAlu delayAlu;
     Counters counters;
     WaitHide waitHide;
+    Matrix matrix;
 };
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
