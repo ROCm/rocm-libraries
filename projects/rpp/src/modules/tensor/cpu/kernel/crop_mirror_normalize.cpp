@@ -1772,6 +1772,7 @@ static inline void crop_mirror_normalize_u8_f32_host_impl(
 
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
     Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u alignedLengthPkd = (alignedLength > 48) ? (alignedLength - 48) : 0;
     Rpp32u vectorIncrement = 48;
     Rpp32u vectorIncrementPerChannel = 16;
 
@@ -1900,7 +1901,7 @@ static inline void crop_mirror_normalize_u8_f32_host_impl(
                 dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
+                for (; vectorLoopCount < alignedLengthPkd;
                      vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 p[6];
                     rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
@@ -1949,7 +1950,7 @@ static inline void crop_mirror_normalize_u8_f32_host_impl(
                 dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
+                for (; vectorLoopCount < alignedLengthPkd;
                      vectorLoopCount += vectorIncrementPerChannel) {
                     srcPtrTempR -= vectorIncrementPerChannel;
                     srcPtrTempG -= vectorIncrementPerChannel;
@@ -2001,7 +2002,7 @@ static inline void crop_mirror_normalize_u8_f32_host_impl(
                 dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                for (; vectorLoopCount < alignedLengthPkd; vectorLoopCount += vectorIncrement) {
                     __m256 p[6];
                     rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp,
                                   p);                    // simd loads
@@ -2040,7 +2041,7 @@ static inline void crop_mirror_normalize_u8_f32_host_impl(
                 dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+                for (; vectorLoopCount < alignedLengthPkd; vectorLoopCount += vectorIncrement) {
                     srcPtrTemp -= vectorIncrement;
 
                     __m256 p[6];

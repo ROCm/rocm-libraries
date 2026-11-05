@@ -1249,6 +1249,7 @@ inline void resize_mirror_normalize_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDesc
 
     Rpp32u alignedLength =
         dstImgSize.width & ~7;  // Align dst width to process 8 dst pixels per iteration
+    Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
     __m256 pWRatio = _mm256_set1_ps(wRatio);
     __m256 pWOffset = _mm256_set1_ps(wOffset);
 
@@ -1382,7 +1383,8 @@ inline void resize_mirror_normalize_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDesc
             pDstLoc = pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 computeFnSrcLocAvx(pDstLoc, pWRatio, srcLocationColumnArray, &pWeightParams[2],
@@ -1416,16 +1418,17 @@ inline void resize_mirror_normalize_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDesc
                                // location
                 compute_bilinear_coefficients(weightParams,
                                               bilinearCoeffs);  // Compute Bilinear coefficients
+                Rpp32f interpResult[3];
                 compute_bilinear_interpolation_3c_pln(
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
-                    &dstPtrTemp[0], &dstPtrTemp[1],
-                    &dstPtrTemp[2]);  // Compute Bilinear interpolation
+                    &interpResult[0], &interpResult[1],
+                    &interpResult[2]);  // Compute Bilinear interpolation
                 dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(dstPtrTemp[0] + 128 - mean[0]) * invStdDev[0] - 128)));
+                    std::nearbyint((interpResult[0] + 128 - mean[0]) * invStdDev[0] - 128));
                 dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(dstPtrTemp[1] + 128 - mean[1]) * invStdDev[1] - 128)));
+                    std::nearbyint((interpResult[1] + 128 - mean[1]) * invStdDev[1] - 128));
                 dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(dstPtrTemp[2] + 128 - mean[2]) * invStdDev[2] - 128)));
+                    std::nearbyint((interpResult[2] + 128 - mean[2]) * invStdDev[2] - 128));
                 dstPtrTemp += dstDescPtr->c;
             }
         }
@@ -1460,7 +1463,8 @@ inline void resize_mirror_normalize_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDesc
             pDstLoc = pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 computeFnSrcLocAvx(
@@ -1487,16 +1491,17 @@ inline void resize_mirror_normalize_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDesc
                                                    // to the dst col location
                 compute_bilinear_coefficients(weightParams,
                                               bilinearCoeffs);  // Compute Bilinear coefficients
+                Rpp32f interpResult[3];
                 compute_bilinear_interpolation_3c_pkd(
                     srcRowPtrsForInterp, srcLocationColumn, maxWidthLimit, bilinearCoeffs,
-                    &dstPtrTemp[0], &dstPtrTemp[1],
-                    &dstPtrTemp[2]);  // Compute Bilinear interpolation
+                    &interpResult[0], &interpResult[1],
+                    &interpResult[2]);  // Compute Bilinear interpolation
                 dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(dstPtrTemp[0] + 128 - mean[0]) * invStdDev[0] - 128)));
+                    std::nearbyint((interpResult[0] + 128 - mean[0]) * invStdDev[0] - 128));
                 dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(dstPtrTemp[1] + 128 - mean[1]) * invStdDev[1] - 128)));
+                    std::nearbyint((interpResult[1] + 128 - mean[1]) * invStdDev[1] - 128));
                 dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                    (((Rpp32f)(dstPtrTemp[2] + 128 - mean[2]) * invStdDev[2] - 128)));
+                    std::nearbyint((interpResult[2] + 128 - mean[2]) * invStdDev[2] - 128));
                 dstPtrTemp += dstDescPtr->c;
             }
         }
@@ -1573,12 +1578,13 @@ inline void resize_mirror_normalize_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDesc
                 compute_bilinear_coefficients(weightParams,
                                               bilinearCoeffs);  // Compute Bilinear coefficients
                 for (int c = 0; c < dstDescPtr->c; c++) {
+                    Rpp32f interpResult;
                     compute_bilinear_interpolation_1c(
                         &srcRowPtrsForInterp[c * INTERP_BILINEAR_KERNEL_SIZE], srcLocationColumn,
                         maxWidthLimit, bilinearCoeffs,
-                        dstPtrTempChn);  // Compute Bilinear interpolation
+                        &interpResult);  // Compute Bilinear interpolation
                     *dstPtrTempChn = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)(*dstPtrTempChn + 128 - mean[c]) * invStdDev[c] - 128)));
+                        std::nearbyint((interpResult + 128 - mean[c]) * invStdDev[c] - 128));
                     dstPtrTempChn += dstDescPtr->strides.cStride;
                 }
 
