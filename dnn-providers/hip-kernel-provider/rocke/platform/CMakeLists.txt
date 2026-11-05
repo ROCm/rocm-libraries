@@ -725,8 +725,10 @@ if(ROCKE_INSTALL_TESTS)
 
     # Library conv TF32 tests (no GPU required): validation, IR lowering on
     # gfx942 and gfx950, comgr ISA checks (skipped without comgr/llvm-objdump),
-    # the benchmark/AOT dtype plumbing. Their own entry, not part of the quick
-    # conv lane: the build-and-lower matrices take tens of seconds. The GPU
+    # the benchmark/AOT dtype plumbing. Their own entry rather than part of
+    # rocke_library_conv_pytest: the build-and-lower matrices take tens of
+    # seconds, past that entry's per-test timeout. Both run in the quick and
+    # ffm-quick tiers (ROCKE_ENGINE_test_categories_external.yaml). The GPU
     # classes (all named *Gpu*) are deselected here and run in the GPU list.
     set(_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_tf32.py"
