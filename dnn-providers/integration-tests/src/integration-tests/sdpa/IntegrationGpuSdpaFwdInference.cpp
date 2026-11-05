@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_SDPA
 
 #include <cmath>
+#include <stdexcept>
 #include <type_traits>
 
 #include <hip/hip_runtime.h>

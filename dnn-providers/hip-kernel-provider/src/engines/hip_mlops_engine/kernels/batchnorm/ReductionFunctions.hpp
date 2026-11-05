@@ -40,12 +40,12 @@ constexpr static int log2_ceil_v = log2_ceil<N>::value;
 
 } // namespace detail
 
-template <typename FloatAccum, unsigned int SizeLclData>
-__forceinline__ __device__ void lds_reduce2(FloatAccum& x,
-                                            FloatAccum& y,
+template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void lds_reduce2(FloatAccumC& x,
+                                            FloatAccumC& y,
                                             FloatAccum scale,
-                                            FloatAccum (&lcl_data_x)[SizeLclData],
-                                            FloatAccum (&lcl_data_y)[SizeLclData],
+                                            FloatAccumC (&lcl_data_x)[SizeLclData],
+                                            FloatAccumC (&lcl_data_y)[SizeLclData],
                                             unsigned int lid)
 {
     lcl_data_x[lid] = x;
@@ -78,8 +78,8 @@ __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
     unsigned int offset1 = 2 * (xlid + ylid * xstride);
     // store the values by pairs (so the compiler will generate
     // one instruction to read/write them)
-    lcl_data[offset1 + 0] = static_cast<FloatAccumC>(x);
-    lcl_data[offset1 + 1] = static_cast<FloatAccumC>(y);
+    lcl_data[offset1 + 0] = x;
+    lcl_data[offset1 + 1] = y;
 
     __syncthreads();
     for(unsigned int red = (1 << detail::log2_ceil_v<SizeLclData>) >> 1; red > 0; red >>= 1)
@@ -126,12 +126,12 @@ __forceinline__ __device__ void dpp_interleaved_reduction(FloatAccum& temp_sum1,
                      : "0"(temp_sum1), "1"(temp_sum2));
 }
 
-template <typename FloatAccum, unsigned int SizeLclData>
-__forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
-                                            FloatAccum& y,
+template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void gcn_reduce2(FloatAccumC& x,
+                                            FloatAccumC& y,
                                             FloatAccum scale,
-                                            FloatAccum (&lcl_data_x)[SizeLclData],
-                                            FloatAccum (&lcl_data_y)[SizeLclData],
+                                            FloatAccumC (&lcl_data_x)[SizeLclData],
+                                            FloatAccumC (&lcl_data_y)[SizeLclData],
                                             unsigned int lid)
 {
     const unsigned int ldsidx = lid >> 6;
@@ -157,9 +157,9 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
     y *= scale;
 }
 
-template <typename FloatAccum, unsigned int BlockSize>
+template <typename FloatAccumC, typename FloatAccum, unsigned int BlockSize>
 __forceinline__ __device__ void
-    reduce2(FloatAccum& x, FloatAccum& y, FloatAccum scale, unsigned int lid)
+    reduce2(FloatAccumC& x, FloatAccumC& y, FloatAccum scale, unsigned int lid)
 {
     static_assert(BlockSize > 0, "BlockSize must be positive");
 

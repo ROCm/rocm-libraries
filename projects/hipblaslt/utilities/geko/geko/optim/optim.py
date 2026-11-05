@@ -6,15 +6,16 @@ from __future__ import annotations
 """GEMM Kernel Optimization module.
 
 Implements the main optimization workflow.
-Generates Tensile tensilelite for specific GEMM types and executes multi-GPU
+Generates TensileLite configurations for specific GEMM types and executes multi-GPU
 optimization with automatic load balancing and progress monitoring.
 
 Key functions:
-    configure: Generate tensilelite configs for GEMM types.
+    configure: Generate TensileLite configs for GEMM types.
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
+    process_duplicates: Replace TensileLite estimates for shared sizes with bench results.
 
-Integrates with hipBLASLt for benchmarking and Tensile for kernel compilation.
+Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
 """
 
 import os
@@ -35,8 +36,11 @@ from threading import Lock
 from dataclasses import dataclass
 
 from geko import bench
+import geko.library as library
+from geko.bench.utils import is_built_custom_library
 from geko.config_generator import config_generator as cg
 from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
 from geko.schemas import GemmConfig
 from geko.concurrency.runner import Runner, Worker
@@ -50,7 +54,7 @@ from geko.optim.utils import *
 from geko.optim import _metrics
 
 
-__all__ = ["configure", "run", "analyze"]
+__all__ = ["configure", "run", "analyze", "process_duplicates"]
 
 _THIS_FILE = Path(__file__).resolve()
 if len(_THIS_FILE.parents) < 4:
@@ -135,7 +139,7 @@ def configure(
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
     apply_input_config_defaults, and runs config_generator.run to write
-    tensilelite tuning YAML (and side artifacts) under output_dir.
+    TensileLite tuning YAML (and side artifacts) under output_dir.
 
     Each GemmConfig carries its own ``mx`` flag. MX-only data types (F4)
     auto-enable MX in GemmConfig.__post_init__; for F8, MX is set by the
@@ -217,30 +221,30 @@ def run(
     abort_after_consecutive_failures: int = 8,
     max_shape_failures: int = 0,
 ) -> None:
-    """Run tensilelite optimization across every tuning YAML under tuning_dir.
+    """Run TensileLite optimization across every tuning YAML under tuning_dir.
 
-    Builds the tensilelite client once and dispatches one job per discovered
+    Builds the TensileLite client once and dispatches one job per discovered
     config to the shared Runner abstraction. Scheduling matches the previous
     run() implementation (workload-based assignment with LPT ordering);
     progress reporting follows search.run() (queue-driven completion updates).
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the Tensile binary and to add tensilelite to PYTHONPATH.
+            for the TensileLite binary and to add tensilelite to PYTHONPATH.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
             balancer. 
             Defaults to None, which is interpreted as all 8 devices if not specified.
         client_build_dir (str | Path, optional): Build directory for the
-            tensilelite client (see build_tensilelite_client).
+            TensileLite client (see build_tensilelite_client).
             Defaults to Path("build_tmp").
         n_slots (int, optional): Maximum concurrent jobs per device. Defaults
             to 4.
         retry (bool, optional): Worker-level retry behavior for existing
             failed / resumable build dirs. Defaults to True.
         stall_timeout (float, optional): Seconds a worker may go without writing
-            to its tensilelite log before it is killed and its slot released.
+            to its TensileLite log before it is killed and its slot released.
             0 disables. Defaults to 900.0.
         abort_after_consecutive_failures (int, optional): Stop scheduling new
             jobs after this many consecutive job failures across all devices;
@@ -340,6 +344,10 @@ def run(
                 "PYTHONPATH": tensile_pythonpath(hipblaslt_path),
                 **runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")),
             }
+            cu_count = HARDWARE_MAP.get(tuning_config.get("Backend", {}).get("Arch"), {}).get("CUs")
+            if cu_count is not None:
+                env["CU"] = str(cu_count)
+
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
@@ -559,3 +567,134 @@ def analyze(
     )
 
     return final_df.drop("valid", axis=1, errors="ignore"), df
+
+
+def _size_key(lib_name: str, size: list) -> tuple | None:
+    """Return a duplicate key of library name plus [M, N, batch, K].
+
+    The library name encodes datatype and transpose, so sizes from different
+    layouts are not treated as the same problem.
+    """
+    if not size or not isinstance(size[0], (list, tuple)) or len(size[0]) < 4:
+        return None
+    return (lib_name, *(int(dim) for dim in size[0][:4]))
+
+
+def process_duplicates(
+    hipblaslt_path: str | Path,
+    input_dir: str | Path,
+    devices: Sequence[int] | None = None,
+) -> None:
+    """Replace TensileLite performance estimates for duplicated problem sizes.
+
+    A completed config is a ``build_<name>`` directory whose ``3_LibraryLogic``
+    directory is non-empty. A problem size is duplicated when the same library
+    name and ``[M, N, batch, K]`` appear more than once, including repeated rows
+    inside one file. The library name keeps different datatypes and layouts
+    apart. Each config that contains such a size is built, benchmarked with
+    that library, and the measured ``hipblaslt-Gflops`` is written back onto
+    the matching ExactLogic rows.
+    The solution index is left unchanged so the row still points at the kernel
+    that was tuned. Sizes that are not duplicated are left as they are.
+
+    Args:
+        hipblaslt_path: hipBLASLt checkout root.
+        input_dir: Optimizations directory that contains the tuning YAMLs and
+            ``build_*`` outputs.
+        devices: GPU ids forwarded to hipblaslt-bench.
+    """
+    input_dir = Path(input_dir)
+    completed: list[tuple[Path, list[tuple[Path, library.Library]]]] = []
+    for config_path in list_optimization_configs(input_dir):
+        build_dir = input_dir / f"build_{Path(config_path).stem}"
+        if get_build_state(build_dir) != "completed":
+            continue
+        logic_dir = build_dir / "3_LibraryLogic"
+        loaded = [
+            (path, library.load_library(path))
+            for path in sorted(logic_dir.glob("*.yaml"))
+        ]
+        if loaded:
+            completed.append((build_dir, loaded))
+
+    occurrences: dict[tuple, list[Path]] = {}
+    keyed = [
+        (key, build_dir)
+        for build_dir, loaded in completed
+        for _, lib in loaded
+        for size in lib.sizes or []
+        if (key := _size_key(lib.name, size)) is not None
+    ]
+    for key, build_dir in keyed:
+        occurrences.setdefault(key, []).append(build_dir)
+    duplicated = {key for key, builds in occurrences.items() if len(builds) > 1}
+    selected = {build for key in duplicated for build in occurrences[key]}
+    if not duplicated:
+        logger.info("No duplicate problem sizes among completed configs")
+        return
+
+    logger.info(
+        "Benchmarking %s completed config(s) that share %s problem size(s)",
+        len(selected),
+        len(duplicated),
+    )
+
+    class DuplicateBenchWorker(Worker[tuple[Path, list[tuple[Path, library.Library]]]]):
+        """Build one config's library and benchmark its duplicated sizes."""
+
+        def setup(self) -> None:
+            self.build_dir, self.loaded = self.item
+
+        def run(self) -> bool:
+            lib_out = self.build_dir / "lib"
+            if not is_built_custom_library(lib_out):
+                library.create(hipblaslt_path, self.build_dir / "3_LibraryLogic", lib_out)
+
+            bench_dir = self.build_dir / "duplicate_bench"
+            for yaml_path, lib in self.loaded:
+                if not any(_size_key(lib.name, size) in duplicated for size in lib.sizes or []):
+                    continue
+                bench_file, _ = lib.create_bench_input(bench_dir)
+                results = bench.run(
+                    hipblaslt_path,
+                    bench_file,
+                    Path(bench_file).with_suffix(".out"),
+                    custom_lib_dir=lib_out,
+                    devices=[self.device],
+                    cache=True,
+                )
+                measured = {
+                    (int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])): float(row["hipblaslt-Gflops"])
+                    for _, row in results.iterrows()
+                }
+                updates = [
+                    (size, key[1:])
+                    for size in lib.sizes or []
+                    if (key := _size_key(lib.name, size)) is not None
+                    and key in duplicated
+                    and key[1:] in measured
+                    and isinstance(size[1], list)
+                    and len(size[1]) >= 2
+                ]
+                for size, problem in updates:
+                    size[1][1] = measured[problem]
+                if updates:
+                    lib.dump(yaml_path.parent, name=yaml_path.name)
+                    logger.info(
+                        "Wrote measured performance for duplicate sizes in '%s'",
+                        yaml_path,
+                    )
+            return True
+
+        def teardown(self) -> None:
+            pass
+
+    device_list = list(devices) if devices else [0]
+    work = [(build_dir, loaded) for build_dir, loaded in completed if build_dir in selected]
+    runner = Runner(
+        items=work,
+        worker_impl=DuplicateBenchWorker,
+        devices=device_list,
+        n_slots=1,
+    )
+    runner(input_dir / "duplicate_bench_runner")
