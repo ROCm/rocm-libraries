@@ -468,15 +468,23 @@ class GemmKernelConfig:
 
         Returns ``(config, reject_reason)``; the reason is None when legal.
         """
-        if not any(requested):
-            return replace(self, vector_size_a=0, vector_size_b=0, vector_size_c=0), None
-        vec, reason = _codegen_common().resolve_gemm_vector_sizes(
-            **self._vector_args(),
-            requested=requested,
-            pipeline=self.pipeline,
-            epilogue=self.epilogue,
-            variant=self.variant,
-        )
+        cc = _codegen_common()
+        vec, reason = (0, 0, 0), None
+        if any(requested):
+            vec, reason = cc.resolve_gemm_vector_sizes(
+                **self._vector_args(),
+                requested=requested,
+                pipeline=self.pipeline,
+                epilogue=self.epilogue,
+                variant=self.variant,
+                reduction_strategy=self.reduction_strategy,
+            )
+        if not reason and not any(vec) and self.variant == "stream_k":
+            # Native widths (unset, or requested ones that resolve to native) skip
+            # resolution's checks; Stream-K's C check still applies.
+            reason = cc.streamk_c_reject_reason(
+                self.reduction_strategy, 0, self.dtype_c, self.layout[2]
+            )
         if reason:
             reason = (
                 f"{self.tile_str} {self.pipeline}/{self.epilogue} "
@@ -2930,6 +2938,11 @@ def expand_sweep(
     expansion, so an override never multiplies the sweep by the config's own
     strategies. An unknown strategy name raises ``ValueError`` before any
     codegen/build.
+
+    Applying it before expansion also checks each fixed vector width against the
+    strategy that runs it: a C width that is illegal for atomic is legal for
+    linear and tree. The argument with another variant, and Stream-K with a
+    column-major C (which no strategy supports), raise ``ValueError`` too.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -3002,6 +3015,18 @@ def expand_sweep(
                 f"unknown Stream-K reduction strategy {unknown}; "
                 f"expected one of {STREAMK_REDUCTION_STRATEGIES}"
             )
+        # The C layout rule holds for every strategy, so a column-major C has no
+        # Stream-K kernel at all: say why instead of returning an empty sweep.
+        c_reason = _codegen_common().streamk_c_reject_reason(
+            None, 0, _output_dtype(dtype), layout[2]
+        )
+        if c_reason:
+            raise ValueError(
+                f"{c_reason}, got layout {layout!r}; "
+                f"expected one of {_codegen_common().STREAMK_GEMM_LAYOUTS}"
+            )
+    elif reduction_strategies:
+        raise ValueError(f"reduction_strategies is Stream-K only, not {variant!r}")
     else:
         reductions = ["atomic"]
 
