@@ -238,6 +238,29 @@ TEST(FusedA2AWorldShape_smoke, EveryWorldFrom2To8IsTileDivisible)
     EXPECT_EQ(two.extent, 2048);
 }
 
+TEST(FusedA2ASdmaEngine_smoke, RemoteQueuesNeedAnEvenEngineOnGfx942AndGfx950)
+{
+    using TensileLite::Client::sdmaCheckRemoteEngine;
+    auto gfx = [](uint32_t major, uint32_t minor, uint32_t stepping) {
+        HSA_ENGINE_ID id{};
+        id.ui32.Major    = major;
+        id.ui32.Minor    = minor;
+        id.ui32.Stepping = stepping;
+        return id;
+    };
+
+    for(HSA_ENGINE_ID id : {gfx(9, 4, 2), gfx(9, 5, 0)})
+    {
+        EXPECT_NO_THROW(sdmaCheckRemoteEngine(id, 2));
+        EXPECT_NO_THROW(sdmaCheckRemoteEngine(id, 14));
+        EXPECT_THROW(sdmaCheckRemoteEngine(id, 0), std::runtime_error);
+        EXPECT_THROW(sdmaCheckRemoteEngine(id, 3), std::runtime_error);
+        EXPECT_THROW(sdmaCheckRemoteEngine(id, 16), std::runtime_error);
+    }
+    EXPECT_NO_THROW(sdmaCheckRemoteEngine(gfx(9, 0, 10), 3));
+    EXPECT_NO_THROW(sdmaCheckRemoteEngine(gfx(12, 5, 0), 0));
+}
+
 class FusedA2AMultiProcess_multi_gpu
     : public ::testing::TestWithParam<std::tuple<Collective, uint32_t>>
 {

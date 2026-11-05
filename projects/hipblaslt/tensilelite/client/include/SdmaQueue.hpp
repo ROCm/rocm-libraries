@@ -217,6 +217,32 @@ namespace TensileLite
             return props.NumSdmaXgmiEngines;
         }
 
+        // On gfx942 and gfx950 a remote peer queue needs an even engine in 2..14.
+        inline void sdmaCheckRemoteEngine(HSA_ENGINE_ID gfx, uint32_t engine)
+        {
+            const bool evenOnly = gfx.ui32.Major == 9
+                                  && ((gfx.ui32.Minor == 4 && gfx.ui32.Stepping == 2)
+                                      || (gfx.ui32.Minor == 5 && gfx.ui32.Stepping == 0));
+            if(evenOnly && (engine < 2 || engine > 14 || engine % 2 != 0))
+                throw std::runtime_error(
+                    "[fused-a2a] a remote peer queue requires an even xGMI SDMA engine in 2..14; "
+                    "got "
+                    + std::to_string(engine) + ".");
+        }
+
+        // sdmaSelectEngine, checked by sdmaCheckRemoteEngine unless srcNode == dstNode.
+        inline uint32_t sdmaSelectCheckedEngine(uint32_t srcNode, uint32_t dstNode)
+        {
+            const uint32_t engine = sdmaSelectEngine(srcNode, dstNode);
+            if(srcNode != dstNode)
+            {
+                HsaNodeProperties props{};
+                CHK_KMT(hsaKmtGetNodeProperties(srcNode, &props));
+                sdmaCheckRemoteEngine(props.EngineId, engine);
+            }
+            return engine;
+        }
+
         // One SDMA queue: owns a 256KB Uncached ring and the KFD queue resource.
         // Non-copyable (owns HW resources). The two software cursors are not
         // here: they are a u64 pair in the client's counter buffer
