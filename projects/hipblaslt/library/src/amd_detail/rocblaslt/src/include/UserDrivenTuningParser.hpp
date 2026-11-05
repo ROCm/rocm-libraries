@@ -325,6 +325,9 @@ namespace TensileLite
      */
     bool shouldLogTuningKeyEvent(TuningKeyEvent kind, const ProblemOverride& key);
 
+    /// Info-level: a launch on device ran untimed with every pair in flight.
+    void noteOnlineEventPairCap(int device, int cap);
+
     /** Drop the announcement latch and every per-key set. Tests only. */
     void resetTuningDiagnosticsForTest();
 
