@@ -118,6 +118,10 @@ struct PassFeatureConfig {
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
         /// (wmmaQueueDepth * the WMMA latency).
         int wmmaRefillToCycles = 0;
+        /// After the WMMA queue is reset (the loop header's first WMMA region, a barrier wait),
+        /// WMMAs go ahead of ds_loads and fillers until the queue is full. tensor_loads and
+        /// prefetches are not held.
+        bool wmmaFillAfterReset = true;
         /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
