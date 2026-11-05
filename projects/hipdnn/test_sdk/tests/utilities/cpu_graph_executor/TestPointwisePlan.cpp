@@ -1126,7 +1126,7 @@ TEST(TestPointwisePlanBuilder, MissingPlanBuilderIsNotApplicable)
 {
     PlanBuilderRegistry registry;
     const PointwiseSignatureKey unregistered(
-        PointwiseMode::ADD, DataType::INT32, DataType::FLOAT, DataType::INT32, DataType::INT32);
+        PointwiseMode::ADD, DataType::INT32, DataType::HALF, DataType::INT32, DataType::INT32);
 
     EXPECT_THROW(registry.getPlanBuilder(unregistered), CpuReferenceNotApplicableError);
 }
@@ -1217,5 +1217,510 @@ TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
         EXPECT_EQ(mulData.getHostValue(0, c, h, w), (xValue + 2.0f) * 4.0f) << "element " << i;
         EXPECT_EQ(outData.getHostValue(0, c, h, w), 10.0f - ((xValue + 2.0f) * 4.0f))
             << "element " << i;
+    }
+}
+
+TEST(TestPointwisePlanDataTypes, DoubleAddKeepsDoublePrecision)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    DataType::DOUBLE,
+                                    DataType::DOUBLE,
+                                    DataType::DOUBLE,
+                                    DataType::DOUBLE,
+                                    hipdnn_frontend::PointwiseMode::ADD);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<double>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1 = static_cast<Tensor<double>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<double>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input0->setHostValue(1.0, 0, 0, 0, 0);
+    input1->setHostValue(1e-12, 0, 0, 0, 0);
+    input0->markHostModified();
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    // 1 + 1e-12 is not representable in float
+    EXPECT_EQ(output->getHostValue(0, 0, 0, 0), 1.0 + 1e-12);
+}
+
+TEST(TestPointwisePlanDataTypes, Int32Multiply)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    DataType::INT32,
+                                    DataType::INT32,
+                                    DataType::FLOAT,
+                                    DataType::INT32,
+                                    hipdnn_frontend::PointwiseMode::MUL);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1 = static_cast<Tensor<int32_t>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input0->setHostValue(7, 0, 0, 0, 0);
+    input1->setHostValue(-3, 0, 0, 0, 0);
+    input0->markHostModified();
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_EQ(output->getHostValue(0, 0, 0, 0), -21);
+}
+
+TEST(TestPointwisePlanDataTypes, BooleanBinarySelect)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseTernaryGraph({1, 1, 1, 2},
+                                     {1, 1, 1, 2},
+                                     {1, 1, 1, 2},
+                                     {1, 1, 1, 2},
+                                     DataType::BOOLEAN,
+                                     DataType::BOOLEAN,
+                                     DataType::BOOLEAN,
+                                     DataType::FLOAT,
+                                     DataType::BOOLEAN,
+                                     hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* mask
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.in_2_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    // Element 0 selects input0 (true), element 1 selects input1 (false)
+    input0->setHostValue(true, 0, 0, 0, 0);
+    input0->setHostValue(true, 0, 0, 0, 1);
+    input1->setHostValue(false, 0, 0, 0, 0);
+    input1->setHostValue(false, 0, 0, 0, 1);
+    mask->setHostValue(true, 0, 0, 0, 0);
+    mask->setHostValue(false, 0, 0, 0, 1);
+    input0->markHostModified();
+    input1->markHostModified();
+    mask->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_TRUE(output->getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(output->getHostValue(0, 0, 0, 1));
+}
+
+TEST(TestPointwisePlanDataTypes, Fp8E4M3AddToFloat)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    {1, 1, 1, 1},
+                                    DataType::FP8_E4M3,
+                                    DataType::FP8_E4M3,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<fp8_e4m3>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1 = static_cast<Tensor<fp8_e4m3>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input0->setHostValue(static_cast<fp8_e4m3>(1.5f), 0, 0, 0, 0);
+    input1->setHostValue(static_cast<fp8_e4m3>(2.0f), 0, 0, 0, 0);
+    input0->markHostModified();
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_EQ(output->getHostValue(0, 0, 0, 0), 3.5f);
+}
+
+TEST(TestPointwisePlanDataTypes, Fp8E5M2NegKeepsFp8Output)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 1, 1, 1},
+                                   {1, 1, 1, 1},
+                                   DataType::FP8_E5M2,
+                                   DataType::FLOAT,
+                                   DataType::FP8_E5M2,
+                                   hipdnn_frontend::PointwiseMode::NEG);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input
+        = static_cast<Tensor<fp8_e5m2>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* output
+        = static_cast<Tensor<fp8_e5m2>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input->setHostValue(static_cast<fp8_e5m2>(2.0f), 0, 0, 0, 0);
+    input->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_EQ(static_cast<float>(output->getHostValue(0, 0, 0, 0)), -2.0f);
+}
+
+TEST(TestPointwisePlanDataTypes, CompareGreaterWithMixedInputTypes)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 2},
+                                    {1, 1, 1, 2},
+                                    {1, 1, 1, 2},
+                                    DataType::FLOAT,
+                                    DataType::HALF,
+                                    DataType::FLOAT,
+                                    DataType::BOOLEAN,
+                                    hipdnn_frontend::PointwiseMode::CMP_GT);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1
+        = static_cast<Tensor<half>*>(&tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input0->setHostValue(3.0f, 0, 0, 0, 0);
+    input0->setHostValue(1.0f, 0, 0, 0, 1);
+    input1->setHostValue(static_cast<half>(2.0f), 0, 0, 0, 0);
+    input1->setHostValue(static_cast<half>(2.0f), 0, 0, 0, 1);
+    input0->markHostModified();
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_TRUE(output->getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(output->getHostValue(0, 0, 0, 1));
+}
+
+namespace
+{
+
+constexpr int64_t TEST_ELEMENT_COUNT = 4;
+
+template <typename T>
+T fromTestValue(double value)
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return value;
+    }
+    else
+    {
+        return static_cast<T>(static_cast<float>(value));
+    }
+}
+
+template <typename T>
+double toTestValue(T value)
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return value;
+    }
+    else
+    {
+        return static_cast<double>(static_cast<float>(value));
+    }
+}
+
+// Runs a unary pointwise graph through the CPU reference and returns every output element.
+template <DataType InDataType, DataType ComputeDataType, DataType OutDataType>
+std::vector<double> runUnary(hipdnn_frontend::PointwiseMode mode, const std::vector<double>& values)
+{
+    using InType = DataTypeToNative<InDataType>;
+    using OutType = DataTypeToNative<OutDataType>;
+    const std::vector<int64_t> dims = {1, 1, 1, TEST_ELEMENT_COUNT};
+
+    auto [graph, tensorBundle, variantPack] = buildPointwiseUnaryGraph(
+        dims, dims, InDataType, ComputeDataType, OutDataType, mode, 1, TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input
+        = static_cast<Tensor<InType>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* output
+        = static_cast<Tensor<OutType>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    for(int64_t i = 0; i < TEST_ELEMENT_COUNT; ++i)
+    {
+        input->setHostValue(fromTestValue<InType>(values[static_cast<size_t>(i)]), 0, 0, 0, i);
+    }
+    input->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    std::vector<double> result;
+    result.reserve(values.size());
+    for(int64_t i = 0; i < TEST_ELEMENT_COUNT; ++i)
+    {
+        result.push_back(toTestValue(output->getHostValue(0, 0, 0, i)));
+    }
+    return result;
+}
+
+// Runs a binary pointwise graph through the CPU reference and returns every output element.
+template <DataType In0DataType,
+          DataType In1DataType,
+          DataType ComputeDataType,
+          DataType OutDataType>
+std::vector<double> runBinary(hipdnn_frontend::PointwiseMode mode,
+                              const std::vector<double>& values0,
+                              const std::vector<double>& values1)
+{
+    using In0Type = DataTypeToNative<In0DataType>;
+    using In1Type = DataTypeToNative<In1DataType>;
+    using OutType = DataTypeToNative<OutDataType>;
+    const std::vector<int64_t> dims = {1, 1, 1, TEST_ELEMENT_COUNT};
+
+    auto [graph, tensorBundle, variantPack] = buildPointwiseBinaryGraph(dims,
+                                                                        dims,
+                                                                        dims,
+                                                                        In0DataType,
+                                                                        In1DataType,
+                                                                        ComputeDataType,
+                                                                        OutDataType,
+                                                                        mode,
+                                                                        1,
+                                                                        TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<In0Type>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1 = static_cast<Tensor<In1Type>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<OutType>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    for(int64_t i = 0; i < TEST_ELEMENT_COUNT; ++i)
+    {
+        input0->setHostValue(fromTestValue<In0Type>(values0[static_cast<size_t>(i)]), 0, 0, 0, i);
+        input1->setHostValue(fromTestValue<In1Type>(values1[static_cast<size_t>(i)]), 0, 0, 0, i);
+    }
+    input0->markHostModified();
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    std::vector<double> result;
+    result.reserve(values0.size());
+    for(int64_t i = 0; i < TEST_ELEMENT_COUNT; ++i)
+    {
+        result.push_back(toTestValue(output->getHostValue(0, 0, 0, i)));
+    }
+    return result;
+}
+
+// Runs BINARY_SELECT with a mask of {true, false, true, false} and returns every output element.
+template <DataType DataTypeEnum, DataType ComputeDataType>
+std::vector<double> runSelect(const std::vector<double>& values0,
+                              const std::vector<double>& values1)
+{
+    using Type = DataTypeToNative<DataTypeEnum>;
+    const std::vector<int64_t> dims = {1, 1, 1, TEST_ELEMENT_COUNT};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseTernaryGraph(dims,
+                                     dims,
+                                     dims,
+                                     dims,
+                                     DataTypeEnum,
+                                     DataTypeEnum,
+                                     DataType::BOOLEAN,
+                                     ComputeDataType,
+                                     DataTypeEnum,
+                                     hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<Type>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1
+        = static_cast<Tensor<Type>*>(&tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* mask
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.in_2_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<Type>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    for(int64_t i = 0; i < TEST_ELEMENT_COUNT; ++i)
+    {
+        input0->setHostValue(fromTestValue<Type>(values0[static_cast<size_t>(i)]), 0, 0, 0, i);
+        input1->setHostValue(fromTestValue<Type>(values1[static_cast<size_t>(i)]), 0, 0, 0, i);
+        mask->setHostValue(i % 2 == 0, 0, 0, 0, i);
+    }
+    input0->markHostModified();
+    input1->markHostModified();
+    mask->markHostModified();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    std::vector<double> result;
+    result.reserve(values0.size());
+    for(int64_t i = 0; i < TEST_ELEMENT_COUNT; ++i)
+    {
+        result.push_back(toTestValue(output->getHostValue(0, 0, 0, i)));
+    }
+    return result;
+}
+
+} // namespace
+
+TEST(TestPointwisePlanDataTypes, DoubleOperations)
+{
+    using hipdnn_frontend::PointwiseMode;
+    constexpr auto D = DataType::DOUBLE;
+    const std::vector<double> a = {-2.5, -0.5, 1.5, 4.0};
+    const std::vector<double> b = {1.0, -0.5, 3.0, 2.0};
+
+    EXPECT_EQ((runUnary<D, D, D>(PointwiseMode::RELU_FWD, a)),
+              (std::vector<double>{0.0, 0.0, 1.5, 4.0}));
+    EXPECT_EQ((runUnary<D, D, D>(PointwiseMode::ABS, a)),
+              (std::vector<double>{2.5, 0.5, 1.5, 4.0}));
+    EXPECT_EQ((runUnary<D, D, D>(PointwiseMode::NEG, a)),
+              (std::vector<double>{2.5, 0.5, -1.5, -4.0}));
+    EXPECT_NEAR(
+        (runUnary<D, D, D>(PointwiseMode::SIGMOID_FWD, a))[3], 1.0 / (1.0 + std::exp(-4.0)), 1e-12);
+    EXPECT_EQ((runBinary<D, D, D, D>(PointwiseMode::SUB, a, b)),
+              (std::vector<double>{-3.5, 0.0, -1.5, 2.0}));
+    EXPECT_EQ((runBinary<D, D, D, DataType::BOOLEAN>(PointwiseMode::CMP_GT, a, b)),
+              (std::vector<double>{0.0, 0.0, 0.0, 1.0}));
+    EXPECT_EQ((runSelect<D, D>(a, b)), (std::vector<double>{-2.5, -0.5, 1.5, 2.0}));
+}
+
+TEST(TestPointwisePlanDataTypes, Int32Operations)
+{
+    using hipdnn_frontend::PointwiseMode;
+    constexpr auto I = DataType::INT32;
+    constexpr auto F = DataType::FLOAT;
+    const std::vector<double> a = {-5, -1, 3, 8};
+    const std::vector<double> b = {2, -1, 7, 4};
+
+    EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::RELU_FWD, a)), (std::vector<double>{0, 0, 3, 8}));
+    EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::ABS, a)), (std::vector<double>{5, 1, 3, 8}));
+    EXPECT_EQ((runUnary<I, F, I>(PointwiseMode::NEG, a)), (std::vector<double>{5, 1, -3, -8}));
+    EXPECT_EQ((runBinary<I, I, F, I>(PointwiseMode::SUB, a, b)),
+              (std::vector<double>{-7, 0, -4, 4}));
+    EXPECT_EQ((runBinary<I, I, F, I>(PointwiseMode::MAX, a, b)),
+              (std::vector<double>{2, -1, 7, 8}));
+    EXPECT_EQ((runBinary<I, I, F, I>(PointwiseMode::MIN, a, b)),
+              (std::vector<double>{-5, -1, 3, 4}));
+    EXPECT_EQ((runBinary<I, I, F, DataType::BOOLEAN>(PointwiseMode::CMP_GT, a, b)),
+              (std::vector<double>{0, 0, 0, 1}));
+    EXPECT_EQ((runSelect<I, F>(a, b)), (std::vector<double>{-5, -1, 3, 4}));
+}
+
+TEST(TestPointwisePlanDataTypes, Fp8Operations)
+{
+    using hipdnn_frontend::PointwiseMode;
+    constexpr auto E4 = DataType::FP8_E4M3;
+    constexpr auto E5 = DataType::FP8_E5M2;
+    constexpr auto F = DataType::FLOAT;
+    // All values are exactly representable in both FP8 formats
+    const std::vector<double> a = {-2.0, -0.5, 1.0, 4.0};
+    const std::vector<double> b = {1.0, -0.5, 2.0, 2.0};
+
+    EXPECT_EQ((runUnary<E4, F, E4>(PointwiseMode::ABS, a)),
+              (std::vector<double>{2.0, 0.5, 1.0, 4.0}));
+    EXPECT_EQ((runUnary<E4, F, F>(PointwiseMode::RELU_FWD, a)),
+              (std::vector<double>{0.0, 0.0, 1.0, 4.0}));
+    EXPECT_EQ((runBinary<E5, E5, F, E5>(PointwiseMode::ADD, a, b)),
+              (std::vector<double>{-1.0, -1.0, 3.0, 6.0}));
+    EXPECT_EQ((runBinary<E5, E5, F, F>(PointwiseMode::MUL, a, b)),
+              (std::vector<double>{-2.0, 0.25, 2.0, 8.0}));
+    EXPECT_EQ((runBinary<E4, E4, F, DataType::BOOLEAN>(PointwiseMode::CMP_GT, a, b)),
+              (std::vector<double>{0, 0, 0, 1}));
+    EXPECT_EQ((runBinary<E5, E5, F, DataType::BOOLEAN>(PointwiseMode::CMP_GT, a, b)),
+              (std::vector<double>{0, 0, 0, 1}));
+    EXPECT_EQ((runSelect<E4, F>(a, b)), (std::vector<double>{-2.0, -0.5, 1.0, 2.0}));
+    EXPECT_EQ((runSelect<E5, F>(a, b)), (std::vector<double>{-2.0, -0.5, 1.0, 2.0}));
+}
+
+TEST(TestPointwisePlanDataTypes, CompareGreaterWithEveryMixedInputPair)
+{
+    using hipdnn_frontend::PointwiseMode;
+    constexpr auto F = DataType::FLOAT;
+    constexpr auto H = DataType::HALF;
+    constexpr auto BF = DataType::BFLOAT16;
+    constexpr auto D = DataType::DOUBLE;
+    constexpr auto BOOL = DataType::BOOLEAN;
+    const std::vector<double> a = {3.0, 1.0, 2.0, -1.0};
+    const std::vector<double> b = {2.0, 2.0, 2.0, -2.0};
+    const std::vector<double> expected = {1, 0, 0, 1};
+
+    EXPECT_EQ((runBinary<F, H, F, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<H, F, F, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<F, BF, F, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<BF, F, F, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<H, BF, F, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<BF, H, F, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<D, F, D, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+    EXPECT_EQ((runBinary<F, D, D, BOOL>(PointwiseMode::CMP_GT, a, b)), expected);
+}
+
+TEST(TestPointwisePlanDataTypes, DeclinesOperationsThatAreNotMeaningfulForTheType)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+
+    for(const auto& [dataType, mode] :
+        {std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::SIGMOID_FWD},
+         std::pair{DataType::INT32, hipdnn_frontend::PointwiseMode::TANH_FWD},
+         std::pair{DataType::BOOLEAN, hipdnn_frontend::PointwiseMode::RELU_FWD}})
+    {
+        auto [graph, tensorBundle, variantPack] = buildPointwiseUnaryGraph(
+            dims, dims, dataType, DataType::FLOAT, dataType, mode, 1, TensorLayout::NCHW);
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        CpuReferenceGraphExecutor executor;
+        EXPECT_FALSE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+        EXPECT_THROW(executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack),
+                     CpuReferenceNotApplicableError);
     }
 }

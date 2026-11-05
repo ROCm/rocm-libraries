@@ -49,9 +49,9 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
+| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference |  |
+| Pointwise Binary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference |  |
+| Pointwise Ternary | FP16, BFP16, FP32, FP64, INT32, BOOLEAN, FP8 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
