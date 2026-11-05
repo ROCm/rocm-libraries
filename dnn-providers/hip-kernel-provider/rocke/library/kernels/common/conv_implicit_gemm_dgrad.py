@@ -10331,7 +10331,16 @@ def _build_tilde_dgrad(
 
         # Zero row: every thread writes the same zeros (benign); the first
         # barrier orders it before any read, and the loader never writes it.
-        if _xh_ak4:
+        if spec.xh_yring:
+            # xh_yring: no zero row here. The y-ring loop writes its own (ring
+            # row P + 1) and never reads this one, and row lds_rows - 1 is a
+            # ring slot: with P == lds_rows (Wi 130: P = 260) it is back row -1
+            # of the first tile, which lanes 4..7 of wave 0 store in this same
+            # barrier interval -- a cross-wave write-write race (when another
+            # wave's zero store lands last, dY row m0 - 1 of the first (z,
+            # chunk) reads 0 at taps y 0 and 1).
+            pass
+        elif _xh_ak4:
             # One 4-element zero piece per k-group slab.
             zk0 = b.mod(tid, b.const_i32(block_k // 4))
             b.smem_store_vN(

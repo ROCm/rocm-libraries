@@ -6554,7 +6554,11 @@ static rocke_kernel_def_t*
                                 "tapk_prefetch 1/3)");
                 return NULL;
             }
-            /* zero row: one 4-element zero piece per k-group slab */
+            /* zero row: one 4-element zero piece per k-group slab. Not with
+             * xh_yring: the ring loop writes its own (ring row P + 1) and row
+             * lds_rows - 1 is a ring slot (Wi 130: back row -1 of the first
+             * tile, stored in this barrier interval -> cross-wave WAW race). */
+            if(!(spec->xh_yring > 0))
             {
                 rocke_value_t* zk0 = rocke_b_mod(b, tid, rocke_b_const_i32(b, block_k / 4));
                 rocke_value_t* zm = rocke_b_mul(b, zk0, rocke_b_const_i32(b, ak4_mp));
