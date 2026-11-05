@@ -42,6 +42,7 @@ from ..dtypes import dtype_info
 from ..ir import I32, Op, Type, VectorType, type_bits
 from ..mma_operand import (
     MmaOperandRole,
+    _require_integer_vector_count,
     mma_operand_value,
     mma_operand_needs_reinterpret,
     mma_result_needs_reinterpret,
@@ -227,11 +228,9 @@ class ZeroPadded(_Form):
         payload = _operand_type(op, role)
         words = self.payload_words
         for kind, ty in (("operand", payload), ("register", register)):
-            if isinstance(ty, VectorType) and type(ty.count) is not int:
-                raise ValueError(
-                    f"MMA operand {role} of {_op_id(op)!r} requires an integer "
-                    f"{kind} vector count, got {ty.count!r}"
-                )
+            _require_integer_vector_count(
+                f"MMA operand {role} of {_op_id(op)!r}", kind, ty
+            )
         if payload not in (VectorType(I32, words), register):
             raise ValueError(
                 f"MMA operand {role} of {_op_id(op)!r} is {payload.name}; the "

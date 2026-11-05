@@ -63,6 +63,14 @@ def _admitted_elements(
     return frozenset(elements)
 
 
+def _require_integer_vector_count(label: str, kind: str, ty: Type) -> None:
+    """Check counts before equality can admit a numerically equal float or bool."""
+    if isinstance(ty, VectorType) and type(ty.count) is not int:
+        raise ValueError(
+            f"{label} requires an integer {kind} vector count, got {ty.count!r}"
+        )
+
+
 def _require_reshape(
     label: str,
     verb: str,
@@ -117,10 +125,7 @@ def mma_operand_needs_reinterpret(
     """
     label = f"MMA operand {role} of {op_id!r}"
     for kind, ty in (("operand", operand_type), ("register", register_type)):
-        if isinstance(ty, VectorType) and type(ty.count) is not int:
-            raise ValueError(
-                f"{label} requires an integer {kind} vector count, got {ty.count!r}"
-            )
+        _require_integer_vector_count(label, kind, ty)
     if operand_type == register_type:
         return False
     catalog_op = arch.mma.by_op_id(op_id)
@@ -151,10 +156,7 @@ def mma_result_needs_reinterpret(
     """
     label = f"MMA result of {op_id!r}"
     for kind, ty in (("result", result_type), ("register", register_type)):
-        if isinstance(ty, VectorType) and type(ty.count) is not int:
-            raise ValueError(
-                f"{label} requires an integer {kind} vector count, got {ty.count!r}"
-            )
+        _require_integer_vector_count(label, kind, ty)
     if result_type == register_type:
         return False
     catalog_op = arch.mma.by_op_id(op_id)
