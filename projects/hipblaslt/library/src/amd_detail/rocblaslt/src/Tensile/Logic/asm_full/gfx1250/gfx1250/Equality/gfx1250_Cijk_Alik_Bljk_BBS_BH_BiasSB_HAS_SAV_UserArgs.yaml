@@ -558,8 +558,8 @@ Solutions:
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [3, 3, 4050000, 3]
-  - [0, 26.5862]
+  - [0, 0.0]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
-LibraryType: GridBased
+LibraryType: Equality
