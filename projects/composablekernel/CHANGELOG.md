@@ -12,18 +12,22 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed padded-row output updates in the global-atomic path of CK Tile multiblock reduction, including float outputs on gfx11.
 * Fixed partial-vector direct reduction stores and scalar atomic output tails, and rejected incomplete packed atomic output vectors.
 * Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
+* Fixed the CK Tile GEMM Stream-K dispatcher rejecting linear and tree reduction kernels whose C store is narrower than 4 bytes, so fp16 and bf16 problems with an odd N (for example N = 1) get a linear or tree reduction kernel.
 
 ### Added
 
 * Added gfx1250 support and WMMA regression tests for CK Tile GEMM Stream-K with atomic, linear, and tree reduction.
+* Added a gfx1250 WMMA configuration and reduction-strategy selection to the CK Tile GEMM Stream-K dispatcher benchmark.
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
 * Added optional instance filters for the CK Tile LayerNorm2D forward and quantized GEMM examples to reduce compilation for selected workloads.
+* Added K tails to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250: they accept any K that is a whole number of storage elements.
 
 ### Changed
 
 ### Removed
 
 ### Optimized
+* Improved FMHA forward performance on gfx1250 for the head dimension 128 qr_tdm_sched kernels by writing the output tile back from LDS with asynchronous stores, issuing the Q, K, and V prologue loads together, and removing a per-element scalar operation from the attention mask check.
 
 ### Resolved issues
 

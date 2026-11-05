@@ -1,5 +1,5 @@
 
-// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -76,33 +76,39 @@ INSTANTIATE_TEST_SUITE_P(emulation_1D,
                                                              true)),
                          accuracy_test::TestName);
 
+// For quick 2D tests, run a similar number of cases to 1D cases,
+// since 2D is a NxN combinatorial explosion.
 INSTANTIATE_TEST_SUITE_P(emulation_2D,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator(emulation_prob,
-                                                             generate_lengths({emulation_range_2D,
-                                                                               emulation_range_2D}),
-                                                             precision_range_sp_dp,
-                                                             batch_range_1D,
-                                                             stride_range,
-                                                             stride_range,
-                                                             ioffset_range_zero,
-                                                             ooffset_range_zero,
-                                                             place_range,
-                                                             true)),
+                         ::testing::ValuesIn(param_generator(
+                             quick_tests_only ? emulation_prob / emulation_range_2D.size()
+                                              : emulation_prob,
+                             generate_lengths({emulation_range_2D, emulation_range_2D}),
+                             precision_range_sp_dp,
+                             batch_range_1D,
+                             stride_range,
+                             stride_range,
+                             ioffset_range_zero,
+                             ooffset_range_zero,
+                             place_range,
+                             true)),
                          accuracy_test::TestName);
 
-INSTANTIATE_TEST_SUITE_P(emulation_3D,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator(emulation_prob,
-                                                             generate_lengths({emulation_range_3D,
-                                                                               emulation_range_3D,
-                                                                               emulation_range_3D}),
-                                                             precision_range_sp_dp,
-                                                             batch_range_1D,
-                                                             stride_range,
-                                                             stride_range,
-                                                             ioffset_range_zero,
-                                                             ooffset_range_zero,
-                                                             place_range,
-                                                             true)),
-                         accuracy_test::TestName);
+// For quick 3D tests, run a similar number of cases to 1D cases,
+// since 3D is a NxNxN combinatorial explosion.
+INSTANTIATE_TEST_SUITE_P(
+    emulation_3D,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator(
+        quick_tests_only ? emulation_prob / emulation_range_3D.size() / emulation_range_3D.size()
+                         : emulation_prob,
+        generate_lengths({emulation_range_3D, emulation_range_3D, emulation_range_3D}),
+        precision_range_sp_dp,
+        batch_range_1D,
+        stride_range,
+        stride_range,
+        ioffset_range_zero,
+        ooffset_range_zero,
+        place_range,
+        true)),
+    accuracy_test::TestName);

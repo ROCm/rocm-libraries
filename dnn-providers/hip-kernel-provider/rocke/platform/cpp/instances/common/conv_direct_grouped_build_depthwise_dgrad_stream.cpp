@@ -51,12 +51,6 @@ int dgs_pymod(int a, int m)
     return r < 0 ? r + m : r;
 }
 
-void dgs_reason(char* reason, size_t reason_cap, const char* text)
-{
-    if(reason != NULL && reason_cap > 0)
-        snprintf(reason, reason_cap, "%s", text);
-}
-
 void dgs_set_err(rocke_ir_builder_t* b)
 {
     if(b->status == ROCKE_OK)
@@ -89,11 +83,6 @@ bool dgs_stream_padding_reason(const rocke_direct_conv_problem_t* p,
                                size_t reason_cap)
 {
     return rocke_direct_conv_one_padding_reason(p, prefix, reason, reason_cap);
-}
-
-bool dgs_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
 }
 
 /* Iteration arguments whose names outlive the scf.for they seed. */
@@ -245,11 +234,11 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
     c.BLOCK_W = BLOCK_W;
     c.stride = stride;
     c.n_slots = stride * KH;
-    c.is_bf16 = dgs_is_bf16(p);
+    c.is_bf16 = rocke_direct_conv_problem_is_bf16(p);
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_emit_params(
-        b, &c.params, "dgrad", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+        b, &c.params, "dgrad", rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p)));
     rocke_value_t* p_Hi = c.params.p_Hi;
 
     c.c0 = rocke_b_const_i32(b, 0);
@@ -494,12 +483,12 @@ rocke_kernel_def_t* dgs_build_packed(rocke_ir_builder_t* b,
     c.BLOCK_W = BLOCK_W;
     c.stride = stride;
     c.n_slots = stride * KH;
-    c.is_bf16 = dgs_is_bf16(p);
+    c.is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const rocke_type_t* elem = c.is_bf16 ? rocke_bf16() : rocke_f16();
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_emit_params(
-        b, &c.params, "dgrad", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+        b, &c.params, "dgrad", rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p)));
     rocke_value_t* p_Hi = c.params.p_Hi;
     rocke_value_t* c_Ho = c.params.p_Ho;
 
@@ -793,7 +782,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_kernel_name(
     {
         const char* flag_names[1] = {"bf16"};
         int flag_on[1];
-        flag_on[0] = dgs_is_bf16(&spec->problem) ? 1 : 0;
+        flag_on[0] = rocke_direct_conv_problem_is_bf16(&spec->problem) ? 1 : 0;
         return rocke_kernel_name_join(
             spec->name, parts, n_parts, flag_names, flag_on, 1, out, out_cap, NULL);
     }
@@ -807,7 +796,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_validate(
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
     {
-        const char* dt = p->dtype ? p->dtype : "fp16";
+        const char* dt = rocke_direct_conv_problem_dtype(p);
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason && reason_cap > 0)
@@ -843,7 +832,7 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
     const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        dgs_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -854,22 +843,12 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
         return false;
     }
     p = &spec->problem;
-    /* dilation_reason(p) */
-    if(p->dil_h != 1 || p->dil_w != 1)
-    {
-        if(reason && reason_cap > 0)
-            snprintf(reason,
-                     reason_cap,
-                     "this direct conv kernel has no dilation (got %dx%d); only the non-grouped "
-                     "forward kernel computes a dilated convolution",
-                     p->dil_h,
-                     p->dil_w);
+    if(rocke_direct_dilation_reason(p, reason, reason_cap))
         return false;
-    }
     if(dgs_stream_padding_reason(p, "", reason, reason_cap))
         return false;
     {
-        const char* dt = p->dtype ? p->dtype : "fp16";
+        const char* dt = rocke_direct_conv_problem_dtype(p);
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason && reason_cap > 0)
@@ -925,7 +904,7 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
             return false;
         }
     }
-    dgs_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -981,7 +960,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        dgs_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -991,10 +970,10 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        dgs_reason(err,
-                   err_cap,
-                   (m != NULL && m[0] != '\0') ? m
-                                               : "build_direct_depthwise_dgrad_streaming failed");
+        rocke_spec_set_reason(
+            err,
+            err_cap,
+            (m != NULL && m[0] != '\0') ? m : "build_direct_depthwise_dgrad_streaming failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
@@ -1010,6 +989,14 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
 int rocke_direct_conv_problem_pad_w(const rocke_direct_conv_problem_t* p)
 {
     return p->pad_w < 0 ? p->PAD : p->pad_w;
+}
+
+bool rocke_direct_conv_pad_w_reason(const rocke_direct_conv_problem_t* p,
+                                    const char* prefix,
+                                    char* reason,
+                                    size_t reason_cap)
+{
+    return dgs_pad_w_reason(p, prefix, reason, reason_cap);
 }
 
 bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
@@ -1087,7 +1074,8 @@ bool rocke_dconv_dw_tiled_padding_reason(const rocke_direct_depthwise_tiled_spec
     }
     if(!spec->dgrad && pad_w != p->PAD)
     {
-        dgs_reason(reason, reason_cap, "DirectDepthwiseTiledSpec: one padding for both axes");
+        rocke_spec_set_reason(
+            reason, reason_cap, "DirectDepthwiseTiledSpec: one padding for both axes");
         return true;
     }
     return false;
