@@ -458,7 +458,8 @@ _CONFIGS = {
     #     direct-Q-global, and the mask-limit/invariant-hoist VALU stack -- are
     #     surfaced as known unported gfx942 C-twin paths; see the task report.
     #     They are NOT sampled here because the C twin cannot yet match them
-    #     byte-for-byte. cfvst is sampled by gfx942_attention_tiled_2d cfg11/12.) ---
+    #     byte-for-byte. cfvst is sampled by gfx942_attention_tiled_2d's i32
+    #     and i64 cfvst configs.) ---
     # idx40: bf16 transposed-x8 d64 (exercises the bf16 32x32x8 atom).
     40: dict(
         head_size=64,
