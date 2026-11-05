@@ -1614,7 +1614,9 @@ def _linear_scorer(
     if objective not in ("max", "min"):
         raise ValueError(
             f"{artifact}: a linear_data score is oriented by the corpus's objective, and "
-            f"none was declared ({objective!r})"
+            f"none was declared ({objective!r}). The descriptor's `min` orients only the "
+            "runtime score, and an installed model has no train_manifest.json: pass "
+            "--objective, as min and max are both legal and this is never guessed"
         )
     sign = -1.0 if objective == "max" else 1.0
 
@@ -1692,9 +1694,11 @@ def load_model(
     # Read, never assumed: a backwards objective inverts every number in the report.
     objective = descriptor.get("objective") or manifest.get("objective")
     if descriptor.get("adapter") == "linear_data":
-        # The descriptor's `min` orients the runtime's score; a report ranks against the
-        # measured target, whose direction `train` recorded as the manifest's `objective`.
-        objective = objective_override or manifest.get("objective") or objective
+        # The descriptor's `min` orients the runtime's score, not the measured target: a
+        # report ranks against the target, whose direction `train` recorded as the
+        # manifest's `objective`. An installed model has no manifest, so without
+        # --objective the direction is unknown and `run_evaluate` refuses to guess it.
+        objective = objective_override or manifest.get("objective")
 
     group_feature = manifest.get("group_by_feature")
 

@@ -103,7 +103,8 @@ public:
 
     /// Rows of @p kernels in order, row-major: `kernels.size() * featureCount()` doubles.
     /// @param ctx The selection's problem bindings. build() binds the mixed entries'
-    ///        `kernel.*` names into it, so it must not be shared with another thread.
+    ///        `kernel.*` names into it, so it must not be shared with another thread; it
+    ///        unbinds them first, so a context an earlier build() used is safe to pass.
     /// @param prefix Output of FeatureExtractor::prepare() on @p ctx.
     /// @throws uhd::JsonLogicError where extract() would, for the first such kernel.
     std::vector<double> build(uhd::FeatureExtractionContext& ctx,
@@ -119,6 +120,12 @@ public:
         const auto [facts, keyCount] = factsFor(kernels);
         const size_t mixedCount = _extractor->mixedCount();
         const auto& names = _extractor->mixedKernelVariables();
+        // Start from no kernel bound: a name left by an earlier build() on this context would
+        // otherwise stand in for a field the first kernel lacks.
+        for(const auto& name : names)
+        {
+            ctx.unbindSlot(name);
+        }
         // Per selection: the value of each distinct (entry, kernel values) key once computed.
         std::vector<double> memo(keyCount);
         std::vector<uint8_t> computed(keyCount, 0);

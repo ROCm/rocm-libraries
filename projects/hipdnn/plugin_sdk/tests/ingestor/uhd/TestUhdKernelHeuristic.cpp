@@ -1454,7 +1454,7 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
     const MatchContext context{graph, 0, properties};
     const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
 
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "1 of 2 candidates"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "1 of 2 fully scored candidates"));
     EXPECT_TRUE(recorder.hasLogContaining("The remaining candidates ranked on the model."));
 
     // The usable candidate still won on its score.
@@ -2448,6 +2448,36 @@ TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesOrderInTheObjectivesDirecti
     EXPECT_EQ(scored[3].score, 0.0);
 
     EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalog, context), 3.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, TheOutOfRangeReportCountsOnlyFullyScoredCandidates)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_early_exit_out_of_range"));
+    // After the first tree 128 and 256 lead (2 against 1), so 32 and 64 are pruned. The
+    // whole model then predicts -8 throughput for both survivors, which is out of range.
+    const auto fixture = writeEarlyExitFixture(
+        dir.path(), {stepOnTileM(96, 1, 2), stepOnTileM(96, 0, -10), stepOnTileM(48, 0, 0)}, "max");
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto definitions = earlyExitKernels();
+    const auto scored = heuristic->rankScored(catalogOver(definitions, 2048), context);
+    ASSERT_EQ(scored.size(), 4U);
+
+    // Both fully scored candidates are out of range; the pruned ones are not counted, and
+    // they still rank ahead on their partial sums, so the ranking is not declared order.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "2 of 2 fully scored candidates"));
+    EXPECT_TRUE(recorder.hasLogContaining("Every fully scored candidate was affected"));
+    EXPECT_FALSE(recorder.hasLogContaining("the model contributed nothing"));
+    EXPECT_EQ(scored[0].kernelId, testId(0x01));
+    EXPECT_EQ(scored[1].kernelId, testId(0x02));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -503,7 +503,9 @@ def add_model_encoding_arguments(parser: argparse.ArgumentParser) -> None:
         help="Early-exit schedule of a tree_data catalog ranker (README, 'Early exit'): "
         "'auto' (default) chooses one from out-of-fold predictions for an uncalibrated, "
         "single-layer sort_kernel_catalog model with problem identity, and writes none "
-        "otherwise; 'none' writes none; TREES:KEEP[,TREES:KEEP...] writes that schedule",
+        "otherwise; 'none' writes none; TREES:KEEP[,TREES:KEEP...] writes that schedule "
+        "(refused for a calibrated, grouped or predict_engine model). A schedule changes "
+        "model.bin, and with it the engine's selector revision",
     )
 
 
@@ -983,6 +985,11 @@ def _early_exit_request(args: argparse.Namespace, groups: list | None):
                 "--early-exit applies to a single-layer sort_kernel_catalog model: "
                 "predict_engine scores one row with every tree, and a grouped model's "
                 "runtime ignores the schedule"
+            )
+        if args.calibrated:
+            raise ValueError(
+                "--early-exit does not apply to a --calibrated model: a pruned candidate "
+                "carries no estimate, and a calibrated ranking needs every candidate's"
             )
         return parse_schedule(text)
     if args.role == ROLE or args.group_by_feature or args.calibrated or not groups:

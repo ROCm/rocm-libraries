@@ -295,6 +295,25 @@ TEST(TestKernelFeatureRows, AFieldTheKernelLacksReadsAsUnboundAndNeverLeaksFromA
     EXPECT_EQ(rows, (std::vector<double>{1001, 99, 1003, 1001, 99}));
 }
 
+TEST(TestKernelFeatureRows, AContextAnEarlierBuildUsedLeaksNoKernelValue)
+{
+    const auto extractor = std::make_shared<const FeatureExtractor>(std::vector<json>{
+        json::parse(R"({"value_or_default":[{"+":["$graph.n","$kernel.opt"]},99]})")});
+    FeatureExtractionContext ctx;
+    ctx.bind("graph.n", int64_t{1000});
+    const auto prefix = extractor->prepare(ctx);
+
+    std::vector<KernelDefinition> kernels(2);
+    kernels[0].kernelId = idOf(1);
+    kernels[0].metadata["opt"] = int64_t{5};
+    kernels[1].kernelId = idOf(2); // lacks `opt`
+
+    const KernelRowBuilder builder(extractor);
+    EXPECT_EQ(builder.build(ctx, prefix, {&kernels[0]}), std::vector<double>{1005});
+    // The same context again: the first build left `kernel.opt` bound in it.
+    EXPECT_EQ(builder.build(ctx, prefix, {&kernels[1]}), std::vector<double>{99});
+}
+
 TEST(TestKernelFeatureRows, AnUnresolvableRowFailsLikeTheReferenceAndCachesNothingForThatKernel)
 {
     // A bare reference to a missing field throws; so does a mixed expression with no default.

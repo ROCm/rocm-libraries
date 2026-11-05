@@ -1157,8 +1157,10 @@ skip there and run only locally.
 
 `python -m uhd_gen train --adapter linear_data ...` fits one ridge regression per kernel
 configuration instead of a tree ensemble. It is a cheap alternative for a small catalog:
-about 50 ns per candidate at run time (one hash lookup and one dot product), and on the
-catalogs it was evaluated on it matched or beat a tuned tree model.
+about 220 ns per candidate at run time (one hash lookup and one dot product over 31 basis
+terms, catalogs of 17-255 candidates sharing their problem features). Whether it ranks as
+well as a tree model depends on the catalog; compare the two with `evaluate` before
+choosing it.
 
 What it predicts. A candidate's score is its **log slowdown against the best candidate of
 the same problem**, `log t - log min t` (or `log max v - log v` for a rate such as TFLOPS),
@@ -1174,19 +1176,21 @@ UHD that declares otherwise (RFC 0019 §7.5). Consequences for `train`:
 - The target is relative to the best candidate of a problem, so the corpus needs problem
   identity: `--group-by`, or a `benchmark` column.
 
-How it fits (`rellin.py`, a port of the RelLinX prototype).
+How it fits (`rellin.py`).
 
 - The **key** is the feature slots identifying a configuration: by default every
   `$kernel.*` reference of the (pruned) signature, or `--key-features`. Every other varying
-  feature is a **basis term**, standardized, `log1p`-transformed when it is non-negative and
-  spans more than 64.
+  feature is a **basis term**, standardized over its finite training values, and
+  `log1p`-transformed when those are non-negative and reach above 64.
 - Each configuration's coefficients are a ridge fit (`--ridge`, default `1e-2`) shrunk toward
   its family's (`--family-features`) and, through the family, toward a fit on every row. A
   configuration with fewer than `--min-rows` (10) rows is shrunk much harder.
-- The **guard**: each basis term is clamped to the range it took in training, and a
-  configuration's prediction is floored at the smallest slowdown it showed in training, so a
-  configuration that was never the best cannot be extrapolated into the winner. A family or
-  the global fit, which describes configurations the corpus never measured, floors at 0.
+- The **guard**: each basis term is clamped to the range it took in training (an infinite
+  value included), and a measured configuration's prediction is floored at the smallest
+  slowdown it showed in training, so a measured configuration that was never the best cannot
+  be extrapolated into the winner. That holds for measured configurations only: a family or
+  the global fit, which describes configurations the corpus never measured, floors at 0, so
+  an unmeasured configuration can tie or beat a measured winner.
 
 `model.bin` is a `LinearModel` (`linear_model.fbs`, identifier `HLIN`). Loading it checks, in
 order: the digest, the identifier, the FlatBuffers verifier, `features_hash`, then the model's
@@ -1341,10 +1345,20 @@ shortlists of 8-32, and keeps the one doing the fewest tree walks whose mean top
 is within 0.02 points, and p95 within 0.2 points, of scoring every candidate fully; none
 if no schedule saves at least 20% of the walks. The candidates' figures are recorded in
 `train_manifest.json` `early_exit`.
-`--early-exit 30:16` or `10:32,40:8` writes a schedule as given;
-`--early-exit none` (the default for calibrated and grouped models) writes none.
+`--early-exit 30:16` or `10:32,40:8` writes a schedule as given. It is refused for a
+calibrated model (a pruned candidate carries no estimate), a grouped one (whose runtime
+ignores the schedule) and `predict_engine` (which scores one row with every tree).
+`--early-exit none` (the default for those models) writes none.
 `evaluate` applies the stored schedule exactly as the runtime does, so its regret is
 the shipped model's.
+
+A schedule is part of `model.bin`, so adding, changing or removing one changes
+`tree_data.hash` and, through the ranker's identity, the engine's selector revision
+(`engineSelectorRevision`; RFC 0019 [Section 8.1](../../docs/rfcs/0019_UniversalHeuristicDescriptor.md#81-descriptor-versions-and-uhd-coupling)).
+A `predict_engine` estimate that records the old revision in `trained_against` is then
+unavailable until it is retrained against the new one. `auto` is the default, so
+regenerating an eligible catalog ranker has this effect even when its trees come out the
+same: pass `--early-exit none` when the engine's estimates are not retrained alongside it.
 
 ## Generated FlatBuffers bindings
 

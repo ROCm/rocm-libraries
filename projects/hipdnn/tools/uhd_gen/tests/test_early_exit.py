@@ -376,3 +376,21 @@ def test_train_writes_no_schedule_when_asked_for_none(tmp_path, evaluator):
     code, output = _train(tmp_path, "--early-exit", "none")
     assert code == 0
     assert _stored_schedule(output) == []
+
+
+def test_an_explicit_schedule_on_a_calibrated_model_is_refused():
+    import argparse
+
+    from uhd_gen.__main__ import _early_exit_request
+
+    args = argparse.Namespace(
+        early_exit="30:16",
+        role="sort_kernel_catalog",
+        group_by_feature=None,
+        calibrated=True,
+    )
+    # A pruned candidate carries no estimate, and a calibrated ranking reads every one.
+    with pytest.raises(ValueError, match="--calibrated"):
+        _early_exit_request(args, groups=[0])
+    args.calibrated = False
+    assert _early_exit_request(args, groups=[0]) == [(30, 16)]

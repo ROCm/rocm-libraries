@@ -900,17 +900,18 @@ private:
 
             // A raw -infinity is a candidate the adapter declined (a grouped model's losing
             // groups), not an out-of-range prediction; only the latter are reported, out of
-            // the candidates actually scored. A pruned candidate is neither: it has no full
-            // score to be out of range.
+            // the candidates fully scored. A pruned candidate is neither: it has no full
+            // score to be out of range, so it counts in neither number.
             size_t declined = 0;
+            size_t pruned = 0;
             size_t outOfRange = 0;
             for(size_t index = 0; index < scored.size(); ++index)
             {
                 if(scored[index].pruned)
                 {
-                    continue;
+                    ++pruned;
                 }
-                if(batch.raw[index] == -std::numeric_limits<double>::infinity())
+                else if(batch.raw[index] == -std::numeric_limits<double>::infinity())
                 {
                     ++declined;
                 }
@@ -919,7 +920,7 @@ private:
                     ++outOfRange;
                 }
             }
-            reportOutOfRangeOnce(outOfRange, scored.size() - declined);
+            reportOutOfRangeOnce(outOfRange, scored.size() - declined - pruned, pruned);
 
             detail::orderRanked(scored);
 
@@ -1104,24 +1105,30 @@ private:
 
     /// Reports a model predicting outside the range its target can occupy, once per heuristic.
     /// ERROR because the score is wrong, not merely uncertain, and is discarded.
-    void reportOutOfRangeOnce(size_t affected, size_t total) const
+    /// @param total The candidates fully scored; @p pruned were pruned by early exit.
+    void reportOutOfRangeOnce(size_t affected, size_t total, size_t pruned) const
     {
         if(affected == 0 || _reportedScoreOutOfRange.exchange(true))
         {
             return;
         }
+        const char* outcome = "The remaining candidates ranked on the model.";
+        if(affected == total)
+        {
+            outcome = pruned == 0
+                          ? "Every candidate was affected, so this ranking is declared order "
+                            "and the model contributed nothing."
+                          : "Every fully scored candidate was affected; the candidates early "
+                            "exit pruned rank ahead of them on their partial scores.";
+        }
         HIPDNN_PLUGIN_LOG_ERROR(
             "uhd: " << _describedBy << " predicted a score its target cannot take for " << affected
-                    << " of " << total << " candidates (raw=" << _lastOutOfRangeRaw
+                    << " of " << total << " fully scored candidates (raw=" << _lastOutOfRangeRaw
                     << ", recovered=" << _lastOutOfRangeRecovered << ", transform='"
                     << _config.scoreTransform
                     << "'). A metric value cannot be negative, so those scores are discarded and "
                        "those candidates rank last. "
-                    << (affected == total
-                            ? "Every candidate was affected, so this ranking is declared order "
-                              "and the model contributed nothing."
-                            : "The remaining candidates ranked on the model.")
-                    << " Further occurrences for this heuristic are not logged.");
+                    << outcome << " Further occurrences for this heuristic are not logged.");
     }
 
     /// Authored (metric, architecture) entries and their lazily loaded per-engine models.

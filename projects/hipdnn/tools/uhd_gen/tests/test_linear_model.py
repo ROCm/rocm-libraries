@@ -479,6 +479,26 @@ def test_the_fit_ranks_the_planted_best_config_on_problems_it_never_saw():
     assert random_regret > 10 * regret
 
 
+def test_an_infinite_training_value_still_writes_a_model_the_runtime_loads(tmp_path):
+    frame = _corpus(problems=60)
+    clean, _, _ = _fit(frame)
+    frame.loc[3, "size2"] = math.inf
+    frame.loc[7, "size2"] = -math.inf
+    ranker, matrix, _ = _fit(frame)
+    for values in (ranker.mean, ranker.scale, ranker.lo, ranker.hi):
+        assert np.isfinite(values).all()
+    # The loader's checks (non-finite mean, scale, lo or hi is refused) pass.
+    path = tmp_path / "model.bin"
+    digest = write_linear_model(ranker, FEATURES_HASH, path)
+    load_linear_artifact(path, digest, feature_count=3)
+    # An infinite value is clamped to the range training saw, as the runtime clamps it.
+    assert np.isfinite(ranker.predict(matrix)).all()
+    assert np.isfinite(ranker.predict(np.array([[0.0, 10.0, math.inf]]))).all()
+    # The finite rows set the standardization the clean corpus would have had.
+    term = list(ranker.basis_features).index(2)
+    assert ranker.mean[term] == pytest.approx(clean.mean[term], rel=0.05)
+
+
 def test_a_term_is_clamped_to_its_training_range_and_a_floor_is_each_configs_best():
     frame = _corpus()
     ranker, matrix, y = _fit(frame[frame["size"] < 500])
@@ -704,6 +724,26 @@ def test_the_trained_model_ranks_the_fastest_candidate_first_when_evaluated(
     # `--objective` overrides the direction of the corpus the score is compared with.
     flipped = load_model(output, feature_evaluator=evaluator, objective_override="min")
     np.testing.assert_allclose(flipped.scorer(frame), -scores, atol=1e-15)
+
+
+def test_an_installed_model_without_a_manifest_needs_the_corpus_direction(
+    tmp_path, evaluator
+):
+    frame = _catalog()
+    code, output = _train(tmp_path, evaluator, frame=frame)
+    assert code == 0
+    # As promote installs it: the descriptor and model.bin, no train_manifest.json.
+    (output / "train_manifest.json").unlink()
+    # The descriptor's `min` orients the runtime score, not the TFLOPS the report ranks.
+    with pytest.raises(ValueError, match="pass --objective"):
+        load_model(output, feature_evaluator=evaluator)
+    bundle = load_model(output, feature_evaluator=evaluator, objective_override="max")
+    best = frame.assign(score=bundle.scorer(frame)).sort_values("score")
+    best = best.groupby("benchmark").tail(1).set_index("benchmark")
+    oracle = (
+        frame.sort_values("tflops").groupby("benchmark").tail(1).set_index("benchmark")
+    )
+    assert (best["tflops"] / oracle["tflops"]).min() > 0.99
 
 
 @pytest.mark.parametrize(

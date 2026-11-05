@@ -208,8 +208,10 @@ struct LinearConfig FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   /// The smallest slowdown this entry was seen to have in training (log scale, >= 0 for a
   /// model fitted on slowdown relative to the best candidate). A prediction below it is
-  /// raised to it, so a configuration that was never the best in training cannot be
-  /// extrapolated into the winner. Finite.
+  /// raised to it, so a measured configuration that was never the best in training cannot
+  /// be extrapolated into the winner. A family or global entry describes configurations
+  /// training never measured; uhd_gen writes floor 0 for it, so it carries no such
+  /// guarantee. Finite.
   double floor() const {
     return GetField<double>(VT_FLOOR, 0.0);
   }

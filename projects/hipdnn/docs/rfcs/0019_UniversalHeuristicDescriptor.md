@@ -809,7 +809,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 | `native` | A scorer compiled into the engine, resolved by symbol name — **first to land** | Whatever the function returns | none (code, not data) |
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
-| `linear_data` | A per-config linear ranker (RelLinX): predicted log slowdown against the catalog's best, carried as a FlatBuffer | Score each candidate, lowest first | with engine |
+| `linear_data` | A per-config linear ranker (RelLin): predicted log slowdown against the catalog's best, carried as a FlatBuffer | Score each candidate, lowest first | with engine |
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | An author-shipped `.so` behind a small C ABI (drop-in escape hatch) | Whatever the library returns | with engine |
 
@@ -1936,9 +1936,12 @@ score = max(entry.coefficients . [1, z], entry.floor)
 ```
 
 A missing (`NaN`) input gives `z = 0`. Keys compare as doubles with every `NaN` equal. The clamp holds a
-term to the range it took in training, and `floor` is the smallest slowdown the entry showed in training,
-so a configuration that was never the best in training cannot be extrapolated into a winner. Per
-candidate the adapter does one hash lookup and one dot product and allocates nothing. Training
+term to the range it took in training. A configuration's `floor` is the smallest slowdown it showed in
+training, so a measured configuration that was never the best in training cannot be extrapolated into a
+winner. The guarantee covers measured configurations only: a family entry and the global entry describe
+configurations the corpus never measured, and their floor is 0, so an unmeasured configuration can tie or
+beat a measured winner. Per candidate the adapter does one hash lookup and one dot product; a batch
+transforms a basis value only when it differs from the row before. Training
 (`uhd_gen train --adapter linear_data`) fits one ridge regression per configuration, shrunk toward its
 family and, through it, toward a fit on every row; a configuration with few rows is shrunk harder. It
 needs a corpus in which every problem is measured on several configurations, because its target is the

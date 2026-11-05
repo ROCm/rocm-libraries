@@ -10,9 +10,10 @@ configuration (linear_model.fbs):
   the family, toward one fitted on every row (`ridge` scales with the rows' weight);
 * a configuration with fewer than `min_rows` rows is shrunk much harder, because its own rows
   say too little about it;
-* the guard: every basis term is clamped to the range it took in training, and a
+* the guard: every basis term is clamped to the range it took in training, and a measured
   configuration's prediction never falls below the smallest slowdown it showed in training, so
-  a configuration that never won cannot be extrapolated into a winner.
+  a measured configuration that never won cannot be extrapolated into a winner. A family or
+  global entry (an unmeasured configuration) floors at 0 and has no such guard.
 
 `LinearRanker.predict` is the definition the runtime's `LinearDataAdapter` implements;
 `evaluate` scores a shipped artifact with it, so the two agree.
@@ -165,14 +166,15 @@ def select_basis(
     matrix: np.ndarray, key_features: list[int]
 ) -> tuple[list[int], list[int]]:
     """The model inputs: every non-key slot that varies in training, log1p-transformed when it
-    is non-negative and spans more than `LOG_RANGE_THRESHOLD`. Returns (slots, transforms).
+    is non-negative and spans more than `LOG_RANGE_THRESHOLD`. Missing and infinite values do
+    not count (`fit_rellin` standardizes over finite values). Returns (slots, transforms).
     """
     slots, transforms = [], []
     for slot in range(matrix.shape[1]):
         if slot in key_features:
             continue
         column = matrix[:, slot]
-        column = column[~np.isnan(column)]
+        column = column[np.isfinite(column)]
         if not len(column) or column.min() == column.max():
             continue
         slots.append(slot)
@@ -227,8 +229,10 @@ def fit_rellin(
     if clip:
         y = np.minimum(y, clip)
 
-    # Standardize the basis. A term that does not vary is left unscaled (mean 0, scale 1),
-    # so its clamp pins it to the one value it has.
+    # Standardize the basis over the finite values only: one infinite value would make a
+    # term's mean, scale and range non-finite, which the runtime refuses at load. A term that
+    # does not vary is left unscaled (mean 0, scale 1), so its clamp pins it to the one value
+    # it has.
     raw = np.column_stack(
         [
             apply_transform(matrix[:, slot], transform)
@@ -239,15 +243,21 @@ def fit_rellin(
     mean = np.zeros(raw.shape[1])
     scale = np.ones(raw.shape[1])
     for j in range(raw.shape[1]):
-        column = raw[:, j][~np.isnan(raw[:, j])]
+        column = raw[:, j][np.isfinite(raw[:, j])]
         spread = column.std() if len(column) else 0.0
         if not np.isclose(spread, 0):
             mean[j], scale[j] = column.mean(), spread
     standardized = (raw - mean) / scale
     # A missing value stands at the training mean, as the runtime reads it.
     z = np.where(np.isnan(standardized), 0.0, standardized)
-    lo = z.min(axis=0) if len(z) else np.zeros(0)
-    hi = z.max(axis=0) if len(z) else np.zeros(0)
+    finite = np.isfinite(z)
+    # A term with no finite value at all keeps the range [0, 0]; its clamp pins it there.
+    lo = np.where(finite, z, np.inf).min(axis=0, initial=np.inf)
+    hi = np.where(finite, z, -np.inf).max(axis=0, initial=-np.inf)
+    lo = np.where(np.isfinite(lo), lo, 0.0)
+    hi = np.where(np.isfinite(hi), hi, 0.0)
+    # An infinite value is clamped to the training range, as the runtime clamps it.
+    z = np.clip(z, lo, hi)
 
     design = np.column_stack([np.ones(len(y)), z])
     width = design.shape[1]
