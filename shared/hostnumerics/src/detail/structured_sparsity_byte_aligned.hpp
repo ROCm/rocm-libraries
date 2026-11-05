@@ -19,7 +19,6 @@
 #include "generation_primitives.hpp"
 #include "index_iteration.hpp"
 #include "structured_sparsity_plan.hpp"
-#include "threading.hpp"
 
 namespace roc::hostnumerics::detail {
 struct TwoOfFourPositionSet {

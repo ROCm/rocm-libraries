@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <limits>
 #include <numeric>
 #include <roc/hostnumerics/generation.hpp>
@@ -676,7 +675,7 @@ struct GenerationRecipeAccess {
         const bool sameOrder = std::ranges::equal(traversalPlan.axes(), logicalPlan.axes());
         const bool contiguous = detail::isContiguous(destination.layout(), traversalOrder);
         const bool trackCoordinates = valueUsesCoordinates || !contiguous || !sameOrder;
-        const int threadCount = independent ? operationThreadCount(elementCount, 4096, 8) : 1;
+        const int threadCount = independent ? operationThreadCount(elementCount, 4096) : 1;
 
         const auto runRange = [&](size_t first, size_t end) {
             if (first == end) return;
@@ -697,34 +696,12 @@ struct GenerationRecipeAccess {
             }
         };
 
-#ifdef _OPENMP
-        if (threadCount > 1 &&
-            elementCount <= static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
-            std::exception_ptr error;
-#pragma omp parallel num_threads(threadCount)
-            {
-                try {
-                    const size_t threadIndex = static_cast<size_t>(omp_get_thread_num());
-                    const size_t actualThreadCount = static_cast<size_t>(omp_get_num_threads());
-                    const size_t baseCount = elementCount / actualThreadCount;
-                    const size_t remainder = elementCount % actualThreadCount;
-                    const size_t first = threadIndex * baseCount + std::min(threadIndex, remainder);
-                    const size_t count = baseCount + static_cast<size_t>(threadIndex < remainder);
-                    runRange(first, first + count);
-                } catch (...) {
-#pragma omp critical(hostnumerics_generation_error)
-                    {
-                        if (!error) error = std::current_exception();
-                    }
-                }
-            }
-            if (error) std::rethrow_exception(error);
-            return;
-        }
-#else
-        (void)threadCount;
-#endif
-        runRange(0, elementCount);
+        const size_t partitionCount = static_cast<size_t>(threadCount);
+        forEachParallelIndex(partitionCount, elementCount, true, 4096, [&](size_t partition) {
+            const auto [first, pastLast] =
+                evenlyPartitionedRange(elementCount, partitionCount, partition);
+            runRange(first, pastLast);
+        });
     }
 
     template <typename Tag>

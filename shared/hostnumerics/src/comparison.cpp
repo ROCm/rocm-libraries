@@ -39,7 +39,7 @@ ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expe
     // indices; sparse selections retain their existing traversal.
     const int threadCount =
         options.indicesCount == observed.elementCount() && !options.computeFrobenius
-            ? detail::operationThreadCount(selectedCount, minimumElementsPerThread, 8)
+            ? detail::operationThreadCount(selectedCount, minimumElementsPerThread)
             : 1;
 
     if (threadCount <= 1) {
