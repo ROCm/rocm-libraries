@@ -74,7 +74,12 @@ from rocke.helpers.tiling.traits import (
     load_mma_traits,
 )
 from rocke.helpers.tiling.traits.mma_traits import UNSIGNED_TWIN
-from rocke.tests.ir_validity import Verdict, arbiter_llvm_flavor, arbiter_verdict
+from rocke.tests.ir_validity import (
+    Verdict,
+    arbiter_llvm_flavor,
+    arbiter_verdict,
+    require_arbiter_llvm_flavor,
+)
 
 _CATALOG = load_mma_traits()
 _ROWS = sorted(_CATALOG.by_op_id.values(), key=lambda row: row.op_id)
@@ -487,15 +492,6 @@ def test_backend_coverage_does_not_depend_on_the_host_flavor(host_flavor: str) -
     )
 
 
-def _judging_flavor() -> str:
-    """The LLVM flavor of the arbiter's clang, which the compile tests lower at; skip when there is
-    none."""
-    flavor, why_not = arbiter_llvm_flavor()
-    if flavor is None:
-        pytest.skip(why_not)
-    return flavor
-
-
 @dataclass(frozen=True)
 class _CompileJob:
     """One module the compile decides: ``row``'s backend ``op``, known to the caller as ``key``."""
@@ -540,7 +536,7 @@ def _entry_key(op_id: str, target: str, entry: CoverageEntry) -> tuple:
 
 @pytest.mark.parametrize("target", _TARGETS)
 def test_backend_coverage_compiles(target: str) -> None:
-    flavor = _judging_flavor()
+    flavor = require_arbiter_llvm_flavor()
     ops = {op.op_id: op for op in ArchTarget.from_gfx(target).mma.ops}
     recorded = {
         _entry_key(op_id, target, entry): entry

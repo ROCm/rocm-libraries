@@ -8,8 +8,10 @@ A TileMma names its dtypes as IR types (``FP8E4M3``, ``BF8E5M2``); these tests c
 bf8 wave tile lowers to one MFMA call per atom, that its fragments move through global memory and
 LDS with vector accesses rather than one byte at a time, each claiming the alignment of its own
 size, and that ``MmaTee.from_mma`` sizes and labels each operand from those dtypes.
-Every kernel is lowered by both engines, which must emit the same IR
-(``rocke.tests.engines.lower_with_both_engines``).
+Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
+``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
+binding is not built, only the C++ cases skip. Where the host clang targets the arch, a separate
+test compiles and links the LDS round trip once (compile-verified, never run).
 """
 
 from __future__ import annotations
@@ -37,9 +39,8 @@ from rocke.helpers.tiling import (
 )
 from rocke.helpers.tiling.mma import TileMma, Tiling
 from rocke.helpers.tiling.visualization import layout_render as lr
-from rocke.tests.engines import lower_with_both_engines
-
-from .test_mma_issue import _compile_or_skip
+from rocke.tests.engines import ENGINES, lower_with_engine
+from rocke.tests.ir_validity import assert_kernel_target_accepts
 
 
 def _wave_tile_kernel(dtype, mma: TileMma):
@@ -65,6 +66,7 @@ def _wave_tile_kernel(dtype, mma: TileMma):
     return b.kernel
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "dtype,intrinsic",
     [
@@ -72,7 +74,7 @@ def _wave_tile_kernel(dtype, mma: TileMma):
         (BF8E5M2, "@llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8"),
     ],
 )
-def test_8bit_wave_tile_issues_one_mfma_per_atom(dtype, intrinsic) -> None:
+def test_8bit_wave_tile_issues_one_mfma_per_atom(dtype, intrinsic, engine) -> None:
     # A 32x32x64 wave tile over the gfx942 16x16x32 atom is a 2 x 2 x 2 atom grid: eight calls.
     mma = TileMma(
         (32, 32, 64),
@@ -83,7 +85,7 @@ def test_8bit_wave_tile_issues_one_mfma_per_atom(dtype, intrinsic) -> None:
         tiling=Tiling(atom_shape=(16, 16, 32)),
     )
     assert mma.a_dtype is dtype and mma.b_dtype is dtype and mma.c_dtype is F32
-    ir = lower_with_both_engines(_wave_tile_kernel(dtype, mma), "gfx942")
+    ir = lower_with_engine(_wave_tile_kernel(dtype, mma), "gfx942", engine=engine)
     calls = [line for line in ir.splitlines() if "call" in line and intrinsic in line]
     assert len(calls) == 8
 
@@ -102,8 +104,9 @@ def _accesses(ir: str, space: int) -> list[str]:
     ]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2])
-def test_8bit_wave_tile_loads_its_operands_with_vector_loads(dtype) -> None:
+def test_8bit_wave_tile_loads_its_operands_with_vector_loads(dtype, engine) -> None:
     # Each lane holds 8 consecutive K elements of A and of B per atom, so the 32x32x64 tile reads
     # its operands as 8 loads of 8 bytes (A and B, 2 atoms along M or N, 2 along K) instead of 64
     # one-byte loads.
@@ -115,7 +118,7 @@ def test_8bit_wave_tile_loads_its_operands_with_vector_loads(dtype) -> None:
         target="gfx942",
         tiling=Tiling(atom_shape=(16, 16, 32)),
     )
-    ir = lower_with_both_engines(_wave_tile_kernel(dtype, mma), "gfx942")
+    ir = lower_with_engine(_wave_tile_kernel(dtype, mma), "gfx942", engine=engine)
     loads = [access for access in _accesses(ir, 1) if access.startswith("load")]
     assert loads == ["load <8 x i8>, align 8"] * 8
 
@@ -150,18 +153,23 @@ def _lds_round_trip_kernel(dtype):
     return b.kernel
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2, I8])
-def test_8bit_fragment_moves_through_lds_with_vector_accesses(dtype) -> None:
+def test_8bit_fragment_moves_through_lds_with_vector_accesses(dtype, engine) -> None:
     # The 8 consecutive bytes a lane holds per atom are one LDS store and one LDS load each; no LDS
     # access moves a single byte, and each claims 8-byte alignment, which an 8-byte run of the
     # 8-element-aligned buffer has.
     kernel = _lds_round_trip_kernel(dtype)
-    ir = lower_with_both_engines(kernel, "gfx942")
+    ir = lower_with_engine(kernel, "gfx942", engine=engine)
     assert (
         _accesses(ir, 3)
         == ["load <8 x i8>, align 8"] * 4 + ["store <8 x i8>, align 8"] * 4
     )
-    _compile_or_skip(kernel, "gfx942")
+
+
+@pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2, I8])
+def test_8bit_lds_round_trip_compiles(dtype) -> None:
+    assert_kernel_target_accepts(_lds_round_trip_kernel(dtype), "gfx942")
 
 
 def test_mma_tee_sizes_and_labels_operands_from_the_mma_dtypes() -> None:

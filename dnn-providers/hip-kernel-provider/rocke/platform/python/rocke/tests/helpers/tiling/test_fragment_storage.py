@@ -16,8 +16,8 @@ window that would split a word is refused, and its LDS buffer holds i32 words. A
 or bound on a packed tensor's stride-1 axis is refused unless the caller states it is on a
 whole-word group (``packed_runs_aligned=True``). ``storage_slots`` is the one rule for which storage
 registers hold which logical registers. These tests check the storage table and that rule, the
-refusals and their messages, the alignment each packed access claims, and that both engines lower these
-kernels to the same IR on the CPU, and on a gfx90a GPU that tf32
+refusals and their messages, the alignment each packed access claims, and that each engine lowers these
+kernels on the CPU, the C++ engine to the Python engine's IR, and on a gfx90a GPU that tf32
 payloads and packed operand tiles (in gfx950's canonical operand layouts) round-trip bit-exactly
 through global memory and LDS, and that the packed words a lane loads are exactly
 ``FragmentPacking.pack`` of the elements its layout places there.
@@ -71,7 +71,7 @@ from rocke.helpers.tiling import (
 from rocke.helpers.tiling.emit import emit_tensor_coordinates
 from rocke.helpers.tiling.fragments import storage_slots
 from rocke.helpers.tiling.lds_conflict import NumBuilder, addr_map
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import ENGINES, lower_with_engine
 
 _WAVE = 64
 
@@ -271,8 +271,9 @@ def test_a_u8_fragment_is_filled_with_u8_zeros() -> None:
     assert fill.attrs["elem"] == "u8" and fill.attrs["fill"] == 0.0
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("dest", ["global", "lds"])
-def test_a_u8_fragment_loads_from_global_and_stores(dest) -> None:
+def test_a_u8_fragment_loads_from_global_and_stores(dest, engine) -> None:
     b = IRBuilder(f"u8_to_{dest}")
     tid = b.thread_id_x()
     src = b.param("IN", PtrType(U8, "global"))
@@ -285,7 +286,7 @@ def test_a_u8_fragment_loads_from_global_and_stores(dest) -> None:
         dst = b.smem_alloc(U8, [_U8_TENSOR.element_span], name_hint="lds")
     store_fragment(b, dst, window, fragment, tid)
     b.ret()
-    text = lower_with_both_engines(b.kernel, "gfx90a")
+    text = lower_with_engine(b.kernel, "gfx90a", engine=engine)
     # The registers start from a u8 zero vector, which LLVM spells as i8.
     assert "<16 x i8> zeroinitializer" in text
 
@@ -312,9 +313,10 @@ def _u8_round_trip_kernel():
     return b.kernel, signature
 
 
-def test_a_u8_tile_lowers_identically_in_both_engines() -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_u8_round_trip_tile_lowers_with_each_engine(engine) -> None:
     kernel, _ = _u8_round_trip_kernel()
-    text = lower_with_both_engines(kernel, "gfx90a")
+    text = lower_with_engine(kernel, "gfx90a", engine=engine)
     # The registers start from a u8 zero vector, which LLVM spells as i8.
     assert "<16 x i8> zeroinitializer" in text
 
@@ -860,15 +862,16 @@ def test_packed_operand_tile_round_trips(name, dtype, bits) -> None:
     np.testing.assert_array_equal(result_lds, data)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("name", [p[0] for p in _PACKED] + ["tf32"])
-def test_storage_word_kernels_lower_identically_in_both_engines(name) -> None:
+def test_storage_word_kernels_lower_with_each_engine(name, engine) -> None:
     # The kernels above move packed words (whole i32 words, <N x i32> vectors) and tf32 held as
-    # i32; the C++ engine must lower them to the same IR as the Python engine.
+    # i32; each engine must lower them, and the C++ engine to the same IR as the Python engine.
     if name == "tf32":
         kernel = _tf32_round_trip_kernel()[0]
     else:
         kernel = _packed_round_trip_kernel(*next(p for p in _PACKED if p[0] == name))[0]
-    lower_with_both_engines(kernel, "gfx90a")
+    lower_with_engine(kernel, "gfx90a", engine=engine)
 
 
 @pytest.mark.usefixtures("gfx90a_gpu")

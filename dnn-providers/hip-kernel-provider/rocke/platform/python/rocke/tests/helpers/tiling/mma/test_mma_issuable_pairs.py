@@ -9,19 +9,22 @@ variant, drives a single-instruction TileMma whose A, B, C and result dtypes are
 The tile must lower to that instruction's LLVM intrinsic, and its result Fragment must carry the
 instruction's result dtype (which differs from the accumulator's for one row).
 
-Every kernel is lowered by both engines, which must emit the same IR
-(``rocke.tests.engines.lower_with_both_engines``). Where the host clang targets the arch, the module
-is also compiled and linked (compile-verified, never run).
+Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
+``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
+binding is not built, only the C++ cases skip. Where the host clang targets the arch, a separate
+test compiles and links the module once (compile-verified, never run).
 """
 
 from __future__ import annotations
 
 import re
+from functools import cache
 
 import pytest
 
-from rocke.core.ir import I8, U8, IRBuilder, PtrType, dtype_to_ir_type
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, dtype_to_ir_type
 from rocke.helpers.tiling import (
+    Fragment,
     fill_fragment,
     make_fragment,
     make_tensor_desc,
@@ -31,9 +34,8 @@ from rocke.helpers.tiling import (
 from rocke.helpers.tiling.mma import TileMma
 from rocke.helpers.tiling.mma.driver import _DRIVEN_FAMILIES
 from rocke.helpers.tiling.traits import load_backend_coverage, load_mma_traits
-from rocke.tests.engines import lower_with_both_engines
-
-from .test_mma_issue import _compile_or_skip
+from rocke.tests.engines import ENGINES, lower_with_engine
+from rocke.tests.ir_validity import assert_kernel_target_accepts
 
 _CATALOG = load_mma_traits()
 _COVERAGE = load_backend_coverage()
@@ -79,14 +81,9 @@ def _plan(op_id: str, target: str, operand_dtypes) -> TileMma:
 
 
 def _zero_fragment(b: IRBuilder, desc, dtype):
-    """A zero Fragment of ``dtype``. fill_fragment zeroes every dtype but u8, which core's zero_vec
-    has no form for; a u8 zero is the i8 zero vector reinterpreted, bit for bit."""
+    """A zero Fragment of ``dtype``."""
     fragment = make_fragment(desc, dtype)
-    if dtype == U8:
-        count = fragment.storage_type.count
-        fragment.value = b.bitcast(b.zero_vec(I8, count), fragment.storage_type)
-    else:
-        fill_fragment(b, fragment, 0)
+    fill_fragment(b, fragment, 0)
     return fragment
 
 
@@ -108,19 +105,38 @@ def _single_instruction_tile(b: IRBuilder, mma: TileMma):
     return result
 
 
-@pytest.mark.parametrize("op_id,target,operand_dtypes", list(_params(_PAIRS)))
-def test_issuable_instruction_drives_a_tile_that_lowers_to_it(
+@cache
+def _issuable_tile(
     op_id, target, operand_dtypes
-) -> None:
+) -> tuple[TileMma, KernelDef, Fragment]:
+    """The single-instruction tile of one pair: its TileMma, kernel and result Fragment.
+
+    Built once per pair and shared, read-only, by the pair's lowering cases (one per engine) and its
+    compile test: building the TileMma takes most of each test's time.
+    """
     mma = _plan(op_id, target, operand_dtypes)
     b = IRBuilder("issuable_pair")
     result = _single_instruction_tile(b, mma)
+    return mma, b.kernel, result
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("op_id,target,operand_dtypes", list(_params(_PAIRS)))
+def test_issuable_instruction_drives_a_tile_that_lowers_to_it(
+    op_id, target, operand_dtypes, engine
+) -> None:
+    mma, kernel, result = _issuable_tile(op_id, target, operand_dtypes)
     # The result carries the instruction's result dtype, the accumulator's for every row but the
     # bf16-from-f32 one.
     assert result.dtype == mma.d_dtype == dtype_to_ir_type(mma.traits.d_dtype)
-    ir = lower_with_both_engines(b.kernel, target)
+    ir = lower_with_engine(kernel, target, engine=engine)
     assert len(_intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 1
-    _compile_or_skip(b.kernel, target)
+
+
+@pytest.mark.parametrize("op_id,target,operand_dtypes", list(_params(_PAIRS)))
+def test_issuable_instruction_tile_compiles(op_id, target, operand_dtypes) -> None:
+    _, kernel, _ = _issuable_tile(op_id, target, operand_dtypes)
+    assert_kernel_target_accepts(kernel, target)
 
 
 def test_issuable_population() -> None:

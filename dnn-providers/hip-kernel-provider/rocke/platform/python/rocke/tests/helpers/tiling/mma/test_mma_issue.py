@@ -9,12 +9,15 @@ class ``issuable`` is refused with its class. The driver then refuses, before an
 family it cannot feed (scaled, sparse) and a result dtype other than the accumulator's that would be
 fed back as the next K step's accumulator, and types its result by the instruction's result dtype.
 
-Every kernel is lowered by both engines, which must emit the same IR
-(``rocke.tests.engines.lower_with_both_engines``). Where the host clang targets the arch, the module
-is also compiled and linked (compile-verified, never run).
+Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
+``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
+binding is not built, only the C++ cases skip. Where the host clang targets the arch, a separate
+test compiles and links the module of each f16 and f32 tile once (compile-verified, never run).
 """
 
 from __future__ import annotations
+
+from functools import partial
 
 import pytest
 
@@ -32,7 +35,6 @@ from rocke.core.ir import (
     PtrType,
     dtype_to_ir_type,
 )
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers.tiling import (
     fill_fragment,
     load_fragment,
@@ -47,8 +49,8 @@ from rocke.helpers.tiling.traits import (
     load_backend_coverage,
     load_mma_traits,
 )
-from rocke.tests.engines import lower_with_both_engines
-from rocke.tests.ir_validity import arbiter_llvm_flavor, assert_target_accepts
+from rocke.tests.engines import ENGINES, lower_with_engine
+from rocke.tests.ir_validity import assert_kernel_target_accepts
 
 _CATALOG = load_mma_traits()
 _COVERAGE = load_backend_coverage()
@@ -81,17 +83,6 @@ def _wave_tile_kernel(mma: TileMma, name: str):
 
 def _calls(ir: str, intrinsic: str) -> list[str]:
     return [line for line in ir.splitlines() if "call" in line and intrinsic in line]
-
-
-def _compile_or_skip(kernel, target: str) -> None:
-    """Lower ``kernel`` at the flavor of the arbiter's clang and require it to compile and link for
-    ``target`` (:func:`rocke.tests.ir_validity.assert_target_accepts`); skip, naming why, when no
-    verdict is possible on this host."""
-    flavor, why_not = arbiter_llvm_flavor()
-    if flavor is None:
-        pytest.skip(why_not)
-    ir = _lower_kernel_to_llvm_python(kernel, arch=target, llvm_flavor=flavor)
-    assert_target_accepts(ir, target)
 
 
 # ---- emit_op reads the record ------------------------------------------------------------------
@@ -295,8 +286,9 @@ def test_atom_override_refuses_another_result_dtype() -> None:
     )
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("shape,calls", [((16, 16, 32), 1), ((32, 32, 32), 4)])
-def test_bf16_result_tile_returns_a_bf16_fragment(shape, calls) -> None:
+def test_bf16_result_tile_returns_a_bf16_fragment(shape, calls, engine) -> None:
     # One C subtile, then four, each taking one instruction along K: the f32 accumulator goes in,
     # a bf16 result comes out, and it is never fed back as an accumulator.
     mma = TileMma(
@@ -311,7 +303,7 @@ def test_bf16_result_tile_returns_a_bf16_fragment(shape, calls) -> None:
     kernel, result = _wave_tile_kernel(mma, "bf16_result")
     assert result.dtype == BF16
     assert result.value.type == result.storage_type
-    ir = lower_with_both_engines(kernel, "gfx1250")
+    ir = lower_with_engine(kernel, "gfx1250", engine=engine)
     assert len(_calls(ir, "@llvm.amdgcn.wmma.bf16f32.16x16x32.bf16")) == calls
 
 
@@ -341,54 +333,83 @@ def test_bf16_result_tile_with_two_instructions_along_k_is_refused() -> None:
 # ---- WMMA and MFMA tiles issued from the record -----------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "target,atom,intrinsic",
-    [
-        ("gfx1250", (16, 16, 32), "@llvm.amdgcn.wmma.f32.16x16x32.f16"),
-        ("gfx1151", (16, 16, 16), "@llvm.amdgcn.wmma.f32.16x16x16.f16"),
-    ],
-)
-def test_f16_wmma_tile_lowers_to_wmma(target, atom, intrinsic) -> None:
-    # A 32x32x32 wave tile: a grid of WMMA atoms, one call each.
-    mma = TileMma(
-        (32, 32, 32),
-        a=F16,
-        b=F16,
-        c=F32,
-        target=target,
-        tiling=Tiling(atom_shape=atom),
+def _f16_wmma_tile(target: str, atom: tuple[int, int, int]) -> TileMma:
+    """A 32x32x32 f16 wave tile on ``target``'s WMMA instruction of shape ``atom``."""
+    return TileMma(
+        (32, 32, 32), a=F16, b=F16, c=F32, target=target, tiling=Tiling(atom_shape=atom)
     )
+
+
+def _gfx11_f16_result_tile() -> TileMma:
+    """One gfx1100 WMMA instruction with an f16 accumulator and result."""
+    return TileMma((16, 16, 16), a=F16, b=F16, c=F16, target="gfx1100")
+
+
+def _f32_mfma_tile() -> TileMma:
+    """One gfx942 f32 16x16x4 MFMA instruction."""
+    return TileMma((16, 16, 4), a=F32, b=F32, c=F32, target="gfx942")
+
+
+# The f16 WMMA tiles: (target, instruction shape, its intrinsic).
+_F16_WMMA_TILES = [
+    ("gfx1250", (16, 16, 32), "@llvm.amdgcn.wmma.f32.16x16x32.f16"),
+    ("gfx1151", (16, 16, 16), "@llvm.amdgcn.wmma.f32.16x16x16.f16"),
+]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("target,atom,intrinsic", _F16_WMMA_TILES)
+def test_f16_wmma_tile_lowers_to_wmma(target, atom, intrinsic, engine) -> None:
+    # A 32x32x32 wave tile: a grid of WMMA atoms, one call each.
+    mma = _f16_wmma_tile(target, atom)
     kernel, _ = _wave_tile_kernel(mma, f"wmma_f16_{target}")
-    ir = lower_with_both_engines(kernel, target)
+    ir = lower_with_engine(kernel, target, engine=engine)
     assert len(_calls(ir, intrinsic)) == mma.plan.mfma_count
-    _compile_or_skip(kernel, target)
 
 
-def test_gfx11_f16_result_wmma_tile_lowers_and_compiles() -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_gfx11_f16_result_wmma_tile_lowers_to_wmma(engine) -> None:
     # The 16-bit-result instruction keeps an F16 accumulator in its 8 logical slots per lane.
-    mma = TileMma((16, 16, 16), a=F16, b=F16, c=F16, target="gfx1100")
+    mma = _gfx11_f16_result_tile()
     assert mma.op_id == "wmma_f16_16x16x16_f16_w32"
     assert mma.c_desc.register_count == 8
     kernel, result = _wave_tile_kernel(mma, "wmma_f16_result")
     assert result.dtype == F16
-    ir = lower_with_both_engines(kernel, "gfx1100")
+    ir = lower_with_engine(kernel, "gfx1100", engine=engine)
     assert len(_calls(ir, "@llvm.amdgcn.wmma.f16.16x16x16.f16")) == 1
-    _compile_or_skip(kernel, "gfx1100")
 
 
-def test_pinned_fp8_by_bf8_wmma_lowers_to_the_mixed_intrinsic() -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_pinned_fp8_by_bf8_wmma_lowers_to_the_mixed_intrinsic(engine) -> None:
     # The pinned mixed instruction issues fp8 x bf8, never the fp8 x fp8 one of the same shape.
     mma = TileMma(target="gfx1250", atom_override="wmma_f32_16x16x64_fp8_bf8")
     assert (mma.a_dtype, mma.b_dtype) == (FP8E4M3, BF8E5M2)
     kernel, _ = _wave_tile_kernel(mma, "wmma_fp8_bf8")
-    ir = lower_with_both_engines(kernel, "gfx1250")
+    ir = lower_with_engine(kernel, "gfx1250", engine=engine)
     assert len(_calls(ir, "@llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8")) == 1
     assert not _calls(ir, "@llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8")
 
 
-def test_f32_mfma_16x16x4_issues_and_compiles() -> None:
-    mma = TileMma((16, 16, 4), a=F32, b=F32, c=F32, target="gfx942")
-    kernel, _ = _wave_tile_kernel(mma, "mfma_f32_16x16x4")
-    ir = lower_with_both_engines(kernel, "gfx942")
+@pytest.mark.parametrize("engine", ENGINES)
+def test_f32_mfma_16x16x4_tile_issues_one_instruction(engine) -> None:
+    kernel, _ = _wave_tile_kernel(_f32_mfma_tile(), "mfma_f32_16x16x4")
+    ir = lower_with_engine(kernel, "gfx942", engine=engine)
     assert len(_calls(ir, "@llvm.amdgcn.mfma.f32.16x16x4f32")) == 1
-    _compile_or_skip(kernel, "gfx942")
+
+
+@pytest.mark.parametrize(
+    "make_mma,target",
+    [
+        *(
+            pytest.param(
+                partial(_f16_wmma_tile, target, atom), target, id=f"wmma-f16-{target}"
+            )
+            for target, atom, _ in _F16_WMMA_TILES
+        ),
+        pytest.param(_gfx11_f16_result_tile, "gfx1100", id="wmma-f16-result-gfx1100"),
+        pytest.param(_f32_mfma_tile, "gfx942", id="mfma-f32-16x16x4-gfx942"),
+    ],
+)
+def test_issued_tile_compiles(make_mma, target) -> None:
+    kernel, _ = _wave_tile_kernel(make_mma(), "issued_tile")
+    assert_kernel_target_accepts(kernel, target)

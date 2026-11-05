@@ -670,12 +670,13 @@ if(ROCKE_INSTALL_TESTS)
       # The tiling package's tests live inside the package (rocke/tests/helpers/tiling), so
       # rocke_pytest above, which collects the installed tests/ tree, never sees them. Run
       # them from the installed package, the way the arch-domain gate reads its package data.
-      # Two kinds of test skip here and pass: the GPU tests, without a usable GPU, and every test
-      # that loads platform/tools/, which the installed tree does not hold. The second kind runs
-      # only from a source checkout: the backend coverage re-measurement, the compile of every
-      # issued MMA instruction and the gfx950 fp8 x fp4 hardware run (traits/README.md, Backend
-      # coverage). Like rocke_pytest, the entry gets the compiler tool locations but not the
-      # compiler requirement policy.
+      # Three kinds of test skip here and pass: the GPU tests, without a usable GPU; the C++-engine
+      # cases of the IR tests, as the installed tree has no rocke_engine binding (their
+      # Python-engine cases run); and every test that loads platform/tools/, which the installed
+      # tree does not hold. The last kind runs only from a source checkout: the backend coverage
+      # re-measurement, the compile of every issued MMA instruction and the gfx950 fp8 x fp4
+      # hardware run (traits/README.md, Backend coverage). Like rocke_pytest, the entry gets the
+      # compiler tool locations but not the compiler requirement policy.
       #
       # No directory above the installed package holds a rocke pytest configuration, so
       # without -c pytest would take one from any pytest.ini or pyproject.toml above the
