@@ -395,3 +395,157 @@ def test_dropout_current_stream(varlen, capture):
             torch.testing.assert_close(grad, ref_grad, atol=4e-3, rtol=4e-3)
         # Finish reference reads before a replay overwrites the captured buffers.
         stream.wait_stream(torch.cuda.current_stream())
+
+
+def _call_sink_api(api, q, sink, **kwargs):
+    import ck_tile_fmha
+
+    if api == "fixed":
+        return fmha_func(q, q, q, sink=sink, **kwargs)
+    if api == "kvpacked":
+        return ck_tile_fmha.fmha_kvpacked_func(q, torch.stack((q, q), dim=2), sink=sink, **kwargs)
+    if api == "qkvpacked":
+        return ck_tile_fmha.fmha_qkvpacked_func(torch.stack((q, q, q), dim=2), sink=sink, **kwargs)
+    if api == "kvcache":
+        return fmha_with_kvcache(q, q.clone(), q.clone(), sink=sink, **kwargs)
+    cu = torch.arange(q.shape[0] + 1, device=q.device, dtype=torch.int32) * q.shape[1]
+    flat = q.flatten(0, 1)
+    if api == "varlen":
+        return fmha_varlen_func(
+            flat, flat, flat, cu, cu, q.shape[1], q.shape[1], sink=sink, **kwargs
+        )
+    if api == "varlen_kvpacked":
+        return ck_tile_fmha.fmha_varlen_kvpacked_func(
+            flat,
+            torch.stack((flat, flat), dim=1),
+            cu,
+            cu,
+            q.shape[1],
+            q.shape[1],
+            sink=sink,
+            **kwargs,
+        )
+    return ck_tile_fmha.fmha_varlen_qkvpacked_func(
+        torch.stack((flat, flat, flat), dim=1),
+        cu,
+        q.shape[1],
+        sink=sink,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("api", ["fixed", "varlen", "kvcache"])
+@pytest.mark.parametrize("logit", [False, True])
+@pytest.mark.parametrize(
+    "causal,window",
+    [
+        pytest.param(False, (-1, -1), id="unmasked"),
+        pytest.param(True, (-1, -1), id="causal"),
+        pytest.param(False, (-1, 3), id="right-bounded"),
+        pytest.param(False, (16, 0), id="clamped-left"),
+    ],
+)
+def test_sink_prefix_without_left_window_matches_default(api, logit, causal, window):
+    torch.manual_seed(45)
+    q = torch.randn(1, 16, 2, 64, device="cuda", dtype=torch.float16)
+    sink = torch.tensor([-0.7, 4.0], device=q.device) if logit else None
+    kwargs = dict(causal=causal, window_size=window)
+    baseline = _call_sink_api(api, q, sink, **kwargs)
+    # Even a prefix beyond split-KV's local-window limit is inert here.
+    actual = _call_sink_api(api, q, sink, sink_size=80, **kwargs)
+    torch.testing.assert_close(actual, baseline, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("api", ["fixed", "varlen", "kvcache"])
+@pytest.mark.parametrize(
+    "invalid", ["shape", "heads", "dtype", "device", "stride", "sink_size", "scale"]
+)
+def test_sink_validation(api, invalid):
+    q = torch.randn(1, 4, 2, 64, device="cuda", dtype=torch.float16)
+    sink = torch.zeros(2, device=q.device)
+    kwargs = {}
+    if invalid == "shape":
+        sink = sink[None]
+        message = "shape"
+    elif invalid == "heads":
+        sink = sink[:1]
+        message = "shape"
+    elif invalid == "dtype":
+        sink = sink.half()
+        message = "float32"
+    elif invalid == "device":
+        sink = sink.cpu()
+        message = "same device"
+    elif invalid == "stride":
+        sink = torch.zeros(4, device=q.device)[::2]
+        message = "contiguous"
+    elif invalid == "sink_size":
+        kwargs["sink_size"] = -1
+        message = "nonnegative"
+    else:
+        kwargs["softmax_scale"] = 0.0
+        message = "positive finite"
+    with pytest.raises(RuntimeError, match=message):
+        _call_sink_api(api, q, sink, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "api",
+    ["fixed", "kvpacked", "qkvpacked", "varlen", "varlen_kvpacked", "varlen_qkvpacked", "kvcache"],
+)
+@pytest.mark.parametrize("grad_input", ["q", "sink", "prefix"])
+def test_sink_forward_only(api, grad_input):
+    q = torch.randn(
+        1, 4, 2, 64, device="cuda", dtype=torch.float16, requires_grad=grad_input != "sink"
+    )
+    sink = (
+        None
+        if grad_input == "prefix"
+        else torch.zeros(2, device=q.device, requires_grad=grad_input == "sink")
+    )
+    kwargs = dict(sink_size=2, causal=True, window_size=(1, 0))
+    with pytest.raises(ValueError, match="forward only"):
+        _call_sink_api(api, q, sink, **kwargs)
+    with torch.no_grad():
+        result = _call_sink_api(api, q, sink, **kwargs)
+        assert not result.requires_grad
+
+
+@pytest.mark.parametrize("varlen", [False, True])
+def test_sink_operator_metadata_and_compile(varlen):
+    torch.manual_seed(48)
+    q = torch.randn(2, 33, 4, 64, device="cuda", dtype=torch.float16)
+    k = torch.randn(2, 65, 2, 64, device=q.device, dtype=q.dtype)
+    v = torch.randn_like(k)
+    sink = torch.tensor([-torch.inf, 0.0, 4.0, 7.0], device=q.device)
+    sequence_args = ()
+    if varlen:
+        q, k, v = (x.flatten(0, 1) for x in (q, k, v))
+        cu_q = torch.tensor([0, 33, 66], device=q.device, dtype=torch.int32)
+        cu_k = torch.tensor([0, 65, 130], device=q.device, dtype=torch.int32)
+        sequence_args = (cu_q, cu_k, 33, 65)
+    op = (
+        torch.ops.ck_tile_fmha._fmha_varlen_forward
+        if varlen
+        else torch.ops.ck_tile_fmha._fmha_forward
+    )
+    args = (q, k, v, *sequence_args, 0.0, 0.125, True, 17, 0, 0.0, None, False)
+    torch.library.opcheck(
+        op, args, kwargs=dict(sink_size=4, sink=sink), test_utils=("test_schema", "test_faketensor")
+    )
+
+    def forward(q, k, v, sink):
+        kwargs = dict(
+            causal=True, window_size=(17, 0), sink_size=4, sink=sink, return_attn_probs=True
+        )
+        if varlen:
+            return fmha_varlen_func(q, k, v, *sequence_args, **kwargs)[:2]
+        return fmha_func(q, k, v, **kwargs)[:2]
+
+    compiled = torch.compile(forward, backend="inductor", fullgraph=True)
+    # Reuse the graph with different logits so the sink tensor cannot be captured as a constant.
+    for values in (sink, sink + 1.0):
+        actual = compiled(q, k, v, values)
+        expected = forward(q, k, v, values)
+        for result, ref in zip(actual, expected):
+            torch.testing.assert_close(result, ref, atol=0, rtol=0)

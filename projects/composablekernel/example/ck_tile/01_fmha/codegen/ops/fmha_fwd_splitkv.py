@@ -1018,7 +1018,6 @@ def get_fwd_splitkv_blobs(
                     cond &= pipeline.F_bias in ["no", "alibi"]
                     cond &= pipeline.F_logits == "f"
                     cond &= pipeline.F_squant == "f"
-                    cond &= pipeline.F_sink == "f"
                     if not cond:
                         continue
                 # Aiter(mha_varlen_fwd) integration

@@ -97,12 +97,13 @@ namespace ck_tile {
 using index_t = int;
 struct stream_config {};
 struct gfx125_t {};
+struct gfx950_t {};
 inline std::string get_device_name() {
     const char* value = std::getenv("FMHA_TEST_DEVICE");
     return value == nullptr ? "gfx1250" : value;
 }
 template <bool> struct SimplifiedGenericAttentionMask {};
-enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG };
+enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_ASYNC, QRKSVS_ASYNC_TRLOAD, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG };
 enum class BlockAttentionBiasEnum { NO_BIAS, ELEMENTWISE_BIAS, ALIBI };
 enum class BlockAttentionQuantScaleEnum { NO_SCALE, PERTENSOR, BLOCKSCALE, KV_BLOCKSCALE, MX };
 }
@@ -135,6 +136,7 @@ struct fmha_fwd_args {
     int stride_q = 192, nhead_stride_q = 24576;
     int window_size_left = -1, window_size_right = -1;
     int batch = 2, nhead_q = 8, nhead_k = 2;
+    int sink_size = 0;
     const void* sink_ptr = nullptr;
     const void* seqlen_k_ptr = nullptr;
     const void* cu_seqlen_k_ptr = nullptr;
@@ -160,7 +162,7 @@ int main() {
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
          >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> o_offset >> a.stride_o
-         >> a.nhead_stride_o >> a.batch_stride_o)) return 2;
+         >> a.nhead_stride_o >> a.batch_stride_o >> a.sink_size)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -287,6 +289,7 @@ class _CompiledDispatcher:
             stride_o=1024,
             nhead_stride_o=128,
             batch_stride_o=262144,
+            sink_size=0,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -310,6 +313,119 @@ class _CompiledDispatcher:
             check=True,
         )
         return [int(value) for value in result.stdout.split()]
+
+
+@unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+class TestCompiledGfx950SinkDispatch(unittest.TestCase):
+    def test_prefix_sink_falls_back_and_logit_sink_keeps_trload(self):
+        for dtype in ("fp16", "bf16"):
+            pool, kernels = get_fwd_blobs(
+                ["gfx950"],
+                f"fmha_fwd_d*_{dtype}_*_nlogits_nbias_mask_lse_ndropout_nskip_nqscale_*",
+                5,
+                [64, 128, 256],
+                "simplified",
+            )
+            dispatch = _CompiledDispatcher(self, pool, kernels)
+            by_id = {value: kernel for kernel, value in dispatch.kernel_ids}
+            # Exercise both short-Q trload tiles and the d128 prefill branch
+            # reached when the grid exceeds the number of CUs.
+            for group in (0, 1):
+                for dim, sq, batch in (
+                    (64, 16, 1),
+                    (128, 32, 1),
+                    (128, 512, 16),
+                    (256, 16, 1),
+                ):
+                    for sink_size, has_sink_ptr in ((0, 1), (4, 0), (4, 1)):
+                        with self.subTest(
+                            dtype=dtype,
+                            group=group,
+                            dim=dim,
+                            sq=sq,
+                            sink_size=sink_size,
+                            has_sink_ptr=has_sink_ptr,
+                        ):
+                            selected = dispatch.run(
+                                device="gfx950",
+                                dtype=dtype,
+                                hdim_q=dim,
+                                hdim_v=dim,
+                                seqlen_q=sq,
+                                seqlen_k=1024,
+                                batch=batch,
+                                nhead_q=4,
+                                nhead_k=2,
+                                group=group,
+                                has_cu_sk=group,
+                                mask=2,
+                                window_size_left=63,
+                                window_size_right=0,
+                                lse=1,
+                                sink=1,
+                                sink_size=sink_size,
+                                has_sink_ptr=has_sink_ptr,
+                            )
+                            self.assertEqual(len(selected), 1)
+                            self.assertIn(selected[0], by_id)
+                            pipeline = by_id[selected[0]].F_pipeline.tag
+                            if dim == 256:
+                                # d256's qr variants precede trload in the dispatcher.
+                                self.assertEqual(pipeline, "qr")
+                            elif sink_size:
+                                self.assertIn(pipeline, ("qr", "qr_async"))
+                            else:
+                                self.assertEqual(pipeline, "qr_async_trload")
+
+            # d256 normally selects qr first. With that fallback filtered out,
+            # verify that its trload variants accept logits and reject prefixes.
+            trload_dispatch = _CompiledDispatcher(
+                self,
+                pool,
+                kernels,
+                filter_fn=lambda trait: trait.hdim == "256"
+                and trait.pipeline_tag == "qr_async_trload",
+            )
+            for group in (0, 1):
+                # Group trload only has unpadded head dimensions. Batch also
+                # has a padded-head variant, exercised with d248.
+                for dim in (256,) if group else (248, 256):
+                    for sink_size, has_sink_ptr in ((0, 1), (4, 0), (4, 1)):
+                        with self.subTest(
+                            dtype=dtype,
+                            group=group,
+                            dim=dim,
+                            trload_only=True,
+                            sink_size=sink_size,
+                            has_sink_ptr=has_sink_ptr,
+                        ):
+                            selected = trload_dispatch.run(
+                                device="gfx950",
+                                dtype=dtype,
+                                hdim_q=dim,
+                                hdim_v=dim,
+                                seqlen_q=16,
+                                seqlen_k=1024,
+                                nhead_q=4,
+                                nhead_k=2,
+                                group=group,
+                                has_cu_sk=group,
+                                mask=2,
+                                window_size_left=63,
+                                window_size_right=0,
+                                lse=1,
+                                sink=1,
+                                sink_size=sink_size,
+                                has_sink_ptr=has_sink_ptr,
+                            )
+                            if sink_size:
+                                self.assertEqual(selected, [-1])
+                            else:
+                                self.assertEqual(len(selected), 1)
+                                self.assertIn(
+                                    selected[0],
+                                    {value for _, value in trload_dispatch.kernel_ids},
+                                )
 
 
 class TestGfx125D192Codegen(unittest.TestCase):

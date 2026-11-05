@@ -1352,9 +1352,17 @@ class KernelComponentFactoryGfx950(
                     and dropout == "f"
                     and skip == "f"
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip  # group mode spad
+                    # TRLOAD handles the extra sink logit, but does not load KV
+                    # prefix tiles outside the local window. Let prefix sinks
+                    # fall through to qr/qr_async, including short-Q/group mode.
+                    sink_constraint = (
+                        CppConstraint("a.sink_size == 0")
+                        if sink == "t"
+                        else CppConstraint()
+                    )
+                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink, F_constraint=sink_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "t", sink, F_constraint=sink_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink, F_constraint=sink_constraint))  # fmt: skip  # group mode spad
 
             # # qr_async_trload_v3 bf16/fp16 not ready
             # if (hdim, hdim_v) == (128, 128):
@@ -2326,7 +2334,6 @@ def get_product(receipt: int) -> Product:
             cond &= pipeline.F_logits == "f"
             cond &= pipeline.F_qscale == "no"
             cond &= pipeline.F_skip == "f"
-            cond &= pipeline.F_sink == "f"
             return cond
 
         return Product(name="CK Tile Python API", rule=fit)

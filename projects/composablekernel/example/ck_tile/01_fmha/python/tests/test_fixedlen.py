@@ -831,3 +831,138 @@ def test_window_bounds(api, sq, sk, window, causal):
         expected = torch.autograd.grad(ref, (q, k, v), dout)
         for grad, ref_grad in zip(actual, expected):
             torch.testing.assert_close(grad, ref_grad, atol=4e-3, rtol=4e-3)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize(
+    "batch,sq,sk,d,hk,causal,window,sink_size,logit,bias_kind,dropout_p",
+    [
+        pytest.param(2, 97, 113, 64, 4, False, (-1, -1), 0, True, "none", 0.0, id="dense-logit"),
+        pytest.param(2, 129, 257, 128, 2, True, (-1, -1), 0, True, "none", 0.0, id="causal-gqa"),
+        pytest.param(2, 257, 385, 64, 1, True, (31, 0), 80, False, "none", 0.0, id="prefix-mqa"),
+        pytest.param(2, 257, 385, 128, 2, True, (31, 0), 0, True, "none", 0.0, id="local-logit"),
+        pytest.param(2, 257, 385, 64, 2, True, (31, 0), 80, True, "none", 0.0, id="both"),
+        pytest.param(2, 97, 33, 64, 2, True, (-1, -1), 0, True, "none", 0.0, id="masked-rows"),
+        pytest.param(2, 1, 257, 64, 1, False, (-1, -1), 0, True, "none", 0.0, id="decode-mqa"),
+        pytest.param(2, 97, 113, 64, 2, False, (17, 9), 0, True, "bias", 0.0, id="bias-logit"),
+        pytest.param(
+            2, 257, 385, 64, 2, True, (31, 0), 80, True, "bias", 0.0, id="bias-multitile-prefix"
+        ),
+        pytest.param(2, 257, 385, 64, 2, True, (31, 0), 4, True, "alibi", 0.0, id="alibi-both"),
+        pytest.param(2, 257, 385, 64, 2, True, (31, 0), 4, True, "none", 0.17, id="dropout-both"),
+        pytest.param(2, 97, 113, 59, 2, False, (17, 9), 4, True, "none", 0.0, id="padded-head"),
+        # gfx950 used to select qr_async_trload, which ignores retained prefix keys.
+        pytest.param(1, 16, 512, 64, 2, True, (63, 0), 4, False, "none", 0.0, id="short-q-prefix"),
+        pytest.param(1, 32, 512, 128, 2, True, (63, 0), 4, True, "none", 0.0, id="short-q-both"),
+        pytest.param(
+            16, 512, 640, 128, 2, True, (63, 0), 4, False, "none", 0.0, id="large-grid-prefix"
+        ),
+    ],
+)
+def test_sink_forward(
+    dtype, batch, sq, sk, d, hk, causal, window, sink_size, logit, bias_kind, dropout_p
+):
+    torch.manual_seed(42)
+    q = torch.randn(batch, sq, 4, d, device="cuda", dtype=dtype)
+    k = torch.randn(batch, sk, hk, d, device=q.device, dtype=dtype)
+    v = torch.randn_like(k)
+    sink = torch.tensor([-torch.inf, -0.7, 4.0, 7.0], device=q.device) if logit else None
+    bias = torch.randn(sq, sk, device=q.device, dtype=dtype) if bias_kind == "bias" else None
+    alibi = torch.tensor([0.01, 0.03, 0.1, 0.2], device=q.device) if bias_kind == "alibi" else None
+    scale = 0.19
+    out, lse, randval = fmha_func(
+        q,
+        k,
+        v,
+        causal=causal,
+        window_size=window,
+        softmax_scale=scale,
+        sink_size=sink_size,
+        sink=sink,
+        bias=bias,
+        alibi_slopes=alibi,
+        dropout_p=dropout_p,
+        return_attn_probs=True,
+    )
+    attn_bias = bias.float() if bias is not None else None
+    if alibi is not None:
+        attn_bias = attn_bias_from_alibi_slopes(alibi[None].expand(batch, -1), sq, sk, causal=False)
+    dropout_mask = ck_randval_to_dropout_mask(randval, dropout_p) >= 0 if dropout_p else None
+    expected, _, expected_lse = attention_ref(
+        q.float(),
+        k.float(),
+        v.float(),
+        causal=causal,
+        window_size=window,
+        softmax_scale=scale,
+        sink_size=sink_size,
+        sink=sink,
+        attn_bias=attn_bias,
+        dropout_p=dropout_p,
+        dropout_mask=dropout_mask,
+        return_lse=True,
+    )
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    torch.testing.assert_close(out.float(), expected, atol=tol, rtol=tol)
+    torch.testing.assert_close(lse, expected_lse, atol=2e-3, rtol=2e-3)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("api", ["separate", "kvpacked", "qkvpacked"])
+def test_sink_packed_forward(dtype, api):
+    torch.manual_seed(43)
+    q, k, v = (torch.randn(2, 129, 4, 64, device="cuda", dtype=dtype) for _ in range(3))
+    sink = torch.tensor([-torch.inf, 0.0, 3.0, 6.0], device=q.device)
+    kwargs = dict(sink_size=4, sink=sink, causal=True, window_size=(17, 0), return_attn_probs=True)
+    if api == "separate":
+        out, lse, _ = fmha_func(q, k, v, **kwargs)
+    elif api == "kvpacked":
+        out, lse, _ = fmha_kvpacked_func(q, torch.stack((k, v), dim=2), **kwargs)
+    else:
+        out, lse, _ = fmha_qkvpacked_func(torch.stack((q, k, v), dim=2), **kwargs)
+    ref, _, ref_lse = attention_ref(
+        q.float(),
+        k.float(),
+        v.float(),
+        sink_size=4,
+        sink=sink,
+        causal=True,
+        window_size=(17, 0),
+        return_lse=True,
+    )
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    torch.testing.assert_close(out.float(), ref, atol=tol, rtol=tol)
+    torch.testing.assert_close(lse, ref_lse, atol=2e-3, rtol=2e-3)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("sk", [0, 1, 129])
+def test_sink_exact_normalization(dtype, sk):
+    q = torch.zeros(2, 3, 4, 64, device="cuda", dtype=dtype)
+    k = torch.zeros(2, sk, 1, 64, device=q.device, dtype=dtype)
+    v = torch.ones_like(k)
+    sink = torch.tensor([-80.0, 0.0, 5.0, 80.0], device=q.device)
+    out, lse, _ = fmha_func(q, k, v, sink=sink, softmax_scale=0.23, return_attn_probs=True)
+    # QK=0 and V=1: O=N/(N+exp(sink)), LSE=log(N+exp(sink)).
+    real_lse = torch.tensor(float(sk), device=q.device).log()
+    expected_lse = torch.logaddexp(real_lse, sink)
+    expected = torch.exp(real_lse - expected_lse)
+    tol = 2e-3 if dtype == torch.float16 else 8e-3
+    torch.testing.assert_close(
+        out.float(), expected[None, None, :, None].expand_as(out), atol=tol, rtol=tol
+    )
+    torch.testing.assert_close(
+        lse, expected_lse[None, :, None].expand_as(lse), atol=2e-4, rtol=2e-4
+    )
+
+
+def test_sink_disabled_matches_default():
+    torch.manual_seed(44)
+    q, k, v = (torch.randn(1, 97, 4, 64, device="cuda", dtype=torch.float16) for _ in range(3))
+    kwargs = dict(causal=True, window_size=(17, 0), return_attn_probs=True)
+    baseline = fmha_func(q, k, v, **kwargs)
+    explicit = fmha_func(q, k, v, sink_size=0, sink=None, **kwargs)
+    disabled = fmha_func(q, k, v, sink=torch.full((4,), -torch.inf, device=q.device), **kwargs)
+    for a, b, c in zip(baseline[:2], explicit[:2], disabled[:2]):
+        torch.testing.assert_close(a, b, atol=0, rtol=0)
+        torch.testing.assert_close(a, c, atol=2e-3, rtol=2e-3)

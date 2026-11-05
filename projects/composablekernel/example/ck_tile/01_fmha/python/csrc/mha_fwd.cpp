@@ -194,7 +194,9 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
         std::string qscale,
         bool return_lse,
         int block_size_q,
-        int block_size_kv)
+        int block_size_kv,
+        int sink_size,
+        std::optional<at::Tensor> sink)
 {
     TORCH_CHECK(softcap == 0.0f, "CK Tile FMHA Python bindings do not support softcap");
     auto q_dtype      = q.dtype();
@@ -230,6 +232,7 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     const int num_heads_k = k.size(2);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     detail::check_alibi(alibi_slopes_, q, batch_size, num_heads);
+    detail::check_sink(sink, sink_size, q, num_heads, softmax_scale);
     TORCH_CHECK(head_size > 0 && head_size <= 256, "CK only supports head dimension in [1, 256]");
     TORCH_CHECK(head_size % 8 == 0,
                 "query, key, value, and out_ must have a head_size that is a multiple of 8");
@@ -326,6 +329,10 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     {
         window_size_right = -1;
     }
+    // Prefix retention only changes attention with a bounded left window.
+    // Keep full-attention calls on their usual kernel path.
+    if(window_size_left < 0)
+        sink_size = 0;
 
     // causal=true is the same as causal=false in this case
     if(seqlen_q == 1 && !alibi_slopes_.has_value())
@@ -337,9 +344,10 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     if(is_causal)
     {
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
-        window_size_right         = 0;
-        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
-        mask                      = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
+        window_size_right = 0;
+        std::string mask_identify =
+            "b:" + std::to_string(window_size_left) + ",0," + std::to_string(sink_size);
+        mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
     }
     else if(window_size_left == -1 && window_size_right == -1)
     {
@@ -348,8 +356,9 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     else
     {
         // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        std::string mask_identify =
-            "b:" + std::to_string(window_size_left) + "," + std::to_string(window_size_right);
+        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," +
+                                    std::to_string(window_size_right) + "," +
+                                    std::to_string(sink_size);
         mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // local
     }
 
@@ -358,7 +367,7 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     const int seqlenq_ngroups_swapped =
         seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 &&
         p_dropout == 0.f && head_size % 8 == 0 && !alibi_slopes_.has_value() &&
-        !bias_.has_value() && !perhead && !blockscale;
+        !bias_.has_value() && !perhead && !blockscale && !sink.has_value();
     const int ngroups = num_heads / num_heads_k;
     if(seqlenq_ngroups_swapped)
     {
@@ -456,6 +465,9 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
                                          p_dropout,
                                          drop_seed_offset);
 
+        traits.has_sink    = sink_size > 0 || sink.has_value();
+        args.sink_size     = sink_size;
+        args.sink_ptr      = sink.has_value() ? sink->data_ptr() : nullptr;
         traits.qscale_type = qscale_type;
         if(is_fp8 && qscale_type != quant_scale_enum::no_scale)
         {
@@ -510,7 +522,10 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
         out.zero_();
-        softmax_lse.fill_(std::numeric_limits<float>::infinity());
+        if(sink.has_value() && has_lse)
+            softmax_lse.copy_(sink->view({1, num_heads, 1}).expand_as(softmax_lse));
+        else
+            softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }
 
     if(seqlenq_ngroups_swapped)

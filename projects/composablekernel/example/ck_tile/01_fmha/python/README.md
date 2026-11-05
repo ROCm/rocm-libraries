@@ -5,8 +5,7 @@ It supports FP16/BF16 fixed-length and variable-length attention, packed inputs,
 forward/backward, MHA/GQA/MQA, causal/local masks, ALiBi, dropout, deterministic
 backward, and KV-cache operations, subject to CK backend restrictions.
 
-Validated on **gfx942, gfx950 and gfx1250**. Nonzero `softcap`, attention sinks, and unequal Q/V
-head dimensions are unsupported. The package can coexist with `flash_attn` and
+Validated on **gfx942, gfx950 and gfx1250**. Nonzero `softcap` and unequal Q/V head dimensions are unsupported. The package can coexist with `flash_attn` and
 does not fall back to other backends.
 
 ## Build and install
@@ -69,6 +68,59 @@ and added to `Q @ K.T * softmax_scale` before softmax. It cannot be combined wit
 
 Bias gradients require a `(batch_size, nheads, seqlen_q, seqlen_k)` temporary,
 reduced across batches and heads.
+
+## Attention sinks (FP16/BF16 forward)
+
+The current sink numerical test suite has been validated on **gfx942 and gfx950**.
+An earlier suite (135 tests) passed on **gfx1250**; the subsequently added
+short-query and large-grid regression cases have not been run there.
+
+Fixed-length, variable-length, packed and KV-cache functions accept two optional
+keyword arguments. Both can be used together:
+
+```python
+sink = torch.linspace(-1.0, 7.0, q.shape[2], device=q.device, dtype=torch.float32)
+with torch.no_grad():
+    out = fmha_func(q, k, v, causal=True, window_size=(127, 0),
+                    sink_size=4, sink=sink)
+```
+
+- `sink_size` retains this many prefix KV tokens outside the local window,
+  independently for each sequence. CK's causal/right-window bounds still apply.
+  With a full attention window it has no additional effect. For a local window,
+  CK applies the retained prefix only to query rows whose index is less than
+  that sequence's KV length; calls with more Q than KV tokens therefore do not
+  retain the prefix for every query row.
+- `sink` supplies one extra softmax logit per **Q head**, shared across batches
+  and query positions. It must be a contiguous FP32 tensor `[nheads_q]` on Q's GPU,
+  including for GQA/MQA. The logit joins the softmax denominator without a value
+  vector. It is not multiplied by `softmax_scale`; the current CK entry requires
+  a positive finite `softmax_scale` when a logit tensor is supplied.
+
+For real-token scores `S`, normalization is
+`LSE = logsumexp(concat(S, sink))` and `out = exp(S - LSE) @ V` (before dropout).
+Returned LSE includes the sink. A logit of `-inf` disables that head's sink;
+zero is an active logit. Finite sinks give zero output and `LSE=sink` when no
+real keys are visible. Sink values must be finite or `-inf`; `+inf` and NaN are
+not supported. Sink logits are compared with `softmax_scale * (Q @ K.T)` plus
+any bias or ALiBi term.
+
+For paged variable-length KV and KV-cache attention with a left-bounded local
+window, `sink_size` is limited to 64. The current CK split-KV path loses prefix
+keys when the prefix spans more than one 64-token KV tile; larger values raise
+an error. Full attention and other layouts do not have this limit.
+
+Sink attention currently supports **forward only**. Calls that request gradients
+raise an error; use `torch.no_grad()` for inference with model parameters.
+FP8 sink arguments are not exposed. Kernel availability for combinations of
+mask, bias, dropout and cache layout follows the existing CK dispatcher.
+
+Sink cases are part of `test_fixedlen.py`, `test_varlen.py`, `test_kvcache.py` and
+`test_interface.py`, sharing the PyTorch reference in `tests/reference.py`:
+
+```bash
+HIP_VISIBLE_DEVICES=0 python -m pytest tests -k sink
+```
 
 ## FP8 forward
 

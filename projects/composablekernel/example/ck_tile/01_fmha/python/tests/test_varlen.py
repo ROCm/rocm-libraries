@@ -750,3 +750,190 @@ def test_varlen_window_bounds_with_different_lengths(window, extra_max):
         torch.autograd.grad(out, (q, k, v), dout), torch.autograd.grad(ref, (q, k, v), dout)
     ):
         torch.testing.assert_close(grad, ref_grad, atol=4e-3, rtol=4e-3)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("kind", ["none", "prefix", "logit", "both"])
+@pytest.mark.parametrize("paged", [False, True])
+@pytest.mark.parametrize("short_q", [False, True])
+def test_sink_varlen_forward(dtype, kind, paged, short_q):
+    torch.manual_seed(45)
+    # A short maximum Q length selects a different gfx950 pipeline.
+    qlens = [1, 16, 32] if short_q else [97, 1, 129]
+    klens = [33, 257, 385]
+    h, hk, d = 4, 2, 64
+    q = torch.randn(sum(qlens), h, d, device="cuda", dtype=dtype)
+    k = torch.randn(sum(klens), hk, d, device=q.device, dtype=dtype)
+    v = torch.randn_like(k)
+    cu_q = torch.tensor([0, *qlens], device=q.device).cumsum(0, dtype=torch.int32)
+    cu_k = torch.tensor([0, 33, 290, 675], device=q.device, dtype=torch.int32)
+    sink_size = 64 if kind in ("prefix", "both") else 0
+    sink = (
+        torch.tensor([-torch.inf, 0.0, 4.0, 7.0], device=q.device)
+        if kind in ("logit", "both")
+        else None
+    )
+    block_table = None
+    k_input, v_input = k, v
+    if paged:
+        # Deliberately permute physical pages to exercise logical prefix indexing.
+        block_table = torch.tensor(
+            [[5, 0, 0, 0], [2, 6, 0, 0], [4, 1, 7, 3]], device=q.device, dtype=torch.int32
+        )
+        k_input = torch.zeros(8, 128, hk, d, device=q.device, dtype=dtype)
+        v_input = torch.zeros_like(k_input)
+        offset = 0
+        for b, length in enumerate(klens):
+            for page in range((length + 127) // 128):
+                count = min(128, length - page * 128)
+                index = block_table[b, page].item()
+                k_input[index, :count] = k[offset + page * 128 : offset + page * 128 + count]
+                v_input[index, :count] = v[offset + page * 128 : offset + page * 128 + count]
+            offset += length
+    out, lse, _ = fmha_varlen_func(
+        q,
+        k_input,
+        v_input,
+        cu_q,
+        cu_k,
+        max(qlens),
+        max(klens),
+        causal=True,
+        window_size=(31, 0),
+        sink_size=sink_size,
+        sink=sink,
+        block_table=block_table,
+        return_attn_probs=True,
+    )
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    q_start = k_start = 0
+    for sq, sk in zip(qlens, klens):
+        ref, _, ref_lse = attention_ref(
+            q[q_start : q_start + sq][None].float(),
+            k[k_start : k_start + sk][None].float(),
+            v[k_start : k_start + sk][None].float(),
+            causal=True,
+            window_size=(31, 0),
+            sink_size=sink_size,
+            sink=sink,
+            return_lse=True,
+        )
+        torch.testing.assert_close(out[q_start : q_start + sq].float(), ref[0], atol=tol, rtol=tol)
+        torch.testing.assert_close(lse[:, q_start : q_start + sq], ref_lse[0], atol=2e-3, rtol=2e-3)
+        q_start += sq
+        k_start += sk
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("api", ["kvpacked", "qkvpacked"])
+def test_sink_varlen_packed_forward(dtype, api):
+    torch.manual_seed(46)
+    lengths = [97, 129]
+    cu = torch.tensor([0, 97, 226], device="cuda", dtype=torch.int32)
+    q, k, v = (torch.randn(226, 4, 128, device="cuda", dtype=dtype) for _ in range(3))
+    sink = torch.tensor([-torch.inf, 0.0, 4.0, 7.0], device=q.device)
+    kwargs = dict(causal=True, window_size=(17, 0), sink_size=4, sink=sink, return_attn_probs=True)
+    if api == "kvpacked":
+        out, lse, _ = fmha_varlen_kvpacked_func(
+            q, torch.stack((k, v), dim=1), cu, cu, 129, 129, **kwargs
+        )
+    else:
+        out, lse, _ = fmha_varlen_qkvpacked_func(torch.stack((q, k, v), dim=1), cu, 129, **kwargs)
+    start = 0
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    for length in lengths:
+        ref, _, ref_lse = attention_ref(
+            q[start : start + length][None].float(),
+            k[start : start + length][None].float(),
+            v[start : start + length][None].float(),
+            causal=True,
+            window_size=(17, 0),
+            sink_size=4,
+            sink=sink,
+            return_lse=True,
+        )
+        torch.testing.assert_close(out[start : start + length].float(), ref[0], atol=tol, rtol=tol)
+        torch.testing.assert_close(lse[:, start : start + length], ref_lse[0], atol=2e-3, rtol=2e-3)
+        start += length
+
+
+def test_sink_varlen_empty_keys():
+    q = torch.zeros(5, 2, 64, device="cuda", dtype=torch.float16)
+    k = torch.empty(0, 1, 64, device=q.device, dtype=q.dtype)
+    cu_q = torch.tensor([0, 2, 5], device=q.device, dtype=torch.int32)
+    cu_k = torch.zeros(3, device=q.device, dtype=torch.int32)
+    sink = torch.tensor([-1.0, 3.0], device=q.device)
+    out, lse, _ = fmha_varlen_func(q, k, k, cu_q, cu_k, 3, 0, sink=sink, return_attn_probs=True)
+    torch.testing.assert_close(out, torch.zeros_like(out), atol=0, rtol=0)
+    torch.testing.assert_close(lse, sink[:, None].expand_as(lse), atol=0, rtol=0)
+
+
+def test_sink_varlen_paged_prefix_spanning_tiles_is_rejected():
+    q = torch.randn(1, 2, 64, device="cuda", dtype=torch.float16)
+    k = torch.randn(3, 128, 1, 64, device=q.device, dtype=q.dtype)
+    cu_q = torch.tensor([0, 1], device=q.device, dtype=torch.int32)
+    cu_k = torch.tensor([0, 257], device=q.device, dtype=torch.int32)
+    block_table = torch.tensor([[0, 1, 2]], device=q.device, dtype=torch.int32)
+    args = (q, k, k, cu_q, cu_k, 1, 257)
+    baseline = fmha_varlen_func(*args, block_table=block_table, return_attn_probs=True)
+    full_window = fmha_varlen_func(
+        *args, block_table=block_table, sink_size=80, return_attn_probs=True
+    )
+    for actual, expected in zip(full_window[:2], baseline[:2]):
+        torch.testing.assert_close(actual, expected, atol=2e-3, rtol=2e-3)
+    with pytest.raises(RuntimeError, match="sink_size at most 64"):
+        fmha_varlen_func(
+            q,
+            k,
+            k,
+            cu_q,
+            cu_k,
+            1,
+            257,
+            causal=True,
+            window_size=(31, 0),
+            sink_size=65,
+            block_table=block_table,
+        )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("paged", [False, True])
+def test_sink_varlen_dense_gqa_decode(dtype, paged):
+    torch.manual_seed(52)
+    q = torch.randn(1, 4, 64, device="cuda", dtype=dtype)
+    k = torch.randn(257, 1, 64, device=q.device, dtype=dtype)
+    v = torch.randn_like(k)
+    sink = torch.tensor([-torch.inf, 0.0, 4.0, 7.0], device=q.device)
+    cu_q = torch.tensor([0, 1], device=q.device, dtype=torch.int32)
+    cu_k = torch.tensor([0, 257], device=q.device, dtype=torch.int32)
+    block_table = None
+    if paged:
+        block_table = torch.tensor([[2, 0, 1]], device=q.device, dtype=torch.int32)
+        k_paged = torch.zeros(3, 128, 1, 64, device=q.device, dtype=dtype)
+        v_paged = torch.zeros_like(k_paged)
+        for page, physical in enumerate(block_table[0].tolist()):
+            count = min(128, 257 - 128 * page)
+            k_paged[physical, :count] = k[128 * page : 128 * page + count]
+            v_paged[physical, :count] = v[128 * page : 128 * page + count]
+        k_input, v_input = k_paged, v_paged
+    else:
+        k_input, v_input = k, v
+    out, lse, _ = fmha_varlen_func(
+        q,
+        k_input,
+        v_input,
+        cu_q,
+        cu_k,
+        1,
+        257,
+        sink=sink,
+        block_table=block_table,
+        return_attn_probs=True,
+    )
+    ref, _, ref_lse = attention_ref(
+        q[None].float(), k[None].float(), v[None].float(), sink=sink, return_lse=True
+    )
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    torch.testing.assert_close(out.float(), ref[0], atol=tol, rtol=tol)
+    torch.testing.assert_close(lse, ref_lse[0], atol=2e-3, rtol=2e-3)

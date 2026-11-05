@@ -389,3 +389,121 @@ def test_kvcache_rotary_unbounded_local_window(dtype, sq):
         cache_lengths=[127, 255],
         window_size=(512, 512),
     )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("kind", ["none", "prefix", "logit", "both"])
+@pytest.mark.parametrize("num_splits", [1, 3])
+def test_sink_kvcache_forward(dtype, kind, num_splits):
+    torch.manual_seed(47)
+    # GQA decode and distinct cache indices exercise the binding's head/layout handling.
+    q = torch.randn(2, 1, 4, 64, device="cuda", dtype=dtype)
+    k = torch.randn(3, 512, 1, 64, device=q.device, dtype=dtype)
+    v = torch.randn_like(k)
+    new_k = torch.randn(2, 1, 1, 64, device=q.device, dtype=dtype)
+    new_v = torch.randn_like(new_k)
+    cache_indices = torch.tensor([2, 0], device=q.device, dtype=torch.int32)
+    lengths = torch.tensor([257, 385], device=q.device, dtype=torch.int32)
+    sink_size = 64 if kind in ("prefix", "both") else 0
+    sink = (
+        torch.tensor([-torch.inf, 0.0, 4.0, 7.0], device=q.device)
+        if kind in ("logit", "both")
+        else None
+    )
+    # Logit-only uses a full window to exercise the GQA reshape eligibility condition.
+    window = (31, 0) if sink_size else (-1, -1)
+    out, lse = fmha_with_kvcache(
+        q,
+        k,
+        v,
+        k=new_k,
+        v=new_v,
+        cache_seqlens=lengths,
+        cache_batch_idx=cache_indices,
+        causal=True,
+        window_size=window,
+        sink_size=sink_size,
+        sink=sink,
+        num_splits=num_splits,
+        return_softmax_lse=True,
+    )
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    for b, (index, length) in enumerate(zip([2, 0], [257, 385])):
+        torch.testing.assert_close(k[index, length], new_k[b, 0], atol=0, rtol=0)
+        torch.testing.assert_close(v[index, length], new_v[b, 0], atol=0, rtol=0)
+        ref, _, ref_lse = attention_ref(
+            q[b : b + 1].float(),
+            k[index : index + 1, : length + 1].float(),
+            v[index : index + 1, : length + 1].float(),
+            causal=True,
+            window_size=window,
+            sink_size=sink_size,
+            sink=sink,
+            return_lse=True,
+        )
+        torch.testing.assert_close(out[b : b + 1].float(), ref, atol=tol, rtol=tol)
+        torch.testing.assert_close(lse[b : b + 1], ref_lse, atol=2e-3, rtol=2e-3)
+
+
+@pytest.mark.parametrize("paged", [False, True])
+def test_sink_kvcache_rejects_multi_tile_local_prefix(paged):
+    q = torch.randn(1, 1, 4, 64, device="cuda", dtype=torch.float16)
+    k = torch.randn(2 if paged else 1, 128 if paged else 256, 1, 64, device=q.device, dtype=q.dtype)
+    v = torch.randn_like(k)
+    block_table = torch.tensor([[0, 1]], device=q.device, dtype=torch.int32) if paged else None
+    cache_seqlens = torch.tensor([128], device=q.device, dtype=torch.int32)
+
+    with pytest.raises(RuntimeError, match="prefix sink supports sink_size at most 64"):
+        fmha_with_kvcache(
+            q,
+            k,
+            v,
+            cache_seqlens=cache_seqlens,
+            block_table=block_table,
+            causal=True,
+            window_size=(31, 0),
+            sink_size=80,
+            num_splits=1,
+        )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("paged", [False, True])
+@pytest.mark.parametrize("kind", ["prefix", "logit", "both"])
+def test_sink_kvcache_page_and_prefix_boundary(dtype, paged, kind):
+    torch.manual_seed(51)
+    q = torch.randn(1, 1, 4, 64, device="cuda", dtype=dtype)
+    k = torch.randn(2 if paged else 1, 128 if paged else 256, 1, 64, device=q.device, dtype=dtype)
+    v = torch.randn_like(k)
+    block_table = torch.tensor([[0, 1]], device=q.device, dtype=torch.int32) if paged else None
+    cache_seqlens = torch.tensor([128], device=q.device, dtype=torch.int32)
+    sink_size = 64 if kind != "logit" else 0
+    sink = torch.tensor([-torch.inf, 0.0, 4.0, 7.0], device=q.device) if kind != "prefix" else None
+    window = (31, 0) if sink_size else (-1, -1)
+
+    out, lse = fmha_with_kvcache(
+        q,
+        k,
+        v,
+        cache_seqlens=cache_seqlens,
+        block_table=block_table,
+        causal=True,
+        window_size=window,
+        sink_size=sink_size,
+        sink=sink,
+        num_splits=1,
+        return_softmax_lse=True,
+    )
+    ref, _, ref_lse = attention_ref(
+        q.float(),
+        k.reshape(1, 256, 1, 64)[:, :128].float(),
+        v.reshape(1, 256, 1, 64)[:, :128].float(),
+        causal=True,
+        window_size=window,
+        sink_size=sink_size,
+        sink=sink,
+        return_lse=True,
+    )
+    tol = 3e-3 if dtype == torch.float16 else 2e-2
+    torch.testing.assert_close(out.float(), ref, atol=tol, rtol=tol)
+    torch.testing.assert_close(lse, ref_lse, atol=2e-3, rtol=2e-3)

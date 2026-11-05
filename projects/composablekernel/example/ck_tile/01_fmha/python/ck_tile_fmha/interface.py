@@ -12,6 +12,14 @@ def maybe_contiguous(x):
     return x.contiguous() if x is not None and x.stride(-1) != 1 else x
 
 
+def _check_sink_autograd(is_grad_enabled, sink_size, sink, *inputs):
+    if is_grad_enabled and (sink_size != 0 or sink is not None):
+        if any(x.requires_grad for x in (*inputs, sink) if x is not None):
+            raise ValueError(
+                "Sink attention supports forward only; use torch.no_grad() for inference"
+            )
+
+
 # torch.compile() support is only enabled for pytorch >= 2.4
 # The reason for this is that we are using the new custom_op and register_fake
 # APIs, which support inplace modification of inputs in the function itself
@@ -61,6 +69,8 @@ def _fmha_forward(
     return_lse: bool = True,
     block_size_q: int = 128,
     block_size_kv: int = 128,
+    sink_size: int = 0,
+    sink: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, softmax_lse, S_dmask, rng_state = fmha_gpu.fwd(
@@ -85,6 +95,8 @@ def _fmha_forward(
         return_lse,
         block_size_q,
         block_size_kv,
+        sink_size,
+        sink,
     )
     return out, softmax_lse, S_dmask, rng_state
 
@@ -110,6 +122,8 @@ def _fmha_forward_fake(
     return_lse: bool = True,
     block_size_q: int = 128,
     block_size_kv: int = 128,
+    sink_size: int = 0,
+    sink: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     batch_size, seqlen_q, num_heads, head_size = q.shape
@@ -246,6 +260,8 @@ def _fmha_varlen_forward(
     v_descale: Optional[torch.Tensor] = None,
     qscale: str = "no_scale",
     return_lse: bool = True,
+    sink_size: int = 0,
+    sink: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, softmax_lse, S_dmask, rng_state = fmha_gpu.varlen_fwd(
@@ -276,6 +292,8 @@ def _fmha_varlen_forward(
         v_descale,
         qscale,
         return_lse,
+        sink_size,
+        sink,
     )
     return out, softmax_lse, S_dmask, rng_state
 
@@ -307,6 +325,8 @@ def _fmha_varlen_forward_fake(
     v_descale: Optional[torch.Tensor] = None,
     qscale: str = "no_scale",
     return_lse: bool = True,
+    sink_size: int = 0,
+    sink: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     total_q, num_heads, _ = q.shape
@@ -638,7 +658,10 @@ class FmhaQKVPackedFunc(torch.autograd.Function):
         return_softmax,
         is_grad_enabled,
         bias,
+        sink_size,
+        sink,
     ):
+        _check_sink_autograd(is_grad_enabled, sink_size, sink, qkv, bias, alibi_slopes)
         is_grad = is_grad_enabled and (
             qkv.requires_grad or (bias is not None and bias.requires_grad)
         )
@@ -656,6 +679,8 @@ class FmhaQKVPackedFunc(torch.autograd.Function):
             v,
             dropout_p,
             softmax_scale,
+            sink_size=sink_size,
+            sink=sink,
             causal=causal,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
@@ -679,7 +704,7 @@ class FmhaQKVPackedFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dout, *args):
         q, k, v, out, softmax_lse, rng_state, bias = ctx.saved_tensors
-        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-1] else None
+        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-3] else None
         qkv_shape = q.shape[:-2] + (3, *q.shape[-2:])
         dqkv = torch.empty(qkv_shape, dtype=q.dtype, device=q.device)
         head_size_og = dout.size(3)
@@ -709,7 +734,7 @@ class FmhaQKVPackedFunc(torch.autograd.Function):
             dbias=dbias,
         )
         dqkv = dqkv[..., : dout.shape[-1]]  # We could have padded the head dimension
-        return dqkv, None, None, None, None, None, None, None, None, None, dbias
+        return dqkv, None, None, None, None, None, None, None, None, None, dbias, None, None
 
 
 class FmhaVarlenQKVPackedFunc(torch.autograd.Function):
@@ -728,7 +753,10 @@ class FmhaVarlenQKVPackedFunc(torch.autograd.Function):
         deterministic,
         return_softmax,
         is_grad_enabled,
+        sink_size,
+        sink,
     ):
+        _check_sink_autograd(is_grad_enabled, sink_size, sink, qkv, alibi_slopes)
         is_grad = is_grad_enabled and qkv.requires_grad
         if softmax_scale is None:
             softmax_scale = qkv.shape[-1] ** (-0.5)
@@ -748,6 +776,8 @@ class FmhaVarlenQKVPackedFunc(torch.autograd.Function):
             max_seqlen,
             dropout_p,
             softmax_scale,
+            sink_size=sink_size,
+            sink=sink,
             causal=causal,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
@@ -803,7 +833,7 @@ class FmhaVarlenQKVPackedFunc(torch.autograd.Function):
             rng_state=rng_state,
         )
         dqkv = dqkv[..., : dout.shape[-1]]  # We could have padded the head dimension
-        return dqkv, None, None, None, None, None, None, None, None, None, None, None
+        return dqkv, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 class FmhaKVPackedFunc(torch.autograd.Function):
@@ -822,7 +852,10 @@ class FmhaKVPackedFunc(torch.autograd.Function):
         return_softmax,
         is_grad_enabled,
         bias,
+        sink_size,
+        sink,
     ):
+        _check_sink_autograd(is_grad_enabled, sink_size, sink, q, kv, bias, alibi_slopes)
         is_grad = is_grad_enabled and (
             any(x.requires_grad for x in [q, kv]) or (bias is not None and bias.requires_grad)
         )
@@ -840,6 +873,8 @@ class FmhaKVPackedFunc(torch.autograd.Function):
             v,
             dropout_p,
             softmax_scale,
+            sink_size=sink_size,
+            sink=sink,
             causal=causal,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
@@ -863,7 +898,7 @@ class FmhaKVPackedFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dout, *args):
         q, k, v, out, softmax_lse, rng_state, bias = ctx.saved_tensors
-        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-1] else None
+        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-3] else None
         dq = torch.empty_like(q)
         kv_shape = k.shape[:-2] + (2, *k.shape[-2:])
         dkv = torch.empty(kv_shape, dtype=k.dtype, device=k.device)
@@ -895,7 +930,7 @@ class FmhaKVPackedFunc(torch.autograd.Function):
         )
         dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
         dkv = dkv[..., : dout.shape[-1]]
-        return dq, dkv, None, None, None, None, None, None, None, None, None, dbias
+        return dq, dkv, None, None, None, None, None, None, None, None, None, dbias, None, None
 
 
 class FmhaVarlenKVPackedFunc(torch.autograd.Function):
@@ -917,7 +952,10 @@ class FmhaVarlenKVPackedFunc(torch.autograd.Function):
         deterministic,
         return_softmax,
         is_grad_enabled,
+        sink_size,
+        sink,
     ):
+        _check_sink_autograd(is_grad_enabled, sink_size, sink, q, kv, alibi_slopes)
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, kv])
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
@@ -937,6 +975,8 @@ class FmhaVarlenKVPackedFunc(torch.autograd.Function):
             max_seqlen_k,
             dropout_p,
             softmax_scale,
+            sink_size=sink_size,
+            sink=sink,
             causal=causal,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
@@ -997,7 +1037,25 @@ class FmhaVarlenKVPackedFunc(torch.autograd.Function):
         )
         dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
         dkv = dkv[..., : dout.shape[-1]]
-        return dq, dkv, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return (
+            dq,
+            dkv,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 class FmhaFunc(torch.autograd.Function):
@@ -1017,7 +1075,10 @@ class FmhaFunc(torch.autograd.Function):
         return_softmax,
         is_grad_enabled,
         bias,
+        sink_size,
+        sink,
     ):
+        _check_sink_autograd(is_grad_enabled, sink_size, sink, q, k, v, bias, alibi_slopes)
         is_grad = is_grad_enabled and (
             any(x.requires_grad for x in [q, k, v]) or (bias is not None and bias.requires_grad)
         )
@@ -1034,6 +1095,8 @@ class FmhaFunc(torch.autograd.Function):
             v,
             dropout_p,
             softmax_scale,
+            sink_size=sink_size,
+            sink=sink,
             causal=causal,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
@@ -1057,7 +1120,7 @@ class FmhaFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dout, *args):
         q, k, v, out, softmax_lse, rng_state, bias = ctx.saved_tensors
-        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-1] else None
+        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-3] else None
         dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
         head_size_og = dout.size(3)
         dout_padded = dout
@@ -1088,7 +1151,7 @@ class FmhaFunc(torch.autograd.Function):
         dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : dout.shape[-1]]
         dv = dv[..., : dout.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias, None, None
 
 
 class FmhaVarlenFunc(torch.autograd.Function):
@@ -1112,7 +1175,10 @@ class FmhaVarlenFunc(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        sink_size,
+        sink,
     ):
+        _check_sink_autograd(is_grad_enabled, sink_size, sink, q, k, v, alibi_slopes)
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
@@ -1131,6 +1197,8 @@ class FmhaVarlenFunc(torch.autograd.Function):
             max_seqlen_k,
             dropout_p,
             softmax_scale,
+            sink_size=sink_size,
+            sink=sink,
             causal=causal,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
@@ -1209,6 +1277,8 @@ class FmhaVarlenFunc(torch.autograd.Function):
             None,
             None,
             None,
+            None,
+            None,
         )
 
 
@@ -1223,6 +1293,9 @@ def fmha_qkvpacked_func(
     deterministic=False,
     return_attn_probs=False,
     bias=None,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     If Q, K, V are already stacked into 1 tensor, this function will be faster than
@@ -1253,6 +1326,12 @@ def fmha_qkvpacked_func(
             Added to QK^T * softmax_scale before softmax, shared across batches and heads.
             The last dimension must be contiguous. Cannot be combined with alibi_slopes.
             Gradients with respect to bias are supported.
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
@@ -1273,6 +1352,8 @@ def fmha_qkvpacked_func(
         return_attn_probs,
         torch.is_grad_enabled(),
         bias,
+        sink_size,
+        sink,
     )
 
 
@@ -1288,6 +1369,9 @@ def fmha_kvpacked_func(
     deterministic=False,
     return_attn_probs=False,
     bias=None,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     If K, V are already stacked into 1 tensor, this function will be faster than
@@ -1335,6 +1419,12 @@ def fmha_kvpacked_func(
             Added to QK^T * softmax_scale before softmax, shared across batches and heads.
             The last dimension must be contiguous. Cannot be combined with alibi_slopes.
             Gradients with respect to bias are supported.
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
@@ -1356,6 +1446,8 @@ def fmha_kvpacked_func(
         return_attn_probs,
         torch.is_grad_enabled(),
         bias,
+        sink_size,
+        sink,
     )
 
 
@@ -1372,6 +1464,9 @@ def fmha_func(
     deterministic=False,
     return_attn_probs=False,
     bias=None,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
@@ -1416,6 +1511,12 @@ def fmha_func(
             Added to QK^T * softmax_scale before softmax, shared across batches and heads.
             The last dimension must be contiguous. Cannot be combined with alibi_slopes.
             Gradients with respect to bias are supported.
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
@@ -1438,6 +1539,8 @@ def fmha_func(
         return_attn_probs,
         torch.is_grad_enabled(),
         bias,
+        sink_size,
+        sink,
     )
 
 
@@ -1453,6 +1556,9 @@ def fmha_varlen_qkvpacked_func(
     alibi_slopes=None,
     deterministic=False,
     return_attn_probs=False,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     If Q, K, V are already stacked into 1 tensor, this function will be faster than
@@ -1482,6 +1588,12 @@ def fmha_varlen_qkvpacked_func(
         return_attn_probs: bool. Whether to return the attention probabilities. This option is for
            testing only. The returned probabilities are not guaranteed to be correct
            (they might not have the right scaling).
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (total, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (nheads, total_q_seqlen). The
@@ -1503,6 +1615,8 @@ def fmha_varlen_qkvpacked_func(
         deterministic,
         return_attn_probs,
         torch.is_grad_enabled(),
+        sink_size,
+        sink,
     )
 
 
@@ -1521,6 +1635,9 @@ def fmha_varlen_kvpacked_func(
     alibi_slopes=None,
     deterministic=False,
     return_attn_probs=False,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     If K, V are already stacked into 1 tensor, this function will be faster than
@@ -1570,6 +1687,12 @@ def fmha_varlen_kvpacked_func(
         return_attn_probs: bool. Whether to return the attention probabilities. This option is for
            testing only. The returned probabilities are not guaranteed to be correct
            (they might not have the right scaling).
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (total, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (nheads, total_q_seqlen). The
@@ -1594,6 +1717,8 @@ def fmha_varlen_kvpacked_func(
         deterministic,
         return_attn_probs,
         torch.is_grad_enabled(),
+        sink_size,
+        sink,
     )
 
 
@@ -1614,6 +1739,9 @@ def fmha_varlen_func(
     deterministic=False,
     return_attn_probs=False,
     block_table=None,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in K, V with fewer heads
@@ -1661,6 +1789,12 @@ def fmha_varlen_func(
         return_attn_probs: bool. Whether to return the attention probabilities. This option is for
            testing only. The returned probabilities are not guaranteed to be correct
            (they might not have the right scaling).
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (total, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (nheads, total_q_seqlen). The
@@ -1687,6 +1821,8 @@ def fmha_varlen_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
+        sink_size,
+        sink,
     )
 
 
@@ -1710,6 +1846,9 @@ def fmha_with_kvcache(
     alibi_slopes=None,
     num_splits=0,
     return_softmax_lse=False,
+    *,
+    sink_size=0,
+    sink=None,
 ):
     """
     If k and v are not None, k_cache and v_cache will be updated *inplace* with the new values from
@@ -1792,12 +1931,21 @@ def fmha_with_kvcache(
            Don't change this unless you know what you are doing.
         return_softmax_lse: bool. Whether to return the logsumexp of the attention scores.
 
+        sink_size: Number of prefix KV tokens retained outside the local window, per sequence.
+            Causal/right-window bounds still apply. Defaults to 0.
+        sink: Optional contiguous FP32 tensor [nheads_q] on the same device as q.
+            One extra softmax logit per Q head, shared across batches and query positions.
+            It contributes to LSE but has no value vector. -inf disables a head's sink.
+            Sink attention currently supports forward only (use torch.no_grad() for inference).
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_softmax_lse=True]: (batch_size, nheads, seqlen). The
             logsumexp of each row of the matrix QK^T * scaling (e.g., log of the softmax
             normalization factor).
     """
+    _check_sink_autograd(
+        torch.is_grad_enabled(), sink_size, sink, q, k_cache, v_cache, k, v, alibi_slopes
+    )
     assert k_cache.stride(-1) == 1, "k_cache must have contiguous last dimension"
     assert v_cache.stride(-1) == 1, "v_cache must have contiguous last dimension"
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
@@ -1831,5 +1979,7 @@ def fmha_with_kvcache(
         softcap,
         rotary_interleaved,
         num_splits,
+        sink_size,
+        sink,
     )
     return (out, softmax_lse) if return_softmax_lse else out

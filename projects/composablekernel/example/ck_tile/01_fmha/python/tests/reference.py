@@ -203,6 +203,7 @@ def construct_local_mask(
     key_padding_mask=None,
     device=None,
     key_leftpad=None,
+    sink_size=0,
 ):
     row_idx = rearrange(torch.arange(seqlen_q, device=device, dtype=torch.long), "s -> s 1")
     col_idx = torch.arange(seqlen_k, device=device, dtype=torch.long)
@@ -224,9 +225,15 @@ def construct_local_mask(
         return col_idx > row_idx + sk - sq + window_size[1]
     else:
         sk = torch.full_like(col_idx, seqlen_k) if key_padding_mask is None else sk
+        below_window = col_idx < row_idx + sk - sq - window_size[0]
+        if sink_size:
+            # Match CK's i_y < x_total gate: with sq > sk, later query rows do
+            # not retain prefix keys outside the local window.
+            prefix = (col_idx < sink_size) & (row_idx < sk)
+            below_window = below_window & ~prefix
         return torch.logical_or(
             col_idx > torch.minimum(row_idx + sk - sq + window_size[1], sk),
-            col_idx < row_idx + sk - sq - window_size[0],
+            below_window,
         )
 
 
@@ -247,6 +254,8 @@ def attention_ref(
     key_leftpad=None,
     softmax_scale=None,
     return_lse=False,
+    sink_size=0,
+    sink=None,
 ):
     """
     Arguments:
@@ -267,6 +276,8 @@ def attention_ref(
             reordering.
         softmax_scale: defaults to 1/sqrt(head_dim).
         return_lse: whether to also return FP32 logsumexp of the attention scores.
+        sink_size: number of prefix keys retained outside the local window.
+        sink: optional FP32 [nheads_q] logits, added after scaling and masking.
     Output:
         output: (batch_size, seqlen_q, nheads, head_dim)
         attention: (batch_size, nheads, seqlen_q, seqlen_k), softmax before dropout
@@ -304,16 +315,25 @@ def attention_ref(
             key_padding_mask,
             q.device,
             key_leftpad=key_leftpad,
+            sink_size=sink_size,
         )
         scores.masked_fill_(local_mask, float("-inf"))
     if attn_bias is not None:
         scores = scores + attn_bias
     if query_padding_mask is not None:
         scores = scores.masked_fill(rearrange(~query_padding_mask, "b s -> b 1 s 1"), -torch.inf)
+    if sink is not None:
+        sink_scores = sink.float().view(1, -1, 1, 1).expand(q.shape[0], -1, seqlen_q, 1)
+        if query_padding_mask is not None:
+            sink_scores = sink_scores.masked_fill(
+                rearrange(~query_padding_mask, "b s -> b 1 s 1"), -torch.inf
+            )
+        scores = torch.cat((scores, sink_scores), dim=-1)
     all_masked = torch.isneginf(scores).all(dim=-1, keepdim=True)
     # Avoid NaNs in both softmax and its backward for fully masked rows.
     scores = scores.masked_fill(all_masked, 0.0)
     attention = torch.softmax(scores, dim=-1).to(v.dtype).masked_fill(all_masked, 0.0)
+    attention = attention[..., :seqlen_k]
     dropout_scaling = 1.0 / (1 - dropout_p)
     # attention_drop = attention.masked_fill(~dropout_mask, 0.0) * dropout_scaling
     # output = torch.einsum('bhts,bshd->bthd', attention_drop , v)
@@ -345,6 +365,8 @@ def attention_kvpacked_ref(
     upcast=True,
     reorder_ops=False,
     key_leftpad=None,
+    sink_size=0,
+    sink=None,
 ):
     return attention_ref(
         q,
@@ -361,6 +383,8 @@ def attention_kvpacked_ref(
         softcap=softcap,
         reorder_ops=reorder_ops,
         key_leftpad=key_leftpad,
+        sink_size=sink_size,
+        sink=sink,
     )
 
 
@@ -375,6 +399,8 @@ def attention_qkvpacked_ref(
     softcap=0.0,
     upcast=True,
     reorder_ops=False,
+    sink_size=0,
+    sink=None,
 ):
     return attention_ref(
         qkv[:, :, 0],
@@ -390,6 +416,8 @@ def attention_qkvpacked_ref(
         window_size=window_size,
         softcap=softcap,
         reorder_ops=reorder_ops,
+        sink_size=sink_size,
+        sink=sink,
     )
 
 

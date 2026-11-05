@@ -293,7 +293,9 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     const float softcap,
     bool is_rotary_interleaved, // if true, rotary combines indices 0 & 1, else indices 0 &
                                 // rotary_dim / 2
-    int num_splits)
+    int num_splits,
+    int sink_size,
+    std::optional<at::Tensor> sink)
 {
     TORCH_CHECK(softcap == 0.0f, "CK Tile FMHA Python bindings do not support softcap");
     TORCH_CHECK(!leftpad_k_.has_value(), "KV-cache attention does not support cache_leftpad");
@@ -343,6 +345,7 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     const int batch_size_c = !paged_KV ? kcache.size(0) : batch_size;
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     detail::check_alibi(alibi_slopes_, q, batch_size, num_heads);
+    detail::check_sink(sink, sink_size, q, num_heads, softmax_scale);
     TORCH_CHECK(head_size_og <= 256,
                 "FlashAttention forward only supports head dimension at most 256");
     TORCH_CHECK(num_heads > 0 && num_heads_k > 0 && num_heads % num_heads_k == 0,
@@ -359,12 +362,25 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     {
         window_size_right = -1;
     }
+    // Prefix retention only changes attention with a bounded left window.
+    if(window_size_left < 0)
+        sink_size = 0;
+    // Split-KV loses retained prefix keys when a bounded local window needs
+    // more than one 64-token KV tile, with or without a paged cache.
+    TORCH_CHECK(window_size_left < 0 || sink_size <= 64,
+                "KV-cache prefix sink supports sink_size at most 64 with a local window");
 
     // causal=true is the same as causal=false in this case
     if(seqlen_q == 1 && !alibi_slopes_.has_value())
     {
         is_causal = false;
     }
+    // With one query, the bottom-right right bound of zero includes every real key.
+    // Use that equivalent mask for GQA with a logit sink: CK's unmasked split-KV
+    // decode path drops the sink logit when Q has more heads than KV.
+    if(seqlen_q == 1 && sink.has_value() && num_heads > num_heads_k && window_size_left == -1 &&
+       window_size_right == -1)
+        window_size_right = 0;
     if(is_causal)
     {
         window_size_right = 0;
@@ -374,9 +390,10 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     if(is_causal)
     {
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
-        window_size_right         = 0;
-        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
-        mask                      = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
+        window_size_right = 0;
+        std::string mask_identify =
+            "b:" + std::to_string(window_size_left) + ",0," + std::to_string(sink_size);
+        mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
     }
     else if(window_size_left == -1 && window_size_right == -1)
     {
@@ -385,16 +402,17 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     else
     {
         // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        std::string mask_identify =
-            "b:" + std::to_string(window_size_left) + "," + std::to_string(window_size_right);
+        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," +
+                                    std::to_string(window_size_right) + "," +
+                                    std::to_string(sink_size);
         mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // local
     }
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in
     // this case H/t Daniel Haziza
-    const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k &&
-                                        window_size_left < 0 && window_size_right < 0 &&
-                                        head_size_og % 8 == 0 && !alibi_slopes_.has_value();
+    const int seqlenq_ngroups_swapped =
+        seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 &&
+        head_size_og % 8 == 0 && !alibi_slopes_.has_value() && !sink.has_value();
     if(seqlenq_ngroups_swapped)
     {
         const int ngroups = num_heads / num_heads_k;
@@ -621,6 +639,10 @@ std::vector<at::Tensor> mha_fwd_kvcache(
                                                      softmax_lse,
                                                      softmax_lse_accum,
                                                      out_accum);
+
+    splitkv_traits.has_sink = sink_size > 0 || sink.has_value();
+    splitkv_args.sink_size  = sink_size;
+    splitkv_args.sink_ptr   = sink.has_value() ? sink->data_ptr() : nullptr;
 
     const float t = fmha_fwd_splitkv(splitkv_traits, splitkv_args, stream_config);
     TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd_splitkv");

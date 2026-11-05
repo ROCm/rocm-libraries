@@ -27,7 +27,9 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
         std::string qscale,
         bool return_lse,
         int block_size_q,
-        int block_size_kv);
+        int block_size_kv,
+        int sink_size,
+        std::optional<at::Tensor> sink);
 
 std::vector<at::Tensor> mha_varlen_fwd(
     at::Tensor& q, // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
@@ -62,7 +64,9 @@ std::vector<at::Tensor> mha_varlen_fwd(
     std::optional<at::Tensor> k_descale_,
     std::optional<at::Tensor> v_descale_,
     std::string qscale,
-    bool return_lse);
+    bool return_lse,
+    int sink_size,
+    std::optional<at::Tensor> sink);
 
 std::vector<at::Tensor>
 mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple_of(head_size_og, 8)
@@ -139,7 +143,9 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     const float softcap,
     bool is_rotary_interleaved, // if true, rotary combines indices 0 & 1, else indices 0 &
                                 // rotary_dim / 2
-    int num_splits);
+    int num_splits,
+    int sink_size,
+    std::optional<at::Tensor> sink);
 
 } // namespace ck_tile::fmha::torch_api
 
@@ -169,7 +175,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
           pybind11::arg("qscale")        = "no_scale",
           pybind11::arg("return_lse")    = true,
           pybind11::arg("block_size_q")  = 128,
-          pybind11::arg("block_size_kv") = 128);
+          pybind11::arg("block_size_kv") = 128,
+          pybind11::arg("sink_size")     = 0,
+          pybind11::arg("sink")          = pybind11::none());
     m.def("varlen_fwd",
           &ck_tile::fmha::torch_api::mha_varlen_fwd,
           "Forward pass (variable length)",
@@ -199,7 +207,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
           pybind11::arg("k_descale")  = pybind11::none(),
           pybind11::arg("v_descale")  = pybind11::none(),
           pybind11::arg("qscale")     = "no_scale",
-          pybind11::arg("return_lse") = true);
+          pybind11::arg("return_lse") = true,
+          pybind11::arg("sink_size")  = 0,
+          pybind11::arg("sink")       = pybind11::none());
     m.def("bwd",
           &ck_tile::fmha::torch_api::mha_bwd,
           "Backward pass",
@@ -226,5 +236,29 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
           pybind11::arg("dbias") = pybind11::none());
     m.def(
         "varlen_bwd", &ck_tile::fmha::torch_api::mha_varlen_bwd, "Backward pass (variable length)");
-    m.def("fwd_kvcache", &ck_tile::fmha::torch_api::mha_fwd_kvcache, "Forward pass, with KV-cache");
+    m.def("fwd_kvcache",
+          &ck_tile::fmha::torch_api::mha_fwd_kvcache,
+          "Forward pass, with KV-cache",
+          pybind11::arg("q"),
+          pybind11::arg("kcache"),
+          pybind11::arg("vcache"),
+          pybind11::arg("k"),
+          pybind11::arg("v"),
+          pybind11::arg("seqlens_k"),
+          pybind11::arg("rotary_cos"),
+          pybind11::arg("rotary_sin"),
+          pybind11::arg("cache_batch_idx"),
+          pybind11::arg("leftpad_k"),
+          pybind11::arg("block_table"),
+          pybind11::arg("alibi_slopes"),
+          pybind11::arg("out"),
+          pybind11::arg("softmax_scale"),
+          pybind11::arg("causal"),
+          pybind11::arg("window_size_left"),
+          pybind11::arg("window_size_right"),
+          pybind11::arg("softcap"),
+          pybind11::arg("rotary_interleaved"),
+          pybind11::arg("num_splits"),
+          pybind11::arg("sink_size") = 0,
+          pybind11::arg("sink")      = pybind11::none());
 }

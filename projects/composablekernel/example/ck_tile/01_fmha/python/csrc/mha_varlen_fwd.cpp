@@ -349,7 +349,9 @@ std::vector<at::Tensor> mha_varlen_fwd(
     std::optional<at::Tensor> k_descale_,
     std::optional<at::Tensor> v_descale_,
     std::string qscale,
-    bool return_lse)
+    bool return_lse,
+    int sink_size,
+    std::optional<at::Tensor> sink)
 {
     TORCH_CHECK(softcap == 0.0f, "CK Tile FMHA Python bindings do not support softcap");
     TORCH_CHECK(!seqused_k.has_value(), "varlen attention does not support seqused_k");
@@ -424,6 +426,7 @@ std::vector<at::Tensor> mha_varlen_fwd(
 
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     detail::check_alibi(alibi_slopes_, q, batch_size, num_heads);
+    detail::check_sink(sink, sink_size, q, num_heads, softmax_scale);
     TORCH_CHECK(head_size > 0 && head_size <= 256, "CK only supports head dimension in [1, 256]");
     TORCH_CHECK(head_size % 8 == 0,
                 "query, key, value, and out_ must have a head_size that is a multiple of 8");
@@ -499,14 +502,27 @@ std::vector<at::Tensor> mha_varlen_fwd(
     {
         window_size_right = -1;
     }
+    // Prefix retention only changes attention with a bounded left window.
+    if(window_size_left < 0)
+        sink_size = 0;
+    // The paged group split-KV path loses retained prefix keys beyond one
+    // 64-token KV tile. A full left window has no retained-prefix phase.
+    TORCH_CHECK(!paged_KV || window_size_left < 0 || sink_size <= 64,
+                "paged variable-length prefix sink supports sink_size at most 64");
+    // For single-token paged GQA, CK's unmasked split-KV path drops a logit
+    // sink. A bottom-right mask with right bound zero includes every real key.
+    if(paged_KV && max_seqlen_q == 1 && sink.has_value() && num_heads > num_heads_k &&
+       window_size_left == -1 && window_size_right == -1)
+        window_size_right = 0;
 
     mask_info mask;
 
     if(is_causal)
     {
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
-        window_size_right         = 0;
-        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
+        window_size_right = 0;
+        std::string mask_identify =
+            "b:" + std::to_string(window_size_left) + ",0," + std::to_string(sink_size);
         mask = mask_info::decode(mask_identify, max_seqlen_q, max_seqlen_k); // casual
     }
     else if(window_size_left == -1 && window_size_right == -1)
@@ -516,8 +532,9 @@ std::vector<at::Tensor> mha_varlen_fwd(
     else
     {
         // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        std::string mask_identify =
-            "b:" + std::to_string(window_size_left) + "," + std::to_string(window_size_right);
+        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," +
+                                    std::to_string(window_size_right) + "," +
+                                    std::to_string(sink_size);
         mask = mask_info::decode(mask_identify, max_seqlen_q, max_seqlen_k); // local
     }
 
@@ -642,6 +659,10 @@ std::vector<at::Tensor> mha_varlen_fwd(
                                                             softmax_lse_accum,
                                                             out_accum);
 
+            traits.has_sink = sink_size > 0 || sink.has_value();
+            args.sink_size  = sink_size;
+            args.sink_ptr   = sink.has_value() ? sink->data_ptr() : nullptr;
+
             float t = fmha_fwd_splitkv(traits, args, stream_config);
             TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd_splitkv");
         }
@@ -673,6 +694,9 @@ std::vector<at::Tensor> mha_varlen_fwd(
                                                     p_dropout,
                                                     drop_seed_offset);
 
+            traits.has_sink    = sink_size > 0 || sink.has_value();
+            args.sink_size     = sink_size;
+            args.sink_ptr      = sink.has_value() ? sink->data_ptr() : nullptr;
             traits.qscale_type = qscale_type;
             if(is_fp8 && qscale_type != quant_scale_enum::no_scale)
             {
@@ -726,7 +750,10 @@ std::vector<at::Tensor> mha_varlen_fwd(
     {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
         out.zero_();
-        softmax_lse.fill_(std::numeric_limits<float>::infinity());
+        if(sink.has_value() && has_lse)
+            softmax_lse.copy_(sink->view({num_heads, 1}).expand_as(softmax_lse));
+        else
+            softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }
 
     return {out, softmax_lse, p, rng_state};

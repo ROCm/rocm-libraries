@@ -9,6 +9,7 @@
 #include <torch/nn/functional.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <cmath>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -30,6 +31,30 @@
 #define CK_TILE_FMHA_CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
 namespace ck_tile::fmha::torch_api::detail {
+inline void check_sink(const std::optional<at::Tensor>& sink,
+                       int sink_size,
+                       const at::Tensor& q,
+                       int num_heads,
+                       float softmax_scale)
+{
+    TORCH_CHECK(sink_size >= 0, "sink_size must be nonnegative");
+    if(sink_size > 0 || sink.has_value())
+        TORCH_CHECK(q.scalar_type() == at::ScalarType::Half ||
+                        q.scalar_type() == at::ScalarType::BFloat16,
+                    "Sink attention Python bindings support FP16/BF16 inputs");
+    if(!sink.has_value())
+        return;
+    const auto& tensor = sink.value();
+    TORCH_CHECK(tensor.device() == q.device(), "sink must be on the same device as query");
+    TORCH_CHECK(tensor.scalar_type() == at::ScalarType::Float, "sink must have dtype float32");
+    TORCH_CHECK(tensor.sizes() == torch::IntArrayRef({num_heads}),
+                "sink must have shape [nheads_q]");
+    TORCH_CHECK(tensor.stride(0) == 1, "sink must be contiguous");
+    // The existing CK entry converts the sink into pre-scale score units.
+    TORCH_CHECK(std::isfinite(softmax_scale) && softmax_scale > 0,
+                "sink logits require a positive finite softmax_scale");
+}
+
 inline void check_alibi(const std::optional<at::Tensor>& slopes,
                         const at::Tensor& q,
                         int batch_size,
