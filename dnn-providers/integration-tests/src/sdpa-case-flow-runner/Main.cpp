@@ -63,6 +63,7 @@
 #include "CaseGraph.hpp"
 #include "RaggedCompareView.hpp"
 #include "RunnerSourceHash.hpp"
+#include "ShiftedStarts.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
@@ -76,6 +77,7 @@ namespace
 {
 
 using sdpa_case_flow::Row;
+using sdpa_case_flow::ShiftedStarts;
 using Clock = std::chrono::steady_clock;
 using Bundle = hipdnn_test_sdk::utilities::GraphTensorBundle;
 using TensorPtr = std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>;
@@ -1580,76 +1582,6 @@ void markOutputsHostModified(Bundle& bundle, const std::vector<int64_t>& outputU
     }
 }
 
-// Device copies of the tensors whose data starts past an aligned allocation start. The engine
-// reads and writes the copies; copyOutputsBack returns the engine's outputs to the bundle.
-class ShiftedStarts
-{
-public:
-    ShiftedStarts(Bundle& bundle,
-                  const std::map<int64_t, int64_t>& offsetBytes,
-                  std::unordered_map<int64_t, void*>& variantPack)
-    {
-        for(const auto& [uid, offset] : offsetBytes)
-        {
-            auto& tensor = *bundle.tensors.at(uid);
-            Copy copy;
-            copy.uid = uid;
-            copy.bytes = tensor.elementSpace() * tensor.elementSize();
-            copy.original = variantPack.at(uid);
-            if(hipMalloc(&copy.base, copy.bytes + static_cast<size_t>(offset)) != hipSuccess)
-            {
-                throw std::runtime_error("hipMalloc failed for a shifted data start");
-            }
-            _copies.push_back(copy);
-            void* shifted = static_cast<char*>(copy.base) + offset;
-            if(hipMemcpy(shifted, copy.original, copy.bytes, hipMemcpyDeviceToDevice) != hipSuccess)
-            {
-                throw std::runtime_error("hipMemcpy failed for a shifted data start");
-            }
-            _copies.back().shifted = shifted;
-            variantPack[uid] = shifted;
-        }
-    }
-
-    ShiftedStarts(const ShiftedStarts&) = delete;
-    ShiftedStarts& operator=(const ShiftedStarts&) = delete;
-
-    ~ShiftedStarts()
-    {
-        for(const auto& copy : _copies)
-        {
-            static_cast<void>(hipFree(copy.base));
-        }
-    }
-
-    void copyOutputsBack(const std::vector<int64_t>& outputUids) const
-    {
-        for(const auto& copy : _copies)
-        {
-            if(std::find(outputUids.begin(), outputUids.end(), copy.uid) == outputUids.end())
-            {
-                continue;
-            }
-            if(hipMemcpy(copy.original, copy.shifted, copy.bytes, hipMemcpyDeviceToDevice)
-               != hipSuccess)
-            {
-                throw std::runtime_error("hipMemcpy failed for a shifted output");
-            }
-        }
-    }
-
-private:
-    struct Copy
-    {
-        int64_t uid = 0;
-        size_t bytes = 0;
-        void* original = nullptr;
-        void* base = nullptr;
-        void* shifted = nullptr;
-    };
-    std::vector<Copy> _copies;
-};
-
 // The uid of each tensor that the built case starts past an aligned allocation start.
 std::map<int64_t, int64_t> startOffsetsByUid(const sdpa_case_flow::BuiltCase& built,
                                              const std::map<int64_t, TensorPtr>& attrs)
@@ -1932,7 +1864,7 @@ std::string runCase(size_t index,
                 {
                     auto variantPack = engineBundle.toDeviceVariantPack();
                     const ShiftedStarts shifted(
-                        engineBundle, startOffsetsByUid(built, attrs), variantPack);
+                        engineBundle.tensors, startOffsetsByUid(built, attrs), variantPack);
                     syncDevice();
                     stageStart = Clock::now();
                     const auto executed = graph.execute(ctx.handle, variantPack, workspace->get());
@@ -2058,6 +1990,10 @@ std::string runCase(size_t index,
                 {
                     handOffRngDump(gpuBundle);
                     auto variantPack = gpuBundle.toDeviceVariantPack();
+                    // The GPU reference reads and writes at the shifted data starts too, so the
+                    // reference comparison checks the shifted copies.
+                    const ShiftedStarts shifted(
+                        gpuBundle.tensors, startOffsetsByUid(built, attrs), variantPack);
                     syncDevice();
                     stageStart = Clock::now();
                     ctx.gpuRef.execute(blob.data(), blob.size(), variantPack);
@@ -2067,6 +2003,7 @@ std::string runCase(size_t index,
                     ctx.gpuRef.execute(blob.data(), blob.size(), variantPack);
                     syncDevice();
                     line.num("t_gpu_ref_warm_us", microsSince(stageStart));
+                    shifted.copyOutputsBack(outputUids);
                     markOutputsDeviceModified(gpuBundle, outputUids);
                     gpuStatus = "ok";
                 }
@@ -2281,12 +2218,6 @@ ExportResult prepareCase(const CaseInput& input,
         auto built = sdpa_case_flow::buildCaseGraph(input.row, input.overrides, caseContext);
         auto& graph = *built.graph;
         graph.set_name(EXPORT_GRAPH_NAME);
-        // A bundle holds the declared alignment only; the shifted data start stays in the runner.
-        for(const auto& [name, offset] : built.startOffsets)
-        {
-            result.inputsNote += (result.inputsNote.empty() ? "" : "; ") + name + " data start "
-                                 + std::to_string(offset) + " bytes past alignment: not carried";
-        }
 
         result.stage = "contents";
         std::vector<std::string> notExpressible;
@@ -2311,6 +2242,15 @@ ExportResult prepareCase(const CaseInput& input,
                 message += " " + item;
             }
             return fail("content-not-expressible", message);
+        }
+        if(!built.startOffsets.empty())
+        {
+            std::string message = "data starts past an aligned allocation start:";
+            for(const auto& [name, offset] : built.startOffsets)
+            {
+                message += " " + name + " +" + std::to_string(offset) + " bytes";
+            }
+            return fail("start-offset-not-expressible", message);
         }
 
         result.stage = "validate";

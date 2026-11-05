@@ -1,14 +1,16 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Device-free unit tests of the SDPA case builder: each test builds a case from a row and
-# checks the returned graph contents. No test runs a graph. TestRaggedCompareView checks the
-# runner's ragged comparison view on host tensors.
+# Unit tests of the SDPA case builder: each test builds a case from a row and checks the
+# returned graph contents. No test runs a graph. TestRaggedCompareView checks the runner's ragged
+# comparison view on host tensors. TestShiftedStarts checks the runner's shifted device copies and
+# skips without a GPU.
 set(SDPA_CASE_FLOW_CASE_GRAPH_TESTS hipdnn_sdpa_case_flow_case_graph_tests)
 
 add_executable(${SDPA_CASE_FLOW_CASE_GRAPH_TESTS}
     TestCaseGraph.cpp
     TestRaggedCompareView.cpp
+    TestShiftedStarts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../CaseGraph.cpp
 )
 
