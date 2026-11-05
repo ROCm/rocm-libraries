@@ -141,4 +141,12 @@ namespace TensileLite
                 + " (alignment/padding mismatch; the epilogue would read wrong offsets)");
         }
     }
+
+    inline void checkA2AGemmBufAligned(std::vector<FusedA2APeerFields> const& peers,
+                                       uint32_t                               myRank)
+    {
+        if(myRank < peers.size()
+           && reinterpret_cast<uintptr_t>(peers[myRank][FUSED_A2A_SLOT_BUF_PTR]) % 128 != 0)
+            throw std::runtime_error("[fused-a2a] A2AGemm requires a 128-byte aligned a2aBuf.");
+    }
 } // namespace TensileLite

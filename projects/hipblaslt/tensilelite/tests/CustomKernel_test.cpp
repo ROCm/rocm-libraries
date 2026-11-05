@@ -529,7 +529,8 @@ namespace
     }
 
     KernelInvocation fusedCustomCall(FusedA2A mode     = FusedA2A::GemmA2A,
-                                     int      fixedWGM = std::numeric_limits<int>::max())
+                                     int      fixedWGM = std::numeric_limits<int>::max(),
+                                     void*    myBuf    = nullptr)
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
@@ -543,8 +544,11 @@ namespace
         FusedA2APeerFields peer0{};
         peer0[FUSED_A2A_SLOT_FLAG_PTR] = const_cast<char*>(&fusedPeerFlag);
 
+        FusedA2APeerFields peer1{};
+        peer1[FUSED_A2A_SLOT_BUF_PTR] = myBuf;
+
         ContractionInputs inputs;
-        inputs.fusedA2APeers   = {peer0, FusedA2APeerFields{}};
+        inputs.fusedA2APeers   = {peer0, peer1};
         inputs.fusedA2ACounter = const_cast<char*>(&fusedCounter);
         inputs.fusedA2AMyRank  = 1;
         inputs.fusedA2ADrain   = FUSED_A2A_DRAIN_RECV;
@@ -576,4 +580,13 @@ TEST(CustomKernelTest, A2AGemmRejectsANegativeRuntimeWgm)
     EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm));
     EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, -8), std::runtime_error);
     EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, -8));
+}
+
+TEST(CustomKernelTest, A2AGemmRejectsAMisalignedA2ABuf)
+{
+    alignas(128) static char buf[256];
+    constexpr int            defaultWGM = std::numeric_limits<int>::max();
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf));
+    EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf + 64), std::runtime_error);
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, defaultWGM, buf + 64));
 }
