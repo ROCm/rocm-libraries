@@ -387,7 +387,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // selection). Values name the phases a promotion issues through; isPromote(p)
     // is true when nothing is promoted (every phase runs) or when p is the
     // promoted phase (only it runs).
-    enum class PromotePhase { None, NonWmmaFill, Barrier };
+    enum class PromotePhase { None, NonWmmaFill, Barrier, Wmma };
 
     // --- Priority buckets (DAG ids compare smaller = earlier in source) ---
     ReadySetByDAGid wmmaQueue;
@@ -473,6 +473,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     bool wmmaQueueOn() const {
         return wmmaQueueDepth() > 1;
+    }
+    // Fill the WMMA queue after it is reset (see wmmaQueueFillPending_).
+    bool fillQueueAfterResetOn() const {
+        return wmmaQueueOn() &&
+               getPassContext().getPassFeatureConfig().dagFeatures.wmmaFillAfterReset;
     }
     // The refill line: cycles of queued WMMA work needed before a non-WMMA pick may issue.
     // Automatic (the option below 0): one WMMA short of a full queue, sized by the next WMMA's
@@ -758,6 +763,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // NonWmmaFill only: the queue (NonWmmaKind) promotedNode_ is popped from.
     int promotedKind_ = -1;
 
+    // The WMMA queue was reset at the loop header's first WMMA region or by a barrier wait, and
+    // promoteWmmaQueueFill() fills it before other work goes in. Ends once the queue is full; the
+    // ds stages it held then count their batches from there (DsSpreadPacer::noteHeldUntil).
+    bool wmmaQueueFillPending_ = false;
+    bool headerFillPending_ = false;  // per BB: the loop header's first WMMA region is still ahead
+
     // Open SCC chain blocks handshake barriers (see cluster-barrier.md).
     unsigned openSccChain_ = 0;
     unsigned sccReadersLeft_ = 0;
@@ -973,7 +984,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool promoteDueBarrier();
     bool promotePrefetchAddressValu();
     bool promotePrefetchAtWindow();
+    bool promoteWmmaQueueFill();
     bool issuableNow(DAGNode* node) const;
+    DAGNode* bestDsRead() const;
+    bool loopHeadBalanceHoldsWmma() const;
+    bool coexecSpacingHoldsWmma(const DAGNode* wmma, bool hasPickableNonWmma) const;
+    bool dsLoadDue() const;
     bool isPromote(PromotePhase phase) const {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
     }
@@ -1040,6 +1056,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
         if (waitAlu_) waitAlu_->commit(inst);
+        if (wmmaQueueFillPending_ && outstandingWmmas() >= wmmaQueueDepth()) {
+            wmmaQueueFillPending_ = false;
+            dsSpread_.noteHeldUntil(wmmaIssuedCountThisRegion_);
+        }
     }
 };
 
@@ -1813,6 +1833,7 @@ void CDNA5ReadyQueue::decidePromote() {
         {PlacementLevel::Barrier, &CDNA5ReadyQueue::promoteDueBarrier},
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAddressValu},
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAtWindow},
+        {PlacementLevel::WmmaQueue, &CDNA5ReadyQueue::promoteWmmaQueueFill},
     };
     static_assert(std::is_sorted(std::begin(kRules), std::end(kRules),
                                  [](const auto& a, const auto& b) { return a.first < b.first; }),
@@ -1900,6 +1921,68 @@ bool CDNA5ReadyQueue::issuableNow(DAGNode* node) const {
     if (heldBackForLead(node) || prefetchHeldForLead(node) || needsWaitAlu(node)) return false;
     if (getMaxSrcDataWait(node) > 0) return false;
     return !destOverlapsActiveWmmaSrc(node);
+}
+
+// After a queue reset (wmmaQueueFillPending_) the most-ready WMMA goes ahead of ds_loads and
+// fillers until the queue is full. A ds_load its stage needs now (LastDs level), a tensor_load or
+// a prefetch (Prefetch level) keeps its own schedule, and the vetoes no queue fill overrides still
+// hold the WMMA.
+bool CDNA5ReadyQueue::promoteWmmaQueueFill() {
+    if (!wmmaQueueFillPending_ || wmmaQueue.empty() || outstandingWmmas() >= wmmaQueueDepth())
+        return false;
+    if (dsLoadDue()) return false;
+    auto [best, latency] = findMostReadyWMMA();
+    if (latency > 0 || !issuableNow(best)) return false;
+    DAGNode* smallest = nullptr;
+    int kind = -1;
+    const bool hasPickableNonWmma = findSmallestPickableNonWmma(bestDsRead(), &smallest, &kind);
+    if (kind == kGlobalRead || kind == kPrefetch) return false;
+    if (loopHeadBalanceHoldsWmma() || coexecSpacingHoldsWmma(best, hasPickableNonWmma))
+        return false;
+    promote(PromotePhase::Wmma, best);
+    return true;
+}
+
+// Whether a ready ds_load's stage has reached its end (DsSpreadPacer::due): the last ds before the
+// barrier it feeds is due.
+bool CDNA5ReadyQueue::dsLoadDue() const {
+    for (DAGNode* n : localReadQueue)
+        if (dsSpread_.due(n->id, wmmaIssuedCountThisRegion_)) return true;
+    return false;
+}
+
+// The ds_load the phases consider: the best by dsReadPriority among those the spread releases,
+// else among all. A load the spread holds does not stand in for the ones it releases: its stage
+// may open later than another's.
+DAGNode* CDNA5ReadyQueue::bestDsRead() const {
+    DAGNode* picked = nullptr;
+    const bool spreadOn = dsSpreadOn();
+    for (int pass = 0; pass < 2 && !picked; ++pass) {
+        for (DAGNode* n : localReadQueue) {
+            if (pass == 0 && spreadOn && !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
+                continue;
+            if (!picked || n->dsReadPriority < picked->dsReadPriority) picked = n;
+        }
+    }
+    return picked;
+}
+
+// Rule (5): the loop header's first WMMA waits while non-WMMA queues have work.
+bool CDNA5ReadyQueue::loopHeadBalanceHoldsWmma() const {
+    const bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
+                                     !otherQueue.empty() || !valuQueue.empty() ||
+                                     !prefetchQueue.empty();
+    return deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
+}
+
+// Hold a dependent WMMA while non-WMMA work remains; else the shortfall is emitted as v_nops.
+bool CDNA5ReadyQueue::coexecSpacingHoldsWmma(const DAGNode* wmma, bool hasPickableNonWmma) const {
+    if (!hasPickableNonWmma) return false;
+    for (const DAGNode* w : queuedWmmas_) {
+        if (!wmmaToWmmaCoexecOverlap(*w->inst, *wmma->inst)) continue;
+        if (nonWmmaFillsSinceActiveWmma_ < popcount16(w->inst->coIssueWindow) + 1) return true;
+    }
+    return false;
 }
 
 // WMMA windows needed to issue dsLoadCount ds_reads at the even-spread density of the region
@@ -2487,22 +2570,15 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     decidePromote();
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
-    // A load the spread gate holds does not stand in for the ones it releases: its stage may
-    // open later than another's.
-    DAGNode* pickedDS = nullptr;
-    const bool spreadOn = dsSpreadOn();
-    for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
-        for (DAGNode* n : localReadQueue) {
-            if (pass == 0 && spreadOn && !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
-                continue;
-            if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
-        }
+    DAGNode* pickedDS = bestDsRead();
+
+    // Phase B — the promoted WMMA (a queue fill), else try WMMA if all gates pass.
+    if (promotedPhase_ == PromotePhase::Wmma) {
+        DAGNode* node = pickOneFromWMMA(promotedNode_);
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked queue-fill WMMA dagId=" << node->id
+                             << "\n");
+        return rememberPick(node);
     }
-
-    // Phase B — try WMMA if all gates pass.
-    bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
-                               !otherQueue.empty() || !valuQueue.empty() || !prefetchQueue.empty();
-
     if (promotedPhase_ == PromotePhase::None && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
 
@@ -2515,8 +2591,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool hasPickableNonWmma =
             findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait);
 
-        const bool blockWmmaForLoopHeadBalance =
-            deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
+        const bool blockWmmaForLoopHeadBalance = loopHeadBalanceHoldsWmma();
         // evenSpreadFillers: meeting the fill quota closes an open window early,
         // so surplus fillers are not pulled in to pad it. The quota can only
         // shorten a window, never lengthen it: once a region's fillers run out
@@ -2547,16 +2622,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             blockWmmaForAtLeastOneNonWmmaInterleaving = !preemptForQueue && hasPickableNonWmma &&
                                                         isMatrixInstruction(*lastPickedNode_->inst);
         }
-        // Hold a dependent bestWMMA while non-WMMA work remains; else emit
-        // shortfall as v_nops.
-        bool blockWmmaForCoexecSpacing = false;
-        if (hasPickableNonWmma) {
-            for (const DAGNode* w : queuedWmmas_) {
-                if (!wmmaToWmmaCoexecOverlap(*w->inst, *bestWMMA->inst)) continue;
-                if (nonWmmaFillsSinceActiveWmma_ < popcount16(w->inst->coIssueWindow) + 1)
-                    blockWmmaForCoexecSpacing = true;
-            }
-        }
+        const bool blockWmmaForCoexecSpacing =
+            coexecSpacingHoldsWmma(bestWMMA, hasPickableNonWmma);
         PASS_DEBUG(
             std::cerr
             << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
@@ -2662,7 +2729,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             updateWMMAStatus(barrier);
             // The stall in front of a barrier wait (s_wait_dscnt / s_wait_tensorcnt, not simulated)
             // lets the queued WMMAs finish: take the WMMA queue as empty.
-            if (isBarrierWait(*barrier->inst)) resetActiveWindow();
+            if (isBarrierWait(*barrier->inst)) {
+                resetActiveWindow();
+                wmmaQueueFillPending_ = fillQueueAfterResetOn();
+            }
             // This barrier may be opening a ds stage whose batches were counted from its planned
             // window. It can issue later than that (a predecessor was held, an SCC chain, an open
             // barrier pair). Count the batches from here; the stage's planned end stays.
@@ -2742,6 +2812,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
+    headerFillPending_ = true;
 
     // Per-BB like the PipeOps lanes: the tracker walks the BB's final order from an empty
     // state.
@@ -2901,6 +2972,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
+    wmmaQueueFillPending_ = false;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
@@ -2991,6 +3063,20 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         } else if (isDSRead(inst)) {
             ++dsTotalThisRegion_;
         }
+    }
+
+    // The queue starts empty at the loop header's first WMMA region and in a region cut by a
+    // barrier wait: fill it first. The loop-head deferral wins over the fill.
+    if (fillQueueAfterResetOn() && hasWMMAInRegion_) {
+        const bool headerStart =
+            headerFillPending_ && loop && loop->headerBB == blockBegin->getParent();
+        bool afterWait = false;
+        if (regionStart != blockBegin) {
+            auto* prev = dyn_cast<StinkyInstruction>(std::prev(regionStart).getNodePtr());
+            afterWait = prev != nullptr && isBarrierWait(*prev);
+        }
+        if (headerStart) headerFillPending_ = false;
+        wmmaQueueFillPending_ = (headerStart || afterWait) && !deferHeadBalanceThisRegion_;
     }
 
     // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
