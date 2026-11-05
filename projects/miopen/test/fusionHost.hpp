@@ -324,9 +324,12 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
         miopen::par_for(channels, 1, [&](int cidx) {
             double mean           = 0.0;
             double invVar         = 0.0;
-            double elemStd        = 0.;
+            double elemStd        = 0.0;
             double mean_accum     = 0.0;
             double variance_accum = 0.0;
+            double curCount       = 0.0;
+            double mean_accum_old = 0.0;
+
             if(!savedMean.data.empty())
             {
                 mean   = static_cast<double>(savedMean(0, cidx, 0, 0));   // HxW elements
@@ -334,21 +337,27 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
             }
             else
             {
-                for(int row = 0; row < height; row++)
-                { // via rows
-                    for(int column = 0; column < width; column++)
-                    { // via columns
-                        for(int bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
+                // process the batch per channel
+                for(int bidx = 0; bidx < n_batch; bidx++)
+                { // via mini_batch
+                    for(int row = 0; row < height; row++)
+                    { // via rows
+                        for(int column = 0; column < width; column++)
+                        { // via columns
+                            // #1 calculate the mean
+                            // iterating through the stack of images in the mini_batch
+                            curCount += 1.;
+                            mean_accum_old = mean_accum;
+                            // Given that each thread processes one channel, and the values are
+                            // computed per channel, no concurrency conflicts are expected
                             auto inval = static_cast<double>(x_input(bidx, cidx, row, column));
-                            mean_accum += inval;
-                            variance_accum += inval * inval;
-                        }
-                    }
-                }
-                mean_accum /= nhw;
+                            mean_accum = (mean_accum * (curCount - 1) + inval) / curCount;
+                            variance_accum += (inval - mean_accum_old) * (inval - mean_accum);
+                        } // end for (column)
+                    } // end for (row)
+                } // end for (n)
+
                 variance_accum /= nhw;
-                variance_accum += (-mean_accum * mean_accum);
                 mean   = mean_accum;
                 invVar = 1.0 / sqrt(variance_accum + epsilon);
             }
@@ -389,7 +398,6 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
 
         if(!savedMean.data.empty())
         {
-
             mean   = savedMean(0, cidx, 0, 0);   // HxW elements
             invVar = savedInvVar(0, cidx, 0, 0); // HxW elements
         }
@@ -397,7 +405,8 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
         {
             double variance_accum = 0.;
             double mean_accum     = 0.;
-            double inv_Var        = 0.;
+            double curCount       = 0.;
+            double mean_accum_old = 0.;
 
             // process the batch per channel
             for(int bidx = 0; bidx < n_batch; bidx++)
@@ -406,23 +415,20 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                 { // via rows
                     for(int column = 0; column < width; column++)
                     { // via columns
-                        // #1 calculate the mean
-                        // iterating through the stack of images in the mini_batch
-                        auto inval = static_cast<double>(x_input(bidx, cidx, row, column));
-                        mean_accum += inval;
-                        variance_accum += inval * inval;
+                        curCount += 1.;
+                        mean_accum_old = mean_accum;
+                        auto inval     = static_cast<double>(x_input(bidx, cidx, row, column));
+                        mean_accum     = (mean_accum * (curCount - 1) + inval) / curCount;
+                        variance_accum += (inval - mean_accum_old) * (inval - mean_accum);
                     } // end for (column)
                 } // end for (row)
             } // end for (n)
 
-            mean_accum /= nhw;
             variance_accum /= nhw;
-            variance_accum += (-mean_accum * mean_accum);
-            inv_Var = 1.0 / sqrt(variance_accum + epsilon);
-
             mean   = mean_accum;
-            invVar = inv_Var;
+            invVar = 1.0 / sqrt(variance_accum + epsilon);
         }
+
         for(int row = 0; row < height; row++)
         { // via rows
             for(int column = 0; column < width; column++)
