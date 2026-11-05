@@ -8,6 +8,10 @@
 #include <miopen/handle_lock.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/stringutils.hpp>
+
+#include <mutex>
+#include <unordered_map>
 
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
@@ -75,6 +79,52 @@ void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims, const std::strin
     }
 }
 
+namespace {
+
+/// On gfx12 (RDNA4) the Y and Z workgroup IDs are only 16 bits wide (they share one register),
+/// so a launch with more than 65536 workgroups in Y or Z wraps blockIdx.y/z. The module launch
+/// APIs do not reject such a grid, so the kernel silently covers only part of the problem.
+bool WorkgroupIdYZIs16Bit()
+{
+    static std::mutex mutex;
+    static std::unordered_map<int, bool> cache;
+
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
+        return false;
+
+    const std::lock_guard<std::mutex> lock(mutex);
+    const auto it = cache.find(device);
+    if(it != cache.end())
+        return it->second;
+
+    hipDeviceProp_t props{};
+    const bool is_gfx12 = hipGetDeviceProperties(&props, device) == hipSuccess &&
+                          StartsWith(props.gcnArchName, "gfx12");
+    cache.emplace(device, is_gfx12);
+    return is_gfx12;
+}
+
+} // namespace
+
+void ValidateWorkgroupCount(const std::array<size_t, 3>& gdims,
+                            const std::array<size_t, 3>& ldims,
+                            const std::string& name)
+{
+    constexpr size_t max_workgroups_yz = size_t{1} << 16;
+
+    for(size_t i = 1; i < 3; ++i)
+    {
+        const auto workgroups = (gdims[i] + ldims[i] - 1) / ldims[i];
+        if(workgroups > max_workgroups_yz && WorkgroupIdYZIs16Bit())
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Kernel " + name + ": " + std::to_string(workgroups) +
+                             " workgroups in dimension " + std::to_string(i) +
+                             " exceed the 16-bit workgroup ID limit of this architecture (65536); "
+                             "the launch would silently wrap blockIdx and return wrong results");
+    }
+}
+
 void HIPOCKernelInvoke::run(void* args, std::size_t size) const
 {
     MIOPEN_LOG_I2("kernel_name = "
@@ -82,6 +132,7 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
                   << ", local_work_dim = " << DimToFormattedString(ldims.data(), 3));
 
     ValidateGlobalWorkSize(gdims, GetName());
+    ValidateWorkgroupCount(gdims, ldims, GetName());
 
     HipEventPtr start = nullptr;
     HipEventPtr stop  = nullptr;

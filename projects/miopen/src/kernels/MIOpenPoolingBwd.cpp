@@ -54,12 +54,16 @@ extern "C" __global__ __launch_bounds__(block_size) //
 {
     __shared__ FLOAT lcl_top_diff[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
 
-    int x       = blockIdx.x * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
-    int y       = blockIdx.y * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
+    // The workgroup index is linearized in blockIdx.x as (batch * channel, vertical tile,
+    // horizontal tile), horizontal tile fastest: blockIdx.y/z are only 16 bits wide on gfx12.
+    int rest = blockIdx.x / MLO_POOLBWD_N_X_TILES;
+    int x =
+        (blockIdx.x % MLO_POOLBWD_N_X_TILES) * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
+    int y = (rest % MLO_POOLBWD_N_Y_TILES) * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
     //        int lcl_id = (lcl_id1 << MLO_POOLBWD_GROUP_LG2SZ1) + lcl_id0;
-    int ob = blockIdx.z; // outputs * batch_sz
+    int ob = rest / MLO_POOLBWD_N_Y_TILES; // outputs * batch_sz
     int b  = ob / mlo_n_outputs;
     int o  = ob - b * mlo_n_outputs;
 
@@ -220,13 +224,14 @@ extern "C" __global__ __launch_bounds__(block_size) //
     __shared__ FLOAT lcl_top_df[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
     __shared__ index_t lcl_mask[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
 
-    int gid0    = blockIdx.x;
-    int gid1    = blockIdx.y;
+    int rest    = blockIdx.x / MLO_POOLBWD_N_X_TILES;
+    int gid0    = blockIdx.x % MLO_POOLBWD_N_X_TILES;
+    int gid1    = rest % MLO_POOLBWD_N_Y_TILES;
     int x       = gid0 * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
     int y       = gid1 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
-    int ob      = blockIdx.z; // outputs * batch_sz
+    int ob      = rest / MLO_POOLBWD_N_Y_TILES; // outputs * batch_sz
     int b       = ob / mlo_n_outputs;
     int o       = ob - b * mlo_n_outputs;
 

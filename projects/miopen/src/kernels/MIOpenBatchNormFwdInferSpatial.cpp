@@ -114,7 +114,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || tidz >= batchSize)
     {
         return;
     }
@@ -160,20 +160,25 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         invVariance[i] = rsqrt(fabs(variance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
     }
 
-    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
-                                              tidy,
-                                              in,
-                                              out,
-                                              mean,
-                                              invVariance,
-                                              pscale,
-                                              pbias,
-                                              batchSize,
-                                              cStride,
-                                              hwStride,
-                                              batchStride,
-                                              alpha,
-                                              beta);
+    // The host caps the number of workgroups in Y (the Y and Z workgroup IDs are only 16 bits wide
+    // on gfx12), so each thread strides over the remaining spatial positions.
+    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
+    {
+        BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+                                                  tidy,
+                                                  in,
+                                                  out,
+                                                  mean,
+                                                  invVariance,
+                                                  pscale,
+                                                  pbias,
+                                                  batchSize,
+                                                  cStride,
+                                                  hwStride,
+                                                  batchStride,
+                                                  alpha,
+                                                  beta);
+    }
 }
 
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
@@ -203,7 +208,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || tidz >= batchSize)
     {
         return;
     }
@@ -243,18 +248,23 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         }
     }
 
-    BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
-                                              tidy,
-                                              in,
-                                              out,
-                                              mean,
-                                              invVariance,
-                                              pscale,
-                                              pbias,
-                                              batchSize,
-                                              cStride,
-                                              hwStride,
-                                              batchStride,
-                                              alpha,
-                                              beta);
+    // The host caps the number of workgroups in Y (the Y and Z workgroup IDs are only 16 bits wide
+    // on gfx12), so each thread strides over the remaining spatial positions.
+    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
+    {
+        BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
+                                                  tidy,
+                                                  in,
+                                                  out,
+                                                  mean,
+                                                  invVariance,
+                                                  pscale,
+                                                  pbias,
+                                                  batchSize,
+                                                  cStride,
+                                                  hwStride,
+                                                  batchStride,
+                                                  alpha,
+                                                  beta);
+    }
 }
