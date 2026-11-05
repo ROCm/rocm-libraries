@@ -246,7 +246,7 @@ The following global knobs are available in hipDNN:
 
 | Knob Name | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `global.benchmarking` | int64 | 0 (disabled) | Enable benchmarking mode for kernel selection. When enabled, engines may run multiple kernel variants and select the fastest. First run may be slower due to benchmarking overhead. The `HIPDNN_FORCE_BENCHMARKING` environment variable overrides this knob (see [Environment Configuration](./Environment.md#hipdnn_force_benchmarking)). |
+| `global.benchmarking` | int64 | 0 (disabled) | Enable benchmarking mode for kernel selection. When enabled, engines may run multiple kernel variants and select the fastest. First run may be slower due to benchmarking overhead. In the kernel ingestor, a cold benchmarked plan build prepares every candidate left after knob and workspace filtering, so its cost grows with the candidate count; other engines may defer that work to the first `execute()`. The `HIPDNN_FORCE_BENCHMARKING` environment variable overrides this knob (see [Environment Configuration](./Environment.md#hipdnn_force_benchmarking)). |
 | `global.workspace_size_limit` | int64 | Engine-dependent (the maximum the engine reports) | Maximum workspace memory in bytes. Only engines that support it expose it. Today the MIOpen provider exposes it for convolution operations. See the [MIOpen provider knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md). |
 
 > [!NOTE]

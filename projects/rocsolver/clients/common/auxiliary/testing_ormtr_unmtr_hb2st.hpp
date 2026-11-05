@@ -632,8 +632,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "ortho I-Q^HQ",
-                                       "berror A-QBQ^H", "ferror QC-Q#C");
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "ortho", "berror", "ferror");
                 rocsolver_bench_output(cpu_time_used, gpu_time_used, errors[0], errors[1], errors[2]);
             }
             else
