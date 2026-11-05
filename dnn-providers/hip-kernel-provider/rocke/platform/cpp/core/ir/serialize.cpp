@@ -26,6 +26,7 @@
 
 #include "rocke/ir_serialize.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1193,76 +1194,140 @@ static char* lr_next(line_reader_t* lr)
 
 typedef struct val_entry
 {
-    const char* name;
+    const char* name; /* NULL: never used; vt_removed: removed */
     rocke_value_t* value;
 } val_entry_t;
 
+/* Python's dict of SSA names, as an open-addressing hash table: a kernel can
+ * define tens of thousands of values, and every operand is looked up by name.
+ * The slots live in the builder's arena: each rebuild (growth, or clearing
+ * removed slots) leaves the old ones there until the builder is freed. */
 typedef struct val_table
 {
-    val_entry_t* entries;
-    int count;
+    val_entry_t* entries; /* `cap` slots; cap is 0 or a power of two */
+    int count; /* live names */
+    int used; /* live and removed slots */
     int cap;
     rocke_ir_builder_t* b;
 } val_table_t;
 
-static rocke_value_t* vt_get(val_table_t* vt, const char* name)
+/* The name a removed slot holds: probes continue past it, inserts reuse it. */
+static const char vt_removed_mark = 0;
+static const char* const vt_removed = &vt_removed_mark;
+
+/* 64-bit FNV-1a over the name's bytes. */
+static uint64_t vt_hash(const char* name)
 {
-    for(int i = 0; i < vt->count; ++i)
+    uint64_t hash = 14695981039346656037ull;
+    for(const unsigned char* c = (const unsigned char*)name; *c; ++c)
     {
-        if(strcmp(vt->entries[i].name, name) == 0)
+        hash ^= *c;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+/* The slot holding `name`, or NULL when the table has none. */
+static val_entry_t* vt_find(val_table_t* vt, const char* name)
+{
+    if(!vt->cap)
+    {
+        return NULL;
+    }
+    const size_t mask = (size_t)vt->cap - 1;
+    for(size_t i = (size_t)(vt_hash(name) & mask);; i = (i + 1) & mask)
+    {
+        val_entry_t* slot = &vt->entries[i];
+        if(!slot->name)
         {
-            return vt->entries[i].value;
+            return NULL;
+        }
+        if(slot->name != vt_removed && strcmp(slot->name, name) == 0)
+        {
+            return slot;
         }
     }
-    return NULL;
+}
+
+static rocke_value_t* vt_get(val_table_t* vt, const char* name)
+{
+    val_entry_t* slot = vt_find(vt, name);
+    return slot ? slot->value : NULL;
+}
+
+/* Rehash the live names into `cap` fresh slots; -1 when out of memory. */
+static int vt_resize(val_table_t* vt, int cap)
+{
+    val_entry_t* entries
+        = (val_entry_t*)rocke_arena_alloc(&vt->b->arena, sizeof(val_entry_t) * (size_t)cap);
+    if(!entries)
+    {
+        return -1;
+    }
+    memset(entries, 0, sizeof(val_entry_t) * (size_t)cap);
+    const size_t mask = (size_t)cap - 1;
+    for(int i = 0; i < vt->cap; ++i)
+    {
+        const val_entry_t* old = &vt->entries[i];
+        if(!old->name || old->name == vt_removed)
+        {
+            continue;
+        }
+        size_t j = (size_t)(vt_hash(old->name) & mask);
+        while(entries[j].name)
+        {
+            j = (j + 1) & mask;
+        }
+        entries[j] = *old;
+    }
+    vt->entries = entries;
+    vt->cap = cap;
+    vt->used = vt->count;
+    return 0;
 }
 
 static int vt_put(val_table_t* vt, const char* name, rocke_value_t* v)
 {
     /* overwrite if present (later defs shadow within block scope handling). */
-    for(int i = 0; i < vt->count; ++i)
+    val_entry_t* slot = vt_find(vt, name);
+    if(slot)
     {
-        if(strcmp(vt->entries[i].name, name) == 0)
-        {
-            vt->entries[i].value = v;
-            return 0;
-        }
+        slot->value = v;
+        return 0;
     }
-    if(vt->count >= vt->cap)
+    /* Keep the table at most three-quarters full, removed slots included. */
+    if((vt->used + 1) * 4 > vt->cap * 3)
     {
-        int nc = vt->cap ? vt->cap * 2 : 32;
-        val_entry_t* ne
-            = (val_entry_t*)rocke_arena_alloc(&vt->b->arena, sizeof(val_entry_t) * (size_t)nc);
-        if(!ne)
+        const int cap = vt->count * 4 >= vt->cap ? (vt->cap ? vt->cap * 2 : 64) : vt->cap;
+        if(vt_resize(vt, cap) != 0)
         {
             return -1;
         }
-        if(vt->entries && vt->count)
-        {
-            memcpy(ne, vt->entries, sizeof(val_entry_t) * (size_t)vt->count);
-        }
-        vt->entries = ne;
-        vt->cap = nc;
     }
-    vt->entries[vt->count].name = name;
-    vt->entries[vt->count].value = v;
+    const size_t mask = (size_t)vt->cap - 1;
+    size_t i = (size_t)(vt_hash(name) & mask);
+    while(vt->entries[i].name && vt->entries[i].name != vt_removed)
+    {
+        i = (i + 1) & mask;
+    }
+    if(!vt->entries[i].name)
+    {
+        vt->used++;
+    }
+    vt->entries[i].name = name;
+    vt->entries[i].value = v;
     vt->count++;
     return 0;
 }
 
 static void vt_remove(val_table_t* vt, const char* name)
 {
-    for(int i = 0; i < vt->count; ++i)
+    val_entry_t* slot = vt_find(vt, name);
+    if(slot)
     {
-        if(strcmp(vt->entries[i].name, name) == 0)
-        {
-            for(int j = i; j + 1 < vt->count; ++j)
-            {
-                vt->entries[j] = vt->entries[j + 1];
-            }
-            vt->count--;
-            return;
-        }
+        slot->name = vt_removed;
+        slot->value = NULL;
+        vt->count--;
     }
 }
 
@@ -2199,6 +2264,7 @@ static rocke_status_t
     val_table_t vt;
     vt.entries = NULL;
     vt.count = 0;
+    vt.used = 0;
     vt.cap = 0;
     vt.b = b;
 
