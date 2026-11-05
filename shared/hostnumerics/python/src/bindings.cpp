@@ -17,6 +17,7 @@ void registerPermutationBindings(nb::module_& module);
 void registerShapeBindings(nb::module_& module);
 void registerIndexRangeBindings(nb::module_& module);
 void registerLayoutBindings(nb::module_& module);
+void registerScalarStorageBindings(nb::module_& module);
 }  // namespace roc::hostnumerics::python_bindings
 
 NB_MODULE(_hostnumerics, module) {
@@ -74,4 +75,5 @@ NB_MODULE(_hostnumerics, module) {
     python_bindings::registerShapeBindings(module);
     python_bindings::registerIndexRangeBindings(module);
     python_bindings::registerLayoutBindings(module);
+    python_bindings::registerScalarStorageBindings(module);
 }
