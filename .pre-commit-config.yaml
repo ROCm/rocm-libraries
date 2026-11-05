@@ -308,9 +308,13 @@ repos:
       # rocKE advisory static analysis (all rocke Python): types, metrics, dead
       # code. NON-BLOCKING -- the wrapper always exits 0; `verbose` prints its
       # report. System hooks never install dependencies during a push; missing
-      # tools are advisory too. CI does not run these pre-push hooks.
-      # Enable locally with `pre-commit install --hook-type pre-push`
-      # (this also runs the repo's other hooks at push time: none sets a stage).
+      # tools are advisory too, but the hooks need `python` on PATH. CI does not
+      # run these pre-push hooks.
+      # Enable locally with:
+      #   pre-commit install --hook-type pre-push --install-hooks
+      # This also runs the repo's other hooks at push time (none sets a stage).
+      # --install-hooks downloads their repositories now; without it the first
+      # push does, and fails when offline.
       # Settings: rocke/pyrightconfig.json and rocke/tools/advisory_checks.py.
       # Reading the reports: rocke/docs/static-analysis.md.
       - id: rocke-pyright
