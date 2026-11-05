@@ -730,6 +730,20 @@ namespace TensileLite
             TENSILELITEHOST_EXPORT static size_t perQueueStrideBytes(Hardware const& hardware);
         };
 
+        /**
+         *   High bits of slot2
+         */
+        struct Slot2Bits
+        {
+            static constexpr uint32_t MagicAddBit              = 1u << 31; // magicNumberAlg2's "add" indicator
+            static constexpr uint32_t HybridModeBit            = 1u << 30; // set: dynamic work queue; clear: static
+            static constexpr uint32_t UniformSummationOrderBit = 1u << 29;
+
+            static constexpr uint32_t TileReservedMask
+                = MagicAddBit | HybridModeBit | UniformSummationOrderBit;
+            static constexpr uint32_t ShiftReservedMask = HybridModeBit | UniformSummationOrderBit;
+        };
+
         // Scheduling ABI 2: a logical worker is a hardware cluster and a scheduling
         // tile is a spatial block. Partial/flag slot q*C+peer retains the peer identity.
         // This resolved value is shared by workspace queries, argument packing, launch

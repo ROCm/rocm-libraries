@@ -1166,7 +1166,7 @@ namespace TensileLite
                 &magicShift);
             if(solution.internalArgsSupport.perTileExtraIters
                && problem.getParams().uniformSummationOrder() != 0)
-                magicShift |= 0x20000000u;
+                magicShift |= StreamK::Slot2Bits::UniformSummationOrderBit;
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magic);
             args.template append<uint32_t>("magicShiftItersPerTile", magicShift);
@@ -1539,9 +1539,9 @@ namespace TensileLite
                     // and takes the global mapping, which is all it has -- but
                     // skTiles must still not collide with it. Free in practice:
                     // sk4_skTiles <= tiles and a 2^29 tile count is unreachable.
-                    TENSILE_ASSERT_EXC((sk4_skTiles & 0xE0000000u) == 0u
+                    TENSILE_ASSERT_EXC((sk4_skTiles & StreamK::Slot2Bits::TileReservedMask) == 0u
                                        && "SK5 SK4 skTiles collides with mode/magic bits");
-                    uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
+                    uint32_t packedSkTiles = sk4_skTiles | StreamK::Slot2Bits::HybridModeBit;
 
                     args.template append<uint32_t>("ItersPerTile",
                                                    sk3_itersPerTile);
@@ -1572,13 +1572,13 @@ namespace TensileLite
                     // Both are stolen from the always-zero 5..30 window of
                     // magicNumberAlg2's shift field; bit 31 stays the "add"
                     // indicator.
-                    assert((magicShiftItersPerTile & 0x60000000u) == 0u);
+                    assert((magicShiftItersPerTile & StreamK::Slot2Bits::ShiftReservedMask) == 0u);
                     // Same host rule as the standalone SK3 packer: capability
                     // AND mode, so a kernel without the runtime gate never sees
                     // the bit.
                     if(internalArgsSupport.perTileExtraIters
                        && problem.getParams().uniformSummationOrder() != 0)
-                        magicShiftItersPerTile |= 0x20000000u;
+                        magicShiftItersPerTile |= StreamK::Slot2Bits::UniformSummationOrderBit;
 
                     uint32_t sk3_skItersPerWG;
                     uint32_t sk3_skTiles;
@@ -1656,9 +1656,9 @@ namespace TensileLite
                 // without the capability term, a solution whose assembly
                 // predates the gate (custom kernels, older logic) would receive
                 // a bit it misreads.
-                assert((magicShiftItersPerTile & 0x60000000u) == 0u);
+                assert((magicShiftItersPerTile & StreamK::Slot2Bits::ShiftReservedMask) == 0u);
                 if(StreamK::usePerTileSplit(*this, problem, launch, tiles, itersPerTile))
-                    magicShiftItersPerTile |= 0x20000000u;
+                    magicShiftItersPerTile |= StreamK::Slot2Bits::UniformSummationOrderBit;
 
                 args.template append<uint32_t>("itersPerTile", itersPerTile);
                 args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
