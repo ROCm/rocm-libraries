@@ -193,6 +193,8 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                 {"MLO_POOLBWD_N_VERT_OUT_PIX", kp.out_pix_tile1},
                 {"MLO_POOLBWD_GROUP_SZ0", kp.grp_tile0},
                 {"MLO_POOLBWD_GROUP_SZ1", kp.grp_tile1},
+                {"MLO_POOLBWD_N_X_TILES", g_wk_width},
+                {"MLO_POOLBWD_N_Y_TILES", g_wk_height},
                 {"MLO_POOLING_INDEX_TYPE",
                  get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
                 {"USE_IMG_INDEX",
@@ -205,8 +207,13 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk = {kp.grp_tile0, kp.grp_tile1, 1};
-        kernel.g_wk = {
-            g_wk_width * kp.grp_tile0, g_wk_height * kp.grp_tile1, kp.n_inputs * kp.batch_sz};
+        // All workgroups go to X, see the kernels. X then carries tiles * N * C * grp_tile0
+        // work-items, which ValidateGlobalWorkSize() requires to stay below 2^32 (only reachable
+        // for tensors far beyond what the 32-bit offsets in the kernel can address anyway).
+        kernel.g_wk = {static_cast<std::size_t>(g_wk_width) * g_wk_height * kp.n_inputs *
+                           kp.batch_sz * kp.grp_tile0,
+                       kp.grp_tile1,
+                       1};
 
         result.construction_params.push_back(kernel);
     }

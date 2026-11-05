@@ -52,6 +52,13 @@ struct GPU_BNOCLInferLarge3D_FP16
 {
 };
 
+// The forward inference spatial kernels used to map H*W to the Y workgroup ID for NHWC with a
+// single-thread workgroup in Y. That ID is only 16 bits wide on gfx12, so H*W > 65536 wrapped it.
+struct GPU_BNOCLInferYWorkgroupLimit2D_FP16
+    : BNInferTest<half_float::half, half_float::half, float, float, float, double, BN2DTestCase>
+{
+};
+
 // XDataType       : bfloat16
 // YDataYype       : bfloat16
 // ScaleDataType   : bfloat16
@@ -104,6 +111,7 @@ struct GPU_BNInferLarge2D_FP64
 TEST_P(GPU_BNCKInferLarge2D_FP16, DISABLED_BnV2LargeInferCKfp16_2D) {}
 TEST_P(GPU_BNOCLInferLarge2D_FP16, BnV2LargeInferOCLfp16_2D) {}
 TEST_P(GPU_BNOCLInferLarge3D_FP16, BnV2LargeInferOCLfp16_3D) {}
+TEST_P(GPU_BNOCLInferYWorkgroupLimit2D_FP16, BnV2InferYWorkgroupLimitOCLfp16_2D) {}
 
 // bfp16
 TEST_P(GPU_BNCKInferLarge2D_BFP16, DISABLED_BnV2LargeInferCKbfp16_2D) {}
@@ -149,6 +157,24 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({testBNAPIV1, testBNAPIV2, testBNAPIInvVar}),
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN3DTestCase>());
+
+// An odd C (vector size 1) with C >= 256 gives a one-thread-high NHWC workgroup, so the number of Y
+// workgroups equals H*W. The host caps the Y workgroup count at 65535, so 255x255 (65025) runs
+// without the cap (control), while 256x256 (65536) and 300x300 are capped and exercise the stride
+// loop on every architecture.
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_BNOCLInferYWorkgroupLimit2D_FP16,
+    testing::Combine(testing::ValuesIn(std::vector<BN2DTestCase>{
+                         {1, 257, 255, 255, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                         {1, 257, 256, 256, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                         {1, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0}}),
+                     testing::ValuesIn({miopenTensorNHWC}),
+                     testing::ValuesIn({miopenBNSpatial}),
+                     testing::ValuesIn({testBNAPIV2, testBNAPIInvVar}),
+                     testing::ValuesIn({miopenActivationPASTHRU})),
+    TestNameGenerator<BN2DTestCase>());
+
 // bfp16
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNCKInferLarge2D_BFP16,

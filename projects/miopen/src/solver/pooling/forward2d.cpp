@@ -165,6 +165,11 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         while(grp_tile0 * grp_tile1 > 256 && grp_tile0 > 1)
             grp_tile0 >>= 1;
 
+        const int g_wk_width =
+            ((kp.out_width + grp_tile0 * kp.out_pix_tile0 - 1) / (grp_tile0 * kp.out_pix_tile0));
+        const int g_wk_height =
+            ((kp.out_height + grp_tile1 * kp.out_pix_tile1 - 1) / (grp_tile1 * kp.out_pix_tile1));
+
         int pooling_method =
             (pool_d.GetMode() == miopenPoolingMax)
                 ? MLO_POOLING_OP_MAX
@@ -181,6 +186,8 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
             {"MLO_POOLING_N_VERT_OUT_PIX", kp.out_pix_tile1},
             {"MLO_POOLING_GROUP_SZ0", grp_tile0},
             {"MLO_POOLING_GROUP_SZ1", grp_tile1},
+            {"MLO_POOLING_N_X_TILES", g_wk_width},
+            {"MLO_POOLING_N_Y_TILES", g_wk_height},
             {"MLO_POOLING_INDEX_TYPE", get_pooling_index_type_name(pool_d.GetIndexType())},
         };
 
@@ -201,14 +208,14 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         kernel.l_wk.push_back(grp_tile1);
         kernel.l_wk.push_back(1);
 
-        int g_wk_width =
-            ((kp.out_width + grp_tile0 * kp.out_pix_tile0 - 1) / (grp_tile0 * kp.out_pix_tile0));
-        int g_wk_height =
-            ((kp.out_height + grp_tile1 * kp.out_pix_tile1 - 1) / (grp_tile1 * kp.out_pix_tile1));
-
-        kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_width) * grp_tile0);
-        kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_height) * grp_tile1);
-        kernel.g_wk.push_back(static_cast<std::size_t>(n_outputs) * batch_sz);
+        // All workgroups go to X, in (batch * channel, vertical tile, horizontal tile) order: Y and
+        // Z are limited to 16 bits on gfx12. X then carries tiles * N * C * grp_tile0 work-items,
+        // which ValidateGlobalWorkSize() requires to stay below 2^32 (only reachable for tensors
+        // far beyond what the 32-bit offsets in the kernel can address anyway).
+        kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_width) * g_wk_height * n_outputs *
+                              batch_sz * grp_tile0);
+        kernel.g_wk.push_back(grp_tile1);
+        kernel.g_wk.push_back(1);
 
         result.construction_params.push_back(kernel);
     }
