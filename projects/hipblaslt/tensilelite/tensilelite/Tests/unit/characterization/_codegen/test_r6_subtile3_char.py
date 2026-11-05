@@ -267,8 +267,8 @@ def test_r6_grComputeRowPartition_ratio_half():
 def test_r6_grComputeRowPartition_ratio_two():
     """_grComputeRowPartition covers the loadRatioGR == 2.0 branch (lines 602-604).
 
-    WG=(4,4) + AB_B16 yields loadRatioGR = 2.0.  The branch emits
-    VMovB32(localRow=waveId) + VMovB32(partitionRow=0).
+    WG=(4,4) + AB_B16 yields loadRatioGR = 2.0. Four waves cooperate
+    inside each partition, so the mapping uses waveId % 4 and waveId / 4.
     """
     from tensilelite.Components.Subtile.SubtileGREmit import _grComputeRowPartition
     from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
@@ -286,6 +286,8 @@ def test_r6_grComputeRowPartition_ratio_two():
     src = str(m)
     lines = [l for l in src.splitlines() if l.strip()]
     assert len(lines) >= 3, f"Expected >=3 instructions, got {len(lines)}: {src}"
+    assert "waveId % 4" in src
+    assert "waveId / 4" in src
 
 
 def test_r6_grComputeAllOffsets_ratio_half():
@@ -541,7 +543,8 @@ def test_r6_globalReadLDSBufferSwap_scale_path():
         "MacroTileA": 128, "MacroTileB": 128,
         "DepthU": 256,
         "_DepthUA": 256, "_DepthUB": 256,
-        "_DepthUMXSA": 8, "_DepthUMXSB": 8,
+            "_DepthUMXSA": 8, "_DepthUMXSB": 8,
+            "_ScalePeriodUA": 256, "_ScalePeriodUB": 256,
         "MIWaveGroup": [2, 2], "WavefrontSize": 64,
     }
     # Construct scale TileInfos
