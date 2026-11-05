@@ -395,15 +395,15 @@ _MX_F8 = {"MXBlockA": 32, "MXBlockB": 32, "DataTypeMXSA": "E8", "DataTypeMXSB": 
 
 @pytest.mark.parametrize("problemType", [{}, _MX_F8, {**_MX_F8, "MacDataTypeB": "F4"}],
                          ids=["f8", "mx_f8", "mx_f8_f4"])
-def test_rap_b_leaves_m_and_n_alone_and_serves_whole_k_tiles(
+def test_rap_b_constrains_k_alone_as_rap_a_does(
     _gp_gfx1250, gfx1250_iim, assembler, capsys, problemType
 ):
-    """RAP 2 holds B over any M and N, edge tiles included, and whole k-tiles.
+    """RAP 2 holds B over any M, N and K up to its resident block, as RAP 1 does A.
 
     The entry guard compares (batch, N-tile) and refills B when either changes;
     B does not depend on M, and a partial N-tile only reaches C columns the edge
-    store masks. K's multiple is a predicate, not a reject on ASEM: fp4 forces
-    ASEM to 32, which a reject would turn into refusing every F8 x F4 kernel.
+    store masks. A K remainder is tail-folded: TDM clamps the partial last k-tile
+    for B as it does for A, so K carries only its range.
     """
     import tensilelite.Contractions as C
 
@@ -419,8 +419,7 @@ def test_rap_b_leaves_m_and_n_alone_and_serves_whole_k_tiles(
     rapPreds = {(p.index, p.tag, p.value) for p in preds if p.index in (0, 1, kIdx)}
     depthU, kTiles = sol["DepthU"], sol["_RAPNumResidentKTiles"]
     assert {p for p in rapPreds if p[0] in (0, 1)} == set(), "M and N carry no RAP predicate"
-    assert rapPreds >= {
-        (kIdx, "SizeMultiple", depthU),
+    assert rapPreds == {
         (kIdx, "SizeGreaterThan", 0),
         (kIdx, "SizeLessThan", kTiles * depthU + 1),
     }
@@ -496,6 +495,8 @@ def test_rap_k_predicates_admit_every_k_up_to_the_resident_block(
     [
         pytest.param(1, 32, True, True, id="rap_with_a_remainder"),
         pytest.param(1, 256, False, True, id="rap_without_a_remainder"),
+        pytest.param(2, 32, True, True, id="rap_b_with_a_remainder"),
+        pytest.param(2, 256, False, True, id="rap_b_without_a_remainder"),
         pytest.param(0, 32, False, False, id="no_rap_with_a_remainder"),
         pytest.param(0, 256, False, True, id="no_rap_without_a_remainder"),
     ],
@@ -511,8 +512,9 @@ def test_tail_folding_is_rap_meeting_a_k_remainder(
     exactly when its ASEM leaves a remainder. NoTailLoop then means only that no
     tail is emitted: the partial last k-tile takes a resident slot of its own.
     """
+    mi = {"MatrixInstruction": _MI_MT256x64} if rap == 2 else {}
     sol, out = _derive(gfx1250_iim, assembler, capsys,
-                       ReuseAcrossPersistent=rap, AssertSummationElementMultiple=asem)
+                       ReuseAcrossPersistent=rap, AssertSummationElementMultiple=asem, **mi)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert sol.get("_TailFolding", False) is folds
     assert sol["NoTailLoop"] is noTailLoop
