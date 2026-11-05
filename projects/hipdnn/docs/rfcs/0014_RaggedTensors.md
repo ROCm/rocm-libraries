@@ -99,10 +99,16 @@ The immediate consumer is SDPA on AITER FMHA kernels.
 
 ### 2.1 What is a ragged tensor
 
-A tensor with a physical memory layout of `[B, X, …]` (referred to here as the primary tensor) where `X` (typically the sequence
-dimension) varies per batch. Batch `b` starts at the origin
-`ragged_offset[b] * multiplier` of the physical buffer and has `len_b`
-live rows.
+A ragged tensor (referred to here as the primary tensor) has logical
+dims `[B, …]` with one axis `X` (typically the sequence dimension) whose
+extent varies per batch; the logical dim gives its maximum. Batch `b`
+starts at the origin `ragged_offset[b] * multiplier` of the physical
+buffer and has `len_b` live rows. The strides place everything else, so
+the batch need not be the outermost physical dimension: in token-major
+(THD) layouts the tokens of all batches form the outer axis, `[T, H, D]`,
+and in head-major layouts `H` is outermost, `[H, T, D]`, with each head
+holding the tokens of every batch grouped by batch
+([§4.5](#45-data-sdk-shared-elements) item 4).
 
 Some ops additionally need to distinguish *valid* sequence
 positions within each batch's range from *trailing padding*
