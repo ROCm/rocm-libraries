@@ -614,8 +614,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
             "supported");
 
-        // The kernel reads each descale through a device pointer. A virtual descale has no
-        // buffer, and a pass-by-value one is delivered as a host pointer (or not at all).
+        // The kernel reads each descale as an FP32 value through a device pointer. A virtual
+        // descale has no buffer, a pass-by-value one is delivered as a host pointer (or not at
+        // all), and any other dtype would have its bytes reinterpreted as a float.
         for(const auto& [label, tensor] : {std::pair{"descale_q", qDescale},
                                            std::pair{"descale_k", kDescale},
                                            std::pair{"descale_v", vDescale}})
@@ -625,6 +626,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
                     || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor),
                 std::string(label)
                     + " tensor must be a non-virtual, non-pass-by-value device tensor");
+            HIP_KERNEL_RETURN_FALSE_IF(tensor->data_type() != DataType::FLOAT,
+                                       std::string(label) + " tensor must be FLOAT (Actual value: "
+                                           + EnumNameDataType(tensor->data_type()) + ")");
         }
     }
 

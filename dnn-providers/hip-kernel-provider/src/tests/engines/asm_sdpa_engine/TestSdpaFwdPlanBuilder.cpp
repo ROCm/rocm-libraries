@@ -1146,6 +1146,37 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotADeviceTens
     }
 }
 
+// The kernel reads each fp8 descale as an FP32 value, so any other dtype must decline rather
+// than have its bytes reinterpreted as a float.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotFloat)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const GraphTest control{createSdpaFwdFp8Graph(/*withDescale=*/true), "unmodified fp8 graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const std::string name : {"descale_q", "descale_k", "descale_v"})
+    {
+        for(const DataType dataType :
+            {DataType::BFLOAT16, DataType::HALF, DataType::FP8_E4M3_FNUZ, DataType::INT32})
+        {
+            const std::string description = name + " " + EnumNameDataType(dataType);
+            SCOPED_TRACE(description);
+            const GraphTest test{
+                mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                            [&](GraphT& graph) { findTensor(graph, name).data_type = dataType; }),
+                description};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
+    }
+}
+
 // The fp8 kernels run fp8 MFMA, so a 16-bit mma_core_mode (HALF, the cuDNN-frontend
 // default that is accepted for bf16 inputs) does not describe them and must decline.
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)

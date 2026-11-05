@@ -37,7 +37,7 @@ reason) any graph outside this contract:
 | Stats (LSE) | FP32 (optional output) | FP32 (required input) |
 | Node `compute_data_type` | FLOAT | FLOAT |
 | `mma_core_mode` | UNSET, or HALF/BFLOAT16 for BF16 inputs | — |
-| Descale Q, K, V (FP8 only) | Scalar, non-virtual, non-pass-by-value device tensors | — |
+| Descale Q, K, V (FP8 only) | FLOAT scalars, non-virtual, non-pass-by-value device tensors | — |
 
 - **Accumulation.** QKᵀ, the online softmax and PV accumulate in fp32 inside the kernels;
   no intermediate tensor is exposed. Backward dQ accumulates through an fp32 workspace by
