@@ -24,6 +24,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -3817,6 +3818,7 @@ def test_real_sigint_stops_the_driver_gracefully(run):
     seen = ""
     while "batch " not in seen and time.monotonic() < deadline:
         seen += proc.stdout.readline()
+    assert (run.work / fuzz.LOCK_NAME).exists()  # held while the run is going
     proc.send_signal(signal.SIGINT)
     out, _ = proc.communicate(timeout=60)
     assert proc.returncode == 0, out
@@ -3825,6 +3827,294 @@ def test_real_sigint_stops_the_driver_gracefully(run):
         run.summary["stopped_because"] == "interrupted"
         and run.summary["outcomes"]["CRASH"] == 0
     )
+    assert not (run.work / fuzz.LOCK_NAME).exists()  # released on SIGINT
+
+
+# --------------------------------------------------------------------------
+# One driver per work directory
+# --------------------------------------------------------------------------
+
+
+def _lock_path(run):
+    return run.work / fuzz.LOCK_NAME
+
+
+def _dead_pid():
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+def _write_lock(run, pid, host=None, started="2020-01-02T03:04:05Z"):
+    run.work.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(
+        {
+            "pid": pid,
+            "host": host or socket.gethostname(),
+            "started": started,
+            "argv": ["--earlier", "run"],
+            "token": "earlier-token",
+        },
+        sort_keys=True,
+    )
+    _lock_path(run).write_text(text, encoding="utf-8")
+    return text
+
+
+def test_process_alive_tells_a_running_process_from_a_finished_one():
+    # bug caught: a liveness probe that calls everything alive (a crashed driver's lock would
+    # block its work dir for good) or everything dead (a live driver's lock would be taken over)
+    assert fuzz.process_alive(os.getpid())
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert fuzz.process_alive(child.pid)
+    finally:
+        child.kill()
+        child.wait()
+    assert not fuzz.process_alive(child.pid)
+
+
+def test_a_second_driver_on_a_work_dir_in_use_is_refused(run, capsys):
+    # bug caught: two drivers writing one work dir (one's rmtree under the other's bundles)
+    run.control(delay=0.2)
+    cmd = [sys.executable, str(fuzz.DRIVER_PATH)] + run.args(
+        "--samples", "0", "--time-budget", "5m", "--batch-size", "2"
+    )
+    first = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.monotonic() + 30
+        while not _lock_path(run).exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        record = json.loads(_lock_path(run).read_text())
+        assert record["pid"] == first.pid and record["host"] == socket.gethostname()
+        assert set(record) == {"pid", "host", "started", "argv", "token"}
+        assert "--time-budget" in record["argv"]
+        capsys.readouterr()
+        assert run.run("--samples", "1") == 2
+        err = capsys.readouterr().err
+        assert (
+            f"work dir in use by pid {first.pid} on host {socket.gethostname()} since"
+            in err
+        )
+        assert json.loads(_lock_path(run).read_text()) == record  # not touched
+    finally:
+        first.kill()
+        first.wait()
+    # the killed driver left its lock behind; its pid is dead, so the next run takes it over
+    assert run.run("--samples", "1") == 0
+    assert "took over the lock" in capsys.readouterr().err
+    assert not _lock_path(run).exists()
+
+
+def test_a_pairwise_generate_only_run_takes_the_lock_too(run, tmp_path, capsys):
+    # bug caught: the one mode that writes sweeps without a binary left out of the lock
+    spaces = _pw_spaces(tmp_path, "Toy.Default.space.json")
+    _write_lock(run, os.getpid())
+    code = fuzz.main(
+        [
+            "--pairwise", "--generate-only", "--seed", "5",
+            "--work-dir", str(run.work), "--spaces-dir", str(spaces),
+        ]
+    )  # fmt: skip
+    assert code == 2 and "work dir in use by pid" in capsys.readouterr().err
+    assert not (run.work / "bundles").exists()
+
+
+def test_a_run_removes_its_lock_when_it_ends_normally(run):
+    assert run.run("--samples", "2") == 0
+    assert not _lock_path(run).exists()
+    assert run.run("--samples", "2") == 0  # and the work dir is free again
+
+
+def test_a_run_removes_its_lock_when_it_ends_in_an_error(run):
+    # bug caught: a binary that cannot start leaves a lock that blocks the next attempt
+    run.control(startup_fail=True)
+    assert run.run("--samples", "2") == 2
+    assert not _lock_path(run).exists()
+
+
+def test_a_usage_error_before_the_run_leaves_no_work_dir(run):
+    assert (
+        fuzz.main(
+            ["--binary", "definitely-not-a-binary-xyz", "--work-dir", str(run.work)]
+        )
+        == 2
+    )
+    assert not run.work.exists()
+
+
+def test_an_interrupt_in_process_releases_the_lock(run):
+    # bug caught: a SIGINT path that skips the release leaves a lock until someone deletes it
+    run.control(delay=0.2)
+    seen = []
+
+    def interrupt():
+        deadline = time.monotonic() + 30
+        # the outcomes file exists once the driver has installed its SIGINT handler
+        while (
+            not (run.work / "outcomes.jsonl").exists() and time.monotonic() < deadline
+        ):
+            time.sleep(0.02)
+        seen.append(_lock_path(run).exists())
+        signal.raise_signal(signal.SIGINT)
+
+    timer = threading.Thread(target=interrupt)
+    timer.start()
+    code = run.run("--samples", "0", "--time-budget", "5m", "--batch-size", "2")
+    timer.join()
+    assert code == 0 and seen == [True]
+    assert run.summary["stopped_because"] == "interrupted"
+    assert not _lock_path(run).exists()
+
+
+def test_a_lock_of_a_dead_process_on_this_host_is_taken_over(run, capsys):
+    # bug caught: a crashed driver's lock blocks its work dir for good
+    pid = _dead_pid()
+    _write_lock(run, pid)
+    assert run.run("--samples", "2") == 0
+    err = capsys.readouterr().err
+    assert f"took over the lock of pid {pid}" in err and "2020-01-02T03:04:05Z" in err
+    assert len(run.outcome_list) == 2
+    assert not _lock_path(run).exists()
+
+
+@pytest.mark.parametrize("alive", [True, False])
+def test_a_lock_from_another_host_is_never_taken_over(run, capsys, alive):
+    # bug caught: a pid of another host means nothing here, so a dead-looking pid must not
+    # release the lock
+    text = _write_lock(
+        run, os.getpid() if alive else _dead_pid(), host="some-other-host.example"
+    )
+    assert run.run("--samples", "2") == 2
+    err = capsys.readouterr().err
+    assert (
+        "work dir in use by pid" in err
+        and "on host some-other-host.example since 2020" in err
+    )
+    assert "delete" in err and fuzz.LOCK_NAME in err
+    assert _lock_path(run).read_text() == text
+    assert not (run.work / "outcomes.jsonl").exists()
+
+
+def test_an_unreadable_lock_is_a_usage_error_naming_the_file(run, capsys, monkeypatch):
+    monkeypatch.setattr(fuzz, "LOCK_READ_PAUSE", 0.0)
+    run.work.mkdir()
+    _lock_path(run).write_text("not a lock record")
+    assert run.run("--samples", "1") == 2
+    err = capsys.readouterr().err
+    assert fuzz.LOCK_NAME in err and "delete it by hand" in err
+    assert _lock_path(run).read_text() == "not a lock record"
+
+
+def test_a_takeover_only_replaces_the_lock_it_saw_go_stale(tmp_path):
+    # bug caught: a driver that read a stale lock replaces a fresher one a faster driver wrote
+    path = tmp_path / fuzz.LOCK_NAME
+    stale = json.dumps(
+        {"pid": _dead_pid(), "host": "h", "started": "t", "token": "old"}
+    )
+    path.write_text(stale)
+    first = fuzz.WorkDirLock(tmp_path).record
+    second = fuzz.WorkDirLock(tmp_path).record
+    assert fuzz.take_over_stale_lock(path, stale, first) is True
+    assert json.loads(path.read_text())["token"] == first["token"]
+    assert (
+        fuzz.take_over_stale_lock(path, stale, second) is False
+    )  # saw the old content
+    assert json.loads(path.read_text())["token"] == first["token"]
+    assert [p.name for p in tmp_path.iterdir()] == [
+        fuzz.LOCK_NAME
+    ]  # no temp or claim left
+
+
+def test_a_takeover_claimed_by_another_driver_is_not_made_twice(tmp_path):
+    # bug caught: two drivers past the content check at once, both replacing the lock
+    path = tmp_path / fuzz.LOCK_NAME
+    stale = json.dumps(
+        {"pid": _dead_pid(), "host": "h", "started": "t", "token": "old"}
+    )
+    path.write_text(stale)
+    fuzz.takeover_claim_path(path, stale).write_text(
+        ""
+    )  # another driver holds the claim
+    record = fuzz.WorkDirLock(tmp_path).record
+    assert fuzz.take_over_stale_lock(path, stale, record) is False
+    assert path.read_text() == stale
+
+
+def test_a_release_leaves_a_lock_that_became_another_drivers(tmp_path):
+    mine = fuzz.WorkDirLock(tmp_path)
+    mine.acquire()
+    other = fuzz.WorkDirLock(tmp_path)
+    (tmp_path / fuzz.LOCK_NAME).write_text(json.dumps(other.record))
+    mine.release()
+    assert (
+        json.loads((tmp_path / fuzz.LOCK_NAME).read_text())["token"]
+        == other.record["token"]
+    )
+
+
+def test_concurrent_takeovers_of_one_stale_lock_leave_exactly_one_winner(tmp_path):
+    # bug caught: two drivers that find the same stale lock both proceed and share a work dir
+    contenders = 6
+    for attempt in range(15):
+        work = tmp_path / f"round{attempt}"
+        work.mkdir()
+        (work / fuzz.LOCK_NAME).write_text(
+            json.dumps(
+                {
+                    "pid": _dead_pid(),
+                    "host": socket.gethostname(),
+                    "started": "t",
+                    "token": "old",
+                }
+            )
+        )
+        barrier = threading.Barrier(contenders)
+        outcomes = []
+
+        def contend():
+            lock = fuzz.WorkDirLock(work, ["race"])
+            barrier.wait()
+            try:
+                lock.acquire()
+            except fuzz.DriverError as e:
+                outcomes.append((lock, str(e)))
+            else:
+                outcomes.append((lock, None))
+
+        threads = [threading.Thread(target=contend) for _ in range(contenders)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        winners = [lock for lock, error in outcomes if error is None]
+        assert len(outcomes) == contenders and len(winners) == 1, outcomes
+        assert (
+            json.loads((work / fuzz.LOCK_NAME).read_text())["token"]
+            == winners[0].record["token"]
+        )
+        assert all(
+            "work dir in use" in e or "could not take over" in e
+            for _, e in outcomes
+            if e
+        )
+        winners[0].release()
+        assert list(work.iterdir()) == []
+
+
+def test_the_oracle_cost_ladder_runs_its_rungs_in_their_own_work_dirs(run, tmp_path):
+    # bug caught: the driver-per-rung ladder refused by its own lock, or leaving locks behind
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces)
+    run.control(
+        default="pass",
+        reference_ms={"a": 3.0, "k": 0.25, "product_of": ["values.n", "values.m"]},
+        reference_lane="cpu",
+    )
+    status, [m] = measure(tmp_path, spaces)
+    assert status == 0 and m["status"] == "measured"
+    assert list((tmp_path / "ladder").rglob(fuzz.LOCK_NAME)) == []
 
 
 # --------------------------------------------------------------------------

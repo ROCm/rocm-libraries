@@ -132,6 +132,12 @@ Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
 ``failures/<case>/`` for every ``WRONG`` and ``CRASH`` (and ``shrink/<case>/`` for the candidate
 runs of ``--shrink``). The exit status is non-zero iff a sample was ``WRONG`` or ``CRASH`` (2 for
 usage and space errors).
+
+One driver per work directory. A run (any mode but ``--coverage-of``) holds ``<work>/.gauntlet.lock``,
+created exclusively with its pid, host, start time and command line, and removes it on exit (normal,
+error or SIGINT). A second driver on that directory exits 2 with ``work dir in use by pid P on host H
+since T``. A lock whose process is dead on this host is taken over with a warning; one from another host
+is never taken over (delete it by hand when no driver is running).
 """
 
 import argparse
@@ -143,9 +149,11 @@ import json
 import os
 import random
 import re
+import secrets
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -933,6 +941,251 @@ def coverage_of(work_dir, levels_from, first=None, spaces_dir=None):
             "with_outcome": len(records),
         }
     return found
+
+
+# --------------------------------------------------------------------------
+# One driver per work directory
+# --------------------------------------------------------------------------
+
+LOCK_NAME = ".gauntlet.lock"
+LOCK_READ_TRIES = 20  # a lock file may be read between its creation and its content
+LOCK_READ_PAUSE = 0.05
+LOCK_ATTEMPTS = 10
+LOCK_SHARING_TRIES = (
+    20  # a file another driver has open is refused for a moment on Windows
+)
+LOCK_SHARING_PAUSE = 0.01
+WINDOWS_STILL_ACTIVE = 259
+WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+WINDOWS_ERROR_INVALID_PARAMETER = 87  # OpenProcess: no process has this id
+
+
+def _windows_process_alive(pid):
+    """Whether a process with this id is running (Windows). ``os.kill`` is no probe there: it
+    terminates the process."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Only "no such process" says dead; a process we may not open (access denied) lives.
+        return ctypes.get_last_error() != WINDOWS_ERROR_INVALID_PARAMETER
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == WINDOWS_STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def process_alive(pid):
+    """Whether a process with this id is running on this host; True when that cannot be told."""
+    if os.name == "nt":
+        return _windows_process_alive(pid)
+    try:
+        os.kill(pid, 0)  # signal 0 only checks that the process exists
+    except ProcessLookupError:
+        return False
+    except OSError:  # PermissionError: it exists and is another user's
+        return True
+    return True
+
+
+def _retry_sharing(operation):
+    """``operation()``, again for a short while while it is refused (``PermissionError``): on
+    Windows a file another driver has open for a moment cannot be read, replaced or removed.
+    """
+    for _ in range(LOCK_SHARING_TRIES - 1):
+        try:
+            return operation()
+        except PermissionError:
+            time.sleep(LOCK_SHARING_PAUSE)
+    return operation()
+
+
+def _read_lock_text(path):
+    """The text of the lock file, or None when there is none."""
+    try:
+        return _retry_sharing(lambda: path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def _lock_holder(text):
+    """``(pid, host, started)`` of a lock file's text, or None when it is not a lock record."""
+    try:
+        record = json.loads(text)
+        pid, host, started = record["pid"], record["host"], record["started"]
+        record["token"]
+    except (ValueError, TypeError, KeyError):
+        return None
+    if type(pid) is not int or pid <= 0 or not isinstance(host, str):
+        return None
+    return pid, host, started
+
+
+def takeover_claim_path(path, stale_text):
+    """The file whose exclusive creation entitles one driver to take over the lock at ``path``
+    that holds ``stale_text``: one name per stale lock content."""
+    digest = hashlib.sha256(stale_text.encode("utf-8")).hexdigest()[:16]
+    return path.with_name(f"{path.name}.takeover-{digest}")
+
+
+def take_over_stale_lock(path, stale_text, record):
+    """Whether this driver now holds the lock at ``path`` that held ``stale_text``.
+
+    Exactly one driver at a time wins the exclusive claim of that stale content
+    (``takeover_claim_path``); only it goes on. It writes the new record (with its fresh token)
+    to a temporary file and ``os.replace``s the lock with it if the lock still reads
+    ``stale_text``, so the lock never disappears for a third driver to create, and a driver that
+    read the stale lock before another took it over finds the content changed and loses. The
+    re-read that follows must show our own token.
+    """
+    claim = takeover_claim_path(path, stale_text)
+    tmp = path.with_name(f"{path.name}.{record['token']}.tmp")
+    text = json.dumps(record, sort_keys=True)
+    try:
+        os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    except (
+        OSError
+    ):  # FileExistsError: another driver is taking this lock over right now
+        return False
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        if _read_lock_text(path) != stale_text:
+            return False
+        _retry_sharing(lambda: os.replace(tmp, path))
+        held = _read_lock_text(path)
+    except OSError:
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+        claim.unlink(missing_ok=True)
+    return held == text
+
+
+class WorkDirLock:
+    """``<work>/.gauntlet.lock``, held while a driver writes the work directory.
+
+    Created exclusively, with the pid, host, start time and command line of its owner. Another
+    driver on the same directory gets a ``DriverError``. A lock of a dead process of this host is
+    taken over (with a warning); a lock of another host is never, for its process cannot be seen.
+    """
+
+    def __init__(self, work, argv=()):
+        self.path = Path(work) / LOCK_NAME
+        self.record = {
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "started": datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "argv": list(argv),
+            "token": secrets.token_hex(16),
+        }
+        self.held = False
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc):
+        self.release()
+
+    def _create(self):
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            return False
+        except PermissionError:
+            if os.name != "nt":
+                raise
+            # Windows refuses a name whose deletion is pending: the lock is going away
+            time.sleep(LOCK_SHARING_PAUSE)
+            return False
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(self.record, sort_keys=True))
+        return True
+
+    def _read_holder(self):
+        """``(text, holder)`` of the lock now there; ``(None, None)`` when it is gone."""
+        for _ in range(LOCK_READ_TRIES):
+            text = _read_lock_text(self.path)
+            if text is None:
+                return None, None
+            holder = _lock_holder(text)
+            if holder is not None:
+                return text, holder
+            time.sleep(LOCK_READ_PAUSE)
+        raise DriverError(
+            f"the work dir lock {self.path} is not a lock record; delete it by hand if no"
+            " driver is running"
+        )
+
+    def acquire(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(LOCK_ATTEMPTS):
+            if self._create():
+                self.held = True
+                return
+            text, holder = self._read_holder()
+            if holder is None:
+                continue  # released between our create and our read: try again
+            pid, host, started = holder
+            if host != self.record["host"]:
+                raise DriverError(
+                    f"work dir in use by pid {pid} on host {host} since {started}; that is"
+                    " another host, so the lock is not taken over: delete"
+                    f" {self.path} by hand if no driver is running"
+                )
+            if process_alive(pid):
+                raise DriverError(
+                    f"work dir in use by pid {pid} on host {host} since {started}"
+                )
+            if take_over_stale_lock(self.path, text, self.record):
+                print(
+                    f"run_gauntlet_fuzz.py: warning: took over the lock of pid {pid} (not"
+                    f" running) since {started}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                self.held = True
+                return
+            time.sleep(LOCK_READ_PAUSE)  # let the driver that is taking it over finish
+        raise DriverError(
+            f"could not take over the stale work dir lock {self.path}: another driver is doing"
+            f" so, or a {LOCK_NAME}.takeover-* file left by one that died blocks it; delete"
+            " that file by hand if no driver is running"
+        )
+
+    def release(self):
+        """Remove the lock, unless it has become another driver's."""
+        if not self.held:
+            return
+        self.held = False
+        text = _read_lock_text(self.path)
+        if text is None:
+            return
+        try:
+            if json.loads(text).get("token") != self.record["token"]:
+                return
+        except (ValueError, AttributeError):
+            return
+        try:
+            _retry_sharing(self.path.unlink)
+        except FileNotFoundError:
+            pass
 
 
 # --------------------------------------------------------------------------
@@ -2986,8 +3239,6 @@ def main(argv=None):
             print(json.dumps(report, indent=2))
             return 0
         spaces = select_spaces(args)
-        if args.generate_only:
-            return generate_only(args, spaces)
         row_sample = None
         if args.row_spec is not None:
             # Rendered before anything is written, so a row that no sample could be is a usage
@@ -3009,7 +3260,16 @@ def main(argv=None):
                     row_sample.case_id,
                     args.row_spec["engine_variant"],
                 )
-        return Fuzz(args, spaces, row_sample).run()
+        # Built before the lock is taken, so a usage error leaves no work directory behind.
+        driver = None if args.generate_only else Fuzz(args, spaces, row_sample)
+        # Held by every mode that writes the work directory (not --coverage-of, which reads it).
+        with WorkDirLock(
+            Path(args.work_dir).resolve(),
+            sys.argv[1:] if argv is None else argv,
+        ):
+            if driver is None:
+                return generate_only(args, spaces)
+            return driver.run()
     except (
         DriverError,
         space_lib.SpaceError,

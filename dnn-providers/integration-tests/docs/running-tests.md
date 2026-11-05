@@ -683,6 +683,19 @@ sample is `WRONG` or `CRASH`; `UNEXERCISED` samples are listed with their reason
 never count as green. A run whose samples are all `DECLINED` or `UNEXERCISED` has not
 tested the engine.
 
+**One driver per work dir.** A run holds `<work-dir>/.gauntlet.lock` while it writes the work dir
+(every mode but `--coverage-of`, which only reads it): a JSON file with the driver's `pid`, `host`,
+start time (`started`), `argv` and a random `token`, created exclusively and removed when the run
+ends, whether it finished, failed or was interrupted. A second driver on the same `--work-dir`
+exits with status 2 and `work dir in use by pid P on host H since T`; use another `--work-dir`
+(run the shards of a [catalog](#catalog-sweeps---catalog) sweep or several pairwise runs in separate
+ones). A lock left by a driver that was killed is taken over, with a warning, when its pid is no
+longer running on this host; the takeover is exclusive, so two drivers that find the same stale lock
+never both proceed. A lock from another host is never taken over, because its process cannot be
+seen from here (a shared network directory): the error says so; delete `.gauntlet.lock` by hand once
+you know no driver is running. [`measure_oracle_cost.py`](#measuring-the-oracles-cost) keeps one
+driver run per rung in its own subdirectory, so it is not affected.
+
 **Sweep directories.** The driver writes one sweep per input data type, under
 `bundles/gauntlet/<Op>/<Space>/<tag>_cases/`, where `<tag>` is `fp32`, `fp16` or `bfp16`
 (a sample's `x_dtype`, or its `dtype` when the space has no `x_dtype`; a space with neither
