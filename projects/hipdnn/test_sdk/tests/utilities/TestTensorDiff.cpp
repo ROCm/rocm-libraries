@@ -521,8 +521,9 @@ TEST(TestComputeTensorDiffNonFinite, ComputedNaNIsNotTheUnwrittenSentinel)
 // come first and survive the cap, however many finite mismatches arrive before it.
 TEST(TestComputeTensorDiffNonFinite, NaNEntriesAreListedAndSortedFirst)
 {
-    std::vector<float> refValues(8, 0.0f);
-    std::vector<float> implValues = {1.0f, 100.0f, 2.0f, 3.0f, 4.0f, NAN_VALUE, 5.0f, INF_VALUE};
+    const std::vector<float> refValues(8, 0.0f);
+    const std::vector<float> implValues
+        = {1.0f, 100.0f, 2.0f, 3.0f, 4.0f, NAN_VALUE, 5.0f, INF_VALUE};
     auto ref = makeVector(refValues);
     auto impl = makeVector(implValues);
 
