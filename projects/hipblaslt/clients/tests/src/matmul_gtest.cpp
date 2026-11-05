@@ -26,6 +26,7 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "scoped_env_var.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
@@ -642,27 +643,8 @@ namespace
     {
         void operator()(const Arguments& arg)
         {
-            static constexpr const char* kName = "HIPBLASLT_USE_ROCROLLER";
-            const char*                  cur   = std::getenv(kName);
-            const std::string            old   = cur ? cur : "";
-            setEnv(kName, "0");
+            ScopedEnvVar rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
             testing_matmul(arg);
-            if(cur)
-                setEnv(kName, old.c_str());
-            else
-                setEnv(kName, nullptr);
-        }
-
-        static void setEnv(const char* name, const char* value)
-        {
-#if defined(_WIN32)
-            _putenv_s(name, value ? value : "");
-#else
-            if(value)
-                setenv(name, value, 1);
-            else
-                unsetenv(name);
-#endif
         }
     };
 
@@ -687,12 +669,34 @@ namespace
 
     TEST_P(tensile_mx_layout_test, matmul)
     {
-        // Every gfx950 TensileLite MX kernel is HostPreSwizzle, so packed scales
-        // find none there, and scale 1001 must still match the reference.
         if(GetParam().scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        {
             tensile_mx_layout_testing{}(GetParam());
-        else
-            EXPECT_FATAL_FAILURE(tensile_mx_layout_testing{}(GetParam()), "NO solution found!");
+            return;
+        }
+
+        // Packed scales either find a kernel that reads them, and then must match
+        // the reference, or find none. Today every gfx950 TensileLite MX kernel is
+        // HostPreSwizzle, so they find none.
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            tensile_mx_layout_testing{}(GetParam());
+        }
+        const bool noKernel
+            = results.size() == 1 && results.GetTestPartResult(0).fatally_failed()
+              && std::strstr(results.GetTestPartResult(0).message(), "NO solution found!")
+                     != nullptr;
+        if(noKernel)
+            return;
+        for(int i = 0; i < results.size(); i++)
+        {
+            const auto& r = results.GetTestPartResult(i);
+            if(r.failed())
+                ADD_FAILURE_AT(r.file_name() ? r.file_name() : "", r.line_number()) << r.message();
+        }
     }
     INSTANTIATE_TEST_CATEGORIES(tensile_mx_layout_test);
 

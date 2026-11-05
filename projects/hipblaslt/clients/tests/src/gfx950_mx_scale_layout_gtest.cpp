@@ -4,8 +4,8 @@
 // gfx950 keeps HostPreSwizzle kernels (name token MXSFHPS) for scale 1001 and
 // refuses them for packed scales. Both modes search the same Tensile problem,
 // so these tests fail if the layout check is removed from the heuristic, the
-// support check or the launch, in the C API or the hipblaslt_ext Gemm and
-// GroupedGemm APIs.
+// support check, the launch, the tuning candidates or the tuning-file
+// override, in the C API or the hipblaslt_ext Gemm and GroupedGemm APIs.
 //
 // Every gfx950 TensileLite MX kernel is HostPreSwizzle: logic files leave
 // MXScaleFormat at Auto, which gfx950 resolves to HostPreSwizzle. Off the
@@ -16,9 +16,25 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "scoped_env_var.hpp"
+
+#include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <set>
 #include <string>
 #include <vector>
+
+extern "C" void   hipblaslt_tuning_reset_for_test();
+extern "C" size_t hipblaslt_tuning_candidates_for_test(void*  handle,
+                                                       void*  matmulDesc,
+                                                       void*  matA,
+                                                       void*  matB,
+                                                       void*  matC,
+                                                       void*  matD,
+                                                       size_t workspaceBytes,
+                                                       int*   indexes,
+                                                       size_t count);
 
 namespace
 {
@@ -44,47 +60,14 @@ namespace
         return kernelName.find("MXSFHPS") != std::string::npos;
     }
 
-    void setEnv(const char* name, const char* value)
+    // Destroyed on every exit from a test, including a skip or a failed assertion.
+    struct OwnedHandle
     {
-#if defined(_WIN32)
-        _putenv_s(name, value);
-#else
-        setenv(name, value, 1);
-#endif
-    }
-
-    void unsetEnv(const char* name)
-    {
-#if defined(_WIN32)
-        _putenv_s(name, "");
-#else
-        unsetenv(name);
-#endif
-    }
-
-    // The handle reads HIPBLASLT_USE_ROCROLLER in its constructor.
-    struct RocRollerEnv
-    {
-        static constexpr const char* kName = "HIPBLASLT_USE_ROCROLLER";
-        bool                         had   = false;
-        std::string                  old;
-
-        explicit RocRollerEnv(const char* value)
+        hipblasLtHandle_t handle = nullptr;
+        ~OwnedHandle()
         {
-            if(const char* cur = std::getenv(kName))
-            {
-                had = true;
-                old = cur;
-            }
-            setEnv(kName, value);
-        }
-
-        ~RocRollerEnv()
-        {
-            if(had)
-                setEnv(kName, old.c_str());
-            else
-                unsetEnv(kName);
+            if(handle)
+                hipblasLtDestroy(handle);
         }
     };
 
@@ -259,6 +242,36 @@ namespace
         return results;
     }
 
+    // isSolutionSupported skips an algo whose first data byte is 0.
+    const hipblasLtMatmulHeuristicResult_t*
+        checkableAlgo(const std::vector<hipblasLtMatmulHeuristicResult_t>& results)
+    {
+        for(const auto& result : results)
+            if(result.algo.data[0] != 0)
+                return &result;
+        return nullptr;
+    }
+
+    // The indexes tune mode would measure for this problem. Tune mode runs
+    // inside a matmul, after its heuristic query has set up the descriptor.
+    std::vector<int> tuningCandidates(Problem& q)
+    {
+        static_cast<void>(heuristic(q, 1));
+        std::vector<int> indexes(hipblaslt_tuning_candidates_for_test(
+            q.handle, q.desc, q.a, q.b, q.d, q.d, kWorkspace, nullptr, 0));
+        hipblaslt_tuning_candidates_for_test(
+            q.handle, q.desc, q.a, q.b, q.d, q.d, kWorkspace, indexes.data(), indexes.size());
+        return indexes;
+    }
+
+    std::vector<std::string> namesOf(hipblasLtHandle_t handle, std::vector<int> indexes)
+    {
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        EXPECT_EQ(hipblaslt_ext::getAlgosFromIndex(handle, indexes, results),
+                  HIPBLAS_STATUS_SUCCESS);
+        return names(handle, results);
+    }
+
     class Gfx950MxScaleLayout : public ::testing::Test
     {
     protected:
@@ -273,9 +286,10 @@ namespace
     // kernel and return wrong values.
     TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOff)
     {
-        RocRollerEnv      env("0");
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        ScopedEnvVar env("HIPBLASLT_USE_ROCROLLER", "0");
+        OwnedHandle  owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
         {
             Problem packed;
             Problem preswizzled;
@@ -296,36 +310,36 @@ namespace
             }
 
             auto preResults = heuristic(preswizzled, kAlgoCount);
-            ASSERT_FALSE(preResults.empty());
-            // isSolutionSupported skips an algo whose first data byte is 0.
-            const hipblasLtMatmulHeuristicResult_t* algo = nullptr;
-            for(const auto& result : preResults)
-                if(result.algo.data[0] != 0)
-                {
-                    algo = &result;
-                    break;
-                }
+            const auto* algo       = checkableAlgo(preResults);
             ASSERT_NE(algo, nullptr);
 
             EXPECT_EQ(supported(preswizzled, *algo), HIPBLAS_STATUS_SUCCESS);
-            EXPECT_NE(supported(packed, *algo), HIPBLAS_STATUS_SUCCESS);
+            // hipblaslt_ext::isSolutionSupported casts the rocblaslt status
+            // directly, so invalid_value arrives as HIPBLAS_STATUS_NOT_SUPPORTED.
+            EXPECT_EQ(supported(packed, *algo), HIPBLAS_STATUS_NOT_SUPPORTED);
 
             EXPECT_EQ(matmul(preswizzled, &algo->algo), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(matmul(preswizzled, nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
             EXPECT_EQ(matmul(packed, &algo->algo), HIPBLAS_STATUS_INVALID_VALUE);
-            EXPECT_NE(matmul(packed, nullptr), HIPBLAS_STATUS_SUCCESS);
+            // No kernel at all, which hipblasLtMatmul reports as for any problem.
+            EXPECT_EQ(matmul(packed, nullptr), HIPBLAS_STATUS_INTERNAL_ERROR);
         }
-        hipblasLtDestroy(handle);
     }
 
-    // Packed scales go to rocRoller. FP8 E4M3 with scale 1001 on both sides
-    // stays on Tensile, and still gets its HostPreSwizzle kernels.
-    TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOn)
+    // With HIPBLASLT_USE_ROCROLLER unset, block-scaled problems are routed to
+    // rocRoller. Where rocRoller is compiled out, that route still launches
+    // through runContractionProblem, so a caller-supplied HostPreSwizzle algo
+    // must be refused there too.
+    TEST_F(Gfx950MxScaleLayout, smoke_RocRollerRouteRefusesPreswizzledAlgo)
     {
-        RocRollerEnv      env("1");
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+#ifdef HIPBLASLT_USE_ROCROLLER
+        GTEST_SKIP() << "rocRoller is compiled in and serves packed scales itself";
+#endif
+        ScopedEnvVar env("HIPBLASLT_USE_ROCROLLER", nullptr);
+        OwnedHandle  owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
         {
             Problem packed;
             Problem preswizzled;
@@ -334,25 +348,133 @@ namespace
             if(HasFatalFailure())
                 return;
 
-            auto preResults = heuristic(preswizzled, kAlgoCount);
-            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
-            for(const auto& name : names(handle, preResults))
-                EXPECT_TRUE(isPreswizzled(name)) << name;
+            // FP8 E4M3 with scale 1001 on both sides stays on Tensile.
+            auto        preResults = heuristic(preswizzled, kAlgoCount);
+            const auto* algo       = checkableAlgo(preResults);
+            ASSERT_NE(algo, nullptr);
+            hipblasLtMatmulAlgo_t preAlgo = algo->algo;
+            ASSERT_TRUE(isPreswizzled(hipblaslt_ext::getKernelNameFromAlgo(handle, preAlgo)));
 
             auto packedResults = heuristic(packed, kAlgoCount);
             for(const auto& name : names(handle, packedResults))
                 EXPECT_FALSE(isPreswizzled(name)) << name;
+            EXPECT_EQ(supported(packed, *algo), HIPBLAS_STATUS_NOT_SUPPORTED);
+            EXPECT_EQ(matmul(packed, &algo->algo), HIPBLAS_STATUS_INVALID_VALUE);
         }
-        hipblasLtDestroy(handle);
+    }
+
+    // Both the all-kernels enumeration (getAllSolutions) and the ranked prefix.
+    TEST_F(Gfx950MxScaleLayout, smoke_TuningCandidates)
+    {
+        ScopedEnvVar rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+        for(const char* allKernels : {"1", "0"})
+        {
+            SCOPED_TRACE(allKernels);
+            ScopedEnvVar policy("HIPBLASLT_TUNING_ALL_KERNELS", allKernels);
+            OwnedHandle  owner;
+            ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+            hipblasLtHandle_t handle = owner.handle;
+            {
+                Problem packed;
+                Problem preswizzled;
+                makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+                makeProblem(
+                    preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+                if(HasFatalFailure())
+                    return;
+
+                // All-kernels mode enumerates more than this problem type;
+                // tune mode's support check removes the rest. Scale 1001's
+                // candidates are this type's HostPreSwizzle kernels, and packed
+                // scales must get none of them.
+                auto preIndexes = tuningCandidates(preswizzled);
+                ASSERT_FALSE(preIndexes.empty()) << "scale 1001 has no tuning candidate";
+                for(const auto& name : namesOf(handle, preIndexes))
+                    EXPECT_TRUE(isPreswizzled(name)) << name;
+                const std::set<int> preswizzledSet(preIndexes.begin(), preIndexes.end());
+                for(int index : tuningCandidates(packed))
+                    EXPECT_EQ(preswizzledSet.count(index), 0u) << index;
+            }
+        }
+    }
+
+    // A tuning-file row is keyed on shape and types, so a row recorded for scale
+    // 1001 also matches packed scales of the same shape. It must serve only
+    // scale 1001.
+    TEST_F(Gfx950MxScaleLayout, smoke_TuningFileRowServesOnlyItsScaleLayout)
+    {
+        ScopedEnvVar rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+        int          rowIndex = -1;
+        std::string  rowName;
+        {
+            OwnedHandle owner;
+            ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+            hipblasLtHandle_t handle = owner.handle;
+            {
+                Problem q;
+                makeProblem(q, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+                if(HasFatalFailure())
+                    return;
+                // Not the first rank, so serving it shows the row was used.
+                auto results = heuristic(q, kAlgoCount);
+                ASSERT_GE(results.size(), 2u);
+                rowIndex = hipblaslt_ext::getIndexFromAlgo(results.back().algo);
+                rowName  = hipblaslt_ext::getKernelNameFromAlgo(handle, results.back().algo);
+            }
+        }
+
+        const std::string path = ::testing::TempDir() + "gfx950_mx_scale_layout_tuning.txt";
+        // Declared before the variable it outlives: the tuning state is reloaded
+        // after the override file is unset.
+        struct Cleanup
+        {
+            std::string path;
+            ~Cleanup()
+            {
+                std::remove(path.c_str());
+                hipblaslt_tuning_reset_for_test();
+            }
+        } cleanup{path};
+        {
+            std::ofstream out(path, std::ios::trunc);
+            out << "Git Version: gfx950_mx_scale_layout\n"
+                << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
+                   "solution_index,kernel_name\n"
+                << "T,N,1," << kM << "," << kN << "," << kK << ",f8_r,f8_r,f32_r,f32_r," << rowIndex
+                << "," << rowName << "\n";
+            ASSERT_TRUE(out.good());
+        }
+        ScopedEnvVar overrideFile("HIPBLASLT_TUNING_OVERRIDE_FILE", path.c_str());
+        hipblaslt_tuning_reset_for_test();
+
+        OwnedHandle owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
+        {
+            Problem packed;
+            Problem preswizzled;
+            makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            makeProblem(preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(!HasFatalFailure())
+            {
+                auto preResults = heuristic(preswizzled, 1);
+                ASSERT_EQ(preResults.size(), 1u);
+                EXPECT_EQ(hipblaslt_ext::getIndexFromAlgo(preResults[0].algo), rowIndex)
+                    << "the tuning-file row was not used";
+                EXPECT_TRUE(heuristic(packed, 1).empty());
+                EXPECT_TRUE(heuristic(packed, kAlgoCount).empty());
+            }
+        }
     }
 
     // A descriptor keeps its Tensile problem between queries. After a scale-1001
     // query, scalar scales must not keep searching MX kernels.
     TEST_F(Gfx950MxScaleLayout, smoke_ReusedDescriptorLeavesMxScaling)
     {
-        RocRollerEnv      env("0");
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        ScopedEnvVar env("HIPBLASLT_USE_ROCROLLER", "0");
+        OwnedHandle  owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
         {
             Problem q;
             makeProblem(q, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
@@ -372,15 +494,15 @@ namespace
             for(const auto& name : names(handle, scalarResults))
                 EXPECT_EQ(name.find("MXAE8"), std::string::npos) << name;
         }
-        hipblasLtDestroy(handle);
     }
 
     // hipblaslt_ext::Gemm has no rocRoller dispatch, so it reaches the Tensile
     // check whatever HIPBLASLT_USE_ROCROLLER says.
     TEST_F(Gfx950MxScaleLayout, smoke_ExtGemmApi)
     {
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        OwnedHandle owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
         {
             Problem packed;
             Problem preswizzled;
@@ -414,13 +536,13 @@ namespace
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
             EXPECT_EQ(packedGemm.initialize(algo, packed.ws), HIPBLAS_STATUS_INVALID_VALUE);
         }
-        hipblasLtDestroy(handle);
     }
 
     TEST_F(Gfx950MxScaleLayout, smoke_ExtGroupedGemmApi)
     {
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        OwnedHandle owner;
+        ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtHandle_t handle = owner.handle;
         {
             Problem packed;
             Problem preswizzled;
@@ -449,6 +571,5 @@ namespace
             EXPECT_EQ(preGemm.initialize(algo, preswizzled.ws, false), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(packedGemm.initialize(algo, packed.ws, false), HIPBLAS_STATUS_INVALID_VALUE);
         }
-        hipblasLtDestroy(handle);
     }
 }
