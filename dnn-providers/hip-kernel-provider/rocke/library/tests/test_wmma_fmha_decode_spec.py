@@ -368,6 +368,32 @@ class TestDecodeSpec(unittest.TestCase):
             ("rocke_wmma_fmha_decode_merge_bf16", MERGE_THREADS),
         )
 
+    def test_merge_padded_slots_load_masked_to_zero(self):
+        # A padded merge slot (s >= ns) re-reads split 0's partial under a zero weight;
+        # an Inf there gave Inf * 0 = NaN. Every WS_O partial load of the merge loop (the
+        # merge kernel and the fused merge in the main kernel share _split_merge) must
+        # feed an arith.select that replaces it with zeros for padded slots.
+        import re
+
+        from rocke.core.ir_serialize import serialize
+
+        spec = WmmaFmhaDecodeSpec(head_size=128)
+        for arch in _ARCHS:
+            for builder in (build_wmma_fmha_decode, build_wmma_fmha_decode_merge):
+                with self.subTest(arch=arch, builder=builder.__name__):
+                    text = serialize(builder(spec, arch=arch))
+                    loads = re.findall(
+                        r"(%\w+) : vec<f32x4> = memref\.global_load_vN \( %WS_O,", text
+                    )
+                    self.assertGreaterEqual(len(loads), 8)
+                    for name in loads:
+                        self.assertRegex(
+                            text,
+                            r"vec<f32x4> = arith\.select \( %\w+, "
+                            + re.escape(name)
+                            + r", %\w+ \)",
+                        )
+
     def test_feature_off_ir_has_no_feature_ops(self):
         from rocke.core.ir_serialize import serialize
 
