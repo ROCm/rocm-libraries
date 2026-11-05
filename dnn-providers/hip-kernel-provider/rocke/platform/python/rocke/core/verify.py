@@ -23,8 +23,9 @@ Checks performed:
 * **Region well-formedness** — ``scf.for`` / ``scf.if`` carry their required
   regions; loop-carried values are typed; the kernel body ends in a terminator;
   every ``scf.yield`` is directly in an ``scf.for`` body or a branch of an
-  ``scf.if_else`` with results; a loop's carried-value counts agree and its
-  body yields them once, at its end, with their types (``_scf_for_error``).
+  ``scf.if_else`` with results; a loop's carried-value counts agree, its
+  ``iter_args`` metadata describes them and its results share their types, and
+  its body yields them once, at its end, with their types (``_scf_for_error``).
 * **Attr maps** — required keys present per opcode; enum-valued attrs legal.
 * **Vector / smem / addrspace sanity** — vector widths > 0, smem shapes
   positive, pointer address spaces from the known set.
@@ -548,16 +549,8 @@ class _Verifier:
                 break
 
         iter_meta = op.attrs.get("iter_args", []) or []
-        # result types must match init types
-        for res, init in zip(op.results, iter_inits):
-            if res.type != init.type:
-                self.err(
-                    f"scf.for: result type {res.type.name} != iter init "
-                    f"type {init.type.name}",
-                    op,
-                )
-        # The counts of carried values and the body's yields: one rule for the
-        # verifier and every lowering.
+        # The carried values (their counts, metadata and result types) and the
+        # body's yields: one rule for the verifier and every lowering.
         loop_error = _scf_for_error(op)
         if loop_error is not None:
             self.err(loop_error, op)

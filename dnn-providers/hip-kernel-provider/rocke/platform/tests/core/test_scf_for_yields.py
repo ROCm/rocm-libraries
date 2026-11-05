@@ -4,16 +4,21 @@
 """The carried values of an ``scf.for`` and the ``scf.yield`` that ends its body.
 
 A loop's ``num_iter_args``, init operands, ``iter_args`` metadata and results
-agree in count, and the loop takes its carried values from the one
-``scf.yield`` that ends its body: the body yields only at its end, and ends in a
-yield of one value per carried value, of that value's type, whenever the loop
-carries any. A loop that carries none may end in an empty yield or in none.
-The verifier and the LLVM and HIP lowerings of both engines refuse any other
-loop with the same text and a ``ValueError``, also in an unrolled loop of zero
-trips, which the LLVM lowering does not lower; each loop is held to its own
-counts, and a loop or an if/else nested in a body keeps its own yields. Each
-refusal runs the Python verifier and the Python lowerings everywhere, and the
-C++ lowerings where the ``rocke_engine`` binding is built.
+agree in count, each metadata entry names its carried value and that value's
+type (which the loop's result shares), and the loop takes its carried values
+from the one ``scf.yield`` that ends its body: the body yields only at its end,
+and ends in a yield of one value per carried value, of that value's type,
+whenever the loop carries any. A loop that carries none may end in an empty
+yield or in none. The verifier and the LLVM and HIP lowerings of both engines
+refuse any other loop with the same text and a ``ValueError``, also in an
+unrolled loop of zero trips, which the LLVM lowering does not lower; each loop
+is held to its own counts, and a loop or an if/else nested in a body keeps its
+own yields. A metadata entry that is not a map is the exception: the C++
+engine's parser refuses it before the loop rule runs, with its own text. An
+entry with no type name is refused by the C++ parser first too, with the text
+the loop rule shares. Each refusal runs the Python verifier and the Python
+lowerings everywhere, and the C++ lowerings where the ``rocke_engine`` binding
+is built.
 ``tests/core/test_yield_rules.cpp`` covers the same rules in the C++ engine,
 its verifier included.
 """
@@ -21,8 +26,15 @@ its verifier included.
 from __future__ import annotations
 
 import pytest
-from rocke.core.ir import I32, IRBuilder
-from rocke.tests.engines import assert_accepted_everywhere, assert_refused_everywhere
+from rocke.core.ir import F32, I32, IRBuilder
+from rocke.core.verify import verify
+from rocke.tests.engines import (
+    assert_accepted_everywhere,
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
+    assert_refused_everywhere,
+    available_engines,
+)
 
 ARCH = "gfx942"
 # A concrete LLVM flavor, so the checks need no COMGR to pick one.
@@ -211,6 +223,123 @@ def test_a_loop_whose_carried_counts_disagree_is_refused(edit, message):
     (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
     edit(loop)
     _refused(kernel, message)
+
+
+def _loop_kernel_yielding_its_init(name):
+    """A loop kernel whose body yields the loop's init value, so the body does
+    not depend on the metadata naming the carried value."""
+    kernel = _loop_kernel_with_body(name, lambda b, k, acc: b.scf_yield(acc))
+    (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
+    loop.regions[0].ops[-1].operands = loop.operands[3:]
+    return kernel, loop
+
+
+def _make_the_metadata_a_bare_map(loop):
+    loop.attrs["iter_args"] = dict(loop.attrs["iter_args"][0])
+
+
+def _empty_the_name(loop):
+    loop.attrs["iter_args"][0]["name"] = ""
+
+
+def _drop_the_name(loop):
+    del loop.attrs["iter_args"][0]["name"]
+
+
+def _drop_the_type(loop):
+    del loop.attrs["iter_args"][0]["type"]
+
+
+def _make_the_type_a_number(loop):
+    loop.attrs["iter_args"][0]["type"] = 0
+
+
+def _name_another_type(loop):
+    loop.attrs["iter_args"][0]["type"] = "f32"
+
+
+def _give_the_result_another_type(loop):
+    loop.results[0].type = F32
+
+
+# The IR parser's refusal of a carried value with no type name, which the loop
+# rule shares.
+UNTYPED_ACC_MESSAGE = (
+    "scf.for: the loop value '%acc' has no type name; its iv_type attr or "
+    "iter_args entry must name its type"
+)
+
+
+@pytest.mark.parametrize(
+    "edit,message",
+    [
+        pytest.param(
+            _make_the_metadata_a_bare_map,
+            "scf.for iter_args metadata must be a list",
+            id="bare_map",
+        ),
+        pytest.param(
+            _empty_the_name, "scf.for iter_arg 0 metadata has no name", id="empty_name"
+        ),
+        pytest.param(
+            _drop_the_name, "scf.for iter_arg 0 metadata has no name", id="no_name"
+        ),
+        pytest.param(_drop_the_type, UNTYPED_ACC_MESSAGE, id="no_type"),
+        pytest.param(
+            _make_the_type_a_number, UNTYPED_ACC_MESSAGE, id="type_not_a_string"
+        ),
+        pytest.param(
+            _name_another_type,
+            "scf.for iter_arg %acc metadata type 'f32' does not match init type 'i32'",
+            id="metadata_type",
+        ),
+        pytest.param(
+            _give_the_result_another_type,
+            "scf.for result type 'f32' does not match iter_arg %acc type 'i32'",
+            id="result_type",
+        ),
+    ],
+)
+def test_a_loop_whose_metadata_misdescribes_its_carried_values_is_refused(
+    edit, message
+):
+    """Serialized IR can give a loop ``iter_args`` metadata that does not
+    describe its carried values; the verifier and every lowering refuse it, the
+    HIP lowering included."""
+    kernel, loop = _loop_kernel_yielding_its_init("loop_metadata")
+    edit(loop)
+    _refused(kernel, message)
+
+
+# What the C++ engine's parser reports for a metadata list whose element is
+# not a map: it refuses the IR before the loop rule runs.
+PARSER_ENTRY_NOT_A_MAP_MESSAGE = "list: element must be a dict"
+
+
+def test_a_metadata_entry_that_is_not_a_map_is_refused():
+    """A metadata entry that is not a map is refused: the Python verifier and
+    lowerings report the loop rule's text, and the C++ engine's parser refuses
+    the serialized IR before its rule runs (``test_yield_rules.cpp`` checks the
+    C++ rule's text)."""
+    kernel, loop = _loop_kernel_yielding_its_init("loop_metadata_entry")
+    loop.attrs["iter_args"] = ["acc"]
+    message = "scf.for iter_arg 0 metadata must be a map"
+    assert message in [diagnostic.message for diagnostic in verify(kernel)]
+    for engine in available_engines():
+        engine_message = (
+            message if engine == "python" else PARSER_ENTRY_NOT_A_MAP_MESSAGE
+        )
+        assert_engine_rejects(
+            kernel,
+            ARCH,
+            engine=engine,
+            error_type=ValueError,
+            message=engine_message,
+            llvm_flavor=HOST_FLAVOR,
+        )
+        assert_engine_rejects_hip(
+            kernel, ARCH, engine=engine, error_type=ValueError, message=engine_message
+        )
 
 
 def test_well_formed_loops_lower():
