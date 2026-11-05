@@ -379,22 +379,11 @@ Tensor Tensor::copyWithZeroPadding(Shape shape) const {
 }
 
 Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToSource) const {
-    if (destinationToSource.size() != shape().rank())
+    const Permutation permutation(destinationToSource);
+    if (permutation.size() != shape().rank())
         throw std::runtime_error("Tensor permutation rank does not match the tensor.");
 
-    std::vector<bool> seen(shape().rank(), false);
-    std::vector<size_t> destinationDimensions(shape().rank(), 0);
-    for (size_t destinationDimension = 0; destinationDimension < shape().rank();
-         ++destinationDimension) {
-        const size_t sourceDimension = destinationToSource[destinationDimension];
-        if (sourceDimension >= shape().rank() || seen[sourceDimension])
-            throw std::runtime_error(
-                "Tensor permutation must contain each source dimension exactly once.");
-        seen[sourceDimension] = true;
-        destinationDimensions[destinationDimension] = shape()[sourceDimension];
-    }
-
-    Tensor result(type(), Shape(std::move(destinationDimensions)));
+    Tensor result(type(), Shape(permutation.apply(shape().dimensions())));
     std::vector<size_t> destinationIndices(shape().rank(), 0);
     const uint16_t bits = scalarTypeInfo(type()).storageBits;
     shape().forEachCoordinateLastDimensionFastest(
@@ -403,7 +392,7 @@ Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToS
             for (size_t destinationDimension = 0; destinationDimension < shape().rank();
                  ++destinationDimension)
                 destinationIndices[destinationDimension] =
-                    sourceIndices[destinationToSource[destinationDimension]];
+                    sourceIndices[permutation[destinationDimension]];
 
             detail::preparedCopyBitRange(
                 rawEncodedBackingStorage(),
