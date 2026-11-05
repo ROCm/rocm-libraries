@@ -12,8 +12,6 @@ include(GNUInstallDirs)
 option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${PROJECT_IS_TOP_LEVEL})
 option(HOSTNUMERICS_BUILD_PYTHON "Build the HostNumerics Python module."
        ${PROJECT_IS_TOP_LEVEL})
-option(HOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP
-       "Parallelize large AMD GPU layout conversions with OpenMP when it is available." ON)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/version.hpp.in"
@@ -51,14 +49,14 @@ add_library(roc::hostnumerics ALIAS hostnumerics)
 target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 
 # CPU conversions to the physical storage layouts that AMD GPU kernels read.
-# They need only C++17 and the standard library, so this target does not link
-# the other HostNumerics targets.
+# They need only the standard library, so this target does not link the other
+# HostNumerics targets.
 add_library(hostnumerics-amd-gpu-layout STATIC
     src/amd_gpu_layout/mx.cpp
     src/amd_gpu_layout/operand.cpp
 )
 add_library(roc::hostnumerics-amd-gpu-layout ALIAS hostnumerics-amd-gpu-layout)
-target_compile_features(hostnumerics-amd-gpu-layout PUBLIC cxx_std_17)
+target_compile_features(hostnumerics-amd-gpu-layout PUBLIC cxx_std_20)
 target_include_directories(hostnumerics-amd-gpu-layout
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
@@ -70,27 +68,12 @@ target_sources(hostnumerics-amd-gpu-layout
             include/roc/hostnumerics/amd_gpu_layout/mx.hpp
             include/roc/hostnumerics/amd_gpu_layout/operand.hpp
 )
-# Compile as strict C++17 so that GCC and Clang reject the newer language
-# features that MSVC rejects in C++17 mode.
 set_target_properties(hostnumerics-amd-gpu-layout
     PROPERTIES
-        CXX_STANDARD 17
-        CXX_EXTENSIONS OFF
         CXX_VISIBILITY_PRESET hidden
         POSITION_INDEPENDENT_CODE ON
         VISIBILITY_INLINES_HIDDEN ON
 )
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(hostnumerics-amd-gpu-layout PRIVATE -pedantic-errors)
-endif()
-set(HOSTNUMERICS_AMD_GPU_LAYOUT_USES_OPENMP OFF)
-if(HOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP)
-    find_package(OpenMP QUIET COMPONENTS CXX)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(hostnumerics-amd-gpu-layout PRIVATE OpenMP::OpenMP_CXX)
-        set(HOSTNUMERICS_AMD_GPU_LAYOUT_USES_OPENMP ON)
-    endif()
-endif()
 
 if(HOSTNUMERICS_BUILD_TESTING)
     list(APPEND CMAKE_MODULE_PATH "${HostNumerics_SOURCE_DIR}/cmake")
@@ -101,24 +84,13 @@ if(HOSTNUMERICS_BUILD_PYTHON)
     add_subdirectory(python)
 endif()
 
-install(TARGETS hostnumerics-core hostnumerics
+install(TARGETS hostnumerics-core hostnumerics hostnumerics-amd-gpu-layout
     EXPORT hostnumerics-targets
     FILE_SET HEADERS DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
 set(_hostnumerics_cmake_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/HostNumerics")
 install(EXPORT hostnumerics-targets
     FILE HostNumericsTargets.cmake
-    DESTINATION "${_hostnumerics_cmake_install_dir}"
-    NAMESPACE roc::
-)
-# Consumers load this export only when they request the AMDGPULayout component,
-# so that other consumers do not need OpenMP.
-install(TARGETS hostnumerics-amd-gpu-layout
-    EXPORT hostnumerics-amd-gpu-layout-targets
-    FILE_SET HEADERS DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-)
-install(EXPORT hostnumerics-amd-gpu-layout-targets
-    FILE HostNumericsAMDGPULayoutTargets.cmake
     DESTINATION "${_hostnumerics_cmake_install_dir}"
     NAMESPACE roc::
 )
@@ -131,7 +103,6 @@ write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion
-    ARCH_INDEPENDENT
 )
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfig.cmake"

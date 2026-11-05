@@ -3,26 +3,5 @@
 
 @PACKAGE_INIT@
 
-# Core and Operations are always loaded. Request the AMDGPULayout component to
-# load roc::hostnumerics-amd-gpu-layout.
 include("${CMAKE_CURRENT_LIST_DIR}/HostNumericsTargets.cmake")
-set(HostNumerics_Core_FOUND TRUE)
-set(HostNumerics_Operations_FOUND TRUE)
-
-if("AMDGPULayout" IN_LIST HostNumerics_FIND_COMPONENTS)
-    set(HostNumerics_AMDGPULayout_FOUND TRUE)
-    # The installed static library links the OpenMP runtime when it was built with OpenMP.
-    if(@HOSTNUMERICS_AMD_GPU_LAYOUT_USES_OPENMP@)
-        find_package(OpenMP QUIET COMPONENTS CXX)
-        if(NOT OpenMP_CXX_FOUND)
-            set(HostNumerics_AMDGPULayout_FOUND FALSE)
-            set(HostNumerics_NOT_FOUND_MESSAGE
-                "HostNumerics component AMDGPULayout was built with OpenMP, but OpenMP CXX was not found.")
-        endif()
-    endif()
-    if(HostNumerics_AMDGPULayout_FOUND)
-        include("${CMAKE_CURRENT_LIST_DIR}/HostNumericsAMDGPULayoutTargets.cmake")
-    endif()
-endif()
-
 check_required_components(HostNumerics)

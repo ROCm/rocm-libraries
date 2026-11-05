@@ -6,10 +6,6 @@ cmake_minimum_required(VERSION 3.25.2)
 project(HostNumericsPackageTest LANGUAGES CXX)
 
 find_package(HostNumerics CONFIG REQUIRED)
-if(TARGET roc::hostnumerics-amd-gpu-layout)
-    message(FATAL_ERROR "HostNumerics should load AMDGPULayout only when it is requested.")
-endif()
-find_package(HostNumerics CONFIG REQUIRED COMPONENTS AMDGPULayout)
 
 if(NOT HOSTNUMERICS_SOURCE_DIR)
     message(FATAL_ERROR "Set HOSTNUMERICS_SOURCE_DIR to the HostNumerics source tree.")
@@ -27,8 +23,6 @@ add_executable(hostnumerics-amd-gpu-layout-package-test
     "${HOSTNUMERICS_SOURCE_DIR}/tests/amd_gpu_operand_layout_test.cpp")
 target_link_libraries(hostnumerics-amd-gpu-layout-package-test
     PRIVATE roc::hostnumerics-amd-gpu-layout GTest::gtest_main)
-set_target_properties(hostnumerics-amd-gpu-layout-package-test
-    PROPERTIES CXX_STANDARD 17 CXX_EXTENSIONS OFF)
 
 enable_testing()
 include(GoogleTest)

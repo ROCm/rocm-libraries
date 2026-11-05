@@ -10,10 +10,6 @@
 #include <stdexcept>
 #include <vector>
 
-#ifdef _OPENMP
-#error "AMD GPU layout consumers must not inherit OpenMP compile flags."
-#endif
-
 using namespace roc::hostnumerics::amd_gpu_layout;
 
 namespace {
