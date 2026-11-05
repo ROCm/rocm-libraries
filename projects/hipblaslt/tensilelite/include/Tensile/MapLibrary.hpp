@@ -28,6 +28,7 @@
 
 #include <atomic>
 
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/PropertyMatching.hpp>
 
@@ -176,7 +177,11 @@ namespace TensileLite
                 }
                 return result;
             }
-            auto library = lookup(problems[0], hardware);
+            auto const* ranked = groupedGemmMemberToRank(problems);
+            if(ranked == nullptr)
+                return SolutionSet<MySolution>();
+
+            auto library = lookup(*ranked, hardware);
 
             if(library == nullptr)
                 return SolutionSet<MySolution>();
@@ -215,7 +220,11 @@ namespace TensileLite
                                         Hardware const&               hardware,
                                         int                           numSolutions) const override
         {
-            auto library = lookup(problems[0], hardware);
+            auto const* ranked = groupedGemmMemberToRank(problems);
+            if(ranked == nullptr)
+                return SolutionVector<MySolution>();
+
+            auto library = lookup(*ranked, hardware);
 
             if(library == nullptr)
                 return SolutionVector<MySolution>();

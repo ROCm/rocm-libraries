@@ -440,6 +440,11 @@ namespace TensileLite
                     //   If tensor contains multiple batch dims this may not be true.
                     //   Really should modify Contractions.py to select SizeN >= value, based on
                     //   desired index requirement
+                    // Grouped GEMM allows an empty M, same as LeadingFree1 allows an
+                    // empty N. The member launches with zero tiles.
+                    if(problem.groupedGemm() && problem.freeIndicesA().size()
+                       && problem.freeSizeA(0) == 0)
+                        return true;
                     return (problem.freeIndicesA().size() ? problem.freeSizeA(0) >= value
                                                           : problem.batchSize(0) >= value);
                 }

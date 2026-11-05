@@ -30,6 +30,7 @@
 #include <set>
 #include <vector>
 
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/PropertyMatching.hpp>
 
 #include <tensilelitehost/export.h>
@@ -128,9 +129,13 @@ namespace TensileLite
         {
             SolutionSet<MySolution> rv;
 
+            auto const* ranked = groupedGemmMemberToRank(problems);
+            if(ranked == nullptr && searchType == SolutionLibrarySearchType::DEFAULT)
+                return rv;
+
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
                                ? table->GetAll()
-                               : table->matchesInOrder(problems[0]);
+                               : table->matchesInOrder(*ranked);
 
             for(auto const& row : matches)
             {
@@ -180,12 +185,16 @@ namespace TensileLite
                                         Hardware const&               hardware,
                                         int                           numSolutions) const override
         {
+            auto const* ranked = groupedGemmMemberToRank(problems);
+            if(ranked == nullptr)
+                return SolutionVector<MySolution>();
+
             typename Table::Transform transform
                 = [&](Element library) -> std::shared_ptr<MySolution> {
                 return library->findBestSolution(problems, hardware);
             };
             SolutionVector<MySolution> solutions
-                = table->findTopMatch(problems[0], transform, numSolutions);
+                = table->findTopMatch(*ranked, transform, numSolutions);
             return solutions;
         }
     };

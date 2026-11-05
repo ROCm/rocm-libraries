@@ -241,9 +241,13 @@ namespace TensileLite
         {
             SolutionSet<MySolution> rv;
 
+            auto const* ranked = groupedGemmMemberToRank(problems);
+            if(ranked == nullptr)
+                return rv;
+
             for(auto const& row : rows)
             {
-                if(row.first.value->type() == "AMDGPU" && !row.first(problems[0], hardware))
+                if(row.first.value->type() == "AMDGPU" && !row.first(*ranked, hardware))
                     continue;
 
                 auto rowSolutions
@@ -351,9 +355,13 @@ namespace TensileLite
         {
             SolutionVector<MySolution> rv, solutions;
 
+            auto const* ranked = groupedGemmMemberToRank(problems);
+            if(ranked == nullptr)
+                return rv;
+
             for(auto const& row : rows)
             {
-                if(row.first(problems[0], hardware))
+                if(row.first(*ranked, hardware))
                 {
                     solutions = row.second->findTopSolutionsGroupedGemm(
                         problems, hardware, numSolutions - rv.size());

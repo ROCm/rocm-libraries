@@ -61,4 +61,19 @@ namespace
         EXPECT_EQ(std::hash<ContractionProblemGemm>{}(first),
                   std::hash<ContractionProblemGemm>{}(second));
     }
+
+    // The grouped solution cache ignores an empty member after ranking, so the
+    // group size has to stay in the key. SynchronizerSizeCheck reads it.
+    TEST(ContractionProblemFactory, smoke_GroupedGemmCountIsPartOfCacheKey)
+    {
+        auto first  = halfGemm();
+        auto second = halfGemm();
+        first.setGroupedGemm(true);
+        second.setGroupedGemm(true);
+        first.setGroupedGemmCount(1);
+        second.setGroupedGemmCount(2);
+        EXPECT_FALSE(first == second);
+        EXPECT_NE(std::hash<ContractionProblemGemm>{}(first),
+                  std::hash<ContractionProblemGemm>{}(second));
+    }
 } // namespace

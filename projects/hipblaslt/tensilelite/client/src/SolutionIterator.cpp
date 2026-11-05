@@ -151,15 +151,23 @@ namespace TensileLite
         {
             if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
+                bool anyTiles = false;
                 for(int idx = 0; idx < problems->gemms.size(); idx++)
                 {
                     size_t ws      = solution.requiredWorkspaceSizeGroupedGemm(problems->gemms, *m_hardware);
                     auto&  problem = problems->gemms[idx];
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems->gemms.size());
+                    // An empty member still occupies an argument slot, so the
+                    // workspace above uses the full group. It has no tiles to
+                    // predicate (ROCM-33326).
+                    if(!problem.hasOutputTiles())
+                        continue;
+                    anyTiles = true;
                     if(!checkSolution(solution, problem))
                         return false;
                 }
+                return anyTiles;
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
@@ -170,8 +178,6 @@ namespace TensileLite
                 throw std::runtime_error(
                     "[SolutionIterator] Failed to cast to any ContractionProblem");
             }
-
-            return true;
         }
 
         static std::string formatFormocastInfo(ContractionSolution* const solution,
@@ -625,6 +631,8 @@ namespace TensileLite
             SolutionIterator::preProblem(problem);
             if(auto groupedProblem = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
             {
+                // Keep every member. The library ranks only those with output
+                // tiles and sizes workspace from the full group (ROCM-33326).
                 m_solutions = m_library->findTopSolutionsGroupedGemm(
                     groupedProblem->gemms, *m_hardware, m_numSolutions);
             }

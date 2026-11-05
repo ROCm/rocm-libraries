@@ -29,6 +29,7 @@
 #include <set>
 #include <vector>
 
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Properties.hpp>
@@ -226,16 +227,24 @@ namespace TensileLite
                 if((*row.second->hardwarePredicate)(hardware))
                 {
                     useSolution = true;
+                    auto const* rankedProblem = groupedGemmMemberToRank(problems);
+                    if(rankedProblem == nullptr)
+                        useSolution = false;
+
                     if(searchType == SolutionLibrarySearchType::DEFAULT)
                     {
-                        size_t ws = (*row.second).requiredWorkspaceSizeGroupedGemm(problems, hardware);
+                        size_t ws = 0;
+                        if(useSolution)
+                            ws = (*row.second).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
-                        for(size_t idx = 0; idx < problems.size(); idx++)
+                        for(size_t idx = 0; idx < problems.size() && useSolution; idx++)
                         {
+                            if(!problems[idx].hasOutputTiles())
+                                continue;
                             auto problem = problems[idx];
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
-                            problem.setGroupedGemmCount(problems.size());
+                            problem.noteGroupedGemmCount(static_cast<int>(problems.size()));
                             // setGroupedGemm(true) re-aims GroupedGemmEqual,
                             // SynchronizerSizeCheck and the free-size-B clause on
                             // this local copy, so it is USO-gated like the widened
@@ -249,7 +258,8 @@ namespace TensileLite
                     }
                     else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
                     {
-                        if(!isGemmTypeSame((*row.second), problems[0]))
+                        if(rankedProblem == nullptr
+                           || !isGemmTypeSame((*row.second), *rankedProblem))
                             useSolution = false;
                     }
 
@@ -260,7 +270,7 @@ namespace TensileLite
                         {
                             (*row.second).requiredHostWorkspaceSizePerProblem
                                 = (*row.second)
-                                      .requiredHostSizeGroupedGemmSingle(problems[0], hardware);
+                                      .requiredHostSizeGroupedGemmSingle(*rankedProblem, hardware);
                         }
                         rv.insert(row.second);
                     }
@@ -275,6 +285,8 @@ namespace TensileLite
                     {
                         for(size_t idx = 0; idx < problems.size(); idx++)
                         {
+                            if(!problems[idx].hasOutputTiles())
+                                continue;
                             auto problem = problems[idx];
                             Task task(hardware, problem, *(row.second));
                             row.second->problemPredicate->debugEval(problem, std::cout);
