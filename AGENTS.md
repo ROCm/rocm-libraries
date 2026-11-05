@@ -78,6 +78,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `hipdnn-tidy` | Running clang-tidy on hipDNN, scoped to the files you changed. |
 | `hipdnn-ingestor-engine` | Creating or extending a generic-kernel-ingestor integration. |
 | `hipdnn-uhd` | Taking a hipDNN engine through the UHD heuristic lifecycle on the local GPU: generating, training, judging, validating, installing, and triaging heuristics and their training data. |
+| `hipdnn-aiter-asm-sdpa-fwd-sync` | Updating the ASM SDPA engine's forward kernels from an AITER release for the GPU archs you choose: tiered plan, apply with generated provenance, engine follow-up and validation. ASM kernels only, never CK. |
 | `hipdnn-codegen` (at [`projects/hipdnn/tools/DescriptorGenerator/.claude/skills/`](projects/hipdnn/tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md)) | Generating operation boilerplate from a YAML config. |
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
