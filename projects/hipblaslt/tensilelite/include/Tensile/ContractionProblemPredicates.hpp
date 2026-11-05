@@ -31,6 +31,7 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -2704,8 +2705,9 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    if(problem.useBias() && problem.useScaleAlphaVec()
-                       && problem.useBias() != problem.useScaleAlphaVec())
+                    const int vectorAlphaMode = scaleAlphaVectorMode(problem.useScaleAlphaVec());
+                    if(problem.useBias() && vectorAlphaMode
+                       && problem.useBias() != vectorAlphaMode)
                         return false;
 
                     int factorDim = (problem.useBias() == 1) ? 0
