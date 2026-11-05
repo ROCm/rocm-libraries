@@ -562,6 +562,52 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created the FlyDSL external integration targets (one per engine and architecture)")
     endif()
 
+    # hipkernel:Gfx1250ConvFwdAot against its own Gfx1250ConvFwdAot bundles and the shared
+    # ConvolutionFwd sweeps: the shape of the gfx950 attention entries above -- gated on
+    # the engine actually shipping for gfx1250, routed into the gfx1250 shard (whose
+    # external file the FlyDSL loop may already have opened), GTEST_FILTER and ENVIRONMENT
+    # kept out of the categorization-only argument list.
+    set(_hkp_gfx1250_conv_fwd_aot FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_fwd_aot
+                                          "hipkernel:Gfx1250ConvFwdAot" gfx1250)
+    endif()
+    set(_target ${PROJECT_NAME}-gfx1250-conv-fwd-aot-external-integration-check)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR
+       AND _hkp_gfx1250_conv_fwd_aot
+       AND TARGET hipdnn_integration_tests)
+        _hkp_census_external_test_file(_shard_ctest gfx1250)
+        set(_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+           AND DEFINED HIPKERNELPROVIDER_GFX1250_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML)
+            list(APPEND _category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX1250_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx1250-conv-fwd-aot-external-integration
+            )
+        endif()
+        # The TOML goes to the reservation as well as TEST_CONFIG; hkp_reserve_census_shard()
+        # says why.
+        set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx1250ConvFwdAot.toml")
+        hkp_reserve_census_shard(_shard_dest gfx1250 FILES "${_config}")
+        add_external_integration_test_target(
+            TARGET_NAME    ${_target}
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx1250ConvFwdAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx1250
+            TEST_CONFIG    ${_config}
+            GTEST_FILTER   "quick_Gfx1250ConvFwdAot_*.*:standard_Gfx1250ConvFwdAot_*.*:quick_ConvolutionFwd_Default.*:standard_ConvolutionFwd_Default.*:comprehensive_ConvolutionFwd_Default.*:full_ConvolutionFwd_Default.*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_category_args}
+        )
+        message(STATUS "Created ${_target} target")
+    else()
+        message(STATUS "hipkernel:Gfx1250ConvFwdAot is not shipped for gfx1250 by this configuration - skipping ${_target}")
+    endif()
+
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can

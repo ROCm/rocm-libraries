@@ -1,0 +1,82 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:Gfx1250ConvFwdAot external integration test categories.
+#
+# Pinned to hipkernel:Gfx1250ConvFwdAot via --test-engine. Matches the bundles under
+# integration-test-bundles/{quick,standard}/Gfx1250ConvFwdAot/, which hold the cases the
+# engine serves, and the shared integration-test-bundles/<tier>/ConvolutionFwd/Default
+# sweeps, every case of which the engine declines today (1-D or 3-D, NCHW, fp32, or a
+# non-depthwise group with one output channel); the harness skips a declined case.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Quick gfx1250 forward convolution bundle coverage"
+    test_patterns:
+      - "quick_Gfx1250ConvFwdAot*"
+      - "quick_ConvolutionFwd_Default*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard gfx1250 forward convolution bundle coverage"
+    test_patterns:
+      - "quick_Gfx1250ConvFwdAot*"
+      - "standard_Gfx1250ConvFwdAot*"
+      - "quick_ConvolutionFwd_Default*"
+      - "standard_ConvolutionFwd_Default*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive gfx1250 forward convolution coverage"
+    test_patterns:
+      - "quick_Gfx1250ConvFwdAot*"
+      - "standard_Gfx1250ConvFwdAot*"
+      - "comprehensive_Gfx1250ConvFwdAot*"
+      - "quick_ConvolutionFwd_Default*"
+      - "standard_ConvolutionFwd_Default*"
+      - "comprehensive_ConvolutionFwd_Default*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full gfx1250 forward convolution coverage"
+    test_patterns:
+      - "*Gfx1250ConvFwdAot*"
+      - "*ConvolutionFwd_Default*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: gfx1250 forward convolution quick bundles"
+    test_patterns:
+      - "quick_Gfx1250ConvFwdAot*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

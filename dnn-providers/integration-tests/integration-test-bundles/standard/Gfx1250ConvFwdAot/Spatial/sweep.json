@@ -1,0 +1,1349 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "pointwise_s2_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              14,
+              14
+            ],
+            "strides": [
+              12544,
+              1,
+              896,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              28,
+              28
+            ],
+            "strides": [
+              50176,
+              1,
+              1792,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "pointwise_s2_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              14,
+              14
+            ],
+            "strides": [
+              12544,
+              1,
+              896,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              28,
+              28
+            ],
+            "strides": [
+              50176,
+              1,
+              1792,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "dense3x3_s2_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              128,
+              9,
+              10
+            ],
+            "strides": [
+              11520,
+              1,
+              1280,
+              128
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              64,
+              3,
+              3
+            ],
+            "strides": [
+              576,
+              1,
+              192,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              17,
+              19
+            ],
+            "strides": [
+              20672,
+              1,
+              1216,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "dense3x3_s2_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              128,
+              9,
+              10
+            ],
+            "strides": [
+              11520,
+              1,
+              1280,
+              128
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              64,
+              3,
+              3
+            ],
+            "strides": [
+              576,
+              1,
+              192,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              17,
+              19
+            ],
+            "strides": [
+              20672,
+              1,
+              1216,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "dilated2_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              32,
+              32
+            ],
+            "strides": [
+              65536,
+              1,
+              2048,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              64,
+              3,
+              3
+            ],
+            "strides": [
+              576,
+              1,
+              192,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              32,
+              32
+            ],
+            "strides": [
+              65536,
+              1,
+              2048,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "dilated2_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              32,
+              32
+            ],
+            "strides": [
+              65536,
+              1,
+              2048,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              64,
+              3,
+              3
+            ],
+            "strides": [
+              576,
+              1,
+              192,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              32,
+              32
+            ],
+            "strides": [
+              65536,
+              1,
+              2048,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "dense5x5_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              20,
+              20
+            ],
+            "strides": [
+              25600,
+              1,
+              1280,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              5,
+              5
+            ],
+            "strides": [
+              800,
+              1,
+              160,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              20,
+              20
+            ],
+            "strides": [
+              12800,
+              1,
+              640,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "dense5x5_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              20,
+              20
+            ],
+            "strides": [
+              25600,
+              1,
+              1280,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              5,
+              5
+            ],
+            "strides": [
+              800,
+              1,
+              160,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              20,
+              20
+            ],
+            "strides": [
+              12800,
+              1,
+              640,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "nonsquare3x5_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              11,
+              17
+            ],
+            "strides": [
+              11968,
+              1,
+              1088,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              3,
+              5
+            ],
+            "strides": [
+              480,
+              1,
+              160,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              11,
+              17
+            ],
+            "strides": [
+              5984,
+              1,
+              544,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            2
+          ],
+          "parameters__pre_padding": [
+            1,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "nonsquare3x5_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              11,
+              17
+            ],
+            "strides": [
+              11968,
+              1,
+              1088,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              3,
+              5
+            ],
+            "strides": [
+              480,
+              1,
+              160,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              11,
+              17
+            ],
+            "strides": [
+              5984,
+              1,
+              544,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            2
+          ],
+          "parameters__pre_padding": [
+            1,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "row1x7_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              256
+            ],
+            "strides": [
+              8192,
+              1,
+              8192,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              32,
+              32,
+              1,
+              7
+            ],
+            "strides": [
+              224,
+              1,
+              224,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1,
+              256
+            ],
+            "strides": [
+              8192,
+              1,
+              8192,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            3
+          ],
+          "parameters__pre_padding": [
+            0,
+            3
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "row1x7_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              256
+            ],
+            "strides": [
+              8192,
+              1,
+              8192,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              32,
+              32,
+              1,
+              7
+            ],
+            "strides": [
+              224,
+              1,
+              224,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1,
+              256
+            ],
+            "strides": [
+              8192,
+              1,
+              8192,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            3
+          ],
+          "parameters__pre_padding": [
+            0,
+            3
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "stem7x7_c3_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              32,
+              32
+            ],
+            "strides": [
+              65536,
+              1,
+              2048,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              3,
+              7,
+              7
+            ],
+            "strides": [
+              147,
+              1,
+              21,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              64,
+              64
+            ],
+            "strides": [
+              12288,
+              1,
+              192,
+              3
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            3,
+            3
+          ],
+          "parameters__pre_padding": [
+            3,
+            3
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "stem7x7_c3_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              32,
+              32
+            ],
+            "strides": [
+              65536,
+              1,
+              2048,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              3,
+              7,
+              7
+            ],
+            "strides": [
+              147,
+              1,
+              21,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              64,
+              64
+            ],
+            "strides": [
+              12288,
+              1,
+              192,
+              3
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            3,
+            3
+          ],
+          "parameters__pre_padding": [
+            3,
+            3
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "few_out_k3_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              3,
+              64,
+              64
+            ],
+            "strides": [
+              12288,
+              1,
+              192,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              64,
+              3,
+              3
+            ],
+            "strides": [
+              576,
+              1,
+              192,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              64,
+              64
+            ],
+            "strides": [
+              262144,
+              1,
+              4096,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    },
+    {
+      "id": "few_out_k3_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              3,
+              64,
+              64
+            ],
+            "strides": [
+              12288,
+              1,
+              192,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              64,
+              3,
+              3
+            ],
+            "strides": [
+              576,
+              1,
+              192,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              64,
+              64,
+              64
+            ],
+            "strides": [
+              262144,
+              1,
+              4096,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution for the packaged gfx1250 AOT engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1,
+        "reference_source": "synthesis+cpu_reference"
+      }
+    }
+  ]
+}

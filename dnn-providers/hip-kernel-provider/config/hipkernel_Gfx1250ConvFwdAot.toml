@@ -1,0 +1,19 @@
+# Integration test configuration for hipkernel:Gfx1250ConvFwdAot
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# The engine serves 2D forward cross-correlation (grouped and depthwise included)
+# with packed channels-last FP16 or BF16 storage on gfx1250. Its own
+# Gfx1250ConvFwdAot bundles hold the cases it serves (claimed in their support.json);
+# it declines every case of the shared ConvolutionFwd sweeps today (1-D or 3-D, NCHW,
+# fp32, or a non-depthwise group with one output channel, which no shipped instance
+# admits), and the harness skips them. No tolerance overrides: the common ConvolutionFwdAttributes
+# tolerance applies.
+#
+# No [[test_skips]] entry: the engine's pack arch-prunes before the matcher, so a
+# non-gfx1250 device declines through the ordinary path. An entry cannot express
+# "skip everywhere except gfx1250" -- the schema has no negation, and an empty
+# `archs` list means EVERY arch (TestSettings.hpp: `entry.archs.empty() || ...`),
+# so a skip written that way would silence gfx1250 too.

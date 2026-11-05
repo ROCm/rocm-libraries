@@ -15,15 +15,16 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+| `rocKE/gfx1250_conv_fwd_aot/` | `hipkernel:Gfx1250ConvFwdAot` | `packs/Gfx1250ConvFwdAotNative.cpp` |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
-`gfx942_attention_unified_3d`, `gfx942_attention_dense` and `gfx950_conv_dgrad_aot` KDPs are
-stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
-and declare gfx950 or gfx942 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
+`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
+`gfx1250_conv_fwd_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
+and declare gfx950, gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
 git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
 rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
-walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
-DVC KDPs must also have been pulled.
+walk) and whose GPU targets include an arch its KDP declares; for gfx950, gfx942 and
+gfx1250 the DVC KDPs must also have been pulled.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
@@ -125,13 +126,26 @@ updates atomically. Files are stored uncompressed, one blob each. `gfx950_attent
 and `gfx942_attention_unified_3d` use this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
 accepted.
 
-**Heuristic models.** A heuristic model file is binary and does not belong in git. Each
-one is its own DVC output: `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` has a
-`model.bin.dvc` pointer and a one-line `.gitignore` (`/model.bin`) beside its
-`heuristic.uhd.json`, the layout FlyDSL uses. `uhd_gen promote` copies the model there;
-add the pointer with `dvc add model.bin` in that folder, then append `remote: ingestor`
-to it as for any new pointer (below). A model file that nothing refers to by path can
-instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure.
+**Heuristic models.** A heuristic model file is binary and does not belong in git. It is
+tracked in one of two forms:
+
+- **One pointer per model.** Each model is its own DVC output:
+  `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` has a `model.bin.dvc` pointer
+  and a one-line `.gitignore` (`/model.bin`) beside its `heuristic.uhd.json`, which stays
+  in git. FlyDSL and `gfx942_attention_unified_3d` use this form. `uhd_gen promote`
+  copies the model there; add the pointer with `dvc add model.bin` in that folder, then
+  append `remote: ingestor` to it as for any new pointer (below).
+- **One pointer for the bundle's whole `heuristics/` tree.** The bundle has a
+  `heuristics.dvc` pointer beside `artifacts.dvc`, and its `.gitignore` lists
+  `/heuristics` as well as `/artifacts`. Every model's `heuristic.uhd.json` and
+  `model.bin` are then in DVC, none in git. `gfx950_conv_dgrad_aot` and
+  `gfx1250_conv_fwd_aot` use this form (their `<arch>` folder is `default`, the
+  `sort_kernel_catalog` key their UED binds). After `uhd_gen promote`, run
+  `dvc add heuristics` in the bundle folder and append `remote: ingestor` to the new
+  pointer.
+
+A model file that nothing refers to by path can instead sit in `artifacts/`. Any `.dvc`
+pointer under `rocKE/` is checked at configure.
 
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).
@@ -150,7 +164,10 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
   The UED still names the model; the loader reads the dangling id as that role being off
   for the architecture, so the engine stays available and falls back to its other
   rankers. A missing model with no `.dvc` pointer beside it is a bug and still fails the
-  pack. Every warning prints the `dvc pull` command. A build that sets
+  pack. A `heuristics/` tree tracked by one `heuristics.dvc` is different: not
+  pulled, it holds no UHD at all, so configure warns once for the folder and the pack
+  then fails, because the UED names a UHD the tree lacks (`gfx950_conv_dgrad_aot` and
+  `gfx1250_conv_fwd_aot`); pull it before building with rocKE. Every warning prints the `dvc pull` command. A build that sets
   `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
   checked. Set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` (default OFF) to make this
   an error. Release builds should set it.

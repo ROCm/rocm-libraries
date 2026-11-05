@@ -1,0 +1,30 @@
+{
+  "claims": {
+    "hipkernel:Gfx1250ConvFwdAot": [
+      {
+        "cases": [
+          "depthwise11x11_bfloat16",
+          "depthwise11x11_half",
+          "depthwise5x5_bfloat16",
+          "depthwise5x5_half",
+          "depthwise7x7_bfloat16",
+          "depthwise7x7_half",
+          "depthwise_s2_bfloat16",
+          "depthwise_s2_half",
+          "grouped_g2_bfloat16",
+          "grouped_g2_half",
+          "grouped_g32_bfloat16",
+          "grouped_g32_half",
+          "grouped_g8_cpg8_bfloat16",
+          "grouped_g8_cpg8_half"
+        ],
+        "support": {
+          "gfx1250": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
