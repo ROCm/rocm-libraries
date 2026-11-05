@@ -319,14 +319,14 @@ def _data_table(mode: str) -> list[int]:
 
     import numpy as np
 
-    from .fp8_data import e4m3_round
+    from rocke.numeric.fp8 import fp8e4m3_round
 
     rng = random.Random(42)
     if mode == "int":
         xs = [rng.randint(-5, 5) for _ in range(64)]
     else:
         xs = [rng.gauss(0.0, 0.1) for _ in range(64)]
-    return [int(c) for c in e4m3_round(np, np.array(xs, dtype=np.float32))]
+    return [int(c) for c in fp8e4m3_round(np.array(xs, dtype=np.float32))]
 
 
 DATA_MODE = "const"

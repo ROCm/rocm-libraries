@@ -204,19 +204,17 @@ bool dict_str(const py::dict& d, const char* key, std::string& out)
     return false;
 }
 
-/* Build a rocke_gemm_universal_spec_t from a Python spec dict.
+/* Fill a rocke_gemm_universal_spec_t (already default-initialised) from a spec
+ * dict; the one reader of the GEMM spec dict. `store` keeps any string fields
+ * alive for the spec's lifetime. build_spec (universal GEMM), the batched,
+ * grouped and flatmm readers, and gemm_multi_d (its nested `base`) all call it.
  *
  * The dict mirrors UniversalGemmSpec. Recognised layouts (both accepted):
  *   (a) flat:   {name, tile_m, tile_n, ..., pipeline, epilogue, dtype_a, ...}
  *   (b) nested: {name, tile:{...}, trait:{...}, data:{...}, wave_size, ...}
  * Nested sub-dicts take precedence; any flat key is also honoured. Every field
- * defaults to the C engine default (rocke_gemm_universal_spec_default), so a
- * minimal dict {name, tile_m, tile_n, tile_k, warp_m, warp_n} works. */
-/* Fill a rocke_gemm_universal_spec_t (already default-initialised) from a spec
- * dict. `store` keeps any string fields alive for the spec's lifetime. The
- * GEMM-variant families that wrap a UniversalGemmSpec (gemm_multi_d /
- * gemm_multi_abd) reuse this to populate their nested `base` field. The dict
- * accepts both a flat key view and nested tile/trait/data sub-dicts. */
+ * keeps its default when absent, so a minimal dict
+ * {name, tile_m, tile_n, tile_k, warp_m, warp_n} works. */
 void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                          std::deque<std::string>& store,
                          const py::dict& root)

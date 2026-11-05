@@ -162,7 +162,8 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* batch_off_a;
     rocke_value_t* batch_off_b;
     rocke_value_t* batch_off_c;
-    /* TDM fills: the batch offsets, in i64 for batched TDM, else batch_off_a/b. */
+    /* TDM fills: one i64 batch offset per operand when trait.tdm (zext(batch_idx) *
+     * zext(stride) when batched, an i64 zero otherwise); NULL without TDM. */
     rocke_value_t* tdm_batch_a;
     rocke_value_t* tdm_batch_b;
 

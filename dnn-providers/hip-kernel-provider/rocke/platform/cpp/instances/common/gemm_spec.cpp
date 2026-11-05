@@ -614,9 +614,8 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
 /* _resolve_mma_op(spec, arch): resolve the MmaOp for spec on the target via
  * target.mma.op_for_shape(family, a, a, acc, wt_m, wt_n, wt_k). Returns NULL if
  * the target has no atom for the spec's warp-tile shape + dtype. */
-[[maybe_unused]] static const rocke_mmaop_t*
-    ck_gemm_resolve_mma_op(const rocke_gemm_universal_spec_t* spec,
-                           const rocke_archtarget_t* target)
+static const rocke_mmaop_t* ck_gemm_resolve_mma_op(const rocke_gemm_universal_spec_t* spec,
+                                                   const rocke_archtarget_t* target)
 {
     const rocke_gemm_tile_spec_t* t;
     const char* a_name;
@@ -1200,10 +1199,10 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 #undef CK_GEMM_REJECT
 }
 
-/* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths are pure parity surfaces
- * mirroring the Python module's file-scope _resolve_mma_op / _mfma_atom_widths.
- * The validity gate above resolves the atom via rocke_mma_catalog_has_shape, so
- * neither is called within this TU; they are kept defined for source parity and
- * marked [[maybe_unused]] at their definitions. (A prior "anchor" function that
- * referenced them tripped clang's -Wunneeded-internal-declaration, since it was
- * itself never emitted.) */
+/* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths mirror the Python module's
+ * file-scope _resolve_mma_op / _mfma_atom_widths. The validity gate above calls
+ * ck_gemm_resolve_mma_op (an atom without A/B lane maps is rejected there, as in
+ * Python). ck_gemm_mfma_atom_widths is not called within this TU; it is kept
+ * defined for source parity and marked [[maybe_unused]]. (A prior "anchor"
+ * function that referenced it tripped clang's -Wunneeded-internal-declaration,
+ * since it was itself never emitted.) */

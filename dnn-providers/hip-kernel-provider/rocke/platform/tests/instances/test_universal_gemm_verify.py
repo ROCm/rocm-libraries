@@ -39,11 +39,6 @@ from rocke.examples.common.universal_gemm_verify import (
     _pick_atom,
     build_manifest,
 )
-from rocke.numeric.fp8 import (
-    bf8e5m2_decode_table,
-    bf8e5m2_encode,
-    fp8e4m3_encode,
-)
 from rocke.instances.common.manifest_runner.gemm import (
     _F8_ENCODERS,
     _gemm_f8_dtype,
@@ -251,44 +246,12 @@ class TestEightBitManifest(unittest.TestCase):
 class TestEightBitEncoders(unittest.TestCase):
     """The gemm_fp8 runner must hand each kernel bytes in its own format.
 
+    The codec's own facts are in tests/numeric/test_fp8_codec.py; these check
+    which encoder the runner picks.
+
     A bf8 kernel fed e4m3 bytes decodes nonsense, so a correct kernel fails
     nearly every element and the verify lane cannot pass for bf8 at all.
     """
-
-    def test_e5m2_table_matches_the_format(self):
-        import numpy as np
-
-        t = bf8e5m2_decode_table()
-        for code, want in (
-            (0x3C, 1.0),
-            (0xBC, -1.0),
-            (0x45, 5.0),
-            (0x7B, 57344.0),  # largest finite
-            (0x04, 2.0**-14),  # smallest normal
-            (0x01, 2.0**-16),  # smallest subnormal
-        ):
-            with self.subTest(code=hex(code)):
-                self.assertEqual(float(t[code]), want)
-        # e == 0x1F is inf / NaN; none of those codes may be encodable.
-        self.assertTrue(np.isnan(t[0x7C:0x80]).all())
-        self.assertTrue(np.isnan(t[0xFC:0x100]).all())
-
-    def test_e5m2_encode_round_trips_every_finite_code(self):
-        import numpy as np
-
-        t = bf8e5m2_decode_table()
-        finite = np.flatnonzero(np.isfinite(t) & (np.arange(256) != 0x80))
-        codes = bf8e5m2_encode(t[finite])
-        self.assertTrue(np.array_equal(codes, finite.astype(np.uint8)))
-
-    def test_encoders_reject_what_their_format_cannot_hold(self):
-        import numpy as np
-
-        # 1.125 needs three significand bits: exact in e4m3, not in e5m2.
-        x = np.array([1.125], dtype=np.float32)
-        self.assertEqual(int(fp8e4m3_encode(x)[0]), 0x39)
-        with self.assertRaisesRegex(ValueError, "bf8e5m2"):
-            bf8e5m2_encode(x)
 
     def test_test_inputs_are_exact_in_both_formats(self):
         import numpy as np

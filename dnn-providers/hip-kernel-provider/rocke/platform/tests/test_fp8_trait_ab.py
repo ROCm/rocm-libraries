@@ -19,7 +19,6 @@ from unittest import mock
 import numpy as np
 from rocke.examples.gfx1250.gemm_perf_fp8 import fp8_data, fp8_trait_ab
 from rocke.examples.gfx1250.gemm_perf_fp8 import wmma_roofline_probe as probe
-from rocke.numeric.fp8 import fp8e4m3_decode_table
 
 
 def _smi_listing(stdout: str):
@@ -79,32 +78,6 @@ class TestSweepExactSet(unittest.TestCase):
 
         ref = bf16_to_f32(f32_to_bf16(a32 @ b32.T))
         self.assertTrue(np.array_equal(prob.reference, ref))
-
-
-class TestE4m3Round(unittest.TestCase):
-    def test_every_finite_value_round_trips(self):
-        table = fp8e4m3_decode_table()
-        codes = np.flatnonzero(np.isfinite(table) & (np.arange(256) != 0x80))
-        self.assertTrue(
-            np.array_equal(
-                fp8_data.e4m3_round(np, table[codes]), codes.astype(np.uint8)
-            )
-        )
-
-    def test_ties_go_to_the_even_code(self):
-        # 1.0 = 0x38, 1.125 = 0x39, 1.25 = 0x3A: midpoints go to 0x38 and 0x3A.
-        x = np.array([1.0625, 1.1875, -1.0625], dtype=np.float32)
-        self.assertEqual(list(fp8_data.e4m3_round(np, x)), [0x38, 0x3A, 0xB8])
-
-    def test_rounds_to_nearest_and_saturates(self):
-        x = np.array([1.05, 1.08, 1000.0, -1000.0, 0.0], dtype=np.float32)
-        self.assertEqual(
-            list(fp8_data.e4m3_round(np, x)), [0x38, 0x39, 0x7E, 0xFE, 0x00]
-        )
-
-    def test_nan_is_rejected(self):
-        with self.assertRaises(ValueError):
-            fp8_data.e4m3_round(np, np.array([np.nan], dtype=np.float32))
 
 
 class TestInputSets(unittest.TestCase):

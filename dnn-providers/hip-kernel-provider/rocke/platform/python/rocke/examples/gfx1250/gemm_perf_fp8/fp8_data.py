@@ -14,17 +14,13 @@ the case study, "The ceiling depends on the operand data"):
     measurably slower for the same kernel; checked against a tolerance (see
     :func:`rand_rel_error_bound`).
 
-Rounding is derived from the runner's e4m3 decode table rather than written
-out separately, so there is one definition of the wire format.
+Encoding and rounding come from :mod:`rocke.numeric.fp8`, so there is one
+definition of the wire format.
 """
 
 from __future__ import annotations
 
-from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_encode
-
-#: Largest finite e4m3 magnitude; rounding saturates here (the format has no
-#: infinity, and the NaN codes are never produced).
-E4M3_MAX = 448.0
+from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_encode, fp8e4m3_round
 
 #: Seeds of the two input sets, fixed so every run sees the same bytes.
 INT_SEED = 0xC0FFEE
@@ -34,33 +30,6 @@ RAND_SEED = 42
 def e4m3_decode(np, codes):
     """e4m3 bytes -> f32 values."""
     return fp8e4m3_decode_table()[np.asarray(codes, dtype=np.uint8)]
-
-
-def e4m3_round(np, x):
-    """f32 -> nearest e4m3 bytes: round to nearest, ties to even, saturating.
-
-    Ties go to the even code, which in e4m3 is the even mantissa -- the IEEE
-    rule. Magnitudes beyond 448 clamp to +-448; NaN inputs are rejected.
-    """
-    xf = np.ascontiguousarray(x, dtype=np.float32)
-    if np.isnan(xf).any():
-        raise ValueError("e4m3_round: NaN input")
-    table = fp8e4m3_decode_table()
-    codes = np.arange(256, dtype=np.uint8)
-    # Every finite value once, keeping +0 (code 0x00) for zero.
-    keep = np.isfinite(table) & (codes != 0x80)
-    vals, vcodes = table[keep], codes[keep]
-    order = np.argsort(vals, kind="stable")
-    vals, vcodes = vals[order], vcodes[order]
-
-    flat = np.clip(xf.ravel(), -E4M3_MAX, E4M3_MAX)
-    hi = np.clip(np.searchsorted(vals, flat), 1, vals.size - 1)
-    lo = hi - 1
-    d_lo = flat - vals[lo]
-    d_hi = vals[hi] - flat
-    pick_hi = (d_hi < d_lo) | ((d_hi == d_lo) & (vcodes[hi] % 2 == 0))
-    out = np.where(pick_hi, vcodes[hi], vcodes[lo])
-    return out.reshape(xf.shape)
 
 
 def int_operands(np, m: int, n: int, k: int) -> tuple[object, object, object, object]:
@@ -79,8 +48,8 @@ def rand_operands(np, m: int, n: int, k: int) -> tuple[object, object, object, o
     order and the final rounding to bf16.
     """
     rng = np.random.default_rng(RAND_SEED)
-    a8 = e4m3_round(np, rng.standard_normal((m, k), dtype=np.float32) * 0.1)
-    b8 = e4m3_round(np, rng.standard_normal((n, k), dtype=np.float32) * 0.1)
+    a8 = fp8e4m3_round(rng.standard_normal((m, k), dtype=np.float32) * 0.1)
+    b8 = fp8e4m3_round(rng.standard_normal((n, k), dtype=np.float32) * 0.1)
     return a8, b8, e4m3_decode(np, a8), e4m3_decode(np, b8)
 
 

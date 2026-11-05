@@ -10,8 +10,8 @@ different kernel (a non-TDM one, when ``tdm`` itself is dropped) for the cpp
 backend without a word. The byte-identity gate drives the C struct directly, so
 it cannot see this seam; these tests do.
 
-The first class needs nothing; the second needs the ``rocke_engine`` binding
-and is skipped when it is not importable.
+The first two classes need nothing; the third needs the ``rocke_engine``
+binding and is skipped when it is not importable.
 """
 
 from __future__ import annotations

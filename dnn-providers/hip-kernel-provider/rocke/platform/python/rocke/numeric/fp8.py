@@ -3,12 +3,14 @@
 
 """Torch-free OCP fp8 host codecs: e4m3 (``fn``) and e5m2, carried as ``uint8``.
 
-The decode tables are derived from the formats rather than typed in, and the
-encoders accept only values the format holds exactly: the verify harnesses
-that use them compare a kernel against a reference computed on exactly the
-numbers the device sees, and a silent round here would demote that to a
-tolerance check. Sibling of :mod:`rocke.numeric.bf16`; harnesses import the
-codec from here instead of growing a second copy.
+The decode tables are derived from the formats rather than typed in. The
+``*_encode`` functions accept only values the format holds exactly: the verify
+harnesses that use them compare a kernel against a reference computed on exactly
+the numbers the device sees, and a silent round would demote that to a tolerance
+check. ``fp8e4m3_round`` rounds to the nearest code instead, for random operand
+data whose reference is computed from the rounded bytes. Sibling of
+:mod:`rocke.numeric.bf16`; harnesses import the codec from here instead of
+growing a second copy.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ __all__ = [
     "bf8e5m2_encode",
     "fp8e4m3_decode_table",
     "fp8e4m3_encode",
+    "fp8e4m3_round",
 ]
 
 
@@ -77,6 +80,35 @@ def bf8e5m2_encode(x):
     return _encode_exact(x, bf8e5m2_decode_table(), "bf8e5m2")
 
 
+def fp8e4m3_round(x):
+    """Round f32 values to the nearest OCP e4m3 bytes, ties to even, saturating.
+
+    For inputs that need not be representable (random operand data), unlike
+    :func:`fp8e4m3_encode`. Ties go to the even code, which in e4m3 is the
+    even mantissa (the IEEE rule). Magnitudes beyond the largest finite value
+    (448) clamp to it, since the format has no infinity; NaN inputs are
+    rejected.
+    """
+    return _round_nearest(x, fp8e4m3_decode_table(), "fp8e4m3")
+
+
+def _sorted_codes(table):
+    """The finite values of ``table`` sorted ascending, each once, with their codes.
+
+    -0.0 and +0.0 compare equal; ``np.unique`` folds them and ``return_index``
+    keeps the first occurrence, which the stable sort leaves as +0.0 (code 0x00).
+    """
+    import numpy as np
+
+    keep = np.isfinite(table)
+    vals = table[keep]
+    codes = np.arange(256, dtype=np.uint8)[keep]
+    order = np.argsort(vals, kind="stable")
+    vals, codes = vals[order], codes[order]
+    uniq, first = np.unique(vals, return_index=True)
+    return uniq, codes[first]
+
+
 def _encode_exact(x, table, name):
     """Encode f32 values to the 8-bit codes of ``table``, rejecting anything
     inexact.
@@ -88,17 +120,32 @@ def _encode_exact(x, table, name):
     """
     import numpy as np
 
-    keep = np.isfinite(table)
-    vals = table[keep]
-    codes = np.arange(256, dtype=np.uint8)[keep]
-    order = np.argsort(vals, kind="stable")
-    vals, codes = vals[order], codes[order]
-    # -0.0 and +0.0 compare equal; np.unique folds them and return_index keeps
-    # the first occurrence, which the stable sort left as +0.0 (code 0x00).
-    uniq, first = np.unique(vals, return_index=True)
-    uniq_codes = codes[first]
+    vals, codes = _sorted_codes(table)
     xf = np.ascontiguousarray(x, dtype=np.float32).ravel()
-    idx = np.minimum(np.searchsorted(uniq, xf), uniq.size - 1)
-    if not np.array_equal(uniq[idx], xf):
-        raise ValueError(f"{name} encode: value not exactly representable in {name}")
-    return uniq_codes[idx].reshape(np.shape(x))
+    idx = np.minimum(np.searchsorted(vals, xf), vals.size - 1)
+    bad = vals[idx] != xf
+    if bad.any():
+        first = int(np.flatnonzero(bad)[0])
+        raise ValueError(
+            f"{name} encode: {float(xf[first])!r} (element {first}) is not exactly "
+            f"representable in {name}"
+        )
+    return codes[idx].reshape(np.shape(x))
+
+
+def _round_nearest(x, table, name):
+    """Round f32 values to the nearest code of ``table``: ties to the even code,
+    saturating at the table's largest finite magnitude; NaN is rejected."""
+    import numpy as np
+
+    vals, codes = _sorted_codes(table)
+    xf = np.ascontiguousarray(x, dtype=np.float32)
+    if np.isnan(xf).any():
+        raise ValueError(f"{name} round: NaN input")
+    flat = np.clip(xf.ravel(), vals[0], vals[-1])
+    hi = np.clip(np.searchsorted(vals, flat), 1, vals.size - 1)
+    lo = hi - 1
+    d_lo = flat - vals[lo]
+    d_hi = vals[hi] - flat
+    pick_hi = (d_hi < d_lo) | ((d_hi == d_lo) & (codes[hi] % 2 == 0))
+    return np.where(pick_hi, codes[hi], codes[lo]).astype(np.uint8).reshape(xf.shape)

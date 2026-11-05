@@ -33,12 +33,8 @@ args_signature dtype
     False for fp16, False when the key is absent.
 
 e4m3 codec
-    ``rocke.numeric.fp8`` (``fp8e4m3_decode_table`` / ``fp8e4m3_encode``) checked against the OCP
-    e4m3 (``fn``) format rather than against a transcription of themselves --
-    a second hand-written table could drift from the hardware's in exactly
-    the way the first one did.  The encoder must *refuse* inexact values
-    rather than round them: a silent round would demote the runner's exact
-    compare to a tolerance check without changing any output.
+    Tested in tests/numeric/test_fp8_codec.py, the codec's one home; this file
+    checks only what the runner does with it.
 
 fp8 runner body
     ``run_gemm_fp8_manifest_problem`` over the same 24x128x3072 problem:
@@ -64,7 +60,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
-from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_encode
+from rocke.numeric.fp8 import fp8e4m3_decode_table
 from rocke.examples.gfx1201.wmma_probe import probe_manifest
 from rocke.helpers.compile import KernelArtifact
 from rocke.helpers.manifest import gemm_args_signature
@@ -340,82 +336,6 @@ class TestGemmIsBf16(unittest.TestCase):
 
     def test_missing_signature_returns_false(self):
         self.assertFalse(_gemm_is_bf16({}))
-
-
-class TestFp8E4M3Codec(unittest.TestCase):
-    """The e4m3 codec the fp8 runner encodes its test inputs with.
-
-    The runner verifies the device against a numpy reference *exactly* --
-    ``bad = err > 0.0``, no tolerance -- which is only sound while the host
-    encodes those inputs into e4m3 without rounding them.  An exact gate that
-    silently stopped being exact would still report PASS.
-    """
-
-    def test_known_codes_decode_to_their_format_values(self):
-        # Anchors spanning the encoding: both zeros, the implicit-leading-one
-        # boundary, a mantissa step, and the largest finite magnitude. Hand-
-        # computed from s.eeee.mmm / bias 7, not read back out of the table.
-        table = fp8e4m3_decode_table()
-        for code, want in (
-            (0x00, 0.0),
-            (0x80, -0.0),
-            (0x38, 1.0),
-            (0x3C, 1.5),
-            (0x40, 2.0),
-            (0xB8, -1.0),
-            (0x7E, 448.0),
-            (0xFE, -448.0),
-        ):
-            with self.subTest(code=hex(code)):
-                self.assertEqual(float(table[code]), want)
-
-    def test_subnormals_use_the_e_eq_0_rule(self):
-        # e == 0 drops the implicit leading one and pins the exponent at 2^-6,
-        # so the smallest step is 2^-6/8 == 2^-9 and the steps are uniform.
-        table = fp8e4m3_decode_table()
-        self.assertEqual(float(table[0x01]), 2.0**-9)
-        self.assertEqual(float(table[0x07]), 7 * 2.0**-9)
-        # Subnormal-to-normal must be continuous: 0x08 is the first normal.
-        self.assertEqual(float(table[0x08]), 8 * 2.0**-9)
-
-    def test_nan_only_at_the_two_all_ones_codes(self):
-        # e4m3 spends no codes on infinities, so 0x7f/0xff are the only NaNs
-        # and every other code is finite -- which is what lets the encoder
-        # treat the finite set as the whole representable set.
-        table = fp8e4m3_decode_table()
-        nan_codes = set(np.flatnonzero(np.isnan(table)).tolist())
-        self.assertEqual(nan_codes, {0x7F, 0xFF})
-        self.assertFalse(np.isinf(table).any())
-
-    def test_every_finite_code_round_trips(self):
-        table = fp8e4m3_decode_table()
-        finite = np.flatnonzero(np.isfinite(table)).astype(np.uint8)
-        got = fp8e4m3_encode(table[finite])
-        # -0.0 encodes to +0.0's code: they are numerically equal, so the
-        # encoder cannot distinguish them and must not claim to. Compare the
-        # decoded values instead of the codes.
-        self.assertTrue(np.array_equal(fp8e4m3_decode_table()[got], table[finite]))
-
-    def test_the_verify_input_range_is_exactly_representable(self):
-        # The runner draws integers in -5..5 and leans on every one being exact
-        # in e4m3. If that ever stopped holding the gate would quietly compare
-        # the device against numbers it was never given.
-        vals = np.arange(-5, 6, dtype=np.float32)
-        table = fp8e4m3_decode_table()
-        self.assertTrue(np.array_equal(table[fp8e4m3_encode(vals)], vals))
-
-    def test_inexact_values_are_refused_rather_than_rounded(self):
-        # A silent round here is the failure mode that matters: it would demote
-        # the exact compare to a tolerance check without changing any output.
-        for bad in (0.3, 1.1, 2.0**-10, 449.0, 1e30):
-            with self.subTest(value=bad):
-                with self.assertRaises(ValueError):
-                    fp8e4m3_encode(np.array([bad], dtype=np.float32))
-
-    def test_encode_preserves_shape(self):
-        x = np.zeros((3, 5), dtype=np.float32)
-        self.assertEqual(fp8e4m3_encode(x).shape, (3, 5))
-        self.assertEqual(fp8e4m3_encode(x).dtype, np.uint8)
 
 
 class TestGemmFp8ManifestRunner(unittest.TestCase):
