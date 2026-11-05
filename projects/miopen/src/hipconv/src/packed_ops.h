@@ -85,3 +85,10 @@ __device__ __forceinline__ auto fp32xN_to_bf16_pair(packed_vec_t<fp32_t, N> a) -
     r.small = packed_convert<bf16_t>(a - packed_convert<fp32_t>(r.big));
     return r;
 }
+
+// Scalar form of fp32xN_to_bf16_pair.
+__device__ __forceinline__ auto fp32_to_bf16_pair(fp32_t a) -> bf16_pair
+{
+    const bf16_t big = static_cast<bf16_t>(a);
+    return {big, static_cast<bf16_t>(a - static_cast<fp32_t>(big))};
+}

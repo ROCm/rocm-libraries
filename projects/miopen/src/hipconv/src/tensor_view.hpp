@@ -81,12 +81,31 @@ struct tensor_view
     }
     __device__ auto operator()(std::array<IdxT, Dim> const& idx) const -> OffsetT
     {
-        return offset + delta(idx);
+        return advance(delta(idx));
     }
     template <std::integral... I>
     __device__ auto operator()(I... idx) const -> OffsetT
     {
-        return offset + delta(std::forward<I>(idx)...);
+        return advance(delta(std::forward<I>(idx)...));
+    }
+
+    // offset + d; for a pointer OffsetT, d elements are added through a char pointer.
+    //
+    // Typed pointer arithmetic can exceed the getelementptr depth to which amdgpu-lower-module-lds
+    // follows chains when attaching alias.scope to LDS accesses. An LDS store without alias.scope
+    // is preceded by s_waitcnt vmcnt for every buffer load into LDS in flight.
+    __device__ auto advance(IdxT d) const -> OffsetT
+    {
+        if constexpr(std::is_pointer_v<OffsetT>)
+        {
+            using elem = std::remove_pointer_t<OffsetT>;
+            using byte = std::conditional_t<std::is_const_v<elem>, const char, char>;
+            return reinterpret_cast<OffsetT>(reinterpret_cast<byte*>(offset) +
+                                             static_cast<std::ptrdiff_t>(d) *
+                                                 static_cast<std::ptrdiff_t>(sizeof(elem)));
+        }
+        else
+            return offset + d;
     }
 
     // Checks whether a multi-index is within bounds; does not check whether index is negative
@@ -138,13 +157,12 @@ struct tensor_view
         std::array<IdxT, Dim> offsets  = {detail::offset(idx_or_slice)...};
         std::array<bool, Dim> is_slice = {std::is_same_v<std::decay_t<I>, slice<IdxT>>...};
 
-        OffsetT suboffset = offset;
+        const OffsetT suboffset = advance(delta(offsets));
         std::array<IdxT, SubDim> subshape, substride;
         int j = 0;
 #pragma unroll
         for(int i = 0; i < Dim; ++i)
         {
-            suboffset += offsets[i] * stride[i];
             if(is_slice[i])
             {
                 subshape[j]  = shape[i];

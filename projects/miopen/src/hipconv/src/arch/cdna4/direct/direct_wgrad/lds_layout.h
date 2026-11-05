@@ -2,9 +2,9 @@
 
 // LDS geometry for the direct_wgrad row buffers, and the swizzle their operand reads use.
 //
-// Both operands sit in LDS channel-contiguous, S as W x C and delta as Q x K, and both feed the
+// Both operands sit in LDS channel-contiguous, S as W × C and delta as Q × K, and both feed the
 // MFMA transposed, so both are read with ds_read_b64_tr_b16.
-// docs/algorithms/direct/direct-wgrad-cdna4-lds-swizzle.md derives the swizzle.
+// docs/algorithms/details/direct/direct-wgrad-cdna4-lds-swizzle.md derives the swizzle.
 
 #include "bunnies.hpp"
 #include "bunnies_cdna4.hpp"

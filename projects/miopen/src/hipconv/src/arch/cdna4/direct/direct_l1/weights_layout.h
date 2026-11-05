@@ -7,14 +7,20 @@
 // sub-tensor). wave_group(i) addresses sub-tensor i; the count lives in
 // Config::waves_k, not here. One partition's slice is:
 //
-//   (K_wavegroup / Kwg) × (C / 64) × Kw × (C / 32 % 2) × Kh × (K_wavegroup / 16 % (Kwg / 16))
-//   × [(C / 8 % 4) × (K % 16) × (C % 8)] × f16
+//   (K_wavegroup / Kwg) × Kd × (C / 64) × Kw × (C / 32 % 2) × Kh
+//   × (K_wavegroup / 16 % (Kwg / 16)) × [(C / 8 % 4) × (K % 16) × (C % 8)] × f16
 //
 // where [ ] is a 16 × 32 f16 matrix in native MFMA layout (matrix_layout.h). The
-// Kw × (C/32%2) factors are the Kw*2 main-loop steps; Kh × (Kwg/16) is the K(16) ×
-// C(32) matrices per step; C/64 the channel chunks; K_wavegroup/Kwg the K workgroup.
+// Kw × (C/32%2) factors are the Kw × 2 main-loop steps; a Config::c64_step config
+// runs Kw steps, each covering both C(32) halves. Kh × (Kwg/16) is the K(16) × C(32)
+// matrices per C(32) half; C/64 the channel chunks; K_wavegroup/Kwg the K workgroup.
 // Kwg in {32,48,64}; K_wavegroup = Kwg × Kq. Per-thread the inner (C%8) splits into
 // (8/Veclen) × Veclen, the trailing Veclen being one offset step.
+//
+// Kd sits directly inside kq so that C/64 main-loop iterations advance the
+// WeightsLoader cursor by exactly one tap slice: a tap loop walking 0..Kd-1 rolls
+// from one tap to the next with no seek. Kd == 1 leaves every stride numerically
+// what it was, so a conv2d config is unaffected.
 #include <hip/hip_runtime.h>
 
 #include "channels_last_layouts.h"
@@ -22,7 +28,7 @@
 namespace hipconv::cdna4
 {
 
-template <int Kh, int Kw, int Kwg, int Veclen = 8>
+template <int Kh, int Kw, int Kwg, int Veclen = 8, int Kd = 1>
 struct WeightsShape
 {
     using Pars = WeightPars<Kh, Kw>;
@@ -46,6 +52,8 @@ struct WeightsShape
 
     __device__ __host__ int c64() const { return pars.C / 64; }
 
+    constexpr int kd() const { return Kd; }
+
     __device__ __host__ int kq() const { return pars.K / Kwg; }
 
     // Nominal partition extent only (real count is Config::waves_k).
@@ -53,11 +61,11 @@ struct WeightsShape
 };
 
 // Define the strides of one wavegroup's DirectL1 sub-tensor.
-template <int Kh, int Kw, int Kwg, int Veclen = 8>
+template <int Kh, int Kw, int Kwg, int Veclen = 8, int Kd = 1>
 struct WeightsStrides
 {
     using Pars  = WeightPars<Kh, Kw>;
-    using Shape = WeightsShape<Kh, Kw, Kwg, Veclen>;
+    using Shape = WeightsShape<Kh, Kw, Kwg, Veclen, Kd>;
 
     const Pars& pars;
 
@@ -81,7 +89,10 @@ struct WeightsStrides
 
     constexpr int c64() const { return shape().kw() * kw(); }
 
-    __device__ __host__ int kq() const { return shape().c64() * c64(); }
+    // One depth tap's slice: exactly what C/64 main-loop iterations advance over.
+    __device__ __host__ int kd() const { return shape().c64() * c64(); }
+
+    __device__ __host__ int kq() const { return shape().kd() * kd(); }
 
     // One sub-tensor's element count: the stride between adjacent partitions.
     __device__ __host__ int wave_group() const { return shape().kq() * kq(); }
@@ -92,12 +103,12 @@ struct WeightsStrides
 //
 // Maps an offset to its individual dimension values. Kwg in {32,48,64}; Veclen is
 // f16 elements per offset step (default 8). K must be divisible by Kwg, C by 64.
-template <int Kh, int Kw, int Kwg, int Veclen = 8>
+template <int Kh, int Kw, int Kwg, int Veclen = 8, int Kd = 1>
 struct WeightsIndex
 {
     using Pars    = WeightPars<Kh, Kw>;
-    using Shape   = WeightsShape<Kh, Kw, Kwg, Veclen>;
-    using Strides = WeightsStrides<Kh, Kw, Kwg, Veclen>;
+    using Shape   = WeightsShape<Kh, Kw, Kwg, Veclen, Kd>;
+    using Strides = WeightsStrides<Kh, Kw, Kwg, Veclen, Kd>;
     const Pars pars;
     const int offset;
 
@@ -137,6 +148,8 @@ struct WeightsIndex
 
     __device__ __host__ int c64() const { return extract(strides().c64(), shape().c64()); }
 
+    __device__ __host__ int kd() const { return extract(strides().kd(), shape().kd()); }
+
     // This will go out of bounds by design for large offsets.
     __device__ __host__ int kq() const { return extract(strides().kq()); }
 
@@ -159,11 +172,11 @@ struct WeightsIndex
 // e.g. WeightsLayout<3, 3, 32>(64, 32) for a 3x3 filter, Kwg=32, K=64, C=32. Kwg in
 // {32,48,64}; K divisible by Kwg, C by 64. offset is in Veclen f16 units (default
 // Veclen 8); one MFMA 16x32 tile is 512/Veclen units = 1024 bytes.
-template <int Kh, int Kw, int Kwg, int Veclen = 8>
+template <int Kh, int Kw, int Kwg, int Veclen = 8, int Kd = 1>
 struct WeightsLayout
 {
     using Pars    = WeightPars<Kh, Kw>;
-    using Strides = WeightsStrides<Kh, Kw, Kwg, Veclen>;
+    using Strides = WeightsStrides<Kh, Kw, Kwg, Veclen, Kd>;
 
     const Pars pars;
     const int offset;
@@ -190,6 +203,8 @@ struct WeightsLayout
     __device__ __host__ auto wave_group(int x) const { return step(x * strides().wave_group()); }
 
     __device__ __host__ auto kq(int x) const { return step(x * strides().kq()); }
+
+    __device__ __host__ auto kd(int x) const { return step(x * strides().kd()); }
 
     __device__ __host__ auto c64(int x) const { return step(x * strides().c64()); }
 

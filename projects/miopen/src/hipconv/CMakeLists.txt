@@ -121,6 +121,35 @@ if(NOT HIPCONV_OFFLOAD_LTO)
     set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
 
+# A consumer that installs only its own shared library, such as MIOpen, sets HIPCONV_FORCE_STATIC.
+option(HIPCONV_FORCE_STATIC "Build libhipconv as a static library whatever BUILD_SHARED_LIBS says"
+    OFF)
+if(BUILD_SHARED_LIBS AND NOT HIPCONV_FORCE_STATIC)
+    set(_hipconv_lib_type SHARED)
+else()
+    set(_hipconv_lib_type STATIC)
+endif()
+# A DLL needs __declspec(dllexport) on HIPCONV_INTERNAL_API, which export.hpp does not define.
+#
+# The amdgcn device compilation also warns on __declspec in every translation unit that includes
+# the public headers.
+if(_hipconv_lib_type STREQUAL "SHARED" AND WIN32)
+    message(FATAL_ERROR "hipconv cannot build as a DLL; set HIPCONV_FORCE_STATIC=ON")
+endif()
+
+# hipconv_headers carries the public headers and the generated export.hpp to targets that compile
+# hipconv sources or include its headers without linking libhipconv.
+#
+# In a static build, HIPCONV_STATIC_DEFINE defines HIPCONV_API as empty in these targets, so on
+# Windows it does not become __declspec(dllimport).
+set(HIPCONV_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+add_library(hipconv_headers INTERFACE)
+target_include_directories(hipconv_headers INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include" "${HIPCONV_GENERATED_INCLUDE_DIR}")
+if(_hipconv_lib_type STREQUAL "STATIC")
+    target_compile_definitions(hipconv_headers INTERFACE HIPCONV_STATIC_DEFINE)
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -181,7 +210,7 @@ add_custom_target(hipconv_version
     VERBATIM)
 list(APPEND _hipconv_srcs "${_version_cpp}")
 
-add_library(hipconv STATIC ${_hipconv_srcs} "${_reg_gen}")
+add_library(hipconv ${_hipconv_lib_type} ${_hipconv_srcs} "${_reg_gen}")
 set_source_files_properties(${_hipconv_srcs} "${_reg_gen}" PROPERTIES LANGUAGE HIP)
 set_source_files_properties("${_version_cpp}" PROPERTIES GENERATED TRUE)
 add_dependencies(hipconv hipconv_version)
@@ -189,15 +218,20 @@ foreach(_target IN LISTS _arch_targets)
     target_sources(hipconv PRIVATE $<TARGET_OBJECTS:${_target}>)
 endforeach()
 
-target_include_directories(hipconv
-    PUBLIC  include
-    PRIVATE src
-)
+target_include_directories(hipconv PRIVATE src)
+target_link_libraries(hipconv PUBLIC hipconv_headers)
+include(GenerateExportHeader)
+generate_export_header(hipconv
+    EXPORT_MACRO_NAME HIPCONV_API
+    EXPORT_FILE_NAME "${HIPCONV_GENERATED_INCLUDE_DIR}/hipconv/export.hpp")
 # Position-independent so the static lib can link into libMIOpen.so
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
 target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
                                        ${HIPCONV_DEVICE_COMPILE_OPTIONS})
+if(_hipconv_lib_type STREQUAL "SHARED")
+    target_compile_definitions(hipconv PRIVATE HIPCONV_EXPORT_INTERNALS)
+endif()
 if(HIPCONV_ENABLE_EXPLICIT_GEMM)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_EXPLICIT_GEMM)

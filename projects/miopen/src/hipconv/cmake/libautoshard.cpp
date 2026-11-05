@@ -1,4 +1,5 @@
 #include "libautoshard.hpp"
+#include "hash.hpp"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -11,7 +12,8 @@ int make_autoshard(std::string const& target_dir,
                    char const* config_table_header,
                    char const* kernel_header,
                    int num_configs,
-                   int num_shards)
+                   int num_shards,
+                   std::function<std::string(int)> config_number_to_description)
 {
     if(!std::filesystem::is_directory(target_dir))
         return 2;
@@ -29,14 +31,19 @@ int make_autoshard(std::string const& target_dir,
         auto file            = std::ofstream(file_name);
         if(!file.good())
             return 3;
+        // A shard with no configs stays empty; its includes alone cost ~1.5 s of compile.
+        if(shard >= num_configs)
+            continue;
         file << "#include \"" << config_table_header << "\"\n";
         file << "#include \"" << kernel_header << "\"\n";
         file << "#include <hip/hip_runtime.h>\n";
+        file << "#include <string_view>\n";
         file << "namespace " << the_namespace << "{";
         for(int cfg = shard; cfg < num_configs; cfg += num_shards)
         {
             file << "template void " << the_namespace << "::launch_impl<configs[" << cfg
-                 << "]>(const LaunchParams&, const ConvParams&, const void*, const void*, void*, "
+                 << "]>(const LaunchParams&, const Device&, const ConvParams&, const void*, const "
+                    "void*, void*, "
                     "void*, hipStream_t);";
         }
         file << "}\n";
@@ -51,11 +58,13 @@ int make_autoshard(std::string const& target_dir,
         file << "#include \"" << kernel_header << "\"\n";
         file << "#include \"conv_kernel.h\"\n";
         file << "#include <hip/hip_runtime.h>\n";
+        file << "#include <string_view>\n";
         file << "namespace " << the_namespace << "{";
         for(int cfg = 0; cfg < num_configs; ++cfg)
         {
             file << "extern template void " << the_namespace << "::launch_impl<configs[" << cfg
-                 << "]>(const LaunchParams&, const ConvParams&, const void*, const void*, void*, "
+                 << "]>(const LaunchParams&, const Device&, const ConvParams&, const void*, const "
+                    "void*, void*, "
                     "void*, hipStream_t);";
         }
         file << "inline auto kernels=std::array<" << kernel_class << "," << num_configs << ">{";
@@ -69,11 +78,24 @@ int make_autoshard(std::string const& target_dir,
         {
             file << "&kernels[" << cfg << "],";
         }
-        file << "};}\n"
+        file << "};\n";
+
+        file << "auto get_kernel_by_config(RepresentationHashPair const& cfg) -> "
+                "hipconv::ConvKernel* {"
+                "hipconv::ConvKernel* kernel=nullptr;"
+                "switch(cfg.hash()){\n";
+        for(int cfg = 0; cfg < num_configs; ++cfg)
+        {
+            const auto repr = config_number_to_description(cfg);
+            file << "case " << hipconv::murmur3_32(repr) << ": kernel = cfg.repr() == \"" << repr
+                 << "\"?&kernels[" << cfg << "]:nullptr;break;\n";
+        }
+        file << "default:break;} return kernel; }}\n"
                 "#ifndef __HIP_DEVICE_COMPILE__\n"
                 "extern const auto "
-             << the_symbol << "=hipconv::ConvKernelSpan{" << the_namespace
-             << "::kernel_ptrs};\n"
+             << the_symbol << "=hipconv::ConvKernelGroup{" << the_namespace << "::kernel_ptrs,"
+             << the_namespace
+             << "::get_kernel_by_config};\n"
                 "#endif\n";
     }
 
