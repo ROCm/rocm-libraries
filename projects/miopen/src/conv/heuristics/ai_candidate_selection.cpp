@@ -669,29 +669,6 @@ std::string JoinFloats(const std::vector<float>& values)
     return ss.str();
 }
 
-const char* CandidateKernelLabel(std::size_t index,
-                                 const std::vector<std::string>* candidate_kernel_names)
-{
-    if(candidate_kernel_names != nullptr && index < candidate_kernel_names->size())
-        return candidate_kernel_names->at(index).c_str();
-    return "";
-}
-
-void LogConfigEncoderBlock(std::size_t index,
-                           const std::vector<std::string>* candidate_kernel_names,
-                           const std::vector<float>& raw_active,
-                           const std::vector<float>* engineered = nullptr)
-{
-    if(!miopen::IsLogging(miopen::LoggingLevel::Info2))
-        return;
-
-    MIOPEN_LOG_I2("ConfigEncoder candidate "
-                  << index << " " << CandidateKernelLabel(index, candidate_kernel_names));
-    MIOPEN_LOG_I2("ConfigEncoder RAW: [" << JoinFloats(raw_active) << "]");
-    if(engineered != nullptr)
-        MIOPEN_LOG_I2("ConfigEncoder features: [" << JoinFloats(*engineered) << "]");
-}
-
 void LogInputEncoderBlock(const std::vector<float>& raw_active,
                           const std::vector<float>& engineered)
 {
@@ -1027,37 +1004,19 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates,
     const std::vector<std::string>* candidate_kernel_names) const
 {
-    // Precomputed config-tower fast path. Keyed on the raw EncodeKernelParams vectors (before any
-    // feature engineering), so it must run here -- ahead of EngineerKernelConfigFeaturesImpl -- and
-    // replaces the entire config tower (engineering + fdeep). nullopt on any miss -> neural path.
+    // The precomputed config-tower table is the only config-encoding path. It is keyed on the raw
+    // EncodeKernelParams vectors (before any feature engineering), so it must run here -- ahead of
+    // EngineerKernelConfigFeaturesImpl -- and fully replaces the config tower. A miss (table
+    // absent, dimension drift, or an un-enumerated config) is an error: throw so RunAIHeuristics
+    // drops to the non-AI heuristic. The per-solver fdeep config encoders are intentionally not
+    // shipped, so there is no neural fallback here.
     if(auto cached = TryEncodeKernelConfigsFromTable(encoded_candidates, arch_, solver_))
         return std::move(*cached);
 
-    // Engineered kernel-config path for 2D/3D models (see EncodeInputFeatures).
-    if(!UsesEngineeredInputFeatures(metadata_))
-    {
-        for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
-            LogConfigEncoderBlock(i, candidate_kernel_names, encoded_candidates[i]);
-        return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
-    }
-
-    // active_params and the output dim are metadata-derived (candidate-independent), so derive them
-    // once here rather than per candidate inside the loop.
-    const auto active_params = ActiveOutputParams(metadata_);
-    const auto expected_output_dim =
-        ComputeKernelConfigPreprocessorOutputDim(metadata_, active_params);
-
-    std::vector<std::vector<float>> engineered_candidates;
-    engineered_candidates.reserve(encoded_candidates.size());
-    for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
-    {
-        const auto& raw_active = encoded_candidates[i];
-        auto engineered        = EngineerKernelConfigFeaturesImpl(
-            raw_active, metadata_, active_params, expected_output_dim);
-        LogConfigEncoderBlock(i, candidate_kernel_names, raw_active, &engineered);
-        engineered_candidates.push_back(std::move(engineered));
-    }
-    return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
+    (void)candidate_kernel_names;
+    MIOPEN_THROW(miopenStatusInternalError,
+                 "No precomputed config embedding for " + arch_ + "_" + solver_ +
+                     " (table miss or absent); falling back to the non-AI heuristic");
 }
 
 MIOPEN_INTERNALS_EXPORT

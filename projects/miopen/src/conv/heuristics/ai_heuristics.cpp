@@ -1748,8 +1748,9 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
 // running the neural model. When the table covers every candidate this lets us drop the
 // ~450 KB-per-solver _kernel_config_encoder.tn.model from the shipped artifacts entirely.
 //
-// Returns nullopt on any miss (table absent, or a candidate not in the table) so the caller
-// transparently falls back to the fdeep path; this keeps the change backward compatible.
+// Returns nullopt on any miss (table absent, or a candidate not in the table); EncodeKernelConfigs
+// then throws and RunAIHeuristics drops to the non-AI heuristic. The config encoders are not
+// shipped, so there is no fdeep fallback.
 
 // A loaded config-embedding table: encoded-param vector (raw bytes) -> fp32 embedding.
 struct ConfigEmbeddingTable
@@ -1968,60 +1969,14 @@ TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_c
     for(const auto& candidate : encoded_candidates)
     {
         // A candidate whose encoding is not in the table (dimension drift or an un-enumerated
-        // config) aborts the fast path entirely so the whole batch falls back to fdeep -- never
-        // a partial/mismatched result.
+        // config) returns nullopt; EncodeKernelConfigs then throws and RunAIHeuristics drops to the
+        // non-AI heuristic. There is no fdeep fallback -- the config encoders are not shipped.
         if(candidate.size() != table.key_dim)
             return std::nullopt;
         auto it = table.rows.find(EmbeddingKey(candidate));
         if(it == table.rows.end())
             return std::nullopt;
         result.push_back(it->second);
-    }
-    return result;
-}
-
-std::vector<std::vector<float>>
-EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
-                             const std::string& arch,
-                             const std::string& solver)
-{
-
-    if(encoded_candidates.empty() || encoded_candidates[0].empty())
-        MIOPEN_THROW(miopenStatusInternalError,
-                     "Empty candidates provided to kernel config encoder");
-
-    // Note: the precomputed-table fast path now lives in
-    // CandidateSelectionModel::EncodeKernelConfigs (keyed on the raw candidates, before feature
-    // engineering); by the time we reach here the batch already missed the table, so run the fdeep
-    // config encoder.
-    std::string key = arch + "_" + solver + "_kernel_config_encoder";
-    std::string path =
-        (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
-
-    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
-    const auto model = GetFdeepModel(path, key);
-
-    // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
-    // set
-    bool use_single = env::enabled(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT);
-
-    std::vector<std::vector<float>> result;
-    std::vector<fdeep::tensors> inputs_vec;
-    inputs_vec.reserve(encoded_candidates.size());
-    for(const auto& candidate : encoded_candidates)
-    {
-        fdeep::tensor t(fdeep::tensor_shape(candidate.size()), candidate);
-        inputs_vec.push_back(fdeep::tensors{t}); // wrap tensor in a vector
-    }
-    auto outputs = model->predict_multi(inputs_vec, !use_single); // parallelly = !use_single
-    if(outputs.size() != inputs_vec.size())
-        MIOPEN_THROW(miopenStatusInternalError, "predict_multi returned wrong number of outputs");
-    for(const auto& out : outputs)
-    {
-        if(out.empty())
-            MIOPEN_THROW(miopenStatusInternalError,
-                         "Kernel config encoder returned empty tensor list");
-        result.push_back(out[0].to_vector());
     }
     return result;
 }

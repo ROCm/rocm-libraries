@@ -80,15 +80,11 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
                                                 const std::string& arch,
                                                 const std::string& solver);
 
-std::vector<std::vector<float>>
-EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
-                             const std::string& arch,
-                             const std::string& solver);
-
-/// Precomputed config-tower fast path: look each raw (EncodeKernelParams) candidate up in the
-/// shipped {arch}_{solver}_kernel_config_embeddings.bin table and return the stored embeddings,
-/// skipping the whole config tower (feature engineering + fdeep). nullopt on any miss so the
-/// caller falls back to the neural path. Keyed on the raw encoded candidate, so it must run
+/// Config-tower lookup: look each raw (EncodeKernelParams) candidate up in the shipped
+/// {arch}_{solver}_kernel_config_embeddings.bin table and return the stored embeddings, replacing
+/// the whole config tower (feature engineering + fdeep). nullopt on any miss (table absent or a
+/// candidate not enumerated) so EncodeKernelConfigs throws and the caller drops to the non-AI
+/// heuristic -- there is no fdeep fallback. Keyed on the raw encoded candidate, so it must run
 /// before EngineerKernelConfigFeaturesImpl. Implemented in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
 TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
