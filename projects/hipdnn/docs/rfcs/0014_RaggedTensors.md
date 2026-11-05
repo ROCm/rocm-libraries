@@ -1505,7 +1505,9 @@ validator would only skip over this one value.
    `>= 0`. Applicability sees only graph attributes, not offset
    values; layouts that depend on the values are rejected when the
    tensor is built (bundle load), or with `std::invalid_argument` at
-   execute for callers passing raw pointers.
+   execute for callers passing raw pointers. The cuDNN frontend does
+   not validate ragged geometry; the divergence is recorded in
+   `SdpaSemanticsRegister.md` SEM-026.
 9. **Paged K/V and ragged Max/Sum_exp.** The native ragged forward
    gate declines ragged Q over paged K/V and declines `Max` and
    `Sum_exp`. The dense rewrite (`RaggedSdpaDensify.hpp`) serves

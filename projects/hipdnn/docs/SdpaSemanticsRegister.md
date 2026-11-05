@@ -344,6 +344,27 @@ batch when `seq_len_q/kv` are set).
   cuDNN's code.
 - **Contract:** cuDNN.
 
+## Ragged layouts
+
+### SEM-026: Ragged layout validation
+
+- **Status:** Diverges (reference container; deliberately stricter).
+- **cuDNN:** a ragged tensor is addressed from its per-batch offsets and strides. The frontend checks only graph
+  attributes (ragged needs padding, backend and architecture gates, paged plus ragged from backend 9.7); it never
+  reads offset values, so it does not validate overlapping layouts and defines no behaviour for them.
+  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:27-30, 90-92, 281-283`,
+    `scaled_dot_product_flash_attention.h:486-507` (ragged offsets added to the node).
+- **hipDNN:** the Data SDK `RaggedTensor` rejects, at construction, layouts whose non-empty batches share a token
+  row, dense views that break the sorted-stride rule, negative strides, origins that are not whole tokens, and
+  `seq_len` values outside `[0, S_max]`. Zero-stride broadcast axes are accepted. The frontend and the
+  `isApplicable` gates see graph attributes only, so the rule applies where offset values are on the host: bundle
+  loading and the CPU and GPU references (RFC 0014, Known limitations item 8). Pinned by `TestRaggedLayoutRows`
+  (`AliasingRowsAreRejectedByRule`, `OverlapRuleBoundaryIsOneSharedRow`, `SortedStrideRuleExemptsSizeOneAxes`) and
+  `TestRaggedLayoutRejections`.
+- **Contract:** every logical element has exactly one address, so outputs are written once and the element count
+  and footprint are well defined. A use case that needs aliased read-only inputs (for example a shared prefix)
+  would relax the rule for inputs only.
+
 ## Process
 
 - Add an entry when a reference change, provider or adapter exposes a disagreement between use cases.
