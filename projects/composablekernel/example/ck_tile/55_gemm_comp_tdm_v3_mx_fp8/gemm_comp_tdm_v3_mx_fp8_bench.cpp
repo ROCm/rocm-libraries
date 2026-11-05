@@ -20,10 +20,12 @@
 //                  every scale 1/2, 1 or 2, chosen at random per (row or column, 32-element K
 //                  block), so a scale applied to the wrong K block or row changes the result.
 //                  Every product is a multiple of 1/4 of magnitude at most 16 and sum|terms| stays
-//                  far below 2^24, so fp32 accumulation is exact in any order; an output whose
-//                  sum|terms| is at most 256 is exact in fp16 and bf16 after any number of
-//                  roundings of partial sums and must equal the reference bit for bit at any
-//                  -k_batch. The rest use the bound below.
+//                  far below 2^24, so fp32 accumulation is exact in any order. Every partial sum
+//                  of an output is a multiple of 1/4 no larger than its sum|terms|, which C holds
+//                  exactly up to 2^(p-2) (p: C's significand bits, 11 fp16, 8 bf16); an output
+//                  whose sum|terms| is at most half that, 256 for fp16 and 32 for bf16, is exact
+//                  after any number of roundings of partial sums and must equal the reference bit
+//                  for bit at any -k_batch. The rest use the bound below.
 //   verify-rand    normal(0, sigma) rounded to e4m3, scales 2^e with e uniform in [-2, 2]. Checked
 //                  against a double reference with |got - ref| <= |ref| * u + k_batch * S * u,
 //                  where S = sum|terms| and u is C's unit roundoff (2^-11 fp16, 2^-8 bf16).
@@ -199,6 +201,14 @@ template <typename CDataType>
 constexpr double unit_roundoff()
 {
     return std::is_same_v<CDataType, ck_tile::bf16_t> ? 0x1p-8 : 0x1p-11;
+}
+
+// verify-sparse: the largest sum|terms| whose output must be exact at any k_batch. Partial sums
+// are multiples of 1/4, which C holds exactly up to 2^(p-2); half of that leaves a margin.
+template <typename CDataType>
+constexpr double sparse_exact_limit()
+{
+    return std::is_same_v<CDataType, ck_tile::bf16_t> ? 32.0 : 256.0;
 }
 
 struct Problem3
@@ -486,7 +496,7 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
             const CDataType got     = first[static_cast<size_t>(m) * p.N + n];
             const double gotf       = ck_tile::type_convert<float>(got);
             const double err        = std::fabs(gotf - refs[i]);
-            const bool exact_sparse = sparse && sabs[i] <= 256.0;
+            const bool exact_sparse = sparse && sabs[i] <= sparse_exact_limit<CDataType>();
             exact_points += exact_sparse;
             const bool ok = exact_sparse
                                 ? ck_tile::bit_cast<uint16_t>(got) == c_bits<CDataType>(refs[i])
