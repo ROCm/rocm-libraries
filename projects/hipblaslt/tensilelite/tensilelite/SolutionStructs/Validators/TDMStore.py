@@ -37,6 +37,8 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
   next, and MacroTile1 split evenly across the waves. The block also computes the elements
   outside D and bounds only the D store, so besides D the epilogue may only read the bias and
   ScaleAlphaVec vectors along M and the ScaleAB vectors, which go after the staged tile in LDS.
+  A GlobalSplitU=-1 kernel uses the block only when the runtime GSU is 1, and its GSU>1
+  partials keep buffer_store; it is supported with MultipleBuffer and AdaptiveGemmGSUA=0.
   """
   if not state["TDMStore"]:
     return True
@@ -54,8 +56,10 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
     reason = "TDMStore supports persistent kernels only as non-atomic StreamK=3"
   elif state["PrefetchAcrossPersistent"] or state["ReuseAcrossPersistent"] or isStreamKSpatialCluster(state):
     reason = "TDMStore does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or StreamK spatial clusters"
-  elif not isPersistent(state) and state["GlobalSplitU"] != 1:
-    reason = "TDMStore requires GlobalSplitU=1"
+  elif not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
+    reason = "TDMStore requires GlobalSplitU=1 or -1"
+  elif state["GlobalSplitU"] == -1 and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer" or state["AdaptiveGemmGSUA"]):
+    reason = "TDMStore supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
   elif state["UseSubtileImpl"]:
     reason = "TDMStore does not support UseSubtileImpl"
   elif state["StoreRemapVectorWidth"]:

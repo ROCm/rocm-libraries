@@ -197,7 +197,8 @@ BenchmarkProblems:
           - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
   ########################################
   # Bias, ScaleAlphaVec and activation along M, read by every store batch: with TDMStore the
-  # vectors go after the staged D tile in LDS.
+  # vectors go after the staged D tile in LDS. GlobalSplitU=-1 runs GSU 1 for K=128 and GSU 2
+  # for the single-tile K=512 size, whose partials keep buffer_store.
   ########################################
   -
     - &problem_type_bf16_epilogue
@@ -218,7 +219,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, -1]
         - AdaptiveGemm: [1]
         - TDMStore: [0, 1]
       BenchmarkJoinParameters:
@@ -232,6 +233,7 @@ BenchmarkProblems:
           - Exact: [504, 512, 1, 128]
           - Exact: [512, 509, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [255, 253, 1, 512]
         - BiasTypeArgs: ['s', 'b']
         - ActivationArgs:
           - [Enum: relu]

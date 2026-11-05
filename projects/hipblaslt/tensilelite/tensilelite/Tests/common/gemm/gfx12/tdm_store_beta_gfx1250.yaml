@@ -63,7 +63,7 @@ BenchmarkProblems:
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
   ########################################
   # The beta != 0 epilogue of a TDMStore kernel reads the bias and ScaleAlphaVec vectors after
-  # the staged tile too.
+  # the staged tile too; with GlobalSplitU=-1 the K=512 size runs GSU 2.
   ########################################
   -
     - <<: *problem_type_bf16
@@ -83,7 +83,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, -1]
         - AdaptiveGemm: [1]
         - TDMStore: [1]
       BenchmarkJoinParameters:
@@ -91,6 +91,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [511, 512, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [255, 253, 1, 512]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: relu]

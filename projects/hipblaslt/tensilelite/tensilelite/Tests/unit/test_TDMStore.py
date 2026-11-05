@@ -59,6 +59,8 @@ def _state(**overrides):
     "ISA": (12, 5, 0),
     "BufferStore": True,
     "GlobalSplitU": 1,
+    "GlobalSplitUAlgorithm": "MultipleBuffer",
+    "AdaptiveGemmGSUA": 0,
     "TileProcessingStrategy": "None",
     "WorkAssignment": "StaticGrid",
     "PrefetchAcrossPersistent": 0,
@@ -85,6 +87,10 @@ def test_accepts_non_atomic_streamk3():
   assert validateTDMStore(_state(TileProcessingStrategy="StreamK", GlobalSplitU=0), False)
 
 
+def test_accepts_multiple_buffer_dynamic_gsu():
+  assert validateTDMStore(_state(GlobalSplitU=-1, UseBias=1, UseScaleAlphaVec=1), False)
+
+
 @pytest.mark.parametrize("overrides", [
   {"UseBias": 1},
   {"UseScaleAlphaVec": 1},
@@ -109,7 +115,9 @@ def test_disabled_is_not_validated():
   {"HighPrecisionAccumulate": False},
   {"BufferStore": False},
   {"GlobalSplitU": 2},
-  {"GlobalSplitU": -1},
+  {"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "SingleBuffer"},
+  {"GlobalSplitU": -1, "GlobalSplitUAlgorithm": "MultipleBufferSingleKernel"},
+  {"GlobalSplitU": -1, "AdaptiveGemmGSUA": 1},
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0},
   {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "WorkAssignment": "DynamicWorkQueue"},
   {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "StreamKAtomic": 1},
