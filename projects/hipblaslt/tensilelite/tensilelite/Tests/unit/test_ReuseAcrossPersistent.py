@@ -432,10 +432,15 @@ def test_rap_b_constrains_k_alone_as_rap_a_does(
                      "ReuseAcrossPersistent does not support HalfPLR", id="rap1_with_half_plr"),
         pytest.param({"ReuseAcrossPersistent": 2, "HalfPLR": 2, "MatrixInstruction": _MI_MT256x64},
                      "ReuseAcrossPersistent does not support HalfPLR", id="rap2_with_half_plr"),
-        pytest.param({"ReuseAcrossPersistent": 2, "MatrixInstruction": _MI_MT256x64,
-                      "ProblemType": {"MXBlockA": 128, "MXBlockB": 128,
+        # MacroTile1 192 neither divides nor is a multiple of the 128-wide scale
+        # tile, so B's scale rows take the workgroup phase; PAP off, which that
+        # path rejects on its own.
+        pytest.param({"ReuseAcrossPersistent": 2, "MatrixInstruction": [16, 16, 128, 1, 1, 8, 6, 2, 2],
+                      "PrefetchAcrossPersistent": 0,
+                      "ProblemType": {"MXBlockA": 128, "MXBlockB": 128, "MXBlockFreeA": 128, "MXBlockFreeB": 128,
                                       "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"}},
-                     "ReuseAcrossPersistent = 2 supports MXBlock 32 scales only", id="rap2_with_mx128"),
+                     "ReuseAcrossPersistent = 2 does not support a 2D B scale with a workgroup phase",
+                     id="rap2_with_a_resident_2d_scale_phase"),
         # Without MX scales, where RAP 1 accepts TDMFuse 1-3 (A rides every wave
         # of its own set).
         pytest.param({"ReuseAcrossPersistent": 2, "MatrixInstruction": _MI_MT256x64,
@@ -761,12 +766,9 @@ def test_rap_is_rejected_with_space_filling_algo(
 # splat every k-tile's scales, and the reuse copy, which loads none, must not
 # splat again -- in a 1D tile the packed source bytes are gone by then.
 # ---------------------------------------------------------------------------
-_MXSA_REG = re.compile(r"vgprValuMXSA_X(\d+)_I0\+([0-9+]+)")
-
-
-def _mxsaRegs(line):
+def _mxsRegs(line, tc="MXSA"):
     return [(int(buf), sum(int(term) for term in offset.split("+")))
-            for buf, offset in _MXSA_REG.findall(line)]
+            for buf, offset in re.findall(r"vgprValu%s_X(\d+)_I0\+([0-9+]+)" % tc, line)]
 
 
 # The rest of rap_gfx1250.yaml's audited configuration: without it the MT64x256
@@ -800,13 +802,19 @@ def _kernelSource(sol, assembler):
         return kwa._getKernelSource(kernel)
 
 
+@pytest.mark.parametrize("rap", [1, 2], ids=["a", "b"])
 @pytest.mark.parametrize("mxBlockFree", [1, 128], ids=["1d", "2d"])
 def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
-    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree
+    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree, rap
 ):
     # MXBlock [128] or [128, 128] in a config, as ProblemType parses it.
     scales = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=mxBlockFree, MXBlockFreeB=mxBlockFree)
-    sol = Solution(_make_params(gfx1250_iim, ProblemType=dict(_MX_PROBLEM_TYPE, **scales), **_AUDITED),
+    # The resident side's scales: MT 64x256 for A, its mirror for B.
+    side = {1: dict(MatrixInstruction=[16, 16, 128, 1, 1, 2, 8, 2, 2]),
+            2: dict(MatrixInstruction=_MI_MT256x64)}[rap]
+    tc = "MXSA" if rap == 1 else "MXSB"
+    sol = Solution(_make_params(gfx1250_iim, ReuseAcrossPersistent=rap, ProblemType=dict(_MX_PROBLEM_TYPE, **scales),
+                                **side, **_AUDITED),
                    False, False, False, assembler, gfx1250_iim)
     assert sol.get("Valid") is True
     # Raises if the resident block overflows the register pool.
@@ -817,7 +825,7 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
     splatted = {}
     for line in fill.splitlines():
         line = line.strip()
-        regs = _mxsaRegs(line)
+        regs = _mxsRegs(line, tc)
         if line.startswith("ds_load") and regs:
             splatted[regs[0][0]] = set()
         elif line.startswith("v_perm_b32") and regs:
@@ -827,7 +835,7 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
             for buf, offset in regs:
                 assert offset in splatted.get(buf, ()), f"WMMA reads an unsplatted scale: {line}"
     assert set(splatted) == set(range(sol["_RAPNumResidentKTiles"] * sol["LoopIters"]))
-    reuseLines = [line.strip() for line in reuse.splitlines() if _mxsaRegs(line)]
+    reuseLines = [line.strip() for line in reuse.splitlines() if _mxsRegs(line, tc)]
     assert reuseLines and all(line.startswith("v_wmma") for line in reuseLines), \
         "the reuse copy reloads or re-splats a resident scale"
 

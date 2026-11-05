@@ -8038,11 +8038,13 @@ class Solution(collections.abc.Mapping):
         if state["ProblemType"]["Sparse"]:
           reject(state, printRejectionReason, "ReuseAcrossPersistent = 2 does not support Sparse")
           return
-        # Not yet covered for a resident B: MXBlock 128 splats in place, and 2D
-        # scales add the workgroup phase.
-        if any(state["ProblemType"]["MXBlock%s" % s] > 32 or state["ProblemType"]["MXBlockFree%s" % s] > 1
-               for s in ("A", "B")):
-          reject(state, printRejectionReason, "ReuseAcrossPersistent = 2 supports MXBlock 32 scales only")
+        # A 2D B scale whose MacroTile1 neither divides nor is a multiple of its
+        # tile takes the workgroup phase (mxPhaseLraFixup), which has not been
+        # verified on a resident scale block -- on either side; RAP 1 has the
+        # same gap for A.
+        freeB = state["ProblemType"]["MXBlockFreeB"]
+        if freeB > 1 and state["MacroTile1"] % freeB and freeB % state["MacroTile1"]:
+          reject(state, printRejectionReason, "ReuseAcrossPersistent = 2 does not support a 2D B scale with a workgroup phase")
           return
       # The entry guard repeats DefaultWGM's remap to learn which M-tile a tile
       # reads, and the phased tile walk derives its period from that remap.
