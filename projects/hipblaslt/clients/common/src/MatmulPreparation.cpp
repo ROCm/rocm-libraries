@@ -36,7 +36,7 @@ namespace hipblaslt::client
                                  == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                       ? std::array<size_t, 2>{freeExtent, divideRoundUp(blockedExtent, blockSize)}
                       : std::array<size_t, 2>{divideRoundUp(blockedExtent, blockSize), freeExtent};
-            return roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
+            return roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
                 naturalShape, blockSize, physicalLayout);
         }
     } // namespace
@@ -339,7 +339,7 @@ namespace hipblaslt::client
                     preparedProblem.a.mxScaleStorage
                         = mxScaleStoragePlan(problem.a, blockAxis, scaleBlock, scaleLayoutA);
                     preparedProblem.a.scaleElements
-                        = preparedProblem.a.mxScaleStorage->physicalByteCount;
+                        = preparedProblem.a.mxScaleStorage->physicalByteCount();
                 }
 
                 if(arguments.scaleB == hipblaslt_scaling_format::Scalar)
@@ -353,7 +353,7 @@ namespace hipblaslt::client
                     preparedProblem.b.mxScaleStorage
                         = mxScaleStoragePlan(problem.b, blockAxis, scaleBlock, scaleLayoutB);
                     preparedProblem.b.scaleElements
-                        = preparedProblem.b.mxScaleStorage->physicalByteCount;
+                        = preparedProblem.b.mxScaleStorage->physicalByteCount();
                 }
 
                 if(arguments.bias_vector)

@@ -96,10 +96,10 @@ namespace TensileLite
                                            size_t                  mxBlock)
         {
             using namespace roc::hostnumerics::amd_gpu_layout;
-            return planMxScaleStorage({tensor.sizes()[1 - boundIndex], tensor.sizes()[boundIndex]},
+            return MxScaleStoragePlan({tensor.sizes()[1 - boundIndex], tensor.sizes()[boundIndex]},
                                       mxBlock,
                                       MxScaleStorageLayout::Gfx950)
-                .physicalByteCount;
+                .physicalByteCount();
         }
     }
 

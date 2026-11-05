@@ -410,8 +410,8 @@ TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
             const auto& prepared = preparation.problems.front();
             ASSERT_TRUE(prepared.a.mxScaleStorage);
             ASSERT_TRUE(prepared.b.mxScaleStorage);
-            EXPECT_EQ(prepared.a.mxScaleStorage->naturalShape, (std::array<size_t, 2>{17, 8}));
-            EXPECT_EQ(prepared.b.mxScaleStorage->naturalShape, (std::array<size_t, 2>{33, 8}));
+            EXPECT_EQ(prepared.a.mxScaleStorage->naturalShape(), (std::array<size_t, 2>{17, 8}));
+            EXPECT_EQ(prepared.b.mxScaleStorage->naturalShape(), (std::array<size_t, 2>{33, 8}));
             EXPECT_EQ(prepared.a.scaleElements, 256);
             EXPECT_EQ(prepared.b.scaleElements, 512);
         }

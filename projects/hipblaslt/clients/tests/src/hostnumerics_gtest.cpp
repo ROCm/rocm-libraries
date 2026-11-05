@@ -1994,7 +1994,7 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
                             = layout == MxScaleStorageLayout::Gfx950 && !kMajor
                                   ? generated.scales.copyWithPermutedDimensions({1, 0})
                                   : generated.scales;
-                        const auto plan = amd_gpu_layout::planMxScaleStorage(
+                        const amd_gpu_layout::MxScaleStoragePlan plan(
                             {scalesForDevice.shape()[0], scalesForDevice.shape()[1]}, 32, layout);
                         const auto scale = amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             scalesForDevice.rawEncodedBackingStorage().data(),
